@@ -1,0 +1,5 @@
+kind=capture
+bytes=abcdefghijklmnopqrstuvwxyz0123456789\n
+flags=-p
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'abcdefghijklmnopqrstuvwxyz0123456789\n'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p
+expected=abcdefghijklmnopqrst\nuvwxyz0123456789\n\n\n\n

@@ -1,0 +1,5 @@
+kind=capture
+bytes=abcdefghijklmnopqr  \033[1muv\033[0m   \r\nnext  
+flags=-pJe
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'abcdefghijklmnopqr  \033[1muv\033[0m   \r\nnext  '"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -pJe
+expected=abcdefghijklmnopqr  \033[1muv\033[0m   \nnext  \n\n\n

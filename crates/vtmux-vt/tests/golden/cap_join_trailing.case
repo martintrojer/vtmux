@@ -1,0 +1,7 @@
+kind=capture
+bytes=abcdefghijklmnopqr  uv   \r\nnext  
+flags=-pJ
+cols=20
+rows=5
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'abcdefghijklmnopqr  uv   \r\nnext  '"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -pJ
+expected=abcdefghijklmnopqr  uv   \nnext  \n\n\n
