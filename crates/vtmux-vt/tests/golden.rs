@@ -199,6 +199,26 @@ golden! {
     fmt_reflow_narrow_cursor_y,
     #[ignore = "D-pending: tmux clusters ZWJ sequences (cursor_x 4 for x+family+y); Ghostty without mode 2027 does not, like xterm"]
     fmt_zwj_cursor_x,
+    cap_ed3_alt,
+    fmt_ed3_alt,
+    cap_ed3_alt_exit,
+    fmt_ed3_alt_exit,
+    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
+    cap_scroll_on_clear_ed2,
+    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
+    fmt_scroll_on_clear_ed2,
+    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
+    cap_scroll_on_clear_ctrl_l,
+    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
+    fmt_scroll_on_clear_ctrl_l,
+    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    cap_ris,
+    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    fmt_ris,
+    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    cap_ris_alt,
+    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    fmt_ris_alt,
     reply_da1,
     reply_da2,
     reply_cpr,

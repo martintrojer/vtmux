@@ -57,3 +57,31 @@ and the probes from `review_vt_wrap`.
   widened to 2000 then 2300 lines fed: 276 of 2000), so `capture -S -` then
   shows fewer lines than tmux.
 - Visible: `#{history_size}` and capture ranges after a large widening.
+
+## P6. Scroll-on-clear does not feed history
+
+- Golden: `cap_scroll_on_clear_ed2`, `fmt_scroll_on_clear_ed2`,
+  `cap_scroll_on_clear_ctrl_l`, `fmt_scroll_on_clear_ctrl_l` (follow-up
+  `history_parity`)
+- tmux: with the pane option `scroll-on-clear` (default on, options-table.c:1723),
+  ED2 (`screen_write_clearscreen`, screen-write.c:2094) and ED0 at 0,0
+  (`screen_write_clearendofscreen`, screen-write.c:1936-1942) call
+  `grid_view_clear_history`, which moves the screen's used rows into history
+  first. 20x5 after `l0..l9`: `ESC[2J` or `ESC[H ESC[J` (what bash/zsh Ctrl-L
+  sends) gives `#{history_size}` 10 and capture `-S - -E -` `l0..l9` then blank
+  rows (history was 6, the four used screen rows join it).
+- vtmux (Ghostty): clears the screen in place, `history_size` stays 6 and the
+  four screen rows are lost.
+- Visible: `#{history_size}`, `capture-pane -S`, copy mode after every Ctrl-L.
+  `ESC[3J` (ncurses `clear`) already matches.
+
+## P7. RIS (`ESC c`) drops history
+
+- Golden: `cap_ris`, `fmt_ris`, `cap_ris_alt`, `fmt_ris_alt` (follow-up
+  `history_parity`)
+- tmux: `screen_reinit` (screen.c:109-130) turns the alternate screen off and
+  clears only the visible lines (`grid_clear_lines(hsize, sy)`), so history
+  stays: `ESC c` after `l0..l9` leaves `#{history_size}` 10; under the alternate
+  screen it leaves the primary 6.
+- vtmux (Ghostty): a full reset drops scrollback, `history_size` 0.
+- Visible: `#{history_size}`, capture and copy mode after `reset` / `tput reset`.
