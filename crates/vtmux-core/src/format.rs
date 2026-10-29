@@ -23,15 +23,42 @@ mod golden;
 /// `FORMAT_LOOP_LIMIT` (format.c:137): the deepest allowed nesting of expansions.
 pub(crate) const LOOP_LIMIT: usize = 100;
 
-/// Budget of nested re-expansions per [`expand`]: a deterministic stand-in for
-/// tmux's wall-clock `FORMAT_TIME_LIMIT` (format.c:140), which stops runaway
-/// re-expansion such as `@a='#{E:@a}#{E:@a}'`. Only an `E:`/`T:` that runs
-/// inside another one is charged: that is the only way to make work grow
-/// beyond the size of the template, so literal text, conditionals and
-/// top-level `E:` are never truncated. Once spent, further nested
-/// re-expansions yield the empty string, as in tmux once the time limit is
-/// reached (format.c:6713).
-const REEXPAND_LIMIT: u32 = 100_000;
+/// `FORMAT_TIME_LIMIT` (format.c:140), in milliseconds: how long one
+/// [`expand`] may run before every further nested expansion yields the empty
+/// string. It stops runaway re-expansion such as `@a='#{E:@a}#{E:@a}'`
+/// (format.c:4750, `format_check_time`). Time, not an operation count, so a
+/// finite template is never truncated while it finishes within the limit.
+pub(crate) const TIME_LIMIT_MS: u64 = 100;
+
+/// A monotonic millisecond clock, injected so tests can drive the time limit
+/// deterministically.
+pub trait Clock {
+    /// Milliseconds since some fixed, arbitrary point; never goes backwards.
+    fn now_ms(&self) -> u64;
+}
+
+/// The real clock: milliseconds elapsed since it was created.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemClock(std::time::Instant);
+
+impl SystemClock {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(std::time::Instant::now())
+    }
+}
+
+impl Default for SystemClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clock for SystemClock {
+    fn now_ms(&self) -> u64 {
+        u64::try_from(self.0.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+}
 
 /// Where variable values come from. The server implements this over its
 /// options, environment and the target session/window/pane.
@@ -108,13 +135,19 @@ pub fn parse(template: &str) -> Parsed {
     Parsed { ast, deferred }
 }
 
-/// Expand a parsed template.
+/// Expand a parsed template against the real clock.
 #[must_use]
 pub fn expand(ast: &Format, ctx: &dyn FormatContext) -> String {
+    expand_with_clock(ast, ctx, &SystemClock::new())
+}
+
+/// Expand a parsed template; `clock` drives the [`TIME_LIMIT_MS`] cut-off.
+#[must_use]
+pub fn expand_with_clock(ast: &Format, ctx: &dyn FormatContext, clock: &dyn Clock) -> String {
     Eval {
         ctx,
-        budget: REEXPAND_LIMIT,
-        reexpanding: 0,
+        clock,
+        start: clock.now_ms(),
     }
     .expand(ast, 0)
 }
@@ -132,16 +165,18 @@ fn is_true(s: &str) -> bool {
 
 struct Eval<'a> {
     ctx: &'a dyn FormatContext,
-    budget: u32,
-    /// How many re-expansions are currently open.
-    reexpanding: usize,
+    clock: &'a dyn Clock,
+    /// When this expansion started (`es->start_time`, format.c:6899).
+    start: u64,
 }
 
 impl Eval<'_> {
     /// `format_expand1`. `depth` is tmux's `es->loop` on entry; every nested
     /// expansion (branches, operands, `E`) enters one deeper (format.c:6720-6724).
+    /// Empty input returns before any time or depth accounting (format.c:6717),
+    /// so no-op expansions are free.
     fn expand(&mut self, fmt: &Format, depth: usize) -> String {
-        if fmt.nodes.is_empty() || depth >= LOOP_LIMIT {
+        if fmt.nodes.is_empty() || !self.in_time() || depth >= LOOP_LIMIT {
             return String::new();
         }
         let mut out = String::new();
@@ -154,7 +189,8 @@ impl Eval<'_> {
                     let mut v = self.value(value, depth);
                     if *reexpand {
                         // format.c:6606: expand the result again, one level down.
-                        v = self.reexpand(&v, depth + 1);
+                        let ast = parse::template(&v, depth + 1, &mut Vec::new());
+                        v = self.expand(&ast, depth + 1);
                     }
                     out.push_str(&v);
                 }
@@ -163,18 +199,11 @@ impl Eval<'_> {
         out
     }
 
-    /// Expand a variable's value as a template, charging nested re-expansions.
-    fn reexpand(&mut self, v: &str, depth: usize) -> String {
-        if self.reexpanding > 0 {
-            if self.budget == 0 {
-                return String::new();
-            }
-            self.budget -= 1;
-        }
-        self.reexpanding += 1;
-        let out = self.expand(&parse::template(v, depth, &mut Vec::new()), depth);
-        self.reexpanding -= 1;
-        out
+    /// `format_check_time` (format.c:4750). tmux also polls it every
+    /// `FORMAT_TIME_LOOP_CHECK` characters inside its scanning loops; parsing
+    /// here is linear in the template, so only expansions check.
+    fn in_time(&self) -> bool {
+        self.clock.now_ms().saturating_sub(self.start) < TIME_LIMIT_MS
     }
 
     fn value(&mut self, value: &Value, depth: usize) -> String {
@@ -254,30 +283,93 @@ mod tests {
         assert_eq!(expand_str("[#{session_name}]", &ctx), "[main]");
     }
 
+    /// Advances `step` ms on every reading.
+    struct FakeClock {
+        now: std::cell::Cell<u64>,
+        step: u64,
+    }
+
+    impl Clock for FakeClock {
+        fn now_ms(&self) -> u64 {
+            let t = self.now.get();
+            self.now.set(t + self.step);
+            t
+        }
+    }
+
+    fn ticking(step: u64) -> FakeClock {
+        FakeClock {
+            now: std::cell::Cell::new(0),
+            step,
+        }
+    }
+
+    #[test]
+    fn time_limit_cuts_off_later_expansions() {
+        // Readings: start (0), the top-level expansion (1), then one per `E`.
+        // Elapsed must stay under TIME_LIMIT_MS, so the top level and 98 `E`s
+        // run and the rest are empty.
+        let ctx = map(&[("@e", "y")]);
+        let ast = parse(&"#{E:@e}".repeat(300)).ast;
+        assert_eq!(
+            expand_with_clock(&ast, &ctx, &ticking(1)),
+            "y".repeat(usize::try_from(TIME_LIMIT_MS - 2).unwrap())
+        );
+        // A clock that never advances never cuts anything off.
+        assert_eq!(expand_with_clock(&ast, &ctx, &ticking(0)), "y".repeat(300));
+        // Surrounding text outside the cut-off expansions survives.
+        let ast = parse("a#{E:@e}b").ast;
+        assert_eq!(expand_with_clock(&ast, &ctx, &ticking(60)), "ab");
+        assert_eq!(expand_with_clock(&ast, &ctx, &ticking(40)), "ayb");
+    }
+
+    #[test]
+    fn empty_expansions_never_read_the_clock() {
+        // format.c:6717: empty input returns before format_check_time.
+        let ctx = map(&[("@e", "")]);
+        let clock = ticking(1);
+        let ast = parse("#{E:@e}").ast;
+        assert_eq!(expand_with_clock(&ast, &ctx, &clock), "");
+        // start + the top-level template; the empty re-expansion adds none.
+        assert_eq!(clock.now.get(), 2);
+    }
+
     #[test]
     fn runaway_reexpansion_terminates() {
         // Exponential if unchecked: tmux stops it with a time limit (format.c:140).
         let ctx = map(&[("@a", "#{E:@a}#{E:@a}x")]);
-        let out = expand_str("#{E:@a}", &ctx);
-        assert!(out.len() < 1_000_000);
+        let start = std::time::Instant::now();
+        let _ = expand_str("#{E:@a}", &ctx);
+        // The limit is 100 ms; allow generous slack for a loaded CI host.
+        assert!(start.elapsed() < std::time::Duration::from_millis(500));
     }
 
-    #[test]
-    fn runaway_reexpansion_is_fast() {
-        let ctx = map(&[("@a", "#{E:@a}#{E:@a}")]);
-        let start = std::time::Instant::now();
-        let out = expand_str("#{E:@a}", &ctx);
-        assert_eq!(out, "");
-        assert!(start.elapsed() < std::time::Duration::from_secs(1));
-    }
+    // The 110k-element cases take 50-90 ms in a debug build, close to the
+    // 100 ms limit (tmux itself needs ~70 ms), so they run on a frozen clock;
+    // what they pin is that no count-based budget truncates finite output.
+    // The real clock gets a small case.
 
     #[test]
     fn large_flat_templates_are_not_truncated() {
-        let ctx = map(&[("@x", "1")]);
         let n = 110_000;
-        assert_eq!(expand_str(&"#{?@x,y}".repeat(n), &ctx), "y".repeat(n));
         let ctx = map(&[("@x", "1"), ("@e", "y")]);
-        assert_eq!(expand_str(&"#{E:@e}".repeat(n), &ctx), "y".repeat(n));
+        let frozen = ticking(0);
+        let ast = parse(&"#{?@x,y}".repeat(n)).ast;
+        assert_eq!(expand_with_clock(&ast, &ctx, &frozen), "y".repeat(n));
+        let ast = parse(&"#{E:@e}".repeat(n)).ast;
+        assert_eq!(expand_with_clock(&ast, &ctx, &frozen), "y".repeat(n));
+        assert_eq!(expand_str(&"#{?@x,y}".repeat(1000), &ctx), "y".repeat(1000));
+    }
+
+    #[test]
+    fn nested_empty_expansions_do_not_discard_later_output() {
+        let b = format!("{}#{{E:@y}}", "#{E:}".repeat(100_000));
+        let ctx = map(&[("@y", "y"), ("@b", &b)]);
+        let ast = parse("#{E:@b}").ast;
+        assert_eq!(expand_with_clock(&ast, &ctx, &ticking(0)), "y");
+        let b = format!("{}#{{E:@y}}", "#{E:}".repeat(1000));
+        let ctx = map(&[("@y", "y"), ("@b", &b)]);
+        assert_eq!(expand_str("#{E:@b}", &ctx), "y");
     }
 
     #[test]
