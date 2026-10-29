@@ -38,7 +38,7 @@ configure failed. tmux needs libevent, ncurses, pkg-config and yacc (bison); ins
   Fedora Atomic: toolbox run -c vtmux-dev mise exec -- cargo xtask ref-tmux
   Fedora:        dnf install libevent-devel ncurses-devel bison
   Debian/Ubuntu: apt install libevent-dev libncurses-dev bison
-  macOS:         brew install libevent ncurses pkg-config bison utf8proc (tmux requires utf8proc on macOS)";
+  macOS:         brew install libevent ncurses pkg-config bison utf8proc jemalloc (tmux requires both on macOS)";
 
 #[derive(Debug)]
 pub struct RefTmuxError(String);
