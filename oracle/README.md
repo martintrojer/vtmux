@@ -64,8 +64,16 @@ Applied before storing or diffing:
 - `$TMUX` pid (`<SOCKET>,1234,0`) -> `<PID>`
 - ctime-style dates (`Thu Oct 29 17:17:32 2026`, from `#{t:session_created}`) -> `<DATE>`
 - status-line clocks (`%H:%M %d-%b-%y`) -> `<CLOCK>`
-- tty names (`/dev/pts/3`) -> `<TTY>`; the hostname -> `<HOST>`
+- tty names (`/dev/pts/3`) -> `<TTY>`; the hostname -> `<HOST>` (a backstop only: the status line pads and truncates around the title, so a
+  scenario that attaches must pin the pane title with `select-pane -T`, never rely on the default hostname)
 - control streams: `%begin/%end/%error` timestamps -> `<TIME>`; guard command numbers renumbered by first
   appearance (`#1`, `#2`; absolute numbers count internal queue items, cmd-queue.c:713,745-746); consecutive
   `%output %N` lines per pane coalesced into one decoded payload between other events (chunking depends on
   buffering, control.c:807-855, 936-948)
+
+## Comparison
+
+Observations are matched by step index (and order within a step), so a timeout or a step that observes
+nothing never shifts later diffs onto the wrong step; unmatched items are reported per side. `live --self`
+ignores `divergence` annotations (both sides are the reference); `replay` and `live` judge annotated steps
+against their `expect`.

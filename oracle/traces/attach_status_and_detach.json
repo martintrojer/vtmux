@@ -26,6 +26,15 @@
         ]
       },
       {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
         "attach": {
           "session": "a"
         }
@@ -68,7 +77,16 @@
       }
     },
     {
-      "step": 2,
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -77,7 +95,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"<HOST>\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
         ],
         "cursor": [
           2,
@@ -86,7 +104,7 @@
       }
     },
     {
-      "step": 5,
+      "step": 6,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -95,7 +113,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"<HOST>\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
         ],
         "cursor": [
           0,
@@ -104,7 +122,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 9,
       "observation": {
         "kind": "cli",
         "stdout": "",
