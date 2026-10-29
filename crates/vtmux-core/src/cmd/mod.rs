@@ -4,8 +4,9 @@
 //! - [`parse_argv`]: words already split by the shell (`tmux display -p x`).
 //!   No quotes, comments or escapes are processed; a word ending in `;` ends
 //!   a command (cmd-parse.y `cmd_parse_from_arguments`, 1065-1136).
-//! - [`parse_config_line`]: tmux's own lexer for config files and command
-//!   strings: quotes, escapes, `#` comments, `;` separators.
+//! - [`parse_config_with`]: tmux's own lexer for config files and command
+//!   strings: quotes, escapes, `#` comments, `;` separators, `NAME=value`.
+//!   `$VAR` and `~user` go through a [`ConfigEnv`]; this crate does no I/O.
 //!
 //! Both end in the same step (`cmd_parse_build_command`): expand a default
 //! `command-alias`, look the command up (cmd.c `cmd_find`), and split its
@@ -24,7 +25,7 @@ pub mod target;
 use std::fmt;
 
 pub use args::{Args, NumError, strtonum};
-pub use parse::{ConfigEnv, ProcessEnv, parse_argv, parse_config_line, parse_config_with};
+pub use parse::{ConfigEnv, parse_argv, parse_config_with};
 pub use table::{CmdEntry, FindFlags, FindSpec, TMUX_COMMANDS};
 pub use target::{TargetKind, TargetSpec};
 
@@ -35,6 +36,24 @@ use crate::error::EdgeError;
 pub struct CommandCall {
     pub entry: &'static CmdEntry,
     pub args: Args,
+}
+
+/// A `NAME=value` or `%hidden NAME=value` statement (cmd-parse.y
+/// `assignment`, `hidden_assignment`). Applying it to the server's global
+/// environment (`environ_put`, skipped for `source-file -n`) is the server's
+/// job.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Assignment {
+    pub name: String,
+    pub value: String,
+    pub hidden: bool,
+}
+
+/// One parsed config statement, in source order.
+#[derive(Clone, Debug)]
+pub enum Statement {
+    Command(CommandCall),
+    Assign(Assignment),
 }
 
 /// Why text did not become commands, or why a command cannot run. `Display`
@@ -60,7 +79,7 @@ pub enum CmdError {
     /// A lexer message (`invalid octal escape`, `invalid \u argument`, ...).
     Lex(&'static str),
     /// Valid tmux syntax that vtmux M0 does not handle yet (`{ }` blocks,
-    /// `%if`, assignments, a non-UTF-8 argument).
+    /// `%if`, a non-UTF-8 argument).
     Unsupported(&'static str),
     /// The command exists in tmux 3.8 but vtmux does not run it yet.
     NotImplemented(String),
