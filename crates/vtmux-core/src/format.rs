@@ -23,11 +23,15 @@ mod golden;
 /// `FORMAT_LOOP_LIMIT` (format.c:137): the deepest allowed nesting of expansions.
 pub(crate) const LOOP_LIMIT: usize = 100;
 
-/// Work budget per [`expand`]: a deterministic stand-in for tmux's wall-clock
-/// `FORMAT_TIME_LIMIT` (format.c:140), which stops runaway re-expansion such as
-/// `@a='#{E:@a}#{E:@a}'`. Once spent, further expansions yield the empty string,
-/// as they do in tmux once the time limit is reached (format.c:6713).
-const WORK_LIMIT: u32 = 100_000;
+/// Budget of nested re-expansions per [`expand`]: a deterministic stand-in for
+/// tmux's wall-clock `FORMAT_TIME_LIMIT` (format.c:140), which stops runaway
+/// re-expansion such as `@a='#{E:@a}#{E:@a}'`. Only an `E:`/`T:` that runs
+/// inside another one is charged: that is the only way to make work grow
+/// beyond the size of the template, so literal text, conditionals and
+/// top-level `E:` are never truncated. Once spent, further nested
+/// re-expansions yield the empty string, as in tmux once the time limit is
+/// reached (format.c:6713).
+const REEXPAND_LIMIT: u32 = 100_000;
 
 /// Where variable values come from. The server implements this over its
 /// options, environment and the target session/window/pane.
@@ -109,7 +113,8 @@ pub fn parse(template: &str) -> Parsed {
 pub fn expand(ast: &Format, ctx: &dyn FormatContext) -> String {
     Eval {
         ctx,
-        budget: WORK_LIMIT,
+        budget: REEXPAND_LIMIT,
+        reexpanding: 0,
     }
     .expand(ast, 0)
 }
@@ -128,16 +133,17 @@ fn is_true(s: &str) -> bool {
 struct Eval<'a> {
     ctx: &'a dyn FormatContext,
     budget: u32,
+    /// How many re-expansions are currently open.
+    reexpanding: usize,
 }
 
 impl Eval<'_> {
     /// `format_expand1`. `depth` is tmux's `es->loop` on entry; every nested
     /// expansion (branches, operands, `E`) enters one deeper (format.c:6720-6724).
     fn expand(&mut self, fmt: &Format, depth: usize) -> String {
-        if fmt.nodes.is_empty() || depth >= LOOP_LIMIT || self.budget == 0 {
+        if fmt.nodes.is_empty() || depth >= LOOP_LIMIT {
             return String::new();
         }
-        self.budget -= 1;
         let mut out = String::new();
         for node in &fmt.nodes {
             match node {
@@ -148,13 +154,26 @@ impl Eval<'_> {
                     let mut v = self.value(value, depth);
                     if *reexpand {
                         // format.c:6606: expand the result again, one level down.
-                        v = self
-                            .expand(&parse::template(&v, depth + 1, &mut Vec::new()), depth + 1);
+                        v = self.reexpand(&v, depth + 1);
                     }
                     out.push_str(&v);
                 }
             }
         }
+        out
+    }
+
+    /// Expand a variable's value as a template, charging nested re-expansions.
+    fn reexpand(&mut self, v: &str, depth: usize) -> String {
+        if self.reexpanding > 0 {
+            if self.budget == 0 {
+                return String::new();
+            }
+            self.budget -= 1;
+        }
+        self.reexpanding += 1;
+        let out = self.expand(&parse::template(v, depth, &mut Vec::new()), depth);
+        self.reexpanding -= 1;
         out
     }
 
@@ -241,6 +260,24 @@ mod tests {
         let ctx = map(&[("@a", "#{E:@a}#{E:@a}x")]);
         let out = expand_str("#{E:@a}", &ctx);
         assert!(out.len() < 1_000_000);
+    }
+
+    #[test]
+    fn runaway_reexpansion_is_fast() {
+        let ctx = map(&[("@a", "#{E:@a}#{E:@a}")]);
+        let start = std::time::Instant::now();
+        let out = expand_str("#{E:@a}", &ctx);
+        assert_eq!(out, "");
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn large_flat_templates_are_not_truncated() {
+        let ctx = map(&[("@x", "1")]);
+        let n = 110_000;
+        assert_eq!(expand_str(&"#{?@x,y}".repeat(n), &ctx), "y".repeat(n));
+        let ctx = map(&[("@x", "1"), ("@e", "y")]);
+        assert_eq!(expand_str(&"#{E:@e}".repeat(n), &ctx), "y".repeat(n));
     }
 
     #[test]
