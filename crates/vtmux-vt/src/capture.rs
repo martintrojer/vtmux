@@ -3,6 +3,8 @@
 //! Mirrors `cmd_capture_pane_history` (cmd-capture-pane.c:315-413) and
 //! `grid_string_cells` / `grid_string_cells_code` (grid.c:859-1260).
 
+use libghostty_vt::Terminal;
+use libghostty_vt::error::Error;
 use libghostty_vt::screen::{CellContentTag, CellWide, GridRef};
 use libghostty_vt::terminal::{Point, PointCoordinate};
 
@@ -50,12 +52,6 @@ impl Default for CaptureOpts {
 pub fn capture(term: &PaneTerm, opts: CaptureOpts) -> Vec<u8> {
     let sy = usize::from(term.rows());
     let hsize = term.history_size();
-    // Ghostty may retain more history than the limit; hide the oldest rows.
-    let hidden = term
-        .term
-        .scrollback_rows()
-        .unwrap_or(0)
-        .saturating_sub(hsize);
     let last = hsize + sy - 1;
 
     let mut top = resolve(opts.start, hsize, last, true);
@@ -69,7 +65,7 @@ pub fn capture(term: &PaneTerm, opts: CaptureOpts) -> Vec<u8> {
     // tmux threads one `lastgc` through every line of a capture (cmd-capture-pane.c:333).
     let mut last_style = Style::default();
     for y in top..=bottom {
-        let (cells, wrapped) = read_row(term, hidden + y, cols);
+        let (cells, wrapped) = read_row(term, y, hsize, cols);
         emit_row(&mut out, &cells, opts, &mut last_style);
         if !opts.join || !wrapped {
             out.push(b'\n');
@@ -101,20 +97,78 @@ fn resolve(r: LineRef, hsize: usize, last: usize, is_start: bool) -> usize {
 }
 
 #[derive(Clone, Debug)]
-struct RowCell {
+pub(crate) struct RowCell {
     text: String,
     style: Style,
     /// Blank cell with no text (tmux stores a space).
     empty: bool,
 }
 
-/// Read one row of the screen as tmux sees it: padding cells removed.
-fn read_row(term: &PaneTerm, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
+impl RowCell {
+    fn is_default_blank(&self) -> bool {
+        self.empty && self.style == Style::default()
+    }
+}
+
+/// A history row copied out of Ghostty's primary screen before an alternate
+/// screen hid it. Trailing default blanks are not stored.
+#[derive(Clone, Debug)]
+pub(crate) struct FrozenRow {
+    cells: Vec<RowCell>,
+    len: usize,
+    wrapped: bool,
+}
+
+impl FrozenRow {
+    /// Copy screen row `y` (history included) of the active screen.
+    pub(crate) fn capture(term: &Terminal<'_, '_>, y: usize, cols: usize) -> Self {
+        let (mut cells, wrapped) = read_screen_row(term, y, cols);
+        let len = cells.len();
+        while cells.last().is_some_and(RowCell::is_default_blank) {
+            cells.pop();
+        }
+        Self {
+            cells,
+            len,
+            wrapped,
+        }
+    }
+
+    fn thaw(&self) -> (Vec<RowCell>, bool) {
+        let mut cells = self.cells.clone();
+        cells.resize(
+            self.len,
+            RowCell {
+                text: String::new(),
+                style: Style::default(),
+                empty: true,
+            },
+        );
+        (cells, self.wrapped)
+    }
+}
+
+/// Row `y` of tmux's grid: `0..hsize` is history, then the visible rows.
+///
+/// While the alternate screen is up, tmux keeps showing the primary history
+/// (screen.c:700-721 saves only the visible rows), but Ghostty can only read
+/// the active screen, so history comes from the copy taken on entry.
+fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCell>, bool) {
+    if term.alternate_on() && y < hsize {
+        return term.frozen_row(y).map(FrozenRow::thaw).unwrap_or_default();
+    }
+    // Ghostty may retain more history than tmux has: skip the oldest rows.
+    let retained = term.term.scrollback_rows().unwrap_or(0);
+    read_screen_row(&term.term, y + retained - hsize, cols)
+}
+
+/// Read one row of the active screen as tmux sees it: padding cells removed.
+fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
     let mut cells = Vec::with_capacity(cols);
     let mut wrapped = false;
     let y = u32::try_from(y).unwrap_or(u32::MAX);
     for x in 0..cols {
-        let Ok(gr) = term.term.grid_ref(Point::Screen(PointCoordinate {
+        let Ok(gr) = term.grid_ref(Point::Screen(PointCoordinate {
             x: u16::try_from(x).unwrap_or(u16::MAX),
             y,
         })) else {
@@ -155,12 +209,30 @@ fn read_row(term: &PaneTerm, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
     (cells, wrapped)
 }
 
+/// tmux's cell data size: `UTF8_SIZE` (tmux.h:721).
+const UTF8_SIZE: usize = 32;
+
+/// The cell's cluster as tmux stores it: a combining character that would
+/// take the cell past `UTF8_SIZE` bytes is discarded, the base stays
+/// (`screen_write_combine`, screen-write.c:2922-2925).
 fn cell_text(gr: &GridRef<'_>) -> String {
-    let mut buf = ['\0'; 16];
-    match gr.graphemes(&mut buf) {
-        Ok(n) => buf[..n.min(16)].iter().collect(),
-        Err(_) => String::new(),
+    let mut buf = vec!['\0'; 16];
+    let n = loop {
+        match gr.graphemes(&mut buf) {
+            Ok(n) => break n,
+            Err(Error::OutOfSpace { required }) if required > buf.len() => {
+                buf.resize(required, '\0');
+            }
+            Err(_) => return String::new(),
+        }
+    };
+    let mut text = String::new();
+    for c in buf.iter().take(n) {
+        if text.len() + c.len_utf8() <= UTF8_SIZE {
+            text.push(*c);
+        }
     }
+    text
 }
 
 fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut Style) {

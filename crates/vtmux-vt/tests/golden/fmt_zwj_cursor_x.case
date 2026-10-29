@@ -1,0 +1,5 @@
+kind=format
+bytes=x\360\237\221\250\342\200\215\360\237\221\251\342\200\215\360\237\221\247y
+format=#{cursor_x}
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'x\360\237\221\250\342\200\215\360\237\221\251\342\200\215\360\237\221\247y'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; display-message -p -t 0 '#{cursor_x}'
+expected=4\n

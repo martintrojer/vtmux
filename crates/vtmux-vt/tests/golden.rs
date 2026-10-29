@@ -17,6 +17,14 @@ struct Case {
     bytes: Vec<u8>,
     flags: String,
     expected: Vec<u8>,
+    /// `seq=N`: the pane first prints `l0..l<N-1>`, one per line.
+    seq: usize,
+    /// `limit=N`: `history-limit`; tmux's default is 2000.
+    limit: usize,
+    /// `resize=COLSxROWS`: the pane is resized after its bytes are written.
+    resize: Option<(u16, u16)>,
+    /// `format=...`: the `display-message -p` format (format kind).
+    format: String,
 }
 
 /// Inverse of the escaping in `regen.py`: `\n \r \t \\` and `\NNN` octal.
@@ -63,6 +71,13 @@ fn load(name: &str) -> Case {
         bytes: unescape(&get("bytes").unwrap()),
         flags: get("flags").unwrap_or_default(),
         expected: unescape(&get("expected").unwrap()),
+        seq: get("seq").map_or(0, |v| v.parse().unwrap()),
+        limit: get("limit").map_or(2000, |v| v.parse().unwrap()),
+        resize: get("resize").map(|v| {
+            let (w, h) = v.split_once('x').unwrap();
+            (w.parse().unwrap(), h.parse().unwrap())
+        }),
+        format: get("format").unwrap_or_default(),
     }
 }
 
@@ -84,17 +99,33 @@ fn line_ref(flags: &str, flag: &str, default: LineRef, dash: LineRef) -> LineRef
 
 fn run(name: &str) {
     let c = load(name);
-    let mut term = PaneTerm::new(c.cols, c.rows, 2000);
+    let mut term = PaneTerm::new(c.cols, c.rows, c.limit);
     // The reference pane sits behind a pty with ONLCR, so a program's `\n`
     // reaches the terminal as `\r\n`.
-    for &b in &c.bytes {
+    let mut written = (0..c.seq)
+        .flat_map(|i| format!("l{i}\n").into_bytes())
+        .collect::<Vec<u8>>();
+    written.extend_from_slice(&c.bytes);
+    for &b in &written {
         if b == b'\n' {
             term.feed(b"\r");
         }
         term.feed(&[b]);
     }
+    if let Some((w, h)) = c.resize {
+        term.resize(w, h);
+    }
     let got = if c.kind == "reply" {
         term.take_replies()
+    } else if c.kind == "format" {
+        let (x, y) = term.cursor();
+        let v = match c.format.as_str() {
+            "#{history_size}" => term.history_size(),
+            "#{cursor_x}" => usize::from(x),
+            "#{cursor_y}" => usize::from(y),
+            f => panic!("{name}: unsupported format {f}"),
+        };
+        format!("{v}\n").into_bytes()
     } else {
         capture(
             &term,
@@ -149,6 +180,25 @@ golden! {
     cap_sgr_unwritten_gap,
     cap_sgr_style_runs,
     cap_scroll_history,
+    cap_history_sawtooth_20x5,
+    cap_history_sawtooth_range,
+    fmt_history_size_sawtooth,
+    fmt_history_size_sawtooth_80x24,
+    cap_alt_history,
+    fmt_alt_history_size,
+    cap_cluster_truncated,
+    #[ignore = "D-pending: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
+    cap_region_scroll_history,
+    #[ignore = "D-pending: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
+    fmt_region_scroll_history_size,
+    #[ignore = "D-pending: tmux reflow on narrowing pushes the top row into history; Ghostty keeps both rows on screen"]
+    cap_reflow_narrow,
+    #[ignore = "D-pending: tmux reflow on narrowing pushes the top row into history; Ghostty keeps both rows on screen"]
+    fmt_reflow_narrow_history_size,
+    #[ignore = "D-pending: tmux reflow on narrowing pushes the top row into history; Ghostty keeps both rows on screen"]
+    fmt_reflow_narrow_cursor_y,
+    #[ignore = "D-pending: tmux clusters ZWJ sequences (cursor_x 4 for x+family+y); Ghostty without mode 2027 does not, like xterm"]
+    fmt_zwj_cursor_x,
     reply_da1,
     reply_da2,
     reply_cpr,
