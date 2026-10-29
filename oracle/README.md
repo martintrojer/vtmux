@@ -17,7 +17,9 @@ scenario; never edit one by hand. `replay` refuses a trace whose stored scenario
 
 Every run: environment cleared (no `TMUX`, `TMUX_PANE`; an inherited `$TMUX` would beat `TMUX_TMPDIR`,
 tmux.c:557-571), `HOME` and `TMUX_TMPDIR` private temp dirs, `SHELL=/bin/sh`, `PS1='$ '`,
-`TERM=xterm-256color`, and every invocation gets `-L oracle-<scenario>-<pid> -f /dev/null`. A `tmux`
+`TERM=xterm-256color`, and every invocation gets `-S /tmp/vto-<6 hex>/s -f /dev/null`. The root is always
+under `/tmp`, never `$TMPDIR`, and the runner refuses a socket path of 100 bytes or more (tmux fails at
+`sizeof sun_path`, client.c:114-116; 104 on macOS). A `tmux`
 symlink to the binary under test is first on `PATH`, so pane programs can `tmux wait-for -S chan`.
 Pin pane programs (`cat`, or `sh -c '...; exec cat'`); name windows (`-n w`) when a program's name would
 otherwise race a `%window-renamed`.
@@ -60,12 +62,15 @@ for ESC in stored rows). Sync uses quiescence and `wait-for`, no fixed sleeps.
 
 Applied before storing or diffing:
 
-- socket path -> `<SOCKET>`, socket dir -> `<SOCKDIR>`, temp root -> `<TMP>`, `-L` label -> `<LABEL>`
+- socket (`-S`) -> `<SOCKET>`, temp root -> `<TMP>`
 - `$TMUX` pid (`<SOCKET>,1234,0`) -> `<PID>`
 - ctime-style dates (`Thu Oct 29 17:17:32 2026`, from `#{t:session_created}`) -> `<DATE>`
 - status-line clocks (`%H:%M %d-%b-%y`) -> `<CLOCK>`
-- tty names (`/dev/pts/3`) -> `<TTY>`; the hostname -> `<HOST>` (a backstop only: the status line pads and truncates around the title, so a
-  scenario that attaches must pin the pane title with `select-pane -T`, never rely on the default hostname)
+- tty names (`/dev/pts/3`) -> `<TTY>`
+- hostnames: scenarios never depend on the hostname (pin pane titles with `select-pane -T`). Traces store
+  `recorded_host`; replaying on another host replaces the recorded name on the trace side, and the current
+  name on the vtmux side (only in steps whose trace has one), with `<HOST>`, whole token only (not adjacent to
+  `[A-Za-z0-9_.-]`). On the recording host nothing is replaced.
 - control streams: `%begin/%end/%error` timestamps -> `<TIME>`; guard command numbers renumbered by first
   appearance (`#1`, `#2`; absolute numbers count internal queue items, cmd-queue.c:713,745-746); consecutive
   `%output %N` lines per pane coalesced into one decoded payload between other events (chunking depends on

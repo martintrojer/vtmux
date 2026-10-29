@@ -22,39 +22,24 @@ static GUARD: LazyLock<Regex> =
 pub struct Normalizer {
     /// Literal replacements, longest first.
     literals: Vec<(String, String)>,
-    hosts: Vec<String>,
 }
 
 impl Normalizer {
-    /// `socket_dir` is the full `<root>/<prefix>-<uid>` path; `label` the `-L` name.
-    pub fn new(root: &str, socket_dir: &str, label: &str, host: &str) -> Self {
+    /// `root` is the run's temp root, `socket` the `-S` path inside it.
+    pub fn new(root: &str, socket: &str) -> Self {
         let mut literals = vec![
-            (format!("{socket_dir}/{label}"), "<SOCKET>".to_string()),
-            (socket_dir.to_string(), "<SOCKDIR>".to_string()),
+            (socket.to_string(), "<SOCKET>".to_string()),
             (root.to_string(), "<TMP>".to_string()),
-            (label.to_string(), "<LABEL>".to_string()),
         ];
         literals.sort_by_key(|(from, _)| std::cmp::Reverse(from.len()));
-        let mut hosts = Vec::new();
-        if host.len() >= 3 {
-            hosts.push(host.to_string());
-            // The default status-right shows `#{=21:pane_title}`, the hostname.
-            let short: String = host.chars().take(21).collect();
-            if short != host {
-                hosts.push(short);
-            }
-        }
-        Self { literals, hosts }
+        Self { literals }
     }
 
-    /// Placeholders for paths, dates, clocks, tty names, hosts and the pid in `$TMUX`.
+    /// Placeholders for paths, dates, clocks, tty names and the pid in `$TMUX`.
     pub fn text(&self, s: &str) -> String {
         let mut out = s.to_string();
         for (from, to) in &self.literals {
             out = out.replace(from, to);
-        }
-        for h in &self.hosts {
-            out = out.replace(h, "<HOST>");
         }
         out = ENV_TMUX.replace_all(&out, "$1,<PID>,").into_owned();
         out = DATE.replace_all(&out, "<DATE>").into_owned();
@@ -109,6 +94,31 @@ impl Normalizer {
     }
 }
 
+/// Replace each of `hosts` with `<HOST>` where it is a whole token: not
+/// adjacent to `[A-Za-z0-9_.-]`, so a host called `server` leaves `no server
+/// running` alone only when it is part of a longer word, never inside one.
+pub fn replace_hosts(s: &str, hosts: &[&str]) -> String {
+    let word = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-');
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    'scan: while i < s.len() {
+        for h in hosts.iter().filter(|h| !h.is_empty()) {
+            if s[i..].starts_with(h)
+                && !s[..i].chars().next_back().is_some_and(word)
+                && !s[i + h.len()..].chars().next().is_some_and(word)
+            {
+                out.push_str("<HOST>");
+                i += h.len();
+                continue 'scan;
+            }
+        }
+        let c = s[i..].chars().next().unwrap();
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
 fn unescape_octal(s: &str) -> Vec<u8> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -136,22 +146,22 @@ mod tests {
     use super::*;
 
     fn norm() -> Normalizer {
-        Normalizer::new("/tmp/r", "/tmp/r/tmux-1000", "lab", "myhost")
+        Normalizer::new("/tmp/r", "/tmp/r/s")
     }
 
     #[test]
     fn replaces_paths_dates_and_clocks() {
         let n = norm();
         assert_eq!(
-            n.text("error connecting to /tmp/r/tmux-1000/lab (No such file or directory)"),
+            n.text("error connecting to /tmp/r/s (No such file or directory)"),
             "error connecting to <SOCKET> (No such file or directory)"
         );
         assert_eq!(
             n.text("a: 1 windows (created Thu Oct 29 16:56:06 2026)"),
             "a: 1 windows (created <DATE>)"
         );
-        assert_eq!(n.text("\"myhost\" 20:23 29-Oct-26"), "\"<HOST>\" <CLOCK>");
-        assert_eq!(n.text("/tmp/r/tmux-1000/lab,4242,0"), "<SOCKET>,<PID>,0");
+        assert_eq!(n.text("\"myhost\" 20:23 29-Oct-26"), "\"myhost\" <CLOCK>");
+        assert_eq!(n.text("/tmp/r/s,4242,0"), "<SOCKET>,<PID>,0");
     }
 
     #[test]
@@ -171,5 +181,24 @@ mod tests {
                 "%exit",
             ]
         );
+    }
+
+    #[test]
+    fn hosts_replace_whole_tokens_only() {
+        let h = ["abc"];
+        assert_eq!(
+            replace_hosts("\"abc\" abc, x-abc abc.d abcd abc", &h),
+            "\"<HOST>\" <HOST>, x-abc abc.d abcd <HOST>"
+        );
+        assert_eq!(
+            replace_hosts("%output %0 abc\\r", &h),
+            "%output %0 <HOST>\\r"
+        );
+        assert_eq!(
+            replace_hosts("no server running", &["server"]),
+            "no <HOST> running"
+        );
+        assert_eq!(replace_hosts("héllo abc", &h), "héllo <HOST>");
+        assert_eq!(replace_hosts("abc", &[""]), "abc");
     }
 }
