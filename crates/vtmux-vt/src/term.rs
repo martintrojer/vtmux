@@ -49,6 +49,10 @@ pub struct PaneTerm {
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
     frozen: Option<Vec<FrozenRow>>,
+    /// ED3 arrived under the alternate screen: tmux cleared the primary
+    /// history (input.c:1758), which libghostty cannot reach until the
+    /// primary screen is back.
+    clear_primary_history: bool,
 }
 
 impl PaneTerm {
@@ -121,6 +125,7 @@ impl PaneTerm {
             pin: None,
             scan: AltModeScanner::default(),
             frozen: None,
+            clear_primary_history: false,
         }
     }
 
@@ -144,21 +149,31 @@ impl PaneTerm {
         let mut i = 0;
         while i < bytes.len() {
             let mut j = i;
-            let mut switch = None;
+            let mut event = None;
             while j < bytes.len() && j - i < step {
-                if let Some(fin) = self.scan.push(bytes[j]) {
-                    switch = Some(fin);
+                if let Some(e) = self.scan.push(bytes[j]) {
+                    event = Some(e);
                     break;
                 }
                 j += 1;
             }
             self.feed_piece(&bytes[i..j]);
             i = j;
-            if let Some(fin) = switch {
-                // The alternate screen is about to switch: last chance to read
-                // the primary history.
-                if fin == b'h' && !self.alternate_on() {
-                    self.frozen = Some(self.freeze_history());
+            if let Some(e) = event {
+                match e {
+                    // The alternate screen is about to switch: last chance to
+                    // read the primary history.
+                    ScanEvent::AltMode(b'h') if !self.alternate_on() => {
+                        self.frozen = Some(self.freeze_history());
+                    }
+                    // tmux's ED3 clears the grid's history, which under the
+                    // alternate screen is the primary one (input.c:1758).
+                    ScanEvent::ClearHistory if self.alternate_on() => {
+                        self.frozen = Some(Vec::new());
+                        self.hsize = 0;
+                        self.clear_primary_history = true;
+                    }
+                    _ => {}
                 }
                 self.feed_piece(&bytes[i..=i]);
                 i += 1;
@@ -177,7 +192,12 @@ impl PaneTerm {
         self.term.vt_write(piece);
         if !self.alternate_on() {
             self.frozen = None;
-            if track {
+            if std::mem::take(&mut self.clear_primary_history) {
+                // Back on the primary screen: apply the ED3 that arrived
+                // under the alternate one.
+                self.term.vt_write(b"\x1b[3J");
+                self.hsize = 0;
+            } else if track {
                 self.account_scroll();
             } else {
                 // Back from the alternate screen (or a reset): the primary
@@ -327,13 +347,23 @@ fn tmux_hsize(mut hsize: usize, limit: usize, lines: usize) -> usize {
 /// Finds `CSI ? ... h|l` sequences that name the alternate screen (modes 47,
 /// 1047, 1049): the one place the primary history must be copied before
 /// libghostty hides it. A false positive costs only a copy; a miss loses the
-/// history while the alternate screen is up.
+/// history while the alternate screen is up. Also finds `CSI 3 J` (ED3), which
+/// tmux applies to the primary history even under the alternate screen.
 #[derive(Debug, Default)]
 struct AltModeScanner {
     state: ScanState,
     private: bool,
     other: bool,
     params: Vec<u8>,
+}
+
+/// What [`AltModeScanner`] found; reported on the sequence's final byte.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScanEvent {
+    /// Alternate screen set (`h`) or reset (`l`).
+    AltMode(u8),
+    /// `CSI 3 J`.
+    ClearHistory,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -345,9 +375,9 @@ enum ScanState {
 }
 
 impl AltModeScanner {
-    /// Feed one byte; `Some(final byte)` when it ends an alternate-screen
-    /// set or reset.
-    fn push(&mut self, b: u8) -> Option<u8> {
+    /// Feed one byte; `Some` when it ends an alternate-screen set or reset,
+    /// or an ED3.
+    fn push(&mut self, b: u8) -> Option<ScanEvent> {
         match (self.state, b) {
             (_, 0x18 | 0x1a) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
@@ -370,6 +400,13 @@ impl AltModeScanner {
             }
             (ScanState::Csi, 0x40..=0x7e) => {
                 self.state = ScanState::Ground;
+                if !self.private
+                    && !self.other
+                    && b == b'J'
+                    && matches!(self.params.as_slice(), b"3" | b"3;0")
+                {
+                    return Some(ScanEvent::ClearHistory);
+                }
                 if self.private
                     && !self.other
                     && matches!(b, b'h' | b'l')
@@ -378,7 +415,7 @@ impl AltModeScanner {
                         .split(|c| *c == b';')
                         .any(|p| matches!(p, b"47" | b"1047" | b"1049"))
                 {
-                    return Some(b);
+                    return Some(ScanEvent::AltMode(b));
                 }
             }
             (ScanState::Csi, _) => self.other = true,
@@ -707,7 +744,13 @@ mod tests {
     fn alt_mode_scanner_matches_only_alternate_screen_modes() {
         let find = |bytes: &[u8]| {
             let mut s = AltModeScanner::default();
-            bytes.iter().filter_map(|b| s.push(*b)).collect::<Vec<u8>>()
+            bytes
+                .iter()
+                .filter_map(|b| match s.push(*b)? {
+                    ScanEvent::AltMode(f) => Some(f),
+                    ScanEvent::ClearHistory => Some(b'J'),
+                })
+                .collect::<Vec<u8>>()
         };
         assert_eq!(find(b"\x1b[?1049h"), b"h");
         assert_eq!(find(b"a\x1b[?25;1047l"), b"l");
@@ -715,6 +758,10 @@ mod tests {
         assert_eq!(find(b"\x1b[?25h"), b"");
         assert_eq!(find(b"\x1b[1049h"), b"");
         assert_eq!(find(b"\x1b[?1049$p"), b"");
+        assert_eq!(
+            find(b"\x1b[3J\x1b[3;0J\x1b[J\x1b[2J\x1b[?3J\x1b[3;1J"),
+            b"JJ"
+        );
     }
 
     #[test]

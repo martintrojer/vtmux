@@ -1,0 +1,8 @@
+kind=format
+cols=20
+rows=5
+seq=10
+bytes=\033[H\033[J
+format=#{history_size}
+command=new-session -d -x 20 -y 5 'sh -c 'i=0; while [ $i -lt 10 ]; do echo l$i; i=$((i+1)); done; printf '"'"'\033[H\033[J'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; display-message -p -t 0 '#{history_size}'
+expected=10\n

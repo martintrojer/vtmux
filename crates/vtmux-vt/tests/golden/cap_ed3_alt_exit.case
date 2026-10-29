@@ -1,0 +1,8 @@
+kind=capture
+cols=20
+rows=5
+seq=10
+bytes=\033[?1049hALT\033[3J\033[?1049l
+flags=-p -S - -E -
+command=new-session -d -x 20 -y 5 'sh -c 'i=0; while [ $i -lt 10 ]; do echo l$i; i=$((i+1)); done; printf '"'"'\033[?1049hALT\033[3J\033[?1049l'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p -S - -E -
+expected=l6\nl7\nl8\nl9\n\n
