@@ -1,0 +1,700 @@
+# Expected regress outcome per test (cargo xtask regress).
+#   status = "pass"  must pass; a failure fails the run
+#   status = "xfail" must fail; a pass fails the run until flipped (--update)
+#   status = "skip"  not run
+# xfail and skip need a reason (link optional). flaky = true: may pass or fail
+# without failing the run; reported separately. Adding an xfail or skip is a
+# manual, reviewed edit; --update only rewrites xfail -> pass.
+
+[tests."alerts.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."alternate-screen-resize.sh"]
+status = "pass"
+
+[tests."am-terminal.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."border-arrows.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."buffers.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."capture-pane-hyperlink.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."capture-pane-sgr0.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."capture-pane-time.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."cfg-client-lost.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."check-names.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."choose-buffer.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."choose-client.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."choose-tree.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."clear-on-attach.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."client-key-order-focus.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."clock-mode.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."cmd-template-replace.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."codepoint-widths.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."combine-test.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."command-alias.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."command-order.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."conf-syntax.sh"]
+status = "pass"
+
+[tests."confirm-before-lock.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-exit-stalled.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-exit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-new-layouts.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-popup.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-run-shell-exit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-sanity.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-size.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-client-wait-exit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-notify-events.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-notify-guard.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."control-subscriptions.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-commands.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-no-client-scroll.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-redraw.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-scroll-exit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-selection-mode.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-selection-scroll.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-test-emacs.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-test-vi.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."copy-mode-unicode-whitespace.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."cursor-test1.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."cursor-test2.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."cursor-test3.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."cursor-test4.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."customize-mode.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."decrqm-sync.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."display-panes.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."environ-update.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."environ.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."find-window.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."floating-pane-covers-tiled-pane.sh"]
+status = "skip"
+reason = "M2: floating panes"
+
+[tests."floating-pane-geometry.sh"]
+status = "skip"
+reason = "M2: floating panes"
+
+[tests."floating-pane-scroll-behind-margins.sh"]
+status = "skip"
+reason = "M2: floating panes"
+
+[tests."floating-pane-top-border-drag.sh"]
+status = "skip"
+reason = "M2: floating panes"
+
+[tests."floating-pane-zoom.sh"]
+status = "skip"
+reason = "M2: floating panes"
+
+[tests."format-animation.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-fuzzy.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-modifiers.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-mouse.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-no-current-window.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-render-contexts.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-strings.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-time-range.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."format-variables.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."has-session-return.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."hooks-after.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."hooks-lifecycle.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."hooks-notify.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."hooks.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."if-shell-TERM.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."if-shell-error.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."if-shell-nested.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-cursor.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-edit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-keys.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-malformed.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-modes.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-osc.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-controls.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-cursor.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-edit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-history.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-reflow.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-scroll.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-sgr.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-unicode.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-raw-wrap.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-reflow-stress.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-replies.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-requests.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-scroll.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-sgr.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."input-unicode.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."join-pane-modal.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."json.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."kill-session-process-exit.sh"]
+status = "pass"
+
+[tests."kill-session-zoomed.sh"]
+status = "pass"
+
+[tests."layout-custom.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."layout-nesting-limit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."layout-set.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."lifecycle-deferred.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."list-commands.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."list-keys-sort-name.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."menu-mouse.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."modal-pane.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."mode-kill.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."mode-mutation.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."mode-tree-scroll.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."new-pane-mouse-status.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."new-pane-mouse.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."new-session-base-index.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."new-session-command.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."new-session-environment.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."new-session-no-client.sh"]
+status = "pass"
+
+[tests."new-session-size.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."new-window-command.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."options-array.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."options-scope.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."options-values.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."osc-11colours.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."pane-ops.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."pipe-pane.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."prompt-keys.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."prompt-mechanics.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."prompt-words-history.sh"]
+status = "skip"
+reason = "fails against reference tmux 3.8"
+
+[tests."renumber-window-limit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."respawn-pane-control-lag.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."run-shell-cwd.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."run-shell-output.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-bidi.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-cache.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-fill-character.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-floating.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-indicators.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-menus.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+flaky = true
+
+[tests."screen-redraw-outside.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-popups.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-scrollbars-auto-hide.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-scrollbars.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-status.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-tiled.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."screen-redraw-window-style.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."server-access.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."server-socket-error.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."session-group-resize.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."session-ops.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."set-hook-B.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."set-hook-E.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."set-hook-R.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."show-options-output.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."split-window-wait-kill.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."style-trim.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."swap-pane-zoom-error.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."switch-mode.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."sync-output-atomic.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."sync-output-copy-cursor.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."sync-output-cursor.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."sync-output-wrapped.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."tab-cell-background.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."targets-panes.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."targets.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."terminal-feature-utf8.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+flaky = true
+
+[tests."theme-report.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."tty-clamp-area-status-top.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."tty-draw-line.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."tty-keys.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."utf8-test.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."wait-for-E.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."wait-for-client-lost.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."window-index-limit.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
+
+[tests."window-ops.sh"]
+status = "xfail"
+reason = "not implemented (M0 baseline)"
