@@ -21,5 +21,6 @@ Record each gate run in the task note (`GATE: commit command scope`, `RESULT: ex
 
 - `unsafe` only in `crates/vtmux-vt` and `crates/vtmux-server/src/sys/`. Every other crate root has `#![forbid(unsafe_code)]` (D10).
 - Behaviour comes from tmux 3.8, read as a spec (D11). Cite the tmux source file and function when you match a non-obvious behaviour.
+- Compliance is at the edge only; the core is idiomatic Rust (spec, *Rust at the core, tmux at the edge*). Don't copy tmux's structures, flag ints or names into the core. When tmux ordering or ID behaviour is visible at the edge, reproduce it explicitly and pin it with an oracle scenario.
 - Never edit `compat/tmux-3.8/regress/`. Divergences go in `compat/patches/` and `compat/DIVERGENCES.md` (spec, *Divergence process*).
 - Every behaviour fix lands with an oracle scenario or a regress flip that proves it.
