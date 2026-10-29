@@ -2,6 +2,7 @@ name = "attach_status_and_detach"
 size = [40, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf '$ '; exec cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
   { attach = { session = "a" } },
   { screen = {} },
   { keys = "echo hi\r" },

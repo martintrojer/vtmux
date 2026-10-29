@@ -13,7 +13,7 @@ mod normalize;
 mod runner;
 mod scenario;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::fmt::Write as _;
 use std::fs;
@@ -187,7 +187,7 @@ fn run_inner() -> Result<ExitCode> {
             let results = parallel(&scenarios, |sc| {
                 let trace = read_trace(&root, sc)?;
                 let got = runner::run(&vtmux, sc)?;
-                Ok::<_, String>(compare(&trace.observations, &got))
+                Ok::<_, String>(compare(&trace.observations, &got, false))
             });
             Ok(report(&scenarios, results, "replay"))
         }
@@ -201,7 +201,7 @@ fn run_inner() -> Result<ExitCode> {
             let results = parallel(&scenarios, |sc| {
                 let want = runner::run(&reference, sc)?;
                 let got = runner::run(&other, sc)?;
-                Ok::<_, String>(compare(&want, &got))
+                Ok::<_, String>(compare(&want, &got, opts.self_check))
             });
             Ok(report(
                 &scenarios,
@@ -296,17 +296,34 @@ struct Outcome {
     diverged: Vec<String>,
 }
 
-/// Diff `got` against `want`. An item carrying a divergence annotation is
-/// judged against its `expect`, never skipped.
-fn compare(want: &[Item], got: &[Item]) -> Outcome {
+/// Diff `got` against `want`, matching observations by step (and by order
+/// within a step), so a missing or timed-out observation never shifts later
+/// diffs onto the wrong step. An item carrying a divergence annotation is
+/// judged against its `expect`, never skipped, unless `ignore_divergence`
+/// (reference vs reference, where the annotation does not apply).
+fn compare(want: &[Item], got: &[Item], ignore_divergence: bool) -> Outcome {
+    fn keyed(items: &[Item]) -> BTreeMap<(usize, usize), &Item> {
+        let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
+        items
+            .iter()
+            .map(|it| {
+                let n = seen.entry(it.step).or_insert(0);
+                *n += 1;
+                ((it.step, *n - 1), it)
+            })
+            .collect()
+    }
+    let (want, got) = (keyed(want), keyed(got));
+    let keys: BTreeSet<_> = want.keys().chain(got.keys()).copied().collect();
     let mut out = Outcome {
         mismatches: Vec::new(),
         diverged: Vec::new(),
     };
-    for i in 0..want.len().max(got.len()) {
-        let g = got.get(i);
-        let w = want.get(i);
-        let div = g.and_then(|g| g.divergence.as_ref());
+    for key in keys {
+        let (w, g) = (want.get(&key), got.get(&key));
+        let div = g
+            .and_then(|g| g.divergence.as_ref())
+            .filter(|_| !ignore_divergence);
         let expected = match (div, w) {
             (Some(d), _) => {
                 out.diverged.push(d.id.clone());
@@ -316,7 +333,6 @@ fn compare(want: &[Item], got: &[Item]) -> Outcome {
         };
         let actual = g.map(|g| &g.observation);
         if expected != actual {
-            let step = g.or(w).map_or(0, |x| x.step);
             let mut left = expected.map_or_else(|| "<no observation>\n".into(), render);
             let mut right = actual.map_or_else(|| "<no observation>\n".into(), render);
             if let Some(d) = div {
@@ -330,7 +346,7 @@ fn compare(want: &[Item], got: &[Item]) -> Outcome {
                 .context_radius(3)
                 .header("expected", "vtmux")
                 .to_string();
-            out.mismatches.push(Mismatch { step, diff });
+            out.mismatches.push(Mismatch { step: key.0, diff });
         }
     }
     out
@@ -452,7 +468,7 @@ mod tests {
     fn compare_reports_the_differing_step() {
         let want = [cli(0, "a\n"), cli(1, "b\n")];
         let got = [cli(0, "a\n"), cli(1, "c\n")];
-        let o = compare(&want, &got);
+        let o = compare(&want, &got, false);
         assert_eq!(o.mismatches.len(), 1);
         assert_eq!(o.mismatches[0].step, 1);
         assert!(o.mismatches[0].diff.contains("-out| b"));
@@ -467,15 +483,43 @@ mod tests {
             id: "D-001".into(),
             expect: cli(0, "vtmux\n").observation,
         });
-        let o = compare(&want, std::slice::from_ref(&got));
+        let o = compare(&want, std::slice::from_ref(&got), false);
         assert!(o.mismatches.is_empty());
         assert_eq!(o.diverged, ["D-001"]);
         got.observation = cli(0, "other\n").observation;
-        assert_eq!(compare(&want, &[got]).mismatches.len(), 1);
+        assert_eq!(compare(&want, &[got], false).mismatches.len(), 1);
     }
 
     #[test]
     fn missing_observation_is_a_mismatch() {
-        assert_eq!(compare(&[cli(0, "a\n")], &[]).mismatches.len(), 1);
+        assert_eq!(compare(&[cli(0, "a\n")], &[], false).mismatches.len(), 1);
+    }
+
+    #[test]
+    fn live_self_ignores_divergence() {
+        let want = [cli(0, "tmux\n")];
+        let mut got = cli(0, "tmux\n");
+        got.divergence = Some(scenario::Divergence {
+            id: "D-001".into(),
+            expect: cli(0, "vtmux\n").observation,
+        });
+        let got = [got];
+        assert_eq!(compare(&want, &got, false).mismatches.len(), 1);
+        let o = compare(&want, &got, true);
+        assert!(o.mismatches.is_empty() && o.diverged.is_empty());
+    }
+
+    #[test]
+    fn observations_are_keyed_by_step() {
+        // Step 1 produced no observation (e.g. a timeout elsewhere): step 2's
+        // comparison must still be against step 2.
+        let want = [cli(0, "a\n"), cli(1, "b\n"), cli(2, "c\n")];
+        let got = [cli(0, "a\n"), cli(2, "x\n")];
+        let o = compare(&want, &got, false);
+        let steps: Vec<_> = o.mismatches.iter().map(|m| m.step).collect();
+        assert_eq!(steps, [1, 2]);
+        assert!(o.mismatches[0].diff.contains("+<no observation>"));
+        assert!(o.mismatches[1].diff.contains("-out| c"));
+        assert!(o.mismatches[1].diff.contains("+out| x"));
     }
 }
