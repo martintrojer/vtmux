@@ -5,22 +5,24 @@
 //! from the release tarball. Layout under `<cache>/vtmux/`:
 //!
 //! - `dl/`        the verified tarball
-//! - `build/<unique>/` per-process scratch extraction + build + staging tree
-//!   (tarball top dir is `tmux-3.8`)
+//! - `build/work/` scratch extraction + build + staging tree (tarball top dir
+//!   is `tmux-3.8`); removed on every exit path
 //! - `tmux-3.8/`  the install prefix (kept apart from the build trees)
+//! - `ref-tmux.lock` exclusive lock serialising resolve-or-build
 //!
 //! The cache is shared by every worktree, so concurrent cold-cache callers
-//! must not interfere: each caller downloads to its own `.part`, builds in its
-//! own `build/<unique>/`, installs with `DESTDIR` into that tree and publishes
-//! with one atomic `rename` of the finished prefix. The loser of that race
-//! discards its copy.
+//! are serialised: whoever holds an exclusive `File::lock` on `ref-tmux.lock`
+//! may download, build and publish; everyone else waits, then re-checks the
+//! install and finds it done. A broken existing install is replaced only
+//! while holding the lock. Because the lock is held, `build/` has no other
+//! live user, so leftovers of a killed run are swept before a new build.
 //!
 //! `$VTMUX_REFERENCE_TMUX_URL` overrides the download URL (mirrors, tests);
 //! the sha256 check still applies.
 
 use std::error::Error;
 use std::fmt;
-use std::fs;
+use std::fs::{self, File};
 use std::io;
 use std::os::fd::AsFd;
 use std::path::{Path, PathBuf};
@@ -86,10 +88,24 @@ pub fn reference_tmux() -> Result<PathBuf> {
     }
     let root = cache_root()?;
     let bin = root.join("tmux-3.8/bin/tmux");
+    // Lock-free fast path: a published prefix is only ever replaced under the
+    // lock, so a pass here is trustworthy and a failure just falls through.
     if bin.exists() && check_version(&bin).is_ok() {
         return Ok(bin);
     }
-    build(&root)?;
+    fs::create_dir_all(&root).or_else(|e| err(format!("create {}: {e}", root.display())))?;
+    let lock_path = root.join("ref-tmux.lock");
+    let lock =
+        File::create(&lock_path).or_else(|e| err(format!("open {}: {e}", lock_path.display())))?;
+    eprintln!("ref-tmux: waiting for {}", lock_path.display());
+    lock.lock()
+        .or_else(|e| err(format!("lock {}: {e}", lock_path.display())))?;
+    // Another caller may have published while we waited.
+    if bin.exists() && check_version(&bin).is_ok() {
+        return Ok(bin);
+    }
+    let url = std::env::var("VTMUX_REFERENCE_TMUX_URL").unwrap_or_else(|_| URL.to_string());
+    build(&root, &url, &lock)?;
     check_version(&bin)?;
     Ok(bin)
 }
@@ -126,17 +142,30 @@ fn check_version(bin: &Path) -> Result<()> {
     }
 }
 
-fn build(root: &Path) -> Result<()> {
+/// Removes a file or directory tree when dropped, on every exit path.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Download, build and publish. The caller must hold the cache lock (`_lock`).
+fn build(root: &Path, url: &str, _lock: &File) -> Result<()> {
     let dl = root.join("dl");
-    let build = root.join("build").join(unique());
+    let build_root = root.join("build");
     let prefix = root.join("tmux-3.8");
     let io = |what: &str, e: io::Error| RefTmuxError(format!("{what}: {e}"));
     fs::create_dir_all(&dl).map_err(|e| io("create dl dir", e))?;
-    // Private build tree, named by `unique()`, so concurrent callers can't
-    // clobber each other.
+    // We hold the lock, so anything left in `build/` belongs to a dead run.
+    let _ = fs::remove_dir_all(&build_root);
+    let build = build_root.join("work");
+    let _scratch = RemoveOnDrop(build.clone());
     fs::create_dir_all(&build).map_err(|e| io("create build dir", e))?;
 
-    let tarball = fetch(&dl)?;
+    let tarball = fetch(&dl, url)?;
     eprintln!("ref-tmux: extracting into {}", build.display());
     run_cmd(
         Command::new("tar")
@@ -176,56 +205,31 @@ fn build(root: &Path) -> Result<()> {
         "make install",
     )?;
     let staged = stage.join(prefix.strip_prefix("/").unwrap_or(&prefix));
-    publish(&staged, &prefix)?;
-    let _ = fs::remove_dir_all(&build);
-    Ok(())
+    publish(&staged, &prefix)
 }
 
-/// A name unique to this call even across PID namespaces (containers sharing
-/// one cache): pid plus a nanosecond clock reading.
-fn unique() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.subsec_nanos());
-    format!("{}-{nanos}", std::process::id())
-}
-
-/// Atomically move a finished install tree to `prefix`. If another caller got
-/// there first and its install is good, keep that one; a broken leftover is
-/// replaced.
+/// Move a finished install tree to `prefix`, replacing whatever is there (the
+/// caller holds the lock and has already found it missing or broken).
 fn publish(staged: &Path, prefix: &Path) -> Result<()> {
-    let mut last = None;
-    for _ in 0..2 {
-        match fs::rename(staged, prefix) {
-            Ok(()) => return Ok(()),
-            Err(e) => last = Some(e),
-        }
-        if check_version(&prefix.join("bin/tmux")).is_ok() {
-            return Ok(());
-        }
-        let _ = fs::remove_dir_all(prefix);
+    match fs::remove_dir_all(prefix) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return err(format!("remove {}: {e}", prefix.display())),
     }
-    err(format!(
-        "install {}: {}",
-        prefix.display(),
-        last.map_or_else(String::new, |e| e.to_string())
-    ))
+    fs::rename(staged, prefix).or_else(|e| err(format!("install {}: {e}", prefix.display())))
 }
 
 /// Return the path of a tarball in `dl` whose sha256 matches the pin.
-fn fetch(dl: &Path) -> Result<PathBuf> {
+fn fetch(dl: &Path, url: &str) -> Result<PathBuf> {
     let dest = dl.join(TARBALL);
     if dest.exists() && sha256(&dest)? == SHA256 {
         return Ok(dest);
     }
     // Not there, or fails its checksum: download afresh. The final rename
     // atomically replaces any bad file, so `dest` is never half-written.
-    let url = std::env::var("VTMUX_REFERENCE_TMUX_URL").unwrap_or_else(|_| URL.to_string());
-    let part = dl.join(format!("{TARBALL}.{}.part", unique()));
+    let part = RemoveOnDrop(dl.join(format!("{TARBALL}.part")));
     eprintln!("ref-tmux: downloading {url}");
-    let result = download(&url, &part, &dest);
-    let _ = fs::remove_file(&part);
-    result.map(|()| dest)
+    download(url, &part.0, &dest).map(|()| dest)
 }
 
 fn download(url: &str, part: &Path, dest: &Path) -> Result<()> {
@@ -284,5 +288,58 @@ fn run_cmd(cmd: &mut Command, what: &str) -> Result<()> {
         Ok(())
     } else {
         err(format!("{what} failed ({status})"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vtmux-ref-tmux-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn fake_tmux(prefix: &Path, version_line: &str) {
+        let bin = prefix.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let tmux = bin.join("tmux");
+        fs::write(&tmux, format!("#!/bin/sh\necho '{version_line}'\n")).unwrap();
+        fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn failed_builds_leave_no_scratch() {
+        let root = temp_root("scratch");
+        fs::create_dir_all(root.join("build")).unwrap();
+        // Stale leftover of a killed run is swept too.
+        fs::create_dir_all(root.join("build/stale")).unwrap();
+        let lock = File::create(root.join("ref-tmux.lock")).unwrap();
+        lock.lock().unwrap();
+        for _ in 0..2 {
+            let r = build(&root, "file:///nonexistent/tmux-3.8.tar.gz", &lock);
+            assert!(r.is_err());
+            let left: Vec<_> = fs::read_dir(root.join("build")).unwrap().collect();
+            assert!(left.is_empty(), "build dir not empty: {left:?}");
+            let dl: Vec<_> = fs::read_dir(root.join("dl")).unwrap().collect();
+            assert!(dl.is_empty(), "dl dir not empty: {dl:?}");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn publish_replaces_wrong_version_prefix() {
+        let root = temp_root("publish");
+        let prefix = root.join("tmux-3.8");
+        let staged = root.join("stage");
+        fake_tmux(&prefix, "tmux 3.7");
+        fake_tmux(&staged, VERSION_LINE);
+        assert!(check_version(&prefix.join("bin/tmux")).is_err());
+        publish(&staged, &prefix).unwrap();
+        check_version(&prefix.join("bin/tmux")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
     }
 }
