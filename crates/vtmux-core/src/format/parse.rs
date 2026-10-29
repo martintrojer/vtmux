@@ -186,15 +186,20 @@ fn replace(key: &str, depth: usize, deferred: &mut Vec<String>) -> Option<Node> 
         None => (Vec::new(), key),
     };
 
+    // `t` is supported only bare (`#{t:x}`); `t/p`, `t/f/...` and the other
+    // argument forms are deferred.
     let unsupported: Vec<&String> = mods
         .iter()
-        .filter(|m| !matches!(m.as_str(), "E" | "T" | "||" | "&&" | "==" | "!="))
+        .filter(|m| !matches!(m.name.as_str(), "E" | "T" | "||" | "&&" | "==" | "!="))
+        .filter(|m| m.name != "t" || m.has_args)
+        .map(|m| &m.name)
         .collect();
     if let Some(first) = unsupported.first() {
         let node = Node::Deferred((*first).clone());
         deferred.extend(unsupported.into_iter().cloned());
         return Some(node);
     }
+    let mods: Vec<String> = mods.into_iter().map(|m| m.name).collect();
 
     // `T` would run strftime first; deferred, so it is `E` for now.
     let reexpand = mods.iter().any(|m| m == "E" || m == "T");
@@ -252,10 +257,21 @@ fn replace(key: &str, depth: usize, deferred: &mut Vec<String>) -> Option<Node> 
         Value::Cond { arms, default }
     } else if body.contains("#{") {
         Value::Inner(sub(body))
+    } else if mods.iter().any(|m| m == "t") {
+        // FORMAT_TIMESTRING only affects the plain lookup (format_find,
+        // format.c:4681-4709).
+        Value::Time(body.to_owned())
     } else {
         Value::Var(body.to_owned())
     };
     Some(Node::Replace { value, reexpand })
+}
+
+/// One entry of a modifier list.
+struct Modifier {
+    name: String,
+    /// Given arguments (`t/p`, `=3`, `s/a/b/`).
+    has_args: bool,
 }
 
 /// `format_is_end`.
@@ -266,16 +282,24 @@ fn is_end(c: u8) -> bool {
 /// `format_build_modifiers` (format.c:4936-5033): the modifier names before the
 /// first top-level `:`, and the offset of the body after it. `None` when the
 /// text is not a modifier list (then the whole key is the body). Arguments are
-/// scanned past, not kept: every modifier that takes one is deferred.
-fn modifiers(key: &str) -> Option<(Vec<String>, usize)> {
+/// scanned past, not kept: every modifier given one is deferred.
+fn modifiers(key: &str) -> Option<(Vec<Modifier>, usize)> {
     const PLAIN: &[u8] = b"labdnwETSWPOVL!<>A";
     const TWO: [&[u8]; 7] = [b"||", b"&&", b"!!", b"!=", b"==", b"<=", b">="];
     const WITH_ARGS: &[u8] = b"ImCLNPSOVst=pReqWcA";
 
     let b = key.as_bytes();
     let at = |i: usize| b.get(i).copied().unwrap_or(0);
-    let mut mods: Vec<String> = Vec::new();
+    let mut mods: Vec<Modifier> = Vec::new();
     let mut cp = 0;
+    let plain = |name: String| Modifier {
+        name,
+        has_args: false,
+    };
+    let with_args = |name: String| Modifier {
+        name,
+        has_args: true,
+    };
 
     while cp < b.len() && b[cp] != b':' {
         if b[cp] == b';' {
@@ -286,12 +310,12 @@ fn modifiers(key: &str) -> Option<(Vec<String>, usize)> {
         }
         let c = b[cp];
         if PLAIN.contains(&c) && is_end(at(cp + 1)) {
-            mods.push(char::from(c).to_string());
+            mods.push(plain(char::from(c).to_string()));
             cp += 1;
             continue;
         }
         if TWO.iter().any(|t| b[cp..].starts_with(t)) && is_end(at(cp + 2)) {
-            mods.push(key[cp..cp + 2].to_owned());
+            mods.push(plain(key[cp..cp + 2].to_owned()));
             cp += 2;
             continue;
         }
@@ -300,7 +324,7 @@ fn modifiers(key: &str) -> Option<(Vec<String>, usize)> {
         }
         let name = char::from(c).to_string();
         if is_end(at(cp + 1)) {
-            mods.push(name);
+            mods.push(plain(name));
             cp += 1;
             continue;
         }
@@ -308,7 +332,7 @@ fn modifiers(key: &str) -> Option<(Vec<String>, usize)> {
         if !first.is_ascii_punctuation() || first == b'-' {
             // One argument, no wrapper character.
             let end = skip(key, cp + 1, b":;")?;
-            mods.push(name);
+            mods.push(with_args(name));
             cp = end;
             continue;
         }
@@ -328,7 +352,7 @@ fn modifiers(key: &str) -> Option<(Vec<String>, usize)> {
                 break;
             }
         }
-        mods.push(name);
+        mods.push(with_args(name));
     }
     if at(cp) != b':' {
         return None;

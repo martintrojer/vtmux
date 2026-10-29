@@ -9,13 +9,17 @@
 //!
 //! Supported: variables and the `#S #I ...` aliases, `#{?c,v,...}`, `#{||:...}`,
 //! `#{&&:...}`, `#{==:a,b}`, `#{!=:a,b}`, `#{E:x}`, `#{T:x}` (like `E`: the
-//! strftime pass is deferred), the `##` `#,` `#}` escapes and `#[style]`
-//! pass-through. Every other modifier parses to [`Node::Deferred`] and expands
+//! strftime pass is deferred), `#{t:x}` (a time variable as `ctime` text), the
+//! `##` `#,` `#}` escapes and `#[style]` pass-through. [`expand_time`] is
+//! `format_expand_time`: a `strftime` pass over the template first. Every other modifier parses to [`Node::Deferred`] and expands
 //! to nothing; [`Parsed::deferred`] lists them so the server can log them.
 //! `#(cmd)` also expands to nothing (jobs are the server's business, D9) and is
 //! reported in `deferred` as `#()`.
 
 mod parse;
+mod time;
+
+pub use time::Tm;
 
 #[cfg(test)]
 mod golden;
@@ -65,6 +69,25 @@ impl Clock for SystemClock {
 pub trait FormatContext {
     /// The value of `name`, or `None` when no such variable exists.
     fn get(&self, name: &str) -> Option<String>;
+
+    /// The seconds-since-epoch value of a time variable (`session_created`
+    /// ...), for `#{t:name}`. `None` when `name` is not a time.
+    fn time(&self, _name: &str) -> Option<i64> {
+        None
+    }
+
+    /// `localtime_r`: `epoch` broken down in the host's zone. The default is
+    /// UTC; the server answers with its local zone.
+    fn local_time(&self, epoch: i64) -> Option<Tm> {
+        Some(Tm::utc(epoch))
+    }
+
+    /// Seconds since the epoch now, for [`expand_time`].
+    fn now(&self) -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+    }
 }
 
 /// A parsed template.
@@ -99,6 +122,8 @@ enum Node {
 enum Value {
     /// Look the (raw) name up.
     Var(String),
+    /// `#{t:name}`: a time variable as `ctime` text (format.c:4681-4709).
+    Time(String),
     /// The body itself contains `#{`: expand it as a template (format.c:6575).
     Inner(Format),
     /// `||` (any) and `&&` (all), n-ary and short-circuiting.
@@ -150,6 +175,19 @@ pub fn expand_with_clock(ast: &Format, ctx: &dyn FormatContext, clock: &dyn Cloc
         start: clock.now_ms(),
     }
     .expand(ast, 0)
+}
+
+/// `format_expand_time` (format.c:6892, 6728-6741): when the template holds a
+/// `%`, run it through `strftime` with the current local time, then expand.
+/// `display-message` uses this; `list-*` formats do not.
+#[must_use]
+pub fn expand_time(template: &str, ctx: &dyn FormatContext) -> String {
+    if template.contains('%')
+        && let Some(tm) = ctx.local_time(ctx.now())
+    {
+        return expand_str(&tm.strftime(template), ctx);
+    }
+    expand_str(template, ctx)
 }
 
 /// Parse and expand in one go.
@@ -210,6 +248,7 @@ impl Eval<'_> {
         let inner = depth + 1;
         match value {
             Value::Var(name) => self.ctx.get(name).unwrap_or_default(),
+            Value::Time(name) => self.time(name),
             Value::Inner(f) => self.expand(f, inner),
             // format_bool_op_n (format.c:5176): stop at the first deciding operand.
             Value::Or(parts) => bool_str(parts.iter().any(|p| is_true(&self.expand(p, inner)))),
@@ -237,6 +276,26 @@ impl Eval<'_> {
                     .map(|d| self.expand(d, inner))
                     .unwrap_or_default()
             }
+        }
+    }
+}
+
+impl Eval<'_> {
+    /// format.c:4681-4709: a time variable, or a variable whose value is a
+    /// positive number, as `ctime`; anything else (zero, negative, text,
+    /// missing) is empty.
+    fn time(&self, name: &str) -> String {
+        let t = self.ctx.time(name).or_else(|| {
+            let v = self.ctx.get(name)?;
+            crate::cmd::strtonum(&v, 0, i64::MAX).ok()
+        });
+        match t {
+            Some(t) if t > 0 => self
+                .ctx
+                .local_time(t)
+                .map(|tm| tm.ctime())
+                .unwrap_or_default(),
+            _ => String::new(),
         }
     }
 }
@@ -274,6 +333,64 @@ mod tests {
             parse("#{?@x,a,b}#{E:@y}#{||:1,0}#S").deferred,
             Vec::<String>::new()
         );
+    }
+
+    /// Reference (TZ=UTC, `set -gF @out FMT; show -gv @out`): `#{t:@t}` with
+    /// @t=86400 is `Fri Jan  2 00:00:00 1970`; @t of -5, 0, `abc` or unset,
+    /// and a non-time variable like `session_name`, give nothing; `#{t:#{@t}}`
+    /// is an inner format, so plain `86400`; `t/p` is deferred.
+    #[test]
+    fn time_modifier() {
+        struct Times(Map);
+        impl FormatContext for Times {
+            fn get(&self, name: &str) -> Option<String> {
+                self.0.get(name)
+            }
+            fn time(&self, name: &str) -> Option<i64> {
+                (name == "session_created").then_some(1_000_000_000)
+            }
+        }
+        let ctx = Times(map(&[
+            ("@t", "86400"),
+            ("@neg", "-5"),
+            ("@zero", "0"),
+            ("@bad", "abc"),
+            ("session_name", "s"),
+        ]));
+        let e = |f: &str| expand_str(f, &ctx);
+        assert_eq!(e("#{t:@t}"), "Fri Jan  2 00:00:00 1970");
+        assert_eq!(e("a#{t:@t}b"), "aFri Jan  2 00:00:00 1970b");
+        assert_eq!(e("#{t:session_created}"), "Sun Sep  9 01:46:40 2001");
+        for empty in [
+            "#{t:@neg}",
+            "#{t:@zero}",
+            "#{t:@bad}",
+            "#{t:@nosuch}",
+            "#{t:session_name}",
+        ] {
+            assert_eq!(e(empty), "", "{empty}");
+        }
+        assert_eq!(e("#{t:#{@t}}"), "86400");
+        assert_eq!(parse("#{t/p:@t}").deferred, ["t"]);
+        assert_eq!(parse("#{t:@t}").deferred, Vec::<String>::new());
+    }
+
+    /// Reference: `display -p '%H %%'` at 20:xx prints `20 %`; a template
+    /// without `%` is not touched by strftime.
+    #[test]
+    fn expand_time_runs_strftime_first() {
+        struct At(Map);
+        impl FormatContext for At {
+            fn get(&self, name: &str) -> Option<String> {
+                self.0.get(name)
+            }
+            fn now(&self) -> i64 {
+                1_793_305_246
+            }
+        }
+        let ctx = At(map(&[("session_name", "a")]));
+        assert_eq!(expand_time("%H %% #S", &ctx), "20 % a");
+        assert_eq!(expand_time("#S", &ctx), "a");
     }
 
     #[test]

@@ -93,6 +93,13 @@ fn rows() -> Vec<(String, String)> {
         r("#{#{session_name}}", "s"), // set -gF @out '#{#{session_name}}' ; show -gv @out
         r("#{#{@name}}", "hello"), // set -gF @out '#{#{@name}}' ; show -gv @out
         r("#{?@x,#{E:@cond},n}", "yes"), // set -gF @out '#{?@x,#{E:@cond},n}' ; show -gv @out
+        r("#{t:@epoch}", "Fri Jan  2 00:00:00 1970"), // set -gF @out '#{t:@epoch}' ; show -gv @out
+        r("a#{t:@epoch}b", "aFri Jan  2 00:00:00 1970b"), // set -gF @out 'a#{t:@epoch}b' ; show -gv @out
+        r("#{t:@zero}", ""), // set -gF @out '#{t:@zero}' ; show -gv @out
+        r("#{t:@name}", ""), // set -gF @out '#{t:@name}' ; show -gv @out
+        r("#{t:@nosuch}", ""), // set -gF @out '#{t:@nosuch}' ; show -gv @out
+        r("#{t:#{@epoch}}", "86400"), // set -gF @out '#{t:#{@epoch}}' ; show -gv @out
+        r("#{E:@epoch}", "86400"), // set -gF @out '#{E:@epoch}' ; show -gv @out
         r("##", "#"), // set -gF @out '##' ; show -gv @out
         r("###", "#"), // set -gF @out '###' ; show -gv @out
         r("####", "##"), // set -gF @out '####' ; show -gv @out

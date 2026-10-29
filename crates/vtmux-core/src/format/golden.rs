@@ -40,6 +40,7 @@ fn fixture() -> Fixture {
         ("@loop", "x#{E:@loop}y"),
         ("@cond", "#{?@x,yes,no}"),
         ("@esc", "a#,b"),
+        ("@epoch", "86400"),
     ]))
 }
 

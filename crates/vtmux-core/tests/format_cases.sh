@@ -12,8 +12,11 @@
 # The fixture the Rust test context mirrors (golden.rs, `ctx()`):
 #   new-session -d -s s -n w ; select-pane -T t
 #   set -g @x 1 ; @zero 0 ; @empty '' ; @name hello ; @loop 'x#{E:@loop}y'
-#   @cond '#{?@x,yes,no}' ; @esc 'a#,b'
+#   @cond '#{?@x,yes,no}' ; @esc 'a#,b' ; @epoch 86400
+# TZ is pinned to UTC so `#{t:...}` rows match the test context's UTC
+# `local_time`.
 set -euo pipefail
+export TZ=UTC
 
 REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
 SOCK="vtmux-format-cases-$$"
@@ -29,6 +32,7 @@ t set -g @name hello
 t set -g @loop 'x#{E:@loop}y'
 t set -g @cond '#{?@x,yes,no}'
 t set -g @esc 'a#,b'
+t set -g @epoch 86400
 
 rust_str() { sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 run() { t set -gF @out "$1"; t show -gv @out; }
@@ -170,6 +174,15 @@ row '#{E:#{session_name}}'
 row '#{#{session_name}}'
 row '#{#{@name}}'
 row '#{?@x,#{E:@cond},n}'
+
+# Time strings (format.c:4681-4709).
+row '#{t:@epoch}'
+row 'a#{t:@epoch}b'
+row '#{t:@zero}'
+row '#{t:@name}'
+row '#{t:@nosuch}'
+row '#{t:#{@epoch}}'
+row '#{E:@epoch}'
 
 # Escapes and aliases (format.c:6770-6871).
 row '##'
