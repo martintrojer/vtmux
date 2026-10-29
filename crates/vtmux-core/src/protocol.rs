@@ -45,8 +45,28 @@ pub struct Hello {
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
     pub tty: Option<TtyInfo>,
-    /// Client flag bits; their meaning belongs to the server.
-    pub flags: u64,
+    pub flags: ClientFlags,
+}
+
+/// How the client was invoked, for the options M0 needs. Each field maps to
+/// a tmux flag at the edge only; the wire carries one byte per field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClientFlags {
+    /// `-C` / `-CC`.
+    pub control: ControlMode,
+    /// `-u`: assume the terminal supports UTF-8.
+    pub utf8: bool,
+    /// `-N`: do not start a server.
+    pub no_start: bool,
+}
+
+/// Control mode as selected by `-C` (once) or `-CC` (twice).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlMode {
+    #[default]
+    None,
+    Control,
+    ControlControl,
 }
 
 impl Hello {
@@ -140,25 +160,32 @@ impl From<io::Error> for ProtocolError {
 
 /// A message that travels in a frame.
 pub trait Message: Sized {
+    /// Exact byte length `write_payload` will produce, so [`encode`] can
+    /// refuse an oversized message before building it.
+    fn payload_len(&self) -> usize;
     fn write_payload(&self, out: &mut Vec<u8>);
     fn read_payload(r: &mut Reader<'_>) -> Result<Self, ProtocolError>;
 }
 
 /// Encode `msg` as one frame.
 ///
-/// # Panics
-/// If the payload is over [`MAX_FRAME`]; callers chunk their data.
-#[must_use]
-pub fn encode<M: Message>(msg: &M) -> Vec<u8> {
-    let mut out = vec![0; 4];
+/// # Errors
+/// [`ProtocolError::Oversized`] if the payload is over [`MAX_FRAME`]; the
+/// check happens before any buffer is built, and callers chunk their data.
+pub fn encode<M: Message>(msg: &M) -> Result<Vec<u8>, ProtocolError> {
+    let len = msg.payload_len();
+    if len > MAX_FRAME {
+        return Err(ProtocolError::Oversized(len));
+    }
+    let mut out = Vec::with_capacity(4 + len);
+    out.extend_from_slice(&u32::try_from(len).expect("<= MAX_FRAME").to_le_bytes());
     msg.write_payload(&mut out);
-    let len = out.len() - 4;
-    assert!(
-        len <= MAX_FRAME,
-        "frame payload of {len} bytes exceeds MAX_FRAME"
+    debug_assert_eq!(
+        out.len(),
+        4 + len,
+        "payload_len disagrees with write_payload"
     );
-    out[..4].copy_from_slice(&u32::try_from(len).expect("checked above").to_le_bytes());
-    out
+    Ok(out)
 }
 
 /// Decode one frame from the front of `buf`; returns the message and the
@@ -185,8 +212,12 @@ pub fn decode<M: Message>(buf: &[u8]) -> Result<(M, usize), ProtocolError> {
 }
 
 /// Write one frame to a stream.
-pub fn write_msg<M: Message>(w: &mut impl Write, msg: &M) -> io::Result<()> {
-    w.write_all(&encode(msg))
+///
+/// # Errors
+/// [`ProtocolError::Oversized`] (nothing is written) or [`ProtocolError::Io`].
+pub fn write_msg<M: Message>(w: &mut impl Write, msg: &M) -> Result<(), ProtocolError> {
+    w.write_all(&encode(msg)?)?;
+    Ok(())
 }
 
 /// Read one frame from a blocking stream. End of stream mid-frame is
@@ -246,10 +277,12 @@ impl<'a> Reader<'a> {
         ))
     }
 
-    fn u64(&mut self) -> Result<u64, ProtocolError> {
-        Ok(u64::from_le_bytes(
-            self.take(8)?.try_into().expect("8 bytes"),
-        ))
+    fn flag(&mut self) -> Result<bool, ProtocolError> {
+        match self.u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(ProtocolError::Malformed("bad bool byte")),
+        }
     }
 
     fn bytes(&mut self) -> Result<Vec<u8>, ProtocolError> {
@@ -288,6 +321,14 @@ impl<'a> Reader<'a> {
     }
 }
 
+fn strings_len(v: &[String]) -> usize {
+    4 + v.iter().map(|s| 4 + s.len()).sum::<usize>()
+}
+
+fn option_len<T>(v: Option<&T>, f: impl FnOnce(&T) -> usize) -> usize {
+    1 + v.map_or(0, f)
+}
+
 fn put_u32(out: &mut Vec<u8>, v: u32) {
     out.extend_from_slice(&v.to_le_bytes());
 }
@@ -322,6 +363,10 @@ fn put_strings(out: &mut Vec<u8>, v: &[String]) {
 }
 
 impl TtyInfo {
+    fn len(&self) -> usize {
+        4 + self.term.len() + 8 + strings_len(&self.features)
+    }
+
     fn write(&self, out: &mut Vec<u8>) {
         put_bytes(out, self.term.as_bytes());
         put_u32(out, self.cols);
@@ -355,7 +400,28 @@ impl Hello {
             put_bytes(out, v.as_bytes());
         }
         put_option(out, self.tty.as_ref(), |o, t| t.write(o));
-        out.extend_from_slice(&self.flags.to_le_bytes());
+        out.push(match self.flags.control {
+            ControlMode::None => 0,
+            ControlMode::Control => 1,
+            ControlMode::ControlControl => 2,
+        });
+        out.push(u8::from(self.flags.utf8));
+        out.push(u8::from(self.flags.no_start));
+    }
+
+    fn len(&self) -> usize {
+        4 + 1
+            + strings_len(&self.argv)
+            + 4
+            + self.cwd.as_os_str().len()
+            + 4
+            + self
+                .env
+                .iter()
+                .map(|(k, v)| 8 + k.len() + v.len())
+                .sum::<usize>()
+            + option_len(self.tty.as_ref(), TtyInfo::len)
+            + 3
     }
 
     fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
@@ -373,7 +439,17 @@ impl Hello {
             .map(|_| Ok((r.string()?, r.string()?)))
             .collect::<Result<_, ProtocolError>>()?;
         let tty = r.option(TtyInfo::read)?;
-        let flags = r.u64()?;
+        let control = match r.u8()? {
+            0 => ControlMode::None,
+            1 => ControlMode::Control,
+            2 => ControlMode::ControlControl,
+            _ => return Err(ProtocolError::Malformed("bad control mode byte")),
+        };
+        let flags = ClientFlags {
+            control,
+            utf8: r.flag()?,
+            no_start: r.flag()?,
+        };
         Ok(Self {
             version,
             invocation,
@@ -387,6 +463,15 @@ impl Hello {
 }
 
 impl Message for ClientMsg {
+    fn payload_len(&self) -> usize {
+        1 + match self {
+            Self::Hello(h) => h.len(),
+            Self::Input(b) | Self::Stdin(b) => 4 + b.len(),
+            Self::Resize { .. } => 8,
+            Self::StdinEof | Self::Detach => 0,
+        }
+    }
+
     fn write_payload(&self, out: &mut Vec<u8>) {
         match self {
             Self::Hello(h) => {
@@ -428,6 +513,14 @@ impl Message for ClientMsg {
 }
 
 impl Message for ServerMsg {
+    fn payload_len(&self) -> usize {
+        1 + match self {
+            Self::Stdout(b) | Self::Stderr(b) | Self::Frame(b) => 4 + b.len(),
+            Self::Exit { message, .. } => 4 + option_len(message.as_ref(), |m| 4 + m.len()),
+            Self::Ready => 0,
+        }
+    }
+
     fn write_payload(&self, out: &mut Vec<u8>) {
         match self {
             Self::Stdout(b) => {
@@ -481,7 +574,11 @@ mod tests {
                 ("E".into(), String::new()),
             ],
             tty,
-            flags: 0x8000_0000_0000_0001,
+            flags: ClientFlags {
+                control: ControlMode::ControlControl,
+                utf8: true,
+                no_start: false,
+            },
         }
     }
 
@@ -528,7 +625,7 @@ mod tests {
     }
 
     fn round_trip<M: Message + PartialEq + fmt::Debug>(m: &M) {
-        let bytes = encode(m);
+        let bytes = encode(m).unwrap();
         let (back, used) = decode::<M>(&bytes).unwrap();
         assert_eq!(&back, m);
         assert_eq!(used, bytes.len());
@@ -544,8 +641,8 @@ mod tests {
 
     #[test]
     fn frames_decode_back_to_back() {
-        let mut stream = encode(&ClientMsg::StdinEof);
-        stream.extend(encode(&ClientMsg::Detach));
+        let mut stream = encode(&ClientMsg::StdinEof).unwrap();
+        stream.extend(encode(&ClientMsg::Detach).unwrap());
         let (a, n) = decode::<ClientMsg>(&stream).unwrap();
         let (b, m) = decode::<ClientMsg>(&stream[n..]).unwrap();
         assert_eq!(
@@ -558,8 +655,8 @@ mod tests {
     fn every_truncation_is_an_error() {
         let frames: Vec<Vec<u8>> = all_client()
             .iter()
-            .map(encode)
-            .chain(all_server().iter().map(encode))
+            .map(|m| encode(m).unwrap())
+            .chain(all_server().iter().map(|m| encode(m).unwrap()))
             .collect();
         for (i, f) in frames.iter().enumerate() {
             for cut in 0..f.len() {
@@ -578,7 +675,7 @@ mod tests {
 
     #[test]
     fn truncated_stream_is_an_error_and_clean_eof_is_none() {
-        let f = encode(&ClientMsg::Input(vec![1, 2, 3]));
+        let f = encode(&ClientMsg::Input(vec![1, 2, 3])).unwrap();
         assert!(matches!(
             read_msg::<ClientMsg>(&mut &f[..f.len() - 1]),
             Err(ProtocolError::Truncated)
@@ -607,6 +704,46 @@ mod tests {
             decode::<ServerMsg>(&huge),
             Err(ProtocolError::Oversized(_))
         ));
+    }
+
+    #[test]
+    fn oversized_encode_and_write_are_errors_not_panics() {
+        let big = ServerMsg::Frame(vec![0; MAX_FRAME]);
+        assert!(matches!(
+            encode(&big),
+            Err(ProtocolError::Oversized(n)) if n == MAX_FRAME + 5
+        ));
+        let mut sink = Vec::new();
+        assert!(matches!(
+            write_msg(&mut sink, &big),
+            Err(ProtocolError::Oversized(_))
+        ));
+        assert!(sink.is_empty(), "nothing is written for a refused frame");
+        let big = ClientMsg::Stdin(vec![0; MAX_FRAME]);
+        assert!(matches!(encode(&big), Err(ProtocolError::Oversized(_))));
+    }
+
+    #[test]
+    fn write_msg_writes_the_frame() {
+        let mut sink = Vec::new();
+        write_msg(&mut sink, &ClientMsg::Detach).unwrap();
+        assert_eq!(sink, encode(&ClientMsg::Detach).unwrap());
+    }
+
+    #[test]
+    fn bad_flag_bytes_are_errors() {
+        let mut f = encode(&ClientMsg::Hello(hello(None))).unwrap();
+        let n = f.len();
+        // control, utf8, no_start are the last three payload bytes.
+        for (at, bad) in [(n - 3, 3), (n - 2, 2), (n - 1, 2)] {
+            let saved = f[at];
+            f[at] = bad;
+            assert!(matches!(
+                decode::<ClientMsg>(&f),
+                Err(ProtocolError::Malformed(_))
+            ));
+            f[at] = saved;
+        }
     }
 
     #[test]

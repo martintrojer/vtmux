@@ -23,7 +23,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-use crate::socket::SocketError;
+use crate::socket::{SocketError, path_line};
 
 /// What C's `strerror` would print for `err`: Rust appends ` (os error N)`
 /// to OS errors, tmux does not.
@@ -127,6 +127,27 @@ impl fmt::Display for EdgeError {
                 )
             }
             Self::Socket(e) => e.fmt(f),
+        }
+    }
+}
+
+impl EdgeError {
+    /// The stderr line (no newline) with path bytes exactly as given; see
+    /// [`SocketError::to_bytes`]. Use this for stderr, `Display` for logs.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::NoServer { path } => path_line("no server running on ", path, ""),
+            Self::ConnectFailed { path, io } => path_line(
+                "error connecting to ",
+                path,
+                &format!(" ({})", strerror(io)),
+            ),
+            Self::CreateFailed { path, io } => {
+                path_line("error creating ", path, &format!(" ({})", strerror(io)))
+            }
+            Self::Socket(e) => e.to_bytes(),
+            _ => self.to_string().into_bytes(),
         }
     }
 }
@@ -241,6 +262,75 @@ mod tests {
     fn socket_errors_pass_through() {
         let e = EdgeError::from(SocketError::NotADirectory("/tmp/tmux-1000".into()));
         assert_eq!(s(&e), "/tmp/tmux-1000 is not a directory");
+    }
+
+    /// Reference: `env -u TMUX $T -f /dev/null -S "$D/bad-\xff" ls` prints
+    /// `error connecting to $D/bad-\xff (No such file or directory)` with the
+    /// 0xff byte intact (client.c:291-297 writes the `char *` with `%s`).
+    #[test]
+    fn non_utf8_paths_keep_their_bytes() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        let path = PathBuf::from(OsString::from_vec(b"/tmp/bad-\xff".to_vec()));
+        let enoent = || io::Error::from_raw_os_error(2);
+        let cases = [
+            (
+                EdgeError::ConnectFailed {
+                    path: path.clone(),
+                    io: enoent(),
+                },
+                &b"error connecting to /tmp/bad-\xff (No such file or directory)"[..],
+            ),
+            (
+                EdgeError::CreateFailed {
+                    path: path.clone(),
+                    io: enoent(),
+                },
+                b"error creating /tmp/bad-\xff (No such file or directory)",
+            ),
+            (
+                EdgeError::NoServer { path: path.clone() },
+                b"no server running on /tmp/bad-\xff",
+            ),
+            (
+                SocketError::NotADirectory(path.clone()).into(),
+                b"/tmp/bad-\xff is not a directory",
+            ),
+            (
+                SocketError::UnsafePermissions(path.clone()).into(),
+                b"directory /tmp/bad-\xff has unsafe permissions",
+            ),
+            (
+                SocketError::CreateDir {
+                    dir: path.clone(),
+                    cause: "Permission denied".into(),
+                }
+                .into(),
+                b"couldn't create directory /tmp/bad-\xff (Permission denied)",
+            ),
+            (
+                SocketError::ReadDir {
+                    dir: path,
+                    cause: "Permission denied".into(),
+                }
+                .into(),
+                b"couldn't read directory /tmp/bad-\xff (Permission denied)",
+            ),
+        ];
+        for (err, want) in cases {
+            assert_eq!(err.to_bytes(), want, "{err}");
+        }
+    }
+
+    #[test]
+    fn to_bytes_matches_display_for_utf8() {
+        let e = EdgeError::ConnectFailed {
+            path: "/tmp/x".into(),
+            io: io::Error::from_raw_os_error(2),
+        };
+        assert_eq!(e.to_bytes(), e.to_string().into_bytes());
+        let e = EdgeError::UnknownCommand("x".into());
+        assert_eq!(e.to_bytes(), b"unknown command: x");
     }
 
     #[test]

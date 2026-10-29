@@ -146,6 +146,34 @@ impl fmt::Display for SocketError {
     }
 }
 
+impl SocketError {
+    /// The stderr line (no newline) with path bytes exactly as given:
+    /// tmux prints its `char *` paths with `%s`, so a non-UTF-8 path must
+    /// not turn into U+FFFD (D20). Use this for stderr, `Display` for logs.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::NoSuitablePath => self.to_string().into_bytes(),
+            Self::CreateDir { dir, cause } => {
+                path_line("couldn't create directory ", dir, &format!(" ({cause})"))
+            }
+            Self::ReadDir { dir, cause } => {
+                path_line("couldn't read directory ", dir, &format!(" ({cause})"))
+            }
+            Self::NotADirectory(dir) => path_line("", dir, " is not a directory"),
+            Self::UnsafePermissions(dir) => path_line("directory ", dir, " has unsafe permissions"),
+        }
+    }
+}
+
+/// `before` + raw path bytes + `after`.
+pub(crate) fn path_line(before: &str, path: &Path, after: &str) -> Vec<u8> {
+    let mut line = before.as_bytes().to_vec();
+    line.extend_from_slice(path.as_os_str().as_bytes());
+    line.extend_from_slice(after.as_bytes());
+    line
+}
+
 impl std::error::Error for SocketError {}
 
 /// Resolve the server socket path. `label` is `-L`, `path` is `-S`.
