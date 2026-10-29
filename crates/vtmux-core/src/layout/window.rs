@@ -82,6 +82,21 @@ impl WindowPanes {
         true
     }
 
+    /// `window_redraw_active_switch` then `window_set_active_pane`, as
+    /// select-pane (cmd-select-pane.c:195, :282), the mouse paths and
+    /// modal spawn do: a newly selected floating pane goes to the head of
+    /// the z-order (window.c:833-838). The previously active pane is not
+    /// raised (the loop breaks on `wp == w->active` first). A pane that is
+    /// already active is left alone (nothing to switch). `floating` is
+    /// whether the cell of `pane` is floating; modal panes are not modelled.
+    pub fn select_raising(&mut self, pane: PaneId, floating: bool) -> bool {
+        if floating && self.active != Some(pane) {
+            self.z_order.retain(|&p| p != pane);
+            self.z_order.insert(0, pane);
+        }
+        self.select(pane)
+    }
+
     /// `window_remove_pane` with `window_lost_pane` (window.c:1185-1233): a
     /// removed active pane gives way to the last-used pane, else its
     /// predecessor in the window, else its successor.
