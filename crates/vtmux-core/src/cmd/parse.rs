@@ -6,7 +6,7 @@
 //!   already split the words, so nothing is quoted, escaped or commented: a
 //!   word ending in `;` ends the command, a word ending in `\;` becomes a
 //!   word ending in a literal `;`, `;` elsewhere in a word is literal.
-//! - [`parse_config_line`] is the lexer and grammar for config files and
+//! - [`parse_config_with`] is the lexer and grammar for config files and
 //!   command strings (`yylex`, 1262-1480, and the `%%` rules above it):
 //!   quotes, backslash escapes, `$VAR` and `~` expansion, `#` comments, `;`
 //!   separators and newlines.
@@ -17,70 +17,46 @@
 //! the whole text, but an execution-time failure (`new -d -x abc`) never
 //! shows up here.
 //!
+//! `NAME=value` and `%hidden NAME=value` parse into [`Statement::Assign`]; the
+//! server applies them (they change its global environment, which a parser
+//! cannot). tmux applies them while parsing, so a later `$NAME` in the same
+//! text sees them; here `$NAME` comes from the [`ConfigEnv`] alone, so a
+//! caller wanting that parse-time visibility parses statement by statement.
+//!
 //! Not handled in M0 and reported as [`CmdError::Unsupported`]: `{ }` blocks,
-//! `%if` and friends, `NAME=value` assignments (they change the server's
-//! global environment, which a parser cannot), and arguments that are not
-//! valid UTF-8 (`\377`, `\U00110000`). Parse errors carry no `file:line:`
-//! prefix; the caller that knows the file adds it.
+//! `%if` and friends, and arguments that are not valid UTF-8 (`\377`,
+//! `\U00110000`). Parse errors carry no `file:line:` prefix; the caller that
+//! knows the file adds it.
 
 use super::table::{DEFAULT_COMMAND_ALIASES, find};
-use super::{Args, CmdError, CommandCall};
+use super::{Args, Assignment, CmdError, CommandCall, Statement};
 
-/// What the lexer needs from the process: `$VAR` (the server's global
-/// environment, `environ_find(global_environ, name)`) and `~` / `~user`
-/// (`getpwuid` / `getpwnam`, with `$HOME` first for a bare `~`).
+/// What the lexer needs from the host. vtmux-core does no I/O: the server
+/// implements this over its global environment and the system user database
+/// (`getpwnam`, which goes through NSS and is not a scan of /etc/passwd).
 pub trait ConfigEnv {
+    /// `$VAR`: `environ_find(global_environ, name)` (cmd-parse.y:1584).
+    /// Hidden variables count; an unset one expands to nothing.
     fn var(&self, name: &str) -> Option<String>;
-    /// `None` is a bare `~`.
+    /// `~` and `~user` (`yylex_token_tilde`, cmd-parse.y:1640-1690). `None`
+    /// is a bare `~`: a non-empty `HOME` in the global environment, else the
+    /// home of the current uid (`getpwuid`). `Some(user)` is `getpwnam`.
+    /// `None` back is a syntax error.
     fn home(&self, user: Option<&str>) -> Option<String>;
 }
 
-/// The real process environment and password database.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ProcessEnv;
+/// The environment for text that cannot contain `$` or `~` (the default
+/// command aliases).
+struct NoEnv;
 
-impl ConfigEnv for ProcessEnv {
-    fn var(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok()
+impl ConfigEnv for NoEnv {
+    fn var(&self, _: &str) -> Option<String> {
+        None
     }
 
-    fn home(&self, user: Option<&str>) -> Option<String> {
-        // yylex_token_tilde (cmd-parse.y:1640-1690): a bare ~ prefers a
-        // non-empty $HOME and falls back to the passwd entry of the uid.
-        // vtmux-core has no libc, so `getpwnam`/`getpwuid` are a scan of
-        // /etc/passwd; a server on a platform with another user database
-        // supplies its own `ConfigEnv`.
-        let key = if let Some(name) = user {
-            PasswdKey::Name(name.to_owned())
-        } else {
-            if let Some(home) = std::env::var("HOME").ok().filter(|h| !h.is_empty()) {
-                return Some(home);
-            }
-            PasswdKey::Uid(rustix::process::getuid().as_raw())
-        };
-        let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
-        passwd.lines().find_map(|line| {
-            let mut f = line.split(':');
-            let (name, _, uid, _, _, home) = (
-                f.next()?,
-                f.next()?,
-                f.next()?,
-                f.next()?,
-                f.next()?,
-                f.next()?,
-            );
-            let hit = match &key {
-                PasswdKey::Name(n) => n == name,
-                PasswdKey::Uid(u) => uid.parse() == Ok(*u),
-            };
-            hit.then(|| home.to_owned())
-        })
+    fn home(&self, _: Option<&str>) -> Option<String> {
+        None
     }
-}
-
-enum PasswdKey {
-    Name(String),
-    Uid(u32),
 }
 
 /// Parse an argument vector as `tmux a b ; c d` receives it.
@@ -108,27 +84,31 @@ pub fn parse_argv(words: &[String]) -> Result<Vec<CommandCall>, CmdError> {
         }
     }
     commands.push(current);
-    build(&commands, &ProcessEnv)
-}
-
-/// Parse config text with the real environment: one line, or several (a
-/// newline ends a statement exactly as `;` does).
-pub fn parse_config_line(line: &str) -> Result<Vec<CommandCall>, CmdError> {
-    parse_config_with(line, &ProcessEnv)
-}
-
-/// [`parse_config_line`] with a caller-supplied environment.
-pub fn parse_config_with(text: &str, env: &dyn ConfigEnv) -> Result<Vec<CommandCall>, CmdError> {
-    let commands = lex_commands(text, env)?;
-    build(&commands, env)
-}
-
-/// `cmd_parse_build_commands` over already-split commands. An empty command
-/// (`;` alone on the command line) builds nothing (cmd-parse.y:901-907).
-fn build(commands: &[Vec<String>], env: &dyn ConfigEnv) -> Result<Vec<CommandCall>, CmdError> {
     let mut out = Vec::new();
-    for words in commands {
-        build_command(words, true, env, &mut out)?;
+    for words in &commands {
+        build_command(words, true, &NoEnv, &mut out)?;
+    }
+    Ok(out)
+}
+
+/// Parse config text: one line, or several (a newline ends a statement
+/// exactly as `;` does). `NAME=value` and `%hidden NAME=value` come back as
+/// [`Statement::Assign`] in source order for the server to apply to its
+/// global environment.
+///
+/// # Errors
+/// The first syntax, lexer or command error in the text.
+pub fn parse_config_with(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Statement>, CmdError> {
+    let mut out = Vec::new();
+    for item in lex_commands(text, env)? {
+        match item {
+            Item::Assign(a) => out.push(Statement::Assign(a)),
+            Item::Words(words) => {
+                let mut calls = Vec::new();
+                build_command(&words, true, env, &mut calls)?;
+                out.extend(calls.into_iter().map(Statement::Command));
+            }
+        }
     }
     Ok(out)
 }
@@ -148,7 +128,13 @@ fn build_command(
         // cmd_parse_expand_alias (cmd-parse.y:820-880): parse the alias text,
         // append the remaining words to its last command, and build without
         // expanding again.
-        let mut expanded = lex_commands(text, env)?;
+        let mut expanded: Vec<Vec<String>> = lex_commands(text, env)?
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Words(words) => Some(words),
+                Item::Assign(_) => None,
+            })
+            .collect();
         let Some(last) = expanded.last_mut() else {
             return Ok(());
         };
@@ -177,8 +163,10 @@ enum Token {
         text: String,
         equals: bool,
     },
-    /// `%if`, `%elif`, `%else`, `%endif`, `%hidden`: a statement-level
-    /// directive. Anywhere else tmux's grammar rejects it.
+    /// `%hidden`: valid only at the start of a statement, before `NAME=value`.
+    Hidden,
+    /// `%if`, `%elif`, `%else`, `%endif`: a statement-level directive.
+    /// Anywhere else tmux's grammar rejects it.
     Directive,
     End,
 }
@@ -294,9 +282,8 @@ impl Lexer<'_> {
                         });
                     }
                     return match word.as_slice() {
-                        b"%hidden" | b"%if" | b"%else" | b"%elif" | b"%endif" => {
-                            Ok(Token::Directive)
-                        }
+                        b"%hidden" => Ok(Token::Hidden),
+                        b"%if" | b"%else" | b"%elif" | b"%endif" => Ok(Token::Directive),
                         _ => Err(CmdError::Syntax),
                     };
                 }
@@ -572,9 +559,52 @@ fn bytes_to_string(bytes: Vec<u8>) -> Result<String, CmdError> {
     String::from_utf8(bytes).map_err(|_| CmdError::Unsupported("non-UTF-8 argument"))
 }
 
-/// The grammar for the M0 subset: statements of commands separated by `;`
-/// and newlines (cmd-parse.y `statements`, `commands`, `command`).
-fn lex_commands(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Vec<String>>, CmdError> {
+/// One lexed statement item: the words of a command, or an assignment.
+enum Item {
+    Words(Vec<String>),
+    Assign(Assignment),
+}
+
+/// Longest `NAME=value` tmux accepts (`CMD_PARSE_MAX_ENVIRON_LEN`,
+/// cmd-parse.y:40).
+const MAX_ENVIRON_LEN: usize = 16384;
+
+/// `assignment` / `hidden_assignment` (cmd-parse.y:224-270). The lexer only
+/// returns an `EQUALS` token when it holds a valid name before the first `=`.
+fn assignment(text: &str, hidden: bool) -> Result<Item, CmdError> {
+    if text.len() > MAX_ENVIRON_LEN {
+        return Err(CmdError::Lex("environment variable is too long"));
+    }
+    let (name, value) = text.split_once('=').ok_or(CmdError::Syntax)?;
+    Ok(Item::Assign(Assignment {
+        name: name.to_owned(),
+        value: value.to_owned(),
+        hidden,
+    }))
+}
+
+/// A `;`, newline or end of text ends a command. tmux quirk
+/// (cmd-parse.y:405-415, `commands ';' command`): when that command is a bare
+/// `NAME=value` it has no arguments, so the rule builds a fresh empty list
+/// and frees every command earlier in the same `;` chain, unbuilt and so
+/// unchecked (`x -- ; A=1` is not an `unknown command` error). The
+/// assignments already took effect when they were parsed.
+fn end_command(items: &mut Vec<Item>, current: &mut Vec<String>, drop: bool, chain_start: usize) {
+    if !current.is_empty() {
+        items.push(Item::Words(std::mem::take(current)));
+    } else if drop {
+        let mut i = 0;
+        items.retain(|item| {
+            i += 1;
+            i <= chain_start || matches!(item, Item::Assign(_))
+        });
+    }
+}
+
+/// The grammar for the M0 subset: statements of commands and assignments
+/// separated by `;` and newlines (cmd-parse.y `statements`, `commands`,
+/// `command`, `hidden_assignment`).
+fn lex_commands(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Item>, CmdError> {
     let mut lexer = Lexer {
         input: text.as_bytes(),
         off: 0,
@@ -582,44 +612,83 @@ fn lex_commands(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Vec<String>>, Cmd
         eof: false,
         env,
     };
-    let mut commands = Vec::new();
+    let mut items = Vec::new();
     let mut current: Vec<String> = Vec::new();
     // A command has started in this statement: a `;` is only valid after
     // one (`; display` is a syntax error, `display ;; display` is not).
     let mut started = false;
+    // The command so far is just `NAME=value` (`optional_assignment` is
+    // followed by a TOKEN, so another `NAME=value` is a syntax error).
+    let mut assigned = false;
+    // Where the current `;`-chain starts in `items`, and whether the
+    // assignment now being read follows an earlier command in the chain.
+    let mut chain_start = 0;
+    let mut drop_chain = false;
     loop {
         match lexer.next_token()? {
             Token::Word { equals, text } => {
                 if current.is_empty() {
-                    if equals {
-                        return Err(CmdError::Unsupported("NAME=value assignments"));
+                    if assigned {
+                        if equals {
+                            return Err(CmdError::Syntax);
+                        }
+                        assigned = false;
+                    } else if equals {
+                        drop_chain = started;
+                        items.push(assignment(&text, false)?);
+                        started = true;
+                        assigned = true;
+                        continue;
                     }
                     started = true;
                 }
                 current.push(text);
             }
-            Token::Directive => {
-                // Valid only where a statement or command may start.
-                if !current.is_empty() {
+            Token::Hidden => {
+                // `statement: hidden_assignment`, then the newline: not part
+                // of a `;` list, so only a whole statement of its own.
+                if started || !current.is_empty() {
                     return Err(CmdError::Syntax);
                 }
-                return Err(CmdError::Unsupported("%if conditionals and %hidden"));
+                match lexer.next_token()? {
+                    Token::Word { equals: true, text } => items.push(assignment(&text, true)?),
+                    _ => return Err(CmdError::Syntax),
+                }
+                if !matches!(lexer.next_token()?, Token::Eol) {
+                    return Err(CmdError::Syntax);
+                }
+            }
+            Token::Directive => {
+                // Valid only where a statement or command may start.
+                if !current.is_empty() || assigned {
+                    return Err(CmdError::Syntax);
+                }
+                return Err(CmdError::Unsupported("%if conditionals"));
             }
             Token::Semi => {
                 if !started {
                     return Err(CmdError::Syntax);
                 }
-                if !current.is_empty() {
-                    commands.push(std::mem::take(&mut current));
-                }
+                end_command(
+                    &mut items,
+                    &mut current,
+                    assigned && drop_chain,
+                    chain_start,
+                );
+                assigned = false;
             }
             Token::Eol => {
-                if !current.is_empty() {
-                    commands.push(std::mem::take(&mut current));
-                }
+                end_command(
+                    &mut items,
+                    &mut current,
+                    assigned && drop_chain,
+                    chain_start,
+                );
                 started = false;
+                assigned = false;
+                chain_start = items.len();
             }
-            Token::End => return Ok(commands),
+            Token::End => return Ok(items),
         }
     }
 }
@@ -642,6 +711,7 @@ mod tests {
             match user {
                 None => Some("/home/me".to_owned()),
                 Some("root") => Some("/root".to_owned()),
+                Some("bin") => Some("/bin".to_owned()),
                 Some(_) => None,
             }
         }
@@ -671,8 +741,36 @@ mod tests {
         parse_argv(&words(w)).expect_err("fails").to_string()
     }
 
+    fn commands(statements: Vec<Statement>) -> Vec<CommandCall> {
+        statements
+            .into_iter()
+            .filter_map(|s| match s {
+                Statement::Command(c) => Some(c),
+                Statement::Assign(_) => None,
+            })
+            .collect()
+    }
+
     fn cfg(text: &str) -> Vec<(&'static str, Vec<String>)> {
-        shape(&parse_config_with(text, &env()).expect("parses"))
+        shape(&commands(parse_config_with(text, &env()).expect("parses")))
+    }
+
+    fn assigns(text: &str) -> Vec<String> {
+        parse_config_with(text, &env())
+            .expect("parses")
+            .into_iter()
+            .map(|s| match s {
+                Statement::Assign(a) => {
+                    format!(
+                        "{}{}={}",
+                        if a.hidden { "%hidden " } else { "" },
+                        a.name,
+                        a.value
+                    )
+                }
+                Statement::Command(c) => c.entry.name.to_owned(),
+            })
+            .collect()
     }
 
     fn cfg_err(text: &str) -> String {
@@ -1222,7 +1320,7 @@ mod tests {
     }
 
     /// Typed "unsupported in M0" errors, the allowed escape hatch in the
-    /// brief: blocks, conditionals, assignments, non-UTF-8 words. Reference
+    /// brief: blocks, conditionals, non-UTF-8 words. Reference
     /// accepts all of them.
     #[test]
     fn config_m0_unsupported_is_typed() {
@@ -1230,9 +1328,6 @@ mod tests {
             "bind x { display -p a }",
             "display { -p a }",
             "%if 1\ndisplay -p x\n%endif",
-            "%hidden A=1",
-            "A=1",
-            "A=1 display -p x",
             "display -p \\377",
             "display -p \\U00110000",
         ] {
@@ -1245,16 +1340,87 @@ mod tests {
         assert_eq!(cfg_err("=x display"), "unknown command: =x");
     }
 
+    /// `NAME=value` statements (cmd-parse.y `assignment`, `command`,
+    /// `hidden_assignment`). Reference: `source-file -nv` on each text.
+    #[test]
+    fn config_assignments_are_typed_statements() {
+        // `A=1` is ok with no output; `A=1 display -p x` prints
+        // `display-message -p x`; `display ; A=1` is ok.
+        assert_eq!(assigns("A=1"), ["A=1"]);
+        assert_eq!(assigns("A=1 display -p x"), ["A=1", "display-message"]);
+        // A bare assignment after `;` drops the commands before it in the
+        // chain, unbuilt (cmd-parse.y:405-415): reference prints nothing.
+        assert_eq!(assigns("display -p x ; A=1"), ["A=1"]);
+        assert_eq!(
+            cfg("display -p x ; A=1 ; display -p y"),
+            one("display-message", &["y"])
+        );
+        assert_eq!(assigns("x -- ; A=1"), ["A=1"]);
+        assert_eq!(cfg("display -p x ; A=1 display -p y").len(), 2);
+        assert_eq!(assigns("A=1 ; display -p x"), ["A=1", "display-message"]);
+        assert_eq!(assigns("A=1;"), ["A=1"]);
+        assert_eq!(assigns("A=1 \\\n display -p x"), ["A=1", "display-message"]);
+        assert_eq!(assigns("A=\"b c\" ; B="), ["A=b c", "B="]);
+        assert_eq!(assigns("A=x=y"), ["A=x=y"]);
+        assert_eq!(assigns("%hidden A=1"), ["%hidden A=1"]);
+        assert_eq!(
+            assigns("%hidden A=1 \n%hidden B=2\nA=$FOO"),
+            ["%hidden A=1", "%hidden B=2", "A=bar"]
+        );
+        assert_eq!(cfg("A=1 display -p x"), one("display-message", &["x"]));
+        // `=` in a later word is just an argument.
+        assert_eq!(cfg("display -p A=1"), one("display-message", &["A=1"]));
+        // Reference: syntax error for each.
+        for text in [
+            "A=1 B=2",
+            "A=1 B=2 display -p x",
+            "%hidden",
+            "%hidden A=1 display -p x",
+            "%hidden A=1 ; display -p x",
+            "display ; %hidden A=1",
+            "A=1 ; %hidden B=2",
+            "%hidden display",
+        ] {
+            assert_eq!(cfg_err(text), "syntax error", "{text}");
+        }
+        // The command after an assignment still goes through lookup.
+        assert_eq!(cfg_err("A=1 nosuch"), "unknown command: nosuch");
+        // cmd-parse.y:237: longer than CMD_PARSE_MAX_ENVIRON_LEN.
+        let long = format!("A={}", "x".repeat(16384));
+        assert_eq!(cfg_err(&long), "environment variable is too long");
+        assert_eq!(assigns(&long[..16384]).len(), 1);
+    }
+
+    /// `~` and `$VAR` come from the `ConfigEnv`, never the host. Reference:
+    /// `display -p ~bin/x` -> `display-message -p /bin/x` on a host whose
+    /// `bin` user lives in /usr/lib/passwd (NSS), not /etc/passwd.
+    #[test]
+    fn config_tilde_and_vars_go_through_config_env() {
+        assert_eq!(
+            cfg("display -p ~bin/x"),
+            one("display-message", &["/bin/x"])
+        );
+        assert_eq!(cfg("display -p ~root"), one("display-message", &["/root"]));
+        assert_eq!(
+            cfg("display -p ~/x"),
+            one("display-message", &["/home/me/x"])
+        );
+        assert_eq!(cfg("display -p $FOO"), one("display-message", &["bar"]));
+        assert_eq!(cfg("display -p ${EMPTY}x"), one("display-message", &["x"]));
+        assert_eq!(cfg("display -p $UNSET"), one("display-message", &[""]));
+        assert_eq!(cfg_err("display -p ~nosuchuser"), "syntax error");
+    }
+
     /// Default command aliases (options-table.c:322-331, `cmd_parse_expand_alias`):
     /// `info -x` becomes `show-messages -JT -x`. Reference: `info -x` ->
     /// `command show-messages: unknown flag -x`.
     #[test]
     fn config_default_aliases() {
         assert_eq!(cfg_err("info -x"), "command show-messages: unknown flag -x");
-        let calls = parse_config_with("info", &env()).unwrap();
+        let calls = commands(parse_config_with("info", &env()).unwrap());
         assert_eq!(calls[0].entry.name, "show-messages");
         assert!(calls[0].args.flag('J') && calls[0].args.flag('T'));
-        let calls = parse_config_with("splitp -h", &env()).unwrap();
+        let calls = commands(parse_config_with("splitp -h", &env()).unwrap());
         assert_eq!(calls[0].entry.name, "split-window");
         assert!(calls[0].args.flag('h'));
     }
@@ -1343,11 +1509,6 @@ mod tests {
         for _ in 0..10_000 {
             let s = rng.string(40);
             let _ = parse_config_with(&s, &env);
-        }
-        // And through the real environment entry point.
-        for _ in 0..1_000 {
-            let s = rng.string(20);
-            let _ = parse_config_line(&s);
         }
     }
 
