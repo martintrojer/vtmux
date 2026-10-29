@@ -19,4 +19,19 @@ jobs:
           toolchain: 1.99.1
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Reference tmux 3.8 build dependencies
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install -y libevent-dev libncurses-dev bison
+          else
+            brew install libevent ncurses pkg-config
+          fi
+      - name: Reference tmux 3.8 cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vtmux/tmux-3.8
+          # Keyed on the pinned tarball sha256 (xtask/src/ref_tmux.rs) and the runner.
+          key: ref-tmux-${{ runner.os }}-${{ runner.arch }}-e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e
+      - run: cargo xtask ref-tmux
       - run: bash scripts/check.sh
