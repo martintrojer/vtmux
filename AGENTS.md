@@ -14,8 +14,8 @@ Record each gate run in the task note (`GATE: commit command scope`, `RESULT: ex
 
 ## Toolchain
 
-- Rust is pinned in `rust-toolchain.toml`; Zig is pinned in `mise.toml` (libghostty-vt 0.2.2 needs exactly 0.15.2). Run cargo through `mise exec --` so the right Zig is on PATH. The first build of `libghostty-vt-sys` compiles ghostty from source (~30 s warm machine, longer cold).
-- The reference tmux 3.8 lives at `${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux` (built by `cargo xtask ref-tmux`), or `$VTMUX_REFERENCE_TMUX`. It is shared by every worktree. Never use the `tmux` on PATH as the reference: it is whatever mise installed. Building it needs libevent and ncurses headers, pkg-config and a C compiler; on Fedora Atomic run the build inside the `vtmux-dev` toolbox (`toolbox run -c vtmux-dev ...`); the resulting binary runs on the host.
+- Rust is pinned in `rust-toolchain.toml`; Zig is pinned in `mise.toml` (libghostty-vt 0.2.2 needs exactly 0.15.2). Zig 0.15.2 cannot link against the macOS 26 SDK, so CI's macOS job runs on `macos-14`; a local macOS 26 build needs an older SDK. Run cargo through `mise exec --` so the right Zig is on PATH. The first build of `libghostty-vt-sys` compiles ghostty from source (~30 s warm machine, longer cold).
+- The reference tmux 3.8 lives at `${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux` (built by `cargo xtask ref-tmux`), or `$VTMUX_REFERENCE_TMUX`. It is shared by every worktree. Never use the `tmux` on PATH as the reference: it is whatever mise installed. Building it needs libevent and ncurses headers, bison (configure requires yacc), pkg-config and a C compiler; on Fedora Atomic run the build inside the `vtmux-dev` toolbox (`toolbox run -c vtmux-dev mise exec -- ...`); the resulting binary runs on the host.
 - A fresh worktree needs `mise trust` once before `mise exec` works.
 
 ## Rules
