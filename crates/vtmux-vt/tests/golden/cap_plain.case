@@ -1,0 +1,5 @@
+kind=capture
+bytes=hello\nworld\n
+flags=-p
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'hello\nworld\n'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p
+expected=hello\nworld\n\n\n\n

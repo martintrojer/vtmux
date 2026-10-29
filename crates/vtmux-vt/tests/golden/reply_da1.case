@@ -1,0 +1,5 @@
+kind=reply
+bytes=\033[c
+terminator=c
+command=new-session -d -x 20 -y 5 'python3 <raw-mode reader: write hex 1b5b63, read to c, print REPLY:<hex>, tmux wait-for -S ready>; exec cat' ; wait-for ready ; capturep -pJ
+expected=\033[?1;2c

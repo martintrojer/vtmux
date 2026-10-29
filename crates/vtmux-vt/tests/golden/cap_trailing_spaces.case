@@ -1,0 +1,5 @@
+kind=capture
+bytes=abc   \nde  f  \n
+flags=-p
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'abc   \nde  f  \n'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p
+expected=abc\nde  f\n\n\n\n

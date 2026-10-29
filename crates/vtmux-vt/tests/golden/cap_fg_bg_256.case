@@ -1,0 +1,5 @@
+kind=capture
+bytes=\033[38;5;196mred\033[0m \033[48;5;21mblue\033[0m \033[38;5;82;48;5;236mboth\033[0m\n
+flags=-pe
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'\033[38;5;196mred\033[0m \033[48;5;21mblue\033[0m \033[38;5;82;48;5;236mboth\033[0m\n'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -pe
+expected=\033[38;5;196mred\033[39m \033[48;5;21mblue\033[49m \033[38;5;82m\033[48;5;236mboth\033[39m\033[49m\n\n\n\n\n
