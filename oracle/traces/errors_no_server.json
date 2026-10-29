@@ -1,0 +1,92 @@
+{
+  "tmux_version": "3.8",
+  "name": "errors_no_server",
+  "inputs": {
+    "name": "errors_no_server",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "ls"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "attach",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "error connecting to <SOCKET> (No such file or directory)\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no server running on <SOCKET>\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no sessions\n",
+        "exit": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "tmux_version": "3.8",
+  "name": "duplicate_session",
+  "inputs": {
+    "name": "duplicate_session",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} #{session_windows}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "duplicate session: a\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+name = "capture_plain_and_escapes"
+size = [20, 5]
+# The pane program prints a styled line, then echoes each input line behind
+# `got:` and signals; tty echo is off so only the program's output shows.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "5", "sh", "-c", "stty -echo; printf 'plain \\033[1;31mred\\033[0m \\033[4mul\\033[0m\\n'; tmux wait-for -S ready; while read -r l; do printf 'got:%s\\n' \"$l\"; tmux wait-for -S fed; done; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "%0"] },
+  { feed = { pane = "%0", bytes = "hello world\r" } },
+  { wait_for = "fed" },
+  { feed = { pane = "%0", bytes = "\u001b[1;32mgreen\u001b[0m\r" } },
+  { wait_for = "fed" },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "%0"] },
+]

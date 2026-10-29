@@ -1,0 +1,48 @@
+{
+  "tmux_version": "3.8",
+  "name": "error_stale_socket",
+  "inputs": {
+    "name": "error_stale_socket",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "setup": "stale_socket"
+      },
+      {
+        "run": [
+          "ls"
+        ]
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no server running on <SOCKET>\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no server running on <SOCKET>\n",
+        "exit": 1
+      }
+    }
+  ]
+}

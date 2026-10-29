@@ -1,0 +1,157 @@
+{
+  "tmux_version": "3.8",
+  "name": "capture_plain_and_escapes",
+  "inputs": {
+    "name": "capture_plain_and_escapes",
+    "size": [
+      20,
+      5
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "20",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "stty -echo; printf 'plain \\033[1;31mred\\033[0m \\033[4mul\\033[0m\\n'; tmux wait-for -S ready; while read -r l; do printf 'got:%s\\n' \"$l\"; tmux wait-for -S fed; done; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "hello world\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\u001b[1;32mgreen\u001b[0m\r"
+        }
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "%0"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "plain red ul\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "plain \u001b[1m\u001b[31mred\u001b[0m \u001b[4mul\u001b[0m\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "plain red ul\ngot:hello world\ngot:green\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "plain \u001b[1m\u001b[31mred\u001b[0m \u001b[4mul\u001b[0m\ngot:hello world\ngot:\u001b[1m\u001b[32mgreen\u001b[0m\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

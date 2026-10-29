@@ -1,0 +1,140 @@
+{
+  "tmux_version": "3.8",
+  "name": "command_lookup_errors",
+  "inputs": {
+    "name": "command_lookup_errors",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "nosuchcmd"
+        ]
+      },
+      {
+        "run": [
+          "displ"
+        ]
+      },
+      {
+        "run": [
+          "display-message",
+          "-Z"
+        ]
+      },
+      {
+        "run": [
+          "show-options",
+          "a",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "set-option"
+        ]
+      },
+      {
+        "run": [
+          "show-options",
+          "-g",
+          "nope"
+        ]
+      },
+      {
+        "run": [
+          "display-message",
+          "-p",
+          "-t",
+          "nope",
+          "x"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown command: nosuchcmd\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "ambiguous command: displ, could be: display-menu, display-message, display-popup, display-panes\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "command display-message: unknown flag -Z\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "command show-options: too many arguments (need at most 1)\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "command set-option: too few arguments (need at least 1)\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: nope\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

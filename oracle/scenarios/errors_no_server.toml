@@ -1,0 +1,8 @@
+name = "errors_no_server"
+steps = [
+  { run = ["ls"] },
+  { run = ["new", "-d", "-s", "a"] },
+  { run = ["kill-server"] },
+  { run = ["has", "-t", "a"] },
+  { run = ["attach", "-t", "a"] },
+]

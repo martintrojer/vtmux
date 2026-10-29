@@ -1,0 +1,115 @@
+{
+  "tmux_version": "3.8",
+  "name": "list_sessions_order_and_format",
+  "inputs": {
+    "name": "list_sessions_order_and_format",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "c",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "ls"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_id} #{session_name} #{session_windows} #{session_attached}"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{t:session_created}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a: 1 windows (created <DATE>)\nb: 1 windows (created <DATE>)\nc: 1 windows (created <DATE>)\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "$1 a 1 0\n$0 b 1 0\n$2 c 1 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<DATE>\n<DATE>\n<DATE>\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

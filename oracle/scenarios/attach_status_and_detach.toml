@@ -1,0 +1,13 @@
+name = "attach_status_and_detach"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf '$ '; exec cat"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { keys = "echo hi\r" },
+  { settle = {} },
+  { screen = {} },
+  { keys = "\u0002d" },
+  { settle = {} },
+  { run = ["has", "-t", "a"] },
+]

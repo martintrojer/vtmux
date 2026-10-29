@@ -1,0 +1,78 @@
+{
+  "tmux_version": "3.8",
+  "name": "control_attached_display",
+  "inputs": {
+    "name": "control_attached_display",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "control": {
+          "argv": [
+            "new",
+            "-s",
+            "c",
+            "-n",
+            "w",
+            "cat"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p hello"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "nosuchcmd"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%error"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 5,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%sessions-changed",
+          "%session-changed $0 c",
+          "%begin <TIME> #2 1",
+          "hello",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 1",
+          "parse error: unknown command: nosuchcmd",
+          "%error <TIME> #3 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
