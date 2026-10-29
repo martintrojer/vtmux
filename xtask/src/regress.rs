@@ -707,7 +707,8 @@ mod tests {
         fs::create_dir_all(&logs).unwrap();
         let run = |patches: &Path, work: &str| {
             let dir = prepare_work_from(&suite, patches, &base.join(work)).unwrap();
-            run_one(Path::new("/bin/true"), &dir, &logs, "conf-syntax.sh").outcome
+            // /usr/bin/true exists on Linux and macOS; /bin/true is Linux-only.
+            run_one(Path::new("/usr/bin/true"), &dir, &logs, "conf-syntax.sh").outcome
         };
         assert_eq!(run(&empty, "plain"), Outcome::Pass);
         assert!(matches!(run(&fixtures, "patched"), Outcome::Fail(_)));
