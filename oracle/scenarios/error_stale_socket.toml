@@ -1,0 +1,6 @@
+name = "error_stale_socket"
+steps = [
+  { setup = "stale_socket" },
+  { run = ["ls"] },
+  { run = ["has", "-t", "a"] },
+]

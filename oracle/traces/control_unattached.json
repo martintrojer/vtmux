@@ -1,0 +1,64 @@
+{
+  "tmux_version": "3.8",
+  "name": "control_unattached",
+  "inputs": {
+    "name": "control_unattached",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "control": {
+          "argv": [
+            "new",
+            "-d",
+            "-s",
+            "c",
+            "-n",
+            "w",
+            "cat"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "c"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 1,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%sessions-changed",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

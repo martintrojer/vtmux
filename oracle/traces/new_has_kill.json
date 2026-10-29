@@ -1,0 +1,97 @@
+{
+  "tmux_version": "3.8",
+  "name": "new_has_kill",
+  "inputs": {
+    "name": "new_has_kill",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "nope"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find session: nope\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no server running on <SOCKET>\n",
+        "exit": 1
+      }
+    }
+  ]
+}

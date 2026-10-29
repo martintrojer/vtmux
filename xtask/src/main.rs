@@ -11,10 +11,7 @@ fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
         Some("ref-tmux") => ref_tmux::run(),
         Some("regress") => regress::run(),
-        Some("oracle") => {
-            eprintln!("not implemented");
-            ExitCode::from(2)
-        }
+        Some("oracle") => oracle::run(),
         _ => {
             eprintln!("usage: cargo xtask <ref-tmux|regress|oracle>");
             ExitCode::from(2)

@@ -1,0 +1,11 @@
+name = "command_lookup_errors"
+steps = [
+  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["nosuchcmd"] },
+  { run = ["displ"] },
+  { run = ["display-message", "-Z"] },
+  { run = ["show-options", "a", "b"] },
+  { run = ["set-option"] },
+  { run = ["show-options", "-g", "nope"] },
+  { run = ["display-message", "-p", "-t", "nope", "x"] },
+]

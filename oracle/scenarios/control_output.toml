@@ -1,0 +1,7 @@
+name = "control_output"
+steps = [
+  { control = { argv = ["new", "-s", "c", "-n", "w", "cat"], id = "c1" } },
+  { run = ["send-keys", "-t", "c", "-l", "abc"] },
+  { control_wait = { id = "c1", until = "%output" } },
+  { control_close = { id = "c1" } },
+]

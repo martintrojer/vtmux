@@ -1,0 +1,10 @@
+name = "display_basic_formats"
+size = [20, 5]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "5", "cat"] },
+  { run = ["display", "-p", "#{session_name} #{session_id} #{window_id} #{pane_id}"] },
+  { run = ["display", "-p", "#{window_index} #{pane_index} #{window_width}x#{window_height}"] },
+  { run = ["display", "-p", "#{pane_width}x#{pane_height} #{version}"] },
+  { run = ["display", "-p", "-t", "nope", "#{session_name}"] },
+  { run = ["display", "-p", "plain text"] },
+]

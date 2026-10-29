@@ -1,0 +1,6 @@
+name = "control_unattached"
+steps = [
+  { control = { argv = ["new", "-d", "-s", "c", "-n", "w", "cat"], id = "c1" } },
+  { control_close = { id = "c1" } },
+  { run = ["has", "-t", "c"] },
+]

@@ -1,0 +1,8 @@
+name = "new_has_kill"
+steps = [
+  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["has", "-t", "a"] },
+  { run = ["has", "-t", "nope"] },
+  { run = ["kill-session", "-t", "a"] },
+  { run = ["has", "-t", "a"] },
+]

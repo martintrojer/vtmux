@@ -1,0 +1,119 @@
+{
+  "tmux_version": "3.8",
+  "name": "display_basic_formats",
+  "inputs": {
+    "name": "display_basic_formats",
+    "size": [
+      20,
+      5
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "20",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{session_name} #{session_id} #{window_id} #{pane_id}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index} #{pane_index} #{window_width}x#{window_height}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{pane_width}x#{pane_height} #{version}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "nope",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "plain text"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a $0 @0 %0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 0 20x5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "20x5 3.8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "plain text\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

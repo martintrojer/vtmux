@@ -1,0 +1,6 @@
+name = "duplicate_session"
+steps = [
+  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["ls", "-F", "#{session_name} #{session_windows}"] },
+]

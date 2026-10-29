@@ -1,0 +1,9 @@
+name = "control_attached_display"
+steps = [
+  { control = { argv = ["new", "-s", "c", "-n", "w", "cat"], id = "c1" } },
+  { control_send = { id = "c1", line = "display -p hello" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "nosuchcmd" } },
+  { control_wait = { id = "c1", until = "%error" } },
+  { control_close = { id = "c1" } },
+]

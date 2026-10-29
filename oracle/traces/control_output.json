@@ -1,0 +1,73 @@
+{
+  "tmux_version": "3.8",
+  "name": "control_output",
+  "inputs": {
+    "name": "control_output",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "control": {
+          "argv": [
+            "new",
+            "-s",
+            "c",
+            "-n",
+            "w",
+            "cat"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "c",
+          "-l",
+          "abc"
+        ]
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%output"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%sessions-changed",
+          "%session-changed $0 c",
+          "%output %0 abc",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
