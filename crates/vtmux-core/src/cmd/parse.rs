@@ -17,11 +17,12 @@
 //! the whole text, but an execution-time failure (`new -d -x abc`) never
 //! shows up here.
 //!
-//! `NAME=value` and `%hidden NAME=value` parse into [`Statement::Assign`]; the
-//! server applies them (they change its global environment, which a parser
-//! cannot). tmux applies them while parsing, so a later `$NAME` in the same
-//! text sees them; here `$NAME` comes from the [`ConfigEnv`] alone, so a
-//! caller wanting that parse-time visibility parses statement by statement.
+//! `NAME=value` and `%hidden NAME=value` are applied while parsing, as the
+//! `assignment` rules do (cmd-parse.y:224-270): [`ConfigEnv::set`] is called
+//! the moment the assignment is read, so a later `$NAME` in the same text,
+//! even in the same statement, sees it, and assignments made before a later
+//! error stay applied. [`ParseOpts::parse_only`] (`source-file -n`,
+//! `CMD_PARSE_PARSEONLY`) skips the call.
 //!
 //! Not handled in M0 and reported as [`CmdError::Unsupported`]: `{ }` blocks,
 //! `%if` and friends, and arguments that are not valid UTF-8 (`\377`,
@@ -29,7 +30,7 @@
 //! knows the file adds it.
 
 use super::table::{DEFAULT_COMMAND_ALIASES, find};
-use super::{Args, Assignment, CmdError, CommandCall, Statement};
+use super::{Args, CmdError, CommandCall};
 
 /// What the lexer needs from the host. vtmux-core does no I/O: the server
 /// implements this over its global environment and the system user database
@@ -43,6 +44,17 @@ pub trait ConfigEnv {
     /// home of the current uid (`getpwuid`). `Some(user)` is `getpwnam`.
     /// `None` back is a syntax error.
     fn home(&self, user: Option<&str>) -> Option<String>;
+    /// `environ_put(global_environ, "NAME=value", hidden)`, called from the
+    /// assignment rule unless the parse is parse-only (cmd-parse.y:224-270).
+    fn set(&mut self, name: &str, value: &str, hidden: bool);
+}
+
+/// Options for [`parse_config_with`] (the `CMD_PARSE_*` flags that matter).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ParseOpts {
+    /// `CMD_PARSE_PARSEONLY` (`source-file -n`): assignments are checked but
+    /// not applied.
+    pub parse_only: bool,
 }
 
 /// The environment for text that cannot contain `$` or `~` (the default
@@ -57,6 +69,8 @@ impl ConfigEnv for NoEnv {
     fn home(&self, _: Option<&str>) -> Option<String> {
         None
     }
+
+    fn set(&mut self, _: &str, _: &str, _: bool) {}
 }
 
 /// Parse an argument vector as `tmux a b ; c d` receives it.
@@ -86,29 +100,26 @@ pub fn parse_argv(words: &[String]) -> Result<Vec<CommandCall>, CmdError> {
     commands.push(current);
     let mut out = Vec::new();
     for words in &commands {
-        build_command(words, true, &NoEnv, &mut out)?;
+        build_command(words, true, &mut out)?;
     }
     Ok(out)
 }
 
 /// Parse config text: one line, or several (a newline ends a statement
-/// exactly as `;` does). `NAME=value` and `%hidden NAME=value` come back as
-/// [`Statement::Assign`] in source order for the server to apply to its
-/// global environment.
+/// exactly as `;` does). `NAME=value` and `%hidden NAME=value` are applied to
+/// `env` as they are read (see the module docs) and produce no command.
 ///
 /// # Errors
-/// The first syntax, lexer or command error in the text.
-pub fn parse_config_with(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Statement>, CmdError> {
+/// The first syntax, lexer or command error in the text. Assignments read
+/// before it stay applied.
+pub fn parse_config_with(
+    text: &str,
+    env: &mut dyn ConfigEnv,
+    opts: ParseOpts,
+) -> Result<Vec<CommandCall>, CmdError> {
     let mut out = Vec::new();
-    for item in lex_commands(text, env)? {
-        match item {
-            Item::Assign(a) => out.push(Statement::Assign(a)),
-            Item::Words(words) => {
-                let mut calls = Vec::new();
-                build_command(&words, true, env, &mut calls)?;
-                out.extend(calls.into_iter().map(Statement::Command));
-            }
-        }
+    for words in lex_commands(text, env, opts)? {
+        build_command(&words, true, &mut out)?;
     }
     Ok(out)
 }
@@ -116,7 +127,6 @@ pub fn parse_config_with(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Statemen
 fn build_command(
     words: &[String],
     expand_alias: bool,
-    env: &dyn ConfigEnv,
     out: &mut Vec<CommandCall>,
 ) -> Result<(), CmdError> {
     let Some(first) = words.first() else {
@@ -128,19 +138,14 @@ fn build_command(
         // cmd_parse_expand_alias (cmd-parse.y:820-880): parse the alias text,
         // append the remaining words to its last command, and build without
         // expanding again.
-        let mut expanded: Vec<Vec<String>> = lex_commands(text, env)?
-            .into_iter()
-            .filter_map(|item| match item {
-                Item::Words(words) => Some(words),
-                Item::Assign(_) => None,
-            })
-            .collect();
+        let opts = ParseOpts { parse_only: true };
+        let mut expanded = lex_commands(text, &mut NoEnv, opts)?;
         let Some(last) = expanded.last_mut() else {
             return Ok(());
         };
         last.extend_from_slice(&words[1..]);
         for command in &expanded {
-            build_command(command, false, env, out)?;
+            build_command(command, false, out)?;
         }
         return Ok(());
     }
@@ -178,7 +183,8 @@ struct Lexer<'a> {
     escapes: u32,
     /// The synthetic final newline has been returned (`ps->eof`).
     eof: bool,
-    env: &'a dyn ConfigEnv,
+    env: &'a mut dyn ConfigEnv,
+    opts: ParseOpts,
 }
 
 const MAX_NAME: usize = 1024 - 2;
@@ -559,28 +565,25 @@ fn bytes_to_string(bytes: Vec<u8>) -> Result<String, CmdError> {
     String::from_utf8(bytes).map_err(|_| CmdError::Unsupported("non-UTF-8 argument"))
 }
 
-/// One lexed statement item: the words of a command, or an assignment.
-enum Item {
-    Words(Vec<String>),
-    Assign(Assignment),
-}
-
 /// Longest `NAME=value` tmux accepts (`CMD_PARSE_MAX_ENVIRON_LEN`,
 /// cmd-parse.y:40).
 const MAX_ENVIRON_LEN: usize = 16384;
 
-/// `assignment` / `hidden_assignment` (cmd-parse.y:224-270). The lexer only
-/// returns an `EQUALS` token when it holds a valid name before the first `=`.
-fn assignment(text: &str, hidden: bool) -> Result<Item, CmdError> {
-    if text.len() > MAX_ENVIRON_LEN {
-        return Err(CmdError::Lex("environment variable is too long"));
+impl Lexer<'_> {
+    /// `assignment` / `hidden_assignment` (cmd-parse.y:224-270). The lexer
+    /// only returns an `EQUALS` token when it holds a valid name before the
+    /// first `=`. Bison reduces the rule without reading a lookahead, so the
+    /// assignment is applied before the next token is lexed.
+    fn assign(&mut self, text: &str, hidden: bool) -> Result<(), CmdError> {
+        if text.len() > MAX_ENVIRON_LEN {
+            return Err(CmdError::Lex("environment variable is too long"));
+        }
+        let (name, value) = text.split_once('=').ok_or(CmdError::Syntax)?;
+        if !self.opts.parse_only {
+            self.env.set(name, value, hidden);
+        }
+        Ok(())
     }
-    let (name, value) = text.split_once('=').ok_or(CmdError::Syntax)?;
-    Ok(Item::Assign(Assignment {
-        name: name.to_owned(),
-        value: value.to_owned(),
-        hidden,
-    }))
 }
 
 /// A `;`, newline or end of text ends a command. tmux quirk
@@ -589,28 +592,34 @@ fn assignment(text: &str, hidden: bool) -> Result<Item, CmdError> {
 /// and frees every command earlier in the same `;` chain, unbuilt and so
 /// unchecked (`x -- ; A=1` is not an `unknown command` error). The
 /// assignments already took effect when they were parsed.
-fn end_command(items: &mut Vec<Item>, current: &mut Vec<String>, drop: bool, chain_start: usize) {
+fn end_command(
+    items: &mut Vec<Vec<String>>,
+    current: &mut Vec<String>,
+    drop: bool,
+    chain_start: usize,
+) {
     if !current.is_empty() {
-        items.push(Item::Words(std::mem::take(current)));
+        items.push(std::mem::take(current));
     } else if drop {
-        let mut i = 0;
-        items.retain(|item| {
-            i += 1;
-            i <= chain_start || matches!(item, Item::Assign(_))
-        });
+        items.truncate(chain_start);
     }
 }
 
 /// The grammar for the M0 subset: statements of commands and assignments
 /// separated by `;` and newlines (cmd-parse.y `statements`, `commands`,
 /// `command`, `hidden_assignment`).
-fn lex_commands(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Item>, CmdError> {
+fn lex_commands(
+    text: &str,
+    env: &mut dyn ConfigEnv,
+    opts: ParseOpts,
+) -> Result<Vec<Vec<String>>, CmdError> {
     let mut lexer = Lexer {
         input: text.as_bytes(),
         off: 0,
         escapes: 0,
         eof: false,
         env,
+        opts,
     };
     let mut items = Vec::new();
     let mut current: Vec<String> = Vec::new();
@@ -635,7 +644,7 @@ fn lex_commands(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Item>, CmdError> 
                         assigned = false;
                     } else if equals {
                         drop_chain = started;
-                        items.push(assignment(&text, false)?);
+                        lexer.assign(&text, false)?;
                         started = true;
                         assigned = true;
                         continue;
@@ -651,7 +660,7 @@ fn lex_commands(text: &str, env: &dyn ConfigEnv) -> Result<Vec<Item>, CmdError> 
                     return Err(CmdError::Syntax);
                 }
                 match lexer.next_token()? {
-                    Token::Word { equals: true, text } => items.push(assignment(&text, true)?),
+                    Token::Word { equals: true, text } => lexer.assign(&text, true)?,
                     _ => return Err(CmdError::Syntax),
                 }
                 if !matches!(lexer.next_token()?, Token::Eol) {
@@ -701,11 +710,19 @@ mod tests {
     use crate::cmd::{NumError, strtonum};
 
     /// Test environment: fixed variables and homes.
-    struct FakeEnv(HashMap<&'static str, &'static str>);
+    struct FakeEnv {
+        vars: HashMap<String, String>,
+        /// Every `set` call, in order: (name, value, hidden).
+        sets: Vec<(String, String, bool)>,
+    }
 
     impl ConfigEnv for FakeEnv {
         fn var(&self, name: &str) -> Option<String> {
-            self.0.get(name).map(|v| (*v).to_owned())
+            self.vars.get(name).cloned()
+        }
+        fn set(&mut self, name: &str, value: &str, hidden: bool) {
+            self.vars.insert(name.to_owned(), value.to_owned());
+            self.sets.push((name.to_owned(), value.to_owned(), hidden));
         }
         fn home(&self, user: Option<&str>) -> Option<String> {
             match user {
@@ -718,7 +735,20 @@ mod tests {
     }
 
     fn env() -> FakeEnv {
-        FakeEnv(HashMap::from([("FOO", "bar"), ("EMPTY", "")]))
+        FakeEnv {
+            vars: HashMap::from([
+                ("FOO".to_owned(), "bar".to_owned()),
+                ("EMPTY".to_owned(), String::new()),
+            ]),
+            sets: Vec::new(),
+        }
+    }
+
+    const RUN: ParseOpts = ParseOpts { parse_only: false };
+    const PARSE_ONLY: ParseOpts = ParseOpts { parse_only: true };
+
+    fn parse(text: &str) -> Result<Vec<CommandCall>, CmdError> {
+        parse_config_with(text, &mut env(), RUN)
     }
 
     fn words(w: &[&str]) -> Vec<String> {
@@ -741,42 +771,24 @@ mod tests {
         parse_argv(&words(w)).expect_err("fails").to_string()
     }
 
-    fn commands(statements: Vec<Statement>) -> Vec<CommandCall> {
-        statements
-            .into_iter()
-            .filter_map(|s| match s {
-                Statement::Command(c) => Some(c),
-                Statement::Assign(_) => None,
-            })
-            .collect()
-    }
-
     fn cfg(text: &str) -> Vec<(&'static str, Vec<String>)> {
-        shape(&commands(parse_config_with(text, &env()).expect("parses")))
+        shape(&parse(text).expect("parses"))
     }
 
-    fn assigns(text: &str) -> Vec<String> {
-        parse_config_with(text, &env())
-            .expect("parses")
-            .into_iter()
-            .map(|s| match s {
-                Statement::Assign(a) => {
-                    format!(
-                        "{}{}={}",
-                        if a.hidden { "%hidden " } else { "" },
-                        a.name,
-                        a.value
-                    )
-                }
-                Statement::Command(c) => c.entry.name.to_owned(),
-            })
-            .collect()
+    /// Names of the commands `text` parses to, and the `set` calls it made.
+    fn assigns(text: &str) -> (Vec<&'static str>, Vec<String>) {
+        let mut e = env();
+        let calls = parse_config_with(text, &mut e, RUN).expect("parses");
+        let sets = e
+            .sets
+            .iter()
+            .map(|(n, v, h)| format!("{}{n}={v}", if *h { "%hidden " } else { "" }))
+            .collect();
+        (calls.iter().map(|c| c.entry.name).collect(), sets)
     }
 
     fn cfg_err(text: &str) -> String {
-        parse_config_with(text, &env())
-            .expect_err("fails")
-            .to_string()
+        parse(text).expect_err("fails").to_string()
     }
 
     fn one(name: &'static str, pos: &[&str]) -> Vec<(&'static str, Vec<String>)> {
@@ -1331,7 +1343,7 @@ mod tests {
             "display -p \\377",
             "display -p \\U00110000",
         ] {
-            let e = parse_config_with(text, &env()).expect_err(text);
+            let e = parse(text).expect_err(text);
             assert!(matches!(e, CmdError::Unsupported(_)), "{text}: {e}");
         }
         // `=` after the command name is just an argument, and `=x` first is
@@ -1346,26 +1358,42 @@ mod tests {
     fn config_assignments_are_typed_statements() {
         // `A=1` is ok with no output; `A=1 display -p x` prints
         // `display-message -p x`; `display ; A=1` is ok.
-        assert_eq!(assigns("A=1"), ["A=1"]);
-        assert_eq!(assigns("A=1 display -p x"), ["A=1", "display-message"]);
+        let a = |t: &str| {
+            let (c, s) = assigns(t);
+            (
+                c,
+                s.iter().map(String::as_str).collect::<Vec<_>>().join(","),
+            )
+        };
+        assert_eq!(a("A=1"), (vec![], "A=1".into()));
+        assert_eq!(
+            a("A=1 display -p x"),
+            (vec!["display-message"], "A=1".into())
+        );
         // A bare assignment after `;` drops the commands before it in the
         // chain, unbuilt (cmd-parse.y:405-415): reference prints nothing.
-        assert_eq!(assigns("display -p x ; A=1"), ["A=1"]);
+        assert_eq!(a("display -p x ; A=1"), (vec![], "A=1".into()));
         assert_eq!(
             cfg("display -p x ; A=1 ; display -p y"),
             one("display-message", &["y"])
         );
-        assert_eq!(assigns("x -- ; A=1"), ["A=1"]);
+        assert_eq!(a("x -- ; A=1"), (vec![], "A=1".into()));
         assert_eq!(cfg("display -p x ; A=1 display -p y").len(), 2);
-        assert_eq!(assigns("A=1 ; display -p x"), ["A=1", "display-message"]);
-        assert_eq!(assigns("A=1;"), ["A=1"]);
-        assert_eq!(assigns("A=1 \\\n display -p x"), ["A=1", "display-message"]);
-        assert_eq!(assigns("A=\"b c\" ; B="), ["A=b c", "B="]);
-        assert_eq!(assigns("A=x=y"), ["A=x=y"]);
-        assert_eq!(assigns("%hidden A=1"), ["%hidden A=1"]);
         assert_eq!(
-            assigns("%hidden A=1 \n%hidden B=2\nA=$FOO"),
-            ["%hidden A=1", "%hidden B=2", "A=bar"]
+            a("A=1 ; display -p x"),
+            (vec!["display-message"], "A=1".into())
+        );
+        assert_eq!(a("A=1;"), (vec![], "A=1".into()));
+        assert_eq!(
+            a("A=1 \\\n display -p x"),
+            (vec!["display-message"], "A=1".into())
+        );
+        assert_eq!(a("A=\"b c\" ; B="), (vec![], "A=b c,B=".into()));
+        assert_eq!(a("A=x=y"), (vec![], "A=x=y".into()));
+        assert_eq!(a("%hidden A=1"), (vec![], "%hidden A=1".into()));
+        assert_eq!(
+            a("%hidden A=1 \n%hidden B=2\nA=$FOO"),
+            (vec![], "%hidden A=1,%hidden B=2,A=bar".into())
         );
         assert_eq!(cfg("A=1 display -p x"), one("display-message", &["x"]));
         // `=` in a later word is just an argument.
@@ -1388,7 +1416,77 @@ mod tests {
         // cmd-parse.y:237: longer than CMD_PARSE_MAX_ENVIRON_LEN.
         let long = format!("A={}", "x".repeat(16384));
         assert_eq!(cfg_err(&long), "environment variable is too long");
-        assert_eq!(assigns(&long[..16384]).len(), 1);
+        assert_eq!(assigns(&long[..16384]).1.len(), 1);
+    }
+
+    /// Value of `$name` after parsing `text` with `opts`, and the display
+    /// arguments it produced.
+    fn probe(text: &str, opts: ParseOpts) -> (Vec<String>, FakeEnv) {
+        let mut e = FakeEnv {
+            vars: HashMap::new(),
+            sets: Vec::new(),
+        };
+        let calls = parse_config_with(text, &mut e, opts).expect("parses");
+        (
+            calls
+                .iter()
+                .flat_map(|c| c.args.positionals.clone())
+                .collect(),
+            e,
+        )
+    }
+
+    /// Assignments take effect while parsing (cmd-parse.y:224-270,
+    /// `environ_put(global_environ)` unless `CMD_PARSE_PARSEONLY`), and
+    /// `yylex_token_variable` (1584) reads that environment, so a later
+    /// `$NAME` in the same text, even the same statement, sees the value.
+    /// Reference, tmux 3.8, `source-file -v f` (no -n), one file per text:
+    ///   `A=1 display -p "[$A]"`       -> display-message -p [1]
+    ///   `B=2 ; display -p "[$B]"`     -> display-message -p [2]
+    ///   `C=3\ndisplay -p "[$C]"`      -> display-message -p [3]
+    ///   `%hidden H=1\ndisplay -p "[$H]"` -> display-message -p [1]
+    ///   `A=1 ; A=2 display -p "[$A]"` -> display-message -p [2]
+    /// and with `source-file -nv` all print `[]`, setting nothing.
+    #[test]
+    fn config_assignments_are_visible_to_later_variables() {
+        for (text, name, want) in [
+            ("A=1 display -p \"[$A]\"", "A", "1"),
+            ("B=2 ; display -p \"[$B]\"", "B", "2"),
+            ("C=3\ndisplay -p \"[$C]\"", "C", "3"),
+            ("%hidden H=1\ndisplay -p \"[$H]\"", "H", "1"),
+            ("A=1 ; A=2 display -p \"[$A]\"", "A", "2"),
+        ] {
+            let (args, e) = probe(text, RUN);
+            assert_eq!(args, [format!("[{want}]")], "{text}");
+            assert_eq!(e.vars[name], want, "{text}");
+            let (args, e) = probe(text, PARSE_ONLY);
+            assert_eq!(args, ["[]"], "{text} (parse only)");
+            assert!(e.sets.is_empty() && e.vars.is_empty(), "{text}");
+        }
+        let (_, e) = probe("%hidden H=1\nA=2", RUN);
+        assert_eq!(
+            e.sets,
+            [
+                ("H".to_owned(), "1".to_owned(), true),
+                ("A".to_owned(), "2".to_owned(), false)
+            ]
+        );
+    }
+
+    /// Assignments read before a later error stay applied. Reference:
+    /// `source-file z.conf` with `ZZ=1\n; x` -> `z.conf:2: syntax error`,
+    /// then `show-environment -g ZZ` -> `ZZ=1`. Also true of an unknown
+    /// command, which fails only after the whole text is lexed.
+    #[test]
+    fn config_assignments_survive_a_later_error() {
+        for text in ["ZZ=1\n; x", "ZZ=1\nnosuch"] {
+            let mut e = env();
+            parse_config_with(text, &mut e, RUN).expect_err(text);
+            assert_eq!(e.vars["ZZ"], "1", "{text}");
+            let mut e = env();
+            parse_config_with(text, &mut e, PARSE_ONLY).expect_err(text);
+            assert!(!e.vars.contains_key("ZZ"), "{text} (parse only)");
+        }
     }
 
     /// `~` and `$VAR` come from the `ConfigEnv`, never the host. Reference:
@@ -1417,10 +1515,10 @@ mod tests {
     #[test]
     fn config_default_aliases() {
         assert_eq!(cfg_err("info -x"), "command show-messages: unknown flag -x");
-        let calls = commands(parse_config_with("info", &env()).unwrap());
+        let calls = parse("info").unwrap();
         assert_eq!(calls[0].entry.name, "show-messages");
         assert!(calls[0].args.flag('J') && calls[0].args.flag('T'));
-        let calls = commands(parse_config_with("splitp -h", &env()).unwrap());
+        let calls = parse("splitp -h").unwrap();
         assert_eq!(calls[0].entry.name, "split-window");
         assert!(calls[0].args.flag('h'));
     }
@@ -1505,10 +1603,10 @@ mod tests {
     #[test]
     fn config_never_panics_on_random_utf8() {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-        let env = env();
+        let mut env = env();
         for _ in 0..10_000 {
             let s = rng.string(40);
-            let _ = parse_config_with(&s, &env);
+            let _ = parse_config_with(&s, &mut env, RUN);
         }
     }
 
