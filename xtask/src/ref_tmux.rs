@@ -5,8 +5,15 @@
 //! from the release tarball. Layout under `<cache>/vtmux/`:
 //!
 //! - `dl/`        the verified tarball
-//! - `build/`     scratch extraction + build tree (tarball top dir is `tmux-3.8`)
-//! - `tmux-3.8/`  the install prefix (kept apart from `build/tmux-3.8`)
+//! - `build/<unique>/` per-process scratch extraction + build + staging tree
+//!   (tarball top dir is `tmux-3.8`)
+//! - `tmux-3.8/`  the install prefix (kept apart from the build trees)
+//!
+//! The cache is shared by every worktree, so concurrent cold-cache callers
+//! must not interfere: each caller downloads to its own `.part`, builds in its
+//! own `build/<unique>/`, installs with `DESTDIR` into that tree and publishes
+//! with one atomic `rename` of the finished prefix. The loser of that race
+//! discards its copy.
 //!
 //! `$VTMUX_REFERENCE_TMUX_URL` overrides the download URL (mirrors, tests);
 //! the sha256 check still applies.
@@ -65,8 +72,14 @@ pub fn run() -> ExitCode {
 /// Absolute path to a tmux whose `-V` prints exactly `tmux 3.8`, building it
 /// into the shared cache if needed.
 pub fn reference_tmux() -> Result<PathBuf> {
-    if let Some(p) = std::env::var_os("VTMUX_REFERENCE_TMUX").filter(|p| !p.is_empty()) {
-        // An explicit override that is wrong is an error, never a silent fallback.
+    if let Some(p) = std::env::var_os("VTMUX_REFERENCE_TMUX") {
+        // An explicit override that is wrong (even empty) is an error, never a
+        // silent fallback.
+        if p.is_empty() {
+            return err(
+                "VTMUX_REFERENCE_TMUX is set but empty; unset it or point it at a tmux 3.8",
+            );
+        }
         let p = absolute(Path::new(&p))?;
         check_version(&p)?;
         return Ok(p);
@@ -115,12 +128,12 @@ fn check_version(bin: &Path) -> Result<()> {
 
 fn build(root: &Path) -> Result<()> {
     let dl = root.join("dl");
-    let build = root.join("build");
+    let build = root.join("build").join(unique());
     let prefix = root.join("tmux-3.8");
     let io = |what: &str, e: io::Error| RefTmuxError(format!("{what}: {e}"));
     fs::create_dir_all(&dl).map_err(|e| io("create dl dir", e))?;
-    // Fresh build tree every time: a half-built one is worthless.
-    let _ = fs::remove_dir_all(&build);
+    // Private build tree, named by `unique()`, so concurrent callers can't
+    // clobber each other.
     fs::create_dir_all(&build).map_err(|e| io("create build dir", e))?;
 
     let tarball = fetch(&dl)?;
@@ -154,30 +167,68 @@ fn build(root: &Path) -> Result<()> {
             .current_dir(&src),
         "make",
     )?;
+    let stage = build.join("stage");
     run_cmd(
-        Command::new("make").arg("install").current_dir(&src),
+        Command::new("make")
+            .arg("install")
+            .arg(format!("DESTDIR={}", stage.display()))
+            .current_dir(&src),
         "make install",
     )?;
+    let staged = stage.join(prefix.strip_prefix("/").unwrap_or(&prefix));
+    publish(&staged, &prefix)?;
     let _ = fs::remove_dir_all(&build);
     Ok(())
+}
+
+/// A name unique to this call even across PID namespaces (containers sharing
+/// one cache): pid plus a nanosecond clock reading.
+fn unique() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    format!("{}-{nanos}", std::process::id())
+}
+
+/// Atomically move a finished install tree to `prefix`. If another caller got
+/// there first and its install is good, keep that one; a broken leftover is
+/// replaced.
+fn publish(staged: &Path, prefix: &Path) -> Result<()> {
+    let mut last = None;
+    for _ in 0..2 {
+        match fs::rename(staged, prefix) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+        if check_version(&prefix.join("bin/tmux")).is_ok() {
+            return Ok(());
+        }
+        let _ = fs::remove_dir_all(prefix);
+    }
+    err(format!(
+        "install {}: {}",
+        prefix.display(),
+        last.map_or_else(String::new, |e| e.to_string())
+    ))
 }
 
 /// Return the path of a tarball in `dl` whose sha256 matches the pin.
 fn fetch(dl: &Path) -> Result<PathBuf> {
     let dest = dl.join(TARBALL);
-    if dest.exists() {
-        if sha256(&dest)? == SHA256 {
-            return Ok(dest);
-        }
-        eprintln!(
-            "ref-tmux: cached {} fails its checksum; removing",
-            dest.display()
-        );
-        let _ = fs::remove_file(&dest);
+    if dest.exists() && sha256(&dest)? == SHA256 {
+        return Ok(dest);
     }
+    // Not there, or fails its checksum: download afresh. The final rename
+    // atomically replaces any bad file, so `dest` is never half-written.
     let url = std::env::var("VTMUX_REFERENCE_TMUX_URL").unwrap_or_else(|_| URL.to_string());
-    let part = dl.join(format!("{TARBALL}.part"));
+    let part = dl.join(format!("{TARBALL}.{}.part", unique()));
     eprintln!("ref-tmux: downloading {url}");
+    let result = download(&url, &part, &dest);
+    let _ = fs::remove_file(&part);
+    result.map(|()| dest)
+}
+
+fn download(url: &str, part: &Path, dest: &Path) -> Result<()> {
     run_cmd(
         Command::new("curl")
             .args([
@@ -187,19 +238,17 @@ fn fetch(dl: &Path) -> Result<PathBuf> {
                 "--location",
                 "--output",
             ])
-            .arg(&part)
-            .arg(&url),
+            .arg(part)
+            .arg(url),
         "curl",
     )?;
-    let got = sha256(&part)?;
+    let got = sha256(part)?;
     if got != SHA256 {
-        let _ = fs::remove_file(&part);
         return err(format!(
             "refusing {url}: sha256 {got} does not match pinned {SHA256}"
         ));
     }
-    fs::rename(&part, &dest).or_else(|e| err(format!("rename {}: {e}", part.display())))?;
-    Ok(dest)
+    fs::rename(part, dest).or_else(|e| err(format!("rename {}: {e}", part.display())))
 }
 
 /// Lower-case hex sha256 of a file, via `sha256sum` or (macOS) `shasum -a 256`.
