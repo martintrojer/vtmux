@@ -12,8 +12,7 @@
 //! as input because `"a"`, `"l"`, `"i"` and `"z"` come from there.
 //!
 //! Not modelled, on purpose (server work): zoom (`saved_layout_cell`
-//! variants), modal panes, scrollbar geometry inside a pane, and
-//! `layout_split_floating_cell` (split-window targeting a floating pane).
+//! variants), modal panes and scrollbar geometry inside a pane.
 //! Error values are tmux's `cause` strings; callers add `: layout-name`
 //! (`cmd-select-layout.c:150`).
 

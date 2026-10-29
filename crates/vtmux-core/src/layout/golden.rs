@@ -9,8 +9,8 @@
 use std::str::FromStr;
 
 use super::{
-    Cell, Dir, FloatArgs, Layout, NamedLayout, PaneStatus, ResizeRequest, SetOpts, SplitRequest,
-    WindowPanes, parse, percentage,
+    Dir, FloatArgs, Layout, NamedLayout, PaneStatus, ResizeRequest, SetOpts, SplitRequest,
+    WindowPanes, percentage,
 };
 use crate::cmd::{Args, parse_argv, strtonum};
 use crate::ids::{PaneId, WindowId};
@@ -23,6 +23,13 @@ struct Case {
     errs: &'static str,
     v2: &'static str,
     v1: &'static str,
+    /// What the reference makes of `v2` / `v1`: `display -p '#{window_layout}'`
+    /// after `select-layout <string>` on the same final state, and the stderr
+    /// of that select-layout. Parsing is not the identity in tmux.
+    re2: &'static str,
+    re2_err: &'static str,
+    re1: &'static str,
+    re1_err: &'static str,
 }
 
 include!("golden_cases.in");
@@ -84,10 +91,12 @@ impl Sim {
             "select-pane" => {
                 if a.flag('l') {
                     let last = self.win.last[0];
-                    self.win.select(last);
+                    let floating = self.is_floating(last);
+                    self.win.select_raising(last, floating);
                 } else {
                     let t = self.target(a);
-                    self.win.select(t);
+                    let floating = self.is_floating(t);
+                    self.win.select_raising(t, floating);
                 }
             }
             "kill-pane" => {
@@ -298,10 +307,6 @@ impl Sim {
     }
 }
 
-fn shape(c: &Cell<PaneId>) -> Cell<()> {
-    c.clone().map(&mut |_| ())
-}
-
 fn replay(case: &Case) -> Sim {
     let mut sim = Sim::new(case.sx, case.sy);
     let mut saved = (String::new(), String::new());
@@ -337,111 +342,62 @@ fn layout_goldens_match_the_reference() {
     );
 }
 
-/// Every emitted v2 string parses back to the same model and window state.
-#[test]
-fn v2_strings_parse_back_to_the_same_model() {
-    for case in &cases() {
-        let sim = replay(case);
-        let panes = sim.layout.pane_list(&sim.win);
-        let parsed = parse(WindowId(0), case.v2, &panes)
-            .unwrap_or_else(|e| panic!("{}: {e}: {}", case.name, case.v2));
-        assert_eq!(parsed.root, sim.layout.root, "{}: {}", case.name, case.v2);
-        let mut win = sim.win.clone();
-        win.active = None;
-        win.last.clear();
-        // The simulated window's own state must be what the string encodes.
-        let state = parsed.state.unwrap();
-        state.apply(&mut win, &parsed.root);
-        assert_eq!(win.active, sim.win.active, "{}", case.name);
-        assert_eq!(win.last, sim.win.last, "{}", case.name);
-        let floating_z: Vec<_> = sim
-            .win
-            .z_order
-            .iter()
-            .copied()
-            .filter(|&p| sim.is_floating(p))
-            .collect();
-        let got_z: Vec<_> = win
-            .z_order
-            .iter()
-            .copied()
-            .filter(|&p| {
-                parsed
-                    .root
-                    .find_pane(p)
-                    .is_some_and(|x| parsed.root.get(&x).is_floating())
-            })
-            .collect();
-        assert_eq!(got_z, floating_z, "{}", case.name);
-        // Emitting the parsed model gives the same string.
-        assert_eq!(
-            super::dump_v2(&parsed.root, &win).as_deref(),
-            Some(case.v2),
-            "{}",
-            case.name
-        );
-        // And the window resizes to the root when it has tiled cells.
-        if sim.layout.root.occupies() {
-            assert_eq!(
-                parsed.resize,
-                Some((sim.layout.root.g().sx, sim.layout.root.g().sy))
-            );
-        }
-    }
+/// Re-select `string` on the final state of `case` the way
+/// `select-layout <string>` does; the new v2 string and the error text.
+fn reselect(case: &Case, string: &str) -> (String, String) {
+    let mut sim = replay(case);
+    sim.errs.clear();
+    sim.select_layout_str(string);
+    let err = sim.errs.join("\n");
+    (sim.layout.dump_v2(&sim.win).unwrap(), err)
 }
 
-/// The v1 string (what a control client without new-layouts sees) parses back
-/// to the tiled part of the model, panes taken in window order.
+/// Parsing an emitted string is not the identity in tmux (`fix_offsets`
+/// rebases a lone node, the last-used stack is rebuilt from the `"l"` values
+/// present, collapsed nodes lose offsets), so the property is: the model
+/// parsing the v2 string ends where the reference parsing it ends.
 #[test]
-fn v1_strings_parse_back_to_the_tiled_shape() {
+fn v2_strings_parse_like_the_reference() {
+    let mut failed = Vec::new();
     for case in &cases() {
-        let sim = replay(case);
-        if case.v1.starts_with("0000,") {
-            continue;
+        let (got, err) = reselect(case, case.v2);
+        // select_layout_str appends `: <string>` to a cause, as the command does.
+        let err = err.strip_suffix(&format!(": {}", case.v2)).unwrap_or(&err);
+        let want_err = case
+            .re2_err
+            .strip_suffix(&format!(": {}", case.v2))
+            .unwrap_or(case.re2_err);
+        if got != case.re2 || err != want_err {
+            failed.push(format!(
+                "{} {:?}\n  want {}\n  got  {}\n  err want {want_err:?} got {err:?}",
+                case.name, case.ops, case.re2, got
+            ));
         }
-        let panes = sim.layout.pane_list(&sim.win);
-        let parsed = parse(WindowId(0), case.v1, &panes)
-            .unwrap_or_else(|e| panic!("{}: {e}: {}", case.name, case.v1));
-        // Strip the floating cells from the model the way v1 emission does.
-        let mut want = sim.layout.root.clone();
-        strip_floating(&mut want);
-        let mut got = parsed.root.clone();
-        strip_floating(&mut got);
-        assert_eq!(shape(&got), shape(&want), "{}: {}", case.name, case.v1);
-        assert!(parsed.state.is_none());
-        // Panes follow window order down the tree, not the old ids, so the
-        // re-emitted string differs only in them.
-        let strip = |s: &str| {
-            s.split_once(',')
-                .unwrap()
-                .1
-                .split(',')
-                .collect::<Vec<_>>()
-                .len()
-        };
-        assert_eq!(
-            strip(&super::dump_v1(&parsed.root)),
-            strip(case.v1),
-            "{}",
-            case.name
-        );
     }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
-fn strip_floating(c: &mut Cell<PaneId>) {
-    if let Cell::Node(n) = c {
-        n.children.retain(|c| !c.is_floating());
-        n.children.iter_mut().for_each(strip_floating);
-        if n.children.len() == 1 {
-            let only = n.children.remove(0);
-            *c = only;
-            if let Cell::Pane(_) = c {
-                let g = c.g_mut();
-                g.xoff = 0;
-                g.yoff = 0;
-            }
+/// The same for the v1 string (what a control client without new-layouts
+/// sees): the reference's result is a v2 string, with panes assigned in
+/// window order and floating cells gone.
+#[test]
+fn v1_strings_parse_like_the_reference() {
+    let mut failed = Vec::new();
+    for case in &cases() {
+        let (got, err) = reselect(case, case.v1);
+        let err = err.strip_suffix(&format!(": {}", case.v1)).unwrap_or(&err);
+        let want_err = case
+            .re1_err
+            .strip_suffix(&format!(": {}", case.v1))
+            .unwrap_or(case.re1_err);
+        if got != case.re1 || err != want_err {
+            failed.push(format!(
+                "{} {:?}\n  want {}\n  got  {}\n  err want {want_err:?} got {err:?}",
+                case.name, case.ops, case.re1, got
+            ));
         }
     }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
 #[test]
