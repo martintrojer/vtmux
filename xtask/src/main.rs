@@ -10,7 +10,8 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     match std::env::args().nth(1).as_deref() {
         Some("ref-tmux") => ref_tmux::run(),
-        Some("regress" | "oracle") => {
+        Some("regress") => regress::run(),
+        Some("oracle") => {
             eprintln!("not implemented");
             ExitCode::from(2)
         }
