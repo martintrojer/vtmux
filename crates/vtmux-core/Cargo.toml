@@ -8,7 +8,6 @@ publish.workspace = true
 
 [dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
-unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
