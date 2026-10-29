@@ -302,26 +302,44 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
 
 /// Copy the suite and apply `compat/patches/*.patch` in name order.
 fn prepare_work(root: &Path, work: &Path) -> Result<PathBuf> {
+    prepare_work_from(&root.join(REGRESS_REL), &root.join(PATCHES_REL), work)
+}
+
+fn prepare_work_from(suite: &Path, patches_dir: &Path, work: &Path) -> Result<PathBuf> {
     let _ = fs::remove_dir_all(work);
     let regress = work.join("regress");
-    copy_dir(&root.join(REGRESS_REL), &regress)?;
-    let mut patches: Vec<PathBuf> = fs::read_dir(root.join(PATCHES_REL))?
+    copy_dir(suite, &regress)?;
+    let mut patches: Vec<PathBuf> = fs::read_dir(patches_dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "patch"))
         .collect();
     patches.sort();
     for p in patches {
-        let st = Command::new("git")
-            .args(["apply", "-p1"])
-            .arg(&p)
-            .current_dir(work)
-            .status()
-            .map_err(|e| format!("git apply: {e}"))?;
-        if !st.success() {
-            return fail(format!("patch {} does not apply", p.display()));
-        }
+        apply_patch(&p, work)?;
     }
     Ok(regress)
+}
+
+/// `git apply` run inside a checkout discovers the enclosing repository and
+/// silently skips every path outside the cwd prefix (exit 0, nothing changed).
+/// Stop discovery at `work` and treat any "Skipped patch" as a failure.
+fn apply_patch(patch: &Path, work: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["apply", "--verbose", "-p1"])
+        .arg(fs::canonicalize(patch)?)
+        .current_dir(work)
+        .env("GIT_CEILING_DIRECTORIES", fs::canonicalize(work)?)
+        .output()
+        .map_err(|e| format!("git apply: {e}"))?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if !out.status.success() || stderr.contains("Skipped patch") {
+        return fail(format!(
+            "patch {} does not apply cleanly: {}",
+            patch.display(),
+            stderr.trim()
+        ));
+    }
+    Ok(())
 }
 
 fn kill_group(pid: u32) {
@@ -665,5 +683,37 @@ mod tests {
         assert!(!out.contains("link"));
         assert!(out.contains("[tests.\"c.sh\"]\nstatus = \"xfail\"\nreason = \"r\""));
         assert!(parse_expected(&out).is_ok());
+    }
+
+    #[test]
+    fn patches_are_applied_inside_a_checkout() {
+        // Under target/ so the temp copy sits inside this git repository, the
+        // case where `git apply` used to skip the patch and exit 0.
+        let base = workspace_root()
+            .join("target")
+            .join(format!("regress-test-{}", std::process::id()));
+        fs::create_dir_all(&base).unwrap();
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let suite = workspace_root().join(REGRESS_REL);
+        let empty = base.join("none");
+        fs::create_dir_all(&empty).unwrap();
+        let logs = base.join("logs");
+        fs::create_dir_all(&logs).unwrap();
+        let run = |patches: &Path, work: &str| {
+            let dir = prepare_work_from(&suite, patches, &base.join(work)).unwrap();
+            run_one(Path::new("/bin/true"), &dir, &logs, "conf-syntax.sh").outcome
+        };
+        assert_eq!(run(&empty, "plain"), Outcome::Pass);
+        assert!(matches!(run(&fixtures, "patched"), Outcome::Fail(_)));
+
+        let bad = base.join("bad");
+        fs::create_dir_all(&bad).unwrap();
+        fs::write(
+            bad.join("x.patch"),
+            "--- a/regress/nope.sh\n+++ b/regress/nope.sh\n@@ -1 +1 @@\n-a\n+b\n",
+        )
+        .unwrap();
+        assert!(prepare_work_from(&suite, &bad, &base.join("badwork")).is_err());
+        let _ = fs::remove_dir_all(&base);
     }
 }
