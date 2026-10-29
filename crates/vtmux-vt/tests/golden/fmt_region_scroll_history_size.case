@@ -1,0 +1,5 @@
+kind=format
+bytes=l0\nl1\nl2\nl3\n\033[2;4r\033[4;1H\n\n\nX
+format=#{history_size}
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'l0\nl1\nl2\nl3\n\033[2;4r\033[4;1H\n\n\nX'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; display-message -p -t 0 '#{history_size}'
+expected=3\n

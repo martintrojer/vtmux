@@ -1,0 +1,9 @@
+kind=capture
+cols=20
+rows=5
+seq=150
+limit=100
+bytes=
+flags=-p -S - -E 0
+command=set -g history-limit 100 ; new-session -d -x 20 -y 5 'sh -c 'i=0; while [ $i -lt 150 ]; do echo l$i; i=$((i+1)); done; printf '"'"''"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p -S - -E 0
+expected=l50\nl51\nl52\nl53\nl54\nl55\nl56\nl57\nl58\nl59\nl60\nl61\nl62\nl63\nl64\nl65\nl66\nl67\nl68\nl69\nl70\nl71\nl72\nl73\nl74\nl75\nl76\nl77\nl78\nl79\nl80\nl81\nl82\nl83\nl84\nl85\nl86\nl87\nl88\nl89\nl90\nl91\nl92\nl93\nl94\nl95\nl96\nl97\nl98\nl99\nl100\nl101\nl102\nl103\nl104\nl105\nl106\nl107\nl108\nl109\nl110\nl111\nl112\nl113\nl114\nl115\nl116\nl117\nl118\nl119\nl120\nl121\nl122\nl123\nl124\nl125\nl126\nl127\nl128\nl129\nl130\nl131\nl132\nl133\nl134\nl135\nl136\nl137\nl138\nl139\nl140\nl141\nl142\nl143\nl144\nl145\nl146\n

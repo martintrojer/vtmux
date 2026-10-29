@@ -4,11 +4,15 @@
 Usage: regen.py [--dry] [CASE.case ...]   (default: every *.case next to this script)
 
 A case file is `key=value` lines. Inputs (hand-written):
-  kind     capture | reply
+  kind     capture | format | reply
   cols,rows  pane size (default 20x5)
   bytes    what the pane program writes, as a printf format (octal \\NNN escapes only)
   flags    capture-pane flags, e.g. -pJe (capture kind)
   terminator  last byte of the reply to wait for (reply kind)
+  limit    history-limit for the session (default: tmux's 2000)
+  seq      N: the pane first prints the lines l0..l<N-1>, then `bytes`
+  resize   COLSxROWS: resize-window after the pane is ready
+  format   display-message -p format to expand (format kind); expected is its output
 Outputs (written by this script):
   command  the exact recorded command line
   expected the reference output, escaped the same way as `bytes`
@@ -108,12 +112,25 @@ def run_case(path):
     raw = unescape(c["bytes"])
     with tempfile.TemporaryDirectory() as td:
         sock = os.path.join(td, "s")
-        if c["kind"] == "capture":
-            shell = "printf %s; $REF wait-for -S ready; exec cat" % shlex.quote(c["bytes"])
+        pre = ""
+        if "seq" in c:
+            pre = "i=0; while [ $i -lt %s ]; do echo l$i; i=$((i+1)); done; " % c["seq"]
+        setup = []
+        if "limit" in c:
+            setup = ["set", "-g", "history-limit", c["limit"], ";"]
+        post = []
+        if "resize" in c:
+            w, h = c["resize"].split("x")
+            post = ["resize-window", "-t", "0", "-x", w, "-y", h]
+        if c["kind"] in ("capture", "format"):
+            shell = pre + "printf %s; $REF wait-for -S ready; exec cat" % shlex.quote(c["bytes"])
             real = shell.replace("$REF", shlex.quote(REF))
             pane_cmd = "sh -c " + shlex.quote(real)
             recorded = "sh -c " + shlex.quote(shell)
-            cap = ["capturep", *c["flags"].split()]
+            if c["kind"] == "capture":
+                cap = ["capturep", *c["flags"].split()]
+            else:
+                cap = ["display-message", "-p", "-t", "0", c["format"]]
         else:
             rd = os.path.join(td, "reader.py")
             open(rd, "w").write(READER)
@@ -122,9 +139,11 @@ def run_case(path):
             pane_cmd = real
             recorded = "python3 <raw-mode reader: write hex %s, read to %s, print REPLY:<hex>, tmux wait-for -S ready>; exec cat" % (raw.hex(), c["terminator"])
             cap = ["capturep", "-pJ"]  # -J: the hex line wraps at the pane width
-        tmux(sock, "new-session", "-d", "-x", cols, "-y", rows, pane_cmd)
+        tmux(sock, *setup, "new-session", "-d", "-x", cols, "-y", rows, pane_cmd)
         try:
             tmux(sock, "wait-for", "ready")
+            if post:
+                tmux(sock, *post)
             out = tmux(sock, *cap).stdout
         finally:
             subprocess.run([REF, "-S", sock, "kill-server"], capture_output=True)
@@ -135,8 +154,11 @@ def run_case(path):
         out = bytes.fromhex(hexs)
         full = "new-session -d -x %s -y %s '%s' ; wait-for ready ; capturep -pJ" % (cols, rows, recorded)
     else:
-        full = "new-session -d -x %s -y %s '%s' ; wait-for ready ; %s" % (
-            cols, rows, recorded, " ".join(cap))
+        full = "%snew-session -d -x %s -y %s '%s' ; wait-for ready ; %s%s" % (
+            " ".join(setup) + " " if setup else "",
+            cols, rows, recorded,
+            (" ".join(post) + " ; ") if post else "",
+            " ".join(shlex.quote(a) if a.startswith("#") else a for a in cap))
     return full, escape(out)
 
 

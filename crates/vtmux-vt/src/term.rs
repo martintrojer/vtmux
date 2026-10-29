@@ -8,12 +8,14 @@ use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::rc::Rc;
 
-use libghostty_vt::screen::Screen;
+use libghostty_vt::screen::{Screen, TrackedGridRef};
 use libghostty_vt::terminal::{
-    ConformanceLevel, DeviceAttributes, DeviceType, Mode, PrimaryDeviceAttributes,
-    SecondaryDeviceAttributes, SizeReportSize, TertiaryDeviceAttributes,
+    ConformanceLevel, DeviceAttributes, DeviceType, Mode, Point, PointCoordinate, PointSpace,
+    PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize, TertiaryDeviceAttributes,
 };
 use libghostty_vt::{Terminal, TerminalOptions};
+
+use crate::capture::FrozenRow;
 
 /// Pixel size of one cell in XTWINOPS replies: tmux's `DEFAULT_XPIXEL` and
 /// `DEFAULT_YPIXEL` (tmux.h:122-123), used when no client reports a size.
@@ -37,6 +39,16 @@ pub struct PaneTerm {
     pub(crate) term: Terminal<'static, 'static>,
     replies: Rc<RefCell<Vec<u8>>>,
     history_lines: usize,
+    /// tmux's `hsize` for the primary grid, modelled (see [`PaneTerm::feed`]).
+    hsize: usize,
+    /// Tracked pin on the first active row, re-armed before every piece fed,
+    /// to count the rows a piece scrolled into history.
+    pin: Option<TrackedGridRef>,
+    scan: AltModeScanner,
+    /// The newest `hsize` history rows, copied when the alternate screen was
+    /// entered: libghostty only reads the active screen, and tmux keeps
+    /// showing the primary history while an alternate screen is up.
+    frozen: Option<Vec<FrozenRow>>,
 }
 
 impl PaneTerm {
@@ -105,12 +117,114 @@ impl PaneTerm {
             term,
             replies,
             history_lines,
+            hsize: 0,
+            pin: None,
+            scan: AltModeScanner::default(),
+            frozen: None,
         }
     }
 
     /// Feed bytes the pane program wrote.
+    ///
+    /// History size follows tmux's collection sawtooth (`grid_collect_history`,
+    /// grid.c:449-474, called per scrolled line from grid-view.c:85,110): once
+    /// `hsize` reaches the limit, the oldest `limit / 10` lines go before the
+    /// next line is added. Ghostty prunes by page and cannot say how many
+    /// rows scrolled, so the bytes are fed in pieces of at most `limit / 2`
+    /// (a byte scrolls at most one row), and the rows each piece scrolled are
+    /// the distance from a pin on the first active row to the active top. The
+    /// model is exact while rows scroll off the top of a full-width region;
+    /// see `DIVERGENCES-PENDING.md` for where Ghostty's grid differs.
     pub fn feed(&mut self, bytes: &[u8]) {
-        self.term.vt_write(bytes);
+        if self.history_lines == 0 {
+            self.term.vt_write(bytes);
+            return;
+        }
+        let step = (self.history_lines / 2).max(1);
+        let mut i = 0;
+        while i < bytes.len() {
+            let mut j = i;
+            let mut switch = None;
+            while j < bytes.len() && j - i < step {
+                if let Some(fin) = self.scan.push(bytes[j]) {
+                    switch = Some(fin);
+                    break;
+                }
+                j += 1;
+            }
+            self.feed_piece(&bytes[i..j]);
+            i = j;
+            if let Some(fin) = switch {
+                // The alternate screen is about to switch: last chance to read
+                // the primary history.
+                if fin == b'h' && !self.alternate_on() {
+                    self.frozen = Some(self.freeze_history());
+                }
+                self.feed_piece(&bytes[i..=i]);
+                i += 1;
+            }
+        }
+    }
+
+    fn feed_piece(&mut self, piece: &[u8]) {
+        if piece.is_empty() {
+            return;
+        }
+        let track = !self.alternate_on();
+        if track {
+            self.arm_pin();
+        }
+        self.term.vt_write(piece);
+        if !self.alternate_on() {
+            self.frozen = None;
+            if track {
+                self.account_scroll();
+            } else {
+                // Back from the alternate screen (or a reset): the primary
+                // history may have changed under us.
+                let retained = self.term.scrollback_rows().unwrap_or(0);
+                self.hsize = self.hsize.min(retained);
+            }
+        }
+    }
+
+    fn arm_pin(&mut self) {
+        let top = Point::Active(PointCoordinate { x: 0, y: 0 });
+        match &mut self.pin {
+            Some(pin) => {
+                let _ = pin.set(&mut self.term, top);
+            }
+            None => self.pin = self.term.track_grid_ref(top).ok(),
+        }
+    }
+
+    /// Add the rows the last piece scrolled into history to the model.
+    fn account_scroll(&mut self) {
+        let retained = self.term.scrollback_rows().unwrap_or(0);
+        let above_pin = self
+            .pin
+            .as_ref()
+            .and_then(|p| p.point(PointSpace::Screen).ok().flatten())
+            .and_then(|c| usize::try_from(c.y).ok());
+        // A pin that lost its page (more scrolled than retained) leaves the
+        // count unknown; assume everything retained is new.
+        let scrolled = retained.saturating_sub(above_pin.unwrap_or(0));
+        self.hsize = tmux_hsize(self.hsize, self.history_lines, scrolled).min(retained);
+    }
+
+    /// Copy the newest `hsize` primary history rows.
+    fn freeze_history(&self) -> Vec<FrozenRow> {
+        let cols = usize::from(self.cols());
+        let hidden = self.term.scrollback_rows().unwrap_or(0) - self.hsize;
+        (0..self.hsize)
+            .map(|y| FrozenRow::capture(&self.term, hidden + y, cols))
+            .collect()
+    }
+
+    /// History row `y` (0 = oldest tmux still has) while the alternate screen
+    /// is up.
+    pub(crate) fn frozen_row(&self, y: usize) -> Option<&FrozenRow> {
+        self.frozen.as_ref()?.get(y)
     }
 
     /// Resize the pane. Primary-screen content reflows (Ghostty).
@@ -118,9 +232,18 @@ impl PaneTerm {
     /// # Panics
     /// Only if libghostty fails to allocate.
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        let before = self.term.scrollback_rows().unwrap_or(0);
+        let on_primary = !self.alternate_on();
         self.term
             .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
             .expect("libghostty resize");
+        if on_primary {
+            // Reflow moves rows in and out of history: keep the rows hidden
+            // from tmux's view constant. (While the alternate screen is up
+            // the frozen copy is not reflowed.)
+            let after = self.term.scrollback_rows().unwrap_or(0);
+            self.hsize = (self.hsize + after).saturating_sub(before).min(after);
+        }
     }
 
     /// Width in cells.
@@ -170,19 +293,97 @@ impl PaneTerm {
         matches!(self.term.active_screen(), Ok(Screen::Alternate))
     }
 
-    /// Lines of history visible to tmux-shaped output (`#{history_size}`):
-    /// what Ghostty retained, capped at the configured limit.
+    /// `#{history_size}`: tmux's `hsize`, which saw-tooths between 90% of the
+    /// limit and the limit (see [`PaneTerm::feed`]). Unchanged while the
+    /// alternate screen is on: tmux keeps the primary history.
     #[must_use]
     pub fn history_size(&self) -> usize {
-        self.term
-            .scrollback_rows()
-            .unwrap_or(0)
-            .min(self.history_lines)
+        if self.alternate_on() && self.frozen.is_none() {
+            0
+        } else {
+            self.hsize
+        }
     }
 
     /// Take the bytes to write back to the pane program (tmux's replies).
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut *self.replies.borrow_mut())
+    }
+}
+
+/// tmux's `hsize` after `lines` more rows scrolled into history: before each
+/// row, a grid at its limit drops the oldest `limit / 10` (at least one)
+/// (`grid_collect_history`, grid.c:449-474).
+fn tmux_hsize(mut hsize: usize, limit: usize, lines: usize) -> usize {
+    for _ in 0..lines {
+        if hsize > 0 && hsize >= limit {
+            hsize -= (limit / 10).clamp(1, hsize);
+        }
+        hsize += 1;
+    }
+    hsize
+}
+
+/// Finds `CSI ? ... h|l` sequences that name the alternate screen (modes 47,
+/// 1047, 1049): the one place the primary history must be copied before
+/// libghostty hides it. A false positive costs only a copy; a miss loses the
+/// history while the alternate screen is up.
+#[derive(Debug, Default)]
+struct AltModeScanner {
+    state: ScanState,
+    private: bool,
+    other: bool,
+    params: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ScanState {
+    #[default]
+    Ground,
+    Esc,
+    Csi,
+}
+
+impl AltModeScanner {
+    /// Feed one byte; `Some(final byte)` when it ends an alternate-screen
+    /// set or reset.
+    fn push(&mut self, b: u8) -> Option<u8> {
+        match (self.state, b) {
+            (_, 0x18 | 0x1a) => self.state = ScanState::Ground,
+            (_, 0x1b) => self.state = ScanState::Esc,
+            // Ground, and C0 controls inside a CSI (executed, not parameters).
+            (ScanState::Ground, _) | (ScanState::Csi, 0x00..=0x1f) => {}
+            (ScanState::Esc, b'[') => {
+                self.state = ScanState::Csi;
+                self.private = false;
+                self.other = false;
+                self.params.clear();
+            }
+            (ScanState::Esc, _) => self.state = ScanState::Ground,
+            (ScanState::Csi, b'?') if self.params.is_empty() && !self.private => {
+                self.private = true;
+            }
+            (ScanState::Csi, b'0'..=b'9' | b';') => {
+                if self.params.len() < 64 {
+                    self.params.push(b);
+                }
+            }
+            (ScanState::Csi, 0x40..=0x7e) => {
+                self.state = ScanState::Ground;
+                if self.private
+                    && !self.other
+                    && matches!(b, b'h' | b'l')
+                    && self
+                        .params
+                        .split(|c| *c == b';')
+                        .any(|p| matches!(p, b"47" | b"1047" | b"1049"))
+                {
+                    return Some(b);
+                }
+            }
+            (ScanState::Csi, _) => self.other = true,
+        }
+        None
     }
 }
 
@@ -427,7 +628,22 @@ mod tests {
     }
 
     #[test]
-    fn history_budget_keeps_the_limit() {
+    fn history_follows_tmux_sawtooth() {
+        // Reference tmux 3.8 (goldens fmt_history_size_sawtooth*).
+        for (cols, rows, limit, feed, want) in [
+            (20u16, 5u16, 100usize, 150usize, 96usize),
+            (80, 24, 2000, 2100, 1877),
+        ] {
+            let mut t = PaneTerm::new(cols, rows, limit);
+            for i in 0..feed {
+                t.feed(format!("l{i}\r\n").as_bytes());
+            }
+            assert_eq!(t.history_size(), want, "cols={cols} limit={limit}");
+        }
+    }
+
+    #[test]
+    fn history_stays_between_nine_tenths_and_the_limit() {
         // (columns, limit, lines to feed): enough lines to force pruning.
         for (cols, limit, feed) in [
             (10u16, 100usize, 1600usize),
@@ -436,7 +652,30 @@ mod tests {
         ] {
             let mut t = PaneTerm::new(cols, 24, limit);
             t.feed(&b"x\r\n".repeat(feed));
-            assert_eq!(t.history_size(), limit, "cols={cols} limit={limit}");
+            let h = t.history_size();
+            assert!(
+                (limit * 9 / 10..=limit).contains(&h),
+                "{h} cols={cols} limit={limit}"
+            );
+        }
+    }
+
+    #[test]
+    fn history_matches_the_model_through_ghostty_pruning() {
+        // Narrow panes make Ghostty prune pages long before tmux would; the
+        // count must not notice, however the bytes arrive.
+        for (cols, chunk) in [(10u16, 1usize), (10, 7), (10, 100_000), (300, 4096)] {
+            let data = b"x\r\n".repeat(3000);
+            let mut t = PaneTerm::new(cols, 5, 100);
+            for part in data.chunks(chunk) {
+                t.feed(part);
+            }
+            // The cursor row stays visible: 3000 newlines scroll 2996 rows.
+            assert_eq!(
+                t.history_size(),
+                tmux_hsize(0, 100, 3000 - 4),
+                "cols={cols} chunk={chunk}"
+            );
         }
     }
 
@@ -446,7 +685,36 @@ mod tests {
         t.feed(&b"x\r\n".repeat(2500));
         t.resize(160, 24);
         t.feed(&b"x\r\n".repeat(2500));
-        assert_eq!(t.history_size(), 2000);
+        assert!(
+            (1800..=2000).contains(&t.history_size()),
+            "{}",
+            t.history_size()
+        );
+    }
+
+    #[test]
+    fn history_is_kept_while_the_alternate_screen_is_on() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(&b"x\r\n".repeat(10));
+        assert_eq!(t.history_size(), 6);
+        t.feed(b"\x1b[?1049hALT");
+        assert_eq!(t.history_size(), 6);
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.history_size(), 6);
+    }
+
+    #[test]
+    fn alt_mode_scanner_matches_only_alternate_screen_modes() {
+        let find = |bytes: &[u8]| {
+            let mut s = AltModeScanner::default();
+            bytes.iter().filter_map(|b| s.push(*b)).collect::<Vec<u8>>()
+        };
+        assert_eq!(find(b"\x1b[?1049h"), b"h");
+        assert_eq!(find(b"a\x1b[?25;1047l"), b"l");
+        assert_eq!(find(b"\x1b[?47h\x1b[?47l"), b"hl");
+        assert_eq!(find(b"\x1b[?25h"), b"");
+        assert_eq!(find(b"\x1b[1049h"), b"");
+        assert_eq!(find(b"\x1b[?1049$p"), b"");
     }
 
     #[test]

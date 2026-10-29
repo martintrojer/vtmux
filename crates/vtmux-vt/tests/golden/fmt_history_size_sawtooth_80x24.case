@@ -1,0 +1,9 @@
+kind=format
+cols=80
+rows=24
+seq=2100
+limit=2000
+bytes=
+format=#{history_size}
+command=set -g history-limit 2000 ; new-session -d -x 80 -y 24 'sh -c 'i=0; while [ $i -lt 2100 ]; do echo l$i; i=$((i+1)); done; printf '"'"''"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; display-message -p -t 0 '#{history_size}'
+expected=1877\n
