@@ -1,5 +1,6 @@
 {
   "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
   "name": "list_sessions_order_and_format",
   "inputs": {
     "name": "list_sessions_order_and_format",

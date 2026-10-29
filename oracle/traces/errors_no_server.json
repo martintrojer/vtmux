@@ -1,5 +1,6 @@
 {
   "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
   "name": "errors_no_server",
   "inputs": {
     "name": "errors_no_server",

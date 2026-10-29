@@ -2,12 +2,14 @@
 //!
 //! Isolation (spec, *Behaviour oracle*; tmux.c:557-571 lets an inherited
 //! `$TMUX` beat `TMUX_TMPDIR`): the environment is cleared, `HOME` is a private
-//! temp dir, and every invocation gets `-L oracle-<scenario>-<pid> -f /dev/null`.
+//! temp dir, and every invocation gets `-S <root>/s -f /dev/null`. The root is
+//! always a short `/tmp/vto-<6 hex>` (never `$TMPDIR`): tmux refuses socket
+//! paths of `sizeof sun_path` or more (client.c:114-116; 104 on macOS).
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -42,7 +44,49 @@ const REACTION_LIMIT: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(5);
 const HISTORY_LIMIT: usize = 2000;
 
+/// Where run roots live. Fixed, so a long `$TMPDIR` cannot lengthen socket paths.
+const ROOT_BASE: &str = "/tmp";
+/// Socket paths must stay under this (the strictest `sun_path` is 104 bytes).
+const MAX_SOCKET_LEN: usize = 100;
+
 static RUN_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+/// Six hex digits that differ per run and per process.
+fn nonce() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_usize(RUN_SEQ.fetch_add(1, Ordering::SeqCst));
+    h.write_u32(std::process::id());
+    format!("{:06x}", h.finish() & 0xff_ffff)
+}
+
+/// The socket inside `root`, checked against `MAX_SOCKET_LEN`.
+fn socket_path(root: &Path) -> Result<PathBuf> {
+    let socket = root.join("s");
+    if socket.as_os_str().len() >= MAX_SOCKET_LEN {
+        return Err(format!(
+            "socket path {} is {} bytes, limit {MAX_SOCKET_LEN}",
+            socket.display(),
+            socket.as_os_str().len()
+        ));
+    }
+    Ok(socket)
+}
+
+/// Create a fresh private run root `ROOT_BASE/vto-<6 hex>`.
+fn make_root() -> Result<PathBuf> {
+    for _ in 0..100 {
+        let root = Path::new(ROOT_BASE).join(format!("vto-{}", nonce()));
+        let mut b = fs::DirBuilder::new();
+        b.mode(0o700);
+        match b.create(&root) {
+            Ok(()) => return Ok(root),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(format!("{}: {e}", root.display())),
+        }
+    }
+    Err(format!("no free run root under {ROOT_BASE}"))
+}
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -106,8 +150,7 @@ pub struct Runner<'a> {
     bin: &'a Path,
     sc: &'a Scenario,
     root: PathBuf,
-    sock_dir: PathBuf,
-    label: String,
+    socket: PathBuf,
     norm: Normalizer,
     act: Arc<Activity>,
     controls: HashMap<String, Control>,
@@ -144,37 +187,21 @@ pub fn run(bin: &Path, sc: &Scenario) -> Result<Vec<Item>> {
 
 impl<'a> Runner<'a> {
     fn new(bin: &'a Path, sc: &'a Scenario) -> Result<Self> {
-        let seq = RUN_SEQ.fetch_add(1, Ordering::SeqCst);
-        let root = std::env::temp_dir().join(format!("vto-{}-{seq}", std::process::id()));
-        fs::create_dir_all(root.join("home")).map_err(|e| format!("{}: {e}", root.display()))?;
-        // Pane programs signal with `tmux wait-for -S`; $TMUX gives them the socket.
-        fs::create_dir_all(root.join("bin")).map_err(|e| e.to_string())?;
-        std::os::unix::fs::symlink(bin, root.join("bin/tmux")).map_err(|e| e.to_string())?;
-        let uid = fs::metadata(&root).map_err(|e| e.to_string())?.uid();
-        // D20: the socket directory follows the invoked name.
-        let prefix = if bin.file_name().is_some_and(|n| n == "vtmux") {
-            "vtmux"
-        } else {
-            "tmux"
+        let root = make_root()?;
+        let made = Self::init_root(bin, &root);
+        let socket = match made.and_then(|()| socket_path(&root)) {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = fs::remove_dir_all(&root);
+                return Err(e);
+            }
         };
-        let sock_dir = root.join(format!("{prefix}-{uid}"));
-        let label = format!("oracle-{}-{}", sc.name, std::process::id());
-        let host = Command::new("hostname")
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
-        let norm = Normalizer::new(
-            &root.to_string_lossy(),
-            &sock_dir.to_string_lossy(),
-            &label,
-            &host,
-        );
+        let norm = Normalizer::new(&root.to_string_lossy(), &socket.to_string_lossy());
         Ok(Self {
             bin,
             sc,
             root,
-            sock_dir,
-            label,
+            socket,
             norm,
             act: Arc::new(Activity {
                 last: Mutex::new(Instant::now()),
@@ -187,6 +214,13 @@ impl<'a> Runner<'a> {
             pending_div: None,
             expect_after: None,
         })
+    }
+
+    fn init_root(bin: &Path, root: &Path) -> Result<()> {
+        fs::create_dir(root.join("home")).map_err(|e| format!("{}: {e}", root.display()))?;
+        // Pane programs signal with `tmux wait-for -S`; $TMUX gives them the socket.
+        fs::create_dir(root.join("bin")).map_err(|e| e.to_string())?;
+        std::os::unix::fs::symlink(bin, root.join("bin/tmux")).map_err(|e| e.to_string())
     }
 
     fn env(&self) -> Vec<(&'static str, String)> {
@@ -211,9 +245,12 @@ impl<'a> Runner<'a> {
     }
 
     fn base_args(&self) -> Vec<String> {
-        ["-L", &self.label, "-f", "/dev/null"]
-            .map(String::from)
-            .to_vec()
+        vec![
+            "-S".into(),
+            self.socket.to_string_lossy().into_owned(),
+            "-f".into(),
+            "/dev/null".into(),
+        ]
     }
 
     fn command(&self, argv: &[String]) -> Command {
@@ -405,12 +442,8 @@ impl<'a> Runner<'a> {
     }
 
     fn stale_socket(&self) -> Result<()> {
-        let mut b = fs::DirBuilder::new();
-        b.recursive(true).mode(0o700);
-        b.create(&self.sock_dir)
-            .map_err(|e| format!("{}: {e}", self.sock_dir.display()))?;
         // Bound then closed: the file stays, nothing listens.
-        drop(UnixListener::bind(self.sock_dir.join(&self.label)).map_err(|e| e.to_string())?);
+        drop(UnixListener::bind(&self.socket).map_err(|e| e.to_string())?);
         Ok(())
     }
 
@@ -631,4 +664,27 @@ fn has_line(buf: &[u8], from: usize, prefix: &str) -> bool {
     buf[from..]
         .split(|b| *b == b'\n')
         .any(|l| l.starts_with(prefix.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_root_ignores_tmpdir_and_stays_short() {
+        // `make_root` never consults $TMPDIR, so a long one cannot lengthen the path.
+        let root = make_root().unwrap();
+        let socket = socket_path(&root);
+        let _ = fs::remove_dir_all(&root);
+        let socket = socket.unwrap();
+        assert!(socket.starts_with(ROOT_BASE), "{}", socket.display());
+        assert_eq!(socket.as_os_str().len(), "/tmp/vto-xxxxxx/s".len());
+    }
+
+    #[test]
+    fn overlong_socket_path_is_refused() {
+        let root = Path::new("/tmp").join("y".repeat(MAX_SOCKET_LEN));
+        assert!(socket_path(&root).is_err());
+        assert!(socket_path(Path::new("/tmp/vto-abcdef")).is_ok());
+    }
 }

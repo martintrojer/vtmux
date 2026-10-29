@@ -1,5 +1,6 @@
 {
   "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
   "name": "control_attached_display",
   "inputs": {
     "name": "control_attached_display",

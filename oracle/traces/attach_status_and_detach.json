@@ -1,5 +1,6 @@
 {
   "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
   "name": "attach_status_and_detach",
   "inputs": {
     "name": "attach_status_and_detach",

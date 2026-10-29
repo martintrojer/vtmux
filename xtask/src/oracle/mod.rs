@@ -110,6 +110,8 @@ pub fn run() -> ExitCode {
 #[derive(Debug, Serialize, Deserialize)]
 struct Trace {
     tmux_version: String,
+    /// Hostname of the machine that recorded the trace (see `host_view`).
+    recorded_host: String,
     name: String,
     inputs: Scenario,
     observations: Vec<Item>,
@@ -187,7 +189,8 @@ fn run_inner() -> Result<ExitCode> {
             let results = parallel(&scenarios, |sc| {
                 let trace = read_trace(&root, sc)?;
                 let got = runner::run(&vtmux, sc)?;
-                Ok::<_, String>(compare(&trace.observations, &got, false))
+                let (want, got) = host_view(&trace, &current_host(), got);
+                Ok::<_, String>(compare(&want, &got, false))
             });
             Ok(report(&scenarios, results, "replay"))
         }
@@ -216,6 +219,92 @@ fn run_inner() -> Result<ExitCode> {
     }
 }
 
+fn current_host() -> String {
+    std::process::Command::new("hostname")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// The trace's and vtmux's observations with hostnames made comparable.
+/// Scenarios never depend on the hostname (titles are pinned), so on the
+/// recording host nothing is touched. On another host the recorded name is
+/// replaced by `<HOST>` in the trace, as a whole token only
+/// (`normalize::replace_hosts`), and the local name likewise in vtmux's output,
+/// but only for steps where the trace holds a `<HOST>`: a host called `server`
+/// must not rewrite `no server running` on one side only.
+fn host_view(trace: &Trace, host: &str, got: Vec<Item>) -> (Vec<Item>, Vec<Item>) {
+    if trace.recorded_host == host {
+        return (trace.observations.clone(), got);
+    }
+    let on = |o: &Observation, name: &str| map_text(o, &|t| normalize::replace_hosts(t, &[name]));
+    let want: Vec<Item> = trace
+        .observations
+        .iter()
+        .map(|it| Item {
+            observation: on(&it.observation, &trace.recorded_host),
+            ..it.clone()
+        })
+        .collect();
+    let host_steps: BTreeSet<usize> = want
+        .iter()
+        .filter(|it| mentions_host(&it.observation))
+        .map(|it| it.step)
+        .collect();
+    let got = got
+        .into_iter()
+        .map(|it| {
+            if host_steps.contains(&it.step) {
+                Item {
+                    observation: on(&it.observation, host),
+                    ..it
+                }
+            } else {
+                it
+            }
+        })
+        .collect();
+    (want, got)
+}
+
+fn mentions_host(o: &Observation) -> bool {
+    let found = std::cell::Cell::new(false);
+    map_text(o, &|t| {
+        found.set(found.get() || t.contains("<HOST>"));
+        t.to_string()
+    });
+    found.get()
+}
+
+fn map_text(o: &Observation, f: &dyn Fn(&str) -> String) -> Observation {
+    let all = |v: &[String]| v.iter().map(|t| f(t)).collect();
+    match o {
+        Observation::Cli {
+            stdout,
+            stderr,
+            exit,
+        } => Observation::Cli {
+            stdout: f(stdout),
+            stderr: f(stderr),
+            exit: *exit,
+        },
+        Observation::Control {
+            lines,
+            stderr,
+            exit,
+        } => Observation::Control {
+            lines: all(lines),
+            stderr: f(stderr),
+            exit: *exit,
+        },
+        Observation::Screen { rows, cursor } => Observation::Screen {
+            rows: all(rows),
+            cursor: *cursor,
+        },
+        Observation::Timeout { what } => Observation::Timeout { what: what.clone() },
+    }
+}
+
 fn record(root: &Path, scenarios: &[Scenario]) -> Result<ExitCode> {
     let reference = ref_tmux::reference_tmux()?;
     let dir = root.join("oracle/traces");
@@ -238,6 +327,7 @@ fn record(root: &Path, scenarios: &[Scenario]) -> Result<ExitCode> {
                 }
                 let trace = Trace {
                     tmux_version: TMUX_VERSION.into(),
+                    recorded_host: current_host(),
                     name: sc.name.clone(),
                     inputs: sc.clone(),
                     observations,
@@ -521,5 +611,45 @@ mod tests {
         assert!(o.mismatches[0].diff.contains("+<no observation>"));
         assert!(o.mismatches[1].diff.contains("-out| c"));
         assert!(o.mismatches[1].diff.contains("+out| x"));
+    }
+
+    fn trace(host: &str, out: &str) -> Trace {
+        Trace {
+            tmux_version: TMUX_VERSION.into(),
+            recorded_host: host.into(),
+            name: "t".into(),
+            inputs: serde_json::from_str(r#"{"name":"t","size":[80,24],"steps":[]}"#).unwrap(),
+            observations: vec![cli(0, out)],
+        }
+    }
+
+    #[test]
+    fn colliding_hostnames_replay_clean_on_another_host() {
+        // Recorded on `linuxpc`; replayed on hosts whose names occur in output.
+        let out = "no server running on x\nduplicate session: a\n%output %0 abc hello\ncat\n";
+        for host in ["server", "session", "abc", "cat", "hello"] {
+            let (want, got) = host_view(&trace("linuxpc", out), host, vec![cli(0, out)]);
+            assert!(compare(&want, &got, false).mismatches.is_empty(), "{host}");
+        }
+    }
+
+    #[test]
+    fn a_host_in_the_trace_is_normalised_on_both_sides() {
+        let (want, got) = host_view(
+            &trace("linuxpc", "\"linuxpc\" and linuxpcx\n"),
+            "other",
+            vec![cli(0, "\"other\" and linuxpcx\n")],
+        );
+        assert!(compare(&want, &got, false).mismatches.is_empty());
+    }
+
+    #[test]
+    fn same_host_is_left_alone() {
+        let (want, got) = host_view(
+            &trace("server", "no server\n"),
+            "server",
+            vec![cli(0, "no sorver\n")],
+        );
+        assert_eq!(compare(&want, &got, false).mismatches.len(), 1);
     }
 }

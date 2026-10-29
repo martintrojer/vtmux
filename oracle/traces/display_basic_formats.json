@@ -1,5 +1,6 @@
 {
   "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
   "name": "display_basic_formats",
   "inputs": {
     "name": "display_basic_formats",
