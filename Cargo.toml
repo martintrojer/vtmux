@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/vtmux-core","crates/vtmux-vt","crates/vtmux-server","crates/vtmux-client","crates/vtmux","xtask"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99.1"
+license = "ISC"
+publish = false
+
+[workspace.dependencies]
+vtmux-core = { path = "crates/vtmux-core" }
+vtmux-vt = { path = "crates/vtmux-vt" }
+vtmux-server = { path = "crates/vtmux-server" }
+vtmux-client = { path = "crates/vtmux-client" }
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
