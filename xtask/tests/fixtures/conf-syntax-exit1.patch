@@ -1,6 +1,8 @@
+diff --git a/regress/conf-syntax.sh b/regress/conf-syntax.sh
+index 562ac76..6fe8db0 100644
 --- a/regress/conf-syntax.sh
 +++ b/regress/conf-syntax.sh
-@@ -17,4 +17,4 @@
+@@ -14,4 +14,4 @@ for i in conf/*.conf; do
  	$TMUX -f/dev/null start \; source -n $i || exit 1
  done
  
