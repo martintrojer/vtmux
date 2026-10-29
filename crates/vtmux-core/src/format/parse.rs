@@ -2,7 +2,8 @@
 //! `format_skip1` (4829), `format_build_modifiers` (4936) and the dispatch in
 //! `format_replace` (6019-6600) into a typed AST.
 
-use super::{CondArm, Format, LOOP_LIMIT, Node, Trim, Value};
+use super::mods;
+use super::{Format, LOOP_LIMIT, Node};
 
 /// `format_upper` / `format_lower` (format.c:222-281): the `#S` style aliases.
 fn alias(ch: u8) -> Option<&'static str> {
@@ -164,9 +165,11 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
             _ => {
                 if let Some(name) = alias(ch).filter(|_| style_end.is_none_or(|e| i > e)) {
                     out.node(Node::Replace {
-                        value: Value::Var(name.to_owned()),
-                        reexpand: false,
-                        trim: None,
+                        value: super::Value::Var {
+                            name: name.to_owned(),
+                            vm: super::VarMods::default(),
+                        },
+                        post: super::Post::default(),
                     });
                 } else {
                     // Unknown: keep the `#`; the next char is copied as is.
@@ -182,144 +185,33 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
 /// One `#{key}`. `None` is tmux's "failed" return, which ends the enclosing
 /// expansion.
 fn replace(key: &str, depth: usize, deferred: &mut Vec<String>) -> Option<Node> {
-    let (mods, body) = match modifiers(key) {
-        Some((mods, off)) => (mods, &key[off..]),
+    let (list, body) = match modifiers(key) {
+        Some((list, off)) => (list, &key[off..]),
         None => (Vec::new(), key),
     };
 
+    let unsupported: Vec<&str> = list
+        .iter()
+        .map(|m| m.name.as_str())
+        .filter(|m| !mods::SUPPORTED.contains(m))
+        .collect();
     // `t` is supported only bare (`#{t:x}`); `t/p`, `t/f/...` and the other
     // argument forms are deferred.
-    let unsupported: Vec<&String> = mods
-        .iter()
-        .filter(|m| !matches!(m.name.as_str(), "E" | "T" | "||" | "&&" | "==" | "!=" | "="))
-        .filter(|m| m.name != "t" || m.args.is_some())
-        .map(|m| &m.name)
+    let unsupported: Vec<&str> = unsupported
+        .into_iter()
+        .chain(
+            list.iter()
+                .filter(|m| m.name == "t" && !m.args.is_empty())
+                .map(|m| m.name.as_str()),
+        )
         .collect();
     if let Some(first) = unsupported.first() {
-        let node = Node::Deferred((*first).clone());
-        deferred.extend(unsupported.into_iter().cloned());
+        let node = Node::Deferred((*first).to_owned());
+        deferred.extend(unsupported.into_iter().map(str::to_owned));
         return Some(node);
     }
-    // `=N` / `=/N/marker` (format.c:6080-6089): the last one wins; its
-    // arguments are expanded when the value is.
-    let trim = mods
-        .iter()
-        .rev()
-        .find(|m| m.name == "=")
-        .and_then(|m| m.args.as_ref())
-        .and_then(|args| {
-            let width = args.first()?;
-            Some(Box::new(Trim {
-                width: template(&unescape(width), depth + 1, deferred),
-                marker: args
-                    .get(1)
-                    .map(|m| template(&unescape(m), depth + 1, deferred)),
-            }))
-        });
-    let mods: Vec<String> = mods.into_iter().map(|m| m.name).collect();
-
-    // `T` would run strftime first; deferred, so it is `E` for now.
-    let reexpand = mods.iter().any(|m| m == "E" || m == "T");
-    let inner = depth + 1;
-    let mut sub = |s: &str| template(s, inner, deferred);
-
-    // The same precedence as format.c:6560-6600 (the `m < >` comparisons, `e`
-    // and the loops are among the deferred modifiers).
-    let value = if let Some(op) = mods.iter().rev().find(|m| *m == "||" || *m == "&&") {
-        let mut parts = Vec::new();
-        let mut start = 0;
-        loop {
-            // format_bool_op_n (format.c:5176): operands split at top-level commas.
-            let Some(c) = skip(body, start, b",") else {
-                parts.push(sub(&body[start..]));
-                break;
-            };
-            parts.push(sub(&body[start..c]));
-            start = c + 1;
-        }
-        if op == "||" {
-            Value::Or(parts)
-        } else {
-            Value::And(parts)
-        }
-    } else if let Some(op) = mods.iter().rev().find(|m| *m == "==" || *m == "!=") {
-        // format_choose (format.c:4867): no comma is a syntax error.
-        let c = skip(body, 0, b",")?;
-        Value::Cmp {
-            ne: op == "!=",
-            left: sub(&body[..c]),
-            right: sub(&body[c + 1..]),
-        }
-    } else if let Some(conds) = body.strip_prefix('?') {
-        // format.c:6502-6580.
-        let mut arms = Vec::new();
-        let mut default = None;
-        let mut rest = conds;
-        loop {
-            let Some(c) = skip(rest, 0, b",") else {
-                default = Some(sub(rest));
-                break;
-            };
-            let raw = &rest[..c];
-            rest = &rest[c + 1..];
-            let end = skip(rest, 0, b",");
-            arms.push(CondArm {
-                raw: raw.to_owned(),
-                test: sub(raw),
-                then: sub(&rest[..end.unwrap_or(rest.len())]),
-            });
-            let Some(end) = end else { break };
-            rest = &rest[end + 1..];
-        }
-        Value::Cond { arms, default }
-    } else if body.contains("#{") {
-        Value::Inner(sub(body))
-    } else if mods.iter().any(|m| m == "t") {
-        // FORMAT_TIMESTRING only affects the plain lookup (format_find,
-        // format.c:4681-4709).
-        Value::Time(body.to_owned())
-    } else {
-        Value::Var(body.to_owned())
-    };
-    Some(Node::Replace {
-        value,
-        reexpand,
-        trim,
-    })
-}
-
-/// `format_unescape` (format.c:4768-4796): outside `#{...}`, `#,` `##`
-/// `#{` `#}` `#:` lose their `#`.
-fn unescape(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut brackets = 0i32;
-    let mut i = 0;
-    while i < b.len() {
-        let c = b[i];
-        let next = b.get(i + 1).copied();
-        if c == b'#' && next == Some(b'{') {
-            brackets += 1;
-        }
-        if brackets == 0 && c == b'#' && next.is_some_and(|n| b",#{}:".contains(&n)) {
-            out.push(b[i + 1]);
-            i += 2;
-            continue;
-        }
-        if c == b'}' {
-            brackets -= 1;
-        }
-        out.push(c);
-        i += 1;
-    }
-    String::from_utf8(out).unwrap_or_default()
-}
-
-/// One entry of a modifier list.
-struct Modifier {
-    name: String,
-    /// Given arguments (`t/p`, `=3`, `s/a/b/`), raw (not unescaped).
-    args: Option<Vec<String>>,
+    let (value, post) = mods::build(&list, body, depth + 1, deferred)?;
+    Some(Node::Replace { value, post })
 }
 
 /// `format_is_end`.
@@ -327,20 +219,56 @@ fn is_end(c: u8) -> bool {
     c == b';' || c == b':'
 }
 
-/// `format_build_modifiers` (format.c:4936-5033): the modifier names before the
-/// first top-level `:`, and the offset of the body after it. `None` when the
-/// text is not a modifier list (then the whole key is the body). Arguments are
-/// kept raw; most modifiers given one are deferred.
-fn modifiers(key: &str) -> Option<(Vec<Modifier>, usize)> {
+/// A modifier as written: its name and its arguments (unescaped and expanded later).
+#[derive(Debug, Clone)]
+pub(super) struct RawMod {
+    pub name: String,
+    pub args: Vec<String>,
+}
+
+/// `format_unescape` (format.c:4768): drop the escaping `#` of `#,` `##` `#{` `#}` `#:`
+/// outside any `#{...}`.
+pub(super) fn unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut brackets = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        let next = b.get(i + 1).copied();
+        if b[i] == b'#' && next == Some(b'{') {
+            brackets += 1;
+        }
+        if brackets == 0 && b[i] == b'#' && next.is_some_and(|n| b",#{}:".contains(&n)) {
+            out.push(b[i + 1]);
+            i += 2;
+            continue;
+        }
+        if b[i] == b'}' {
+            brackets -= 1;
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    // Only ASCII `#`s were removed, so this is still UTF-8.
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// `format_build_modifiers` (format.c:4936-5033): the modifiers before the first
+/// top-level `:`, and the offset of the body after it. `None` when the text is not a
+/// modifier list (then the whole key is the body).
+fn modifiers(key: &str) -> Option<(Vec<RawMod>, usize)> {
     const PLAIN: &[u8] = b"labdnwETSWPOVL!<>A";
     const TWO: [&[u8]; 7] = [b"||", b"&&", b"!!", b"!=", b"==", b"<=", b">="];
     const WITH_ARGS: &[u8] = b"ImCLNPSOVst=pReqWcA";
 
     let b = key.as_bytes();
     let at = |i: usize| b.get(i).copied().unwrap_or(0);
-    let mut mods: Vec<Modifier> = Vec::new();
+    let mut mods: Vec<RawMod> = Vec::new();
     let mut cp = 0;
-    let plain = |name: String| Modifier { name, args: None };
+    let plain = |name: &str| RawMod {
+        name: name.to_owned(),
+        args: Vec::new(),
+    };
 
     while cp < b.len() && b[cp] != b':' {
         if b[cp] == b';' {
@@ -351,12 +279,12 @@ fn modifiers(key: &str) -> Option<(Vec<Modifier>, usize)> {
         }
         let c = b[cp];
         if PLAIN.contains(&c) && is_end(at(cp + 1)) {
-            mods.push(plain(char::from(c).to_string()));
+            mods.push(plain(&key[cp..=cp]));
             cp += 1;
             continue;
         }
         if TWO.iter().any(|t| b[cp..].starts_with(t)) && is_end(at(cp + 2)) {
-            mods.push(plain(key[cp..cp + 2].to_owned()));
+            mods.push(plain(&key[cp..cp + 2]));
             cp += 2;
             continue;
         }
@@ -365,7 +293,7 @@ fn modifiers(key: &str) -> Option<(Vec<Modifier>, usize)> {
         }
         let name = char::from(c).to_string();
         if is_end(at(cp + 1)) {
-            mods.push(plain(name));
+            mods.push(plain(&name));
             cp += 1;
             continue;
         }
@@ -373,9 +301,9 @@ fn modifiers(key: &str) -> Option<(Vec<Modifier>, usize)> {
         if !first.is_ascii_punctuation() || first == b'-' {
             // One argument, no wrapper character.
             let end = skip(key, cp + 1, b":;")?;
-            mods.push(Modifier {
+            mods.push(RawMod {
                 name,
-                args: Some(vec![key[cp + 1..end].to_owned()]),
+                args: vec![key[cp + 1..end].to_owned()],
             });
             cp = end;
             continue;
@@ -398,10 +326,7 @@ fn modifiers(key: &str) -> Option<(Vec<Modifier>, usize)> {
                 break;
             }
         }
-        mods.push(Modifier {
-            name,
-            args: Some(args),
-        });
+        mods.push(RawMod { name, args });
     }
     if at(cp) != b':' {
         return None;

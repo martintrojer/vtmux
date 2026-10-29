@@ -565,7 +565,6 @@ version = "0.0.0"
 dependencies = [
  "rustix",
  "tempfile",
- "unicode-width",
 ]
 
 [[package]]

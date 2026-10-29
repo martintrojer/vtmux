@@ -10,16 +10,28 @@
 //! Supported: variables and the `#S #I ...` aliases, `#{?c,v,...}`, `#{||:...}`,
 //! `#{&&:...}`, `#{==:a,b}`, `#{!=:a,b}`, `#{E:x}`, `#{T:x}` (like `E`: the
 //! strftime pass is deferred), `#{t:x}` (a time variable as `ctime` text), the
-//! `##` `#,` `#}` escapes, `#{=N:x}` / `#{=/N/marker:x}` truncation and
-//! `#[style]` pass-through. [`expand_time`] is
+//! `##` `#,` `#}` escapes and `#[style]` pass-through. [`expand_time`] is
 //! `format_expand_time`: a `strftime` pass over the template first. Every other modifier parses to [`Node::Deferred`] and expands
 //! to nothing; [`Parsed::deferred`] lists them so the server can log them.
 //! `#(cmd)` also expands to nothing (jobs are the server's business, D9) and is
 //! reported in `deferred` as `#()`.
 
+mod colour;
+mod colour_names;
+mod eval;
+mod mods;
+mod num;
 mod parse;
+mod text;
 mod time;
-pub mod trim;
+/// Width and truncation of expanded text that may still hold `#[style]` runs and `##`
+/// escapes (`format_width`, `format_trim_left/right`, format-draw.c:1100-1270), for the
+/// status line.
+pub mod trim {
+    pub use super::text::{trim_left, trim_right, width};
+}
+mod wcwidth;
+mod wcwidth_tables;
 
 pub use time::Tm;
 
@@ -67,7 +79,10 @@ impl Clock for SystemClock {
 }
 
 /// Where variable values come from. The server implements this over its
-/// options, environment and the target session/window/pane.
+/// options, environment and the target session/window/pane. Only [`get`] is
+/// required; the hooks default to "nothing there".
+///
+/// [`get`]: FormatContext::get
 pub trait FormatContext {
     /// The value of `name`, or `None` when no such variable exists.
     fn get(&self, name: &str) -> Option<String>;
@@ -90,6 +105,59 @@ pub trait FormatContext {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
     }
+
+    /// `#{V:...}`: the environment of `scope` in name order, or `None` when there is
+    /// none (no session, no client).
+    fn environ(&self, _scope: EnvScope) -> Option<Vec<EnvVar>> {
+        None
+    }
+
+    /// `#{N:name}`: whether the target session has a window called `name`. `None` when
+    /// there is no session, which ends the whole expansion (format.c:5301).
+    fn window_name_exists(&self, _name: &str) -> Option<bool> {
+        None
+    }
+
+    /// `#{N/s:name}`: whether a session called `name` exists.
+    fn session_name_exists(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// `#{C:pattern}`: the 1-based number of the first line of the target pane that
+    /// matches, `None` (shown as 0) when nothing matches or there is no pane
+    /// (`window_pane_search`, window.c:2123).
+    fn search_pane(&self, _pattern: &str, _flags: SearchFlags) -> Option<u32> {
+        None
+    }
+}
+
+/// Which environment `#{V/x:...}` loops over (format.c:5692).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvScope {
+    /// The target session's (no flag, or `s`).
+    Session,
+    /// The global environment (`g`).
+    Global,
+    /// The client's (`c`).
+    Client,
+}
+
+/// One environment entry as the `#{V:...}` loop sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvVar {
+    pub name: String,
+    /// `None` for an entry marked removed (`set-environment -r`).
+    pub value: Option<String>,
+    pub hidden: bool,
+}
+
+/// The flags of `#{C/ir:...}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SearchFlags {
+    /// `i`: ignore case.
+    pub ignore_case: bool,
+    /// `r`: the pattern is a regular expression, not a glob.
+    pub regex: bool,
 }
 
 /// A parsed template.
@@ -112,9 +180,7 @@ enum Node {
     Text(String),
     Replace {
         value: Value,
-        reexpand: bool,
-        /// The `=` modifier.
-        trim: Option<Box<Trim>>,
+        post: Post,
     },
     /// An unsupported modifier list (first modifier named); expands to nothing.
     Deferred(String),
@@ -122,34 +188,108 @@ enum Node {
     Abort,
 }
 
+/// What the modifiers do to a value once it is found (format.c:6602-6682).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct Post {
+    /// `E` (and `T`, whose strftime pass is deferred): expand the value again.
+    reexpand: bool,
+    /// `=N`: trim to this many columns; negative trims from the left.
+    limit: Option<Format>,
+    /// `=/N/marker`: appended (or prepended when `limit` is negative) if trimmed.
+    marker: Option<Format>,
+    /// `p`: pad to this many columns; negative pads on the left.
+    pad: Option<Format>,
+    /// `n`: replace with the length in bytes.
+    length: bool,
+    /// `w`: replace with the display width.
+    width: bool,
+}
+
+/// The modifiers `format_find` applies to a variable it found (format.c:4691-4740).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct VarMods {
+    /// Bare `t`: a time variable as `ctime` text (format.c:4681-4709). It
+    /// returns before the other modifiers apply.
+    time: bool,
+    basename: bool,
+    dirname: bool,
+    /// One entry per `q` modifier: its argument (`s`, `e`, `h`, `a`), if any.
+    quote: Vec<Option<Format>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
     /// Look the (raw) name up.
-    Var(String),
-    /// `#{t:name}`: a time variable as `ctime` text (format.c:4681-4709).
-    Time(String),
+    Var {
+        name: String,
+        vm: VarMods,
+    },
     /// The body itself contains `#{`: expand it as a template (format.c:6575).
     Inner(Format),
+    /// `l`: the body, unescaped but not expanded.
+    Literal(String),
+    /// `a`: the character with this code.
+    Char(Format),
+    /// `c`: a colour as hex or, with `f`/`b` flags, as an SGR sequence.
+    Colour {
+        flags: Vec<Format>,
+        body: Format,
+    },
+    /// `V`: the body once per environment entry.
+    Environ {
+        flags: Option<Format>,
+        body: Format,
+    },
+    /// `N`: does a window (or, with `s`, a session) of this name exist? Without a
+    /// recognised flag the value is that of `fallback` (`None`: it would have failed).
+    Name {
+        flags: Vec<Option<Format>>,
+        body: Format,
+        fallback: Option<Box<Value>>,
+    },
+    /// `C`: search the pane.
+    Search {
+        flags: Option<Format>,
+        body: Format,
+    },
+    /// `R`: repeat `left` `right` times.
+    Repeat {
+        left: Format,
+        right: Format,
+    },
+    /// `!` (negate) and `!!`: truthiness of the body.
+    Not {
+        negate: bool,
+        body: Format,
+    },
     /// `||` (any) and `&&` (all), n-ary and short-circuiting.
     Or(Vec<Format>),
     And(Vec<Format>),
     Cmp {
-        ne: bool,
+        op: CmpOp,
         left: Format,
         right: Format,
     },
     Cond {
         arms: Vec<CondArm>,
         default: Option<Format>,
+        vm: VarMods,
     },
-}
-
-/// `#{=N:...}` / `#{=/N/marker:...}`: keep the first `N` columns (the last
-/// `-N`), adding `marker` when something was cut (format.c:6627-6648).
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Trim {
-    width: Format,
-    marker: Option<Format>,
+    /// `e|op|flags|precision`: arithmetic. `operands` is `None` without a comma.
+    Expr {
+        args: Vec<Format>,
+        operands: Option<(Format, Format)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,134 +360,6 @@ struct Eval<'a> {
     start: u64,
 }
 
-impl Eval<'_> {
-    /// `format_expand1`. `depth` is tmux's `es->loop` on entry; every nested
-    /// expansion (branches, operands, `E`) enters one deeper (format.c:6720-6724).
-    /// Empty input returns before any time or depth accounting (format.c:6717),
-    /// so no-op expansions are free.
-    fn expand(&mut self, fmt: &Format, depth: usize) -> String {
-        if fmt.nodes.is_empty() || !self.in_time() || depth >= LOOP_LIMIT {
-            return String::new();
-        }
-        let mut out = String::new();
-        for node in &fmt.nodes {
-            match node {
-                Node::Text(t) => out.push_str(t),
-                Node::Deferred(_) => {}
-                Node::Abort => break,
-                Node::Replace {
-                    value,
-                    reexpand,
-                    trim,
-                } => {
-                    let mut v = self.value(value, depth);
-                    if *reexpand {
-                        // format.c:6606: expand the result again, one level down.
-                        let ast = parse::template(&v, depth + 1, &mut Vec::new());
-                        v = self.expand(&ast, depth + 1);
-                    }
-                    if let Some(t) = trim {
-                        v = self.trim(t, v, depth);
-                    }
-                    out.push_str(&v);
-                }
-            }
-        }
-        out
-    }
-
-    /// `format_check_time` (format.c:4750). tmux also polls it every
-    /// `FORMAT_TIME_LOOP_CHECK` characters inside its scanning loops; parsing
-    /// here is linear in the template, so only expansions check.
-    fn in_time(&self) -> bool {
-        self.clock.now_ms().saturating_sub(self.start) < TIME_LIMIT_MS
-    }
-
-    fn value(&mut self, value: &Value, depth: usize) -> String {
-        let inner = depth + 1;
-        match value {
-            Value::Var(name) => self.ctx.get(name).unwrap_or_default(),
-            Value::Time(name) => self.time(name),
-            Value::Inner(f) => self.expand(f, inner),
-            // format_bool_op_n (format.c:5176): stop at the first deciding operand.
-            Value::Or(parts) => bool_str(parts.iter().any(|p| is_true(&self.expand(p, inner)))),
-            Value::And(parts) => bool_str(parts.iter().all(|p| is_true(&self.expand(p, inner)))),
-            Value::Cmp { ne, left, right } => {
-                let l = self.expand(left, inner);
-                let r = self.expand(right, inner);
-                bool_str((l == r) != *ne)
-            }
-            Value::Cond { arms, default } => {
-                for arm in arms {
-                    // format.c:6523-6544.
-                    let found = if let Some(v) = self.ctx.get(&arm.raw) {
-                        v
-                    } else {
-                        let e = self.expand(&arm.test, inner);
-                        if e == arm.raw { String::new() } else { e }
-                    };
-                    if is_true(&found) {
-                        return self.expand(&arm.then, inner);
-                    }
-                }
-                default
-                    .as_ref()
-                    .map(|d| self.expand(d, inner))
-                    .unwrap_or_default()
-            }
-        }
-    }
-}
-
-impl Eval<'_> {
-    /// format.c:6080-6089 and 6627-6648. A width that is not a number in
-    /// `-FORMAT_MAX_WIDTH..=FORMAT_MAX_WIDTH` (10000) is 0: no limit.
-    fn trim(&mut self, t: &Trim, value: String, depth: usize) -> String {
-        let limit =
-            crate::cmd::strtonum(&self.expand(&t.width, depth + 1), -10_000, 10_000).unwrap_or(0);
-        if limit == 0 {
-            return value;
-        }
-        let n = usize::try_from(limit.unsigned_abs()).expect("<= 10000");
-        let cut = if limit > 0 {
-            trim::trim_left(&value, n)
-        } else {
-            trim::trim_right(&value, n)
-        };
-        let Some(marker) = t.marker.as_ref().filter(|_| cut != value) else {
-            return cut;
-        };
-        let marker = self.expand(marker, depth + 1);
-        if limit > 0 {
-            cut + &marker
-        } else {
-            marker + &cut
-        }
-    }
-
-    /// format.c:4681-4709: a time variable, or a variable whose value is a
-    /// positive number, as `ctime`; anything else (zero, negative, text,
-    /// missing) is empty.
-    fn time(&self, name: &str) -> String {
-        let t = self.ctx.time(name).or_else(|| {
-            let v = self.ctx.get(name)?;
-            crate::cmd::strtonum(&v, 0, i64::MAX).ok()
-        });
-        match t {
-            Some(t) if t > 0 => self
-                .ctx
-                .local_time(t)
-                .map(|tm| tm.ctime())
-                .unwrap_or_default(),
-            _ => String::new(),
-        }
-    }
-}
-
-fn bool_str(b: bool) -> String {
-    String::from(if b { "1" } else { "0" })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,9 +382,9 @@ mod tests {
 
     #[test]
     fn deferred_modifiers_are_reported() {
-        let p = parse("a#{l:x}b#{=3:@n}#{s/a/b/;E:@n}#(true)#{@v}");
-        assert_eq!(p.deferred, ["l", "s", "#()"]);
-        assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "abv");
+        let p = parse("a#{l:x}b#{=3:@n}#{s/a/b/;E:@n}#(true)#{@v}#{m:a,b}#{t/p:@n}");
+        assert_eq!(p.deferred, ["s", "#()", "m", "t"]);
+        assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "axbv");
         assert_eq!(
             parse("#{?@x,a,b}#{E:@y}#{||:1,0}#S").deferred,
             Vec::<String>::new()
@@ -543,7 +555,7 @@ mod tests {
             state ^= state >> 27;
             state.wrapping_mul(0x2545_F491_4F6C_DD1D)
         };
-        let alphabet = b"#{}[](),:;?=!|&<>/@ESTlsa-0123xy\0\xff\xc3";
+        let alphabet = b"#{}[](),:;?=!|&<>/@ESTlsa-0123xyepcqRVNCbdnwf+*%.\0\xff\xc3";
         let ctx = map(&[("@x", "1"), ("@a", "#{E:@a}#{?@x,#{E:@a},b}")]);
         for round in 0..10_000 {
             let len = usize::try_from(next() % 64).unwrap();
