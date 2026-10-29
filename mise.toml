@@ -1,0 +1,4 @@
+[tools]
+# libghostty-vt 0.2.2 pins a ghostty commit whose build.zig requires Zig 0.15.2
+# exactly; 0.17 fails even though the crate README says 0.17.x.
+zig = "0.15.2"
