@@ -3,8 +3,8 @@
 //!
 //! The suite is vendored verbatim under `compat/tmux-3.8/regress/` and never
 //! edited. Each run copies it to `target/regress/work/<pid>/regress`, applies
-//! `compat/patches/*.patch` there (`git apply -p1` from the copy's parent, so
-//! patch paths read `a/regress/<test>.sh`), and runs every test with tmux's
+//! `compat/patches/*.patch` there (`git apply -p1` from the copy's parent with
+//! repository discovery disabled, so patch paths read `a/regress/<test>.sh`), and runs every test with tmux's
 //! Makefile environment (`env -i`), in parallel, with a timeout. Pass means
 //! exit 0. `TMUX_TMPDIR` is deliberately not set: isolation comes from the
 //! tests' own `-L` labels, and `terminal-feature-utf8.sh` re-runs a nested
@@ -320,15 +320,21 @@ fn prepare_work_from(suite: &Path, patches_dir: &Path, work: &Path) -> Result<Pa
     Ok(regress)
 }
 
-/// `git apply` run inside a checkout discovers the enclosing repository and
-/// silently skips every path outside the cwd prefix (exit 0, nothing changed).
-/// Stop discovery at `work` and treat any "Skipped patch" as a failure.
+/// Apply one patch with `git apply -p1` from `work`, with repository discovery
+/// disabled. Inside a checkout, `git apply` finds the enclosing repository and
+/// silently skips every path outside the cwd prefix (exit 0, nothing changed),
+/// for git-format patches. A `--git-dir` that does not exist makes git behave
+/// as if outside any repository (a ceiling would not: it only stops discovery
+/// above the listed directory). "Skipped patch" is still treated as a failure.
+/// `git apply` is used because `patch(1)` is not installed everywhere.
 fn apply_patch(patch: &Path, work: &Path) -> Result<()> {
     let out = Command::new("git")
+        .arg("--git-dir")
+        .arg(work.join(".vtmux-no-git-dir"))
         .args(["apply", "--verbose", "-p1"])
         .arg(fs::canonicalize(patch)?)
         .current_dir(work)
-        .env("GIT_CEILING_DIRECTORIES", fs::canonicalize(work)?)
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(|e| format!("git apply: {e}"))?;
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -688,7 +694,7 @@ mod tests {
     #[test]
     fn patches_are_applied_inside_a_checkout() {
         // Under target/ so the temp copy sits inside this git repository, the
-        // case where `git apply` used to skip the patch and exit 0.
+        // case where a plain `git apply` skips a git-format patch and exits 0.
         let base = workspace_root()
             .join("target")
             .join(format!("regress-test-{}", std::process::id()));
@@ -713,7 +719,14 @@ mod tests {
             "--- a/regress/nope.sh\n+++ b/regress/nope.sh\n@@ -1 +1 @@\n-a\n+b\n",
         )
         .unwrap();
-        assert!(prepare_work_from(&suite, &bad, &base.join("badwork")).is_err());
+        let err = prepare_work_from(&suite, &bad, &base.join("badwork")).unwrap_err();
+        assert!(err.to_string().contains("x.patch"), "{err}");
+
+        let garbage = base.join("garbage");
+        fs::create_dir_all(&garbage).unwrap();
+        fs::write(garbage.join("y.patch"), "not a patch\n").unwrap();
+        let err = prepare_work_from(&suite, &garbage, &base.join("gwork")).unwrap_err();
+        assert!(err.to_string().contains("y.patch"), "{err}");
         let _ = fs::remove_dir_all(&base);
     }
 }
