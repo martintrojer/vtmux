@@ -25,7 +25,7 @@ pub mod target;
 use std::fmt;
 
 pub use args::{Args, NumError, strtonum};
-pub use parse::{ConfigEnv, parse_argv, parse_config_with};
+pub use parse::{ConfigEnv, ParseOpts, parse_argv, parse_config_with};
 pub use table::{CmdEntry, FindFlags, FindSpec, TMUX_COMMANDS};
 pub use target::{TargetKind, TargetSpec};
 
@@ -36,24 +36,6 @@ use crate::error::EdgeError;
 pub struct CommandCall {
     pub entry: &'static CmdEntry,
     pub args: Args,
-}
-
-/// A `NAME=value` or `%hidden NAME=value` statement (cmd-parse.y
-/// `assignment`, `hidden_assignment`). Applying it to the server's global
-/// environment (`environ_put`, skipped for `source-file -n`) is the server's
-/// job.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Assignment {
-    pub name: String,
-    pub value: String,
-    pub hidden: bool,
-}
-
-/// One parsed config statement, in source order.
-#[derive(Clone, Debug)]
-pub enum Statement {
-    Command(CommandCall),
-    Assign(Assignment),
 }
 
 /// Why text did not become commands, or why a command cannot run. `Display`
