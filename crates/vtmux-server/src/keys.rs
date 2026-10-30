@@ -26,12 +26,20 @@ pub enum Base {
     Named(Named),
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent key modifiers, as tmux's KEYC_* bits"
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
     pub base: Base,
     pub ctrl: bool,
     pub meta: bool,
     pub shift: bool,
+    /// Meta came from an Escape the terminal sent before an unmodified key
+    /// (tty-keys.c:118-131, no `KEYC_IMPLIED_META`): it reaches the pane
+    /// as Escape plus the key's own sequence, not as an xterm modifier.
+    pub esc_prefix: bool,
 }
 
 /// The pane modes that change key encoding.
@@ -102,6 +110,7 @@ pub fn lookup(s: &str) -> Option<Key> {
         ctrl: false,
         meta: false,
         shift: false,
+        esc_prefix: false,
     };
     let mut rest = s;
     if let Some(r) = rest.strip_prefix('^')
@@ -155,6 +164,21 @@ fn csi_modifier(key: &Key) -> Option<u8> {
 /// `input_key` for a looked-up key.
 #[must_use]
 pub fn encode(key: &Key, modes: KeyModes) -> Vec<u8> {
+    // input-keys.c:658-671: no entry for a non-implied meta key, so write
+    // Escape and then the key without meta. BTab drops its modifiers
+    // first (input-keys.c:617-625).
+    if key.esc_prefix && key.base != Base::Named(Named::BackTab) {
+        let mut out = vec![0x1b];
+        out.extend(encode(
+            &Key {
+                meta: false,
+                esc_prefix: false,
+                ..*key
+            },
+            modes,
+        ));
+        return out;
+    }
     match key.base {
         Base::Named(n) => encode_named(n, key, modes),
         Base::Char(c) => encode_char(c, key),
@@ -177,10 +201,7 @@ fn encode_named(n: Named, key: &Key, modes: KeyModes) -> Vec<u8> {
     if n == BackTab {
         return b"\x1b[Z".to_vec();
     }
-    let modifier = csi_modifier(&Key {
-        meta: key.meta,
-        ..*key
-    });
+    let modifier = csi_modifier(key);
     let (tilde, letter): (Option<&str>, Option<char>) = match n {
         Up => (None, Some('A')),
         Down => (None, Some('B')),
@@ -309,5 +330,28 @@ mod tests {
             send_keys_bytes("Up", false, KeyModes { app_cursor: true }),
             b"\x1bOA"
         );
+    }
+
+    #[test]
+    fn escape_prefixed_keys_keep_their_own_sequence() {
+        let up = Key {
+            base: Base::Named(Named::Up),
+            ctrl: false,
+            meta: true,
+            shift: false,
+            esc_prefix: true,
+        };
+        assert_eq!(encode(&up, KeyModes::default()), b"\x1b\x1b[A");
+        assert_eq!(encode(&up, KeyModes { app_cursor: true }), b"\x1b\x1bOA");
+        let implied = Key {
+            esc_prefix: false,
+            ..up
+        };
+        assert_eq!(encode(&implied, KeyModes::default()), b"\x1b[1;3A");
+        let btab = Key {
+            base: Base::Named(Named::BackTab),
+            ..up
+        };
+        assert_eq!(encode(&btab, KeyModes::default()), b"\x1b[Z");
     }
 }
