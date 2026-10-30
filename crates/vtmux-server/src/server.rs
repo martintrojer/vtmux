@@ -26,7 +26,7 @@ use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg};
 use vtmux_vt::PaneTerm;
 
 use crate::commands::{self, After, Item, Output};
-use crate::environ::{Environ, session_environ};
+use crate::environ::Environ;
 use crate::format_ctx::{ClientView, Ctx, ServerInfo};
 use crate::model::{Model, Pane, Session, Window};
 use crate::names::parse_window_name;
@@ -577,6 +577,33 @@ impl Server {
         match &hello.tty {
             Some(t) if !t.name.is_empty() => t.name.clone(),
             _ => format!("client-{}", hello.pid),
+        }
+    }
+
+    /// The `update-environment` patterns as seen from `tree`, in key order.
+    fn update_environment(&self, tree: TreeId) -> Vec<String> {
+        match self.model.options.get(tree, "update-environment") {
+            Some(e) => match &e.value {
+                OptionValue::Array(items) => {
+                    items.values().map(|v| v.to_text(e.def, false)).collect()
+                }
+                OptionValue::Single(v) => vec![v.to_text(e.def, false)],
+            },
+            None => Vec::new(),
+        }
+    }
+
+    /// `environ_update(s->options, c->environ, s->environ)`: what attach-session
+    /// (cmd-attach-session.c:135,159) and switch-client (cmd-switch-client.c:160)
+    /// do before `server_client_set_session`.
+    pub fn update_session_environ(&mut self, client: ClientId, session: SessionId) {
+        let Some(hello) = self.clients.get(&client).and_then(|c| c.hello.as_ref()) else {
+            return;
+        };
+        let src = Environ::from_pairs(hello.env.clone());
+        let patterns = self.update_environment(TreeId::Session(session));
+        if let Some(s) = self.model.sessions.get_mut(&session) {
+            crate::environ::update(&patterns, &src, &mut s.env);
         }
     }
 
@@ -1198,11 +1225,17 @@ impl Server {
                 n += 1;
             }
         });
-        let mut env = if spec.update_env {
-            session_environ(&spec.client_env)
-        } else {
-            Environ::default()
-        };
+        // cmd-new-session.c:282-283: update-environment from the global
+        // session options, then `-e`.
+        let mut env = Environ::default();
+        if spec.update_env {
+            let patterns = self.update_environment(TreeId::GlobalSession);
+            crate::environ::update(
+                &patterns,
+                &Environ::from_pairs(spec.client_env.clone()),
+                &mut env,
+            );
+        }
         for e in &spec.extra_env {
             if let Some((k, v)) = e.split_once('=') {
                 env.set(k, v, false);
@@ -1419,7 +1452,16 @@ impl Server {
     pub fn spawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<Pane> {
         let mut child = self.global_env.clone();
         ps.session_env.copy_into(&mut child);
-        child.set("TERM", "tmux-256color", false);
+        // environ_for_session (environ.c:243-250): TERM from default-terminal.
+        let term = self
+            .model
+            .options
+            .get(TreeId::Server, "default-terminal")
+            .map_or_else(
+                || "tmux-256color".to_owned(),
+                |e| e.value.to_text(e.def, None, false),
+            );
+        child.set("TERM", &term, false);
         child.set("TERM_PROGRAM", "tmux", false);
         child.set("TERM_PROGRAM_VERSION", "3.8", false);
         child.set("COLORTERM", "truecolor", false);

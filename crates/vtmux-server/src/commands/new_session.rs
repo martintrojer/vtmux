@@ -72,7 +72,7 @@ pub fn exec(
             None => found.session,
         };
         if let Some(s) = existing {
-            return super::attach(server, item, s);
+            return super::attach(server, item, s, !args.flag('E'));
         }
     }
     if let Some(n) = &session_name
@@ -148,7 +148,7 @@ pub fn exec(
         item.print(&text);
     }
     if !detached {
-        super::attach(server, item, s)?;
+        super::attach(server, item, s, false)?;
     }
     // Later commands in the batch see the new session as current: it
     // is the most recently active one (cmd_find_best_session).

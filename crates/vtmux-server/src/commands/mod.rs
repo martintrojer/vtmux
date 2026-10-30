@@ -20,6 +20,7 @@ mod kill_pane;
 mod kill_server;
 mod kill_session;
 mod kill_window;
+mod list_clients;
 mod list_panes;
 mod list_sessions;
 mod list_windows;
@@ -32,7 +33,9 @@ mod select_layout;
 mod select_pane;
 mod select_window;
 mod send_keys;
+mod set_environment;
 mod set_option;
+mod show_environment;
 mod show_options;
 pub mod source_file;
 mod split_window;
@@ -206,6 +209,7 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             kill_server::exec(server);
             Ok(())
         }
+        "list-clients" => list_clients::exec(server, item, args, found),
         "list-sessions" => list_sessions::exec(server, item, args),
         "split-window" => split_window::exec(server, item, args, found),
         "kill-pane" => kill_pane::exec(server, item, args, found),
@@ -251,6 +255,8 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             }
             result.map(|_| ()).map_err(Into::into)
         }
+        "set-environment" => set_environment::exec(server, item, args, found),
+        "show-environment" => show_environment::exec(server, item, args, found),
         "show-options" | "show-window-options" => {
             show_options::exec(server, item, call, found).map_err(Into::into)
         }
@@ -268,7 +274,7 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
                 vtmux_core::cmd::FindFlags::NONE,
             )?;
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
-            attach(server, item, session)
+            attach(server, item, session, !args.flag('E'))
         }
         "detach-client" => {
             if args.flag('s') {
@@ -321,14 +327,21 @@ fn resolve_source(server: &Server, item: &Item, call: &CommandCall) -> Result<Fo
 }
 
 /// Attach the item's client to `session` through the server hook.
+/// `update_env` is attach-session's missing `-E`: the client's
+/// `update-environment` variables go into the session first
+/// (cmd-attach-session.c:135,159); a session just created has had them.
 pub fn attach(
     server: &mut Server,
     item: &mut Item,
     session: vtmux_core::ids::SessionId,
+    update_env: bool,
 ) -> Result<(), CmdError> {
     let Some(client) = item.client else {
         return Ok(());
     };
+    if update_env && (item.control.is_some() || item.tty.is_some()) {
+        server.update_session_environ(client, session);
+    }
     if item.control.is_some() {
         // A control client needs no terminal and gets no Ready.
         server.control_attach(client, session);

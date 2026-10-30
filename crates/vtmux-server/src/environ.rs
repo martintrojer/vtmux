@@ -45,6 +45,16 @@ impl Environ {
         );
     }
 
+    /// `environ_unset`: remove the entry outright.
+    pub fn unset(&mut self, name: &str) {
+        self.0.remove(name);
+    }
+
+    /// `environ_first` / `environ_next`: entries in name (`strcmp`) order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Entry)> {
+        self.0.iter().map(|(k, e)| (k.as_str(), e))
+    }
+
     /// `environ_find`: the entry, removals included.
     #[must_use]
     pub fn find(&self, name: &str) -> Option<&Entry> {
@@ -80,39 +90,49 @@ impl Environ {
     }
 }
 
-/// The default `update-environment` (options-table.c:1210-1217).
-pub const UPDATE_ENVIRONMENT: [&str; 12] = [
-    "DISPLAY",
-    "KRB5CCNAME",
-    "MSYSTEM",
-    "SSH_ASKPASS",
-    "SSH_AUTH_SOCK",
-    "SSH_AGENT_PID",
-    "SSH_CONNECTION",
-    "WAYLAND_DISPLAY",
-    "WINDOWID",
-    "XAUTHORITY",
-    "XDG_CURRENT_DESKTOP",
-    "XDG_SESSION_DESKTOP",
-];
-
-/// `environ_update` (environ.c:186-212) with the default list: copy each
-/// listed variable from the client, or mark it removed.
-#[must_use]
-pub fn session_environ(client: &[(String, String)]) -> Environ {
-    let mut env = Environ::default();
-    for name in UPDATE_ENVIRONMENT.iter().chain(&["XDG_SESSION_TYPE"]) {
-        match client.iter().find(|(k, _)| k == name) {
-            Some((_, v)) => env.set(name, v, false),
-            None => env.clear(name),
+/// `environ_update` (environ.c:186-212): for each `update-environment`
+/// pattern, copy every matching variable of `src` into `dst`; a pattern
+/// that matches nothing marks its own text removed in `dst`.
+pub fn update(patterns: &[String], src: &Environ, dst: &mut Environ) {
+    for pattern in patterns {
+        let mut found = false;
+        for (name, entry) in &src.0 {
+            // environ_set with the source value; a removed source entry has
+            // none, and tmux would format a NULL string.
+            let Some(value) = &entry.value else { continue };
+            if vtmux_core::fnmatch::matches(pattern, name, false) {
+                dst.set(name, value, false);
+                found = true;
+            }
+        }
+        if !found {
+            dst.clear(pattern);
         }
     }
-    env
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_copies_matches_and_clears_misses() {
+        let src = Environ::from_pairs([
+            ("MYVAR".into(), "c".into()),
+            ("TEST_A".into(), "a".into()),
+            ("TEST_B".into(), "b".into()),
+            ("OTHER".into(), "o".into()),
+        ]);
+        let mut dst = Environ::default();
+        dst.set("ABSENT", "old", false);
+        let pats: Vec<String> = ["MYVAR", "ABSENT", "TEST_*"].map(Into::into).into();
+        update(&pats, &src, &mut dst);
+        assert_eq!(dst.get("MYVAR"), Some("c"));
+        assert_eq!(dst.get("TEST_A"), Some("a"));
+        assert_eq!(dst.get("TEST_B"), Some("b"));
+        assert_eq!(dst.find("ABSENT").unwrap().value, None);
+        assert!(dst.find("OTHER").is_none());
+    }
 
     #[test]
     fn removals_hide_globals() {
