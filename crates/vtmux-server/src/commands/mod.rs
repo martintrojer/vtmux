@@ -10,14 +10,19 @@
 
 mod capture_pane;
 mod display_message;
+mod kill_pane;
 mod kill_server;
 mod kill_session;
+mod list_panes;
 mod list_sessions;
 mod new_session;
+mod resize_pane;
+mod select_pane;
 mod send_keys;
 mod set_option;
 mod show_options;
 pub mod source_file;
+mod split_window;
 
 use std::path::PathBuf;
 
@@ -174,29 +179,25 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             Ok(())
         }
         "list-sessions" => list_sessions::exec(server, item, args),
+        "split-window" => split_window::exec(server, item, args, found),
+        "kill-pane" => kill_pane::exec(server, item, args, found),
+        "select-pane" => select_pane::exec(server, item, args, found, false),
+        "last-pane" => select_pane::exec(server, item, args, found, true),
+        "list-panes" => list_panes::exec(server, item, args, found),
+        "resize-pane" => resize_pane::exec(server, item, args, found),
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
         "source-file" => source_file::exec(server, item, args, found),
-        "select-pane" => {
-            if let Some(title) = args.value('T') {
-                let title = expand(server, found, title);
-                let title = crate::names::clean_name(&title);
-                let pane = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
-                server
-                    .model
-                    .panes
-                    .get_mut(&pane)
-                    .ok_or(EdgeError::NoCurrentTarget)?
-                    .term
-                    .feed(format!("\x1b]2;{title}\x1b\\").as_bytes());
-                Ok(())
-            } else {
-                Err(EdgeError::NotImplemented("select-pane except -T".into()).into())
-            }
-        }
         "set-option" | "set-window-option" => {
-            set_option::exec(server, item, call, found).map_err(Into::into)
+            let result = set_option::exec(server, item, call, found);
+            // options_push_changes (options.c:1437-1446): pane-border-status
+            // and the scrollbar options re-run layout_fix_panes everywhere.
+            let windows: Vec<_> = server.model.windows.keys().copied().collect();
+            for w in windows {
+                server.model.fix_panes(w);
+            }
+            result.map_err(Into::into)
         }
         "show-options" | "show-window-options" => {
             show_options::exec(server, item, call, found).map_err(Into::into)

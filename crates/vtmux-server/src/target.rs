@@ -365,8 +365,49 @@ pub fn resolve(
 ) -> Result<Found, EdgeError> {
     let result = resolve_inner(model, origin, spec, kind);
     match result {
-        Err(_) if flags.can_fail => Ok(Found::default()),
+        Err(_) if flags.can_fail => Ok(partial(model, origin, spec, kind)),
         other => other,
+    }
+}
+
+/// What a failed `CANFAIL` lookup leaves behind: `cmd_find_target` returns
+/// success without clearing the state it filled in (cmd-find.c:1237-1243),
+/// and `format_defaults` completes it from the session. A session that was
+/// found stays, with the window if that was found too; a lookup that ended
+/// by trying the text as a session name (and failed) leaves nothing.
+fn partial(model: &Model, origin: Origin, spec: Option<&TargetSpec>, kind: TargetKind) -> Found {
+    let (Some(current), Some(spec)) = (current(model, origin), spec) else {
+        return Found::default();
+    };
+    let Resolved::Parts(parts) = spec.resolve(kind) else {
+        return Found::default();
+    };
+    let session_only = |s: Option<SessionId>| Found {
+        session: s,
+        ..Found::default()
+    };
+    let window_found = |f: Found| Found { pane: None, ..f };
+    if let Some(sp) = &parts.session {
+        let Some(s) = find_session(model, sp) else {
+            return Found::default();
+        };
+        return parts
+            .window
+            .as_ref()
+            .and_then(|wp| find_window_in(model, s, wp))
+            .map_or_else(|| session_only(Some(s)), window_found);
+    }
+    match (&parts.window, &parts.pane) {
+        (Some(wp), _) => match find_window(model, current, wp, parts.window_only) {
+            Some(f) => window_found(f),
+            None if parts.window_only => session_only(current.session),
+            None => Found::default(),
+        },
+        (None, Some(pp)) if parts.pane_only && !pp.text.starts_with('%') => Found {
+            pane: None,
+            ..current
+        },
+        _ => Found::default(),
     }
 }
 

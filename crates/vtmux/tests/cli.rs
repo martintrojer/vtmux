@@ -701,3 +701,210 @@ fn signals_follow_tmux() {
         assert!(ls.stdout.starts_with("a: 1 windows"));
     }
 }
+
+/// split-window, kill-pane, select-pane, last-pane and list-panes on an
+/// 80x24 window, against the reference: geometry and pane order after
+/// -h/-v/-b/-f/-l/-p splits, `-P`/`-F`, the active and last-used panes,
+/// directional selection, `-d`/`-e` input and `-T` titles, the errors
+/// (`no space for a new pane`, layout.c:1692; `invalid tiled geometry`,
+/// layout.c:1681; `no last pane`, cmd-select-pane.c:176; `can't find pane`;
+/// `-f only valid with -a`; `invalid sort order`) and the list-panes orders
+/// (sort.c:207-250). list-panes is compared with -F only: the default
+/// template has `#{history_bytes}`, tmux's grid memory (D-001).
+#[test]
+fn panes_split_select_kill() {
+    compare("panes_split_select_kill", |w| {
+        let lsp = "#{pane_index} #{pane_id} #{pane_left},#{pane_top} #{pane_right},#{pane_bottom} \
+                   #{pane_width}x#{pane_height} #{pane_at_top}#{pane_at_bottom}#{pane_at_left}#{pane_at_right} \
+                   #{pane_active}#{pane_last}";
+        let mut runs = vec![
+            w.run(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+            ]),
+            w.run(&["lastp"]),
+            w.run(&["splitw", "-t", "a", "cat"]),
+            w.run(&[
+                "display",
+                "-p",
+                "#{window_panes} #{pane_index} #{window_layout}",
+            ]),
+            w.run(&["lastp"]),
+            w.run(&["display", "-p", "#{pane_id}"]),
+            w.run(&["splitw", "-h", "-d", "-P", "cat"]),
+            w.run(&[
+                "splitw",
+                "-v",
+                "-b",
+                "-d",
+                "-l",
+                "3",
+                "-t",
+                "%0",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "cat",
+            ]),
+            w.run(&["splitw", "-f", "-h", "-d", "-p", "25", "cat"]),
+            w.run(&["splitw", "-bf", "-d", "-l", "20%", "cat"]),
+            w.run(&["lsp", "-F", lsp]),
+            w.run(&["display", "-p", "#{window_layout}"]),
+            w.run(&["splitw", "-l", "abc"]),
+            w.run(&["splitw", "-p", "200"]),
+            w.run(&["splitw", "-l", ""]),
+            w.run(&["splitw", "-t", "%99"]),
+            w.run(&["selectp", "-L"]),
+            w.run(&["display", "-p", "L #{pane_id}"]),
+            w.run(&["selectp", "-U"]),
+            w.run(&["display", "-p", "U #{pane_id}"]),
+            w.run(&["selectp", "-R"]),
+            w.run(&["display", "-p", "R #{pane_id}"]),
+            w.run(&["selectp", "-D"]),
+            w.run(&["display", "-p", "D #{pane_id}"]),
+            w.run(&["selectp", "-t", "%1", "-T", "t#(x)#{pane_id}"]),
+            w.run(&["display", "-p", "-t", "%1", "[#{pane_title}]"]),
+            w.run(&["selectp", "-l"]),
+            w.run(&["display", "-p", "#{pane_id} #{pane_last}"]),
+            w.run(&["lsp", "-O", "bad"]),
+            w.run(&["lsp", "-O", "size", "-F", "#{pane_id}"]),
+            w.run(&["lsp", "-O", "size", "-r", "-F", "#{pane_id}"]),
+            w.run(&["lsp", "-O", "index", "-r", "-F", "#{pane_id}"]),
+            w.run(&["lsp", "-O", "activity", "-F", "#{pane_id}"]),
+            w.run(&["lsp", "-O", "creation", "-r", "-F", "#{pane_id}"]),
+            w.run(&["lsp", "-O", "title", "-F", "#{pane_id}"]),
+            w.run(&["lsp", "-O", "order", "-r", "-F", "#{pane_id}"]),
+            w.run(&["lsp", "-r", "-F", "#{pane_id}"]),
+            w.run(&[
+                "lsp",
+                "-a",
+                "-F",
+                "#{session_name}:#{window_index}.#{pane_index} #{line}",
+            ]),
+            w.run(&["lsp", "-s", "-f", "#{pane_active}", "-F", "#{pane_id}"]),
+            w.run(&["killp", "-f", "x"]),
+            w.run(&["killp", "-t", "%99"]),
+            w.run(&["killp", "-t", "%3"]),
+            w.run(&["lsp", "-F", lsp]),
+            w.run(&["killp", "-a", "-f", "#{==:#{pane_id},%2}"]),
+            w.run(&["lsp", "-F", lsp]),
+            w.run(&["killp", "-a"]),
+            w.run(&["lsp", "-F", lsp]),
+            w.run(&["display", "-p", "#{window_layout}"]),
+        ];
+        // select-pane -d: send-keys reaches nothing until -e
+        // (window.c:2095 window_pane_key).
+        runs.push(w.run(&["splitw", "-d", "cat"]));
+        runs.push(w.run(&["selectp", "-d", "-t", "%5"]));
+        runs.push(w.run(&["display", "-p", "-t", "%5", "#{pane_input_off}"]));
+        runs.push(w.run(&["send", "-t", "%5", "-l", "lost"]));
+        runs.push(w.run(&["selectp", "-e", "-t", "%5"]));
+        runs.push(w.run(&["send", "-t", "%5", "-l", "kept"]));
+        w.wait_for_text("%5", "kept");
+        runs.push(w.run(&["capturep", "-p", "-t", "%5", "-E", "0"]));
+        runs.push(w.run(&["killp"]));
+        runs.push(w.run(&["killp"]));
+        w.wait_gone();
+        runs.push(w.run(&["ls"]));
+        runs
+    });
+}
+
+/// Pane target forms with pane-base-index 1 and then 0 (cmd-find.c:579-660,
+/// window.c `window_find_string`, `window_pane_find_*`), and what a failed
+/// CANFAIL lookup leaves for display-message (cmd-find.c:1237-1243,
+/// format.c `format_defaults`).
+#[test]
+fn pane_targets() {
+    compare("pane_targets", |w| {
+        let mut runs = vec![
+            w.run(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+            ]),
+            w.run(&["setw", "-g", "pane-base-index", "1"]),
+            w.run(&["splitw", "-t", "a", "cat"]),
+            w.run(&["display", "-p", "#{pane_index} #{window_layout}"]),
+        ];
+        let targets = [
+            "a.1",
+            "a.0",
+            "a.2",
+            "a.{bottom}",
+            "a.{down-of}",
+            "a.{up-of}",
+            "a.{top}",
+            "a.!",
+            "a.+",
+            "a.-1",
+            "{last}",
+            "{next}",
+            "{previous}",
+        ];
+        for t in targets {
+            runs.push(w.run(&["display", "-p", "-t", t, "#{pane_id}"]));
+        }
+        runs.push(w.run(&["setw", "-g", "pane-base-index", "0"]));
+        runs.push(w.run(&["splitw", "-h", "-d", "cat"]));
+        runs.push(w.run(&["splitw", "-v", "-t", "%0", "-d", "-l", "3", "cat"]));
+        let targets = [
+            "{up-of}",
+            "{down-of}",
+            "{left-of}",
+            "{right-of}",
+            "{top}",
+            "{bottom}",
+            "{left}",
+            "{right}",
+            "{top-left}",
+            "{top-right}",
+            "{bottom-left}",
+            "{bottom-right}",
+            "!",
+            "+",
+            "-",
+            "+2",
+            "-3",
+            "0",
+            "3",
+            "4",
+            "a.7",
+            "nope",
+            "a:9",
+            ":9",
+            ".7",
+            "%9",
+            "a:w.7",
+            "a:x.1",
+            "7",
+            "w",
+            "@9",
+            "@0.5",
+            "$9",
+            "$0:7",
+        ];
+        for t in targets {
+            runs.push(w.run(&["display", "-p", "-t", t, "#{pane_id}"]));
+        }
+        for t in ["a.{left-of}", "a.9", "{bottom-left}", "!"] {
+            runs.push(w.run(&["selectp", "-t", t]));
+            runs.push(w.run(&["display", "-p", "#{pane_id}"]));
+        }
+        // With a pane status line the edges and positions move
+        // (window_get_pane_status).
+        runs.push(w.run(&["setw", "pane-border-status", "top"]));
+        runs.push(w.run(&[
+            "lsp",
+            "-F",
+            "#{pane_id} #{pane_top} #{pane_height} #{pane_at_top}#{pane_at_bottom}",
+        ]));
+        runs.push(w.run(&["display", "-p", "-t", "a.{top}", "#{pane_id}"]));
+        runs.push(w.run(&["setw", "pane-border-status", "bottom"]));
+        runs.push(w.run(&[
+            "lsp",
+            "-F",
+            "#{pane_id} #{pane_top} #{pane_height} #{pane_at_top}#{pane_at_bottom}",
+        ]));
+        runs.push(w.run(&["display", "-p", "-t", "a.{bottom}", "#{pane_id}"]));
+        runs.push(w.run(&["display", "-p", "-t", "a.{down-of}", "#{pane_id}"]));
+        runs
+    });
+}

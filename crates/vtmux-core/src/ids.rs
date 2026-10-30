@@ -128,6 +128,14 @@ impl<I: Id> IdAllocator<I> {
         }
     }
 
+    /// The ID [`Self::allocate`] would hand out next, without taking it
+    /// (tmux numbers a pane only once its layout cell exists,
+    /// window.c `window_pane_create`).
+    #[must_use]
+    pub fn peek(&self) -> I {
+        I::new(self.next)
+    }
+
     /// The next ID.
     ///
     /// # Panics

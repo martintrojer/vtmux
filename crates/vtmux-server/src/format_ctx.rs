@@ -214,6 +214,7 @@ impl<'a> Ctx<'a> {
             "cursor_y" => p.term.cursor().1.to_string(),
             "alternate_on" => flag(p.term.alternate_on()),
             "history_size" => p.term.history_size().to_string(),
+            "history_limit" => p.history_limit.to_string(),
             _ => return None,
         })
     }
