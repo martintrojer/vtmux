@@ -885,7 +885,7 @@ impl Server {
             .and_then(|h| crate::render::Caps::open_term(h, &features, &overrides))
             .ok_or_else(|| {
                 EdgeError::OpenTerminalFailed(
-                    "unsupported terminal (M0: xterm, tmux-256color, screen)".into(),
+                    "unsupported terminal (xterm*, xterm-ghostty, screen, screen-256color, tmux-256color)".into(),
                 )
             })?;
         client.caps = Some(caps);
