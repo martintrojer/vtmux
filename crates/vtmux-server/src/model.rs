@@ -268,6 +268,19 @@ impl Model {
         true
     }
 
+    /// Set `PANE_CHANGED` on the active pane of `w` if its
+    /// `automatic-rename` is on, so the next name check looks at it.
+    pub fn mark_for_rename(&mut self, w: WindowId) {
+        if self.number_option(TreeId::Window(w), "automatic-rename") == 0 {
+            return;
+        }
+        if let Some(p) = self.windows.get(&w).map(Window::active)
+            && let Some(pane) = self.panes.get_mut(&p)
+        {
+            pane.changed = true;
+        }
+    }
+
     /// `layout_fix_panes` + `window_pane_resize`: copy each cell's
     /// rectangle (less the pane status line) to its pane, resizing the
     /// terminal and the PTY of every pane whose size changed.

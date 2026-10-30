@@ -39,6 +39,7 @@ use std::path::PathBuf;
 use vtmux_core::cmd::{CmdError, CommandCall, NumError, strtonum};
 use vtmux_core::error::EdgeError;
 use vtmux_core::format;
+use vtmux_core::options::SetOutcome;
 use vtmux_core::protocol::TtyInfo;
 
 use crate::format_ctx::Ctx;
@@ -224,10 +225,16 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             // options_push_changes (options.c:1437-1446): pane-border-status
             // and the scrollbar options re-run layout_fix_panes everywhere.
             let windows: Vec<_> = server.model.windows.keys().copied().collect();
-            for w in windows {
+            for &w in &windows {
                 server.model.fix_panes(w);
             }
-            result.map_err(Into::into)
+            if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "automatic-rename") {
+                // options.c:1380-1386: windows with it on look again.
+                for w in windows {
+                    server.model.mark_for_rename(w);
+                }
+            }
+            result.map(|_| ()).map_err(Into::into)
         }
         "show-options" | "show-window-options" => {
             show_options::exec(server, item, call, found).map_err(Into::into)

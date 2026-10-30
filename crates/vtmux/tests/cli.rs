@@ -229,6 +229,28 @@ impl World {
         );
     }
 
+    /// Poll until `display -p -t target '#{window_name}'` is `want` (max
+    /// 5 s): automatic rename settles only after the pane has printed
+    /// (names.c `check_window_name` waits for `PANE_CHANGED`).
+    fn wait_window_name(&self, target: &str, want: &str) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            if self
+                .run(&["display", "-p", "-t", target, "#{window_name}"])
+                .stdout
+                .trim_end()
+                == want
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!(
+            "window {target} never got named {want:?} ({})",
+            self.bin.display()
+        );
+    }
+
     /// Poll until the server is gone (`ls` fails).
     fn wait_gone(&self) {
         let start = Instant::now();
@@ -1214,4 +1236,250 @@ impl Run {
             code: 0,
         }
     }
+}
+
+/// new-window, select-window, next/previous/last-window, kill-window,
+/// rename-window and list-windows on one session (cmd-new-window.c,
+/// cmd-select-window.c, cmd-kill-window.c, cmd-rename-window.c,
+/// cmd-list-windows.c): the last-window stack and `window_flags` `*`, `-`
+/// and `Z` (window.c `window_printable_flags`), the winlink format flags,
+/// `session_detach` choosing the next current window (last, else previous,
+/// else next), the errors (`no last window`, `no next window`, `no previous
+/// window`, `create window failed: index N in use`, `can't specify pane
+/// here`, `-f only valid with -a`, `invalid sort order`, `invalid window
+/// name`), the default list-windows templates (the `-a` one ends with a
+/// space) and the list orders (sort.c `sort_winlink_cmp`). Windows are
+/// named with -n: an unnamed `cat` window may still show the name of the
+/// forked tmux child until the pane prints (spawn.c, names.c).
+#[test]
+fn windows_select_kill_list() {
+    compare("windows_select_kill_list", |w| {
+        let f = "#{window_index} #{window_id} #{window_name} [#{window_flags}] [#{window_raw_flags}] \
+                 #{window_active}#{window_last_flag}#{window_start_flag}#{window_end_flag} \
+                 #{session_windows} #{window_zoomed_flag}";
+        let steps: &[&[&str]] = &[
+            &[
+                "new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat",
+            ],
+            &["last"],
+            &["last", "-a"],
+            &["neww", "-d", "-n", "w1", "cat"],
+            &["neww", "-n", "w2", "-P", "cat"],
+            &[
+                "neww",
+                "-d",
+                "-n",
+                "w3",
+                "-P",
+                "-F",
+                "#{window_id} #{window_index}",
+                "cat",
+            ],
+            &["lsw"],
+            &["lsw", "-a"],
+            &["lsw", "-F", f],
+            &["last"],
+            &["lsw", "-F", f],
+            &["next"],
+            &["next"],
+            &["display", "-p", "#{window_index}"],
+            &["prev"],
+            &["prev", "-t", "a"],
+            &["display", "-p", "#{window_index}"],
+            &["next", "-a"],
+            &["prev", "-a"],
+            &["selectw", "-t", ":w2"],
+            &["selectw", "-T", "-t", ":w2"],
+            &["display", "-p", "#{window_index}"],
+            &["selectw", "-T", "-t", ":w2"],
+            &["display", "-p", "#{window_index}"],
+            &["selectw", "-n"],
+            &["selectw", "-p"],
+            &["selectw", "-l"],
+            &["lsw", "-F", f],
+            &["selectw", "-t", "99"],
+            &["display", "-p", "-t", "{last}", "#{window_name}"],
+            &["display", "-p", "-t", ":!", "#{window_name}"],
+            &["splitw", "-d", "-t", ":w1", "cat"],
+            &["resizep", "-Z", "-t", ":w1"],
+            &["lsw", "-F", f],
+            &["neww", "-t", "1", "cat"],
+            &["neww", "-d", "-t", "a:1.0", "cat"],
+            &["neww", "-d", "-t", "a:-9", "cat"],
+            &["neww", "-d", "-t", "a:9", "-n", "x", "cat"],
+            &["neww", "-d", "-k", "-t", "a:9", "-n", "y", "cat"],
+            &["neww", "-d", "-t", "a:+1", "-n", "z", "cat"],
+            &["neww", "-d", "-t", "a:-1", "-n", "zz", "cat"],
+            &["neww", "-n", "a\tb", "cat"],
+            &["lsw", "-F", f],
+            &["renamew", "-t", ":y", "y#{window_index}"],
+            &["renamew", "bad\tname"],
+            &["renamew", "-t", "nope", "x"],
+            &["show", "-w", "-t", ":y9", "automatic-rename"],
+            &["lsw", "-O", "bogus"],
+            &["lsw", "-O", "name", "-F", "#{window_name}"],
+            &["lsw", "-O", "name", "-r", "-F", "#{window_name}"],
+            &["lsw", "-O", "index", "-r", "-F", "#{window_index}"],
+            &["lsw", "-O", "creation", "-r", "-F", "#{window_id}"],
+            &["lsw", "-O", "size", "-F", "#{window_id}"],
+            &["lsw", "-O", "order", "-r", "-F", "#{window_id} #{line}"],
+            &["lsw", "-r", "-F", "#{window_id}"],
+            &["lsw", "-f", "#{window_active}", "-F", "#{window_id}"],
+            &["killw", "-f", "x"],
+            &["killw", "-t", "nope"],
+            &["killw"],
+            &["lsw", "-F", f],
+            &["killw", "-t", ":!"],
+            &["lsw", "-F", f],
+            &["killw", "-a", "-f", "#{==:#{window_name},w1}"],
+            &["lsw", "-F", f],
+            &["killw", "-a"],
+            &["lsw", "-F", f],
+            &["killw", "-a"],
+            &["killw"],
+        ];
+        let mut runs: Vec<Run> = steps.iter().map(|a| w.run(a)).collect();
+        w.wait_gone();
+        runs.push(w.run(&["ls"]));
+        runs
+    });
+}
+
+/// base-index and renumber-windows (spawn.c `spawn_window` with idx -1,
+/// window.c `winlink_add`/`winlink_shuffle_up`, session.c
+/// `session_renumber_windows`, server-fn.c `server_kill_window`): the first
+/// window of a new session at base-index 1, -a/-b insertion shuffling the
+/// windows above, kills in the middle with renumbering off and on, the
+/// current window and last-window stack following a renumber, kill-window
+/// -a renumbering every session, and -S selecting an existing window.
+#[test]
+fn windows_base_index_and_renumber() {
+    compare("windows_base_index_and_renumber", |w| {
+        let f = "#{window_index}:#{window_name}#{window_flags}";
+        let lsw = |w: &World| w.run(&["lsw", "-F", f]);
+        let mut runs = vec![
+            w.run(&["start", ";", "set", "-g", "base-index", "1"]),
+            w.run(&[
+                "new", "-d", "-s", "a", "-n", "w1", "-x", "80", "-y", "24", "cat",
+            ]),
+            w.run(&["neww", "-d", "-n", "x", "cat"]),
+            w.run(&["neww", "-n", "y", "cat"]),
+            w.run(&["neww", "-d", "-a", "-t", "1", "-n", "ins", "cat"]),
+            w.run(&["neww", "-d", "-b", "-t", "1", "-n", "bef", "cat"]),
+            w.run(&["neww", "-d", "-a", "-n", "aft", "cat"]),
+            lsw(w),
+            w.run(&["display", "-p", "-t", ":!", "#{window_index}"]),
+            w.run(&["killw", "-t", ":ins"]),
+            lsw(w),
+            w.run(&["set", "renumber-windows", "on"]),
+            w.run(&["killw", "-t", ":x"]),
+            lsw(w),
+            w.run(&["killw"]),
+            lsw(w),
+            w.run(&["last"]),
+            lsw(w),
+            w.run(&["neww", "-d", "-t", "9", "-n", "far", "cat"]),
+            lsw(w),
+            w.run(&["neww", "-S", "-n", "far"]),
+            w.run(&["neww", "-S", "-d", "-t", "1"]),
+            w.run(&["neww", "-S", "-n", "aft", "-P"]),
+            lsw(w),
+            w.run(&["set", "-g", "renumber-windows", "on"]),
+            w.run(&["new", "-d", "-s", "b", "-n", "b1", "cat"]),
+            w.run(&["neww", "-d", "-t", "b:5", "-n", "b5", "cat"]),
+            w.run(&[
+                "lsw",
+                "-a",
+                "-F",
+                "#{session_name}:#{window_index}:#{window_name}",
+            ]),
+            w.run(&["killw", "-a", "-t", "a:far"]),
+            w.run(&[
+                "lsw",
+                "-a",
+                "-F",
+                "#{session_name}:#{window_index}:#{window_name}",
+            ]),
+            w.run(&["set", "-g", "base-index", "2147483647"]),
+            w.run(&["neww", "-d", "-t", "b", "-n", "hi", "cat"]),
+            w.run(&["neww", "-d", "-a", "-t", "b:2147483647", "cat"]),
+            w.run(&["lsw", "-t", "b", "-F", "#{window_index}"]),
+        ];
+        runs.push(w.run(&["kill-server"]));
+        runs
+    });
+}
+
+/// new-window's spawn side and automatic rename: the trailing command in
+/// its three spellings, -c (absolute, and relative to the client's
+/// directory), -e, -P with the default template; the window name from the
+/// pane's current command once it has printed (names.c
+/// `check_window_name`), the `automatic-rename` window option turned off by
+/// -n and rename-window (spawn.c:223, cmd-rename-window.c:61) and back on
+/// with setw (options.c `options_push_changes`); -x/-y as the session's
+/// default-size, which later windows take (resize.c `default_window_size`).
+#[test]
+fn windows_spawn_and_names() {
+    compare("windows_spawn_and_names", |w| {
+        std::fs::create_dir_all(w.dir().join("sub")).expect("mkdir");
+        let sub = w.dir().join("sub");
+        let sub = sub.to_str().expect("utf-8");
+        let mut runs = vec![w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "30",
+            "-y",
+            "5",
+            "printf go; exec cat",
+        ])];
+        w.wait_window_name("a:0", "cat");
+        runs.push(w.run(&["show", "-wv", "-t", "a:0", "automatic-rename"]));
+        runs.push(w.run(&["show", "-t", "a", "default-size"]));
+        runs.push(w.run(&[
+            "neww",
+            "-d",
+            "-c",
+            sub,
+            "-e",
+            "FOO=bar",
+            "printf '%s:' \"$FOO\"; pwd; exec cat",
+        ]));
+        w.wait_for_text("a:1", "bar:");
+        runs.push(w.run(&["capture-pane", "-p", "-t", "a:1", "-E", "0"]));
+        w.wait_window_name("a:1", "cat");
+        runs.push(w.run(&["neww", "-d", "-c", "sub", "pwd; exec cat"]));
+        w.wait_for_text("a:2", "/");
+        runs.push(w.run(&["capture-pane", "-p", "-t", "a:2", "-E", "0"]));
+        runs.push(w.run(&["neww", "-d", "-P", "printf x; exec sleep 101"]));
+        runs.push(w.run(&["neww", "-d", "--", "printf x; exec sleep 102"]));
+        runs.push(w.run(&["neww", "-d", "sh", "-c", "printf x; exec sleep 103"]));
+        for t in ["a:3", "a:4", "a:5"] {
+            w.wait_window_name(t, "sleep");
+        }
+        runs.push(w.run(&[
+            "lsw",
+            "-F",
+            "#{window_index} #{window_name} #{window_width}x#{window_height} #{automatic-rename}",
+        ]));
+        runs.push(w.run(&["renamew", "-t", "a:0", "fixed"]));
+        runs.push(w.run(&["neww", "-d", "-n", "given", "printf x; exec cat"]));
+        runs.push(w.run(&["send", "-t", "a:0", "x"]));
+        w.wait_for_text("a:0", "x");
+        runs.push(w.run(&[
+            "lsw",
+            "-F",
+            "#{window_index} #{window_name} #{automatic-rename}",
+        ]));
+        runs.push(w.run(&["setw", "-t", "a:0", "automatic-rename", "on"]));
+        w.wait_window_name("a:0", "cat");
+        runs.push(w.run(&[
+            "lsw",
+            "-F",
+            "#{window_index} #{window_name} #{automatic-rename}",
+        ]));
+        runs
+    });
 }
