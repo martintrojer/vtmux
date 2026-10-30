@@ -17,11 +17,16 @@ mod display_message;
 mod kill_pane;
 mod kill_server;
 mod kill_session;
+mod kill_window;
 mod list_panes;
 mod list_sessions;
+mod list_windows;
 mod new_session;
+mod new_window;
+mod rename_window;
 mod resize_pane;
 mod select_pane;
+mod select_window;
 mod send_keys;
 mod set_option;
 mod show_options;
@@ -40,6 +45,7 @@ use crate::format_ctx::Ctx;
 use crate::names::utf8_sanitize;
 use crate::server::{ClientId, Server};
 use crate::target::{self, Found, Origin};
+use select_window::Which;
 
 /// Output of a batch, in order.
 #[derive(Debug)]
@@ -199,6 +205,14 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         "select-pane" => select_pane::exec(server, item, args, found, false),
         "last-pane" => select_pane::exec(server, item, args, found, true),
         "list-panes" => list_panes::exec(server, item, args, found),
+        "new-window" => new_window::exec(server, item, args, found),
+        "kill-window" => kill_window::exec(server, item, args, found),
+        "rename-window" => rename_window::exec(server, item, args, found),
+        "list-windows" => list_windows::exec(server, item, args, found),
+        "select-window" => select_window::exec(server, item, args, found, Which::Select),
+        "next-window" => select_window::exec(server, item, args, found, Which::Next),
+        "previous-window" => select_window::exec(server, item, args, found, Which::Previous),
+        "last-window" => select_window::exec(server, item, args, found, Which::Last),
         "resize-pane" => resize_pane::exec(server, item, args, found),
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),

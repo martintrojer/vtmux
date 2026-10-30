@@ -36,6 +36,7 @@ fn size(
         .map_err(|cause| EdgeError::BadNumber { what, cause })
 }
 
+#[allow(clippy::too_many_lines)] // cmd_new_session_exec, in order
 pub fn exec(
     server: &mut Server,
     item: &mut Item,
@@ -135,6 +136,8 @@ pub fn exec(
         client_env: item.env.clone(),
         extra_env: args.values('e').map(str::to_owned).collect(),
         update_env: item.client.is_some() && !args.flag('E'),
+        default_size: (args.flag('x') || args.flag('y'))
+            .then(|| (x.unwrap_or(cols), y.unwrap_or(rows))),
     };
     let s = server
         .create_session(spec)

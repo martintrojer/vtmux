@@ -36,6 +36,9 @@ pub struct Session {
     pub windows: BTreeMap<u32, WindowId>,
     /// The current window's index.
     pub current: u32,
+    /// Previously current windows by index, most recent first (`s->lastw`):
+    /// `last-window`, the `!` target and the `-` flag read its head.
+    pub last: Vec<u32>,
     /// The session's own environment (update-environment, `-e`).
     pub env: crate::environ::Environ,
 }
@@ -52,8 +55,9 @@ pub struct Zoom {
 pub struct Window {
     pub id: WindowId,
     pub name: String,
-    /// `automatic-rename`: off once a name is given.
-    pub auto_rename: bool,
+    /// `w->activity_time` as an ordering stamp (window.c
+    /// `window_update_activity`): creation, selection and pane output.
+    pub activity: u64,
     /// The visible layout (`w->layout_root`); one cell while zoomed.
     pub layout: Layout,
     /// Pane order, active pane, last-used stack, z-order.
@@ -330,25 +334,237 @@ impl Model {
         gone
     }
 
-    /// Unlink window `w` from every session and destroy it; an emptied
-    /// session is destroyed (`server_kill_window`, server-fn.c:239-270).
-    pub fn kill_window(&mut self, w: WindowId) -> Vec<Pane> {
-        let mut gone = self.remove_window(w);
-        let mut dead = Vec::new();
-        for s in self.sessions.values_mut() {
-            s.windows.retain(|_, x| *x != w);
-            if s.windows.is_empty() {
-                dead.push(s.id);
-            } else if !s.windows.contains_key(&s.current) {
-                // session_detach picks the last window (session.c
-                // session_detach -> session_next_session... M0 has one).
-                s.current = *s.windows.keys().next().expect("non-empty");
+    /// `server_kill_window` (server-fn.c:239-262): unlink window `w` from
+    /// every session that has it, in name order (`session_detach`); a
+    /// session left without windows is destroyed, and with `renumber` each
+    /// session is renumbered if its `renumber-windows` is on. Returns the
+    /// panes that went (their PTYs close when dropped).
+    pub fn kill_window(&mut self, w: WindowId, renumber: bool) -> Vec<Pane> {
+        let linked: Vec<SessionId> = self
+            .sessions_by_name()
+            .filter(|s| s.windows.values().any(|x| *x == w))
+            .map(|s| s.id)
+            .collect();
+        let mut gone = Vec::new();
+        for s in linked {
+            self.unzoom(w);
+            while let Some(index) = self.index_of(s, w) {
+                if self.detach_window(s, index) {
+                    gone.extend(self.remove_session(s));
+                    break;
+                }
+            }
+            if renumber {
+                self.renumber_if_set(s);
             }
         }
-        for s in dead {
-            gone.extend(self.remove_session(s));
-        }
+        gone.extend(self.remove_window(w));
         gone
+    }
+
+    /// The first index at which session `s` links window `w`
+    /// (`winlink_find_by_window`).
+    #[must_use]
+    pub fn index_of(&self, s: SessionId, w: WindowId) -> Option<u32> {
+        let session = self.sessions.get(&s)?;
+        session
+            .windows
+            .iter()
+            .find(|(_, x)| **x == w)
+            .map(|(i, _)| *i)
+    }
+
+    /// Remove the link at `index` from session `s` and destroy the window
+    /// if nothing links it any more (`winlink_remove` dropping the last
+    /// reference). The session's current window is not changed.
+    pub fn unlink_index(&mut self, s: SessionId, index: u32) -> Vec<Pane> {
+        let Some(session) = self.sessions.get_mut(&s) else {
+            return Vec::new();
+        };
+        session.last.retain(|i| *i != index);
+        let Some(w) = session.windows.remove(&index) else {
+            return Vec::new();
+        };
+        if self.sessions_with(w).next().is_none() {
+            self.remove_window(w)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// `session_detach` (session.c:338-358): unlink `index` from `s`,
+    /// moving the current window away from it first (last, else previous,
+    /// else next). True when it is the session's only window: the caller
+    /// destroys the session instead.
+    pub fn detach_window(&mut self, s: SessionId, index: u32) -> bool {
+        let Some(session) = self.sessions.get(&s) else {
+            return false;
+        };
+        if session.windows.len() == 1 && session.windows.contains_key(&index) {
+            return true;
+        }
+        if session.current == index
+            && self.last_window(s) != Some(true)
+            && self.previous_window(s, false) != Some(true)
+        {
+            self.next_window(s, false);
+        }
+        if let Some(session) = self.sessions.get_mut(&s) {
+            session.last.retain(|i| *i != index);
+            session.windows.remove(&index);
+        }
+        false
+    }
+
+    /// `session_set_current` (session.c:520-545): `None` when there is no
+    /// window at `index` (-1), `Some(false)` when it already is current
+    /// (1), `Some(true)` when it became current (0). The old current goes
+    /// to the head of the last-window stack and the window's activity is
+    /// stamped.
+    pub fn set_current(&mut self, s: SessionId, index: u32) -> Option<bool> {
+        let session = self.sessions.get(&s)?;
+        let w = *session.windows.get(&index)?;
+        if session.current == index {
+            return Some(false);
+        }
+        let stamp = self.touch();
+        let session = self.sessions.get_mut(&s).expect("checked above");
+        let old = session.current;
+        session.last.retain(|i| *i != index && *i != old);
+        if session.windows.contains_key(&old) {
+            session.last.insert(0, old);
+        }
+        session.current = index;
+        if let Some(window) = self.windows.get_mut(&w) {
+            window.activity = stamp;
+        }
+        Some(true)
+    }
+
+    /// `session_last` (session.c:500-512), same results as
+    /// [`Self::set_current`].
+    pub fn last_window(&mut self, s: SessionId) -> Option<bool> {
+        let session = self.sessions.get(&s)?;
+        let head = *session.last.first()?;
+        if head == session.current {
+            return Some(false);
+        }
+        self.set_current(s, head)
+    }
+
+    /// `session_next` (session.c:424-440), wrapping to the first window.
+    /// With `alert` only windows with an alert count; vtmux has no alerts
+    /// yet, so that always fails.
+    pub fn next_window(&mut self, s: SessionId, alert: bool) -> Option<bool> {
+        let session = self.sessions.get(&s)?;
+        if alert {
+            return None;
+        }
+        let next = session
+            .windows
+            .range(session.current.saturating_add(1)..)
+            .next()
+            .filter(|_| session.current != u32::MAX)
+            .or_else(|| session.windows.iter().next())
+            .map(|(i, _)| *i)?;
+        self.set_current(s, next)
+    }
+
+    /// `session_previous` (session.c:454-470), wrapping to the last window.
+    pub fn previous_window(&mut self, s: SessionId, alert: bool) -> Option<bool> {
+        let session = self.sessions.get(&s)?;
+        if alert {
+            return None;
+        }
+        let prev = session
+            .windows
+            .range(..session.current)
+            .next_back()
+            .or_else(|| session.windows.iter().next_back())
+            .map(|(i, _)| *i)?;
+        self.set_current(s, prev)
+    }
+
+    /// `server_renumber_session` (server-fn.c:265-277): renumber when the
+    /// session's `renumber-windows` is on.
+    pub fn renumber_if_set(&mut self, s: SessionId) {
+        if self.number_option(TreeId::Session(s), "renumber-windows") != 0 {
+            self.renumber(s);
+        }
+    }
+
+    /// `session_renumber_windows` (session.c:745-810): consecutive indices
+    /// from `base-index`, keeping the current window and the last-window
+    /// stack on the same windows; left alone when they would not fit below
+    /// `INT_MAX`.
+    pub fn renumber(&mut self, s: SessionId) {
+        let base = self.number_option(TreeId::Session(s), "base-index");
+        let Some(session) = self.sessions.get_mut(&s) else {
+            return;
+        };
+        let n = i64::try_from(session.windows.len()).unwrap_or(i64::MAX);
+        if n > i64::from(i32::MAX) - base + 1 {
+            return;
+        }
+        let base = u32::try_from(base).unwrap_or(0);
+        let moved: BTreeMap<u32, u32> = session
+            .windows
+            .keys()
+            .zip(base..)
+            .map(|(old, new)| (*old, new))
+            .collect();
+        session.windows = std::mem::take(&mut session.windows)
+            .into_iter()
+            .map(|(old, w)| (moved[&old], w))
+            .collect();
+        session.current = moved.get(&session.current).copied().unwrap_or(base);
+        for i in &mut session.last {
+            if let Some(new) = moved.get(i) {
+                *i = *new;
+            }
+        }
+    }
+
+    /// `winlink_shuffle_up` (window.c:2481-2510): make room for a window
+    /// after (or, with `before`, at) `index` by moving the windows up to
+    /// the next free index along by one. `None` when there is no room
+    /// below `INT_MAX`.
+    pub fn shuffle_up(&mut self, s: SessionId, index: u32, before: bool) -> Option<u32> {
+        const INT_MAX: u32 = i32::MAX as u32;
+        if index >= INT_MAX {
+            return None;
+        }
+        let session = self.sessions.get_mut(&s)?;
+        let idx = if before { index } else { index + 1 };
+        let last = (idx..INT_MAX).find(|i| !session.windows.contains_key(i))?;
+        let shift = |i: u32| if (idx..last).contains(&i) { i + 1 } else { i };
+        session.windows = std::mem::take(&mut session.windows)
+            .into_iter()
+            .map(|(i, w)| (shift(i), w))
+            .collect();
+        session.current = shift(session.current);
+        for i in &mut session.last {
+            *i = shift(*i);
+        }
+        Some(idx)
+    }
+
+    /// `winlink_next_index` (window.c:251-265): the first free index from
+    /// `start`, wrapping from `INT_MAX` to 0.
+    #[must_use]
+    pub fn next_free_index(&self, s: SessionId, start: u32) -> Option<u32> {
+        const INT_MAX: u32 = i32::MAX as u32;
+        let session = self.sessions.get(&s)?;
+        let mut i = start;
+        loop {
+            if !session.windows.contains_key(&i) {
+                return Some(i);
+            }
+            i = if i >= INT_MAX { 0 } else { i + 1 };
+            if i == start {
+                return None;
+            }
+        }
     }
 
     /// `server_destroy_pane` / `server_kill_pane`: remove a pane from its
@@ -362,7 +578,7 @@ impl Model {
             return self.panes.remove(&id).into_iter().collect();
         };
         if window.panes.panes.len() == 1 {
-            return self.kill_window(wid);
+            return self.kill_window(wid, true);
         }
         // window_push_zoom(w, 0, ...) / window_pop_zoom: unzoom around the
         // removal; the flag is only set for float-over-zoom panes, which

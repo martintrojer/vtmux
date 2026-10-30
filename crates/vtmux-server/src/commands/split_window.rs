@@ -200,6 +200,7 @@ pub fn exec(
         index: Some(index),
         window: Some(w),
         pane: Some(new),
+        new_index: None,
     };
     if let Some(t) = args.value('T') {
         let title = expand(server, found, t);

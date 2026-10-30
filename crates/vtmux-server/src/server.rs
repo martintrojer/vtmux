@@ -164,6 +164,25 @@ pub struct NewSession {
     pub extra_env: Vec<String>,
     /// Copy `update-environment` variables from the client.
     pub update_env: bool,
+    /// `-x`/`-y` given: the session's `default-size`.
+    pub default_size: Option<(u16, u16)>,
+}
+
+/// What a new window needs ([`Server::new_window`]).
+#[derive(Debug)]
+pub struct NewWindow<'a> {
+    pub session: SessionId,
+    /// The index asked for; `None` is the first free one from base-index.
+    pub index: Option<u32>,
+    /// `-k`: replace the window at `index`.
+    pub kill: bool,
+    /// `-d`: do not make it current.
+    pub detached: bool,
+    pub name: Option<String>,
+    pub argv: Vec<String>,
+    pub cwd: PathBuf,
+    pub extra_env: &'a [String],
+    pub client_path: Option<&'a str>,
 }
 
 pub struct Server {
@@ -1088,6 +1107,7 @@ impl Server {
         }
         let window_id = self.model.window_ids.allocate();
         let pane_id = self.model.pane_ids.allocate();
+        let (cols, rows) = (u32::from(spec.cols), u32::from(spec.rows));
         let pane = self.spawn_pane(&PaneSpawn {
             pane: pane_id,
             window: window_id,
@@ -1097,36 +1117,16 @@ impl Server {
             client_path: client_path(&spec.client_env),
             argv: spec.argv,
             cwd: spec.cwd.clone(),
-            rect: Geometry::new(u32::from(spec.cols), u32::from(spec.rows), 0, 0),
+            rect: Geometry::new(cols, rows, 0, 0),
         })?;
-
-        // default_window_name (names.c:107-121).
-        let (window_name, auto_rename) = if let Some(n) = spec.window_name {
-            (n, false)
-        } else {
-            let cmd = crate::names::stringify_argv(&pane.argv);
-            let from = if cmd.is_empty() {
-                pane.shell.to_string_lossy().into_owned()
-            } else {
-                cmd
-            };
-            (parse_window_name(&from), true)
-        };
-        self.model.options.add_window(window_id);
-        self.model.options.add_pane(pane_id, window_id);
-        self.model.panes.insert(pane_id, pane);
-        self.model.windows.insert(
-            window_id,
-            Window {
-                id: window_id,
-                name: window_name,
-                auto_rename,
-                layout: CoreLayout::new(u32::from(spec.cols), u32::from(spec.rows), pane_id),
-                panes: WindowPanes::new(pane_id),
-                zoom: None,
-            },
-        );
-        self.model.fix_panes(window_id);
+        self.insert_window(window_id, pane, spec.window_name, cols, rows);
+        // spawn_window with idx -1: the first free index from base-index
+        // (spawn.c:183-185); the session is new, so that is base-index.
+        let index = u32::try_from(
+            self.model
+                .number_option(TreeId::GlobalSession, "base-index"),
+        )
+        .unwrap_or(0);
         let activity = self.model.touch();
         let before = self.control_links();
         self.model.insert_session(Session {
@@ -1135,12 +1135,173 @@ impl Server {
             created: now_epoch(),
             activity,
             cwd: spec.cwd,
-            windows: BTreeMap::from([(0, window_id)]),
-            current: 0,
+            windows: BTreeMap::from([(index, window_id)]),
+            current: index,
+            last: Vec::new(),
             env,
         });
+        if let Some((x, y)) = spec.default_size {
+            // cmd-new-session.c:274-280: -x/-y become the session's
+            // default-size, which later windows use.
+            self.model.options.set_table_value(
+                TreeId::Session(id),
+                "default-size",
+                Value::String(format!("{x}x{y}")),
+            );
+        }
         self.control_links_changed(&before);
         Ok(id)
+    }
+
+    /// The window half of `spawn_window` (spawn.c:183-241) once its first
+    /// pane exists: the name (`default_window_name`, or the given one with
+    /// `automatic-rename` turned off in the window's options), the option
+    /// trees, the layout, and the pane marked changed as
+    /// `window_set_active_pane` does, so automatic-rename looks at it.
+    fn insert_window(
+        &mut self,
+        window_id: WindowId,
+        mut pane: Pane,
+        name: Option<String>,
+        cols: u32,
+        rows: u32,
+    ) {
+        let pane_id = pane.id;
+        self.model.options.add_window(window_id);
+        self.model.options.add_pane(pane_id, window_id);
+        let name = if let Some(n) = name {
+            self.model.options.set_table_value(
+                TreeId::Window(window_id),
+                "automatic-rename",
+                Value::Flag(false),
+            );
+            n
+        } else {
+            // default_window_name (names.c:107-121).
+            let cmd = crate::names::stringify_argv(&pane.argv);
+            let from = if cmd.is_empty() {
+                pane.shell.to_string_lossy().into_owned()
+            } else {
+                cmd
+            };
+            parse_window_name(&from)
+        };
+        pane.changed = true;
+        self.model.panes.insert(pane_id, pane);
+        let activity = self.model.touch();
+        self.model.windows.insert(
+            window_id,
+            Window {
+                id: window_id,
+                name,
+                activity,
+                layout: CoreLayout::new(cols, rows, pane_id),
+                panes: WindowPanes::new(pane_id),
+                zoom: None,
+            },
+        );
+        self.model.fix_panes(window_id);
+    }
+
+    /// `spawn_window` (spawn.c:79-241) for `new-window`: a window with one
+    /// pane linked into an existing session at `index` (or the first free
+    /// one from `base-index`), replacing the window there with `kill`, and
+    /// made current unless `detached`. Errors are `spawn_window`'s causes.
+    pub fn new_window(&mut self, nw: &NewWindow<'_>) -> Result<u32, String> {
+        let s = nw.session;
+        let mut detached = nw.detached;
+        let before = self.control_links();
+        if let Some(index) = nw.index
+            && self.model.sessions[&s].windows.contains_key(&index)
+        {
+            if !nw.kill {
+                return Err(format!("index {index} in use"));
+            }
+            // spawn.c:162-180: unlink without session_detach; replacing the
+            // current window always selects the new one.
+            if self.model.sessions[&s].current == index {
+                detached = false;
+            }
+            for pane in self.model.unlink_index(s, index) {
+                self.close_pane_io(pane);
+            }
+        }
+        let index = if let Some(i) = nw.index {
+            i
+        } else {
+            let base = self.model.number_option(TreeId::Session(s), "base-index");
+            let base = u32::try_from(base).unwrap_or(0);
+            self.model
+                .next_free_index(s, base)
+                .ok_or_else(|| format!("couldn't add window -{}", i64::from(base) + 1))?
+        };
+        let (cols, rows) = self.default_window_size(s);
+        let window_id = self.model.window_ids.allocate();
+        let pane_id = self.model.pane_ids.allocate();
+        let session_env = self.model.sessions[&s].env.clone();
+        let pane = self
+            .spawn_pane(&PaneSpawn {
+                pane: pane_id,
+                window: window_id,
+                session: s,
+                session_env: &session_env,
+                extra_env: nw.extra_env,
+                client_path: nw.client_path,
+                argv: nw.argv.clone(),
+                cwd: nw.cwd.clone(),
+                rect: Geometry::new(cols, rows, 0, 0),
+            })
+            .map_err(|e| format!("fork failed: {e}"))?;
+        self.insert_window(window_id, pane, nw.name.clone(), cols, rows);
+        let session = self.model.sessions.get_mut(&s).expect("target session");
+        session.windows.insert(index, window_id);
+        if !session.windows.contains_key(&session.current) {
+            session.current = index;
+        }
+        if !detached {
+            self.model.set_current(s, index);
+        }
+        self.control_links_changed(&before);
+        Ok(index)
+    }
+
+    /// `default_window_size` (resize.c:291-343) with `window-size latest`:
+    /// a terminal client attached to the session, less its status line,
+    /// else the session's `default-size`, else 80x24; clamped to
+    /// `WINDOW_MINIMUM..=WINDOW_MAXIMUM`.
+    fn default_window_size(&self, s: SessionId) -> (u32, u32) {
+        const WINDOW_MAXIMUM: u32 = 10_000;
+        let client = self
+            .clients
+            .values()
+            .rev()
+            .filter(|c| c.control.is_none() && c.attached == Some(s))
+            .find_map(|c| c.hello.as_ref()?.tty.as_ref());
+        let (sx, sy) = if let Some(tty) = client {
+            (tty.cols, tty.rows.saturating_sub(1))
+        } else {
+            let size = self
+                .model
+                .options
+                .get(TreeId::Session(s), "default-size")
+                .map(|e| e.value.to_text(e.def, None, false))
+                .unwrap_or_default();
+            size.split_once('x')
+                .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
+                .unwrap_or((80, 24))
+        };
+        (sx.clamp(1, WINDOW_MAXIMUM), sy.clamp(1, WINDOW_MAXIMUM))
+    }
+
+    /// `server_kill_window` (server-fn.c:239-262) with the PTYs closed and
+    /// control clients told.
+    pub fn kill_window(&mut self, w: WindowId, renumber: bool) {
+        let before = self.control_links();
+        let panes = self.model.kill_window(w, renumber);
+        self.control_links_changed(&before);
+        for pane in panes {
+            self.close_pane_io(pane);
+        }
     }
 
     /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment
@@ -1413,8 +1574,10 @@ impl Server {
         }
     }
 
-    /// `check_window_name` (names.c:54-104) with the default
-    /// `automatic-rename-format` (`#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}`).
+    /// `check_window_name` (names.c:54-104): for windows with
+    /// `automatic-rename` on whose active pane changed, at most every
+    /// `NAME_INTERVAL`, the expanded `automatic-rename-format` becomes the
+    /// name (`window_set_name(w, name, 1)`).
     fn check_window_names(&mut self) {
         let now = Instant::now();
         let windows: Vec<_> = self.model.windows.keys().copied().collect();
@@ -1422,7 +1585,11 @@ impl Server {
             let Some(window) = self.model.windows.get(&w) else {
                 continue;
             };
-            if !window.auto_rename {
+            if self
+                .model
+                .number_option(TreeId::Window(w), "automatic-rename")
+                == 0
+            {
                 continue;
             }
             let active = window.active();
@@ -1432,14 +1599,21 @@ impl Server {
             if !pane.changed || pane.last_rename.is_some_and(|t| now - t < NAME_INTERVAL) {
                 continue;
             }
+            // format_window_name: FORMAT_WINDOW with no session or winlink.
             let found = crate::target::Found {
-                session: self.model.sessions_with(w).next().map(|s| s.id),
-                index: None,
                 window: Some(w),
                 pane: Some(active),
+                ..Default::default()
             };
+            let template = self
+                .model
+                .options
+                .get(TreeId::Window(w), "automatic-rename-format")
+                .map(|e| e.value.to_text(e.def, None, false))
+                .unwrap_or_default();
             let ctx = crate::format_ctx::Ctx::new(&self.model, &self.info, &self.global_env, found);
-            let name = vtmux_core::format::expand_str("#{pane_current_command}", &ctx);
+            let name =
+                crate::names::clean_untrusted(&vtmux_core::format::expand_str(&template, &ctx));
             if let Some(pane) = self.model.panes.get_mut(&active) {
                 pane.changed = false;
                 pane.last_rename = Some(now);
