@@ -59,6 +59,12 @@ pub struct Cell {
     /// (do not draw it).
     pub width: u8,
     pub style: Style,
+    /// Printed under DEC Special Graphics (tmux's `GRID_ATTR_CHARSET`).
+    /// Ghostty keeps no charset per cell; [`PaneTerm`] carries it in the
+    /// cell's DECSCA protection bit (see `term.rs`).
+    pub acs: bool,
+    /// Inside an OSC 8 hyperlink (tmux's `gc->link != 0`).
+    pub link: bool,
 }
 
 /// The visible grid at one moment, row-major.
@@ -68,6 +74,9 @@ pub struct Snapshot {
     pub rows: u16,
     /// `cols * rows` cells.
     pub cells: Vec<Cell>,
+    /// Per row: the line soft-wrapped onto the next (tmux's
+    /// `GRID_LINE_WRAPPED`). Empty for a composed client screen.
+    pub wrapped: Vec<bool>,
     /// Cursor cell in grid terms (x never exceeds `cols - 1`), `None` when it
     /// is outside the viewport.
     pub cursor: Option<(u16, u16)>,
@@ -142,13 +151,19 @@ pub fn snapshot(term: &PaneTerm) -> Snapshot {
     let cols = snap.cols().unwrap_or(0);
     let nrows = snap.rows().unwrap_or(0);
     let mut out = Vec::with_capacity(usize::from(cols) * usize::from(nrows));
+    let mut wrapped = Vec::with_capacity(usize::from(nrows));
 
     let mut row_iter = rows.update(&snap).expect("row iteration");
     while let Some(row) = row_iter.next() {
+        wrapped.push(
+            row.raw_row()
+                .and_then(libghostty_vt::screen::Row::is_wrapped)
+                .unwrap_or(false),
+        );
         let mut cell_iter = cells.update(row).expect("cell iteration");
         while let Some(cell) = cell_iter.next() {
             let mut style: Style = cell.style().map(Style::from).unwrap_or_default();
-            let mut width = 1;
+            let (mut width, mut acs, mut link) = (1, false, false);
             if let Ok(raw) = cell.raw_cell() {
                 // A cell erased with a background has no text and carries the
                 // colour in its content tag instead of its style.
@@ -170,10 +185,18 @@ pub fn snapshot(term: &PaneTerm) -> Snapshot {
                     Ok(CellWide::SpacerTail) => 0,
                     _ => 1,
                 };
+                acs = raw.is_protected().unwrap_or(false);
+                link = raw.has_hyperlink().unwrap_or(false);
             }
             let mut text = String::new();
             let _ = cell.graphemes_utf8(&mut text);
-            out.push(Cell { text, width, style });
+            out.push(Cell {
+                text,
+                width,
+                style,
+                acs,
+                link,
+            });
         }
     }
 
@@ -181,6 +204,7 @@ pub fn snapshot(term: &PaneTerm) -> Snapshot {
         cols,
         rows: nrows,
         cells: out,
+        wrapped,
         cursor: snap.cursor_viewport().ok().flatten().map(|c| (c.x, c.y)),
         cursor_visible: snap.cursor_visible().unwrap_or(true),
     }
@@ -209,6 +233,27 @@ mod tests {
         assert_eq!(erased.style.bg, Color::Palette(1));
         assert_eq!(s.cursor, Some((4, 0)));
         assert!(s.cursor_visible);
+    }
+
+    /// tmux marks cells printed under `ESC ( 0` (input.c `input_print`) and
+    /// inside OSC 8; both reach the snapshot, as does the soft-wrap flag.
+    #[test]
+    fn snapshot_reads_charset_link_and_wrap() {
+        let mut t = PaneTerm::new(4, 3, 100);
+        t.feed(b"\x1b(0 x\x1b(B \x1b]8;;http://x\x07 \x1b]8;;\x07\r\nabcde");
+        let s = snapshot(&t);
+        let flags: Vec<_> = (0..4)
+            .map(|x| {
+                let c = s.cell(x, 0).unwrap();
+                (c.acs, c.link)
+            })
+            .collect();
+        assert_eq!(
+            flags,
+            [(true, false), (true, false), (false, false), (false, true)]
+        );
+        assert_eq!(s.cell(1, 0).unwrap().text, "│");
+        assert_eq!(s.wrapped, [false, true, false]);
     }
 
     #[test]

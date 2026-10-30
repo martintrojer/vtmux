@@ -1070,6 +1070,7 @@ impl Server {
                 cols,
                 rows,
                 cells: vec![vtmux_vt::Cell::default(); usize::from(cols) * usize::from(rows)],
+                wrapped: Vec::new(),
                 cursor: None,
                 cursor_visible: true,
             };
