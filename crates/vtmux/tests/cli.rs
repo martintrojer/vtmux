@@ -414,7 +414,10 @@ fn source_file_config_env() {
 fn startup_config() {
     compare("startup_config", |w| {
         let conf = w.dir().join("start.conf");
-        std::fs::write(&conf, "new -s test\ndisplay hello\nnosuch\n").expect("write");
+        // `new -d` with a long-lived pane: without -d, new tries to attach a
+        // tty-less client and fails, so the server may exit (exit-empty)
+        // before `ls` runs, on tmux and vtmux alike, which made this flaky.
+        std::fs::write(&conf, "new -d -s test 'sleep 30'\ndisplay hello\nnosuch\n").expect("write");
         let c = conf.to_str().expect("utf-8");
         vec![
             w.raw(&["-L", &w.label, "-f", c, "start"]),
