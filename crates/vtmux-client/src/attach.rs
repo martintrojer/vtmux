@@ -68,6 +68,7 @@ fn relay(
 ) -> io::Result<(i32, Option<String>)> {
     let mut events = Events::with_capacity(16);
     let mut input = Vec::new();
+    let mut signal_exit = None;
     send_size(stream)?;
     loop {
         match poll.poll(&mut events, None) {
@@ -78,12 +79,19 @@ fn relay(
             match event.token() {
                 Token(0) => {
                     let mut bytes = [0; 4096];
-                    let n = io::stdin().read(&mut bytes)?;
-                    if n == 0 {
-                        let _ = send(stream, &ClientMsg::Detach);
-                        return Ok((1, Some("lost tty".into())));
+                    loop {
+                        match io::stdin().read(&mut bytes) {
+                            Ok(0) => {
+                                let _ = send(stream, &ClientMsg::Detach);
+                                signal_exit = Some("lost tty".into());
+                                break;
+                            }
+                            Ok(n) => send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?,
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                            Err(e) => return Err(e),
+                        }
                     }
-                    send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?;
                 }
                 Token(2) => {
                     for sig in signals.pending() {
@@ -91,17 +99,14 @@ fn relay(
                             send_size(stream)?;
                         } else {
                             let _ = send(stream, &ClientMsg::Detach);
-                            return Ok((
-                                1,
-                                Some(
-                                    if sig == SIGTERM {
-                                        "terminated"
-                                    } else {
-                                        "lost tty"
-                                    }
-                                    .into(),
-                                ),
-                            ));
+                            signal_exit = Some(
+                                if sig == SIGTERM {
+                                    "terminated"
+                                } else {
+                                    "lost tty"
+                                }
+                                .to_owned(),
+                            );
                         }
                     }
                 }
@@ -128,7 +133,11 @@ fn relay(
                                         }
                                         ServerMsg::Stderr(b) => io::stderr().write_all(&b)?,
                                         ServerMsg::Exit { code, message } => {
-                                            return Ok((code, message));
+                                            return Ok(if let Some(reason) = signal_exit {
+                                                (1, Some(reason))
+                                            } else {
+                                                (code, message)
+                                            });
                                         }
                                         ServerMsg::Ready => {}
                                     }
