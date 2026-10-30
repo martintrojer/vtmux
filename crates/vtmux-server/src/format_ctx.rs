@@ -2,6 +2,7 @@
 //! `format_table` callbacks).
 
 use vtmux_core::format::{FormatContext, Tm};
+use vtmux_core::options::{OptionsStore, Target};
 
 use crate::environ::Environ;
 use crate::model::Model;
@@ -38,6 +39,7 @@ pub struct Ctx<'a> {
     pub model: &'a Model,
     pub info: &'a ServerInfo,
     pub global_env: &'a Environ,
+    pub options: &'a OptionsStore,
     pub target: Found,
     /// Extra variables (`line` for `list-*`).
     pub extra: Vec<(&'static str, String)>,
@@ -70,6 +72,7 @@ impl<'a> Ctx<'a> {
             model,
             info,
             global_env,
+            options: &model.options,
             target,
             extra: Vec::new(),
         }
@@ -164,6 +167,17 @@ impl<'a> Ctx<'a> {
 
 impl FormatContext for Ctx<'_> {
     fn get(&self, name: &str) -> Option<String> {
+        // format.c format_find: options precede built-ins and extra entries.
+        if let Some(value) = self.options.format_value(
+            name,
+            &Target {
+                session: self.target.session,
+                window: self.target.window,
+                pane: self.target.pane,
+            },
+        ) {
+            return Some(value);
+        }
         if let Some((_, v)) = self.extra.iter().find(|(k, _)| *k == name) {
             return Some(v.clone());
         }
@@ -189,6 +203,13 @@ impl FormatContext for Ctx<'_> {
             .or_else(|| self.pane_value(name))
             // format_find falls back to the session, then global,
             // environment (format.c:4665-4675).
+            .or_else(|| {
+                self.session()?
+                    .env
+                    .iter()
+                    .find(|(k, _)| k == name)
+                    .map(|(_, v)| v.clone())
+            })
             .or_else(|| self.global_env.get(name).map(str::to_owned))
     }
 

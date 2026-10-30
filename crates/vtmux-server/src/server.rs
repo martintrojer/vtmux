@@ -20,6 +20,7 @@ use signal_hook_mio::v1_0::Signals;
 use vtmux_core::cmd::{self, CmdError, ConfigEnv};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId};
+use vtmux_core::options::{Defaults, OptionValue, OptionsStore, TreeId, Value};
 use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg};
 use vtmux_vt::PaneTerm;
 
@@ -38,8 +39,6 @@ const SIGNALS: Token = Token(1);
 const CLIENT_BASE: usize = 1 << 32;
 const PANE_BASE: usize = 16;
 
-/// `history-limit` default (options-table.c).
-const HISTORY_LIMIT: usize = 2000;
 /// `NAME_INTERVAL` (tmux.h:119): automatic-rename runs at most this often.
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -152,8 +151,6 @@ pub struct Server {
     /// The last command number handed out (cmd-queue.c `cmdq_next`'s
     /// static `number`): every fired command takes one.
     pub(crate) cmd_number: u32,
-    /// The global `default-shell` (tmux.c `getshell`).
-    shell: PathBuf,
     config: ServerConfig,
     config_loaded: bool,
     /// Panes that still had output when their read budget ran out. mio is
@@ -253,10 +250,18 @@ impl Server {
         if let Some(cwd) = &config.cwd {
             global_env.set("PWD", &cwd.to_string_lossy(), false);
         }
+        let defaults = Defaults::from_env(
+            default_shell(&config.environ)
+                .to_string_lossy()
+                .into_owned(),
+            global_env.get("VISUAL").map(str::to_owned),
+            global_env.get("EDITOR").map(str::to_owned),
+        );
+        let mut model = Model::default();
+        model.options = OptionsStore::new(&defaults);
         Ok(Self {
-            model: Model::default(),
+            model,
             info: ServerInfo::new(socket.to_string_lossy().into_owned()),
-            shell: default_shell(&config.environ),
             global_env,
             shutdown: false,
             source_depth: 0,
@@ -354,6 +359,13 @@ impl Server {
         // A client that left before saying Hello (`-CC` without a tty)
         // still counts: tmux exits once it has no sessions and no clients.
         (self.config_loaded || self.next_client > 0)
+            && matches!(
+                self.model
+                    .options
+                    .get(TreeId::Server, "exit-empty")
+                    .map(|e| &e.value),
+                Some(OptionValue::Single(Value::Flag(true)))
+            )
             && self.model.sessions.is_empty()
             && self
                 .clients
@@ -991,8 +1003,18 @@ impl Server {
         if child.get("PATH").is_none() {
             child.set("PATH", "/usr/bin:/bin:/usr/sbin:/sbin", false);
         }
-        let shell = if check_shell(&self.shell) {
-            self.shell.clone()
+        // spawn.c spawn_pane: shell and history budget come from the new
+        // session's inherited options, not the starting client's shell.
+        let configured_shell = self
+            .model
+            .options
+            .get(TreeId::Session(id), "default-shell")
+            .map_or_else(
+                || "/bin/sh".to_owned(),
+                |e| e.value.to_text(e.def, None, false),
+            );
+        let shell = if check_shell(Path::new(&configured_shell)) {
+            PathBuf::from(configured_shell)
         } else {
             PathBuf::from("/bin/sh")
         };
@@ -1010,7 +1032,16 @@ impl Server {
         let io = PaneIo::new(spawned.master);
         // window_pane_create (window.c:1479-1480): the title starts as the
         // host name.
-        let mut term = PaneTerm::new(spec.cols, spec.rows, HISTORY_LIMIT);
+        let history_limit = match self
+            .model
+            .options
+            .get(TreeId::Session(id), "history-limit")
+            .map(|e| &e.value)
+        {
+            Some(OptionValue::Single(Value::Number(n))) => usize::try_from(*n).unwrap_or(0),
+            _ => 0,
+        };
+        let mut term = PaneTerm::new(spec.cols, spec.rows, history_limit);
         let host = &self.info.host;
         if !host.chars().any(char::is_control) {
             term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
@@ -1029,6 +1060,8 @@ impl Server {
             };
             (parse_window_name(&from), true)
         };
+        self.model.options.add_window(window_id);
+        self.model.options.add_pane(pane_id, window_id);
         self.model.panes.insert(
             pane_id,
             Pane {

@@ -77,6 +77,8 @@ impl World {
             .current_dir(self.dir())
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
+            .env_remove("EDITOR")
+            .env_remove("VISUAL")
             .env("TMUX_TMPDIR", self.dir())
             .env("SHELL", "/bin/sh")
             .output()
@@ -491,6 +493,148 @@ fn initial_pane_title_is_hostname() {
     w.run(&["new", "-d", "-s", "a"]);
     let host = w.run(&["display", "-p", "#{host}"]).stdout;
     assert_eq!(w.run(&["display", "-p", "#{pane_title}"]).stdout, host);
+}
+
+/// Reference: isolated `tmux new -d -s a cat`, then the set/show/display
+/// invocations below. Missing registration, scope storage or format lookup
+/// breaks this round trip at the CLI boundary.
+#[test]
+fn options_user_scopes() {
+    compare("options_user_scopes", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&["set-option", "-s", "@x", "server"]),
+            w.run(&["set", "-g", "@x", "global session"]),
+            w.run(&["setw", "-g", "@x", "global window"]),
+            w.run(&["set", "-t", "a", "@x", "session"]),
+            w.run(&["set", "-w", "-t", "@0", "@x", "window"]),
+            w.run(&["set", "-p", "-t", "%0", "@x", "pane"]),
+            w.run(&["show", "-s", "@x"]),
+            w.run(&["show", "-g", "@x"]),
+            w.run(&["showw", "-g", "@x"]),
+            w.run(&["show", "-t", "a", "@x"]),
+            w.run(&["show", "-w", "-t", "@0", "@x"]),
+            w.run(&["show", "-p", "-t", "%0", "@x"]),
+            w.run(&["display", "-p", "#{@x}"]),
+            w.run(&["set", "-su", "@x"]),
+            w.run(&["display", "-p", "#{@x}"]),
+            w.run(&["set", "-pu", "-t", "%0", "@x"]),
+            w.run(&["display", "-p", "#{@x}"]),
+            w.run(&["set", "-wu", "-t", "@0", "@x"]),
+            w.run(&["show", "-pA", "-t", "%0", "@x"]),
+            w.run(&["display", "-p", "#{@x}"]),
+        ]
+    });
+}
+
+/// Re-run the core's reference probes at the server boundary. Generating
+/// invocations: crates/vtmux-core/tests/options_cases.sh (isolated new -d
+/// -s s, then each 0x1f-delimited argv). Hook commands belong to later work.
+#[test]
+fn options_core_probes_over_cli() {
+    let mut checked = 0;
+    for case in include_str!("../../vtmux-core/src/options/golden/cases.txt")
+        .split("### ")
+        .skip(1)
+    {
+        let name = case.lines().next().unwrap();
+        let commands: Vec<Vec<&str>> = case
+            .lines()
+            .filter_map(|line| line.strip_prefix("$ "))
+            .map(|line| line.split('\x1f').collect())
+            .collect();
+        if commands
+            .iter()
+            .any(|argv| matches!(argv[0], "set-hook" | "show-hooks"))
+        {
+            continue;
+        }
+        compare(name, |w| {
+            let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+            runs.extend(commands.iter().map(|argv| w.run(argv)));
+            runs
+        });
+        checked += 1;
+    }
+    assert_eq!(checked, 48);
+}
+
+/// spawn.c `spawn_pane` reads default-shell and history-limit for each new
+/// pane; server.c `server_loop` keeps an empty server with exit-empty off.
+#[test]
+fn options_spawn_and_exit_empty() {
+    compare("options_spawn_and_exit_empty", |w| {
+        use std::os::unix::fs::PermissionsExt;
+        let shell = w.dir().join("shell");
+        std::fs::write(
+            &shell,
+            "#!/bin/sh\nprintf 'configured-shell\\n'\nexec /bin/sh \"$@\"\n",
+        )
+        .expect("write shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&["set", "-g", "default-shell", shell.to_str().expect("utf-8")]),
+            w.run(&["set", "-g", "history-limit", "3"]),
+            w.run(&[
+                "new",
+                "-d",
+                "-s",
+                "b",
+                "-x",
+                "30",
+                "-y",
+                "3",
+                "printf '1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n'; exec cat",
+            ]),
+        ];
+        w.wait_for_text("b", "10");
+        runs.push(w.run(&["display", "-p", "-t", "b", "#{history_size}"]));
+        runs.push(w.run(&["new", "-d", "-s", "c", "exec cat"]));
+        w.wait_for_text("c", "configured-shell");
+        runs.push(w.run(&["capture-pane", "-p", "-t", "c"]));
+        runs.push(w.run(&["kill-session", "-t", "c"]));
+        runs.push(w.run(&["set", "-s", "exit-empty", "off"]));
+        runs.push(w.run(&["kill-session", "-t", "a"]));
+        runs.push(w.run(&["kill-session", "-t", "b"]));
+        runs.push(w.run(&["show", "-sv", "exit-empty"]));
+        runs.push(w.run(&["show", "-gv", "default-shell"]));
+        runs.push(w.run(&["set", "-s", "exit-empty", "on"]));
+        w.wait_gone();
+        runs.push(w.run(&["ls"]));
+        runs
+    });
+}
+
+/// Owner acceptance: strip only top-level run/run-shell/if-shell and the
+/// mu-crew source-file, preserving bindings and environment lines. Their
+/// effects are later work; source still runs subsequent set lines.
+#[test]
+fn options_owner_config() {
+    compare("options_owner_config", |w| {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let original =
+            std::fs::read_to_string(PathBuf::from(home).join("dotfiles/tmux/.tmux.conf"))
+                .unwrap_or_else(|_| {
+                    include_str!("../../vtmux-core/src/options/golden/owner_tmux.conf").to_owned()
+                });
+        let text = original
+            .lines()
+            .filter(|line| {
+                let command = line.split_whitespace().next().unwrap_or("");
+                !(matches!(command, "run" | "run-shell" | "if-shell")
+                    || command == "source-file" && line.contains("mu-crew.conf"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config = w.dir().join("owner.conf");
+        std::fs::write(&config, text).expect("write owner copy");
+        let started = w.run(&["new", "-d", "-s", "a", "cat"]);
+        // Binding/environment handlers are not wired yet; source continues
+        // after their per-line errors. This acceptance check is for options.
+        let _source = w.run(&["source", config.to_str().expect("utf-8")]);
+        vec![started, w.run(&["show", "-g"]), w.run(&["show", "-gw"])]
+    });
 }
 
 /// Twelve clients start a server at once (client.c `client_get_lock`):

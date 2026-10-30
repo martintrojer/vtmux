@@ -1,0 +1,270 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "options_formats",
+  "inputs": {
+    "name": "options_formats",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@x",
+          "value"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@fmt",
+          "#{@x}:#S"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{@x}|#{E:@fmt}|#{status-left}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-gF",
+          "@out",
+          "#{E:@fmt}|#{history-limit}|#{mouse}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@out"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-gF",
+          "status-left",
+          "#{@x} x"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{status-left}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "-F",
+          "#{option_name}:#{option_value}:#{option_is_string}",
+          "status-left"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@x",
+          "updated"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{E:@fmt}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@#{@x}",
+          "formatted name"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@updated"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-A",
+          "-F",
+          "#{option_name}:#{option_is_parent}:#{option_value}",
+          "status"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "-F",
+          "#{option_name}:#{option_is_hook}:#{option_has_value}",
+          "after-select-pane"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "value|value:a|[#{session_name}] \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "value:a|2000|1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "value x\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "status-left:value x:1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "updated:a\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "formatted name\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "status:1:on\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after-select-pane:1:0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

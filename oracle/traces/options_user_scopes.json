@@ -1,0 +1,376 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "options_user_scopes",
+  "inputs": {
+    "name": "options_user_scopes",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set-option",
+          "-s",
+          "@x",
+          "server"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@x",
+          "global session"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-g",
+          "@x",
+          "global window"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-t",
+          "a",
+          "@x",
+          "session"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "@0",
+          "@x",
+          "window"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-p",
+          "-t",
+          "%0",
+          "@x",
+          "pane"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "showw",
+          "-g",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "a",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-w",
+          "-t",
+          "@0",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-p",
+          "-t",
+          "%0",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{@x}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-su",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{@x}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-pu",
+          "-t",
+          "%0",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{@x}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-wu",
+          "-t",
+          "@0",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-pA",
+          "-t",
+          "%0",
+          "@x"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{@x}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@x server\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@x \"global session\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@x \"global window\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@x session\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@x window\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@x pane\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "server\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "pane\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "window\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@x* \"global window\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "global window\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

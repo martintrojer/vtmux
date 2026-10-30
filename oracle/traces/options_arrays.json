@@ -1,0 +1,358 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "options_arrays",
+  "inputs": {
+    "name": "options_arrays",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "terminal-features"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "terminal-features[10]",
+          "xterm*:RGB:usstyle:hyperlinks"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "terminal-features[10]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-ag",
+          "terminal-features[10]",
+          "clipboard"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "terminal-features[10]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-go",
+          "terminal-features[10]",
+          "ignored"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-goq",
+          "terminal-features[10]",
+          "ignored"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-gu",
+          "terminal-features[10]"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "terminal-features"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "terminal-features",
+          "one,two"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-ag",
+          "terminal-features",
+          "three"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "-F",
+          "#{option_name}[#{option_array_key}]=#{option_value}",
+          "terminal-features"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-p",
+          "-t",
+          "%0",
+          "cursor-style",
+          "bar"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "@0",
+          "cursor-style",
+          "block"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-wU",
+          "-t",
+          "@0",
+          "cursor-style"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-pA",
+          "-t",
+          "%0",
+          "cursor-style"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@not-array[1]",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-gq",
+          "no-such-option",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gH",
+          "after-select-pane"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title\nterminal-features[1] screen*:title\nterminal-features[2] rxvt*:ignorefkeys\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "xterm*:RGB:usstyle:hyperlinks\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "terminal-features[10] xterm*:RGB:usstyle:hyperlinksclipboard\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "already set: terminal-features[10]\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title\nterminal-features[1] screen*:title\nterminal-features[2] rxvt*:ignorefkeys\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "terminal-features[0]=one\nterminal-features[1]=two\nterminal-features[2]=three\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "cursor-style* default\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "not an array: @not-array[1]\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after-select-pane\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
