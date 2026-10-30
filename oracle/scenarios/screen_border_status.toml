@@ -1,0 +1,23 @@
+name = "screen_border_status"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-v", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t"] },
+  { run = ["set", "-w", "-t", "a", "pane-border-status", "top"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["set", "-w", "-t", "a", "pane-border-status", "bottom"] },
+  { screen = {} },
+  { run = ["set", "-w", "-t", "a", "pane-border-format", "#[fg=red]#{pane_index}#[bg=blue,bold] #{pane_title} #[default]#{?pane_active,*,-}"] },
+  { screen = {} },
+  { run = ["set", "-w", "-t", "a", "pane-border-status", "top"] },
+  { run = ["set", "-w", "-t", "a", "pane-border-lines", "double"] },
+  { screen = {} },
+  { run = ["set", "-w", "-t", "a", "pane-border-format", "a very long pane border format that is cut"] },
+  { run = ["selectp", "-t", "%0"] },
+  { screen = {} },
+]
