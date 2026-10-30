@@ -1,0 +1,272 @@
+backspace	backspace C-?
+buffer-limit	buffer-limit 50
+clear-on-attach	clear-on-attach on
+command-alias	command-alias[0] split-pane=split-windowcommand-alias[1] splitp=split-windowcommand-alias[2] "server-info=show-messages -JT"command-alias[3] "info=show-messages -JT"command-alias[4] "choose-window=choose-tree -w"command-alias[5] "choose-session=choose-tree -s"
+codepoint-widths	codepoint-widths
+copy-command	copy-command ''
+cursor-colour	cursor-colour ''
+cursor-style	cursor-style default
+default-client-command	default-client-command new-session
+default-terminal	default-terminal tmux-256color
+editor	editor /usr/bin/vi
+escape-time	escape-time 10
+exit-empty	exit-empty on
+exit-unattached	exit-unattached off
+extended-keys	extended-keys off
+extended-keys-format	extended-keys-format xterm
+focus-events	focus-events off
+get-clipboard	get-clipboard buffer
+history-file	history-file ''
+input-buffer-size	input-buffer-size 1048576
+menu-style	menu-style bg=themedarkgrey,fg=themewhite
+menu-selected-style	menu-selected-style bg=themeyellow,fg=themeblack
+menu-border-style	menu-border-style bg=themedarkgrey,fg=themelightgrey
+menu-border-lines	menu-border-lines single
+message-limit	message-limit 1000
+prefix-timeout	prefix-timeout 0
+prompt-history-limit	prompt-history-limit 100
+set-clipboard	set-clipboard external
+terminal-overrides	terminal-overrides[0] linux*:AX@
+terminal-features	terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:titleterminal-features[1] screen*:titleterminal-features[2] rxvt*:ignorefkeys
+theme	theme detect
+dark-theme-black	dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+dark-theme-white	dark-theme-white "#{?#{e|>=:#{client_colours},256},gray90,white}"
+dark-theme-light-grey	dark-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray70,white}"
+dark-theme-dark-grey	dark-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray15,black}"
+dark-theme-green	dark-theme-green "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+dark-theme-yellow	dark-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+dark-theme-red	dark-theme-red "#{?#{e|>=:#{client_colours},256},indianred,red}"
+dark-theme-blue	dark-theme-blue "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+dark-theme-cyan	dark-theme-cyan "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+dark-theme-magenta	dark-theme-magenta "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+light-theme-black	light-theme-black "#{?#{e|>=:#{client_colours},256},gray10,black}"
+light-theme-white	light-theme-white "#{?#{e|>=:#{client_colours},256},gray95,white}"
+light-theme-light-grey	light-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray80,white}"
+light-theme-dark-grey	light-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray45,black}"
+light-theme-green	light-theme-green "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+light-theme-yellow	light-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+light-theme-red	light-theme-red "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+light-theme-blue	light-theme-blue "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+light-theme-cyan	light-theme-cyan "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+light-theme-magenta	light-theme-magenta "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+user-keys	user-keys
+variation-selector-always-wide	variation-selector-always-wide on
+activity-action	activity-action other
+assume-paste-time	assume-paste-time 1
+base-index	base-index 0
+bell-action	bell-action any
+default-command	default-command ''
+default-shell	default-shell /bin/sh
+default-size	default-size 80x24
+destroy-unattached	destroy-unattached off
+detach-on-destroy	detach-on-destroy on
+display-time	display-time 750
+focus-follows-mouse	focus-follows-mouse off
+history-limit	history-limit 2000
+initial-repeat-time	initial-repeat-time 0
+key-table	key-table root
+lock-after-time	lock-after-time 0
+lock-command	lock-command "lock -np"
+message-command-style	message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+message-format	message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+message-line	message-line 0
+message-style	message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+mouse	mouse on
+prefix	prefix C-b
+prefix2	prefix2 None
+renumber-windows	renumber-windows off
+repeat-time	repeat-time 500
+set-titles	set-titles off
+set-titles-string	set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+silence-action	silence-action other
+status	status on
+status-bg	status-bg default
+status-fg	status-fg default
+status-format	status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"status-format[1] "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}"status-format[2] "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{q/h:session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{q/h:session_alert}#[pop-default]#[norange list=on default] }"
+status-interval	status-interval 15
+status-justify	status-justify left
+status-keys	status-keys emacs
+status-left	status-left "[#{session_name}] "
+status-left-length	status-left-length 10
+status-left-style	status-left-style default
+status-position	status-position bottom
+status-right	status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+status-right-length	status-right-length 40
+status-right-style	status-right-style default
+status-style	status-style bg=themegreen,fg=themeblack
+pane-status-current-style	pane-status-current-style underscore
+pane-status-style	pane-status-style default
+prompt-cursor-colour	prompt-cursor-colour ''
+prompt-command-cursor-colour	prompt-command-cursor-colour ''
+prompt-cursor-style	prompt-cursor-style default
+prompt-command-cursor-style	prompt-command-cursor-style default
+session-status-current-style	session-status-current-style underscore
+session-status-style	session-status-style default
+update-environment	update-environment[0] DISPLAYupdate-environment[1] KRB5CCNAMEupdate-environment[2] MSYSTEMupdate-environment[3] SSH_ASKPASSupdate-environment[4] SSH_AUTH_SOCKupdate-environment[5] SSH_AGENT_PIDupdate-environment[6] SSH_CONNECTIONupdate-environment[7] WAYLAND_DISPLAYupdate-environment[8] WINDOWIDupdate-environment[9] XAUTHORITYupdate-environment[10] XDG_CURRENT_DESKTOPupdate-environment[11] XDG_SESSION_DESKTOPupdate-environment[12] XDG_SESSION_TYPE
+visual-activity	visual-activity off
+visual-bell	visual-bell off
+visual-silence	visual-silence off
+word-separators	word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+aggressive-resize	aggressive-resize off
+allow-passthrough	allow-passthrough off
+allow-rename	allow-rename off
+allow-set-title	allow-set-title on
+alternate-screen	alternate-screen on
+automatic-rename	automatic-rename on
+automatic-rename-format	automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+clock-mode-colour	clock-mode-colour themeblue
+clock-mode-style	clock-mode-style 24
+display-panes-active-colour	display-panes-active-colour themered
+display-panes-border-style	display-panes-border-style bg=themedarkgrey,fg=themelightgrey
+display-panes-colour	display-panes-colour themeblue
+display-panes-format	display-panes-format "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
+display-panes-time	display-panes-time 1000
+copy-mode-match-style	copy-mode-match-style bg=themecyan,fg=themeblack
+copy-mode-current-match-style	copy-mode-current-match-style bg=thememagenta,fg=themeblack
+copy-mode-mark-style	copy-mode-mark-style bg=themeyellow,fg=themeblack
+copy-mode-position-format	copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+copy-mode-position-style	copy-mode-position-style "#{E:mode-style}"
+copy-mode-selection-style	copy-mode-selection-style "#{E:mode-style}"
+copy-mode-current-line-number-style	copy-mode-current-line-number-style fg=themeyellow
+copy-mode-current-line-style	copy-mode-current-line-style default
+copy-mode-line-number-style	copy-mode-line-number-style fg=themelightgrey,dim
+copy-mode-line-numbers	copy-mode-line-numbers off
+fill-character	fill-character "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}"
+main-pane-height	main-pane-height 24
+main-pane-width	main-pane-width 80
+mode-keys	mode-keys emacs
+mode-style	mode-style noattr,bg=themeyellow,fg=themeblack
+monitor-activity	monitor-activity off
+monitor-bell	monitor-bell on
+monitor-silence	monitor-silence 0
+other-pane-height	other-pane-height 0
+other-pane-width	other-pane-width 0
+pane-active-border-style	pane-active-border-style "fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"
+pane-base-index	pane-base-index 0
+pane-border-format	pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+pane-border-indicators	pane-border-indicators colour
+pane-border-lines	pane-border-lines single
+pane-border-status	pane-border-status off
+pane-border-style	pane-border-style fg=themelightgrey
+pane-colours	pane-colours
+pane-scrollbars	pane-scrollbars off
+pane-scrollbars-timeout	pane-scrollbars-timeout 500
+pane-scrollbars-style	pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+pane-scrollbars-position	pane-scrollbars-position right
+popup-style	popup-style bg=themedarkgrey,fg=themewhite
+popup-border-style	popup-border-style bg=themedarkgrey,fg=themelightgrey
+popup-border-lines	popup-border-lines single
+remain-on-exit	remain-on-exit off
+remain-on-exit-format	remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+scroll-on-clear	scroll-on-clear on
+switch-mode-match-style	switch-mode-match-style "bg=cyan fg=black"
+synchronize-panes	synchronize-panes off
+tiled-layout-max-columns	tiled-layout-max-columns 0
+tree-mode-border-style	tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+tree-mode-preview-format	tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+tree-mode-preview-style	tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+tree-mode-selection-style	tree-mode-selection-style "#{E:mode-style}"
+window-active-style	window-active-style default
+window-pane-current-status-format	window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-pane-status-format	window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-size	window-size latest
+window-style	window-style default
+window-status-activity-style	window-status-activity-style reverse
+window-status-bell-style	window-status-bell-style reverse
+window-status-current-format	window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-current-style	window-status-current-style underscore
+window-status-format	window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-last-style	window-status-last-style default
+window-status-separator	window-status-separator " "
+window-status-style	window-status-style default
+wrap-search	wrap-search on
+xterm-keys	xterm-keys on
+after-bind-key	after-bind-key
+after-capture-pane	after-capture-pane
+after-copy-mode	after-copy-mode
+after-display-message	after-display-message
+after-display-panes	after-display-panes
+after-kill-pane	after-kill-pane
+after-list-buffers	after-list-buffers
+after-list-clients	after-list-clients
+after-list-keys	after-list-keys
+after-list-panes	after-list-panes
+after-list-sessions	after-list-sessions
+after-list-windows	after-list-windows
+after-load-buffer	after-load-buffer
+after-lock-server	after-lock-server
+after-new-session	after-new-session
+after-new-window	after-new-window
+after-paste-buffer	after-paste-buffer
+after-pipe-pane	after-pipe-pane
+after-refresh-client	after-refresh-client
+after-rename-session	after-rename-session
+after-rename-window	after-rename-window
+after-resize-pane	after-resize-pane
+after-resize-window	after-resize-window
+after-save-buffer	after-save-buffer
+after-select-layout	after-select-layout
+after-select-pane	after-select-pane
+after-select-window	after-select-window
+after-send-keys	after-send-keys
+after-set-buffer	after-set-buffer
+after-set-environment	after-set-environment
+after-set-hook	after-set-hook
+after-set-option	after-set-option
+after-show-environment	after-show-environment
+after-show-messages	after-show-messages
+after-show-options	after-show-options
+after-split-window	after-split-window
+after-swap-window	after-swap-window
+after-unbind-key	after-unbind-key
+alert-activity	alert-activity
+alert-bell	alert-bell
+alert-silence	alert-silence
+client-active	client-active
+client-attached	client-attached
+client-created	client-created
+client-closed	client-closed
+client-detached	client-detached
+client-focus-in	client-focus-in
+client-focus-out	client-focus-out
+client-resized	client-resized
+client-session-changed	client-session-changed
+client-light-theme	client-light-theme
+client-dark-theme	client-dark-theme
+command-error	command-error
+marked-pane-changed	marked-pane-changed
+pane-activity	pane-activity
+pane-bell	pane-bell
+pane-command-finished	pane-command-finished
+pane-command-started	pane-command-started
+pane-created	pane-created
+pane-died	pane-died
+pane-exited	pane-exited
+pane-focus-in	pane-focus-in
+pane-focus-out	pane-focus-out
+pane-mode-changed	pane-mode-changed
+pane-mode-entered	pane-mode-entered
+pane-mode-exited	pane-mode-exited
+pane-moved	pane-moved
+pane-prompt-closed	pane-prompt-closed
+pane-prompt-opened	pane-prompt-opened
+pane-resized	pane-resized
+pane-set-clipboard	pane-set-clipboard
+pane-shell-prompt	pane-shell-prompt
+pane-title-changed	pane-title-changed
+session-closed	session-closed
+session-created	session-created
+session-added-to-group	session-added-to-group
+session-renamed	session-renamed
+session-removed-from-group	session-removed-from-group
+session-window-changed	session-window-changed
+window-created	window-created
+window-closed	window-closed
+window-layout-changed	window-layout-changed
+window-linked	window-linked
+window-pane-changed	window-pane-changed
+window-renamed	window-renamed
+window-resized	window-resized
+window-unzoomed	window-unzoomed
+window-zoomed	window-zoomed
+window-unlinked	window-unlinked
