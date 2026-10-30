@@ -10,6 +10,6 @@ Just the core: no agent integration, no extra TUI, no animations. Images pass th
 
 Compliance is checked against tmux's own regress suite and a behaviour oracle recorded from real tmux 3.8. Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
 
-**Status:** design stage. Nothing runs yet. See the [spec](docs/specs/2026-10-29-vtmux.md).
+**Status:** early. The walking skeleton (M0) works: start a server, create sessions, windows and panes, attach and detach, control mode (`-C`), options, and most of tmux's format language. It passes 21 of 21 behaviour-oracle scenarios recorded from real tmux 3.8 and 15 of tmux's 174 regress tests so far. Not usable as a daily tmux yet; that's M1. See the [spec](docs/specs/2026-10-29-vtmux.md).
 
 Linux first, macOS second. ISC license.
