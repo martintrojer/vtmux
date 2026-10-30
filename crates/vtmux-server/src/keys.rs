@@ -2,6 +2,8 @@
 //! (`key_string_lookup_string`, 243-323) and the encoding of input-keys.c
 //! (`input_key`, 574-708, in the standard, non-extended mode).
 
+use vtmux_core::keys::Key as CoreKey;
+
 /// A named key without modifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Named {
@@ -40,6 +42,84 @@ pub struct Key {
     /// (tty-keys.c:118-131, no `KEYC_IMPLIED_META`): it reaches the pane
     /// as Escape plus the key's own sequence, not as an xterm modifier.
     pub esc_prefix: bool,
+}
+
+impl Key {
+    /// The key as tmux numbers it (tty-keys.c `tty_keys_next1`, the table
+    /// entries' `KEYC_*` values): what key tables are looked up with.
+    #[must_use]
+    pub fn to_core(&self) -> CoreKey {
+        use Named::{
+            BackTab, Backspace, Delete, Down, End, F, Home, Insert, Left, PageDown, PageUp, Right,
+            Up,
+        };
+        let mut k = match self.base {
+            Base::Char(c) => CoreKey::from_char(c),
+            Base::Named(n) => match n {
+                F(n) => CoreKey::function_key(n),
+                Insert => CoreKey::IC,
+                Delete => CoreKey::DC,
+                Home => CoreKey::HOME,
+                End => CoreKey::END,
+                PageDown => CoreKey::NPAGE,
+                PageUp => CoreKey::PPAGE,
+                BackTab => CoreKey::BTAB,
+                Backspace => CoreKey::BSPACE,
+                Up => CoreKey::UP,
+                Down => CoreKey::DOWN,
+                Left => CoreKey::LEFT,
+                Right => CoreKey::RIGHT,
+            },
+        };
+        if self.ctrl {
+            k = k.ctrl();
+        }
+        if self.meta {
+            k = k.meta();
+        }
+        if self.shift {
+            k = k.shift();
+        }
+        k
+    }
+
+    /// A core key as a key the pane encoder knows; `None` for keys it has no
+    /// bytes for (mouse, user keys, `None`).
+    #[must_use]
+    pub fn from_core(key: CoreKey) -> Option<Self> {
+        let base = key.base();
+        let base = if let Some(c) = base.as_char() {
+            Base::Char(c)
+        } else {
+            let named = [
+                (CoreKey::IC, Named::Insert),
+                (CoreKey::DC, Named::Delete),
+                (CoreKey::HOME, Named::Home),
+                (CoreKey::END, Named::End),
+                (CoreKey::NPAGE, Named::PageDown),
+                (CoreKey::PPAGE, Named::PageUp),
+                (CoreKey::BTAB, Named::BackTab),
+                (CoreKey::BSPACE, Named::Backspace),
+                (CoreKey::UP, Named::Up),
+                (CoreKey::DOWN, Named::Down),
+                (CoreKey::LEFT, Named::Left),
+                (CoreKey::RIGHT, Named::Right),
+            ];
+            let found = named.iter().find(|(k, _)| *k == base).map(|(_, n)| *n);
+            Base::Named(found.or_else(|| {
+                (1..=12)
+                    .find(|n| CoreKey::function_key(*n) == base)
+                    .map(Named::F)
+            })?)
+        };
+        Some(Self {
+            base,
+            ctrl: key.has_ctrl(),
+            meta: key.has_meta(),
+            shift: key.has_shift(),
+            esc_prefix: false,
+        })
+    }
 }
 
 /// The pane modes that change key encoding.
@@ -330,6 +410,43 @@ mod tests {
             send_keys_bytes("Up", false, KeyModes { app_cursor: true }),
             b"\x1bOA"
         );
+    }
+
+    #[test]
+    fn decoded_keys_are_tmux_key_codes() {
+        let k = |base, ctrl, meta, shift| Key {
+            base,
+            ctrl,
+            meta,
+            shift,
+            esc_prefix: false,
+        };
+        for (key, name) in [
+            (k(Base::Char('b'), true, false, false), "C-b"),
+            (k(Base::Char('%'), false, false, false), "%"),
+            (k(Base::Char('x'), false, true, false), "M-x"),
+            (k(Base::Char(' '), true, false, false), "C-Space"),
+            (k(Base::Char('\r'), false, false, false), "Enter"),
+            (k(Base::Char('\x1b'), false, false, false), "Escape"),
+            (k(Base::Char('é'), false, false, false), "é"),
+            (k(Base::Named(Named::Left), false, false, true), "S-Left"),
+            (k(Base::Named(Named::F(5)), false, false, false), "F5"),
+            (k(Base::Named(Named::PageUp), false, false, false), "PPage"),
+            (
+                k(Base::Named(Named::Backspace), false, false, false),
+                "BSpace",
+            ),
+        ] {
+            let core = key.to_core();
+            assert_eq!(core.to_string(), name);
+            assert_eq!(
+                CoreKey::from_name(name).map(CoreKey::without_flags),
+                Some(core),
+                "{name}"
+            );
+            assert_eq!(Key::from_core(core), Some(key), "{name}");
+        }
+        assert_eq!(Key::from_core(CoreKey::NONE), None);
     }
 
     #[test]

@@ -47,6 +47,43 @@ pub struct ClientView {
     pub session: Option<SessionId>,
     /// `c->activity_time` as a server-wide stamp: creation, then input.
     pub activity: u64,
+    /// `c->activity_time` and `c->creation_time`, epoch seconds.
+    pub activity_secs: i64,
+    pub created_secs: i64,
+    /// `c->tty.sx`/`sy`; the height only once the terminal started
+    /// (`TTY_STARTED`: a terminal client, not control mode).
+    pub width: u32,
+    pub height: Option<u32>,
+    /// `c->term_name` (`unknown` when the client sent none).
+    pub term_name: String,
+    /// `c->ttyname`; `None` without a tty.
+    pub tty: Option<String>,
+    pub control: bool,
+    pub utf8: bool,
+    pub pid: u32,
+    /// The key table the client is in, and its default table.
+    pub key_table: String,
+    pub default_key_table: String,
+    pub last_session: Option<SessionId>,
+    /// `format_cb_client_colours`, for a started terminal.
+    pub colours: Option<u32>,
+    /// Frame bytes written (`c->written`).
+    pub written: usize,
+}
+
+impl ClientView {
+    /// `server_client_get_flags` (server-client.c:3163-3199) for the flags
+    /// vtmux clients have: every listed client is attached and focused.
+    fn flags(&self) -> String {
+        let mut flags = vec!["attached", "focused"];
+        if self.control {
+            flags.push("control-mode");
+        }
+        if self.utf8 {
+            flags.push("UTF-8");
+        }
+        flags.join(",")
+    }
 }
 
 /// One expansion's view: the model plus the target (`format_defaults(ft,
@@ -132,12 +169,46 @@ impl<'a> Ctx<'a> {
         self.model.panes.get(&self.target.pane?)
     }
 
-    /// The client variables vtmux has (format.c `format_cb_client_*`).
+    /// The client variables (format.c `format_cb_client_*`, 1540-1830).
+    /// `client_termfeatures` is the terminal-features work's; vtmux has
+    /// no pixel sizes (0, as tmux without them), discard count, theme or
+    /// read-only clients yet.
     fn client_value(&self, name: &str) -> Option<String> {
         let c = self.client.as_ref()?;
+        let flag = |b: bool| u8::from(b).to_string();
         Some(match name {
             "client_name" => c.name.clone(),
             "client_session" => self.model.sessions.get(&c.session?)?.name.clone(),
+            "client_last_session" => self.model.sessions.get(&c.last_session?)?.name.clone(),
+            "client_width" => c.width.to_string(),
+            "client_height" => c.height?.to_string(),
+            "client_cell_width" | "client_cell_height" => {
+                c.height?;
+                "0".to_owned()
+            }
+            "client_colours" => c.colours?.to_string(),
+            "client_termname" => c.term_name.clone(),
+            "client_termtype" => String::new(),
+            "client_tty" => c.tty.clone()?,
+            "client_flags" => c.flags(),
+            "client_control_mode" => flag(c.control),
+            "client_readonly" => flag(false),
+            "client_utf8" => flag(c.utf8),
+            "client_pid" => c.pid.to_string(),
+            "client_key_table" => c.key_table.clone(),
+            "client_prefix" => flag(c.key_table != c.default_key_table),
+            "client_discarded" => "0".to_owned(),
+            "client_written" => c.written.to_string(),
+            "client_activity" => c.activity_secs.to_string(),
+            "client_created" => c.created_secs.to_string(),
+            // The server accepts only its own user (no server-access), so
+            // the peer's uid is the server's.
+            "client_uid" => rustix::process::getuid().as_raw().to_string(),
+            "client_user" => sys::user::current_user()?.name,
+            "client_mode_format" => {
+                "#[fg=themelightgrey]#{t/p:client_activity}: session #[default]#{session_name}"
+                    .to_owned()
+            }
             _ => return None,
         })
     }
@@ -303,6 +374,8 @@ impl Ctx<'_> {
         let server = match name {
             "socket_path" => Some(self.info.socket_path.clone()),
             "pid" => Some(self.info.pid.to_string()),
+            "uid" => Some(rustix::process::getuid().as_raw().to_string()),
+            "user" => sys::user::current_user().map(|p| p.name),
             "version" => Some("3.8".to_owned()),
             "vtmux_version" => Some(env!("CARGO_PKG_VERSION").to_owned()),
             "host" => Some(self.info.host.clone()),
@@ -346,6 +419,8 @@ impl FormatContext for Ctx<'_> {
     fn time(&self, name: &str) -> Option<i64> {
         match name {
             "session_created" | "session_activity" => self.session().map(|s| s.created),
+            "client_activity" => self.client.as_ref().map(|c| c.activity_secs),
+            "client_created" => self.client.as_ref().map(|c| c.created_secs),
             _ => None,
         }
     }

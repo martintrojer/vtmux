@@ -120,7 +120,7 @@ const fn slot(flag: char, kind: TargetKind, flags: FindFlags) -> FindSpec {
 #[rustfmt::skip]
 pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("attach-session", Some("attach"), "c:dEf:rt:x", 0, Some(0), "[-dErx] [-c working-directory] [-f flags] [-t target-session]", None, None, true, true),
-    cmd("bind-key", Some("bind"), "nrN:T:", 1, None, "[-nr] [-T key-table] [-N note] key [command [argument ...]]", None, None, false, false),
+    cmd("bind-key", Some("bind"), "nrN:T:", 1, None, "[-nr] [-T key-table] [-N note] key [command [argument ...]]", None, None, false, true),
     cmd("break-pane", Some("breakp"), "abdPF:n:s:t:Wx:X:y:Y:", 0, Some(0), "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]", Some(slot('t', TargetKind::Window, FindFlags::WINDOW_INDEX)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, true),
     cmd("capture-pane", Some("capturep"), "ab:CeE:FHIJLMNpPqRS:Tt:", 0, Some(0), "[-aCeFHIJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("choose-buffer", None, "F:f:K:kNO:rt:yZ", 0, Some(1), "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
@@ -153,7 +153,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("list-buffers", Some("lsb"), "F:f:O:r", 0, Some(0), "[-F format] [-f filter] [-O order]", None, None, false, false),
     cmd("list-clients", Some("lsc"), "F:f:O:rt:", 0, Some(0), "[-F format] [-f filter] [-O order][-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("list-commands", Some("lscm"), "F:", 0, Some(1), "[-F format] [command]", None, None, true, false),
-    cmd("list-keys", Some("lsk"), "1aF:NO:P:rT:", 0, Some(1), "[-1aNr] [-F format] [-O order] [-P prefix-string][-T key-table] [key]", None, None, true, false),
+    cmd("list-keys", Some("lsk"), "1aF:NO:P:rT:", 0, Some(1), "[-1aNr] [-F format] [-O order] [-P prefix-string][-T key-table] [key]", None, None, true, true),
     cmd("list-panes", Some("lsp"), "aF:f:O:rst:", 0, Some(0), "[-asr] [-F format] [-f filter] [-O order][-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("list-sessions", Some("ls"), "F:f:O:r", 0, Some(0), "[-r] [-F format] [-f filter] [-O order]", None, None, false, true),
     cmd("list-windows", Some("lsw"), "aF:f:O:rt:", 0, Some(0), "[-ar] [-F format] [-f filter] [-O order][-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
@@ -186,7 +186,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("select-pane", Some("selectp"), "DdegLlMmP:RT:t:UZ", 0, Some(0), "[-DdeLlMmRUZ] [-T title] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("select-window", Some("selectw"), "lnpTt:", 0, Some(0), "[-lnpT] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("send-keys", Some("send"), "c:FHKlMN:Rt:X", 0, None, "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
-    cmd("send-prefix", None, "2t:", 0, Some(0), "[-2] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("send-prefix", None, "2t:", 0, Some(0), "[-2] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("server-access", None, "adglrw", 0, Some(1), "[-adglrw] [-t target-pane] [user|group]", None, None, false, false),
     cmd("set-buffer", Some("setb"), "ab:t:n:w", 0, Some(1), "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]", None, None, false, false),
     cmd("set-environment", Some("setenv"), "Fhgrt:u", 1, Some(2), "[-Fhgru] [-t target-session] variable [value]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, true),
@@ -206,9 +206,9 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("suspend-client", Some("suspendc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, false),
     cmd("swap-pane", Some("swapp"), "dDs:t:UZ", 0, Some(0), "[-dDUZ] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("swap-window", Some("swapw"), "ds:t:", 0, Some(0), "[-d] [-s src-window] [-t dst-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::DEFAULT_MARKED)), false, false),
-    cmd("switch-client", Some("switchc"), "c:EFlnO:pt:rT:Z", 0, Some(0), "[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]", None, None, false, false),
+    cmd("switch-client", Some("switchc"), "c:EFlnO:pt:rT:Z", 0, Some(0), "[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]", None, None, false, true),
     cmd("switch-mode", None, "F:kst:wZ", 0, Some(1), "[-kswZ] [-F format] [-t target-pane] [command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
-    cmd("unbind-key", Some("unbind"), "anqT:", 0, Some(1), "[-anq] [-T key-table] key", None, None, false, false),
+    cmd("unbind-key", Some("unbind"), "anqT:", 0, Some(1), "[-anq] [-T key-table] key", None, None, false, true),
     cmd("unlink-window", Some("unlinkw"), "kt:", 0, Some(0), "[-k] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
     cmd("wait-for", Some("wait"), "EF:LSUlvw:", 1, Some(1), "[-ELSUlv] [-F format] [-w waiter] name", None, None, false, true),
 ];
@@ -346,7 +346,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 42);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 47);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
