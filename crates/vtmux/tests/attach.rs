@@ -3,6 +3,7 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -55,10 +56,13 @@ impl World {
             .unwrap()
     }
     fn attach(&self, args: &[&str]) -> Attached {
+        self.attach_sized(args, 40, 10)
+    }
+    fn attach_sized(&self, args: &[&str], cols: u16, rows: u16) -> Attached {
         let pair = native_pty_system()
             .openpty(PtySize {
-                rows: 10,
-                cols: 40,
+                rows,
+                cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -75,9 +79,16 @@ impl World {
         let mut reader = pair.master.try_clone_reader().unwrap();
         let bytes = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&bytes);
+        let paused = Arc::new(AtomicBool::new(false));
+        let pause = Arc::clone(&paused);
         thread::spawn(move || {
             let mut buf = [0; 8192];
-            while let Ok(n) = reader.read(&mut buf) {
+            loop {
+                // A stalled terminal: stop draining the master.
+                while pause.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                let Ok(n) = reader.read(&mut buf) else { break };
                 if n == 0 {
                     break;
                 }
@@ -90,6 +101,8 @@ impl World {
             writer,
             child,
             bytes,
+            paused,
+            size: (cols, rows),
         }
     }
 }
@@ -103,6 +116,8 @@ struct Attached {
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     bytes: Arc<Mutex<Vec<u8>>>,
+    paused: Arc<AtomicBool>,
+    size: (u16, u16),
 }
 impl Attached {
     fn keys(&mut self, b: &[u8]) {
@@ -113,16 +128,29 @@ impl Attached {
         String::from_utf8_lossy(&self.bytes.lock().unwrap()).into_owned()
     }
     fn screen(&self) -> PaneTerm {
-        let mut t = PaneTerm::new(40, 10, 100);
+        let mut t = PaneTerm::new(self.size.0, self.size.1, 100);
         t.feed(&self.bytes.lock().unwrap());
         t
     }
     fn wait(&self, predicate: impl Fn(&Self) -> bool) {
-        let end = Instant::now() + Duration::from_secs(5);
+        self.wait_for(Duration::from_secs(5), predicate);
+    }
+    fn wait_for(&self, limit: Duration, predicate: impl Fn(&Self) -> bool) {
+        let end = Instant::now() + limit;
         while !predicate(self) {
             assert!(Instant::now() < end, "timeout: {:?}", self.text());
             thread::sleep(Duration::from_millis(10));
         }
+    }
+    fn signal(&self, signal: rustix::process::Signal) {
+        let pid = rustix::process::Pid::from_raw(
+            i32::try_from(self.child.process_id().unwrap()).unwrap(),
+        )
+        .unwrap();
+        rustix::process::kill_process(pid, signal).unwrap();
+    }
+    fn alive(&mut self) -> bool {
+        self.child.try_wait().unwrap().is_none()
     }
     fn exited(&mut self, code: u32) {
         let end = Instant::now() + Duration::from_secs(5);
@@ -246,11 +274,7 @@ fn signal_exit_restores_terminal_modes() {
             let w = World::new(bin.clone());
             let mut a = w.attach(&["new", "-s", "a", "cat"]);
             a.wait(|a| a.text().contains("\x1b[?1049h"));
-            let pid = rustix::process::Pid::from_raw(
-                i32::try_from(a.child.process_id().unwrap()).unwrap(),
-            )
-            .unwrap();
-            rustix::process::kill_process(pid, signal).unwrap();
+            a.signal(signal);
             a.exited(1);
             a.wait(|a| a.text().contains("\x1b[?1049l"));
             assert!(w.cli(&["has", "-t", "a"]).status.success());
@@ -272,5 +296,110 @@ fn session_and_server_exit_messages() {
         assert!(w.cli(&["kill-server"]).status.success());
         b.exited(1);
         b.wait(|a| a.text().contains("[server exited]"));
+    }
+}
+
+/// tmux buffers frames for a stalled terminal (bufferevents); the vtmux
+/// client shares `O_NONBLOCK` between stdin and stdout and must not die on
+/// EAGAIN.
+#[test]
+fn stalled_terminal_under_heavy_output_keeps_the_client() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach_sized(
+            &[
+                "new",
+                "-s",
+                "a",
+                "-n",
+                "w",
+                "sh",
+                "-c",
+                "printf READY; read x; i=0; while [ $i -lt 400 ]; do printf '\\033[3%dm%d %060d\\n' $((i%8)) $i $i; i=$((i+1)); done; printf '\\033[0mDONE'; exec cat",
+            ],
+            80,
+            24,
+        );
+        a.wait(|a| pane_text(a).contains("READY"));
+        a.paused.store(true, Ordering::Relaxed);
+        a.keys(b"\r");
+        thread::sleep(Duration::from_secs(3));
+        assert!(a.alive(), "client died while the terminal was stalled");
+        a.paused.store(false, Ordering::Relaxed);
+        a.wait_for(Duration::from_secs(30), |a| pane_text(a).contains("DONE"));
+        assert!(a.alive());
+        a.keys(b"\x02d");
+        a.exited(0);
+        a.wait(|a| a.text().contains("\x1b[?1049l"));
+    }
+}
+
+/// proc.c `proc_set_signals`: SIGQUIT is ignored and SIGINT is caught and
+/// ignored by an attached client (client.c `client_signal`).
+#[test]
+fn sigint_and_sigquit_leave_the_client_attached() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&["new", "-s", "a", "cat"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        a.signal(rustix::process::Signal::INT);
+        a.signal(rustix::process::Signal::QUIT);
+        thread::sleep(Duration::from_millis(300));
+        assert!(a.alive());
+        a.keys(b"\x02d");
+        a.exited(0);
+        a.wait(|a| a.text().contains("[detached (from session a)]"));
+    }
+}
+
+fn pane_line(w: &World) -> String {
+    String::from_utf8_lossy(&w.cli(&["capture-pane", "-p", "-t", "a"]).stdout)
+        .trim()
+        .to_owned()
+}
+
+/// tty-keys.c:990-1012: while terminal queries are outstanding a partial
+/// sequence waits at least 500ms, so a reply split over a slow link is
+/// still swallowed. DECRPM goes last: it ends vtmux's query window.
+#[test]
+fn split_terminal_replies_are_swallowed() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&["new", "-s", "a", "sh", "-c", "stty raw -echo; exec cat -v"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        for reply in [
+            &b"\x1b[?62;4c"[..],
+            b"\x1b]11;rgb:0000/0000/0000\x1b\\",
+            b"\x1b[?2026;2$y",
+        ] {
+            a.keys(&reply[..4]);
+            thread::sleep(Duration::from_millis(50));
+            a.keys(&reply[4..]);
+            a.keys(b"|");
+        }
+        a.wait(|_| pane_line(&w) == "|||");
+    }
+}
+
+/// tty-keys.c:118-131 and input-keys.c:658-671: Escape before an arrow is
+/// Escape plus the arrow for the pane's cursor mode, not xterm M-Up.
+#[test]
+fn escape_escape_arrow_is_escape_then_arrow() {
+    for bin in bins() {
+        for (pre, want) in [("", "^[^[[A|"), ("printf '\\033[?1h'; ", "^[^[OA|")] {
+            let w = World::new(bin.clone());
+            let mut a = w.attach(&[
+                "new",
+                "-s",
+                "a",
+                "sh",
+                "-c",
+                &format!("{pre}stty raw -echo; exec cat -v"),
+            ]);
+            a.wait(|a| a.text().contains("\x1b[?1049h"));
+            thread::sleep(Duration::from_millis(200));
+            a.keys(b"\x1b\x1b[A|");
+            a.wait(|_| pane_line(&w) == want);
+        }
     }
 }
