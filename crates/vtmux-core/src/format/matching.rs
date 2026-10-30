@@ -63,11 +63,11 @@ impl Eval<'_> {
             return super::fuzzy::matches(&left, &right, flags.contains('p'));
         }
         let yes = if flags.contains('r') {
+            // format.c:format_match returns "0" when regcomp or regexec fails
+            // for any reason, including resource exhaustion; so does a limit here.
             Regex::new(&left, flags.contains('i'))
-                .and_then(|r| r.find(&right))
-                .ok()
-                .flatten()
-                .is_some()
+                .and_then(|r| r.is_match(&right))
+                .unwrap_or(false)
         } else {
             crate::fnmatch::matches(&left, &right, flags.contains('i'))
         };
@@ -96,6 +96,7 @@ fn regsub(pattern: &str, with: &str, text: &str, icase: bool) -> String {
     if text.is_empty() || pattern.is_empty() {
         return text.to_owned();
     }
+    // A regcomp failure makes regsub return NULL; format_sub then keeps the text.
     let Ok(regex) = Regex::new(pattern, icase) else {
         return text.to_owned();
     };
@@ -109,6 +110,8 @@ fn regsub(pattern: &str, with: &str, text: &str, icase: bool) -> String {
         while boundary < text.len() && !text.is_char_boundary(boundary) {
             boundary += 1;
         }
+        // regsub.c: any regexec failure (no match, or a resource limit) copies
+        // the rest of the text and stops; earlier replacements stand.
         let result = regex.find(&text[boundary..]);
         let Ok(Some(m)) = result else {
             out.extend_from_slice(&text.as_bytes()[start..]);
@@ -175,6 +178,28 @@ mod tests {
         }
     }
     include!("matching_golden.in");
+
+    /// A backreference search that trips the work cap behaves like a failed
+    /// `regexec` in tmux (format.c:`format_match`, regsub.c:`regsub`).
+    #[test]
+    fn format_matching_limit_is_regexec_failure() {
+        let tail = "a".repeat(3000);
+        assert_eq!(
+            crate::regex::Regex::new("(a*)\\1b", false)
+                .unwrap()
+                .find(&tail),
+            Err(crate::regex::Error::Limit)
+        );
+        assert_eq!(
+            expand_str(&format!("#{{m/r:(a*)\\1b,{tail}}}"), &Context),
+            "0"
+        );
+        let text = format!("aab {tail}");
+        assert_eq!(
+            super::regsub("(a*)\\1b", "X", &text, false),
+            format!("X {tail}")
+        );
+    }
     #[test]
     fn format_matching_reference_goldens() {
         for (fmt, expected) in rows() {
