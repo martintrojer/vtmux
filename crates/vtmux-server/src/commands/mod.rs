@@ -16,6 +16,7 @@ mod break_pane;
 mod capture_pane;
 mod display_message;
 mod join_pane;
+mod keys;
 mod kill_pane;
 mod kill_server;
 mod kill_session;
@@ -90,6 +91,9 @@ pub struct Item {
     pub control: Option<u8>,
     /// The command that just ran blocked the client (`CMD_RETURN_WAIT`).
     pub blocked: bool,
+    /// Run from a repeating key binding (`CMDQ_STATE_REPEAT`):
+    /// `switch-client` then keeps the client's key table.
+    pub repeat: bool,
 }
 
 impl Item {
@@ -107,6 +111,7 @@ impl Item {
             after: After::Exit,
             control: None,
             blocked: false,
+            repeat: false,
         }
     }
 
@@ -160,7 +165,11 @@ pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) -> Optio
     for (i, call) in calls.iter().enumerate() {
         let guard = server.control_begin(item);
         let result = run_one(server, item, call);
-        if let Err(e) = &result {
+        // A quiet failure (unbind-key -q) ends the group but never reached
+        // cmdq_error: no message, no exit status.
+        if let Err(e) = result.as_ref()
+            && !matches!(e, CmdError::Quiet)
+        {
             let line = match e {
                 CmdError::Edge(edge) => edge.to_bytes(),
                 other => other.to_bytes(),
@@ -168,6 +177,9 @@ pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) -> Optio
             item.error(server, line);
         }
         server.control_end(item, guard, result.is_ok());
+        // send-keys -K: the keys are handled as queue items after this
+        // command (server_client_handle_key_after), so after its guard.
+        server.handle_injected_keys();
         if result.is_err() {
             return None;
         }
@@ -237,6 +249,10 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
+        "bind-key" | "unbind-key" => keys::bind_or_unbind(server, call),
+        "list-keys" => keys::list_keys(server, item, args, found),
+        "send-prefix" => keys::send_prefix(server, args, found),
+        "switch-client" => keys::switch_client(server, item, args),
         "source-file" => source_file::exec(server, item, args, found),
         "wait-for" => wait_for::exec(server, item, args),
         "set-option" | "set-window-option" => {

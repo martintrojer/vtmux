@@ -94,6 +94,9 @@ pub enum CmdError {
     Unsupported(&'static str),
     /// The command exists in tmux 3.8 but vtmux does not run it yet.
     NotImplemented(String),
+    /// The command failed without a message (`unbind-key -q`): the rest of
+    /// its group is dropped, nothing is printed.
+    Quiet,
 }
 
 impl fmt::Display for CmdError {
@@ -123,6 +126,7 @@ impl fmt::Display for CmdError {
             Self::Lex(s) => f.write_str(s),
             Self::Unsupported(s) => write!(f, "not supported in vtmux yet: {s}"),
             Self::NotImplemented(name) => write!(f, "not implemented in vtmux yet: {name}"),
+            Self::Quiet => Ok(()),
         }
     }
 }

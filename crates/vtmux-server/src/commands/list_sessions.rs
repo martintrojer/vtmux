@@ -18,14 +18,14 @@ const TEMPLATE: &str = "#{session_name}: #{session_windows} windows \
 /// `sort_order_from_string` (sort.c:371-394) for the orders a session list
 /// accepts; everything else valid is "no sort" (name order).
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Order {
+pub(super) enum Order {
     Name,
     Index,
     Creation,
     Activity,
 }
 
-fn order(s: Option<&str>) -> Result<Option<Order>, EdgeError> {
+pub(super) fn order(s: Option<&str>) -> Result<Option<Order>, EdgeError> {
     let Some(s) = s else { return Ok(None) };
     let s = s.to_ascii_lowercase();
     Ok(Some(match s.as_str() {
@@ -42,22 +42,7 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
     let template = args.value('F').unwrap_or(TEMPLATE);
     let filter = args.value('f');
     let ord = order(args.value('O'))?;
-    let mut sessions: Vec<_> = server.model.sessions_by_name().collect();
-    // sort_qsort (sort.c:39-61): no -O keeps the tree (name) order and
-    // ignores -r; otherwise sort, ties by name, -r reverses.
-    if let Some(ord) = ord {
-        sessions.sort_by(|a, b| {
-            let primary = match ord {
-                Order::Name => std::cmp::Ordering::Equal,
-                Order::Index => a.id.cmp(&b.id),
-                Order::Creation => a.created.cmp(&b.created),
-                Order::Activity => b.activity.cmp(&a.activity),
-            };
-            let o = primary.then_with(|| a.name.cmp(&b.name));
-            if args.flag('r') { o.reverse() } else { o }
-        });
-    }
-    let ids: Vec<_> = sessions.iter().map(|s| s.id).collect();
+    let ids = sorted(server, ord, args.flag('r'));
     let mut lines = Vec::new();
     for (i, id) in ids.into_iter().enumerate() {
         let found = Found {
@@ -78,4 +63,28 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
         item.print(&line);
     }
     Ok(())
+}
+
+/// Sessions in `sort_get_sessions` order (sort.c:39-61): no order keeps
+/// the tree (name) order and ignores `-r`; otherwise sort, ties by name,
+/// `-r` reverses.
+pub(super) fn sorted(
+    server: &Server,
+    ord: Option<Order>,
+    reversed: bool,
+) -> Vec<vtmux_core::ids::SessionId> {
+    let mut sessions: Vec<_> = server.model.sessions_by_name().collect();
+    if let Some(ord) = ord {
+        sessions.sort_by(|a, b| {
+            let primary = match ord {
+                Order::Name => std::cmp::Ordering::Equal,
+                Order::Index => a.id.cmp(&b.id),
+                Order::Creation => a.created.cmp(&b.created),
+                Order::Activity => b.activity.cmp(&a.activity),
+            };
+            let o = primary.then_with(|| a.name.cmp(&b.name));
+            if reversed { o.reverse() } else { o }
+        });
+    }
+    sessions.iter().map(|s| s.id).collect()
 }

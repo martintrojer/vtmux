@@ -8,6 +8,8 @@ use std::path::PathBuf;
 /// The fields of a passwd entry the server uses.
 #[derive(Clone, Debug)]
 pub struct Passwd {
+    /// `pw_name` (`#{user}`, `#{client_user}`).
+    pub name: String,
     pub home: PathBuf,
     pub shell: PathBuf,
 }
@@ -28,6 +30,7 @@ unsafe fn fields(pw: &libc::passwd) -> Passwd {
         }
     };
     Passwd {
+        name: field(pw.pw_name).to_string_lossy().into_owned(),
         home: field(pw.pw_dir),
         shell: field(pw.pw_shell),
     }

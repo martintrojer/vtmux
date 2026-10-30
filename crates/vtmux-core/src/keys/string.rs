@@ -246,6 +246,34 @@ fn get_modifiers(s: &mut &str) -> Result<u64, ()> {
 }
 
 impl Key {
+    /// The key a character typed on a terminal is (tty-keys.c
+    /// `tty_keys_next1`): ASCII as itself, anything else as its
+    /// `utf8_char`.
+    #[must_use]
+    pub fn from_char(c: char) -> Self {
+        if c.is_ascii() {
+            Self::ascii(c as u8)
+        } else {
+            Self(utf8_char(c))
+        }
+    }
+
+    /// The character of a character key (ASCII or Unicode), modifiers
+    /// ignored; `None` for function, mouse and user keys.
+    #[must_use]
+    pub fn as_char(self) -> Option<char> {
+        let key = self.0 & MASK_KEY;
+        if let Ok(byte) = u8::try_from(key)
+            && byte.is_ascii()
+        {
+            return Some(char::from(byte));
+        }
+        if key >> 32 != ty::UNICODE {
+            return None;
+        }
+        utf8_text(key).chars().next()
+    }
+
     /// `key_string_lookup_string`. `None` is `KEYC_UNKNOWN`; `"None"` is
     /// `Some(Key::NONE)`, which callers reject themselves.
     ///

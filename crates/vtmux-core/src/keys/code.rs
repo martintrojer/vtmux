@@ -161,6 +161,33 @@ impl Key {
         Self(self.0 & (MASK_KEY | MASK_MODIFIERS))
     }
 
+    /// The key without modifiers or flags (`key & KEYC_MASK_KEY`).
+    #[must_use]
+    pub const fn base(self) -> Self {
+        Self(self.0 & MASK_KEY)
+    }
+
+    #[must_use]
+    pub const fn has_ctrl(self) -> bool {
+        self.0 & CTRL != 0
+    }
+
+    #[must_use]
+    pub const fn has_meta(self) -> bool {
+        self.0 & META != 0
+    }
+
+    #[must_use]
+    pub const fn has_shift(self) -> bool {
+        self.0 & SHIFT != 0
+    }
+
+    /// The `n`th function key, `F1` being 1 (`KEYC_F1 + n - 1`).
+    #[must_use]
+    pub const fn function_key(n: u8) -> Self {
+        Self(Self::F1.0 + n as u64 - 1)
+    }
+
     /// The modifier bits alone (`sort_key_binding_cmp`, `-O modifier`).
     #[must_use]
     pub const fn modifiers(self) -> u64 {

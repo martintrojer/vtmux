@@ -82,11 +82,24 @@ pub(crate) struct Client {
     /// `c->activity_time` as a model activity stamp: set when the client
     /// connects (server-client.c:289), bumped by its keys (1467).
     pub(crate) activity: u64,
-    prefix: bool,
+    /// `c->activity_time` and `c->creation_time` in epoch seconds, for
+    /// `#{client_activity}` / `#{client_created}`.
+    pub(crate) activity_secs: i64,
+    pub(crate) created_secs: i64,
+    /// Key table state (`c->keytable`, `CLIENT_REPEAT`, `c->last_key`,
+    /// `c->repeat_timer`).
+    pub(crate) keys: crate::key_dispatch::ClientKeys,
+    /// `c->last_session`.
+    pub(crate) last_session: Option<SessionId>,
+    /// The status-line message an attached client was given
+    /// (`c->message_string`); shown once the status line draws messages.
+    pub(crate) message: Option<String>,
+    /// Frame bytes sent to the client (`c->written`).
+    pub(crate) written: usize,
     pasting: bool,
     decoder: crate::input::Decoder,
     caps: Option<crate::render::Caps>,
-    compositor: crate::render::Compositor,
+    pub(crate) compositor: crate::render::Compositor,
 }
 
 /// Frame bytes the client has not yet written to its terminal: in
@@ -224,6 +237,11 @@ pub struct Server {
     /// Clients woken this turn (`cmdq_continue`); their batches resume at
     /// the end of the turn, as tmux resumes them in its next `cmdq_next`.
     woken: Vec<ClientId>,
+    /// Every key table (`key_tables`), the 3.8 defaults loaded at start.
+    pub key_bindings: vtmux_core::keys::KeyBindings,
+    /// Keys `send-keys -K` handed to a client, handled after the command
+    /// (`server_client_handle_key_after`).
+    pub(crate) injected_keys: Vec<(ClientId, vtmux_core::keys::Key)>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -346,6 +364,8 @@ impl Server {
             waits: WaitChannels::default(),
             parked: BTreeMap::new(),
             woken: Vec::new(),
+            key_bindings: vtmux_core::keys::KeyBindings::with_defaults(),
+            injected_keys: Vec::new(),
         })
     }
 
@@ -386,6 +406,7 @@ impl Server {
             for p in std::mem::take(&mut self.backlog) {
                 self.pane_readable(p);
             }
+            self.expire_repeat(Instant::now());
             let ids: Vec<_> = self.clients.keys().copied().collect();
             for id in ids {
                 let _ = self.on_client_input(id, &[]);
@@ -413,7 +434,8 @@ impl Server {
         if let Some(deadline) = self
             .clients
             .values()
-            .filter_map(|c| c.decoder.deadline())
+            .flat_map(|c| [c.decoder.deadline(), c.keys.repeat_deadline])
+            .flatten()
             .min()
         {
             return Some(deadline.saturating_duration_since(Instant::now()));
@@ -501,7 +523,12 @@ impl Server {
                             attached: None,
                             control: None,
                             activity,
-                            prefix: false,
+                            activity_secs: now_epoch(),
+                            created_secs: now_epoch(),
+                            keys: crate::key_dispatch::ClientKeys::default(),
+                            last_session: None,
+                            message: None,
+                            written: 0,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
                             caps: None,
@@ -681,6 +708,7 @@ impl Server {
             if let Ok(bytes) = protocol::encode(f) {
                 if matches!(f, ServerMsg::Frame(_)) {
                     c.unacked.sent(bytes.len());
+                    c.written += bytes.len();
                 }
                 c.outbuf.extend_from_slice(&bytes);
             }
@@ -849,7 +877,6 @@ impl Server {
         client.caps = Some(caps);
         client.compositor.invalidate();
         client.attached = Some(s);
-        client.prefix = false;
         // server_client_set_session: session_update_activity (server-client.c:468).
         let stamp = self.model.touch();
         if let Some(session) = self.model.sessions.get_mut(&s) {
@@ -874,7 +901,7 @@ impl Server {
 
     /// `recalculate_sizes` latest semantics (M0 one attached client): status
     /// costs one row; both emulator and kernel PTY get the same dimensions.
-    fn resize_client(&mut self, id: ClientId, cols: u32, rows: u32) {
+    pub(crate) fn resize_client(&mut self, id: ClientId, cols: u32, rows: u32) {
         let Some(client) = self.clients.get_mut(&id) else {
             return;
         };
@@ -959,7 +986,9 @@ impl Server {
         self.flush_client(id);
     }
 
-    /// M0 prefix table: C-b d detaches; other prefixed keys are ignored.
+    /// Input from an attached terminal client: decode it into keys
+    /// (tty-keys.c) and hand each to the key tables
+    /// ([`Server::handle_key`], `server_client_key_callback`).
     pub fn on_client_input(&mut self, id: ClientId, bytes: &[u8]) -> Result<(), EdgeError> {
         let Some(s) = self
             .clients
@@ -969,31 +998,22 @@ impl Server {
         else {
             return Ok(());
         };
-        let (_, _, p) = self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
+        self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
         let c = self
             .clients
             .get_mut(&id)
             .ok_or(EdgeError::NoCurrentClient)?;
-        // server_client_handle_key: the client's and session's activity
-        // (server-client.c:1465-1469).
-        let stamp = self.model.touch();
-        c.activity = stamp;
-        if let Some(session) = self.model.sessions.get_mut(&s) {
-            session.activity = stamp;
-        }
         c.decoder.feed(bytes);
-        let events = c.decoder.drain(Instant::now());
-        let term = &self.model.panes[&p].term;
-        let modes = crate::keys::KeyModes {
-            app_cursor: term.app_cursor(),
-        };
-        let bracketed = term.bracketed_paste();
-        let mut forward = Vec::new();
+        let now = Instant::now();
+        let events = c.decoder.drain(now);
+        if !events.is_empty() {
+            // The repeat timer fires before keys that arrive after it.
+            self.expire_repeat(now);
+        }
         for event in events {
-            let c = self
-                .clients
-                .get_mut(&id)
-                .ok_or(EdgeError::NoCurrentClient)?;
+            let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached.is_some()) else {
+                break;
+            };
             match event {
                 crate::input::Event::Ignore => {}
                 crate::input::Event::Sync(sync) => {
@@ -1003,34 +1023,69 @@ impl Server {
                 }
                 crate::input::Event::Paste(start) => {
                     c.pasting = start;
-                    if bracketed {
-                        forward.extend_from_slice(if start { b"\x1b[200~" } else { b"\x1b[201~" });
+                    // server_client_is_bracket_paste: the markers reach a
+                    // pane that asked for bracketed paste.
+                    if let Some(p) = self.client_pane(id)
+                        && self.model.panes[&p].term.bracketed_paste()
+                    {
+                        self.write_pane(p, if start { b"\x1b[200~" } else { b"\x1b[201~" });
                     }
                 }
                 crate::input::Event::Key(key) => {
-                    if !c.pasting && c.prefix {
-                        c.prefix = false;
-                        if key.base == crate::keys::Base::Char('d') && !key.ctrl && !key.meta {
-                            self.detach_client(id);
-                            return Ok(());
-                        }
-                    } else if !c.pasting
-                        && key.base == crate::keys::Base::Char('b')
-                        && key.ctrl
-                        && !key.meta
+                    let pasting = c.pasting;
+                    self.touch_client(id);
+                    if (pasting || !self.handle_key(id, key.to_core()))
+                        && let Some(p) = self.client_pane(id)
                     {
-                        c.prefix = true;
-                    } else {
-                        forward.extend(crate::keys::encode(&key, modes));
+                        self.forward_key(p, &key);
                     }
                 }
             }
         }
-        if let Some(io) = self.model.panes.get_mut(&p).and_then(|p| p.io.as_mut()) {
-            io.write(&forward);
+        Ok(())
+    }
+
+    /// `server_client_key_callback`'s activity update: the client's and the
+    /// session's (server-client.c:1465-1469).
+    pub(crate) fn touch_client(&mut self, id: ClientId) {
+        let stamp = self.model.touch();
+        let Some(c) = self.clients.get_mut(&id) else {
+            return;
+        };
+        c.activity = stamp;
+        c.activity_secs = now_epoch();
+        c.keys.activity = Instant::now();
+        if let Some(session) = c.attached.and_then(|s| self.model.sessions.get_mut(&s)) {
+            session.activity = stamp;
+        }
+    }
+
+    /// The pane a client's keys go to (`cmd_find_from_client`).
+    pub(crate) fn client_pane(&self, id: ClientId) -> Option<PaneId> {
+        let s = self.clients.get(&id)?.attached?;
+        Some(self.model.current_of(s)?.2)
+    }
+
+    /// `window_pane_key` with no mode: the key encoded for the pane.
+    pub(crate) fn forward_key(&mut self, p: PaneId, key: &crate::keys::Key) {
+        let Some(pane) = self.model.panes.get(&p) else {
+            return;
+        };
+        let modes = crate::keys::KeyModes {
+            app_cursor: pane.term.app_cursor(),
+        };
+        self.write_pane(p, &crate::keys::encode(key, modes));
+    }
+
+    /// Bytes to a pane's PTY, unless its input is off (window.c:2095).
+    pub(crate) fn write_pane(&mut self, p: PaneId, bytes: &[u8]) {
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return;
+        };
+        if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
+            io.write(bytes);
         }
         self.pane_output_queued(p);
-        Ok(())
     }
 
     fn render_clients(&mut self) {
@@ -1150,11 +1205,50 @@ impl Server {
     }
 
     fn client_view(&self, id: ClientId, c: &Client) -> ClientView {
+        let hello = c.hello.as_ref();
+        let tty = hello.and_then(|h| h.tty.as_ref());
+        let started = c.control.is_none() && tty.is_some();
+        let term_name = tty
+            .map(|t| t.term.clone())
+            .or_else(|| {
+                hello?
+                    .env
+                    .iter()
+                    .find(|(k, _)| k == "TERM")
+                    .map(|(_, v)| v.clone())
+            })
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "unknown".to_owned());
         ClientView {
             order: u32::try_from(id.0).unwrap_or(u32::MAX),
             name: self.client_name(id),
             session: c.attached,
             activity: c.activity,
+            activity_secs: c.activity_secs,
+            created_secs: c.created_secs,
+            // server-client.c:299: tty.sx starts at 80; tty.c tty_resize
+            // sets it for a terminal.
+            width: if started {
+                tty.map_or(80, |t| t.cols)
+            } else {
+                80
+            },
+            height: started.then(|| tty.map_or(24, |t| t.rows)),
+            colours: started.then(|| match c.caps {
+                Some(caps) if caps.rgb => 16_777_216,
+                Some(caps) if caps.theme_palette => 256,
+                _ if term_name.contains("256") => 16,
+                _ => 8,
+            }),
+            term_name,
+            tty: tty.map(|t| t.name.clone()).filter(|n| !n.is_empty()),
+            control: c.control.is_some(),
+            utf8: hello.is_some_and(|h| h.flags.utf8),
+            pid: hello.map_or(0, |h| h.pid),
+            key_table: c.keys.table.clone(),
+            default_key_table: self.default_key_table(id),
+            last_session: c.last_session,
+            written: c.written,
         }
     }
 

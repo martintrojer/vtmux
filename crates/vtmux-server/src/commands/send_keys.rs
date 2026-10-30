@@ -3,6 +3,7 @@
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
+use vtmux_core::keys::Key as CoreKey;
 
 use super::Item;
 use crate::keys::{KeyModes, send_keys_bytes};
@@ -11,11 +12,14 @@ use crate::target::Found;
 
 pub fn exec(
     server: &mut Server,
-    _item: &mut Item,
+    item: &mut Item,
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    for flag in ['K', 'M', 'X', 'R', 'F', 'c'] {
+    if args.flag('K') {
+        return inject(server, item, args);
+    }
+    for flag in ['M', 'X', 'R', 'F', 'c'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("send-keys -{flag}")).into());
         }
@@ -60,5 +64,41 @@ pub fn exec(
         io.write(&bytes);
     }
     server.pane_output_queued(p);
+    Ok(())
+}
+
+/// `send-keys -K`: each key goes to the target client as if typed
+/// (cmd-send-keys.c:75-92), handled after this command. No target client
+/// is not an error (`CMD_CLIENT_CANFAIL`). Names that are not keys are
+/// sent character by character (`cmd_send_keys_inject_string`).
+fn inject(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdError> {
+    if args.value('c').is_some() {
+        return Err(EdgeError::NotImplemented("send-keys -c".into()).into());
+    }
+    let Some(tc) = server.target_client(item.client, item.origin) else {
+        return Ok(());
+    };
+    let repeat = if args.flag('N') {
+        args.value('N')
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(1)
+    } else {
+        1
+    };
+    for _ in 0..repeat {
+        for arg in &args.positionals {
+            let arg = &*arg.text();
+            let key = (!args.flag('l'))
+                .then(|| CoreKey::from_name(arg))
+                .flatten()
+                .filter(|k| *k != CoreKey::NONE);
+            match key {
+                Some(k) => server.injected_keys.push((tc, k)),
+                None => server
+                    .injected_keys
+                    .extend(arg.chars().map(|c| (tc, CoreKey::from_char(c)))),
+            }
+        }
+    }
     Ok(())
 }
