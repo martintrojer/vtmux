@@ -144,11 +144,10 @@ impl Drop for Attached {
 }
 fn bins() -> Vec<PathBuf> {
     let mut bins = vec![PathBuf::from(env!("CARGO_BIN_EXE_vtmux"))];
-    let reference = std::env::var_os("VTMUX_REFERENCE_TMUX")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/vtmux/tmux-3.8/bin/tmux")
-        });
+    let reference = std::env::var_os("VTMUX_REFERENCE_TMUX").map_or_else(
+        || PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cache/vtmux/tmux-3.8/bin/tmux"),
+        PathBuf::from,
+    );
     assert!(
         reference.exists(),
         "reference tmux missing: {}",
@@ -174,11 +173,22 @@ fn attach_detach_frames_and_exit() {
             "-c",
             r"printf '\033]2;t\033\\'; printf '$ '; exec cat",
         ]);
-        a.wait(|a| pane_text(a).contains("$"));
-        a.wait(|a| pane_text(a).lines().nth(9).is_some_and(|r| r.starts_with("[a] 0:w*")));
+        a.wait(|a| pane_text(a).contains('$'));
+        a.wait(|a| {
+            pane_text(a)
+                .lines()
+                .nth(9)
+                .is_some_and(|r| r.starts_with("[a] 0:w*"))
+        });
         let status = vtmux_vt::snapshot(&a.screen());
-        assert_eq!(status.cell(0,9).unwrap().style.fg, vtmux_vt::Color::Palette(0));
-        assert_eq!(status.cell(0,9).unwrap().style.bg, vtmux_vt::Color::Palette(2));
+        assert_eq!(
+            status.cell(0, 9).unwrap().style.fg,
+            vtmux_vt::Color::Palette(0)
+        );
+        assert_eq!(
+            status.cell(0, 9).unwrap().style.bg,
+            vtmux_vt::Color::Palette(2)
+        );
         a.keys(b"echo hi\r");
         a.wait(|a| pane_text(a).contains("echo hi\necho hi"));
         a.keys(b"\x02d");
@@ -187,6 +197,22 @@ fn attach_detach_frames_and_exit() {
         assert!(w.cli(&["has", "-t", "a"]).status.success());
         let mut b = w.attach(&["attach", "-t", "a"]);
         b.wait(|a| pane_text(a).contains("echo hi"));
+        b.master
+            .resize(PtySize {
+                rows: 12,
+                cols: 60,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        b.wait(|_| {
+            String::from_utf8_lossy(
+                &w.cli(&["display", "-p", "-t", "a", "#{pane_width}x#{pane_height}"])
+                    .stdout,
+            )
+            .trim()
+                == "60x11"
+        });
         assert!(w.cli(&["detach-client", "-s", "a"]).status.success());
         b.exited(0);
     }

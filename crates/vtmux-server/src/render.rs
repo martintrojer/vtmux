@@ -328,7 +328,7 @@ mod tests {
         assert!(frame.starts_with(b"\x1b[?2026h\x1b[?25l"));
         assert!(frame.ends_with(b"\x1b[?2026l"));
         assert!(!frame.windows(3).any(|x| x == b"abc"));
-        assert!(compositor.frame(screen.clone(), caps).is_empty());
+        assert_eq!(compositor.frame(screen.clone(), caps), Vec::new());
         screen.cells[1].text = "X".into();
         let frame = compositor.frame(screen, caps);
         assert!(frame.contains(&b'X'));

@@ -488,7 +488,8 @@ impl Server {
                     self.fail_client(id, &e);
                 }
             }
-            ClientMsg::Resize { .. } | ClientMsg::Stdin(_) | ClientMsg::StdinEof => {}
+            ClientMsg::Resize { cols, rows } => self.resize_client(id, cols, rows),
+            ClientMsg::Stdin(_) | ClientMsg::StdinEof => {}
             ClientMsg::Detach => self.drop_client(id),
         }
     }
@@ -596,7 +597,58 @@ impl Server {
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
         // set of modes, not their ordering.
         self.send(id, &ServerMsg::Frame(caps.startup()));
+        if let Some(tty) = self
+            .clients
+            .get(&id)
+            .and_then(|c| c.hello.as_ref())
+            .and_then(|h| h.tty.clone())
+        {
+            self.resize_client(id, tty.cols, tty.rows);
+        }
         Ok(())
+    }
+
+    /// `recalculate_sizes` latest semantics (M0 one attached client): status
+    /// costs one row; both emulator and kernel PTY get the same dimensions.
+    fn resize_client(&mut self, id: ClientId, cols: u32, rows: u32) {
+        let Some(client) = self.clients.get_mut(&id) else {
+            return;
+        };
+        if let Some(tty) = client.hello.as_mut().and_then(|h| h.tty.as_mut()) {
+            tty.cols = cols.max(1);
+            tty.rows = rows.max(1);
+        }
+        client.compositor.invalidate();
+        let Some(session) = client.attached else {
+            return;
+        };
+        let Some((_, window, pane)) = self.model.current_of(session) else {
+            return;
+        };
+        let cols = u16::try_from(cols).unwrap_or(u16::MAX).max(1);
+        let rows = u16::try_from(rows.saturating_sub(1))
+            .unwrap_or(u16::MAX)
+            .max(1);
+        if let Some(window) = self.model.windows.get_mut(&window) {
+            window.cols = cols;
+            window.rows = rows;
+        }
+        if let Some(pane) = self.model.panes.get_mut(&pane)
+            && (pane.term.cols(), pane.term.rows()) != (cols, rows)
+        {
+            pane.term.resize(cols, rows);
+            if let Some(io) = &pane.io {
+                let _ = rustix::termios::tcsetwinsize(
+                    io.fd(),
+                    rustix::termios::Winsize {
+                        ws_col: cols,
+                        ws_row: rows,
+                        ws_xpixel: 0,
+                        ws_ypixel: 0,
+                    },
+                );
+            }
+        }
     }
 
     pub fn detach_session_clients(&mut self, session: SessionId) {
