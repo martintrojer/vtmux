@@ -639,8 +639,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."tab-cell-background.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."targets-panes.sh"]
 status = "xfail"
