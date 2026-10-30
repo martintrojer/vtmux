@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
-use signal_hook::consts::{SIGCHLD, SIGHUP, SIGINT, SIGTERM};
+use signal_hook::consts::{SIGCHLD, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::cmd::{self, CmdError, ConfigEnv};
 use vtmux_core::error::EdgeError;
@@ -61,6 +61,9 @@ pub struct ServerConfig {
     /// The starting client's working directory (`PWD` in the global
     /// environment).
     pub cwd: Option<PathBuf>,
+    /// The socket is the default `-L` one, not `-S` (`CLIENT_DEFAULTSOCKET`):
+    /// it decides the permissions SIGUSR1 recreates it with.
+    pub default_socket: bool,
 }
 
 struct Client {
@@ -194,7 +197,12 @@ impl Server {
         let mut listener = UnixListener::from_std(listener);
         poll.registry()
             .register(&mut listener, LISTENER, Interest::READABLE)?;
-        let mut signals = Signals::new([SIGCHLD, SIGTERM, SIGINT, SIGHUP])?;
+        // proc_set_signals (proc.c:244-276): PIPE, TSTP, TTIN, TTOU and QUIT
+        // are ignored; the rest are handled in `on_signals`.
+        sys::signal::ignore_job_control();
+        let mut signals = Signals::new([
+            SIGCHLD, SIGTERM, SIGINT, SIGHUP, SIGUSR1, SIGUSR2, SIGWINCH, SIGCONT,
+        ])?;
         poll.registry()
             .register(&mut signals, SIGNALS, Interest::READABLE)?;
         let mut global_env = Environ::from_pairs(config.environ.clone());
@@ -635,6 +643,13 @@ impl Server {
             rows: spec.rows,
         })?;
         let io = PaneIo::new(spawned.master);
+        // window_pane_create (window.c:1479-1480): the title starts as the
+        // host name.
+        let mut term = PaneTerm::new(spec.cols, spec.rows, HISTORY_LIMIT);
+        let host = &self.info.host;
+        if !host.chars().any(char::is_control) {
+            term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
+        }
         io.register(self.poll.registry(), Token(PANE_BASE + pane_id.0 as usize))?;
 
         // default_window_name (names.c:107-121).
@@ -654,7 +669,7 @@ impl Server {
             Pane {
                 id: pane_id,
                 window: window_id,
-                term: PaneTerm::new(spec.cols, spec.rows, HISTORY_LIMIT),
+                term,
                 io: Some(io),
                 pid: spawned.pid.as_raw_nonzero().get(),
                 argv: spec.argv,
@@ -790,8 +805,31 @@ impl Server {
                 SIGCHLD => self.reap_children(),
                 // server_signal: SIGTERM/SIGINT exit (server.c:442-446).
                 SIGTERM | SIGINT => self.shutdown = true,
+                SIGUSR1 => self.recreate_socket(),
+                // SIGUSR2 toggles tmux's debug log, which vtmux does not
+                // have; the rest are caught and ignored like server_signal.
                 _ => {}
             }
+        }
+    }
+
+    /// SIGUSR1 (server.c:450-458): create the socket again, for one that
+    /// was removed by accident, and serve on the new one. On failure the
+    /// old listener stays.
+    fn recreate_socket(&mut self) {
+        let Ok(std_listener) = sys::daemon::bind_socket(&self.socket, self.config.default_socket)
+        else {
+            return;
+        };
+        let mut fresh = UnixListener::from_std(std_listener);
+        let _ = self.poll.registry().deregister(&mut self.listener);
+        if self
+            .poll
+            .registry()
+            .register(&mut fresh, LISTENER, Interest::READABLE)
+            .is_ok()
+        {
+            self.listener = fresh;
         }
     }
 

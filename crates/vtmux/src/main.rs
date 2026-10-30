@@ -138,21 +138,38 @@ fn connect_error(path: &Path, e: io::Error) -> EdgeError {
 }
 
 /// `client_connect` (client.c:104-182): connect; if nothing is there and
-/// the command starts a server, bind the socket (reporting
-/// `error creating`), fork the daemon and connect to it.
+/// the command starts a server, take the `<socket>.lock` flock (waiting for
+/// a concurrent starter to finish), connect again, and only then bind the
+/// socket (reporting `error creating`), fork the daemon and connect to it.
+/// The lock is held until the connection is made.
 fn connect_or_start(
     path: &Path,
     start: bool,
     default_socket: bool,
     config: impl FnOnce() -> ServerConfig,
 ) -> Result<UnixStream, EdgeError> {
-    let err = match connect(path) {
-        Ok(s) => return Ok(s),
-        Err(e) => e,
-    };
-    let absent = matches!(err.raw_os_error(), Some(ECONNREFUSED | ENOENT));
-    if !absent || !start {
-        return Err(connect_error(path, err));
+    let mut lock: Option<daemon::Lock> = None;
+    loop {
+        let err = match connect(path) {
+            Ok(s) => return Ok(s),
+            Err(e) => e,
+        };
+        let absent = matches!(err.raw_os_error(), Some(ECONNREFUSED | ENOENT));
+        if !absent || !start {
+            return Err(connect_error(path, err));
+        }
+        if lock.is_none() {
+            let mut lock_path = path.as_os_str().to_owned();
+            lock_path.push(".lock");
+            match daemon::get_lock(Path::new(&lock_path)) {
+                daemon::Lock::Retry => continue,
+                got => lock = Some(got),
+            }
+            // Always retry once: another client may have started the
+            // server and released the lock between connect and flock.
+            continue;
+        }
+        break;
     }
     let listener =
         daemon::bind_socket(path, default_socket).map_err(|io| EdgeError::CreateFailed {
@@ -162,6 +179,8 @@ fn connect_or_start(
     let config = config();
     match daemon::fork_daemon() {
         Ok(Forked::Daemon) => {
+            // server_start closes the lock descriptor (server.c:223-227).
+            drop(lock);
             let code = vtmux_server::run_server(listener, path.to_owned(), config);
             std::process::exit(code);
         }
@@ -254,6 +273,7 @@ fn main() -> ExitCode {
         },
         environ: env.clone(),
         cwd: Some(cwd.clone()),
+        default_socket,
     };
     let mut stream = match connect_or_start(&path, start, default_socket, config) {
         Ok(s) => s,

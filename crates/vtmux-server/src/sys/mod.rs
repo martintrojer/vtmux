@@ -5,4 +5,5 @@
 
 pub mod daemon;
 pub mod pty;
+pub mod signal;
 pub mod user;
