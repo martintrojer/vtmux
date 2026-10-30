@@ -296,10 +296,7 @@ impl Server {
             let c = self.clients.get_mut(&id).expect("client");
             c.attached = Some(s);
             c.compositor.invalidate();
-            let stamp = self.model.touch();
-            if let Some(session) = self.model.sessions.get_mut(&s) {
-                session.activity = stamp;
-            }
+            self.model.touch_session(s);
             if let Some(tty) = self
                 .clients
                 .get(&id)
@@ -314,6 +311,12 @@ impl Server {
         {
             c.last_session = old;
         }
+        // server_client_set_session: the old window loses the focus, the
+        // new one gains it (server-client.c:462-467).
+        if let Some(w) = old.and_then(|o| self.model.current_of(o)).map(|c| c.1) {
+            self.update_focus(Some(w));
+        }
+        self.update_focus(self.client_window(id));
     }
 
     /// Keys `send-keys -K` gave a client: handled as typed, after the

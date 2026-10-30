@@ -31,6 +31,8 @@ pub struct Session {
     /// Ordering for "most recently active" (cmd-find.c
     /// `cmd_find_session_better`): a server-wide counter bumped on activity.
     pub activity: u64,
+    /// `s->activity_time` in epoch seconds (`#{session_activity}`).
+    pub activity_secs: i64,
     pub cwd: PathBuf,
     /// Window index -> window (tmux's winlinks).
     pub windows: BTreeMap<u32, WindowId>,
@@ -116,6 +118,7 @@ impl Window {
 }
 
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)] // tmux's PANE_* flags
 pub struct Pane {
     pub id: PaneId,
     pub window: WindowId,
@@ -140,6 +143,8 @@ pub struct Pane {
     pub history_limit: usize,
     /// `PANE_INPUTOFF` (select-pane -d / -e).
     pub input_off: bool,
+    /// `PANE_FOCUSED`: the pane was last told it has the focus.
+    pub focused: bool,
     /// `wp->active_point`: when the pane last became active, for picking the
     /// most recent of several neighbours (`window_pane_choose_best`).
     pub active_point: u64,
@@ -184,6 +189,15 @@ impl Model {
     pub fn touch(&mut self) -> u64 {
         self.activity += 1;
         self.activity
+    }
+
+    /// `session_update_activity(s, NULL)`: the session is active now.
+    pub fn touch_session(&mut self, s: SessionId) {
+        let stamp = self.touch();
+        if let Some(session) = self.sessions.get_mut(&s) {
+            session.activity = stamp;
+            session.activity_secs = now_epoch();
+        }
     }
 
     /// Sessions in name order.
@@ -964,4 +978,11 @@ impl Pane {
             let _ = io.resize(cols, rows);
         }
     }
+}
+
+/// Seconds since the epoch.
+pub(crate) fn now_epoch() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
 }

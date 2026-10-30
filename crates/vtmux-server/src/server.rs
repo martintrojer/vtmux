@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixListener as StdListener;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
@@ -86,6 +86,8 @@ pub(crate) struct Client {
     /// `#{client_activity}` / `#{client_created}`.
     pub(crate) activity_secs: i64,
     pub(crate) created_secs: i64,
+    /// `CLIENT_FOCUSED`: set at creation, cleared by a focus-out report.
+    pub(crate) focused: bool,
     /// Key table state (`c->keytable`, `CLIENT_REPEAT`, `c->last_key`,
     /// `c->repeat_timer`).
     pub(crate) keys: crate::key_dispatch::ClientKeys,
@@ -278,11 +280,7 @@ fn default_shell(env: &[(String, String)]) -> PathBuf {
     PathBuf::from("/bin/sh")
 }
 
-fn now_epoch() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
-}
+use crate::model::now_epoch;
 
 /// `find_home` (tmux.c:366-384).
 fn find_home(env: &Environ) -> Option<PathBuf> {
@@ -525,6 +523,7 @@ impl Server {
                             activity,
                             activity_secs: now_epoch(),
                             created_secs: now_epoch(),
+                            focused: true,
                             keys: crate::key_dispatch::ClientKeys::default(),
                             last_session: None,
                             message: None,
@@ -878,16 +877,19 @@ impl Server {
         client.compositor.invalidate();
         client.attached = Some(s);
         // server_client_set_session: session_update_activity (server-client.c:468).
-        let stamp = self.model.touch();
-        if let Some(session) = self.model.sessions.get_mut(&s) {
-            session.activity = stamp;
-        }
+        self.model.touch_session(s);
         // Caps::startup ends with a DECRQM query (tty.c tty_send_requests).
         client.decoder.query_sent(Instant::now());
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
         // set of modes, not their ordering.
-        self.send(id, &ServerMsg::Frame(caps.startup()));
+        let mut startup = caps.startup();
+        // tty_start_tty (tty.c:563-564): ENFCS asks the terminal for focus
+        // reports when `focus-events` is on.
+        if self.model.number_option(TreeId::Server, "focus-events") != 0 {
+            startup.extend_from_slice(b"\x1b[?1004h");
+        }
+        self.send(id, &ServerMsg::Frame(startup));
         if let Some(tty) = self
             .clients
             .get(&id)
@@ -896,6 +898,7 @@ impl Server {
         {
             self.resize_client(id, tty.cols, tty.rows);
         }
+        self.update_focus(self.model.current_of(s).map(|(_, w, _)| w));
         Ok(())
     }
 
@@ -1031,6 +1034,14 @@ impl Server {
                         self.write_pane(p, if start { b"\x1b[200~" } else { b"\x1b[201~" });
                     }
                 }
+                crate::input::Event::Focus(focused) => {
+                    // tty_keys_next (tty-keys.c:1030-1039), then the key
+                    // callback's activity update; focus events are not
+                    // keys and reach no table (server-client.c:1523).
+                    c.focused = focused;
+                    self.touch_client(id);
+                    self.update_focus(self.client_window(id));
+                }
                 crate::input::Event::Key(key) => {
                     let pasting = c.pasting;
                     self.touch_client(id);
@@ -1055,8 +1066,57 @@ impl Server {
         c.activity = stamp;
         c.activity_secs = now_epoch();
         c.keys.activity = Instant::now();
-        if let Some(session) = c.attached.and_then(|s| self.model.sessions.get_mut(&s)) {
-            session.activity = stamp;
+        if let Some(s) = c.attached {
+            self.model.touch_session(s);
+        }
+    }
+
+    /// `session_set_current` and `window_set_active_pane` run
+    /// `window_update_focus` for the windows they change when `focus-events`
+    /// is on; looking at every window after a command finds the same changes.
+    pub(crate) fn update_focus_all(&mut self) {
+        if self.model.number_option(TreeId::Server, "focus-events") == 0 {
+            return;
+        }
+        let windows: Vec<_> = self.model.windows.keys().copied().collect();
+        for w in windows {
+            self.update_focus(Some(w));
+        }
+    }
+
+    /// The window a client is looking at.
+    pub(crate) fn client_window(&self, id: ClientId) -> Option<WindowId> {
+        let s = self.clients.get(&id)?.attached?;
+        Some(self.model.current_of(s)?.1)
+    }
+
+    /// `window_update_focus` (window.c:707-713, 716-752): the window's
+    /// active pane is focused when a focused client looks at its window;
+    /// a change is reported to a pane that asked for it (`?1004h`).
+    pub(crate) fn update_focus(&mut self, w: Option<WindowId>) {
+        let Some(window) = w.and_then(|w| self.model.windows.get(&w)) else {
+            return;
+        };
+        let p = window.active();
+        let looking = self.clients.values().any(|c| {
+            c.focused
+                && c.attached
+                    .and_then(|s| self.model.current_of(s))
+                    .is_some_and(|(_, cw, _)| Some(cw) == w)
+        });
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return;
+        };
+        let focused = looking && !pane.exited;
+        if focused == pane.focused || pane.exited {
+            return;
+        }
+        pane.focused = focused;
+        if pane.term.focus_events() {
+            if let Some(io) = pane.io.as_mut() {
+                io.write(if focused { b"\x1b[I" } else { b"\x1b[O" });
+            }
+            self.pane_output_queued(p);
         }
     }
 
@@ -1243,6 +1303,7 @@ impl Server {
             term_name,
             tty: tty.map(|t| t.name.clone()).filter(|n| !n.is_empty()),
             control: c.control.is_some(),
+            focused: c.focused,
             utf8: hello.is_some_and(|h| h.flags.utf8),
             pid: hello.map_or(0, |h| h.pid),
             key_table: c.keys.table.clone(),
@@ -1378,6 +1439,7 @@ impl Server {
             name,
             created: now_epoch(),
             activity,
+            activity_secs: now_epoch(),
             cwd: spec.cwd,
             windows: BTreeMap::from([(index, window_id)]),
             current: index,
@@ -1651,6 +1713,7 @@ impl Server {
             rect: ps.rect,
             history_limit,
             input_off: false,
+            focused: false,
             active_point: 0,
         })
     }

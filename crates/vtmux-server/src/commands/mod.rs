@@ -177,6 +177,7 @@ pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) -> Optio
             item.error(server, line);
         }
         server.control_end(item, guard, result.is_ok());
+        server.update_focus_all();
         // send-keys -K: the keys are handled as queue items after this
         // command (server_client_handle_key_after), so after its guard.
         server.handle_injected_keys();
@@ -362,6 +363,7 @@ pub fn attach(
         // A control client needs no terminal and gets no Ready.
         server.control_attach(client, session);
         item.origin.attached = Some(session);
+        reset_key_table(server, item, client);
         return Ok(());
     }
     if item.tty.is_none() {
@@ -369,7 +371,17 @@ pub fn attach(
     }
     server.attach_client(client, session)?;
     item.after = After::Stay;
+    reset_key_table(server, item, client);
     Ok(())
+}
+
+/// `server_client_set_key_table(c, NULL)` after `server_client_set_session`
+/// (cmd-attach-session.c:139,162, cmd-new-session.c:343-344): the client
+/// starts in the session's `key-table`, unless a repeating binding ran it.
+fn reset_key_table(server: &mut Server, item: &Item, client: ClientId) {
+    if !item.repeat {
+        server.set_key_table(client, None);
+    }
 }
 
 /// `format_single` with the command's target.
