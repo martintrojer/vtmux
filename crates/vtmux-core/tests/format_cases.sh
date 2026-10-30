@@ -344,11 +344,14 @@ row '#{s/h/j/:@name}'
 row '#{a:b}'
 row '#{E;m:@name,x}'
 
-# Modifiers that are not implemented yet (loops) expand to nothing.
-rowdef '#{W:x}'
+# Loops over the one session, window and pane (more in loop_cases.sh); unknown
+# modifier lists expand to nothing.
+row '#{W:x}'
+row 'x#{S:y}z'
+row '#{P:#{pane_id}#{loop_index}#{loop_last_flag}}'
+row '#{S:#{session_name},act}'
 rowdef '#{@foo:bar}'
 rowdef '#{:S}'
-rowdef 'x#{S:y}z' xz
 
 # Nesting limit, FORMAT_LOOP_LIMIT 100 (format.c:6720-6724, 6885).
 rowgen 'nest(98)' '"ok"' "$(nest 98)" ok

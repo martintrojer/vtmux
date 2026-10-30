@@ -215,10 +215,12 @@ fn rows() -> Vec<(String, String)> {
         r("#{s/h/j/:@name}", "jello"), // set -gF @out '#{s/h/j/:@name}' ; show -gv @out
         r("#{a:b}", ""), // set -gF @out '#{a:b}' ; show -gv @out
         r("#{E;m:@name,x}", "0"), // set -gF @out '#{E;m:@name,x}' ; show -gv @out
-        r("#{W:x}", ""), // deferred; set -gF @out '#{W:x}' ; show -gv @out gives "x"
+        r("#{W:x}", "x"), // set -gF @out '#{W:x}' ; show -gv @out
+        r("x#{S:y}z", "xyz"), // set -gF @out 'x#{S:y}z' ; show -gv @out
+        r("#{P:#{pane_id}#{loop_index}#{loop_last_flag}}", "%001"), // set -gF @out '#{P:#{pane_id}#{loop_index}#{loop_last_flag}}' ; show -gv @out
+        r("#{S:#{session_name},act}", "s"), // set -gF @out '#{S:#{session_name},act}' ; show -gv @out
         r("#{@foo:bar}", ""), // deferred; set -gF @out '#{@foo:bar}' ; show -gv @out gives ""
         r("#{:S}", ""), // deferred; set -gF @out '#{:S}' ; show -gv @out gives ""
-        r("x#{S:y}z", "xz"), // deferred; set -gF @out 'x#{S:y}z' ; show -gv @out gives "xyz"
         r(nest(98), "ok"), // nest(98) via set -gF @out ; show -gv @out
         r(nest(99), "ok"), // nest(99) via set -gF @out ; show -gv @out
         r(nest(100), ""), // nest(100) via set -gF @out ; show -gv @out

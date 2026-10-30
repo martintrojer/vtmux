@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Regenerates crates/vtmux-core/src/format/loop_rows.in from the reference tmux 3.8:
+#   crates/vtmux-core/tests/loop_cases.sh > crates/vtmux-core/src/format/loop_rows.in
+# (included by format/loops/golden.rs; `cargo test -p vtmux-core format`).
+#
+# The topology, built in one invocation chain so the server never sits empty, is what
+# `topology()` in golden.rs mirrors:
+#   sessions zeta $0, alpha $1, mike $2 (created in that order; `cat` panes)
+#   zeta: 0 charlie @0 %0, 1 alpha @5 %5, 2 bravo @3 (current), 4 delta @4 %4
+#     (created charlie, bravo, delta, alpha; then bravo selected)
+#   zeta:2 panes in window order %7 %3 %6 %8 %9: %3 first, %6 split right of it, %7
+#     split left (-b), %8 below %6, %9 floating (new-pane); %6 active; titles t<N>
+#   alpha: 0 w @1 %1 ; mike: 0 w @2 %2
+#   @tag a1 on zeta:1, d4 on zeta:4, @other o0 on zeta:0 (window options)
+#   two control clients: first attached to zeta, then one to alpha (connection order and
+#   activity order); their names (client-PID) become client-1 and client-2 here
+#   options: session zeta @sv x, update-environment[3] FOO, [7] BAR, a hook
+#     after-new-window[0], status-format emptied to an array with no items;
+#     window zeta:2 @wv y; pane %6 @pv z; server @srv q; global @gs1 one, @gw1 w1
+# Each row is `display-message -p -t zeta: '<tpl>'`: the target client is the best
+# client of zeta (client-1), so zeta is the active session of `#{S:all,active}`.
+# `rows_nosession()` come from a second server with no session (`set -gF`, `show -gv`).
+# Case strings must not contain `%` (display-message runs strftime), a newline or a
+# single quote.
+set -euo pipefail
+
+REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
+SOCK="vtmux-loop-cases-$$"
+TMP=$(mktemp -d /tmp/vtmux-loop-cases.XXXXXX)
+H1='' H2=''
+cd /
+t() {
+    env -i PATH=/usr/bin:/bin HOME=/ SHELL=/bin/sh LANG=C.UTF-8 TZ=UTC TERM=screen \
+        "$REF" -L "$SOCK" -f /dev/null "$@"
+}
+cleanup() {
+    t kill-server 2>/dev/null || true
+    for p in $H1 $H2; do kill "$p" 2>/dev/null || true; done
+    rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+t start-server \; set -g exit-empty off \; set -g update-environment '' \; \
+    new -d -s zeta -n charlie -x 80 -y 24 cat \; \
+    new -d -s alpha -n w cat \; new -d -s mike -n w cat \; \
+    new-window -d -t zeta:2 -n bravo cat \; \
+    new-window -d -t zeta:4 -n delta cat \; \
+    new-window -d -t zeta:1 -n alpha cat \; \
+    split-window -d -h -t zeta:2.0 cat \; \
+    split-window -d -b -h -t zeta:2.0 cat \; \
+    split-window -d -v -t zeta:2.2 cat \; \
+    new-pane -d -t zeta:2 -x 20 -y 6 -X 1 -Y 1 cat
+for p in 0 1 2 3 4 5 6 7 8 9; do t select-pane -t "%$p" -T "t$p"; done
+t select-pane -t %6 \; select-window -t zeta:2
+t set -w -t zeta:1 @tag a1 \; set -w -t zeta:4 @tag d4 \; set -w -t zeta:0 @other o0
+t set -t zeta @sv x \; set -t zeta update-environment[3] FOO \; \
+    set -t zeta update-environment[7] BAR \; set-hook -t zeta after-new-window 'display x' \; \
+    set -t zeta status-format[1] q \; set -t zeta -u status-format[1] \; \
+    set -w -t zeta:2 @wv y \; set -p -t %6 @pv z \; set -s @srv q \; \
+    set -g @gs1 one \; set -gw @gw1 w1
+
+mkfifo "$TMP/f1" "$TMP/f2"
+sleep 300 >"$TMP/f1" &
+H1=$!
+sleep 300 >"$TMP/f2" &
+H2=$!
+t -C attach -t zeta <"$TMP/f1" >/dev/null 2>&1 &
+for _ in $(seq 50); do [ "$(t list-clients | wc -l)" -ge 1 ] && break; sleep 0.1; done
+t -C attach -t alpha <"$TMP/f2" >/dev/null 2>&1 &
+for _ in $(seq 50); do [ "$(t list-clients | wc -l)" -ge 2 ] && break; sleep 0.1; done
+C1=$(t list-clients -F '#{client_name}' -f '#{==:#{client_session},zeta}')
+C2=$(t list-clients -F '#{client_name}' -f '#{==:#{client_session},alpha}')
+[ -n "$C1" ] && [ -n "$C2" ] || { echo "control clients did not attach" >&2; exit 1; }
+# client-1 must sort before client-2 by name as the real names do.
+if [[ "$C1" > "$C2" ]]; then echo "client names out of order, rerun" >&2; exit 1; fi
+
+rust_str() { python3 -c '
+import sys
+out = []
+for ch in sys.argv[1]:
+    if ch == "\\": out.append("\\\\")
+    elif ch == "\"": out.append("\\\"")
+    elif ord(ch) < 32 or ord(ch) == 127: out.append("\\u{%x}" % ord(ch))
+    else: out.append(ch)
+sys.stdout.write("".join(out))
+' "$1"; }
+
+# row 'fmt' -> r("fmt", "<reference output>")
+row() {
+    local out
+    out=$(t display-message -p -t zeta: "$1"; echo x)
+    out=${out%x}
+    out=${out%$'\n'}
+    out=${out//$C1/client-1}
+    out=${out//$C2/client-2}
+    printf '        r("%s", "%s"),\n' "$(rust_str "$1")" "$(rust_str "$out")"
+}
+# rowdiv 'fmt' 'vtmux' D-NNN -> a recorded divergence; the reference value is kept.
+rowdiv() {
+    local out
+    out=$(t display-message -p -t zeta: "$1"; echo x)
+    out=${out%x}
+    out=${out%$'\n'}
+    printf '        r("%s", "%s"), // %s: the reference gives "%s"\n' \
+        "$(rust_str "$1")" "$(rust_str "$2")" "$3" "$(rust_str "$out")"
+}
+
+echo "// Generated by crates/vtmux-core/tests/loop_cases.sh from tmux 3.8. Do not edit."
+echo "#[allow(clippy::too_many_lines)]"
+echo "fn rows() -> Vec<(String, String)> {"
+echo "    vec!["
+
+# Sessions (format.c:5231): default by ID, i n t letters, r reverses.
+row '#{S:#{session_name}/#{session_id} }'
+for f in i n t r ir nr tr x; do row "#{S/$f:#{session_name} }"; done
+row '#{S:#{loop_index}#{loop_last_flag}#{window_name}#{pane_id},}'
+row '#{S:#{session_name},[#{session_name}]}'
+row '#{S:a#,b}'
+row '#{S:#{client_session}}'
+row 'a#{S/#{@nosuch}n:#{session_name}}b'
+
+# Windows (format.c:5350): default by index (listed), neighbours and before/after.
+row '#{W:#{window_index}#{window_name}:#{window_active}#{window_before_active}#{window_after_active} n=#{next_window_index}#{next_window_active}#{next_@tag} p=#{prev_window_index}#{prev_@tag}#{prev_@other}|}'
+for f in i n t r ir nr tr; do row "#{W/$f:#{window_name} }"; done
+row '#{W:#{window_name},[#{window_name}] }'
+row '#{W/n:#{window_name},[#{window_name}] }'
+row '#{W:#{loop_index}#{loop_last_flag}#{pane_id},}'
+row '#{W/r:#{window_index}#{window_before_active}#{window_after_active}#{prev_window_index}#{next_window_index},}'
+
+# Panes (format.c:5432): default by creation (ID), i z letters, r reverses.
+row '#{P:#{pane_id}.#{pane_index}.#{pane_title}#{pane_active} }'
+for f in i z r ir zr n t; do row "#{P/$f:#{pane_id} }"; done
+row '#{P:#{pane_id},[#{pane_id}]}'
+row '#{P:#{loop_index}#{loop_last_flag}#{window_name},}'
+
+# Clients (format.c:5762): connection order, i n t letters; no active form.
+row '#{L:#{client_name}:#{client_session} }'
+for f in i n t r nr tr; do row "#{L/$f:#{client_name} }"; done
+row '#{L:#{session_name}#{window_name}#{loop_index}#{loop_last_flag},}'
+row '#{L:a,b}'
+
+# The last loop modifier sets the sort; the first present loop runs (sessions first).
+row '#{S;W:#{session_name} }'
+row '#{W/n;S:#{session_name} }'
+row '#{W;P:#{window_name} }'
+row '#{W;P/z:#{window_name} }'
+row '#{W;L/t:#{window_name} }'
+row '#{S;L/t:#{session_name} }'
+row '#{P;L/n:#{pane_id} }'
+
+# Nesting: every child is the item's own context.
+row '#{S:#{W:#{session_name}.#{window_index}#{P:#{pane_id}}} }'
+# Attaching to zeta applied its update-environment[3] FOO and [7] BAR: both removed.
+row '#{W:#{V:#{loop_index}#{environ_name}#{environ_removed}}|}'
+row '#{W:#{O/w:#{next_window_index}#{loop_index}#{window_index}}|}'
+row '#{L:#{S:#{session_name},[#{session_name}]}|}'
+# A nested loop of the same kind re-sorts tmux's shared static list (sort.c), so the
+# outer loop then reads the inner order: D-005.
+rowdiv '#{S:#{S/n:#{session_name}}-#{session_name} }' \
+    'alphamikezeta-zeta alphamikezeta-alpha alphamikezeta-mike ' D-005
+
+# Options (format.c:5603): one tree, array items one child each.
+row '#{O:#{loop_index}#{option_name}[#{option_array_key}|#{option_array_index}]=#{option_value} a#{option_is_array}f#{option_array_first}l#{option_array_last}c#{option_array_count}h#{option_is_hook}u#{option_is_user}#{loop_last_flag};}'
+row '#{O/s:#{option_name};}'
+row '#{O/w:#{option_name}=#{option_value}#{loop_last_flag};}'
+row '#{O/p:#{option_name}=#{option_value}/#{pane_id};}'
+row '#{O/v:#{?#{m:@*,#{option_name}},#{option_name}=#{option_value}/#{option_is_user};,}}'
+row '#{O/g:#{?#{m:@*,#{option_name}},#{option_name}=#{option_value};,}}'
+row '#{O/gs:#{?#{m:@*,#{option_name}},#{option_name}=#{option_value};,}}'
+row '#{O/gw:#{?#{m:@*,#{option_name}},#{option_name}=#{option_value};,}}'
+row '#{O/gwv:#{?#{m:@*,#{option_name}},#{option_name};,}}'
+row '#{O/gp:x}'
+row '#{O/x:x}'
+# O and V share `loop_flags`: the last of them with exactly one argument.
+row '#{O/g;V/w:#{option_name};}'
+row '#{O/w;V:#{option_name};}'
+
+echo "    ]"
+echo "}"
+echo
+
+# No session at all: W and P fail and end the whole expansion; S, L and O are empty.
+t kill-server
+SOCK="$SOCK-nosession"
+t start-server \; set -g exit-empty off
+echo "fn rows_nosession() -> Vec<(String, String)> {"
+echo "    vec!["
+for f in 'X#{W:x}Y' 'X#{P:x}Y' 'X#{S:y}Y' 'X#{L:y}Y' 'X#{O:y}Y' 'X#{O/g:}Y' 'X#{S:#{W:x}}Y' \
+    'X#{W:a,b}Y#{S:z}'; do
+    t set -gF @out "$f"
+    out=$(t show -gv @out; echo x)
+    out=${out%x}
+    out=${out%$'\n'}
+    printf '        r("%s", "%s"),\n' "$(rust_str "$f")" "$(rust_str "$out")"
+done
+echo "    ]"
+echo "}"

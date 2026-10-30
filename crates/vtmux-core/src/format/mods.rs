@@ -4,6 +4,7 @@
 //! arguments (`q/s`, `c/f`, `N/w` ...) are kept as argument templates and decided when
 //! the template is expanded, because tmux expands every argument first.
 
+use super::loops::{LoopKind, SortMod};
 use super::parse::{RawMod, skip, template, unescape};
 use super::{CmpOp, CondArm, Format, Post, Reexpand, Value, VarMods};
 
@@ -11,7 +12,7 @@ use super::{CmpOp, CondArm, Format, Post, Reexpand, Value, VarMods};
 /// the whole `#{...}` a [`super::Node::Deferred`].
 pub(super) const SUPPORTED: &[&str] = &[
     "E", "T", "||", "&&", "==", "!=", "<", ">", "<=", ">=", "!", "!!", "e", "l", "a", "b", "d",
-    "n", "w", "=", "p", "c", "q", "R", "V", "N", "C", "t", "m", "s",
+    "n", "w", "=", "p", "c", "q", "R", "V", "N", "C", "t", "m", "s", "S", "W", "P", "L", "O",
 ];
 
 /// An argument as a template (`format_unescape` then `format_expand1`, at expansion).
@@ -80,7 +81,46 @@ fn chain(
         };
     }
 
-    // format.c:6355-6376. The loop modifiers S W P L O are other work.
+    // format.c:6383-6407: the loops, sessions first.
+    let kind = ["S", "W", "P", "L"]
+        .iter()
+        .find(|n| has(n))
+        .and_then(|n| LoopKind::from_modifier(n));
+    if let Some(kind) = kind {
+        // The last of S W P L sets the sort, whichever loop runs.
+        let s = last(&["S", "W", "P", "L"])?;
+        let sort = SortMod {
+            kind: LoopKind::from_modifier(&s.name)?,
+            arg: first_arg(s, inner, deferred),
+        };
+        // format_choose without expansion; clients have no active form.
+        let split = if kind == LoopKind::Clients {
+            None
+        } else {
+            choose(body)
+        };
+        let (all, active) = match split {
+            Some((a, b)) => (sub!(a), Some(sub!(b))),
+            None => (sub!(body), None),
+        };
+        return Some(Value::Loop {
+            kind,
+            sort,
+            all,
+            active,
+        });
+    }
+    if has("O") {
+        // `loop_flags` is shared with V: the last O or V with exactly one argument.
+        let flags = list
+            .iter()
+            .rfind(|m| (m.name == "O" || m.name == "V") && m.args.len() == 1)
+            .map(|m| arg(&m.args[0], inner, deferred));
+        return Some(Value::Options {
+            flags,
+            body: sub!(body),
+        });
+    }
     if let Some(v) = list.iter().rfind(|m| m.name == "V") {
         // `argc == 1` only; with more arguments the flags stay empty.
         let flags = (v.args.len() == 1).then(|| arg(&v.args[0], inner, deferred));
