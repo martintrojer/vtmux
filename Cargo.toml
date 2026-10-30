@@ -27,3 +27,7 @@ module_name_repetitions = "allow"
 [profile.dev.package.libghostty-vt-sys]
 opt-level = 3
 debug = false
+
+# The backreference long-text test takes ~8 s in a debug build, ~1 s optimised.
+[profile.dev.package.vtmux-core]
+opt-level = 2
