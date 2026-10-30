@@ -403,3 +403,66 @@ fn escape_escape_arrow_is_escape_then_arrow() {
         }
     }
 }
+
+/// An endless flood at 80x24, started after READY + Enter.
+const FLOOD: &str = "printf READY; read x; i=0; while :; do printf '\\033[3%dm%d %060d\\n' $((i%8)) $i $i; i=$((i+1)); done";
+
+fn flood(w: &World) -> Attached {
+    let mut a = w.attach_sized(&["new", "-s", "a", "sh", "-c", FLOOD], 80, 24);
+    a.wait(|a| pane_text(a).contains("READY"));
+    a.paused.store(true, Ordering::Relaxed);
+    a.keys(b"\r");
+    a
+}
+
+fn rss_kb(w: &World) -> u64 {
+    let pid = String::from_utf8(w.cli(&["display", "-p", "#{pid}"]).stdout).unwrap();
+    let out = Command::new("ps")
+        .args(["-o", "rss=", "-p", pid.trim()])
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+/// tty.c `tty_block_maybe`: a client that stops draining while a pane
+/// floods must not grow the server without bound (reviewer-28 mem.py: the
+/// reference stays at 68 MB, unblocked vtmux passed 1 GB in 30 s).
+#[test]
+fn stalled_terminal_keeps_server_memory_bounded() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let mut a = flood(&w);
+    for _ in 0..6 {
+        thread::sleep(Duration::from_secs(5));
+        let rss = rss_kb(&w);
+        assert!(rss < 100 * 1024, "server RSS {rss} kB while stalled");
+    }
+    assert!(a.alive());
+    a.paused.store(false, Ordering::Relaxed);
+    a.keys(b"\x02d");
+    a.exited(0);
+}
+
+/// After a stall, detach is not queued behind stale frames: the client
+/// exits promptly and drains about one terminal's worth, not the backlog
+/// (reviewer-28 lag.py: reference 0.1 s / 16 KB; unblocked vtmux 15 s / 330 MB).
+#[test]
+fn detach_after_stall_is_not_behind_a_backlog() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = flood(&w);
+        thread::sleep(Duration::from_secs(10));
+        let before = a.bytes.lock().unwrap().len();
+        a.paused.store(false, Ordering::Relaxed);
+        let start = Instant::now();
+        a.keys(b"\x02d");
+        a.exited(0);
+        let took = start.elapsed();
+        let drained = a.bytes.lock().unwrap().len() - before;
+        assert!(took < Duration::from_secs(1), "detach took {took:?}");
+        assert!(drained < 8 << 20, "drained {drained} bytes after detach");
+    }
+}
