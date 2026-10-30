@@ -3,7 +3,7 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -81,6 +81,8 @@ impl World {
         let sink = Arc::clone(&bytes);
         let paused = Arc::new(AtomicBool::new(false));
         let pause = Arc::clone(&paused);
+        let rate = Arc::new(AtomicUsize::new(0));
+        let limit = Arc::clone(&rate);
         thread::spawn(move || {
             let mut buf = [0; 8192];
             loop {
@@ -88,11 +90,24 @@ impl World {
                 while pause.load(Ordering::Relaxed) {
                     thread::sleep(Duration::from_millis(10));
                 }
-                let Ok(n) = reader.read(&mut buf) else { break };
+                // A slow terminal: at most `rate` bytes a second, in 20 ms
+                // slices (reviewer-29 slow.py).
+                let rate = limit.load(Ordering::Relaxed);
+                let want = if rate == 0 {
+                    buf.len()
+                } else {
+                    (rate / 50).clamp(1, buf.len())
+                };
+                let Ok(n) = reader.read(&mut buf[..want]) else {
+                    break;
+                };
                 if n == 0 {
                     break;
                 }
                 sink.lock().unwrap().extend_from_slice(&buf[..n]);
+                if rate != 0 {
+                    thread::sleep(Duration::from_millis(20));
+                }
             }
         });
         let writer = pair.master.take_writer().unwrap();
@@ -102,6 +117,7 @@ impl World {
             child,
             bytes,
             paused,
+            rate,
             size: (cols, rows),
         }
     }
@@ -117,6 +133,8 @@ struct Attached {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     bytes: Arc<Mutex<Vec<u8>>>,
     paused: Arc<AtomicBool>,
+    /// Bytes per second the terminal drains; 0 is unlimited.
+    rate: Arc<AtomicUsize>,
     size: (u16, u16),
 }
 impl Attached {
@@ -465,4 +483,65 @@ fn detach_after_stall_is_not_behind_a_backlog() {
         assert!(took < Duration::from_secs(1), "detach took {took:?}");
         assert!(drained < 8 << 20, "drained {drained} bytes after detach");
     }
+}
+
+/// A terminal that drains slowly but never stops (an SSH link) must not
+/// queue key echoes and detach behind the buffers in front of it: the
+/// client acknowledges frames once written, so the server blocks on what
+/// the terminal has not taken (reviewer-29 slow.py: reference exits within
+/// 0.7 s; vtmux counting only its own outbuf took 5.9 s / 12.4 s / 39.1 s).
+#[test]
+fn slow_terminal_detaches_promptly() {
+    for bin in bins() {
+        for rate in [500_000, 100_000, 30_000] {
+            let w = World::new(bin.clone());
+            let mut a = w.attach_sized(&["new", "-s", "a", "sh", "-c", FLOOD], 80, 24);
+            a.wait(|a| pane_text(a).contains("READY"));
+            a.rate.store(rate, Ordering::Relaxed);
+            a.keys(b"\r");
+            thread::sleep(Duration::from_secs(5));
+            assert!(a.alive());
+            let start = Instant::now();
+            a.keys(b"\x02d");
+            a.exited(0);
+            let took = start.elapsed();
+            assert!(
+                took < Duration::from_secs(1),
+                "{}: detach at {rate} B/s took {took:?}",
+                bin.display()
+            );
+        }
+    }
+}
+
+/// After a flood seen through a slow terminal stops, the blocked client
+/// gets a full redraw: its screen shows what the pane shows, as with the
+/// reference (tty.c `tty_block_maybe` redraws after the queue drains).
+#[test]
+fn slow_terminal_screen_is_correct_after_the_flood() {
+    let flood = "printf READY; read x; i=0; while [ $i -lt 3000 ]; do printf '\\033[3%dm%d %060d\\n' $((i%8)) $i $i; i=$((i+1)); done; printf '\\033[0mDONE'; exec cat";
+    let mut screens = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach_sized(&["new", "-s", "a", "sh", "-c", flood], 80, 24);
+        a.wait(|a| pane_text(a).contains("READY"));
+        a.rate.store(100_000, Ordering::Relaxed);
+        a.keys(b"\r");
+        a.wait_for(Duration::from_secs(60), |a| pane_text(a).contains("DONE"));
+        let observer = pane_line(&w);
+        // Rows above the status line; the client is not left behind.
+        let rows = |a: &Attached| -> String {
+            let text = pane_text(a);
+            let rows: Vec<&str> = text.lines().take(23).collect();
+            rows.join("\n").trim().to_owned()
+        };
+        a.wait(|a| rows(a) == observer);
+        screens.push(rows(&a));
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+    assert_eq!(
+        screens[0], screens[1],
+        "vtmux screen differs from reference"
+    );
 }

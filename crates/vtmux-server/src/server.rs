@@ -70,6 +70,8 @@ pub(crate) struct Client {
     stream: UnixStream,
     inbuf: Vec<u8>,
     outbuf: Vec<u8>,
+    /// Frames sent but not yet written to the client's terminal.
+    unacked: Unacked,
     /// Exit has been queued; close once the output is flushed.
     closing: bool,
     pub(crate) hello: Option<Hello>,
@@ -81,6 +83,37 @@ pub(crate) struct Client {
     decoder: crate::input::Decoder,
     caps: Option<crate::render::Caps>,
     compositor: crate::render::Compositor,
+}
+
+/// Frame bytes the client has not yet written to its terminal: in
+/// `outbuf`, the socket, or the client's own buffer. This is the queue
+/// `tty_block_maybe` measures (tty.c:219-245, `tty->out`); `outbuf` alone
+/// would miss the buffers in front of a slow terminal.
+#[derive(Default)]
+struct Unacked {
+    /// Encoded size of each unacknowledged frame, oldest first.
+    frames: std::collections::VecDeque<usize>,
+    /// Frames sent before the oldest in `frames`.
+    acked: u64,
+    bytes: usize,
+}
+
+impl Unacked {
+    fn sent(&mut self, len: usize) {
+        self.frames.push_back(len);
+        self.bytes += len;
+    }
+
+    /// The client has written the first `seq` frames.
+    fn ack(&mut self, seq: u64) {
+        while self.acked < seq {
+            let Some(len) = self.frames.pop_front() else {
+                break;
+            };
+            self.bytes -= len;
+            self.acked += 1;
+        }
+    }
 }
 
 /// What a new session needs ([`Server::create_session`]).
@@ -363,6 +396,7 @@ impl Server {
                             stream,
                             inbuf: Vec::new(),
                             outbuf: Vec::new(),
+                            unacked: Unacked::default(),
                             closing: false,
                             hello: None,
                             attached: None,
@@ -451,6 +485,9 @@ impl Server {
         };
         for f in &frames {
             if let Ok(bytes) = protocol::encode(f) {
+                if matches!(f, ServerMsg::Frame(_)) {
+                    c.unacked.sent(bytes.len());
+                }
                 c.outbuf.extend_from_slice(&bytes);
             }
         }
@@ -502,6 +539,11 @@ impl Server {
             ClientMsg::Stdin(bytes) => self.control_stdin(id, &bytes),
             ClientMsg::StdinEof => self.control_stdin_eof(id),
             ClientMsg::Detach => self.detach_client(id),
+            ClientMsg::FrameAck { seq } => {
+                if let Some(c) = self.clients.get_mut(&id) {
+                    c.unacked.ack(seq);
+                }
+            }
         }
     }
 
@@ -803,7 +845,7 @@ impl Server {
             let Some(caps) = client.caps else { continue };
             let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
             let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
-            let queued = client.outbuf.len();
+            let queued = client.unacked.bytes;
             if !self
                 .clients
                 .get_mut(&id)
