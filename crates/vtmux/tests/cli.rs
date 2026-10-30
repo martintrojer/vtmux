@@ -341,7 +341,9 @@ fn send_keys_and_capture() {
         runs.push(w.run(&["capture-pane", "-p", "-t", "a"]));
         runs.push(w.run(&["display", "-p", "-t", "a", "#{pane_width}x#{pane_height}"]));
         runs.push(w.run(&["send-keys", "-t", "a", "Enter", "x", "y"]));
-        w.wait_for_text("a", "xy");
+        // After Enter, cat echoes "hi" back after the typed "xy"; wait for
+        // the echo too, or the capture races it on either binary.
+        w.wait_for_text("a", "xyhi");
         runs.push(w.run(&["capture-pane", "-p", "-t", "a"]));
         runs
     });
