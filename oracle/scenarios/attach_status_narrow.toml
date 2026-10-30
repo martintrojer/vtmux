@@ -1,0 +1,14 @@
+name = "attach_status_narrow"
+size = [24, 5]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "24", "-y", "4", "sh", "-c", "printf '$ '; exec cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { resize = [20, 5] },
+  { settle = {} },
+  { screen = {} },
+  { keys = "\u0002d" },
+  { settle = {} },
+  { run = ["has", "-t", "a"] },
+]

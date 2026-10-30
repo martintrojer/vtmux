@@ -1,0 +1,136 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "attach_status_narrow",
+  "inputs": {
+    "name": "attach_status_narrow",
+    "size": [
+      24,
+      5
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "24",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '$ '; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "resize": [
+          20,
+          5
+        ]
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002d"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "$",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4mw\\e[0m\\e[30m\\e[42m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "$",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a]  <CLOCK>"
+        ],
+        "cursor": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
