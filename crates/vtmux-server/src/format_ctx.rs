@@ -1,9 +1,12 @@
 //! The [`FormatContext`] over the model (format.c `format_defaults` and the
 //! `format_table` callbacks).
 
-use vtmux_core::format::FormatContext;
+use std::rc::Rc;
+
+use vtmux_core::format::{FormatContext, LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop};
+use vtmux_core::ids::{SessionId, WindowId};
 use vtmux_core::layout::PaneStatus;
-use vtmux_core::options::{OptionsStore, Target};
+use vtmux_core::options::{OptionValue, OptionsStore, Target, TreeId};
 
 use crate::environ::Environ;
 use crate::model::Model;
@@ -34,6 +37,18 @@ impl ServerInfo {
     }
 }
 
+/// An attached client as formats see it (`#{L:...}`, `ft->c`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientView {
+    /// Connection order (tmux's `clients` list is in creation order).
+    pub order: u32,
+    /// `client-PID` or the tty (server-client.c:3016-3019).
+    pub name: String,
+    pub session: Option<SessionId>,
+    /// `c->activity_time` as a server-wide stamp: creation, then input.
+    pub activity: u64,
+}
+
 /// One expansion's view: the model plus the target (`format_defaults(ft,
 /// c, s, wl, wp)`, which fills a missing window or pane from the session).
 pub struct Ctx<'a> {
@@ -44,6 +59,11 @@ pub struct Ctx<'a> {
     pub target: Found,
     /// Extra variables (`line` for `list-*`).
     pub extra: Vec<(&'static str, String)>,
+    /// The attached clients, in connection order (`#{L:...}`).
+    pub clients: Rc<[ClientView]>,
+    /// The client the formats are for (`ft->c`): its session marks the active item
+    /// of `#{S:all,active}`.
+    pub client: Option<ClientView>,
 }
 
 impl<'a> Ctx<'a> {
@@ -76,7 +96,28 @@ impl<'a> Ctx<'a> {
             options: &model.options,
             target,
             extra: Vec::new(),
+            clients: Rc::from([]),
+            client: None,
         }
+    }
+
+    /// A loop child: the same server view and client over another target.
+    fn child(&self, target: Found, client: Option<ClientView>) -> Ctx<'a> {
+        let mut c = Ctx::new(self.model, self.info, self.global_env, target);
+        c.options = self.options;
+        c.clients = Rc::clone(&self.clients);
+        c.client = client;
+        c
+    }
+
+    /// A window's own `@options`, for `next_@x`/`prev_@x`.
+    fn window_user_options(&self, w: WindowId) -> Vec<(String, String)> {
+        self.options
+            .tree(TreeId::Window(w))
+            .iter()
+            .filter(|(name, _)| name.starts_with('@'))
+            .map(|(name, e)| (name.to_owned(), e.value.to_text(e.def, None, true)))
+            .collect()
     }
 
     fn session(&self) -> Option<&crate::model::Session> {
@@ -89,6 +130,16 @@ impl<'a> Ctx<'a> {
 
     fn pane(&self) -> Option<&crate::model::Pane> {
         self.model.panes.get(&self.target.pane?)
+    }
+
+    /// The client variables vtmux has (format.c `format_cb_client_*`).
+    fn client_value(&self, name: &str) -> Option<String> {
+        let c = self.client.as_ref()?;
+        Some(match name {
+            "client_name" => c.name.clone(),
+            "client_session" => self.model.sessions.get(&c.session?)?.name.clone(),
+            _ => return None,
+        })
     }
 
     fn session_value(&self, name: &str) -> Option<String> {
@@ -266,6 +317,7 @@ impl Ctx<'_> {
             _ => None,
         };
         server
+            .or_else(|| self.client_value(name))
             .or_else(|| self.session_value(name))
             .or_else(|| self.window_value(name))
             .or_else(|| self.pane_value(name))
@@ -296,5 +348,158 @@ impl FormatContext for Ctx<'_> {
             "session_created" | "session_activity" => self.session().map(|s| s.created),
             _ => None,
         }
+    }
+
+    /// `format_loop_sessions` (format.c:5231): `format_defaults(c, s, NULL, NULL)`.
+    fn sessions(&self) -> Vec<LoopItem<'_>> {
+        let current = self.client.as_ref().and_then(|c| c.session);
+        self.model
+            .sessions_by_name()
+            .map(|s| LoopItem {
+                ctx: Box::new(self.child(
+                    Found {
+                        session: Some(s.id),
+                        ..Found::default()
+                    },
+                    self.client.clone(),
+                )),
+                keys: LoopKeys {
+                    active: current == Some(s.id),
+                    id: s.id.0,
+                    name: s.name.clone(),
+                    activity: s.activity,
+                    ..LoopKeys::default()
+                },
+            })
+            .collect()
+    }
+
+    /// `format_loop_windows` (format.c:5350): the target session's winlinks.
+    fn windows(&self) -> Option<Vec<LoopItem<'_>>> {
+        let s = self.session()?;
+        Some(
+            s.windows
+                .iter()
+                .filter_map(|(&index, &w)| {
+                    let window = self.model.windows.get(&w)?;
+                    Some(LoopItem {
+                        ctx: Box::new(self.child(
+                            Found {
+                                session: Some(s.id),
+                                index: Some(index),
+                                window: Some(w),
+                                ..Found::default()
+                            },
+                            self.client.clone(),
+                        )),
+                        keys: LoopKeys {
+                            active: s.current == index,
+                            id: w.0,
+                            index,
+                            name: window.name.clone(),
+                            activity: window.activity,
+                            user_options: self.window_user_options(w),
+                            ..LoopKeys::default()
+                        },
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// `format_loop_panes` (format.c:5432): the target window's panes, with the
+    /// parent's session and winlink.
+    fn panes(&self) -> Option<Vec<LoopItem<'_>>> {
+        let w = self.window()?;
+        Some(
+            w.panes
+                .panes
+                .iter()
+                .filter_map(|&p| {
+                    let pane = self.model.panes.get(&p)?;
+                    Some(LoopItem {
+                        ctx: Box::new(self.child(
+                            Found {
+                                pane: Some(p),
+                                ..self.target
+                            },
+                            self.client.clone(),
+                        )),
+                        keys: LoopKeys {
+                            active: w.active() == p,
+                            id: p.0,
+                            index: self.model.pane_index(p).unwrap_or(0),
+                            name: pane.term.title(),
+                            activity: pane.active_point,
+                            z: self.model.pane_zindex(p).unwrap_or(0),
+                            ..LoopKeys::default()
+                        },
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    /// `format_loop_clients` (format.c:5762): `format_defaults(c, ft->s, ft->wl,
+    /// ft->wp)`; with no session in the target the client's own is used.
+    fn clients(&self) -> Vec<LoopItem<'_>> {
+        self.clients
+            .iter()
+            .map(|c| {
+                let target = if self.target.session.is_none()
+                    && let Some(s) = c.session
+                {
+                    Found {
+                        session: Some(s),
+                        ..Found::default()
+                    }
+                } else {
+                    self.target
+                };
+                LoopItem {
+                    ctx: Box::new(self.child(target, Some(c.clone()))),
+                    keys: LoopKeys {
+                        id: c.order,
+                        name: c.name.clone(),
+                        activity: c.activity,
+                        ..LoopKeys::default()
+                    },
+                }
+            })
+            .collect()
+    }
+
+    /// `format_loop_options` (format.c:5603): one tree's own entries.
+    fn options(&self, scope: OptionScope) -> Option<OptionsLoop<'_>> {
+        let tree = match scope {
+            OptionScope::Server => TreeId::Server,
+            OptionScope::GlobalSession => TreeId::GlobalSession,
+            OptionScope::GlobalWindow => TreeId::GlobalWindow,
+            OptionScope::Session => TreeId::Session(self.target.session?),
+            OptionScope::Window => TreeId::Window(self.target.window?),
+            OptionScope::Pane => TreeId::Pane(self.target.pane?),
+        };
+        let entries = self
+            .options
+            .tree(tree)
+            .iter()
+            .map(|(name, e)| LoopOption {
+                name: name.to_owned(),
+                value: e.value.to_text(e.def, None, false),
+                array: e.is_array().then(|| match &e.value {
+                    OptionValue::Array(items) => items
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_text(e.def, false)))
+                        .collect(),
+                    OptionValue::Single(_) => Vec::new(),
+                }),
+                hook: e.def.is_some_and(|d| d.hook),
+                user: e.def.is_none(),
+            })
+            .collect();
+        Some(OptionsLoop {
+            ctx: Box::new(self.child(self.target, self.client.clone())),
+            entries,
+        })
     }
 }

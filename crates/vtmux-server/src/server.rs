@@ -27,7 +27,7 @@ use vtmux_vt::PaneTerm;
 
 use crate::commands::{self, After, Item, Output};
 use crate::environ::{Environ, session_environ};
-use crate::format_ctx::ServerInfo;
+use crate::format_ctx::{ClientView, Ctx, ServerInfo};
 use crate::model::{Model, Pane, Session, Window};
 use crate::names::parse_window_name;
 use crate::pane_io::{PaneIo, ReadResult};
@@ -79,6 +79,9 @@ pub(crate) struct Client {
     pub(crate) attached: Option<SessionId>,
     /// Control mode (`-C`) state; `None` for terminal and command clients.
     pub(crate) control: Option<crate::control::ControlState>,
+    /// `c->activity_time` as a model activity stamp: set when the client
+    /// connects (server-client.c:289), bumped by its keys (1467).
+    pub(crate) activity: u64,
     prefix: bool,
     pasting: bool,
     decoder: crate::input::Decoder,
@@ -477,6 +480,7 @@ impl Server {
                 Ok((mut stream, _)) => {
                     let id = ClientId(self.next_client);
                     self.next_client += 1;
+                    let activity = self.model.touch();
                     if self
                         .poll
                         .registry()
@@ -496,6 +500,7 @@ impl Server {
                             hello: None,
                             attached: None,
                             control: None,
+                            activity,
                             prefix: false,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
@@ -818,6 +823,11 @@ impl Server {
         client.compositor.invalidate();
         client.attached = Some(s);
         client.prefix = false;
+        // server_client_set_session: session_update_activity (server-client.c:468).
+        let stamp = self.model.touch();
+        if let Some(session) = self.model.sessions.get_mut(&s) {
+            session.activity = stamp;
+        }
         // Caps::startup ends with a DECRQM query (tty.c tty_send_requests).
         client.decoder.query_sent(Instant::now());
         self.send(id, &ServerMsg::Ready);
@@ -937,6 +947,13 @@ impl Server {
             .clients
             .get_mut(&id)
             .ok_or(EdgeError::NoCurrentClient)?;
+        // server_client_handle_key: the client's and session's activity
+        // (server-client.c:1465-1469).
+        let stamp = self.model.touch();
+        c.activity = stamp;
+        if let Some(session) = self.model.sessions.get_mut(&s) {
+            session.activity = stamp;
+        }
         c.decoder.feed(bytes);
         let events = c.decoder.drain(Instant::now());
         let term = &self.model.panes[&p].term;
@@ -1042,7 +1059,7 @@ impl Server {
                 .filter(|&(x, y)| x < cols && y < rows.saturating_sub(1));
             screen.cursor_visible = snap.cursor_visible && screen.cursor.is_some();
             let found = crate::target::Found::from_session(&self.model, s);
-            let ctx = crate::format_ctx::Ctx::new(&self.model, &self.info, &self.global_env, found);
+            let ctx = self.format_ctx(found, Some(id));
             let left = vtmux_core::format::expand_str("[#{session_name}] ", &ctx);
             let right = vtmux_core::format::trim::trim_left(
                 &vtmux_core::format::expand_time("\"#{=21:pane_title}\" %H:%M %d-%b-%y", &ctx),
@@ -1080,6 +1097,62 @@ impl Server {
     #[must_use]
     pub fn client_session(&self, id: ClientId) -> Option<SessionId> {
         self.clients.get(&id)?.attached
+    }
+
+    /// The attached clients in connection order, as formats see them
+    /// (`sort_get_clients`, sort.c:461-480).
+    pub fn client_views(&self) -> std::rc::Rc<[ClientView]> {
+        self.clients
+            .iter()
+            .filter(|(_, c)| c.attached.is_some())
+            .map(|(&id, c)| self.client_view(id, c))
+            .collect()
+    }
+
+    fn client_view(&self, id: ClientId, c: &Client) -> ClientView {
+        ClientView {
+            order: u32::try_from(id.0).unwrap_or(u32::MAX),
+            name: self.client_name(id),
+            session: c.attached,
+            activity: c.activity,
+        }
+    }
+
+    /// `cmd_find_best_client` (cmd-find.c:112-130): the most recently active
+    /// client attached to `s`, or to any session when `s` has none.
+    pub fn best_client(&self, s: Option<SessionId>) -> Option<ClientId> {
+        let s = s.filter(|&s| self.clients.values().any(|c| c.attached == Some(s)));
+        let mut best: Option<(ClientId, u64)> = None;
+        for (&id, c) in &self.clients {
+            let Some(cs) = c.attached else { continue };
+            if s.is_some_and(|s| s != cs) {
+                continue;
+            }
+            // timercmp(>): the first of equals stays.
+            if best.is_none_or(|(_, a)| c.activity > a) {
+                best = Some((id, c.activity));
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+
+    /// `cmd_find_current_client` (cmd-find.c:1278-1305) without its error:
+    /// the calling client when attached, else the best client of the session
+    /// the command runs in.
+    pub fn target_client(&self, client: Option<ClientId>, origin: Origin) -> Option<ClientId> {
+        if let Some(c) = client.filter(|&c| self.client_session(c).is_some()) {
+            return Some(c);
+        }
+        let s = crate::target::current(&self.model, origin)?.session?;
+        self.best_client(Some(s))
+    }
+
+    /// A format context over `found` with `client` as `ft->c`.
+    pub fn format_ctx(&self, found: crate::target::Found, client: Option<ClientId>) -> Ctx<'_> {
+        let mut ctx = Ctx::new(&self.model, &self.info, &self.global_env, found);
+        ctx.clients = self.client_views();
+        ctx.client = client.and_then(|id| Some(self.client_view(id, self.clients.get(&id)?)));
+        ctx
     }
 
     /// Most recent attached client (`cmd_find_current_client`, M0 one client).
@@ -1676,7 +1749,7 @@ impl Server {
                 .get(TreeId::Window(w), "automatic-rename-format")
                 .map(|e| e.value.to_text(e.def, None, false))
                 .unwrap_or_default();
-            let ctx = crate::format_ctx::Ctx::new(&self.model, &self.info, &self.global_env, found);
+            let ctx = self.format_ctx(found, None);
             let name =
                 crate::names::clean_untrusted(&vtmux_core::format::expand_str(&template, &ctx));
             if let Some(pane) = self.model.panes.get_mut(&active) {

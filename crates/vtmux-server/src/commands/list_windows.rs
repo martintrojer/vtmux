@@ -8,7 +8,6 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::format;
 
 use super::Item;
-use crate::format_ctx::Ctx;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -86,7 +85,7 @@ pub fn exec(
     let filter = args.value('f');
     let mut out = Vec::new();
     for link in &links {
-        let mut ctx = Ctx::new(&server.model, &server.info, &server.global_env, *link);
+        let mut ctx = server.format_ctx(*link, item.client);
         ctx.extra.push(("line", links.len().to_string()));
         if let Some(f) = filter
             && !format::is_true(&format::expand_str(f, &ctx))

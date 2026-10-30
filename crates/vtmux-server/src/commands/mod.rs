@@ -47,7 +47,6 @@ use vtmux_core::format;
 use vtmux_core::options::SetOutcome;
 use vtmux_core::protocol::TtyInfo;
 
-use crate::format_ctx::Ctx;
 use crate::names::utf8_sanitize;
 use crate::server::{ClientId, Server};
 use crate::target::{self, Found, Origin};
@@ -346,7 +345,7 @@ pub fn attach(
 
 /// `format_single` with the command's target.
 pub fn expand(server: &Server, found: Found, template: &str) -> String {
-    let ctx = Ctx::new(&server.model, &server.info, &server.global_env, found);
+    let ctx = server.format_ctx(found, None);
     format::expand_str(template, &ctx)
 }
 

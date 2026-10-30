@@ -5,7 +5,6 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::format;
 
 use super::Item;
-use crate::format_ctx::Ctx;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -35,16 +34,14 @@ pub fn exec(
             .filter(|(_, x)| **x != w)
             .find(|(i, x)| {
                 filter.is_none_or(|f| {
-                    let ctx = Ctx::new(
-                        &server.model,
-                        &server.info,
-                        &server.global_env,
+                    let ctx = server.format_ctx(
                         Found {
                             session: Some(s),
                             index: Some(**i),
                             window: Some(**x),
                             ..Found::default()
                         },
+                        None,
                     );
                     format::is_true(&format::expand_str(f, &ctx))
                 })

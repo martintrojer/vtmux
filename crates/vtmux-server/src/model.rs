@@ -232,6 +232,21 @@ impl Model {
         Some(self.pane_base_index(pane.window) + u32::try_from(at).ok()?)
     }
 
+    /// `window_pane_zindex` (window.c:1293): floating panes above count, plus one
+    /// for a tiled pane.
+    #[must_use]
+    pub fn pane_zindex(&self, p: PaneId) -> Option<u32> {
+        let w = self.windows.get(&self.panes.get(&p)?.window)?;
+        let mut i = 0;
+        for &q in &w.panes.z_order {
+            if q == p {
+                return Some(i + u32::from(!w.is_floating(p)));
+            }
+            i += u32::from(w.is_floating(q));
+        }
+        None
+    }
+
     #[must_use]
     pub fn pane_base_index(&self, w: WindowId) -> u32 {
         u32::try_from(self.number_option(TreeId::Window(w), "pane-base-index")).unwrap_or(0)
