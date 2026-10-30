@@ -1,0 +1,12 @@
+name = "attach_keys_application"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "printf '\\033]2;t\\033\\\\'; printf '\\033[?1h'; stty -echo; exec cat -v"] },
+  { attach = { session = "a" } },
+  { keys = "\u001b[A\r" },
+  { settle = {} },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+  { keys = "\u0002d" },
+  { settle = {} },
+  { run = ["has", "-t", "a"] },
+]

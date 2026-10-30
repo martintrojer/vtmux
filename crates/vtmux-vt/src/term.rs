@@ -314,6 +314,12 @@ impl PaneTerm {
         self.term.mode(Mode::DECCKM).unwrap_or(false)
     }
 
+    /// Bracketed paste markers are accepted by the pane (input-keys.c).
+    #[must_use]
+    pub fn bracketed_paste(&self) -> bool {
+        self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false)
+    }
+
     /// True while the alternate screen is active (`#{alternate_on}`).
     #[must_use]
     pub fn alternate_on(&self) -> bool {

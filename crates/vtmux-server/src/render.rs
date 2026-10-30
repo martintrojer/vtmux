@@ -6,7 +6,10 @@ use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
 
 /// M0 terminfo-free table for the three supported terminal families. Full
 /// overrides, theme detection and extended styles are M1 (D8).
-#[expect(clippy::struct_excessive_bools, reason = "independent terminal capabilities")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent terminal capabilities"
+)]
 #[derive(Clone, Copy, Debug)]
 pub struct Caps {
     pub rgb: bool,

@@ -75,6 +75,8 @@ struct Client {
     hello: Option<Hello>,
     attached: Option<SessionId>,
     prefix: bool,
+    pasting: bool,
+    decoder: crate::input::Decoder,
     caps: Option<crate::render::Caps>,
     compositor: crate::render::Compositor,
 }
@@ -270,6 +272,10 @@ impl Server {
             for p in std::mem::take(&mut self.backlog) {
                 self.pane_readable(p);
             }
+            let ids: Vec<_> = self.clients.keys().copied().collect();
+            for id in ids {
+                let _ = self.on_client_input(id, &[]);
+            }
             self.check_window_names();
             self.render_clients();
             if self.should_exit() {
@@ -282,6 +288,14 @@ impl Server {
     fn next_timeout(&self) -> Option<Duration> {
         if !self.backlog.is_empty() {
             return Some(Duration::ZERO);
+        }
+        if let Some(deadline) = self
+            .clients
+            .values()
+            .filter_map(|c| c.decoder.deadline())
+            .min()
+        {
+            return Some(deadline.saturating_duration_since(Instant::now()));
         }
         let pending = self.model.panes.values().any(|p| p.changed);
         if self.clients.values().any(|c| c.attached.is_some()) {
@@ -344,6 +358,8 @@ impl Server {
                             hello: None,
                             attached: None,
                             prefix: false,
+                            pasting: false,
+                            decoder: crate::input::Decoder::default(),
                             caps: None,
                             compositor: crate::render::Compositor::default(),
                         },
@@ -624,22 +640,53 @@ impl Server {
             return Ok(());
         };
         let (_, _, p) = self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
+        let c = self
+            .clients
+            .get_mut(&id)
+            .ok_or(EdgeError::NoCurrentClient)?;
+        c.decoder.feed(bytes);
+        let events = c.decoder.drain(Instant::now());
+        let term = &self.model.panes[&p].term;
+        let modes = crate::keys::KeyModes {
+            app_cursor: term.app_cursor(),
+        };
+        let bracketed = term.bracketed_paste();
         let mut forward = Vec::new();
-        for &b in bytes {
+        for event in events {
             let c = self
                 .clients
                 .get_mut(&id)
                 .ok_or(EdgeError::NoCurrentClient)?;
-            if c.prefix {
-                c.prefix = false;
-                if b == b'd' {
-                    self.detach_client(id);
-                    return Ok(());
+            match event {
+                crate::input::Event::Ignore => {}
+                crate::input::Event::Sync(sync) => {
+                    if let Some(caps) = &mut c.caps {
+                        caps.sync = sync;
+                    }
                 }
-            } else if b == 2 {
-                c.prefix = true;
-            } else {
-                forward.push(b);
+                crate::input::Event::Paste(start) => {
+                    c.pasting = start;
+                    if bracketed {
+                        forward.extend_from_slice(if start { b"\x1b[200~" } else { b"\x1b[201~" });
+                    }
+                }
+                crate::input::Event::Key(key) => {
+                    if !c.pasting && c.prefix {
+                        c.prefix = false;
+                        if key.base == crate::keys::Base::Char('d') && !key.ctrl && !key.meta {
+                            self.detach_client(id);
+                            return Ok(());
+                        }
+                    } else if !c.pasting
+                        && key.base == crate::keys::Base::Char('b')
+                        && key.ctrl
+                        && !key.meta
+                    {
+                        c.prefix = true;
+                    } else {
+                        forward.extend(crate::keys::encode(&key, modes));
+                    }
+                }
             }
         }
         if let Some(io) = self.model.panes.get_mut(&p).and_then(|p| p.io.as_mut()) {
