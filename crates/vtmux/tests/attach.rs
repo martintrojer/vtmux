@@ -218,6 +218,47 @@ fn attach_detach_frames_and_exit() {
     }
 }
 #[test]
+fn large_input_is_drained_without_another_key() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "stty raw -echo; printf READY; head -c 12000 | wc -c; sleep 10",
+        ]);
+        a.wait(|a| pane_text(a).contains("READY"));
+        a.keys(&vec![b'x'; 12000]);
+        a.wait(|a| pane_text(a).contains("12000"));
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
+
+#[test]
+fn signal_exit_restores_terminal_modes() {
+    for bin in bins() {
+        for signal in [rustix::process::Signal::TERM, rustix::process::Signal::HUP] {
+            let w = World::new(bin.clone());
+            let mut a = w.attach(&["new", "-s", "a", "cat"]);
+            a.wait(|a| a.text().contains("\x1b[?1049h"));
+            let pid = rustix::process::Pid::from_raw(
+                i32::try_from(a.child.process_id().unwrap()).unwrap(),
+            )
+            .unwrap();
+            rustix::process::kill_process(pid, signal).unwrap();
+            a.exited(1);
+            a.wait(|a| a.text().contains("\x1b[?1049l"));
+            assert!(w.cli(&["has", "-t", "a"]).status.success());
+        }
+    }
+}
+
+#[test]
 fn session_and_server_exit_messages() {
     for bin in bins() {
         let w = World::new(bin);

@@ -490,7 +490,7 @@ impl Server {
             }
             ClientMsg::Resize { cols, rows } => self.resize_client(id, cols, rows),
             ClientMsg::Stdin(_) | ClientMsg::StdinEof => {}
-            ClientMsg::Detach => self.drop_client(id),
+            ClientMsg::Detach => self.detach_client(id),
         }
     }
 
