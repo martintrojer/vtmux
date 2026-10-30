@@ -9,11 +9,12 @@ use std::fmt::Write as _;
 
 pub mod compose;
 pub mod scene;
+pub mod status;
 pub mod window;
 use vtmux_core::colour::{self, Colour, tty::Depth};
 use vtmux_core::protocol::Hello;
 use vtmux_core::term_features::{Cap, Term};
-use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
+use vtmux_vt::{Color, Snapshot, Style, Underline};
 
 /// What the compositor needs of a client's terminal, from its
 /// [`Term`] (terminfo-free, D8): `terminal-features`, `terminal-overrides`,
@@ -74,24 +75,6 @@ impl Caps {
     pub fn teardown(self) -> Vec<u8> {
         let title = if self.xterm { "\x1b[23;0;0t" } else { "" };
         format!("\x1b[r\x1b[0m\x1b[?1l\x1b>\x1b[H\x1b[2J\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l\x1b[?1049l{title}\x1b[?2031l").into_bytes()
-    }
-    /// `server_client_update_theme_colours` + `format_cb_client_colours`: a
-    /// plain xterm-256color reports 16 unless the 256/RGB feature is set.
-    #[must_use]
-    pub fn status_style(self) -> Style {
-        Style {
-            fg: if self.theme_palette {
-                Color::Rgb(13, 13, 13)
-            } else {
-                Color::Palette(0)
-            },
-            bg: if self.theme_palette {
-                Color::Rgb(154, 205, 50)
-            } else {
-                Color::Palette(2)
-            },
-            ..Style::default()
-        }
     }
 }
 
@@ -288,184 +271,6 @@ fn color(out: &mut String, c: Colour, bg: bool) {
     }
 }
 
-/// Put the default status directly on status row `y`. Full status-format is
-/// M1. Limits/order: options-table.c status-left/right/window-status
-/// defaults; layout: format-draw.c `format_draw_left` (`status-justify left`).
-pub fn status(
-    screen: &mut Snapshot,
-    y: u16,
-    left: &str,
-    windows: &[(String, bool)],
-    right: &str,
-    caps: Caps,
-) {
-    let Some(row) = row_mut(screen, y) else {
-        return;
-    };
-    let base = caps.status_style();
-    row.fill(Cell {
-        text: String::new(),
-        width: 1,
-        style: Style {
-            fg: Color::Default,
-            ..base
-        },
-        ..Cell::default()
-    });
-    let cols = row.len();
-    // `#{T;=/#{status-left-length}:status-left}`, status-left-length 10.
-    let left = cells(&vtmux_core::format::trim::trim_left(left, 10), base);
-    let right = cells(right, base);
-    // The window list, `window-status-separator` " " between entries; the
-    // current entry is the list focus (`list=focus`).
-    let mut list = Vec::new();
-    let mut focus = (0, 0);
-    for (i, (text, current)) in windows.iter().enumerate() {
-        if i > 0 {
-            list.extend(cells(" ", base));
-        }
-        let style = Style {
-            underline: if *current {
-                Underline::Single
-            } else {
-                Underline::None
-            },
-            ..base
-        };
-        let start = list.len();
-        list.extend(cells(text, style));
-        if *current {
-            focus = (start, list.len());
-        }
-    }
-    // Trim first the list, then the right, then the left (no centre or
-    // after-list section in the default format).
-    let (mut width_left, mut width_list, mut width_right) = (left.len(), list.len(), right.len());
-    while width_left + width_list + width_right > cols {
-        if width_list > 0 {
-            width_list -= 1;
-        } else if width_right > 0 {
-            width_right -= 1;
-        } else {
-            width_left -= 1;
-        }
-    }
-    put(row, 0, &left, 0, width_left);
-    put(
-        row,
-        cols - width_right,
-        &right,
-        right.len() - width_right,
-        width_right,
-    );
-    if width_list > 0 {
-        put_list(row, width_left, width_list, &list, focus, base);
-    }
-}
-
-/// A status line with no or an empty format: `status_redraw` (status.c:
-/// 276-295) fills it with spaces in the status style, and the client draws
-/// it with `tty_draw_line` (screen-redraw.c:1793-1811).
-pub fn status_blank(screen: &mut Snapshot, y: u16, caps: Caps) {
-    let Some(row) = row_mut(screen, y) else {
-        return;
-    };
-    row.fill(Cell {
-        text: " ".into(),
-        width: 1,
-        style: caps.status_style(),
-        ..Cell::default()
-    });
-    compose::draw_line(row, caps.bce, false);
-}
-
-fn row_mut(screen: &mut Snapshot, y: u16) -> Option<&mut [Cell]> {
-    let cols = usize::from(screen.cols);
-    (y < screen.rows).then(|| &mut screen.cells[usize::from(y) * cols..][..cols])
-}
-
-/// One status section as cells: a wide character is followed by a
-/// zero-width continuation, combining marks join the previous character.
-fn cells(text: &str, style: Style) -> Vec<Cell> {
-    use unicode_width::UnicodeWidthChar;
-    let mut out: Vec<Cell> = Vec::new();
-    for c in text.chars() {
-        match c.width().unwrap_or(0) {
-            0 => {
-                if let Some(base) = out.iter_mut().rev().find(|cell| cell.width != 0) {
-                    base.text.push(c);
-                }
-            }
-            w => {
-                out.push(Cell {
-                    text: c.to_string(),
-                    width: u8::try_from(w).unwrap_or(1),
-                    style,
-                    ..Cell::default()
-                });
-                if w == 2 {
-                    out.push(Cell {
-                        text: String::new(),
-                        width: 0,
-                        style,
-                        ..Cell::default()
-                    });
-                }
-            }
-        }
-    }
-    out
-}
-
-/// `format_draw_put`: copy `width` cells of `src` from `start` to `offset`.
-/// A wide character cut in half becomes a space.
-fn put(row: &mut [Cell], offset: usize, src: &[Cell], start: usize, width: usize) {
-    for i in 0..width {
-        let mut cell = src[start + i].clone();
-        let cut = (i == 0 && cell.width == 0) || (i + 1 == width && cell.width == 2);
-        if cut {
-            cell.text = " ".into();
-            cell.width = 1;
-        }
-        row[offset + i] = cell;
-    }
-}
-
-/// `format_draw_put_list`: a trimmed list keeps the focus in view and marks
-/// the hidden sides with `<` and `>` (`list=left-marker`/`right-marker`).
-fn put_list(
-    row: &mut [Cell],
-    mut offset: usize,
-    mut width: usize,
-    list: &[Cell],
-    focus: (usize, usize),
-    style: Style,
-) {
-    if width >= list.len() {
-        put(row, offset, list, 0, list.len());
-        return;
-    }
-    let centre = focus.0 + (focus.1 - focus.0) / 2;
-    let mut start = centre.saturating_sub(width / 2).min(list.len() - width);
-    let marker = |text: &str| Cell {
-        text: text.into(),
-        width: 1,
-        style,
-        ..Cell::default()
-    };
-    if start != 0 && width > 1 {
-        row[offset] = marker("<");
-        offset += 1;
-        start += 1;
-        width -= 1;
-    }
-    if start + width < list.len() && width > 1 {
-        row[offset + width - 1] = marker(">");
-        width -= 1;
-    }
-    put(row, offset, list, start, width);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,90 +329,5 @@ mod tests {
         let fresh = Compositor::default().frame(screen, caps);
         assert_eq!(redraw, fresh, "unblocking redraws every cell");
         assert_ne!(redraw, first);
-    }
-
-    fn status_row(cols: u16, windows: &[(&str, bool)], right: &str) -> (String, Snapshot) {
-        let caps = Caps {
-            rgb: false,
-            palette_colours: 256,
-            theme_palette: false,
-            sync: false,
-            bce: true,
-            xterm: true,
-            colours: 256,
-        };
-        let mut screen = vtmux_vt::snapshot(&vtmux_vt::PaneTerm::new(cols, 2, 0));
-        let windows: Vec<_> = windows.iter().map(|(t, c)| ((*t).to_owned(), *c)).collect();
-        status(&mut screen, 1, "[a] ", &windows, right, caps);
-        let text = (0..cols)
-            .map(|x| screen.cell(x, 1).unwrap())
-            .filter(|c| c.width != 0)
-            .map(|c| if c.text.is_empty() { " " } else { &c.text })
-            .collect();
-        (text, screen)
-    }
-
-    /// Reference tmux 3.8 status rows (outer tmux observer, /tmp/rv26/obs3.sh):
-    /// the list is trimmed first, then the right, then the left
-    /// (format-draw.c `format_draw_left`).
-    #[test]
-    fn narrow_status_trims_list_then_right_then_left() {
-        let right = "\"t\" 07:50 30-Oct-26";
-        let one = [("0:w*", true)];
-        assert_eq!(status_row(20, &one, right).0, "[a]  07:50 30-Oct-26");
-        assert_eq!(status_row(12, &one, right).0, "[a] 0-Oct-26");
-        assert_eq!(status_row(24, &one, right).0, "[a] w\"t\" 07:50 30-Oct-26");
-        let long = "\"aaaaaaaaaaaaaaaaaaaaa\" 07:50 30-Oct-26";
-        assert_eq!(
-            status_row(40, &one, long).0,
-            "[a] aaaaaaaaaaaaaaaaaaa\" 07:50 30-Oct-26"
-        );
-        assert_eq!(status_row(3, &one, right).0, "[a]");
-        assert_eq!(status_row(1, &one, right).0, "[");
-    }
-
-    /// `format_draw_put_list`: the focus stays in view, `<`/`>` mark the cut.
-    #[test]
-    fn trimmed_window_list_has_markers() {
-        let right = "\"t\" 07:50 30-Oct-26";
-        let two = [("0:w*", true), ("1:second", false)];
-        // Reference at 30x5: `[a] 0:w* 1>"t" ...`.
-        let (text, screen) = status_row(30, &two, right);
-        assert_eq!(text, "[a] 0:w* 1>\"t\" 07:50 30-Oct-26");
-        assert_eq!(
-            screen.cell(4, 1).unwrap().style.underline,
-            Underline::Single
-        );
-        assert_eq!(screen.cell(10, 1).unwrap().style.underline, Underline::None);
-        // Reference rows (3.8, outer-tmux observer, all titles `t`).
-        for (cols, windows, row) in [
-            (
-                30,
-                &[("0:w", false), ("1:second*", true)][..],
-                "[a] <secon>",
-            ),
-            (
-                31,
-                &[("0:a", false), ("1:bbbbbbb*", true), ("2:c", false)],
-                "[a] <bbbbbb>",
-            ),
-            (
-                27,
-                &[("0:a", false), ("1:bbbbbbb*", true), ("2:c", false)],
-                "[a] <bb>",
-            ),
-            (
-                26,
-                &[("0:a", false), ("1:bbbbbbb*", true), ("2:c", false)],
-                "[a] <b>",
-            ),
-            (
-                27,
-                &[("0:a", false), ("1:b", false), ("2:c*", true)],
-                "[a] <:c*",
-            ),
-        ] {
-            assert_eq!(status_row(cols, windows, right).0, format!("{row}{right}"));
-        }
     }
 }
