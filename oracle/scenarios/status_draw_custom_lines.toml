@@ -1,0 +1,18 @@
+name = "status_draw_custom_lines"
+size = [40, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["set", "-g", "status-format[0]", "zero #S #{window_index}"] },
+  { run = ["set", "-g", "status-format[1]", "#[fg=red]one#[align=right]#{session_windows}"] },
+  { run = ["set", "-g", "status-format[2]", "#[bg=blue,fg=white]two#[fill=yellow]"] },
+  { run = ["set", "-t", "a", "status", "2"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["set", "-t", "a", "status", "3"] },
+  { screen = {} },
+  { run = ["set", "-gu", "status-format[1]"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-style", "bg=magenta"] },
+  { run = ["set", "-g", "status-fg", "cyan"] },
+  { screen = {} },
+]
