@@ -1,0 +1,20 @@
+name = "screen_zoom"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-v", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t"] },
+  { run = ["send-keys", "-t", "%1", "-l", "one"] },
+  { run = ["send-keys", "-t", "%2", "-l", "two"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["resizep", "-Z", "-t", "%2"] },
+  { screen = {} },
+  { run = ["set", "-w", "-t", "a", "pane-border-status", "top"] },
+  { screen = {} },
+  { run = ["resizep", "-Z", "-t", "%2"] },
+  { screen = {} },
+]
