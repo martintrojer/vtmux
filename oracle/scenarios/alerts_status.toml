@@ -1,0 +1,24 @@
+name = "alerts_status"
+size = [60, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "6", "cat"] },
+  { run = ["select-pane", "-t", "a:0", "-T", "t"] },
+  { run = ["neww", "-d", "-n", "x", "sh", "-c", "while read x; do printf x; done"] },
+  { run = ["neww", "-d", "-n", "y", "sh", "-c", "while read x; do printf '\\007'; done"] },
+  { run = ["set", "-g", "monitor-activity", "on"] },
+  { run = ["set", "-g", "window-status-activity-style", "fg=red"] },
+  { run = ["set", "-g", "window-status-bell-style", "fg=blue"] },
+  { attach = { session = "a" } },
+  { run = ["send-keys", "-t", "a:1", "Enter"] },
+  { run = ["send-keys", "-t", "a:2", "Enter"] },
+  { screen = {} },
+  { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
+  { run = ["select-window", "-t", "a:1"] },
+  { screen = {} },
+  { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
+  { run = ["send-keys", "-t", "a:2", "Enter"] },
+  { screen = {} },
+  { run = ["next-window", "-a"] },
+  { screen = {} },
+  { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
+]
