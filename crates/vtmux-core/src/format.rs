@@ -1,4 +1,4 @@
-//! Format (#{...}) expansion for the M0 subset.
+//! tmux 3.8 format (#{...}) parsing and expansion.
 //!
 //! A template is parsed once into a typed AST ([`parse`]) and evaluated against a
 //! [`FormatContext`] ([`expand`]). Behaviour is tmux 3.8's `format.c`, read as a
@@ -7,18 +7,24 @@
 //! early (an unterminated `#{`, a `#{==:a}` without a comma) are decided at
 //! parse time here and show up as [`Node::Abort`].
 //!
-//! Supported: variables and the `#S #I ...` aliases, `#{?c,v,...}`, `#{||:...}`,
-//! `#{&&:...}`, `#{==:a,b}`, `#{!=:a,b}`, `#{E:x}`, `#{T:x}` (like `E`: the
-//! strftime pass is deferred), `#{t:x}` (a time variable as `ctime` text), the
-//! `##` `#,` `#}` escapes and `#[style]` pass-through. [`expand_time`] is
-//! `format_expand_time`: a `strftime` pass over the template first. Every other modifier parses to [`Node::Deferred`] and expands
-//! to nothing; [`Parsed::deferred`] lists them so the server can log them.
+//! Supports variables, aliases, conditionals, boolean and string comparisons,
+//! arithmetic (`e`), glob/ERE/fuzzy matching (`m`), ERE substitution (`s`),
+//! literals/characters (`l`, `a`), paths (`b`, `d`), length/width (`n`, `w`),
+//! trimming/padding (`=`, `p`), colours/quoting (`c`, `q`), repeats (`R`),
+//! environment loops (`V`), name tests (`N`) and pane-search hooks (`C`).
+//! `E` re-expands; `T` is currently like `E` (its strftime pass is deferred).
+//! Bare `t` formats a time variable as `ctime` text. [`expand_time`] runs
+//! strftime over the template first. Escapes and `#[style]` pass through.
+//! Unsupported modifiers become [`Node::Deferred`] and expand to nothing;
+//! [`Parsed::deferred`] lists them so the server can log them.
 //! `#(cmd)` also expands to nothing (jobs are the server's business, D9) and is
 //! reported in `deferred` as `#()`.
 
 mod colour;
 mod colour_names;
 mod eval;
+mod fuzzy;
+mod matching;
 mod mods;
 mod num;
 mod parse;
@@ -191,6 +197,7 @@ enum Node {
 /// What the modifiers do to a value once it is found (format.c:6602-6682).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Post {
+    substitutions: Vec<matching::Substitute>,
     /// `E` (and `T`, whose strftime pass is deferred): expand the value again.
     reexpand: bool,
     /// `=N`: trim to this many columns; negative trims from the left.
@@ -229,6 +236,7 @@ enum CmpOp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Value {
+    Match(matching::PatternMatch),
     /// Look the (raw) name up.
     Var {
         name: String,
@@ -384,8 +392,8 @@ mod tests {
     #[test]
     fn deferred_modifiers_are_reported() {
         let p = parse("a#{l:x}b#{=3:@n}#{s/a/b/;E:@n}#(true)#{@v}#{m:a,b}#{t/p:@n}");
-        assert_eq!(p.deferred, ["s", "#()", "m", "t"]);
-        assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "axbv");
+        assert_eq!(p.deferred, ["#()", "t"]);
+        assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "axbv0");
         assert_eq!(
             parse("#{?@x,a,b}#{E:@y}#{||:1,0}#S").deferred,
             Vec::<String>::new()

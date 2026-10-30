@@ -338,14 +338,16 @@ row '#{=2:pane_title}'
 row '#{=21:pane_title}'
 row '"#{=21:pane_title}"'
 
-# Modifiers that are not implemented yet (loops, time, regex) expand to nothing.
-rowdef '#{m:a*,abc}'
-rowdef '#{s/h/j/:@name}'
+# Matching/substitution and a nonnumeric character code.
+row '#{m:a*,abc}'
+row '#{s/h/j/:@name}'
+row '#{a:b}'
+row '#{E;m:@name,x}'
+
+# Modifiers that are not implemented yet (loops) expand to nothing.
 rowdef '#{W:x}'
-rowdef '#{a:b}'
 rowdef '#{@foo:bar}'
 rowdef '#{:S}'
-rowdef '#{E;m:@name,x}'
 rowdef 'x#{S:y}z' xz
 
 # Nesting limit, FORMAT_LOOP_LIMIT 100 (format.c:6720-6724, 6885).

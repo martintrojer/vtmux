@@ -211,13 +211,13 @@ fn rows() -> Vec<(String, String)> {
         r("#{=2:pane_title}", "t"), // set -gF @out '#{=2:pane_title}' ; show -gv @out
         r("#{=21:pane_title}", "t"), // set -gF @out '#{=21:pane_title}' ; show -gv @out
         r("\"#{=21:pane_title}\"", "\"t\""), // set -gF @out '"#{=21:pane_title}"' ; show -gv @out
-        r("#{m:a*,abc}", ""), // deferred; set -gF @out '#{m:a*,abc}' ; show -gv @out gives "1"
-        r("#{s/h/j/:@name}", ""), // deferred; set -gF @out '#{s/h/j/:@name}' ; show -gv @out gives "jello"
+        r("#{m:a*,abc}", "1"), // set -gF @out '#{m:a*,abc}' ; show -gv @out
+        r("#{s/h/j/:@name}", "jello"), // set -gF @out '#{s/h/j/:@name}' ; show -gv @out
+        r("#{a:b}", ""), // set -gF @out '#{a:b}' ; show -gv @out
+        r("#{E;m:@name,x}", "0"), // set -gF @out '#{E;m:@name,x}' ; show -gv @out
         r("#{W:x}", ""), // deferred; set -gF @out '#{W:x}' ; show -gv @out gives "x"
-        r("#{a:b}", ""), // deferred; set -gF @out '#{a:b}' ; show -gv @out gives ""
         r("#{@foo:bar}", ""), // deferred; set -gF @out '#{@foo:bar}' ; show -gv @out gives ""
         r("#{:S}", ""), // deferred; set -gF @out '#{:S}' ; show -gv @out gives ""
-        r("#{E;m:@name,x}", ""), // deferred; set -gF @out '#{E;m:@name,x}' ; show -gv @out gives "0"
         r("x#{S:y}z", "xz"), // deferred; set -gF @out 'x#{S:y}z' ; show -gv @out gives "xyz"
         r(nest(98), "ok"), // nest(98) via set -gF @out ; show -gv @out
         r(nest(99), "ok"), // nest(99) via set -gF @out ; show -gv @out
