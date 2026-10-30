@@ -2234,3 +2234,92 @@ fn list_clients_without_clients() {
         )
     });
 }
+
+/// `-L label -f /dev/null args...` with HOME pinned, so `$HOME` expanded
+/// into a binding at bind time prints the same on both sides.
+fn run_home(w: &World, args: &[&str]) -> Run {
+    let mut full = vec!["-L", &w.label, "-f", "/dev/null"];
+    full.extend_from_slice(args);
+    w.raw_env(&full, &[("HOME", "/home/vtmux-test")])
+}
+
+/// bind-key, unbind-key, list-keys over the server's tables
+/// (cmd-bind-key.c, cmd-unbind-key.c, cmd-list-keys.c): the fresh default
+/// list byte for byte, every flag, `-N` notes, tables created and removed,
+/// the error texts, and a quiet failure that fails silently with exit 0.
+#[test]
+fn keys_bind_unbind_list() {
+    compare("keys_bind_unbind_list", |w| {
+        let mut out = vec![w.run(&["new", "-d", "-s", "a", "cat"])];
+        for args in [
+            &["lsk"][..],
+            &["lsk", "-N"],
+            &["bind", "-N", "note", "-r", "-T", "t1", "x", "display", "hi"],
+            &["bind", "-n", "M-q"],
+            &["bind", "q"],
+            &["bind", "Foo", "x"],
+            &["bind", "x", "nosuch"],
+            &["bind"],
+            &["unbind"],
+            &["unbind", "-a", "x"],
+            &["unbind", "-T", "nope", "x"],
+            &["unbind", "-q", "-T", "nope", "x"],
+            &["unbind", "-n", "Foo"],
+            &["lsk", "-T", "t1"],
+            &["lsk", "-T", "nope"],
+            &["lsk", "C-b"],
+            &["lsk", "-1", "-T", "prefix"],
+            &["lsk", "-T", "prefix", "-N"],
+            &["lsk", "-aN", "-T", "t1"],
+            &["lsk", "-P", ">> ", "-N"],
+            &[
+                "bind", "-T", "t1", "{", "display", "a", ";", "display", "b", "}",
+            ],
+            &["bind", "-T", "t1", "y", "{ display a ; display 'b c' }"],
+            &["lsk", "-T", "t1"],
+            &["unbind", "-a", "-T", "t1"],
+            &["lsk", "-T", "t1"],
+            &["unbind", "-a", "-n"],
+            &["lsk", "-T", "root"],
+            &["unbind", "-a"],
+            &["lsk"],
+            &["switch-client", "-T", "prefix"],
+            &["switch-client", "-t", "a"],
+            &["send-prefix"],
+            &["send-prefix", "-2"],
+            &["send-keys", "-K", "x"],
+        ] {
+            out.push(run_home(w, args));
+        }
+        out
+    });
+}
+
+/// The owner's bind and unbind lines through source-file: list-keys and
+/// list-keys -N match after them (run-shell, display-popup and choose-tree
+/// bindings are stored and printed; `$HOME` expands at bind time).
+#[test]
+fn keys_owner_config_binds() {
+    compare("keys_owner_config_binds", |w| {
+        let home = std::env::var_os("HOME").expect("HOME");
+        let original =
+            std::fs::read_to_string(PathBuf::from(home).join("dotfiles/tmux/.tmux.conf"))
+                .unwrap_or_else(|_| {
+                    include_str!("../../vtmux-core/src/keys/golden/owner_binds.conf").to_owned()
+                });
+        let mut text = original
+            .lines()
+            .filter(|l| l.starts_with("bind") || l.starts_with("unbind"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        text.push('\n');
+        let config = w.dir().join("binds.conf");
+        std::fs::write(&config, text).expect("write binds");
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            run_home(w, &["source", config.to_str().expect("utf-8")]),
+            run_home(w, &["lsk"]),
+            run_home(w, &["lsk", "-N"]),
+        ]
+    });
+}
