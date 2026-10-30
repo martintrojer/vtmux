@@ -33,10 +33,12 @@ pub fn exec(
     if which == Which::Next || args.flag('n') {
         model
             .next_window(s, args.flag('a'))
+            .filter(|changed| *changed)
             .ok_or_else(|| no("next"))?;
     } else if which == Which::Previous || args.flag('p') {
         model
             .previous_window(s, args.flag('a'))
+            .filter(|changed| *changed)
             .ok_or_else(|| no("previous"))?;
     } else if which == Which::Last || args.flag('l') {
         last(model, s).ok_or_else(|| no("last"))?;

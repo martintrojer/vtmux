@@ -1345,6 +1345,39 @@ fn windows_select_kill_list() {
     });
 }
 
+/// next/previous-window on a single window fail (session.c `session_next`
+/// wraps to the current winlink, `session_set_current` returns 1,
+/// cmd-select-window.c:107-116); new-window -a/-b with a free target index
+/// creates the window there with no shuffle, because `cmd_find_target` leaves
+/// no winlink for it (cmd-find.c:450-459, cmd-new-window.c:130-131), while a
+/// `+N` offset keeps the current window and shuffles around it.
+#[test]
+fn windows_single_and_free_index() {
+    compare("windows_single_and_free_index", |w| {
+        let f = "#{window_index}:#{window_name}";
+        let steps: &[&[&str]] = &[
+            &[
+                "new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat",
+            ],
+            &["next"],
+            &["prev"],
+            &["selectw", "-n"],
+            &["selectw", "-p"],
+            &["neww", "-d", "-n", "w1", "cat"],
+            &["neww", "-d", "-a", "-t", "5", "-n", "a5", "cat"],
+            &["lsw", "-F", f],
+            &["neww", "-d", "-b", "-t", "9", "-n", "b9", "cat"],
+            &["lsw", "-F", f],
+            &["neww", "-d", "-b", "-t", ":+1", "-n", "bplus", "cat"],
+            &["lsw", "-F", f],
+            &["neww", "-d", "-a", "-t", ":+3", "-n", "aplus", "cat"],
+            &["lsw", "-F", f],
+            &["kill-server"],
+        ];
+        steps.iter().map(|a| w.run(a)).collect()
+    });
+}
+
 /// base-index and renumber-windows (spawn.c `spawn_window` with idx -1,
 /// window.c `winlink_add`/`winlink_shuffle_up`, session.c
 /// `session_renumber_windows`, server-fn.c `server_kill_window`): the first
