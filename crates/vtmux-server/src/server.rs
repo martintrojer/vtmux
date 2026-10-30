@@ -73,6 +73,8 @@ struct Client {
     /// Exit has been queued; close once the output is flushed.
     closing: bool,
     hello: Option<Hello>,
+    attached: Option<SessionId>,
+    prefix: bool,
 }
 
 /// What a new session needs ([`Server::create_session`]).
@@ -267,6 +269,7 @@ impl Server {
                 self.pane_readable(p);
             }
             self.check_window_names();
+            self.render_clients();
             if self.should_exit() {
                 self.exit_clients();
                 return Ok(());
@@ -333,6 +336,8 @@ impl Server {
                             outbuf: Vec::new(),
                             closing: false,
                             hello: None,
+                            attached: None,
+                            prefix: false,
                         },
                     );
                 }
@@ -543,19 +548,123 @@ impl Server {
 
     // ------------------------------------------------------- attach hooks
 
-    /// Attach client `id` to session `s`. The client task (attach/detach,
-    /// compositor) fills this in; M0's server reports it as not
-    /// implemented and the command fails with that error.
+    /// `cmd_attach_session`: Ready precedes encoded terminal output.
     pub fn attach_client(&mut self, id: ClientId, s: SessionId) -> Result<(), EdgeError> {
-        let _ = (id, s);
-        Err(EdgeError::NotImplemented("attach".into()))
+        self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
+        let client = self
+            .clients
+            .get_mut(&id)
+            .ok_or(EdgeError::NoCurrentClient)?;
+        client.attached = Some(s);
+        client.prefix = false;
+        self.send(id, &ServerMsg::Ready);
+        // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
+        // set of modes, not their ordering.
+        self.send(id, &ServerMsg::Frame(b"\x1b[?1049h\x1b[22;0;0t\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h".to_vec()));
+        Ok(())
     }
 
-    /// Terminal input from an attached client (`ClientMsg::Input`). Filled
-    /// in by the client task (key decoding, prefix table, pane input).
+    pub fn detach_session_clients(&mut self, session: SessionId) {
+        let ids: Vec<_> = self
+            .clients
+            .iter()
+            .filter_map(|(&id, c)| (c.attached == Some(session)).then_some(id))
+            .collect();
+        for id in ids {
+            self.detach_client(id);
+        }
+    }
+
+    pub fn detach_client(&mut self, id: ClientId) {
+        let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+            return;
+        };
+        let message = self
+            .model
+            .sessions
+            .get(&s)
+            .map(|s| format!("detached (from session {})", s.name));
+        self.exit_attached(id, 0, message);
+    }
+
+    fn exit_attached(&mut self, id: ClientId, code: i32, message: Option<String>) {
+        self.send(id, &ServerMsg::Frame(b"\x1b[r\x1b[0m\x1b[?1l\x1b>\x1b[H\x1b[2J\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l\x1b[?1049l\x1b[23;0;0t\x1b[?2031l".to_vec()));
+        self.send(id, &ServerMsg::Exit { code, message });
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.attached = None;
+            c.closing = true;
+        }
+        self.flush_client(id);
+    }
+
+    /// M0 prefix table: C-b d detaches; other prefixed keys are ignored.
     pub fn on_client_input(&mut self, id: ClientId, bytes: &[u8]) -> Result<(), EdgeError> {
-        let _ = (id, bytes);
-        Err(EdgeError::NotImplemented("client input".into()))
+        let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+            return Ok(());
+        };
+        let (_, _, p) = self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
+        let mut forward = Vec::new();
+        for &b in bytes {
+            let c = self
+                .clients
+                .get_mut(&id)
+                .ok_or(EdgeError::NoCurrentClient)?;
+            if c.prefix {
+                c.prefix = false;
+                if b == b'd' {
+                    self.detach_client(id);
+                    return Ok(());
+                }
+            } else if b == 2 {
+                c.prefix = true;
+            } else {
+                forward.push(b);
+            }
+        }
+        if let Some(io) = self.model.panes.get_mut(&p).and_then(|p| p.io.as_mut()) {
+            io.write(&forward);
+        }
+        self.pane_output_queued(p);
+        Ok(())
+    }
+
+    fn render_clients(&mut self) {
+        let attached: Vec<_> = self
+            .clients
+            .iter()
+            .filter_map(|(&id, c)| c.attached.map(|s| (id, s)))
+            .collect();
+        for (id, s) in attached {
+            if self.shutdown {
+                self.exit_attached(id, 1, Some("server exited".into()));
+                continue;
+            }
+            let Some((_, _, p)) = self.model.current_of(s) else {
+                self.exit_attached(id, 0, Some("exited".into()));
+                continue;
+            };
+            let pane = &self.model.panes[&p];
+            let mut frame = b"\x1b[?25l\x1b[H".to_vec();
+            let bytes = vtmux_vt::capture(&pane.term, vtmux_vt::CaptureOpts::default());
+            for row in bytes
+                .split(|&b| b == b'\n')
+                .take(usize::from(pane.term.rows()))
+            {
+                frame.extend_from_slice(row);
+                frame.extend_from_slice(b"\x1b[K\r\n");
+            }
+            let (x, y) = pane.term.cursor();
+            frame.extend_from_slice(format!("\x1b[{};{}H\x1b[?25h", y + 1, x + 1).as_bytes());
+            self.send(id, &ServerMsg::Frame(frame));
+        }
+    }
+
+    /// Most recent attached client (`cmd_find_current_client`, M0 one client).
+    pub fn current_client(&self) -> Option<ClientId> {
+        self.clients
+            .iter()
+            .rev()
+            .find_map(|(&id, c)| c.attached.map(|_| id))
     }
 
     // ------------------------------------------------------------- config

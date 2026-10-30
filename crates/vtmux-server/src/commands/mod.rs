@@ -166,10 +166,37 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         "send-keys" => send_keys::exec(server, item, args, found),
         "source-file" => source_file::exec(server, item, args, found),
         "attach-session" => {
+            let spec = args.target('t');
+            let found = target::resolve(
+                &server.model,
+                item.origin,
+                spec.as_ref(),
+                vtmux_core::cmd::TargetKind::Session,
+                vtmux_core::cmd::FindFlags::NONE,
+            )?;
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
             attach(server, item, session)
         }
-        "detach-client" => Err(EdgeError::NotImplemented("detach-client".into()).into()),
+        "detach-client" => {
+            if args.flag('s') {
+                let spec = args.target('s');
+                let source = target::resolve(
+                    &server.model,
+                    item.origin,
+                    spec.as_ref(),
+                    vtmux_core::cmd::TargetKind::Session,
+                    vtmux_core::cmd::FindFlags::CANFAIL,
+                )?;
+                if let Some(s) = source.session {
+                    server.detach_session_clients(s);
+                }
+                Ok(())
+            } else {
+                let client = server.current_client().ok_or(EdgeError::NoCurrentClient)?;
+                server.detach_client(client);
+                Ok(())
+            }
+        }
         other => Err(CmdError::NotImplemented(other.to_owned())),
     }
 }

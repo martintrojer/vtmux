@@ -8,6 +8,10 @@ publish.workspace = true
 
 [dependencies]
 vtmux-core.workspace = true
+rustix = { version = "1", features = ["std", "termios"] }
+mio = { version = "1", features = ["os-poll", "os-ext"] }
+signal-hook = "0.3"
+signal-hook-mio = { version = "0.2", features = ["support-v1_0"] }
 
 [lints]
 workspace = true
