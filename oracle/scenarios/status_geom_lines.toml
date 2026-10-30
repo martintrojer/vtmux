@@ -1,0 +1,25 @@
+name = "status_geom_lines"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-g", "status-format[1]", ""] },
+  { run = ["set", "-g", "status-format[2]", ""] },
+  { run = ["set", "-t", "a", "status", "3"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { keys = "stty size\r" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["set", "-t", "a", "status", "5"] },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { resize = [40, 5] },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { resize = [40, 10] },
+  { run = ["set", "-t", "a", "status", "2"] },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+]

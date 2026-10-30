@@ -1,0 +1,22 @@
+name = "status_geom_toggle"
+size = [40, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { run = ["set", "-g", "status", "off"] },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { keys = "stty size\r" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["set", "-g", "status", "on"] },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { run = ["set", "-t", "a", "status-format[0]", ""] },
+  { screen = {} },
+  { run = ["set", "-u", "-t", "a", "status-format[0]"] },
+  { screen = {} },
+]

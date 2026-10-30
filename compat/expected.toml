@@ -553,8 +553,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."screen-redraw-status.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."screen-redraw-tiled.sh"]
 status = "xfail"

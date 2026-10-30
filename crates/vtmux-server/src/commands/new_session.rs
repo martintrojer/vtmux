@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
+use vtmux_core::options::TreeId;
 
 use super::{Item, expand};
 use crate::names::{check_name, clean_name};
@@ -112,11 +113,13 @@ pub fn exec(
     let x = size(args.value('x'), "width", client_size.map(|c| c.0), 80)?;
     let y = size(args.value('y'), "height", client_size.map(|c| c.1), 24)?;
     // Detached: -x/-y or 80x24 (default-size); attached: the client's
-    // terminal less the status line (cmd-new-session.c:255-276).
+    // terminal less one row when the global `status` is on, whatever its
+    // line count (cmd-new-session.c:250-254); attaching fits it after.
+    let status = u32::from(server.model.status_lines(TreeId::GlobalSession) > 0);
     let (cols, rows) = match (detached || control, client_size) {
         (false, Some((c, r))) => (
             u16::try_from(c).unwrap_or(u16::MAX).max(1),
-            u16::try_from(r.saturating_sub(1))
+            u16::try_from(r.saturating_sub(status))
                 .unwrap_or(u16::MAX)
                 .max(1),
         ),

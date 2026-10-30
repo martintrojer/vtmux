@@ -1,0 +1,16 @@
+name = "status_geom_off"
+size = [40, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["splitw", "-v", "-t", "a", "sh", "-c", "printf 'B '; exec cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-g", "status", "off"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_width}x#{window_height}"] },
+  { run = ["lsp", "-t", "a", "-F", "#{pane_id} #{pane_top} #{pane_width}x#{pane_height}"] },
+  { keys = "stty size\r" },
+  { settle = {} },
+  { screen = {} },
+]

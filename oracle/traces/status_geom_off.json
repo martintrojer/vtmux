@@ -1,0 +1,202 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "status_geom_off",
+  "inputs": {
+    "name": "status_geom_off",
+    "size": [
+      40,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "sh"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-v",
+          "-t",
+          "a",
+          "sh",
+          "-c",
+          "printf 'B '; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{window_width}x#{window_height}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a",
+          "-F",
+          "#{pane_id} #{pane_top} #{pane_width}x#{pane_height}"
+        ]
+      },
+      {
+        "keys": "stty size\r"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "sh-5.3$",
+          "",
+          "",
+          "",
+          "\\e[37m─────────────────────\\e[32m───────────────────",
+          "\\e[39mB",
+          "",
+          ""
+        ],
+        "cursor": [
+          2,
+          5
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "40x8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 0 40x4\n%1 5 40x3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "sh-5.3$",
+          "",
+          "",
+          "",
+          "\\e[37m─────────────────────\\e[32m───────────────────",
+          "\\e[39mB stty size",
+          "stty size",
+          ""
+        ],
+        "cursor": [
+          0,
+          7
+        ]
+      }
+    }
+  ]
+}

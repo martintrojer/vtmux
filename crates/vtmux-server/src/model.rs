@@ -236,6 +236,19 @@ impl Model {
         }
     }
 
+    /// `status` (`status_update_cache`, status.c:87-96): how many status
+    /// lines `tree`'s session has, 0 when off.
+    #[must_use]
+    pub fn status_lines(&self, tree: TreeId) -> u32 {
+        u32::try_from(self.number_option(tree, "status")).unwrap_or(0)
+    }
+
+    /// `status-position top` (`statusat` 0, status.c:92).
+    #[must_use]
+    pub fn status_top(&self, tree: TreeId) -> bool {
+        self.number_option(tree, "status-position") == 0
+    }
+
     /// `#{pane_index}`: position in the window's pane list plus
     /// `pane-base-index` (`window_pane_index`).
     #[must_use]

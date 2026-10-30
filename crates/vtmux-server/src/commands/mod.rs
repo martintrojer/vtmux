@@ -270,6 +270,9 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
                     server.model.mark_for_rename(w);
                 }
             }
+            if matches!(&result, Ok(SetOutcome::Changed(_))) {
+                server.push_option_changes();
+            }
             result.map(|_| ()).map_err(Into::into)
         }
         "set-environment" => set_environment::exec(server, item, args, found),
