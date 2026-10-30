@@ -1,0 +1,15 @@
+name = "format_time"
+size = [20, 5]
+# Only output independent of the zone and of the wall clock: %s of a stored instant, %%, the year.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "5", "-e", "TS=1781000000", "cat"] },
+  { run = ["set", "-g", "@ts", "1781000000"] },
+  { run = ["set", "-g", "@fmt", "%%|#S"] },
+  { run = ["display", "-p", "#{t/f/%%%%s|%%%%Y:@ts}"] },
+  { run = ["display", "-p", "#{t/f/%%%%s:@ts}"] },
+  { run = ["display", "-p", "#{t:TS}|#{t/f/%%%%s:TS}|#{TS}"] },
+  { run = ["display", "-p", "%%|#S|%Y-%Y"] },
+  { run = ["display", "-p", "#{T:@fmt}|#{E:@fmt}"] },
+  { run = ["set", "-gF", "@out", "#{T:@fmt}|#{E:@fmt}|%%|#{t/f/%%:@ts}"] },
+  { run = ["show", "-gv", "@out"] },
+]
