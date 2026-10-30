@@ -4,6 +4,7 @@
 pub mod cmd;
 pub mod colour;
 pub mod error;
+pub mod fnmatch;
 pub mod format;
 pub mod ids;
 pub mod keys;
