@@ -403,8 +403,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."layout-nesting-limit.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."layout-set.sh"]
 status = "xfail"
