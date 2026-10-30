@@ -97,12 +97,19 @@ impl World {
 
     /// Socket dir and temp dir -> placeholders; ctime text -> `TIME`.
     fn normalise(&self, s: &str) -> String {
-        let dir = self.dir().to_string_lossy().into_owned();
+        // tmux realpaths TMUX_TMPDIR, so on macOS /tmp shows as /private/tmp:
+        // replace the canonical form first, then the given one.
+        let given = self.dir().to_string_lossy().into_owned();
+        let canon = std::fs::canonicalize(self.dir())
+            .map_or_else(|_| given.clone(), |p| p.to_string_lossy().into_owned());
         let mut out = String::new();
         for line in s.split_inclusive('\n') {
-            let mut line = line
-                .replace(&format!("{dir}/tmux-"), "SOCKDIR/tmux-")
-                .replace(&dir, "TMP");
+            let mut line = line.to_owned();
+            for dir in [&canon, &given] {
+                line = line
+                    .replace(&format!("{dir}/tmux-"), "SOCKDIR/tmux-")
+                    .replace(dir.as_str(), "TMP");
+            }
             if let Some(at) = line.find("(created ") {
                 let end = line[at..].find(')').map_or(line.len(), |e| at + e);
                 line.replace_range(at..end, "(created TIME");
