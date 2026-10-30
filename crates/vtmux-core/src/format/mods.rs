@@ -5,7 +5,7 @@
 //! the template is expanded, because tmux expands every argument first.
 
 use super::parse::{RawMod, skip, template, unescape};
-use super::{CmpOp, CondArm, Format, Post, Value, VarMods};
+use super::{CmpOp, CondArm, Format, Post, Reexpand, Value, VarMods};
 
 /// The modifiers this module (and the evaluator) implements; any other modifier makes
 /// the whole `#{...}` a [`super::Node::Deferred`].
@@ -214,8 +214,14 @@ fn chain(
 /// The modifiers `format_find` applies to a found variable: `t`, `b`, `d` and the `q` family.
 fn var_mods(list: &[RawMod], inner: usize, deferred: &mut Vec<String>) -> VarMods {
     VarMods {
-        // Bare `t` only; the argument forms are deferred in the parser.
-        time: list.iter().any(|m| m.name == "t"),
+        time: list
+            .iter()
+            .filter(|m| m.name == "t")
+            .map(|m| super::time::TimeMod {
+                flags: first_arg(m, inner, deferred),
+                fmt: m.args.get(1).map(|a| arg(a, inner, deferred)),
+            })
+            .collect(),
         basename: list.iter().any(|m| m.name == "b"),
         dirname: list.iter().any(|m| m.name == "d"),
         quote: list
@@ -231,8 +237,9 @@ fn post(list: &[RawMod], inner: usize, deferred: &mut Vec<String>) -> Post {
     let mut p = Post::default();
     for m in list {
         match m.name.as_str() {
-            // `T` would run strftime first; deferred, so it is `E` for now.
-            "E" | "T" => p.reexpand = true,
+            // `E` wins over `T` (format.c:6603-6607).
+            "E" => p.reexpand = Reexpand::E,
+            "T" if p.reexpand == Reexpand::No => p.reexpand = Reexpand::T,
             "=" if !m.args.is_empty() => {
                 p.limit = first_arg(m, inner, deferred);
                 if let Some(marker) = m.args.get(1) {

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use vtmux_core::cmd::{CommandCall, ConfigEnv};
-use vtmux_core::format::{self, FormatContext, Tm};
+use vtmux_core::format::{self, FormatContext};
 use vtmux_core::options::{OptionError, OptionHost, OptionsStore, SetOutcome, Target, apply_set};
 
 use super::Item;
@@ -50,12 +50,21 @@ impl FormatContext for Vars<'_, '_> {
             .or_else(|| self.ctx.get(name))
     }
 
-    fn time(&self, name: &str) -> Option<i64> {
-        self.ctx.time(name)
+    fn get_without_environ(&self, name: &str) -> Option<String> {
+        self.ctx
+            .options
+            .format_value(name, &option_target(self.ctx.target))
+            .or_else(|| {
+                self.extra
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| v.clone())
+            })
+            .or_else(|| self.ctx.get_without_environ(name))
     }
 
-    fn local_time(&self, epoch: i64) -> Option<Tm> {
-        self.ctx.local_time(epoch)
+    fn time(&self, name: &str) -> Option<i64> {
+        self.ctx.time(name)
     }
 }
 

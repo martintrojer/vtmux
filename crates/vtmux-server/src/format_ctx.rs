@@ -1,7 +1,7 @@
 //! The [`FormatContext`] over the model (format.c `format_defaults` and the
 //! `format_table` callbacks).
 
-use vtmux_core::format::{FormatContext, Tm};
+use vtmux_core::format::FormatContext;
 use vtmux_core::layout::PaneStatus;
 use vtmux_core::options::{OptionsStore, Target};
 
@@ -231,8 +231,10 @@ impl<'a> Ctx<'a> {
     }
 }
 
-impl FormatContext for Ctx<'_> {
-    fn get(&self, name: &str) -> Option<String> {
+impl Ctx<'_> {
+    /// Everything `format_find` knows before it falls back to the environment
+    /// (format.c:4623-4663): options, extra entries, then the built-in variables.
+    fn find_before_environ(&self, name: &str) -> Option<String> {
         // format.c format_find: options precede built-ins and extra entries.
         if let Some(value) = self.options.format_value(
             name,
@@ -267,6 +269,12 @@ impl FormatContext for Ctx<'_> {
             .or_else(|| self.session_value(name))
             .or_else(|| self.window_value(name))
             .or_else(|| self.pane_value(name))
+    }
+}
+
+impl FormatContext for Ctx<'_> {
+    fn get(&self, name: &str) -> Option<String> {
+        self.find_before_environ(name)
             // format_find falls back to the session, then global,
             // environment (format.c:4665-4675).
             .or_else(|| {
@@ -278,14 +286,15 @@ impl FormatContext for Ctx<'_> {
             })
     }
 
+    /// Not for `t` lookups: format.c:4666 skips the environment then.
+    fn get_without_environ(&self, name: &str) -> Option<String> {
+        self.find_before_environ(name)
+    }
+
     fn time(&self, name: &str) -> Option<i64> {
         match name {
             "session_created" | "session_activity" => self.session().map(|s| s.created),
             _ => None,
         }
-    }
-
-    fn local_time(&self, epoch: i64) -> Option<Tm> {
-        sys::user::local_time(epoch)
     }
 }

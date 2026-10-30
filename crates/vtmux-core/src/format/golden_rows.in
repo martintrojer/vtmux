@@ -147,7 +147,7 @@ fn rows() -> Vec<(String, String)> {
         r("#{t:#{@epoch}}", "86400"), // set -gF @out '#{t:#{@epoch}}' ; show -gv @out
         r("#{E:@epoch}", "86400"), // set -gF @out '#{E:@epoch}' ; show -gv @out
         r("#{t:@x}", "Thu Jan  1 00:00:01 1970"), // set -gF @out '#{t:@x}' ; show -gv @out
-        r("#{t/p:@epoch}", ""), // deferred; set -gF @out '#{t/p:@epoch}' ; show -gv @out gives "Jan70"
+        r("#{t/p:@epoch}", "Jan70"), // set -gF @out '#{t/p:@epoch}' ; show -gv @out
         r("##", "#"), // set -gF @out '##' ; show -gv @out
         r("###", "#"), // set -gF @out '###' ; show -gv @out
         r("####", "##"), // set -gF @out '####' ; show -gv @out

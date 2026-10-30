@@ -39,9 +39,12 @@ impl Builder {
         }
     }
 
-    fn finish(mut self) -> Format {
+    fn finish(mut self, src: &str) -> Format {
         self.flush();
-        Format { nodes: self.nodes }
+        Format {
+            nodes: self.nodes,
+            src: src.contains('%').then(|| src.into()),
+        }
     }
 }
 
@@ -169,7 +172,7 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
                             name: name.to_owned(),
                             vm: super::VarMods::default(),
                         },
-                        post: super::Post::default(),
+                        post: Box::default(),
                     });
                 } else {
                     // Unknown: keep the `#`; the next char is copied as is.
@@ -179,7 +182,7 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
             }
         }
     }
-    out.finish()
+    out.finish(s)
 }
 
 /// One `#{key}`. `None` is tmux's "failed" return, which ends the enclosing
@@ -195,23 +198,16 @@ fn replace(key: &str, depth: usize, deferred: &mut Vec<String>) -> Option<Node> 
         .map(|m| m.name.as_str())
         .filter(|m| !mods::SUPPORTED.contains(m))
         .collect();
-    // `t` is supported only bare (`#{t:x}`); `t/p`, `t/f/...` and the other
-    // argument forms are deferred.
-    let unsupported: Vec<&str> = unsupported
-        .into_iter()
-        .chain(
-            list.iter()
-                .filter(|m| m.name == "t" && !m.args.is_empty())
-                .map(|m| m.name.as_str()),
-        )
-        .collect();
     if let Some(first) = unsupported.first() {
         let node = Node::Deferred((*first).to_owned());
         deferred.extend(unsupported.into_iter().map(str::to_owned));
         return Some(node);
     }
     let (value, post) = mods::build(&list, body, depth + 1, deferred)?;
-    Some(Node::Replace { value, post })
+    Some(Node::Replace {
+        value,
+        post: Box::new(post),
+    })
 }
 
 /// `format_is_end`.

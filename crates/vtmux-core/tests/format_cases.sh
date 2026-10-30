@@ -266,7 +266,7 @@ row '#{t:@nosuch}'
 row '#{t:#{@epoch}}'
 row '#{E:@epoch}'
 row '#{t:@x}'
-rowdef '#{t/p:@epoch}'
+row '#{t/p:@epoch}'
 
 # Escapes and aliases (format.c:6770-6871).
 row '##'

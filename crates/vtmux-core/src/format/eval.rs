@@ -3,8 +3,8 @@
 
 use super::text;
 use super::{
-    CmpOp, EnvScope, Eval, Format, FormatContext, LOOP_LIMIT, Node, Post, SearchFlags, Value,
-    VarMods, colour, is_true, num, parse,
+    CmpOp, EnvScope, Eval, Format, FormatContext, LOOP_LIMIT, Node, Post, Reexpand, SearchFlags,
+    Value, VarMods, colour, is_true, num, parse,
 };
 use std::fmt::Write as _;
 
@@ -26,6 +26,18 @@ impl FormatContext for Overlay<'_> {
             .find(|(k, _)| *k == name)
             .map(|(_, v)| v.clone())
             .or_else(|| self.parent.get(name))
+    }
+
+    fn get_without_environ(&self, name: &str) -> Option<String> {
+        self.vars
+            .iter()
+            .find(|(k, _)| *k == name)
+            .map(|(_, v)| v.clone())
+            .or_else(|| self.parent.get_without_environ(name))
+    }
+
+    fn time(&self, name: &str) -> Option<i64> {
+        self.parent.time(name)
     }
 
     fn environ(&self, scope: EnvScope) -> Option<Vec<super::EnvVar>> {
@@ -58,6 +70,22 @@ impl Eval<'_> {
         if fmt.nodes.is_empty() || !self.in_time() || depth >= LOOP_LIMIT {
             return String::new();
         }
+        if self.time_mode
+            && let Some(src) = &fmt.src
+        {
+            // format.c:6728: strftime first, then the result is what gets parsed.
+            let Some(text) = self.strftime_pass(src) else {
+                return String::new();
+            };
+            if text != **src {
+                let ast = parse::template(&text, depth, &mut Vec::new());
+                return self.expand_nodes(&ast, depth);
+            }
+        }
+        self.expand_nodes(fmt, depth)
+    }
+
+    fn expand_nodes(&mut self, fmt: &Format, depth: usize) -> String {
         let mut out = String::new();
         for node in &fmt.nodes {
             match node {
@@ -86,10 +114,14 @@ impl Eval<'_> {
     fn replace(&mut self, value: &Value, post: &Post, depth: usize) -> Option<String> {
         let inner = depth + 1;
         let mut v = self.value(value, inner)?;
-        if post.reexpand {
-            // format.c:6606: expand the result again, one level down.
+        if post.reexpand != Reexpand::No {
+            // format.c:6606-6611: expand the result again, one level down. `T` does it
+            // as a time-aware expansion, which stays on for everything nested.
+            let saved = self.time_mode;
+            self.time_mode |= post.reexpand == Reexpand::T;
             let ast = parse::template(&v, inner, &mut Vec::new());
             v = self.expand(&ast, inner);
+            self.time_mode = saved;
         }
         for s in &post.substitutions {
             v = self.substitute(s, &v, inner);
@@ -126,18 +158,11 @@ impl Eval<'_> {
     /// `format_find` (format.c:4610) followed by the modifiers it applies: `None` when
     /// the variable is not found.
     fn find(&mut self, name: &str, vm: &VarMods, depth: usize) -> Option<String> {
-        if vm.time {
+        if !vm.time.is_empty() {
             // format.c:4681-4709: a time variable, or a variable whose value is a
-            // positive number, as `ctime`; anything else (zero, negative, text,
+            // positive number, as time text; anything else (zero, negative, text,
             // missing) is not found. It returns before the other modifiers apply.
-            let t = self.ctx.time(name).or_else(|| {
-                let v = self.ctx.get(name)?;
-                num::strtonum(&v, 0, i64::MAX)
-            });
-            return match t {
-                Some(t) if t > 0 => self.ctx.local_time(t).map(|tm| tm.ctime()),
-                _ => None,
-            };
+            return self.find_time(name, &vm.time, depth);
         }
         let v = self.ctx.get(name)?;
         Some(self.var_mods(v, vm, depth))
@@ -247,6 +272,9 @@ impl Eval<'_> {
                         ctx: &overlay,
                         clock: self.clock,
                         start: self.start,
+                        wall: self.wall,
+                        now: self.now,
+                        time_mode: self.time_mode,
                     };
                     out.push_str(&sub.expand(body, inner));
                 }
