@@ -902,8 +902,9 @@ impl Server {
         Ok(())
     }
 
-    /// `recalculate_sizes` latest semantics (M0 one attached client): status
-    /// costs one row; both emulator and kernel PTY get the same dimensions.
+    /// `recalculate_sizes` latest semantics (M0 one attached client): the
+    /// status lines cost their rows; both emulator and kernel PTY get the
+    /// same dimensions.
     pub(crate) fn resize_client(&mut self, id: ClientId, cols: u32, rows: u32) {
         let Some(client) = self.clients.get_mut(&id) else {
             return;
@@ -919,13 +920,45 @@ impl Server {
         let Some((_, window, _)) = self.model.current_of(session) else {
             return;
         };
+        let lines = self.status_line_size(&self.clients[&id]);
         self.model
-            .resize_window(window, cols.max(1), rows.saturating_sub(1).max(1));
+            .resize_window(window, cols.max(1), rows.saturating_sub(lines).max(1));
+    }
+
+    /// `status_line_size` (status.c:113-122) with `CLIENT_STATUSOFF`
+    /// (resize.c:457-460): the client's session's status lines, none for a
+    /// control client or a terminal no taller than them.
+    pub(crate) fn status_line_size(&self, c: &Client) -> u32 {
+        if c.control.is_some() {
+            return 0;
+        }
+        let tree = c.attached.map_or(TreeId::GlobalSession, TreeId::Session);
+        let lines = self.model.status_lines(tree);
+        match c.hello.as_ref().and_then(|h| h.tty.as_ref()) {
+            Some(tty) if tty.rows <= lines => 0,
+            _ => lines,
+        }
+    }
+
+    /// `options_push_changes` (options.c:1409-1475) for the drawing and
+    /// sizing part: every window is fitted to its clients again
+    /// (`recalculate_sizes`) and every attached client redrawn
+    /// (`server_redraw_client`).
+    pub fn push_option_changes(&mut self) {
+        let windows: Vec<_> = self.model.windows.keys().copied().collect();
+        for w in windows {
+            self.recalculate_window(w);
+        }
+        for c in self.clients.values_mut() {
+            if c.attached.is_some() {
+                c.compositor.invalidate();
+            }
+        }
     }
 
     /// `recalculate_size` (resize.c:367-424) for one window with `latest`
     /// semantics: the last terminal client attached to a session that links
-    /// `w` sizes it, less its status line; no such client leaves it alone.
+    /// `w` sizes it, less its status lines; no such client leaves it alone.
     pub fn recalculate_window(&mut self, w: WindowId) {
         let size = self
             .clients
@@ -937,8 +970,11 @@ impl Server {
                     .and_then(|s| self.model.sessions.get(&s))
                     .is_some_and(|s| s.windows.values().any(|x| *x == w))
             })
-            .find_map(|c| c.hello.as_ref()?.tty.as_ref())
-            .map(|tty| (tty.cols.max(1), tty.rows.saturating_sub(1).max(1)));
+            .find_map(|c| {
+                let tty = c.hello.as_ref()?.tty.as_ref()?;
+                let lines = self.status_line_size(c);
+                Some((tty.cols.max(1), tty.rows.saturating_sub(lines).max(1)))
+            });
         let Some((sx, sy)) = size else {
             return;
         };
@@ -1172,6 +1208,7 @@ impl Server {
             let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
             let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
             let queued = client.unacked.bytes;
+            let lines = u16::try_from(self.status_line_size(client)).unwrap_or(u16::MAX);
             if !self
                 .clients
                 .get_mut(&id)
@@ -1189,53 +1226,13 @@ impl Server {
                 cursor: None,
                 cursor_visible: true,
             };
-            let source = crate::render::window::Source {
-                model: &self.model,
-                info: &self.info,
-                env: &self.global_env,
-            };
-            let area = rows.saturating_sub(1);
-            if let Some((scene, draw)) = source.window(s, cols, area, caps) {
-                let theme = source.theme(caps);
-                crate::render::compose::compose(&scene, &draw, &theme, &mut screen);
-                crate::render::window::cursor(&mut screen, &draw, &self.model, area);
-            }
-            let found = crate::target::Found::from_session(&self.model, s);
-            let ctx = self.format_ctx(found, Some(id));
-            let left = vtmux_core::format::expand_str("[#{session_name}] ", &ctx);
-            let right = vtmux_core::format::trim::trim_left(
-                &vtmux_core::format::expand_time("\"#{=21:pane_title}\" %H:%M %d-%b-%y", &ctx),
-                40,
-            );
-            let session = &self.model.sessions[&s];
-            let windows: Vec<_> = session
-                .windows
-                .iter()
-                .map(|(&index, &w)| {
-                    // The default window-status-format (options-table.c):
-                    // `#I:#W#{?window_flags,#{window_flags}, }`.
-                    let found = crate::target::Found {
-                        session: Some(s),
-                        index: Some(index),
-                        window: Some(w),
-                        ..Default::default()
-                    };
-                    let ctx = crate::format_ctx::Ctx::new(
-                        &self.model,
-                        &self.info,
-                        &self.global_env,
-                        found,
-                    );
-                    (
-                        vtmux_core::format::expand_str(
-                            "#I:#W#{?window_flags,#{window_flags}, }",
-                            &ctx,
-                        ),
-                        index == session.current,
-                    )
-                })
-                .collect();
-            crate::render::status(&mut screen, &left, &windows, &right, caps);
+            // screen-redraw.c redraw_set_context: the scene sits below a
+            // top status (REDRAW_STATUS_TOP) and above a bottom one.
+            let area = rows.saturating_sub(lines);
+            let top = self.model.status_top(TreeId::Session(s));
+            let (scene_y, status_y) = if top { (lines, 0) } else { (0, area) };
+            self.draw_window(s, caps, &mut screen, scene_y, area);
+            self.draw_status(id, s, caps, &mut screen, status_y, lines);
             let frame = self
                 .clients
                 .get_mut(&id)
@@ -1245,6 +1242,112 @@ impl Server {
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
             }
+        }
+    }
+
+    /// Session `s`'s current window composed into rows
+    /// `y..y + rows` of `screen`, with the active pane's cursor.
+    fn draw_window(
+        &self,
+        s: SessionId,
+        caps: crate::render::Caps,
+        screen: &mut vtmux_vt::Snapshot,
+        y: u16,
+        rows: u16,
+    ) {
+        let source = crate::render::window::Source {
+            model: &self.model,
+            info: &self.info,
+            env: &self.global_env,
+        };
+        let Some((scene, draw)) = source.window(s, screen.cols, rows, caps) else {
+            return;
+        };
+        let theme = source.theme(caps);
+        let cols = usize::from(screen.cols);
+        let mut window = vtmux_vt::Snapshot {
+            rows,
+            cells: vec![vtmux_vt::Cell::default(); cols * usize::from(rows)],
+            ..screen.clone()
+        };
+        crate::render::compose::compose(&scene, &draw, &theme, &mut window);
+        crate::render::window::cursor(&mut window, &draw, &self.model, rows);
+        let at = usize::from(y) * cols;
+        screen.cells[at..at + window.cells.len()].clone_from_slice(&window.cells);
+        screen.cursor = window.cursor.map(|(x, cy)| (x, cy + y));
+        screen.cursor_visible = window.cursor_visible;
+    }
+
+    /// The status lines at rows `y..y + lines`. `status_redraw`
+    /// (status.c:268-300): a line with no or an empty format is blank in
+    /// the status style. A set `status-format[0]` is drawn as the default
+    /// format; the other lines stay blank until status-format is drawn
+    /// through `format_draw`.
+    fn draw_status(
+        &self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        screen: &mut vtmux_vt::Snapshot,
+        y: u16,
+        lines: u16,
+    ) {
+        for (i, row) in (0..lines).zip(y..) {
+            crate::render::status_blank(screen, row, caps);
+            if i == 0 && self.status_format_set(s, 0) {
+                let (left, windows, right) = self.default_status(id, s);
+                crate::render::status(screen, row, &left, &windows, &right, caps);
+            }
+        }
+    }
+
+    /// The default `status-format[0]` sections: status-left, the window
+    /// list (current entry flagged) and status-right.
+    fn default_status(&self, id: ClientId, s: SessionId) -> (String, Vec<(String, bool)>, String) {
+        let found = crate::target::Found::from_session(&self.model, s);
+        let ctx = self.format_ctx(found, Some(id));
+        let left = vtmux_core::format::expand_str("[#{session_name}] ", &ctx);
+        let right = vtmux_core::format::trim::trim_left(
+            &vtmux_core::format::expand_time("\"#{=21:pane_title}\" %H:%M %d-%b-%y", &ctx),
+            40,
+        );
+        let session = &self.model.sessions[&s];
+        let windows = session
+            .windows
+            .iter()
+            .map(|(&index, &w)| {
+                // The default window-status-format (options-table.c):
+                // `#I:#W#{?window_flags,#{window_flags}, }`.
+                let found = crate::target::Found {
+                    session: Some(s),
+                    index: Some(index),
+                    window: Some(w),
+                    ..Default::default()
+                };
+                let ctx =
+                    crate::format_ctx::Ctx::new(&self.model, &self.info, &self.global_env, found);
+                (
+                    vtmux_core::format::expand_str("#I:#W#{?window_flags,#{window_flags}, }", &ctx),
+                    index == session.current,
+                )
+            })
+            .collect();
+        (left, windows, right)
+    }
+
+    /// Whether `status-format[line]` is set and non-empty for session `s`.
+    fn status_format_set(&self, s: SessionId, line: u32) -> bool {
+        match self
+            .model
+            .options
+            .get(TreeId::Session(s), "status-format")
+            .map(|e| &e.value)
+        {
+            Some(OptionValue::Array(items)) => matches!(
+                items.get(&vtmux_core::options::ArrayKey::Index(line)),
+                Some(Value::String(f)) if !f.is_empty()
+            ),
+            _ => false,
         }
     }
 
@@ -1575,7 +1678,7 @@ impl Server {
     }
 
     /// `default_window_size` (resize.c:291-343) with `window-size latest`:
-    /// a terminal client attached to the session, less its status line,
+    /// a terminal client attached to the session, less its status lines,
     /// else the session's `default-size`, else 80x24; clamped to
     /// `WINDOW_MINIMUM..=WINDOW_MAXIMUM`.
     fn default_window_size(&self, s: SessionId) -> (u32, u32) {
@@ -1585,9 +1688,9 @@ impl Server {
             .values()
             .rev()
             .filter(|c| c.control.is_none() && c.attached == Some(s))
-            .find_map(|c| c.hello.as_ref()?.tty.as_ref());
-        let (sx, sy) = if let Some(tty) = client {
-            (tty.cols, tty.rows.saturating_sub(1))
+            .find_map(|c| Some((c.hello.as_ref()?.tty.as_ref()?, self.status_line_size(c))));
+        let (sx, sy) = if let Some((tty, lines)) = client {
+            (tty.cols, tty.rows.saturating_sub(lines))
         } else {
             let size = self
                 .model

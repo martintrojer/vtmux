@@ -302,7 +302,7 @@ fn is_empty(c: &Cell, bg: Color) -> bool {
 ///
 /// Returns whether the last cell was written, not erased: the terminal
 /// cursor is then past the end of the span.
-fn draw_line(cells: &mut [Cell], bce: bool, mut wrapped: bool) -> bool {
+pub(crate) fn draw_line(cells: &mut [Cell], bce: bool, mut wrapped: bool) -> bool {
     // `last` starts as the default cell.
     let mut last_bg = Color::Default;
     let mut written = false;

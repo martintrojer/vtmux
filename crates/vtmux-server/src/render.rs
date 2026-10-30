@@ -299,22 +299,21 @@ fn rgb_palette(r: u8, g: u8, b: u8) -> u8 {
     }
 }
 
-/// Put the default status directly on the bottom row. Full status-format is
+/// Put the default status directly on status row `y`. Full status-format is
 /// M1. Limits/order: options-table.c status-left/right/window-status
 /// defaults; layout: format-draw.c `format_draw_left` (`status-justify left`).
 pub fn status(
     screen: &mut Snapshot,
+    y: u16,
     left: &str,
     windows: &[(String, bool)],
     right: &str,
     caps: Caps,
 ) {
-    let Some(y) = screen.rows.checked_sub(1) else {
+    let Some(row) = row_mut(screen, y) else {
         return;
     };
-    let cols = usize::from(screen.cols);
     let base = caps.status_style();
-    let row = &mut screen.cells[usize::from(y) * cols..][..cols];
     row.fill(Cell {
         text: String::new(),
         width: 1,
@@ -324,6 +323,7 @@ pub fn status(
         },
         ..Cell::default()
     });
+    let cols = row.len();
     // `#{T;=/#{status-left-length}:status-left}`, status-left-length 10.
     let left = cells(&vtmux_core::format::trim::trim_left(left, 10), base);
     let right = cells(right, base);
@@ -372,6 +372,27 @@ pub fn status(
     if width_list > 0 {
         put_list(row, width_left, width_list, &list, focus, base);
     }
+}
+
+/// A status line with no or an empty format: `status_redraw` (status.c:
+/// 276-295) fills it with spaces in the status style, and the client draws
+/// it with `tty_draw_line` (screen-redraw.c:1793-1811).
+pub fn status_blank(screen: &mut Snapshot, y: u16, caps: Caps) {
+    let Some(row) = row_mut(screen, y) else {
+        return;
+    };
+    row.fill(Cell {
+        text: " ".into(),
+        width: 1,
+        style: caps.status_style(),
+        ..Cell::default()
+    });
+    compose::draw_line(row, caps.bce, false);
+}
+
+fn row_mut(screen: &mut Snapshot, y: u16) -> Option<&mut [Cell]> {
+    let cols = usize::from(screen.cols);
+    (y < screen.rows).then(|| &mut screen.cells[usize::from(y) * cols..][..cols])
 }
 
 /// One status section as cells: a wide character is followed by a
@@ -525,7 +546,7 @@ mod tests {
         };
         let mut screen = vtmux_vt::snapshot(&vtmux_vt::PaneTerm::new(cols, 2, 0));
         let windows: Vec<_> = windows.iter().map(|(t, c)| ((*t).to_owned(), *c)).collect();
-        status(&mut screen, "[a] ", &windows, right, caps);
+        status(&mut screen, 1, "[a] ", &windows, right, caps);
         let text = (0..cols)
             .map(|x| screen.cell(x, 1).unwrap())
             .filter(|c| c.width != 0)
