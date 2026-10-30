@@ -39,7 +39,7 @@ pub mod trim {
 mod wcwidth;
 mod wcwidth_tables;
 
-pub use time::Tm;
+pub use crate::time::{FixedWallClock, SystemWallClock, Tm, WallClock};
 
 #[cfg(test)]
 mod golden;
@@ -99,17 +99,12 @@ pub trait FormatContext {
         None
     }
 
-    /// `localtime_r`: `epoch` broken down in the host's zone. The default is
-    /// UTC; the server answers with its local zone.
-    fn local_time(&self, epoch: i64) -> Option<Tm> {
-        Some(Tm::utc(epoch))
-    }
-
-    /// Seconds since the epoch now, for [`expand_time`].
-    fn now(&self) -> i64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+    /// [`get`](FormatContext::get) without the environment fallback. `format_find`
+    /// consults the environment only for non-time lookups (format.c:4666), so
+    /// `#{t:TS}` must not see an environment variable `TS`. Contexts that do not
+    /// fall back to the environment need not override it.
+    fn get_without_environ(&self, name: &str) -> Option<String> {
+        self.get(name)
     }
 
     /// `#{V:...}`: the environment of `scope` in name order, or `None` when there is
@@ -170,6 +165,10 @@ pub struct SearchFlags {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Format {
     nodes: Vec<Node>,
+    /// The text this was parsed from, kept when it holds a `%`: a time-aware
+    /// expansion runs strftime over every nested template before parsing it
+    /// (format.c:6728), so the text is needed again at expansion time.
+    src: Option<Box<str>>,
 }
 
 /// The result of [`parse`].
@@ -186,7 +185,7 @@ enum Node {
     Text(String),
     Replace {
         value: Value,
-        post: Post,
+        post: Box<Post>,
     },
     /// An unsupported modifier list (first modifier named); expands to nothing.
     Deferred(String),
@@ -194,12 +193,23 @@ enum Node {
     Abort,
 }
 
+/// How a value is expanded again (format.c:6602-6611).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Reexpand {
+    #[default]
+    No,
+    /// `E`: like any nested expansion; strftime only inside a time-aware expansion.
+    E,
+    /// `T`: strftime first, whatever the expansion. `E` wins when both are given.
+    T,
+}
+
 /// What the modifiers do to a value once it is found (format.c:6602-6682).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Post {
     substitutions: Vec<matching::Substitute>,
-    /// `E` (and `T`, whose strftime pass is deferred): expand the value again.
-    reexpand: bool,
+    /// `E` or `T`: expand the value again.
+    reexpand: Reexpand,
     /// `=N`: trim to this many columns; negative trims from the left.
     limit: Option<Format>,
     /// `=/N/marker`: appended (or prepended when `limit` is negative) if trimmed.
@@ -215,9 +225,10 @@ struct Post {
 /// The modifiers `format_find` applies to a variable it found (format.c:4691-4740).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct VarMods {
-    /// Bare `t`: a time variable as `ctime` text (format.c:4681-4709). It
+    /// One entry per `t` modifier (format.c:4681-4709); empty when there is none. A
+    /// time variable renders as ctime text, `t/p`, `t/r`, `t/d` or `t/f/<fmt>`, and
     /// returns before the other modifiers apply.
-    time: bool,
+    time: Vec<time::TimeMod>,
     basename: bool,
     dirname: bool,
     /// One entry per `q` modifier: its argument (`s`, `e`, `h`, `a`), if any.
@@ -320,34 +331,59 @@ pub fn parse(template: &str) -> Parsed {
     Parsed { ast, deferred }
 }
 
-/// Expand a parsed template against the real clock.
+/// Expand a parsed template against the real clocks.
 #[must_use]
 pub fn expand(ast: &Format, ctx: &dyn FormatContext) -> String {
-    expand_with_clock(ast, ctx, &SystemClock::new())
+    expand_with(ast, ctx, &SystemClock::new(), &SystemWallClock)
 }
 
 /// Expand a parsed template; `clock` drives the [`TIME_LIMIT_MS`] cut-off.
 #[must_use]
 pub fn expand_with_clock(ast: &Format, ctx: &dyn FormatContext, clock: &dyn Clock) -> String {
-    Eval {
-        ctx,
-        clock,
-        start: clock.now_ms(),
-    }
-    .expand(ast, 0)
+    expand_with(ast, ctx, clock, &SystemWallClock)
 }
 
-/// `format_expand_time` (format.c:6892, 6728-6741): when the template holds a
-/// `%`, run it through `strftime` with the current local time, then expand.
-/// `display-message` uses this; `list-*` formats do not.
+/// Expand a parsed template; `wall` says what time it is and which zone is local
+/// (`#{t:...}`, and `T` and `t/f` when they run strftime).
+#[must_use]
+pub fn expand_at(ast: &Format, ctx: &dyn FormatContext, wall: &dyn WallClock) -> String {
+    expand_with(ast, ctx, &SystemClock::new(), wall)
+}
+
+/// [`expand`] with both clocks injected.
+#[must_use]
+pub fn expand_with(
+    ast: &Format,
+    ctx: &dyn FormatContext,
+    clock: &dyn Clock,
+    wall: &dyn WallClock,
+) -> String {
+    Eval::new(ctx, clock, wall, false).expand(ast, 0)
+}
+
+/// `format_expand_time` (format.c:6892, 6728-6741): every template in the expansion,
+/// nested ones included, is run through `strftime` with the current local time
+/// before it is parsed. `display-message` uses this; `list-*` formats do not.
 #[must_use]
 pub fn expand_time(template: &str, ctx: &dyn FormatContext) -> String {
-    if template.contains('%')
-        && let Some(tm) = ctx.local_time(ctx.now())
-    {
-        return expand_str(&tm.strftime(template), ctx);
-    }
-    expand_str(template, ctx)
+    expand_time_with(template, ctx, &SystemClock::new(), &SystemWallClock)
+}
+
+/// [`expand_time`] with `wall` as the clock and zone.
+#[must_use]
+pub fn expand_time_at(template: &str, ctx: &dyn FormatContext, wall: &dyn WallClock) -> String {
+    expand_time_with(template, ctx, &SystemClock::new(), wall)
+}
+
+/// [`expand_time`] with both clocks injected.
+#[must_use]
+pub fn expand_time_with(
+    template: &str,
+    ctx: &dyn FormatContext,
+    clock: &dyn Clock,
+    wall: &dyn WallClock,
+) -> String {
+    Eval::new(ctx, clock, wall, true).expand(&parse(template).ast, 0)
 }
 
 /// Parse and expand in one go.
@@ -367,6 +403,29 @@ struct Eval<'a> {
     clock: &'a dyn Clock,
     /// When this expansion started (`es->start_time`, format.c:6899).
     start: u64,
+    wall: &'a dyn WallClock,
+    /// Seconds since the epoch when the expansion started (`es->time`).
+    now: i64,
+    /// `FORMAT_EXPAND_TIME` (format.c:149): templates pass through strftime first.
+    time_mode: bool,
+}
+
+impl<'a> Eval<'a> {
+    fn new(
+        ctx: &'a dyn FormatContext,
+        clock: &'a dyn Clock,
+        wall: &'a dyn WallClock,
+        time_mode: bool,
+    ) -> Self {
+        Self {
+            ctx,
+            clock,
+            start: clock.now_ms(),
+            wall,
+            now: wall.now(),
+            time_mode,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -392,7 +451,7 @@ mod tests {
     #[test]
     fn deferred_modifiers_are_reported() {
         let p = parse("a#{l:x}b#{=3:@n}#{s/a/b/;E:@n}#(true)#{@v}#{m:a,b}#{t/p:@n}");
-        assert_eq!(p.deferred, ["#()", "t"]);
+        assert_eq!(p.deferred, ["#()"]);
         assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "axbv0");
         assert_eq!(
             parse("#{?@x,a,b}#{E:@y}#{||:1,0}#S").deferred,
@@ -403,7 +462,7 @@ mod tests {
     /// Reference (TZ=UTC, `set -gF @out FMT; show -gv @out`): `#{t:@t}` with
     /// @t=86400 is `Fri Jan  2 00:00:00 1970`; @t of -5, 0, `abc` or unset,
     /// and a non-time variable like `session_name`, give nothing; `#{t:#{@t}}`
-    /// is an inner format, so plain `86400`; `t/p` is deferred.
+    /// is an inner format, so plain `86400`.
     #[test]
     fn time_modifier() {
         struct Times(Map);
@@ -422,7 +481,8 @@ mod tests {
             ("@bad", "abc"),
             ("session_name", "s"),
         ]));
-        let e = |f: &str| expand_str(f, &ctx);
+        let wall = FixedWallClock::new(1_793_369_398, "UTC").expect("zoneinfo");
+        let e = |f: &str| expand_at(&parse(f).ast, &ctx, &wall);
         assert_eq!(e("#{t:@t}"), "Fri Jan  2 00:00:00 1970");
         assert_eq!(e("a#{t:@t}b"), "aFri Jan  2 00:00:00 1970b");
         assert_eq!(e("#{t:session_created}"), "Sun Sep  9 01:46:40 2001");
@@ -436,7 +496,6 @@ mod tests {
             assert_eq!(e(empty), "", "{empty}");
         }
         assert_eq!(e("#{t:#{@t}}"), "86400");
-        assert_eq!(parse("#{t/p:@t}").deferred, ["t"]);
         assert_eq!(parse("#{t:@t}").deferred, Vec::<String>::new());
     }
 
@@ -449,13 +508,11 @@ mod tests {
             fn get(&self, name: &str) -> Option<String> {
                 self.0.get(name)
             }
-            fn now(&self) -> i64 {
-                1_793_305_246
-            }
         }
         let ctx = At(map(&[("session_name", "a")]));
-        assert_eq!(expand_time("%H %% #S", &ctx), "20 % a");
-        assert_eq!(expand_time("#S", &ctx), "a");
+        let wall = FixedWallClock::new(1_793_305_246, "UTC").expect("zoneinfo");
+        assert_eq!(expand_time_at("%H %% #S", &ctx, &wall), "20 % a");
+        assert_eq!(expand_time_at("#S", &ctx, &wall), "a");
     }
 
     #[test]

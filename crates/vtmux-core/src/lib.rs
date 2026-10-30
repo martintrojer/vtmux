@@ -15,4 +15,5 @@ pub mod regex;
 pub mod socket;
 pub mod style;
 pub mod styled;
+pub mod time;
 pub mod width;
