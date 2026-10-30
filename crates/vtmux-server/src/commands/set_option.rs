@@ -150,5 +150,13 @@ pub fn exec(
         },
     );
     server.model.options = options;
+    // options_push_changes (options.c:1399-1401): every client goes back to
+    // the (new) default key table.
+    if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "key-table") {
+        let ids: Vec<_> = server.clients.keys().copied().collect();
+        for id in ids {
+            server.set_key_table(id, None);
+        }
+    }
     result
 }
