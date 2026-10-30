@@ -623,8 +623,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."sync-output-wrapped.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."tab-cell-background.sh"]
 status = "pass"
