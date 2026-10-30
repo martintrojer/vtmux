@@ -118,7 +118,8 @@ mod tests {
     #[test]
     fn current_user_has_a_home() {
         assert!(current_user().is_some_and(|p| !p.home.as_os_str().is_empty()));
-        assert!(user_named("root").is_some_and(|p| p.home == *"/root"));
+        // root's home is /root on Linux and /var/root on macOS.
+        assert!(user_named("root").is_some_and(|p| p.home.ends_with("root")));
         assert!(user_named("no-such-user-vtmux").is_none());
     }
 
