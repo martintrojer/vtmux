@@ -59,6 +59,9 @@ pub struct Item {
     /// `c->retval`.
     pub status: i32,
     pub after: After,
+    /// A control client's command: the `%begin` guard flags (0 for the
+    /// argv command, 1 for lines read from stdin, cmd-queue.c:594).
+    pub control: Option<u8>,
 }
 
 impl Item {
@@ -74,6 +77,7 @@ impl Item {
             output: Vec::new(),
             status: 0,
             after: After::Exit,
+            control: None,
         }
     }
 
@@ -117,15 +121,22 @@ impl Item {
     }
 }
 
-/// Run a parsed batch for `item`, stopping at the first error.
+/// Run a parsed batch for `item`, stopping at the first error. For a
+/// control client each command is wrapped in its own guard
+/// (`cmdq_fire_command`, cmd-queue.c:594-655).
 pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) {
     for call in calls {
-        if let Err(e) = run_one(server, item, call) {
-            let line = match &e {
+        let guard = server.control_begin(item);
+        let result = run_one(server, item, call);
+        if let Err(e) = &result {
+            let line = match e {
                 CmdError::Edge(edge) => edge.to_bytes(),
                 other => other.to_bytes(),
             };
             item.error(server, line);
+        }
+        server.control_end(item, guard, result.is_ok());
+        if result.is_err() {
             return;
         }
     }
@@ -213,7 +224,13 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
                 }
                 Ok(())
             } else {
-                let client = server.current_client().ok_or(EdgeError::NoCurrentClient)?;
+                // cmd_find_current_client: the calling client when it is
+                // attached (cmd-find.c).
+                let client = item
+                    .client
+                    .filter(|&c| server.client_session(c).is_some())
+                    .or_else(|| server.current_client())
+                    .ok_or(EdgeError::NoCurrentClient)?;
                 server.detach_client(client);
                 Ok(())
             }
@@ -231,6 +248,12 @@ pub fn attach(
     let Some(client) = item.client else {
         return Ok(());
     };
+    if item.control.is_some() {
+        // A control client needs no terminal and gets no Ready.
+        server.control_attach(client, session);
+        item.origin.attached = Some(session);
+        return Ok(());
+    }
     if item.tty.is_none() {
         return Err(EdgeError::OpenTerminalFailed("not a terminal".into()).into());
     }

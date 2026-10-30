@@ -101,7 +101,10 @@ pub fn exec(
         }
         None => item.cwd.clone(),
     };
-    if !detached && item.tty.is_none() {
+    // A control client is attached without a terminal and sized like a
+    // detached session (cmd-new-session.c:165-168, 250-266).
+    let control = item.control.is_some();
+    if !detached && !control && item.tty.is_none() {
         return Err(EdgeError::OpenTerminalFailed("not a terminal".into()).into());
     }
     let client_size = item.tty.as_ref().map(|t| (t.cols, t.rows));
@@ -109,7 +112,7 @@ pub fn exec(
     let y = size(args.value('y'), "height", client_size.map(|c| c.1), 24)?;
     // Detached: -x/-y or 80x24 (default-size); attached: the client's
     // terminal less the status line (cmd-new-session.c:255-276).
-    let (cols, rows) = match (detached, client_size) {
+    let (cols, rows) = match (detached || control, client_size) {
         (false, Some((c, r))) => (
             u16::try_from(c).unwrap_or(u16::MAX).max(1),
             u16::try_from(r.saturating_sub(1))
