@@ -17,7 +17,7 @@ use vtmux_core::cmd::{self, CmdError, ParseOpts};
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::protocol::ServerMsg;
 
-use crate::commands::{self, Item, Output};
+use crate::commands::{Item, Output};
 use crate::server::{ClientId, GlobalEnv, Server};
 use crate::target::Origin;
 
@@ -147,7 +147,7 @@ impl Server {
     }
 
     /// Hand buffered protocol bytes to the connection.
-    fn control_flush(&mut self, id: ClientId) {
+    pub(crate) fn control_flush(&mut self, id: ClientId) {
         let Some(cs) = self.control_mut(id) else {
             return;
         };
@@ -252,8 +252,12 @@ impl Server {
     /// `control_read_callback`: every complete line is a command; an empty
     /// line asks to exit and stops reading. Lines already read still run
     /// after a command made the client exit, as in tmux.
-    fn control_read(&mut self, id: ClientId) {
+    pub(crate) fn control_read(&mut self, id: ClientId) {
         loop {
+            // A blocked line holds the queue: the lines behind it wait.
+            if self.is_parked(id) {
+                break;
+            }
             let Some(cs) = self.control_mut(id) else {
                 return;
             };
@@ -303,7 +307,10 @@ impl Server {
             &mut GlobalEnv(&mut self.global_env),
             ParseOpts::default(),
         ) {
-            Ok(calls) => commands::run(self, &mut item, &calls),
+            Ok(calls) => {
+                self.run_batch(id, item, calls);
+                return;
+            }
             Err(e) => {
                 let guard = self.control_begin(&item);
                 let msg = match &e {

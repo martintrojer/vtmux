@@ -7,6 +7,10 @@
 //! (cmd-queue.c:820-886): a command client gets `text\n` on stderr /
 //! stdout (sanitised when it has no UTF-8), a config run (no client)
 //! records errors as causes and drops prints.
+//!
+//! A command can block its client's queue (`CMD_RETURN_WAIT`, only
+//! `wait-for` so far): [`run`] stops after it and reports where to resume;
+//! the server parks the rest of the batch until the client is woken.
 
 mod capture_pane;
 mod display_message;
@@ -23,6 +27,7 @@ mod set_option;
 mod show_options;
 pub mod source_file;
 mod split_window;
+mod wait_for;
 
 use std::path::PathBuf;
 
@@ -69,6 +74,8 @@ pub struct Item {
     /// A control client's command: the `%begin` guard flags (0 for the
     /// argv command, 1 for lines read from stdin, cmd-queue.c:594).
     pub control: Option<u8>,
+    /// The command that just ran blocked the client (`CMD_RETURN_WAIT`).
+    pub blocked: bool,
 }
 
 impl Item {
@@ -85,6 +92,7 @@ impl Item {
             status: 0,
             after: After::Exit,
             control: None,
+            blocked: false,
         }
     }
 
@@ -130,9 +138,12 @@ impl Item {
 
 /// Run a parsed batch for `item`, stopping at the first error. For a
 /// control client each command is wrapped in its own guard
-/// (`cmdq_fire_command`, cmd-queue.c:594-655).
-pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) {
-    for call in calls {
+/// (`cmdq_fire_command`, cmd-queue.c:594-655). A command that blocks the
+/// client ends the run early: the result is the index of the command to
+/// resume at. A blocked command still closes its guard with `%end`, as
+/// `CMD_RETURN_WAIT` is not an error.
+pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) -> Option<usize> {
+    for (i, call) in calls.iter().enumerate() {
         let guard = server.control_begin(item);
         let result = run_one(server, item, call);
         if let Err(e) = &result {
@@ -144,9 +155,13 @@ pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) {
         }
         server.control_end(item, guard, result.is_ok());
         if result.is_err() {
-            return;
+            return None;
+        }
+        if std::mem::take(&mut item.blocked) {
+            return Some(i + 1);
         }
     }
+    None
 }
 
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {
@@ -189,6 +204,7 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
         "source-file" => source_file::exec(server, item, args, found),
+        "wait-for" => wait_for::exec(server, item, args),
         "set-option" | "set-window-option" => {
             let result = set_option::exec(server, item, call, found);
             // options_push_changes (options.c:1437-1446): pane-border-status

@@ -17,7 +17,7 @@ use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
 use signal_hook::consts::{SIGCHLD, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
-use vtmux_core::cmd::{self, CmdError, ConfigEnv};
+use vtmux_core::cmd::{self, CmdError, CommandCall, ConfigEnv};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::layout::{Geometry, Layout as CoreLayout, WindowPanes};
@@ -33,6 +33,7 @@ use crate::names::parse_window_name;
 use crate::pane_io::{PaneIo, ReadResult};
 use crate::sys;
 use crate::target::Origin;
+use crate::wait::WaitChannels;
 
 const LISTENER: Token = Token(0);
 const SIGNALS: Token = Token(1);
@@ -116,6 +117,13 @@ impl Unacked {
     }
 }
 
+/// A batch whose client is blocked (`CMDQ_WAITING`): the item so far and
+/// the commands after the blocking one.
+struct Parked {
+    item: Item,
+    rest: Vec<CommandCall>,
+}
+
 /// What a new pane needs ([`Server::spawn_pane`]).
 #[derive(Debug)]
 pub struct PaneSpawn<'a> {
@@ -184,6 +192,13 @@ pub struct Server {
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
     backlog: std::collections::BTreeSet<PaneId>,
+    /// `wait-for` channels.
+    pub waits: WaitChannels,
+    /// Blocked batches, one per client at most.
+    parked: BTreeMap<ClientId, Parked>,
+    /// Clients woken this turn (`cmdq_continue`); their batches resume at
+    /// the end of the turn, as tmux resumes them in its next `cmdq_next`.
+    woken: Vec<ClientId>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -303,6 +318,9 @@ impl Server {
             config,
             config_loaded: false,
             backlog: std::collections::BTreeSet::new(),
+            waits: WaitChannels::default(),
+            parked: BTreeMap::new(),
+            woken: Vec::new(),
         })
     }
 
@@ -347,9 +365,15 @@ impl Server {
             for id in ids {
                 let _ = self.on_client_input(id, &[]);
             }
+            self.resume_woken();
             self.check_window_names();
             self.render_clients();
             self.control_tick();
+            if self.wants_flush() {
+                // server_loop / server_send_exit: release every waiter.
+                self.woken.extend(self.waits.flush());
+                self.resume_woken();
+            }
             if self.should_exit() {
                 self.exit_clients();
                 return Ok(());
@@ -358,7 +382,7 @@ impl Server {
     }
 
     fn next_timeout(&self) -> Option<Duration> {
-        if !self.backlog.is_empty() {
+        if !self.backlog.is_empty() || !self.woken.is_empty() {
             return Some(Duration::ZERO);
         }
         if let Some(deadline) = self
@@ -377,12 +401,13 @@ impl Server {
         }
     }
 
-    /// `server_loop` (server.c:268-306): exit when told to, or when there
-    /// are no sessions left (`exit-empty`) and no client is waiting.
-    fn should_exit(&self) -> bool {
-        if self.shutdown {
-            return self.clients.values().all(|c| c.outbuf.is_empty());
-        }
+    /// The server would exit but for its clients: `server_send_exit`, or
+    /// `server_loop` with `exit-empty` on and no sessions (server.c:268-306).
+    fn wants_flush(&self) -> bool {
+        self.shutdown || (self.exit_empty() && self.model.sessions.is_empty())
+    }
+
+    fn exit_empty(&self) -> bool {
         // A client that left before saying Hello (`-CC` without a tty)
         // still counts: tmux exits once it has no sessions and no clients.
         (self.config_loaded || self.next_client > 0)
@@ -393,6 +418,15 @@ impl Server {
                     .map(|e| &e.value),
                 Some(OptionValue::Single(Value::Flag(true)))
             )
+    }
+
+    /// `server_loop` (server.c:268-306): exit when told to, or when there
+    /// are no sessions left (`exit-empty`) and no client is waiting.
+    fn should_exit(&self) -> bool {
+        if self.shutdown {
+            return self.clients.values().all(|c| c.outbuf.is_empty());
+        }
+        self.exit_empty()
             && self.model.sessions.is_empty()
             && self
                 .clients
@@ -496,9 +530,76 @@ impl Server {
         }
     }
 
+    /// `server_client_lost`: the client's blocked commands never run
+    /// (`cmd_wait_for_client_lost`, then `cmdq_next` drops the dead
+    /// client's queue).
     fn drop_client(&mut self, id: ClientId) {
         if let Some(mut c) = self.clients.remove(&id) {
             let _ = self.poll.registry().deregister(&mut c.stream);
+        }
+        self.waits.client_lost(id);
+        self.parked.remove(&id);
+    }
+
+    /// The client's name (server-client.c:3016-3019): its tty, else
+    /// `client-PID`.
+    pub fn client_name(&self, id: ClientId) -> String {
+        let Some(hello) = self.clients.get(&id).and_then(|c| c.hello.as_ref()) else {
+            return String::new();
+        };
+        match &hello.tty {
+            Some(t) if !t.name.is_empty() => t.name.clone(),
+            _ => format!("client-{}", hello.pid),
+        }
+    }
+
+    /// `cmdq_continue`: the client's blocked batch resumes at the end of
+    /// this turn.
+    pub fn wake(&mut self, id: ClientId) {
+        self.woken.push(id);
+    }
+
+    fn resume_woken(&mut self) {
+        while !self.woken.is_empty() {
+            for id in std::mem::take(&mut self.woken) {
+                let Some(p) = self.parked.remove(&id) else {
+                    continue;
+                };
+                let control_line = p.item.control == Some(1);
+                self.run_batch(id, p.item, p.rest);
+                if control_line && !self.parked.contains_key(&id) {
+                    self.control_read(id);
+                }
+            }
+        }
+    }
+
+    /// Whether `id` has a blocked batch.
+    pub(crate) fn is_parked(&self, id: ClientId) -> bool {
+        self.parked.contains_key(&id)
+    }
+
+    /// Run a client's batch; park it if a command blocks, else hand its
+    /// results back.
+    pub(crate) fn run_batch(&mut self, id: ClientId, mut item: Item, mut calls: Vec<CommandCall>) {
+        match commands::run(self, &mut item, &calls) {
+            Some(at) => {
+                let rest = calls.split_off(at);
+                if item.control.is_none() {
+                    // What ran so far reaches the client now, as tmux
+                    // writes each command's output as it runs.
+                    self.send_output(id, &mut item);
+                }
+                self.parked.insert(id, Parked { item, rest });
+            }
+            None => match item.control {
+                Some(0) => self.control_command_done(id, item),
+                Some(_) => {
+                    self.control_take_output(id, &mut item);
+                    self.control_flush(id);
+                }
+                None => self.deliver(id, item),
+            },
         }
     }
 
@@ -641,33 +742,33 @@ impl Server {
         }
         // Config causes wait for an attached session (cfg.c
         // cfg_show_causes): a command client never sees them.
-        if argv.is_empty() {
-            // No command: new-session (server_client_default_command).
-            match cmd::parse_argv(&["new-session".to_owned()]) {
-                Ok(calls) => commands::run(self, &mut item, &calls),
-                Err(e) => item.error(self, e.to_bytes()),
-            }
+        // No command: new-session (server_client_default_command).
+        let argv = if argv.is_empty() {
+            vec!["new-session".to_owned()]
         } else {
-            match cmd::parse_argv(&argv) {
-                Ok(calls) => commands::run(self, &mut item, &calls),
-                Err(e) => item.error(self, cmd_error_bytes(&e)),
+            argv
+        };
+        match cmd::parse_argv(&argv) {
+            Ok(calls) => self.run_batch(id, item, calls),
+            Err(e) => {
+                item.error(self, cmd_error_bytes(&e));
+                self.run_batch(id, item, Vec::new());
             }
-        }
-        if control {
-            self.control_command_done(id, item);
-        } else {
-            self.deliver(id, item);
         }
     }
 
-    fn deliver(&mut self, id: ClientId, item: Item) {
-        for out in item.output {
+    fn send_output(&mut self, id: ClientId, item: &mut Item) {
+        for out in std::mem::take(&mut item.output) {
             let msg = match out {
                 Output::Stdout(b) => ServerMsg::Stdout(b),
                 Output::Stderr(b) => ServerMsg::Stderr(b),
             };
             self.send(id, &msg);
         }
+    }
+
+    fn deliver(&mut self, id: ClientId, mut item: Item) {
+        self.send_output(id, &mut item);
         if item.after == After::Exit || self.shutdown {
             self.finish_client(id, item.status);
         }

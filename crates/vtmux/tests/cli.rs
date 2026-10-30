@@ -90,6 +90,43 @@ impl World {
         }
     }
 
+    /// Start `-L label -f /dev/null args...` in the background.
+    fn spawn(&self, args: &[&str]) -> std::process::Child {
+        Command::new(&self.bin)
+            .args(["-L", &self.label, "-f", "/dev/null"])
+            .args(args)
+            .current_dir(self.dir())
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", self.dir())
+            .env("SHELL", "/bin/sh")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn binary")
+    }
+
+    /// Poll `wait-for -l args` (max 5 s) until it lists `want`, with each
+    /// `client-PID` of `pids` written `client-N` (N its index).
+    fn waiters(&self, args: &[&str], pids: &[u32], want: &str) -> Run {
+        let mut full = vec!["wait-for", "-l"];
+        full.extend_from_slice(args);
+        let start = Instant::now();
+        loop {
+            let mut r = self.run(&full);
+            for (i, pid) in pids.iter().enumerate() {
+                r.stdout = r
+                    .stdout
+                    .replace(&format!("client-{pid}\n"), &format!("client-{i}\n"));
+            }
+            if r.stdout == want || start.elapsed() > Duration::from_secs(5) {
+                return r;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Run `-L label -f /dev/null args...`.
     fn run(&self, args: &[&str]) -> Run {
         let mut full = vec!["-L", &self.label, "-f", "/dev/null"];
@@ -1088,6 +1125,62 @@ fn panes_pty_sizes() {
         w.wait_alternate("%1");
         runs.push(w.run(&["resizep", "-t", "%1", "-x", "20"]));
         runs.push(Run::seen(w.pty_size_agrees("%1")));
+        runs
+    });
+}
+
+/// wait-for (cmd-wait-for.c): a waiter blocks until `-S`, which wakes
+/// every waiter and runs the rest of its command list; a signal with no
+/// waiters is kept for the next wait, and a second one drops it; `-L`
+/// queues behind the holder and `-U` hands the lock over; `-w` wakes one
+/// waiter by client name, unknown names are fine; kill-server releases
+/// everyone. Errors: `channel X not locked`, too many arguments.
+#[test]
+fn wait_for_channels_and_locks() {
+    compare("wait_for_channels_and_locks", |w| {
+        let finish = |c: std::process::Child| {
+            let out = c.wait_with_output().expect("wait");
+            Run {
+                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                code: out.status.code().unwrap_or(-1),
+            }
+        };
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&["wait-for", "-U", "x"]),
+            w.run(&["wait-for", "-S", "a", "b"]),
+            w.run(&["wait-for", "-S", "y"]),
+            w.run(&["wait-for", "y"]),
+        ];
+        let wa = w.spawn(&["wait-for", "c", ";", "display", "-p", "A"]);
+        let wb = w.spawn(&["wait-for", "c", ";", "display", "-p", "B"]);
+        let pids = [wa.id(), wb.id()];
+        runs.push(w.waiters(&["c"], &pids, "client-0\nclient-1\n"));
+        runs.push(w.run(&["wait-for", "-S", "c"]));
+        runs.push(finish(wa));
+        runs.push(finish(wb));
+        runs.push(w.waiters(&["c"], &pids, ""));
+        // Lock handoff.
+        runs.push(w.run(&["wait-for", "-L", "l"]));
+        let locker = w.spawn(&["wait-for", "-L", "l", ";", "display", "-p", "got"]);
+        runs.push(w.waiters(&["l"], &[locker.id()], "client-0\n"));
+        runs.push(w.run(&["wait-for", "-U", "l"]));
+        runs.push(finish(locker));
+        runs.push(w.run(&["wait-for", "-U", "l"]));
+        runs.push(w.run(&["wait-for", "-U", "l"]));
+        // -w by client name.
+        let wk = w.spawn(&["wait-for", "k", ";", "display", "-p", "K"]);
+        let name = format!("client-{}", wk.id());
+        runs.push(w.waiters(&["k"], &[wk.id()], "client-0\n"));
+        runs.push(w.run(&["wait-for", "-w", "nobody", "k"]));
+        runs.push(w.run(&["wait-for", "-w", &name, "k"]));
+        runs.push(finish(wk));
+        // kill-server releases a waiter, which runs the rest of its list.
+        let wz = w.spawn(&["wait-for", "z", ";", "display", "-p", "Z"]);
+        runs.push(w.waiters(&["z"], &[wz.id()], "client-0\n"));
+        runs.push(w.run(&["kill-server"]));
+        runs.push(finish(wz));
         runs
     });
 }

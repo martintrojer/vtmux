@@ -104,11 +104,21 @@ fn tty_info(features: &[String]) -> Option<TtyInfo> {
     }
     let ws = rustix::termios::tcgetwinsize(&stdin).ok();
     Some(TtyInfo {
+        name: rustix::termios::ttyname(&stdin, Vec::new())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         term: std::env::var("TERM").unwrap_or_default(),
         cols: ws.map_or(80, |w| u32::from(w.ws_col)),
         rows: ws.map_or(24, |w| u32::from(w.ws_row)),
         features: features.to_vec(),
     })
+}
+
+/// The environment as UTF-8 pairs; others are skipped.
+fn client_env() -> Vec<(String, String)> {
+    std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .collect()
 }
 
 /// `connect(2)` the socket, with C's errno semantics for a long path.
@@ -260,9 +270,7 @@ fn main() -> ExitCode {
             .is_ok_and(|calls| calls.iter().any(|c| c.entry.starts_server));
     let start = start && !cli.no_start;
 
-    let env: Vec<(String, String)> = std::env::vars_os()
-        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
-        .collect();
+    let env = client_env();
     let cwd = find_cwd()
         .or_else(find_home)
         .unwrap_or_else(|| PathBuf::from("/"));
@@ -287,9 +295,10 @@ fn main() -> ExitCode {
     let hello = Hello {
         version: PROTOCOL_VERSION,
         invocation,
+        pid: std::process::id(),
         argv: cli.command.clone(),
-        cwd: cwd.clone(),
-        env: env.clone(),
+        cwd,
+        env,
         tty: tty_info(&cli.features),
         flags: ClientFlags {
             control: cli.control,

@@ -210,7 +210,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("switch-mode", None, "F:kst:wZ", 0, Some(1), "[-kswZ] [-F format] [-t target-pane] [command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("unbind-key", Some("unbind"), "anqT:", 0, Some(1), "[-anq] [-T key-table] key", None, None, false, false),
     cmd("unlink-window", Some("unlinkw"), "kt:", 0, Some(0), "[-k] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
-    cmd("wait-for", Some("wait"), "EF:LSUlvw:", 1, Some(1), "[-ELSUlv] [-F format] [-w waiter] name", None, None, false, false),
+    cmd("wait-for", Some("wait"), "EF:LSUlvw:", 1, Some(1), "[-ELSUlv] [-F format] [-w waiter] name", None, None, false, true),
 ];
 
 /// Look up a typed command name. A port of `cmd_find` (cmd.c:469-506): walk
@@ -330,7 +330,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 22);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 23);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
