@@ -18,7 +18,7 @@ const TEMPLATE: &str = "#{session_name}:#{window_index}.#{pane_index}";
 
 /// `args_string_percentage_and_expand` (arguments.c:1067-1110): a number
 /// in `min..=max` or a percentage of `cur`, formats expanded first.
-fn percentage_expanded(
+pub(super) fn percentage_expanded(
     server: &Server,
     found: Found,
     value: &str,
@@ -177,6 +177,7 @@ pub fn exec(
             .collect(),
         cwd,
         rect,
+        shell: None,
     });
     let pane = match spawned {
         Ok(pane) => pane,

@@ -12,8 +12,10 @@
 //! `wait-for` so far): [`run`] stops after it and reports where to resume;
 //! the server parks the rest of the batch until the client is woken.
 
+mod break_pane;
 mod capture_pane;
 mod display_message;
+mod join_pane;
 mod kill_pane;
 mod kill_server;
 mod kill_session;
@@ -25,6 +27,8 @@ mod new_session;
 mod new_window;
 mod rename_window;
 mod resize_pane;
+mod respawn_pane;
+mod select_layout;
 mod select_pane;
 mod select_window;
 mod send_keys;
@@ -32,6 +36,7 @@ mod set_option;
 mod show_options;
 pub mod source_file;
 mod split_window;
+mod swap_pane;
 mod wait_for;
 
 use std::path::PathBuf;
@@ -171,8 +176,10 @@ pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) -> Optio
     None
 }
 
+#[allow(clippy::too_many_lines)] // one dispatch arm per command
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {
     call.entry.ensure_implemented()?;
+    let source = resolve_source(server, item, call)?;
     // cmdq_find_flag (cmd-queue.c:514-530): resolve the target before the
     // command runs; commands without a target slot get the client's
     // current state, failures ignored.
@@ -215,6 +222,15 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         "previous-window" => select_window::exec(server, item, args, found, Which::Previous),
         "last-window" => select_window::exec(server, item, args, found, Which::Last),
         "resize-pane" => resize_pane::exec(server, item, args, found),
+        "select-layout" => select_layout::exec(server, item, args, found, None),
+        "next-layout" => select_layout::exec(server, item, args, found, Some(true)),
+        "previous-layout" => select_layout::exec(server, item, args, found, Some(false)),
+        "swap-pane" => swap_pane::exec(server, args, source, found),
+        "break-pane" => break_pane::exec(server, item, args, source, found),
+        "join-pane" | "move-pane" => {
+            join_pane::exec(server, args, source, found, call.entry.name == "move-pane")
+        }
+        "respawn-pane" => respawn_pane::exec(server, item, args, found),
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
@@ -282,6 +298,26 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             }
         }
         other => Err(CmdError::NotImplemented(other.to_owned())),
+    }
+}
+
+/// `cmdq_fire_command` (cmd-queue.c:618-623): the `-s` source is resolved
+/// before the target. detach-client looks its `-s` up itself. With no
+/// marked pane (vtmux has none yet), `CMD_FIND_DEFAULT_MARKED` starts from
+/// the current state like any other lookup (cmd-find.c:992-1006).
+fn resolve_source(server: &Server, item: &Item, call: &CommandCall) -> Result<Found, CmdError> {
+    match &call.entry.source {
+        Some(spec) if call.entry.name != "detach-client" => {
+            let value = call.args.target(spec.flag);
+            Ok(target::resolve(
+                &server.model,
+                item.origin,
+                value.as_ref(),
+                spec.kind,
+                spec.flags,
+            )?)
+        }
+        _ => Ok(Found::default()),
     }
 }
 
