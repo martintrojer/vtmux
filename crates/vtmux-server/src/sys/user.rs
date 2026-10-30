@@ -1,7 +1,8 @@
 //! The passwd database (through NSS, so `/usr/lib/passwd`, sssd and LDAP
 //! users resolve as tmux sees them) and `localtime_r`.
 
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr, CString, OsStr};
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use vtmux_core::format::Tm;
@@ -11,6 +12,27 @@ use vtmux_core::format::Tm;
 pub struct Passwd {
     pub home: PathBuf,
     pub shell: PathBuf,
+}
+
+/// Copy the fields out of a filled-in `passwd`.
+///
+/// # Safety
+/// Every non-null string pointer in `pw` must be NUL-terminated and valid.
+unsafe fn fields(pw: &libc::passwd) -> Passwd {
+    let field = |p: *const libc::c_char| {
+        if p.is_null() {
+            PathBuf::new()
+        } else {
+            // SAFETY: the caller guarantees the pointer is a valid C string.
+            let bytes = unsafe { CStr::from_ptr(p) }.to_bytes();
+            // tmux keeps the bytes as they are.
+            PathBuf::from(OsStr::from_bytes(bytes))
+        }
+    };
+    Passwd {
+        home: field(pw.pw_dir),
+        shell: field(pw.pw_shell),
+    }
 }
 
 /// Read a passwd entry with one of the reentrant lookups.
@@ -30,22 +52,9 @@ fn lookup(
         if rc != 0 || result.is_null() {
             return None;
         }
-        let field = |p: *const libc::c_char| {
-            if p.is_null() {
-                PathBuf::new()
-            } else {
-                // SAFETY: on success the getpw*_r functions fill `pw` with
-                // NUL-terminated strings pointing into `buf`, alive here.
-                let bytes = unsafe { CStr::from_ptr(p) }.to_bytes();
-                PathBuf::from(std::ffi::OsStr::new(
-                    std::str::from_utf8(bytes).unwrap_or_default(),
-                ))
-            }
-        };
-        return Some(Passwd {
-            home: field(pw.pw_dir),
-            shell: field(pw.pw_shell),
-        });
+        // SAFETY: on success the getpw*_r functions fill `pw` with
+        // NUL-terminated strings pointing into `buf`, alive here.
+        return Some(unsafe { fields(&pw) });
     }
 }
 
@@ -111,6 +120,20 @@ mod tests {
         assert!(current_user().is_some_and(|p| !p.home.as_os_str().is_empty()));
         assert!(user_named("root").is_some_and(|p| p.home == *"/root"));
         assert!(user_named("no-such-user-vtmux").is_none());
+    }
+
+    #[test]
+    fn non_utf8_fields_are_kept_as_bytes() {
+        let home = CString::new(&b"/home/caf\xe9"[..]).unwrap();
+        let shell = CString::new(&b"/bin/s\xffh"[..]).unwrap();
+        // SAFETY: passwd is a plain C struct; all-zero is a valid value.
+        let mut pw: libc::passwd = unsafe { std::mem::zeroed() };
+        pw.pw_dir = home.as_ptr().cast_mut();
+        pw.pw_shell = shell.as_ptr().cast_mut();
+        // SAFETY: both pointers are NUL-terminated and outlive the call.
+        let got = unsafe { fields(&pw) };
+        assert_eq!(got.home.as_os_str().as_bytes(), b"/home/caf\xe9");
+        assert_eq!(got.shell.as_os_str().as_bytes(), b"/bin/s\xffh");
     }
 
     #[test]

@@ -84,13 +84,26 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     .flatten()
     .map(|d| cstring(d.as_os_str().as_bytes()))
     .collect::<io::Result<_>>()?;
-    let env: Vec<(CString, CString)> = spec
+    // The child's environment is exactly the pane's (environ_push), built
+    // as an `envp` before the fork: `clearenv` and `setenv` are neither
+    // portable nor async-signal-safe. The slot before the terminator is
+    // `PWD`, which the child points at the directory it actually entered.
+    let env: Vec<CString> = spec
         .env
         .iter()
         .filter(|(k, _)| !k.is_empty() && !k.contains('=') && k != "PWD")
-        .map(|(k, v)| Ok((cstring(k.as_bytes())?, cstring(v.as_bytes())?)))
+        .map(|(k, v)| cstring(format!("{k}={v}").as_bytes()))
         .collect::<io::Result<_>>()?;
-    let pwd_key = cstring(b"PWD")?;
+    let pwds: Vec<CString> = dirs
+        .iter()
+        .map(|d| cstring(&[b"PWD=", d.to_bytes()].concat()))
+        .collect::<io::Result<_>>()?;
+    let mut envp: Vec<*const libc::c_char> = env.iter().map(|e| e.as_ptr()).collect();
+    let pwd_slot = envp.len();
+    envp.push(std::ptr::null());
+    envp.push(std::ptr::null());
+    let candidates = exec_candidates(&program, &spec.env, direct)?;
+    let fd_limit = fd_limit();
     let ws = libc::winsize {
         ws_row: spec.rows,
         ws_col: spec.cols,
@@ -98,26 +111,45 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
         ws_ypixel: 0,
     };
 
-    let mut master: libc::c_int = -1;
-    // SAFETY: forkpty writes the master fd into `master`; name and termios
-    // are null (allowed), `ws` outlives the call. The server is
-    // single-threaded, so the child may run the code below until exec.
-    let pid = unsafe {
-        libc::forkpty(
-            &raw mut master,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            &raw const ws,
-        )
+    // spawn.c:454-456: block every signal across the fork so no handler
+    // runs in the child before it resets them.
+    // SAFETY: sigset_t is a plain C struct, all-zero is a valid value, and
+    // sigfillset/sigprocmask only read and write the two sets.
+    let old = unsafe {
+        let mut all: libc::sigset_t = std::mem::zeroed();
+        let mut old: libc::sigset_t = std::mem::zeroed();
+        libc::sigfillset(&raw mut all);
+        libc::sigprocmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
+        old
     };
-    if pid == -1 {
-        return Err(io::Error::last_os_error());
-    }
+    let mut master: libc::c_int = -1;
+    // SAFETY: forkpty writes the master fd into `master`; `ws` outlives the
+    // call. The server is single-threaded, so the child may run the code
+    // below until exec.
+    let pid = unsafe { forkpty(&mut master, &ws) };
+    let fork_error = io::Error::last_os_error();
     if pid == 0 {
         // SAFETY: we are the child of a single-threaded process; every
         // pointer below refers to memory built before fork, and the
         // function never returns (exec or _exit).
-        unsafe { child(&dirs, &env, &pwd_key, &program, &argv_ptrs, direct) }
+        unsafe {
+            child(&mut Child {
+                dirs: &dirs,
+                pwds: &pwds,
+                envp: &mut envp,
+                pwd_slot,
+                argv: &argv_ptrs,
+                candidates: &candidates,
+                fd_limit,
+            })
+        }
+    }
+    // SAFETY: restores the mask saved above.
+    unsafe {
+        libc::sigprocmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
+    }
+    if pid == -1 {
+        return Err(fork_error);
     }
     // SAFETY: forkpty succeeded, so `master` is a fresh fd we now own.
     let master = unsafe { OwnedFd::from_raw_fd(master) };
@@ -128,38 +160,92 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     })
 }
 
+/// `forkpty(3)`; the argument types differ between libcs.
+///
+/// # Safety
+/// Same as `forkpty`: the caller is single-threaded or runs only
+/// async-signal-safe code in the child.
+unsafe fn forkpty(master: &mut libc::c_int, ws: &libc::winsize) -> libc::pid_t {
+    #[cfg(target_vendor = "apple")]
+    {
+        let mut ws = *ws;
+        // SAFETY: valid out-pointers; name and termios may be null.
+        unsafe {
+            libc::forkpty(
+                master,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &raw mut ws,
+            )
+        }
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    // SAFETY: valid out-pointers; name and termios may be null.
+    unsafe {
+        libc::forkpty(master, std::ptr::null_mut(), std::ptr::null(), ws)
+    }
+}
+
+/// The paths `execvp` would try for a directly executed command: the
+/// program itself when it holds a `/` (or for the shell cases), else
+/// `$PATH` (the pane's, defaulting like `confstr(_CS_PATH)`) joined with it.
+fn exec_candidates(
+    program: &CString,
+    env: &[(String, String)],
+    direct: bool,
+) -> io::Result<Vec<CString>> {
+    let name = program.to_bytes();
+    if !direct || name.contains(&b'/') {
+        return Ok(vec![program.clone()]);
+    }
+    let path = env
+        .iter()
+        .find(|(k, _)| k == "PATH")
+        .map_or("/usr/bin:/bin", |(_, v)| v.as_str());
+    path.split(':')
+        .map(|dir| {
+            let dir = if dir.is_empty() { "." } else { dir };
+            cstring(&[dir.as_bytes(), b"/", name].concat())
+        })
+        .collect()
+}
+
+/// One past the highest descriptor the child needs to close.
+fn fd_limit() -> libc::c_int {
+    let limit = rustix::process::getrlimit(rustix::process::Resource::Nofile)
+        .current
+        .unwrap_or(1 << 16);
+    libc::c_int::try_from(limit.min(1 << 16)).unwrap_or(1 << 16)
+}
+
+/// What the forked child needs, all built before the fork.
+struct Child<'a> {
+    dirs: &'a [CString],
+    /// `PWD=<dir>` for each of `dirs`.
+    pwds: &'a [CString],
+    envp: &'a mut [*const libc::c_char],
+    pwd_slot: usize,
+    argv: &'a [*const libc::c_char],
+    candidates: &'a [CString],
+    fd_limit: libc::c_int,
+}
+
 /// The child after `forkpty` (spawn.c:500-574).
 ///
 /// # Safety
 /// Only call in the child of `fork` in a single-threaded parent; all
-/// pointers must be valid NUL-terminated strings (and a null-terminated
-/// `argv`).
-unsafe fn child(
-    dirs: &[CString],
-    env: &[(CString, CString)],
-    pwd_key: &CString,
-    program: &CString,
-    argv: &[*const libc::c_char],
-    direct: bool,
-) -> ! {
+/// pointers must be valid NUL-terminated strings (and null-terminated
+/// `argv`/`envp`).
+unsafe fn child(c: &mut Child<'_>) -> ! {
     // SAFETY (whole body): libc calls on valid C strings in the forked
     // child; see the function contract.
     unsafe {
         // Working directory: the requested one, else home, else "/".
-        let mut actual = None;
-        for d in dirs {
+        for (d, pwd) in c.dirs.iter().zip(c.pwds) {
             if libc::chdir(d.as_ptr()) == 0 {
-                actual = Some(d);
+                c.envp[c.pwd_slot] = pwd.as_ptr();
                 break;
             }
-        }
-        // The environment: exactly the pane's (environ_push).
-        libc::clearenv();
-        for (k, v) in env {
-            libc::setenv(k.as_ptr(), v.as_ptr(), 1);
-        }
-        if let Some(d) = actual {
-            libc::setenv(pwd_key.as_ptr(), d.as_ptr(), 1);
         }
         // VERASE is tmux's backspace (\177) and IUTF8 is on (spawn.c:524-538).
         let mut tio: libc::termios = std::mem::zeroed();
@@ -193,14 +279,32 @@ unsafe fn child(
         let mut set: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&raw mut set);
         libc::sigprocmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
-        // closefrom(STDERR_FILENO + 1).
-        libc::close_range(3, libc::c_uint::MAX, 0);
-        if direct {
-            libc::execvp(program.as_ptr(), argv.as_ptr());
-        } else {
-            libc::execv(program.as_ptr(), argv.as_ptr());
+        close_from(3, c.fd_limit);
+        for path in c.candidates {
+            libc::execve(path.as_ptr(), c.argv.as_ptr(), c.envp.as_ptr());
         }
         libc::_exit(1)
+    }
+}
+
+/// `closefrom(first)`: `close_range` where the kernel has it, else a loop
+/// up to the descriptor limit.
+///
+/// # Safety
+/// Closes descriptors; only call in a forked child that owns none it needs.
+unsafe fn close_from(first: libc::c_int, limit: libc::c_int) {
+    #[cfg(target_os = "linux")]
+    // SAFETY: close_range on a range of descriptors the child does not use.
+    unsafe {
+        if libc::close_range(first.cast_unsigned(), libc::c_uint::MAX, 0) == 0 {
+            return;
+        }
+    }
+    for fd in first..limit {
+        // SAFETY: close on a descriptor the child does not use.
+        unsafe {
+            libc::close(fd);
+        }
     }
 }
 

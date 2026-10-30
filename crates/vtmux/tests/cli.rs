@@ -68,6 +68,7 @@ impl World {
     fn raw(&self, args: &[&str]) -> Run {
         let out = Command::new(&self.bin)
             .args(args)
+            .current_dir(self.dir())
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
             .env("TMUX_TMPDIR", self.dir())
@@ -407,4 +408,85 @@ fn startup_config() {
             w.run(&["ls", "-F", "#{session_name}"]),
         ]
     });
+}
+
+/// A new pane's title is the host name (window.c:1479-1480
+/// `window_pane_create`).
+#[test]
+fn initial_pane_title_is_hostname() {
+    compare("initial_pane_title_is_hostname", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a"]),
+            w.run(&["display", "-p", "[#{pane_title}] #{host}"]),
+        ]
+    });
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a"]);
+    let host = w.run(&["display", "-p", "#{host}"]).stdout;
+    assert_eq!(w.run(&["display", "-p", "#{pane_title}"]).stdout, host);
+}
+
+/// Twelve clients start a server at once (client.c `client_get_lock`):
+/// one server, every session created, no errors.
+#[test]
+fn concurrent_starts_share_one_server() {
+    let (_keep, as_tmux) = vtmux_as_tmux();
+    for _ in 0..5 {
+        let w = World::new(&as_tmux);
+        let runs: Vec<Run> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..12)
+                .map(|i| {
+                    let w = &w;
+                    s.spawn(move || w.run(&["new", "-d", "-s", &format!("s{i}")]))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for r in &runs {
+            assert_eq!((r.code, r.stderr.as_str()), (0, ""), "{runs:?}");
+        }
+        let ls = w.run(&["ls", "-F", "#{session_name}"]);
+        assert_eq!(ls.stdout.lines().count(), 12, "{}", ls.stdout);
+        assert!(
+            !w.dir()
+                .join(format!("tmux-{}/{}.lock", uid(), w.label))
+                .exists()
+        );
+    }
+}
+
+/// SIGUSR1 recreates the socket, SIGQUIT and SIGUSR2 are survived
+/// (server.c `server_signal`, proc.c `proc_set_signals`).
+#[test]
+fn signals_follow_tmux() {
+    let (_keep, as_tmux) = vtmux_as_tmux();
+    let reference = reference();
+    let bins: Vec<PathBuf> = std::iter::once(as_tmux).chain(reference).collect();
+    for bin in bins {
+        let w = World::new(&bin);
+        w.run(&["new", "-d", "-s", "a"]);
+        let pid = w.run(&["display", "-p", "#{pid}"]).stdout.trim().to_owned();
+        let sock = w.dir().join(format!("tmux-{}/{}", uid(), w.label));
+        let kill = |sig: &str| {
+            assert!(
+                Command::new("kill")
+                    .args([sig, &pid])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        kill("-QUIT");
+        kill("-USR2");
+        std::fs::remove_file(&sock).expect("remove socket");
+        assert_ne!(w.run(&["ls"]).code, 0, "socket is gone");
+        kill("-USR1");
+        let start = Instant::now();
+        while !sock.exists() && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let ls = w.run(&["ls"]);
+        assert_eq!(ls.code, 0, "{} {ls:?}", bin.display());
+        assert!(ls.stdout.starts_with("a: 1 windows"));
+    }
 }
