@@ -11,18 +11,40 @@ pub enum Event {
     Sync(bool),
     Ignore,
 }
+/// `escape-time` default (options-table.c).
+const ESCAPE_TIME: Duration = Duration::from_millis(10);
+/// The partial-key floor while a reply may still be in flight
+/// (tty-keys.c:996-1012).
+const REPLY_DELAY: Duration = Duration::from_millis(500);
+/// `TTY_QUERY_TIMEOUT` (tty.c:85): queries unanswered by then are given up.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Default)]
 pub struct Decoder {
     bytes: Vec<u8>,
     pending: Option<Instant>,
+    /// The terminal was queried and has not answered before this instant
+    /// (`TTY_ALL_REQUEST_FLAGS` not all set, tty.c `tty_start_timer_callback`).
+    queries_until: Option<Instant>,
+    /// Inside a bracketed paste (`TTY_BRACKETPASTE`).
+    pasting: bool,
 }
 impl Decoder {
+    /// A query went to the terminal (the startup `DECRQM 2026`); its reply
+    /// may arrive split, so partial sequences wait longer until it is
+    /// answered or `QUERY_TIMEOUT` passes.
+    pub fn query_sent(&mut self, now: Instant) {
+        self.queries_until = Some(now + QUERY_TIMEOUT);
+    }
     pub fn feed(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);
     }
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.pending.map(|t| t + Duration::from_millis(10))
+        let start = self.pending?;
+        let waiting = self.queries_until.is_some_and(|until| start < until)
+            || (self.pasting && b"\x1b[201~".starts_with(&self.bytes) && self.bytes.len() < 6);
+        Some(start + if waiting { REPLY_DELAY } else { ESCAPE_TIME })
     }
     pub fn drain(&mut self, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
@@ -34,6 +56,11 @@ impl Decoder {
             };
             self.bytes.drain(..used);
             self.pending = None;
+            match event {
+                Event::Sync(_) => self.queries_until = None,
+                Event::Paste(start) => self.pasting = start,
+                _ => {}
+            }
             events.push(event);
         }
         events
@@ -45,6 +72,7 @@ fn key(base: Base) -> Key {
         ctrl: false,
         meta: false,
         shift: false,
+        esc_prefix: false,
     }
 }
 #[allow(clippy::too_many_lines)] // terminal sequence dispatch table
@@ -149,11 +177,23 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
             return None;
         }
     }
-    // Escape followed by a key is Meta. A second escape can introduce a
-    // named key; normal/application cursor forms share the same base.
+    // tty_keys_next (tty-keys.c:900-924): Escape followed by a key is that
+    // key with Meta. If the key already carries an xterm Meta modifier (or
+    // is a paste marker), the Escape is a key of its own. The meta forms in
+    // the table (tty-keys.c:118-144) keep Escape+arrow as Escape+arrow,
+    // but `ESC ESC [H`/`ESC ESC O F` are M-Home/M-End.
     let (event, n) = decode(&bytes[1..], expired)?;
     let event = match event {
+        Event::Key(k) if k.meta && !k.esc_prefix => {
+            return Some((Event::Key(key(Base::Char('\x1b'))), 1));
+        }
+        Event::Paste(_) => return Some((Event::Key(key(Base::Char('\x1b'))), 1)),
         Event::Key(mut k) => {
+            let implied = n == 3
+                && bytes[1] == 0x1b
+                && matches!(bytes[2], b'[' | b'O')
+                && matches!(bytes[3], b'H' | b'F');
+            k.esc_prefix = k.esc_prefix || !implied;
             k.meta = true;
             Event::Key(k)
         }
@@ -224,6 +264,82 @@ mod tests {
         assert_eq!(
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]
+        );
+    }
+
+    #[test]
+    fn split_reply_waits_while_a_query_is_outstanding() {
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        for reply in [
+            &b"\x1b[?2026;2$y"[..],
+            b"\x1b[?62;4c",
+            b"\x1b]11;rgb:0000/0000/0000\x1b\\",
+        ] {
+            let mut d = Decoder::default();
+            d.query_sent(now);
+            d.feed(&reply[..4]);
+            assert_eq!(d.drain(now), Vec::new());
+            assert_eq!(d.deadline(), Some(now + ms(500)));
+            assert_eq!(d.drain(now + ms(50)), Vec::new());
+            d.feed(&reply[4..]);
+            let events = d.drain(now + ms(50));
+            assert_eq!(events.len(), 1);
+            assert!(!matches!(events[0], Event::Key(_)), "{events:?}");
+        }
+        // Answered: back to escape-time.
+        let mut d = Decoder::default();
+        d.query_sent(now);
+        d.feed(b"\x1b[?2026;2$y\x1b");
+        assert_eq!(d.drain(now), vec![Event::Sync(true)]);
+        assert_eq!(d.deadline(), Some(now + ms(10)));
+        // Unanswered queries time out after TTY_QUERY_TIMEOUT.
+        let mut d = Decoder::default();
+        d.query_sent(now);
+        d.feed(b"\x1b");
+        assert_eq!(d.drain(now + ms(5000)), Vec::new());
+        assert_eq!(d.deadline(), Some(now + ms(5010)));
+        // A partial paste end inside a paste waits too.
+        let mut d = Decoder::default();
+        d.feed(b"\x1b[200~ab\x1b[20");
+        assert_eq!(d.drain(now).len(), 3);
+        assert_eq!(d.deadline(), Some(now + ms(500)));
+    }
+
+    #[test]
+    fn escape_before_a_key_is_escape_plus_key() {
+        let now = Instant::now();
+        let decode1 = |b: &[u8]| {
+            let mut d = Decoder::default();
+            d.feed(b);
+            d.drain(now + Duration::from_millis(20))
+        };
+        let meta = |base, esc_prefix| {
+            Event::Key(Key {
+                meta: true,
+                esc_prefix,
+                ..key(base)
+            })
+        };
+        assert_eq!(
+            decode1(b"\x1b\x1b[A"),
+            vec![meta(Base::Named(Named::Up), true)]
+        );
+        assert_eq!(
+            decode1(b"\x1b\x1bOA"),
+            vec![meta(Base::Named(Named::Up), true)]
+        );
+        assert_eq!(
+            decode1(b"\x1b\x1b[H"),
+            vec![meta(Base::Named(Named::Home), false)]
+        );
+        assert_eq!(decode1(b"\x1bx"), vec![meta(Base::Char('x'), true)]);
+        // Escape before an xterm M-Left is Escape, then M-Left.
+        let mut m_left = key(Base::Named(Named::Left));
+        m_left.meta = true;
+        assert_eq!(
+            decode1(b"\x1b\x1b[1;3D"),
+            vec![Event::Key(key(Base::Char('\x1b'))), Event::Key(m_left)]
         );
     }
 }

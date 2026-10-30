@@ -614,6 +614,8 @@ impl Server {
         client.compositor.invalidate();
         client.attached = Some(s);
         client.prefix = false;
+        // Caps::startup ends with a DECRQM query (tty.c tty_send_requests).
+        client.decoder.query_sent(Instant::now());
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
         // set of modes, not their ordering.
