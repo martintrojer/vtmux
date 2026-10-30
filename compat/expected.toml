@@ -240,8 +240,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."format-fuzzy.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."format-modifiers.sh"]
 status = "xfail"
