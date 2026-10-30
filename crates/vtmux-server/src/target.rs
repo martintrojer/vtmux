@@ -19,6 +19,11 @@ pub struct Found {
     pub index: Option<u32>,
     pub window: Option<WindowId>,
     pub pane: Option<PaneId>,
+    /// For a `CMD_FIND_WINDOW_INDEX` lookup (new-window), the index the
+    /// target asked for (`fs->idx`), which may be free; `None` when it named
+    /// no index (no target, or only a session). `index` is then still the
+    /// session's current window (cmd-find.c:375-379).
+    pub new_index: Option<u32>,
 }
 
 impl Found {
@@ -33,6 +38,7 @@ impl Found {
             index: Some(index),
             window: Some(window),
             pane: Some(pane),
+            new_index: None,
         }
     }
 
@@ -69,6 +75,7 @@ fn best_with_window(model: &Model, w: WindowId) -> Option<Found> {
         index: Some(index),
         window: Some(w),
         pane: model.windows.get(&w).map(crate::model::Window::active),
+        new_index: None,
     })
 }
 
@@ -186,6 +193,7 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
             index: Some(index),
             window: Some(*w),
             pane: model.windows.get(w).map(crate::model::Window::active),
+            new_index: None,
         })
     };
     if window.starts_with('@') {
@@ -213,7 +221,7 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     }
     if !exact {
         match window {
-            "!" => return None, // no last-window stack in M0
+            "!" => return at(*session.last.first()?),
             "^" => return at(*session.windows.keys().next()?),
             "$" => return at(*session.windows.keys().next_back()?),
             _ => {}
@@ -363,7 +371,7 @@ pub fn resolve(
     kind: TargetKind,
     flags: FindFlags,
 ) -> Result<Found, EdgeError> {
-    let result = resolve_inner(model, origin, spec, kind);
+    let result = resolve_inner(model, origin, spec, kind, flags.window_index);
     match result {
         Err(_) if flags.can_fail => Ok(partial(model, origin, spec, kind)),
         other => other,
@@ -416,6 +424,7 @@ fn resolve_inner(
     origin: Origin,
     spec: Option<&TargetSpec>,
     kind: TargetKind,
+    window_index: bool,
 ) -> Result<Found, EdgeError> {
     let current = current(model, origin).ok_or(EdgeError::NoCurrentTarget)?;
     let Some(spec) = spec else {
@@ -431,7 +440,99 @@ fn resolve_inner(
         Resolved::Marked => return Err(EdgeError::NotImplemented("marked target".into())),
         Resolved::Parts(p) => p,
     };
+    if window_index {
+        return find_index_parts(model, current, &parts);
+    }
     find_parts(model, current, &parts)
+}
+
+/// `cmd_find_target` with `CMD_FIND_WINDOW_INDEX` (cmd-find.c:1157-1222):
+/// no pane part; a free numeric index or a `+N`/`-N` offset from the
+/// current window is a valid target that names no window.
+fn find_index_parts(
+    model: &Model,
+    current: Found,
+    parts: &TargetParts,
+) -> Result<Found, EdgeError> {
+    if parts.pane.is_some() {
+        return Err(EdgeError::Message("can't specify pane here".into()));
+    }
+    let no_window = |p: &Part| EdgeError::WindowNotFound(p.text.clone());
+    let session = match &parts.session {
+        Some(sp) => Some(
+            find_session(model, sp).ok_or_else(|| EdgeError::SessionNotFound(sp.text.clone()))?,
+        ),
+        None => None,
+    };
+    let Some(wp) = &parts.window else {
+        // A session alone: its current window, no index (cmd-find.c:1172).
+        return Ok(session.map_or(current, |s| Found::from_session(model, s)));
+    };
+    if let Some(s) = session {
+        return find_index_in(model, s, wp).ok_or_else(|| no_window(wp));
+    }
+    // cmd_find_get_window (cmd-find.c:469-497).
+    if wp.text.starts_with('@') {
+        return find_window(model, current, wp, true)
+            .map(|f| Found {
+                new_index: f.index,
+                ..f
+            })
+            .ok_or_else(|| no_window(wp));
+    }
+    if let Some(s) = current.session
+        && let Some(f) = find_index_in(model, s, wp)
+    {
+        return Ok(f);
+    }
+    if !parts.window_only
+        && let Some(s) = find_session(model, wp)
+    {
+        return Ok(Found::from_session(model, s));
+    }
+    Err(no_window(wp))
+}
+
+/// `cmd_find_get_window_with_session` with `CMD_FIND_WINDOW_INDEX`
+/// (cmd-find.c:389-461): offsets are plain arithmetic on the current index
+/// and a free index is accepted; otherwise the usual window lookup.
+fn find_index_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
+    let text = part.text.as_str();
+    let int_max = i64::from(i32::MAX);
+    let at_current = |idx: i64| {
+        Some(Found {
+            new_index: Some(u32::try_from(idx).ok()?),
+            ..Found::from_session(model, s)
+        })
+    };
+    let current = i64::from(model.sessions.get(&s)?.current);
+    if !part.exact && (text.starts_with('+') || text.starts_with('-')) {
+        let n = if text.len() > 1 {
+            strtonum(&text[1..], 1, int_max).ok()?
+        } else {
+            1
+        };
+        return if text.starts_with('+') {
+            (int_max - current >= n).then(|| at_current(current + n))?
+        } else {
+            (n <= current).then(|| at_current(current - n))?
+        };
+    }
+    if !text.starts_with('+')
+        && !text.starts_with('-')
+        && let Ok(idx) = strtonum(text, 0, int_max)
+        && !model
+            .sessions
+            .get(&s)?
+            .windows
+            .contains_key(&u32::try_from(idx).ok()?)
+    {
+        return at_current(idx);
+    }
+    find_window_in(model, s, part).map(|f| Found {
+        new_index: f.index,
+        ..f
+    })
 }
 
 fn find_parts(model: &Model, current: Found, parts: &TargetParts) -> Result<Found, EdgeError> {

@@ -49,6 +49,14 @@ pub fn clean_name(name: &str) -> String {
     vis(name)
 }
 
+/// `clean_name(name, 1)` (tmux.c:303-317) for a name from a program
+/// (automatic rename): `#(` loses its `#` so the name cannot run a
+/// command when a format shows it, then [`vis`].
+#[must_use]
+pub fn clean_untrusted(name: &str) -> String {
+    vis(&name.replace("#(", "_("))
+}
+
 /// `parse_window_name` (names.c:140-176): the first word of a command,
 /// without quotes, `exec `, leading spaces or dashes, trailing junk, and
 /// with a path reduced to its basename.

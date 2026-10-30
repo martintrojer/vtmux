@@ -107,26 +107,37 @@ impl<'a> Ctx<'a> {
 
     fn window_value(&self, name: &str) -> Option<String> {
         let w = self.window()?;
-        let current = self
-            .session()
-            .is_some_and(|s| Some(s.current) == self.target.index);
+        // The winlink callbacks (format.c format_cb_window_active and
+        // friends) need a session and index; without one they are empty.
+        let wl = self.session().zip(self.target.index);
         let flag = |b: bool| u8::from(b).to_string();
         Some(match name {
             "window_id" => w.id.to_string(),
-            "window_index" => self.target.index?.to_string(),
+            "window_index" => wl?.1.to_string(),
             "window_name" => w.name.clone(),
             // window_count_panes(w, 1).
             "window_panes" => w.panes.panes.len().to_string(),
             "window_width" => w.sx().to_string(),
             "window_height" => w.sy().to_string(),
-            "window_active" => flag(current),
             "window_zoomed_flag" => flag(w.zoomed()),
+            "window_active" => flag(wl.is_some_and(|(s, i)| s.current == i)),
+            "window_last_flag" => flag(wl.is_some_and(|(s, i)| s.last.first() == Some(&i))),
+            "window_start_flag" => {
+                flag(wl.is_some_and(|(s, i)| s.windows.keys().next() == Some(&i)))
+            }
+            "window_end_flag" => {
+                flag(wl.is_some_and(|(s, i)| s.windows.keys().next_back() == Some(&i)))
+            }
             // window_printable_flags (window.c:1359-1386) for the flags
-            // vtmux has: current and zoomed.
+            // vtmux has: current, last and zoomed (no alerts or marks yet).
             "window_flags" | "window_raw_flags" => {
+                let (s, i) = wl?;
                 let mut f = String::new();
-                if current {
+                if s.current == i {
                     f.push('*');
+                }
+                if s.last.first() == Some(&i) {
+                    f.push('-');
                 }
                 if w.zoomed() {
                     f.push('Z');

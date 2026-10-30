@@ -64,7 +64,7 @@ pub fn exec(
                 session: Some(s),
                 index: Some(index),
                 window: Some(w),
-                pane: None,
+                ..Found::default()
             });
         }
     };

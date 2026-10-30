@@ -225,6 +225,16 @@ impl OptionsStore {
         }
     }
 
+    /// The server setting a table option itself (`options_set_number(w->options,
+    /// "automatic-rename", 0)` in spawn.c:223, `options_set_string(oo,
+    /// "default-size", ...)` in cmd-new-session.c:279). Unknown names are
+    /// ignored.
+    pub fn set_table_value(&mut self, tree: TreeId, name: &str, value: Value) {
+        if let Some(def) = super::table::find(name) {
+            self.set_single(tree, def, value);
+        }
+    }
+
     /// `options_set_number` / `options_set_command`: replace the value
     /// here, creating the entry if needed.
     fn set_single(&mut self, tree: TreeId, def: &'static OptionDef, value: Value) {
