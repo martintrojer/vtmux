@@ -140,6 +140,9 @@ pub struct PaneSpawn<'a> {
     pub cwd: PathBuf,
     /// The pane's rectangle; its size is the PTY's.
     pub rect: Geometry,
+    /// respawn-pane keeps the pane's shell (spawn.c:422-428); otherwise
+    /// it comes from `default-shell`.
+    pub shell: Option<PathBuf>,
 }
 
 /// The client's `PATH`, if it sent one.
@@ -1118,6 +1121,7 @@ impl Server {
             argv: spec.argv,
             cwd: spec.cwd.clone(),
             rect: Geometry::new(cols, rows, 0, 0),
+            shell: None,
         })?;
         self.insert_window(window_id, pane, spec.window_name, cols, rows);
         // spawn_window with idx -1: the first free index from base-index
@@ -1198,6 +1202,8 @@ impl Server {
                 layout: CoreLayout::new(cols, rows, pane_id),
                 panes: WindowPanes::new(pane_id),
                 zoom: None,
+                last_layout: None,
+                old_layout: None,
             },
         );
         self.model.fix_panes(window_id);
@@ -1250,6 +1256,7 @@ impl Server {
                 argv: nw.argv.clone(),
                 cwd: nw.cwd.clone(),
                 rect: Geometry::new(cols, rows, 0, 0),
+                shell: None,
             })
             .map_err(|e| format!("fork failed: {e}"))?;
         self.insert_window(window_id, pane, nw.name.clone(), cols, rows);
@@ -1351,7 +1358,9 @@ impl Server {
                 || "/bin/sh".to_owned(),
                 |e| e.value.to_text(e.def, None, false),
             );
-        let shell = if check_shell(Path::new(&configured_shell)) {
+        let shell = if let Some(kept) = &ps.shell {
+            kept.clone()
+        } else if check_shell(Path::new(&configured_shell)) {
             PathBuf::from(configured_shell)
         } else {
             PathBuf::from("/bin/sh")
@@ -1419,6 +1428,35 @@ impl Server {
         for pane in panes {
             self.close_pane_io(pane);
         }
+    }
+
+    /// `respawn-pane` (spawn.c:312-345 with `SPAWN_RESPAWN|SPAWN_KILL`):
+    /// close the pane's PTY (its process gets SIGHUP), reset its screen
+    /// (`screen_reinit`: history and title stay) and start `ps` in it. The
+    /// pane keeps its ID, place and terminal; the old process's exit no
+    /// longer matches the pane, which now has the new pid.
+    pub fn respawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<()> {
+        let p = ps.pane;
+        self.hangup_pane(p);
+        let fresh = self.spawn_pane(ps)?;
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return Ok(());
+        };
+        // screen_reinit and a fresh input parser: alternate screen off,
+        // scroll region, cursor home, visible lines cleared, modes back to
+        // cursor+wrap, default attributes, default tabs.
+        pane.term.feed(
+            b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l",
+        );
+        let _ = pane.term.take_replies();
+        pane.io = fresh.io;
+        pane.pid = fresh.pid;
+        pane.argv = fresh.argv;
+        pane.shell = fresh.shell;
+        pane.cwd = fresh.cwd;
+        pane.exited = false;
+        pane.changed = true;
+        Ok(())
     }
 
     fn close_pane_io(&self, mut pane: Pane) {

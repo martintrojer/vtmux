@@ -121,7 +121,7 @@ const fn slot(flag: char, kind: TargetKind, flags: FindFlags) -> FindSpec {
 pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("attach-session", Some("attach"), "c:dEf:rt:x", 0, Some(0), "[-dErx] [-c working-directory] [-f flags] [-t target-session]", None, None, true, true),
     cmd("bind-key", Some("bind"), "nrN:T:", 1, None, "[-nr] [-T key-table] [-N note] key [command [argument ...]]", None, None, false, false),
-    cmd("break-pane", Some("breakp"), "abdPF:n:s:t:Wx:X:y:Y:", 0, Some(0), "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]", Some(slot('t', TargetKind::Window, FindFlags::WINDOW_INDEX)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, false),
+    cmd("break-pane", Some("breakp"), "abdPF:n:s:t:Wx:X:y:Y:", 0, Some(0), "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]", Some(slot('t', TargetKind::Window, FindFlags::WINDOW_INDEX)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, true),
     cmd("capture-pane", Some("capturep"), "ab:CeE:FHIJLMNpPqRS:Tt:", 0, Some(0), "[-aCeFHIJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("choose-buffer", None, "F:f:K:kNO:rt:yZ", 0, Some(1), "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("choose-client", None, "F:f:hiK:kNO:rt:yZ", 0, Some(1), "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
@@ -142,7 +142,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("find-window", Some("findw"), "CiNrt:TZ", 1, Some(1), "[-CiNrTZ] [-t target-pane] match-string", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("has-session", Some("has"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("if-shell", Some("if"), "bFt:", 2, Some(3), "[-bF] [-t target-pane] shell-command command [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
-    cmd("join-pane", Some("joinp"), "bdfhvp:l:s:t:", 0, Some(0), "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, false),
+    cmd("join-pane", Some("joinp"), "bdfhvp:l:s:t:", 0, Some(0), "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("kill-pane", Some("killp"), "af:t:", 0, Some(0), "[-a] [-f filter] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("kill-server", None, "", 0, Some(0), "", None, None, false, true),
     cmd("kill-session", None, "aCgf:t:", 0, Some(0), "[-aCg] [-f filter] [-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
@@ -161,28 +161,28 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("lock-client", Some("lockc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, false),
     cmd("lock-server", Some("lock"), "", 0, Some(0), "", None, None, false, false),
     cmd("lock-session", Some("locks"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, false),
-    cmd("move-pane", Some("movep"), "bdD::fhMvl:L::P:R::s:t:U::X:Y:z:", 0, Some(0), "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, false),
+    cmd("move-pane", Some("movep"), "bdD::fhMvl:L::P:R::s:t:U::X:Y:z:", 0, Some(0), "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("move-window", Some("movew"), "abdkrs:t:", 0, Some(0), "[-abdkr] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, false),
     cmd("new-pane", Some("newp"), "AbB:Cc:Dde:EfF:hIkl:KLMm:Op:PR:s:S:t:T:vWx:X:y:Y:Z", 0, None, "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("new-session", Some("new"), "Ac:dDe:EF:f:n:Ps:t:x:Xy:", 0, None, "[-AdDEPX] [-c start-directory] [-e environment] [-F format] [-f flags] [-n window-name] [-s session-name] [-t target-session] [-x width] [-y height] [shell-command [argument ...]]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, true, true),
     cmd("new-window", Some("neww"), "abc:de:EF:kn:PSt:", 0, None, "[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]", Some(slot('t', TargetKind::Window, FindFlags::WINDOW_INDEX)), None, false, true),
-    cmd("next-layout", Some("nextl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
+    cmd("next-layout", Some("nextl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("next-window", Some("next"), "at:", 0, Some(0), "[-a] [-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("paste-buffer", Some("pasteb"), "db:prSs:t:", 0, Some(0), "[-dprS] [-s separator] [-b buffer-name] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("pipe-pane", Some("pipep"), "IOot:", 0, Some(1), "[-IOo] [-t target-pane] [shell-command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
-    cmd("previous-layout", Some("prevl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
+    cmd("previous-layout", Some("prevl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("previous-window", Some("prev"), "at:", 0, Some(0), "[-a] [-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("refresh-client", Some("refresh"), "A:B:cC:Df:r:F:lLRSt:U", 0, Some(1), "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]", None, None, false, false),
     cmd("rename-session", Some("rename"), "t:", 1, Some(1), "[-t target-session] new-name", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, false),
     cmd("rename-window", Some("renamew"), "t:", 1, Some(1), "[-t target-window] new-name", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("resize-pane", Some("resizep"), "D::L::MR::Tt:U::x:y:Z", 0, Some(1), "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("resize-window", Some("resizew"), "aADLRt:Ux:y:", 0, Some(1), "[-aADLRU] [-x width] [-y height] [-t target-window] [adjustment]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
-    cmd("respawn-pane", Some("respawnp"), "c:e:Ekt:", 0, None, "[-Ek] [-c start-directory] [-e environment] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("respawn-pane", Some("respawnp"), "c:e:Ekt:", 0, None, "[-Ek] [-c start-directory] [-e environment] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("respawn-window", Some("respawnw"), "c:e:Ekt:", 0, None, "[-Ek] [-c start-directory] [-e environment] [-t target-window] [shell-command [argument ...]]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
     cmd("rotate-window", Some("rotatew"), "Dt:UZ", 0, Some(0), "[-DUZ] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
     cmd("run-shell", Some("run"), "bd:Ct:Es:c:", 0, None, "[-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
     cmd("save-buffer", Some("saveb"), "ab:", 1, Some(1), "[-a] [-b buffer-name] path", None, None, false, false),
-    cmd("select-layout", Some("selectl"), "Enopt:", 0, Some(1), "[-Enop] [-t target-pane] [layout-name]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("select-layout", Some("selectl"), "Enopt:", 0, Some(1), "[-Enop] [-t target-pane] [layout-name]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("select-pane", Some("selectp"), "DdegLlMmP:RT:t:UZ", 0, Some(0), "[-DdeLlMmRUZ] [-T title] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("select-window", Some("selectw"), "lnpTt:", 0, Some(0), "[-lnpT] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("send-keys", Some("send"), "c:FHKlMN:Rt:X", 0, None, "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
@@ -204,7 +204,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("split-window", Some("splitw"), "bB:c:de:EfF:hIkl:m:p:PR:s:S:t:T:vWZ", 0, None, "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("start-server", Some("start"), "", 0, Some(0), "", None, None, true, true),
     cmd("suspend-client", Some("suspendc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, false),
-    cmd("swap-pane", Some("swapp"), "dDs:t:UZ", 0, Some(0), "[-dDUZ] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, false),
+    cmd("swap-pane", Some("swapp"), "dDs:t:UZ", 0, Some(0), "[-dDUZ] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("swap-window", Some("swapw"), "ds:t:", 0, Some(0), "[-d] [-s src-window] [-t dst-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::DEFAULT_MARKED)), false, false),
     cmd("switch-client", Some("switchc"), "c:EFlnO:pt:rT:Z", 0, Some(0), "[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]", None, None, false, false),
     cmd("switch-mode", None, "F:kst:wZ", 0, Some(1), "[-kswZ] [-F format] [-t target-pane] [command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
@@ -328,6 +328,14 @@ mod tests {
             ("last-window", Some("last")),
             ("rename-window", Some("renamew")),
             ("list-windows", Some("lsw")),
+            ("select-layout", Some("selectl")),
+            ("next-layout", Some("nextl")),
+            ("previous-layout", Some("prevl")),
+            ("swap-pane", Some("swapp")),
+            ("break-pane", Some("breakp")),
+            ("join-pane", Some("joinp")),
+            ("move-pane", Some("movep")),
+            ("respawn-pane", Some("respawnp")),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);
@@ -338,7 +346,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 31);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 39);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

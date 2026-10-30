@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use vtmux_core::ids::{IdAllocator, PaneId, SessionId, WindowId};
-use vtmux_core::layout::{Geometry, Layout, PaneStatus, WindowPanes};
+use vtmux_core::layout::{Cell, Geometry, Layout, NamedLayout, PaneStatus, WindowPanes};
 use vtmux_core::options::{Defaults, OptionValue, OptionsStore, TreeId, Value};
 use vtmux_vt::PaneTerm;
 
@@ -63,6 +63,12 @@ pub struct Window {
     /// Pane order, active pane, last-used stack, z-order.
     pub panes: WindowPanes,
     pub zoom: Option<Zoom>,
+    /// `w->lastlayout`: the named layout last applied (select-layout with
+    /// no name and next-layout/previous-layout start from it).
+    pub last_layout: Option<NamedLayout>,
+    /// `w->old_layout`: the layout string before the last select-layout,
+    /// for `select-layout -o`.
+    pub old_layout: Option<String>,
 }
 
 impl Window {
@@ -266,6 +272,17 @@ impl Model {
             pane.changed = true;
         }
         true
+    }
+
+    /// Stamp `p` as just made active (`w->active->active_point =
+    /// next_active_point++`) when something other than [`Self::set_active`]
+    /// changed the active pane (a parsed layout's `"a"`).
+    pub fn stamp_active(&mut self, p: PaneId) {
+        self.active_points += 1;
+        if let Some(pane) = self.panes.get_mut(&p) {
+            pane.active_point = self.active_points;
+            pane.changed = true;
+        }
     }
 
     /// Set `PANE_CHANGED` on the active pane of `w` if its
@@ -562,6 +579,41 @@ impl Model {
         Some(idx)
     }
 
+    /// `session_attach` (session.c:323-337) of window `w` to session `s` at
+    /// `index`, or with `None` at the first free index from `base-index`
+    /// (`-1 - base-index`). Errors are tmux's causes: `same index: N` when
+    /// the window is already there (server-fn.c:307-309) and `index in use:
+    /// N`. The session's current window is not changed.
+    pub fn link_window(
+        &mut self,
+        s: SessionId,
+        w: WindowId,
+        index: Option<u32>,
+    ) -> Result<u32, String> {
+        let session = self
+            .sessions
+            .get(&s)
+            .ok_or_else(|| "no session".to_owned())?;
+        let index = if let Some(i) = index {
+            if let Some(x) = session.windows.get(&i) {
+                return Err(if *x == w {
+                    format!("same index: {i}")
+                } else {
+                    format!("index in use: {i}")
+                });
+            }
+            i
+        } else {
+            let base = self.number_option(TreeId::Session(s), "base-index");
+            let base = u32::try_from(base).unwrap_or(0);
+            self.next_free_index(s, base)
+                .ok_or_else(|| format!("index in use: {}", -1 - i64::from(base)))?
+        };
+        let session = self.sessions.get_mut(&s).expect("checked above");
+        session.windows.insert(index, w);
+        Ok(index)
+    }
+
     /// `winlink_next_index` (window.c:251-265): the first free index from
     /// `start`, wrapping from `INT_MAX` to 0.
     #[must_use]
@@ -842,6 +894,19 @@ impl Model {
             })
             .map(|p| p.id)
     }
+}
+
+/// Give the cell holding `from` to `to` (`lc->wp = ...`); false when
+/// `from` has no cell.
+pub fn relabel_cell(layout: &mut Layout, from: PaneId, to: PaneId) -> bool {
+    let Some(path) = layout.root.find_pane(from) else {
+        return false;
+    };
+    match layout.root.get_mut(&path) {
+        Cell::Pane(leaf) | Cell::Floating(leaf) => leaf.pane = to,
+        Cell::Node(_) => return false,
+    }
+    true
 }
 
 fn to_i64(v: u32) -> i64 {
