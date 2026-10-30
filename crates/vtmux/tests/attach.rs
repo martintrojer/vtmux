@@ -1278,3 +1278,85 @@ fn colours_below_256_are_downgraded_like_tmux() {
         assert_ne!(screens[0][0].1, vtmux_vt::Color::Palette(200), "{term}");
     }
 }
+
+/// BELs in everything the client wrote to its terminal so far.
+fn bels(a: &Attached) -> usize {
+    a.bytes.lock().unwrap().iter().filter(|b| **b == 7).count()
+}
+
+/// The status line (last row) of the client's screen.
+fn status_row(a: &Attached) -> String {
+    let t = a.screen();
+    String::from_utf8(capture(&t, CaptureOpts::default()))
+        .unwrap()
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .trim_end()
+        .to_owned()
+}
+
+/// alerts.c `alerts_set_message`, `alerts_check_bell`: a BEL from a
+/// background pane reaches the attached client as a BEL unless
+/// `bell-action` is none (or `current`: it is not the current window) or
+/// `visual-bell` is on; the status line shows `!` and, for activity, `#`.
+#[test]
+fn alerts_bell_forwarding_and_status() {
+    // (set-option args, a BEL is expected)
+    let cases: &[(&[&str], bool)] = &[
+        (&[], true),
+        (&["bell-action", "none"], false),
+        (&["bell-action", "current"], false),
+        (&["bell-action", "other"], true),
+        (&["visual-bell", "on"], false),
+        (&["visual-bell", "both"], true),
+    ];
+    for bin in bins() {
+        for (opt, want) in cases {
+            let w = World::new(bin.clone());
+            let a = w.attach(&[
+                "new",
+                "-s",
+                "a",
+                "-n",
+                "w",
+                "sh",
+                "-c",
+                "printf '$ '; exec cat",
+            ]);
+            a.wait(|a| pane_text(a).contains('$'));
+            w.cli(&[
+                "neww",
+                "-d",
+                "-n",
+                "b",
+                "sh",
+                "-c",
+                r#"read x; printf '\007'; exec cat"#,
+            ]);
+            if !opt.is_empty() {
+                w.cli(&["set", "-g", opt[0], opt[1]]);
+            }
+            // The activity alert would ring too (visual-activity is off).
+            w.cli(&["set", "-g", "activity-action", "none"]);
+            w.cli(&["set", "-g", "monitor-activity", "on"]);
+            a.wait(|a| status_row(a).contains("1:b"));
+            let before = bels(&a);
+            w.cli(&["send-keys", "-t", "a:1", "Enter"]);
+            a.wait(|a| status_row(a).contains("1:b#"));
+            thread::sleep(Duration::from_millis(300));
+            let seen = bels(&a) > before;
+            assert_eq!(seen, *want, "{} {opt:?}: bell forwarded", bin.display());
+            let row = status_row(&a);
+            // The bell flag follows the winlink, whatever the action.
+            assert!(
+                row.contains("1:b#!") || row.contains("1:b!#"),
+                "{} {opt:?}: {row:?}",
+                bin.display()
+            );
+            // Selecting the window clears both flags.
+            w.cli(&["select-window", "-t", "a:1"]);
+            a.wait(|a| status_row(a).contains("1:b*"));
+        }
+    }
+}

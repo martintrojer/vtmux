@@ -43,6 +43,9 @@ pub struct Session {
     pub last: Vec<u32>,
     /// The session's own environment (update-environment, `-e`).
     pub env: crate::environ::Environ,
+    /// Alert flags of the winlinks (`wl->flags & WINLINK_ALERTFLAGS`),
+    /// by window index: [`crate::alerts::BELL`] and friends. Absent is 0.
+    pub link_alerts: BTreeMap<u32, u8>,
 }
 
 /// A zoomed window: the full layout is kept aside while the zoomed pane
@@ -74,6 +77,9 @@ pub struct Window {
     /// `WINDOW_RESIZE` with `new_sx`/`new_sy`: the size `recalculate_sizes`
     /// chose, applied once the window is current in an attached session.
     pub pending_size: Option<(u32, u32)>,
+    /// The window's alert state (`w->flags`, `alerts_queued`,
+    /// `alerts_timer`).
+    pub alerts: crate::alerts::WindowAlerts,
 }
 
 impl Window {
@@ -168,6 +174,8 @@ pub struct Model {
     activity: u64,
     /// `next_active_point` (window.c:63).
     active_points: u64,
+    /// Windows queued for the next alert check (`alerts_list`).
+    pub(crate) alerts_list: Vec<WindowId>,
 }
 
 impl Default for Model {
@@ -183,6 +191,7 @@ impl Default for Model {
             pane_ids: IdAllocator::new(),
             activity: 0,
             active_points: 0,
+            alerts_list: Vec::new(),
         }
     }
 }
@@ -457,6 +466,7 @@ impl Model {
             return Vec::new();
         };
         session.last.retain(|i| *i != index);
+        session.link_alerts.remove(&index);
         let Some(w) = session.windows.remove(&index) else {
             return Vec::new();
         };
@@ -486,6 +496,7 @@ impl Model {
         }
         if let Some(session) = self.sessions.get_mut(&s) {
             session.last.retain(|i| *i != index);
+            session.link_alerts.remove(&index);
             session.windows.remove(&index);
         }
         false
@@ -513,6 +524,10 @@ impl Model {
         if let Some(window) = self.windows.get_mut(&w) {
             window.activity = stamp;
         }
+        // session_set_current: winlink_clear_flags, then
+        // window_update_activity.
+        self.alerts_clear_window(w);
+        self.alerts_queue(w, crate::alerts::ACTIVITY);
         Some(true)
     }
 
@@ -528,35 +543,33 @@ impl Model {
     }
 
     /// `session_next` (session.c:424-440), wrapping to the first window.
-    /// With `alert` only windows with an alert count; vtmux has no alerts
-    /// yet, so that always fails.
+    /// With `alert` only windows with an alert flag count.
     pub fn next_window(&mut self, s: SessionId, alert: bool) -> Option<bool> {
         let session = self.sessions.get(&s)?;
-        if alert {
-            return None;
-        }
+        let counts = |i: &&u32| !alert || session.link_alerts.get(i).is_some_and(|f| *f != 0);
         let next = session
             .windows
             .range(session.current.saturating_add(1)..)
-            .next()
+            .map(|(i, _)| i)
+            .find(counts)
             .filter(|_| session.current != u32::MAX)
-            .or_else(|| session.windows.iter().next())
-            .map(|(i, _)| *i)?;
+            .or_else(|| session.windows.keys().find(counts))
+            .copied()?;
         self.set_current(s, next)
     }
 
     /// `session_previous` (session.c:454-470), wrapping to the last window.
     pub fn previous_window(&mut self, s: SessionId, alert: bool) -> Option<bool> {
         let session = self.sessions.get(&s)?;
-        if alert {
-            return None;
-        }
+        let counts = |i: &&u32| !alert || session.link_alerts.get(i).is_some_and(|f| *f != 0);
         let prev = session
             .windows
             .range(..session.current)
-            .next_back()
-            .or_else(|| session.windows.iter().next_back())
-            .map(|(i, _)| *i)?;
+            .map(|(i, _)| i)
+            .rev()
+            .find(counts)
+            .or_else(|| session.windows.keys().rev().find(counts))
+            .copied()?;
         self.set_current(s, prev)
     }
 
@@ -598,6 +611,10 @@ impl Model {
                 *i = *new;
             }
         }
+        session.link_alerts = std::mem::take(&mut session.link_alerts)
+            .into_iter()
+            .filter_map(|(old, f)| moved.get(&old).map(|new| (*new, f)))
+            .collect();
     }
 
     /// `winlink_shuffle_up` (window.c:2481-2510): make room for a window
@@ -621,6 +638,10 @@ impl Model {
         for i in &mut session.last {
             *i = shift(*i);
         }
+        session.link_alerts = std::mem::take(&mut session.link_alerts)
+            .into_iter()
+            .map(|(i, f)| (shift(i), f))
+            .collect();
         Some(idx)
     }
 

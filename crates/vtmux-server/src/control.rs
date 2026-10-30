@@ -387,6 +387,7 @@ impl Server {
         }
         // server_client_set_session: session_update_activity (server-client.c:468).
         self.model.touch_session(s);
+        self.session_attached_alerts(s);
         self.control_flush(id);
     }
 

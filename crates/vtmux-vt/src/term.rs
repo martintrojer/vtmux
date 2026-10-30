@@ -38,6 +38,9 @@ const CELL_BYTES: usize = 8;
 pub struct PaneTerm {
     pub(crate) term: Terminal<'static, 'static>,
     replies: Rc<RefCell<Vec<u8>>>,
+    /// BELs seen since the last [`PaneTerm::take_bells`] (input.c
+    /// `input_c0_dispatch`, `case '\007'`).
+    bells: Rc<std::cell::Cell<u32>>,
     /// A title set by the server (`select-pane -T`); the next OSC 0/2 from
     /// the program replaces it, as both write the one `s->title`.
     title_override: Rc<RefCell<Option<String>>>,
@@ -76,6 +79,8 @@ impl PaneTerm {
 
         let replies = Rc::new(RefCell::new(Vec::new()));
         let sink = Rc::clone(&replies);
+        let bells = Rc::new(std::cell::Cell::new(0u32));
+        let belled = Rc::clone(&bells);
         let title_override = Rc::new(RefCell::new(None));
         let overridden = Rc::clone(&title_override);
         let registered = term
@@ -105,6 +110,7 @@ impl PaneTerm {
                     overridden.borrow_mut().take();
                 })
             })
+            .and_then(|t| t.on_bell(move |_| belled.set(belled.get().saturating_add(1))))
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
             .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")))
             // XTWINOPS 14/16/18 t (input.c:2160-2183) with tmux's default
@@ -130,6 +136,7 @@ impl PaneTerm {
         Self {
             term,
             replies,
+            bells,
             title_override,
             history_lines,
             hsize: 0,
@@ -382,6 +389,11 @@ impl PaneTerm {
         } else {
             self.hsize
         }
+    }
+
+    /// How many BELs the program wrote since the last call.
+    pub fn take_bells(&mut self) -> u32 {
+        self.bells.replace(0)
     }
 
     /// Take the bytes to write back to the pane program (tmux's replies).

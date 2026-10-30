@@ -8,6 +8,7 @@ use vtmux_core::ids::{SessionId, WindowId};
 use vtmux_core::layout::PaneStatus;
 use vtmux_core::options::{OptionValue, OptionsStore, Target, TreeId};
 
+use crate::alerts;
 use crate::environ::Environ;
 use crate::model::Model;
 use crate::names::parse_window_name;
@@ -228,6 +229,7 @@ impl<'a> Ctx<'a> {
 
     fn session_value(&self, name: &str) -> Option<String> {
         let s = self.session()?;
+        let flag = |b: bool| u8::from(b).to_string();
         Some(match name {
             "session_name" => s.name.clone(),
             "session_id" => s.id.to_string(),
@@ -245,6 +247,52 @@ impl<'a> Ctx<'a> {
                 .map(|c| c.name.as_str())
                 .collect::<Vec<_>>()
                 .join(","),
+            // format_cb_session_alert: each flag once, in the order the
+            // windows (by index) first show it.
+            "session_alert" => {
+                let mut seen = 0;
+                let mut f = String::new();
+                for flags in s.link_alerts.values() {
+                    for (bit, c) in [
+                        (alerts::ACTIVITY, '#'),
+                        (alerts::BELL, '!'),
+                        (alerts::SILENCE, '~'),
+                    ] {
+                        if !seen & flags & bit != 0 {
+                            f.push(c);
+                            seen |= bit;
+                        }
+                    }
+                }
+                f
+            }
+            // format_cb_session_alerts: `idx` plus its flags, per window.
+            "session_alerts" => s
+                .link_alerts
+                .iter()
+                .filter(|(_, f)| **f != 0)
+                .map(|(i, f)| {
+                    let mut t = i.to_string();
+                    for (bit, c) in [
+                        (alerts::ACTIVITY, '#'),
+                        (alerts::BELL, '!'),
+                        (alerts::SILENCE, '~'),
+                    ] {
+                        if f & bit != 0 {
+                            t.push(c);
+                        }
+                    }
+                    t
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+            "session_activity_flag" => {
+                flag(s.link_alerts.values().any(|f| f & alerts::ACTIVITY != 0))
+            }
+            "session_bell_flag" => flag(s.link_alerts.values().any(|f| f & alerts::BELL != 0)),
+            "session_silence_flag" => {
+                flag(s.link_alerts.values().any(|f| f & alerts::SILENCE != 0))
+            }
             "session_path" => s.cwd.to_string_lossy().into_owned(),
             _ => return None,
         })
@@ -274,10 +322,21 @@ impl<'a> Ctx<'a> {
                 flag(wl.is_some_and(|(s, i)| s.windows.keys().next_back() == Some(&i)))
             }
             // window_printable_flags (window.c:1359-1386) for the flags
-            // vtmux has: current, last and zoomed (no alerts or marks yet).
+            // vtmux has (no marked pane or modal windows); `window_flags`
+            // doubles the `#` of the activity flag.
             "window_flags" | "window_raw_flags" => {
                 let (s, i) = wl?;
+                let alerts = s.link_alerts.get(&i).copied().unwrap_or(0);
                 let mut f = String::new();
+                if alerts & alerts::ACTIVITY != 0 {
+                    f.push_str(if name == "window_flags" { "##" } else { "#" });
+                }
+                if alerts & alerts::BELL != 0 {
+                    f.push('!');
+                }
+                if alerts & alerts::SILENCE != 0 {
+                    f.push('~');
+                }
                 if s.current == i {
                     f.push('*');
                 }
@@ -289,6 +348,15 @@ impl<'a> Ctx<'a> {
                 }
                 f
             }
+            "window_activity_flag" => flag(wl.is_some_and(|(s, i)| {
+                s.link_alerts.get(&i).copied().unwrap_or(0) & alerts::ACTIVITY != 0
+            })),
+            "window_bell_flag" => flag(wl.is_some_and(|(s, i)| {
+                s.link_alerts.get(&i).copied().unwrap_or(0) & alerts::BELL != 0
+            })),
+            "window_silence_flag" => flag(wl.is_some_and(|(s, i)| {
+                s.link_alerts.get(&i).copied().unwrap_or(0) & alerts::SILENCE != 0
+            })),
             // format_cb_window_layout: the saved layout while zoomed.
             "window_layout" => w.full_layout().dump_v2(&self.layout_panes(w))?,
             "window_visible_layout" => w.layout.dump_v2(&self.layout_panes(w))?,

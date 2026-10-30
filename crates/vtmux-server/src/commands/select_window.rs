@@ -1,6 +1,6 @@
 //! `select-window`, `next-window`, `previous-window` and `last-window`
-//! (cmd-select-window.c:84-150). `-a` (windows with an alert) finds
-//! nothing: vtmux has no alerts yet.
+//! (cmd-select-window.c:84-150). `-a` only counts windows with an alert
+//! flag.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;

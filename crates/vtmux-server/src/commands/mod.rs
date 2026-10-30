@@ -270,6 +270,10 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
                     server.model.mark_for_rename(w);
                 }
             }
+            if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "monitor-silence") {
+                // options.c:1422: alerts_reset_all.
+                server.model.alerts_reset_all();
+            }
             if matches!(&result, Ok(SetOutcome::Changed(_))) {
                 server.push_option_changes();
             }

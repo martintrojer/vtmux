@@ -2323,3 +2323,142 @@ fn keys_owner_config_binds() {
         ]
     });
 }
+
+/// A pane that prints `text` (printf format) each time it reads a line.
+const ON_ENTER: &str = r#"while read x; do printf '%b' "$X"; done"#;
+
+fn alert_pane(text: &str) -> String {
+    format!("X='{text}'; {ON_ENTER}")
+}
+
+fn flags(w: &World) -> Run {
+    w.run(&[
+        "lsw",
+        "-F",
+        "#{window_index} [#{window_activity_flag}#{window_bell_flag}#{window_silence_flag}] #{window_flags} (#{session_alert}) (#{session_alerts}) #{session_activity_flag}#{session_bell_flag}#{session_silence_flag}",
+    ])
+}
+
+/// alerts.c: output in a background window sets `#`, a BEL sets `!`,
+/// `monitor-*` off sets nothing, selecting the window clears its flags,
+/// `kill-session -C` clears them all, `next-window -a` jumps to a flagged
+/// window (reviewer-28 two.py).
+#[test]
+fn alerts_activity_and_bell_flags() {
+    compare("alerts_activity_and_bell_flags", |w| {
+        let settle = || std::thread::sleep(Duration::from_millis(500));
+        let bell = alert_pane(r"\007");
+        let text = alert_pane("x");
+        let mut out = vec![
+            w.run(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+            ]),
+            w.run(&["neww", "-d", "-n", "x", "sh", "-c", &text]),
+            w.run(&["neww", "-d", "-n", "y", "sh", "-c", &bell]),
+        ];
+        settle();
+        out.push(flags(w));
+        // Nothing is monitored for activity yet (off by default); the BEL
+        // alerts because monitor-bell is on.
+        out.push(w.run(&["send-keys", "-t", "a:1", "Enter"]));
+        out.push(w.run(&["send-keys", "-t", "a:2", "Enter"]));
+        settle();
+        out.push(flags(w));
+        out.push(w.run(&["set", "-g", "monitor-activity", "on"]));
+        settle();
+        out.push(flags(w));
+        out.push(w.run(&["send-keys", "-t", "a:1", "Enter"]));
+        settle();
+        out.push(flags(w));
+        out.push(w.run(&[
+            "display",
+            "-p",
+            "-t",
+            "a:1",
+            "[#{window_activity_flag}][#{window_flags}]",
+        ]));
+        out.push(w.run(&["next-window", "-a"]));
+        out.push(w.run(&["display", "-p", "#{window_index}"]));
+        out.push(w.run(&["next-window", "-a"]));
+        out.push(w.run(&["display", "-p", "#{window_index}"]));
+        out.push(flags(w));
+        // The current window never gets its own flags.
+        out.push(w.run(&["send-keys", "-t", "a:2", "Enter"]));
+        settle();
+        out.push(flags(w));
+        out.push(w.run(&["select-window", "-t", "a:0"]));
+        out.push(flags(w));
+        out.push(w.run(&["send-keys", "-t", "a:1", "Enter"]));
+        settle();
+        out.push(flags(w));
+        out.push(w.run(&["kill-session", "-C"]));
+        out.push(flags(w));
+        out.push(w.run(&["previous-window", "-a"]));
+        // monitor-bell off: the BEL leaves no flag.
+        out.push(w.run(&["set", "-g", "monitor-bell", "off"]));
+        out.push(w.run(&["send-keys", "-t", "a:2", "Enter"]));
+        settle();
+        out.push(flags(w));
+        out
+    });
+}
+
+/// `bell-action`/`activity-action` decide which windows alert
+/// (alerts_action_applies); the flag is set either way for a background
+/// window, but only an applying action alerts.
+#[test]
+fn alerts_actions_apply_by_window() {
+    compare("alerts_actions_apply_by_window", |w| {
+        let settle = || std::thread::sleep(Duration::from_millis(500));
+        let bell = alert_pane(r"\007");
+        let mut out = vec![
+            w.run(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+            ]),
+            w.run(&["neww", "-d", "-n", "b", "sh", "-c", &bell]),
+            w.run(&["set", "-g", "bell-action", "none"]),
+            w.run(&["set", "-g", "monitor-activity", "on"]),
+            w.run(&["set", "-g", "activity-action", "current"]),
+        ];
+        out.push(w.run(&["send-keys", "-t", "a:1", "Enter"]));
+        settle();
+        out.push(flags(w));
+        out.push(w.run(&["select-window", "-t", "a:1"]));
+        out.push(w.run(&["send-keys", "-t", "a:1", "Enter"]));
+        settle();
+        out.push(flags(w));
+        out
+    });
+}
+
+/// `monitor-silence`: a window that was output-active and then falls
+/// quiet for that many seconds gets `~`; selecting it clears the flag, and
+/// the timer starts again with the next output.
+#[test]
+fn alerts_silence_flag() {
+    compare("alerts_silence_flag", |w| {
+        let text = alert_pane("x");
+        let mut out = vec![
+            w.run(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+            ]),
+            w.run(&["neww", "-d", "-n", "q", "sh", "-c", &text]),
+            w.run(&["set", "-g", "monitor-bell", "off"]),
+            w.run(&["setw", "-g", "monitor-silence", "1"]),
+        ];
+        out.push(flags(w));
+        std::thread::sleep(Duration::from_millis(1700));
+        out.push(flags(w));
+        out.push(w.run(&["select-window", "-t", "a:1"]));
+        out.push(flags(w));
+        out.push(w.run(&["select-window", "-t", "a:0"]));
+        std::thread::sleep(Duration::from_millis(1700));
+        out.push(flags(w));
+        out.push(w.run(&["setw", "-g", "monitor-silence", "0"]));
+        out.push(w.run(&["select-window", "-t", "a:1"]));
+        out.push(w.run(&["select-window", "-t", "a:0"]));
+        std::thread::sleep(Duration::from_millis(1700));
+        out.push(flags(w));
+        out
+    });
+}
