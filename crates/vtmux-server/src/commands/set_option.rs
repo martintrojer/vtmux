@@ -5,7 +5,7 @@ use std::path::Path;
 
 use vtmux_core::cmd::{CommandCall, ConfigEnv};
 use vtmux_core::format::{self, FormatContext, Tm};
-use vtmux_core::options::{OptionError, OptionHost, OptionsStore, Target, apply_set};
+use vtmux_core::options::{OptionError, OptionHost, OptionsStore, SetOutcome, Target, apply_set};
 
 use super::Item;
 use crate::format_ctx::{Ctx, ServerInfo};
@@ -80,7 +80,7 @@ pub fn exec(
     _item: &mut Item,
     call: &CommandCall,
     found: Found,
-) -> Result<(), OptionError> {
+) -> Result<SetOutcome, OptionError> {
     // Split ownership temporarily rather than cloning the full store for
     // every set. Always restore it, including on validation errors.
     let mut options = std::mem::replace(
@@ -99,5 +99,5 @@ pub fn exec(
         },
     );
     server.model.options = options;
-    result.map(|_| ())
+    result
 }
