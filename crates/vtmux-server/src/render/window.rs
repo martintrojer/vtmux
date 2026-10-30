@@ -179,6 +179,7 @@ impl Source<'_> {
             lines: Lines::from_choice(self.model.number_option(wtree, "pane-border-lines")),
             outside: self.fill(w, false, caps),
             inside: self.fill(w, true, caps),
+            bce: caps.bce,
         };
         Some((scene, draw))
     }

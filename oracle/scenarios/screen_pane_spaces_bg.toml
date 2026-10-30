@@ -1,0 +1,8 @@
+name = "screen_pane_spaces_bg"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh -c 'printf \"\\033[31ma   b\\n\\033[44mx           y\\033[0m\\n\"; exec cat'"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+]
