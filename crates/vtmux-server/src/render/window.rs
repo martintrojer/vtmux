@@ -30,8 +30,7 @@ pub struct Source<'a> {
 impl Source<'_> {
     fn ctx(&self, found: Found, caps: Caps) -> Ctx<'_> {
         let mut ctx = Ctx::new(self.model, self.info, self.env, found);
-        ctx.extra
-            .push(("client_colours", client_colours(caps).into()));
+        ctx.extra.push(("client_colours", caps.colours.to_string()));
         ctx
     }
 
@@ -244,17 +243,6 @@ impl Source<'_> {
                 ..CellStyle::default()
             },
         }
-    }
-}
-
-/// `format_cb_client_colours`.
-fn client_colours(caps: Caps) -> &'static str {
-    if caps.rgb {
-        "16777216"
-    } else if caps.theme_palette {
-        "256"
-    } else {
-        "16"
     }
 }
 
