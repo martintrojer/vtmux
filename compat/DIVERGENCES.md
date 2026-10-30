@@ -60,3 +60,11 @@ product reasons" category.
 - vtmux behaviour: (1) C locale always (`Fri Oct 30 14:32:28 2026`, `Thu Oct`); `#{t:}` (ctime) is C in both. (2) years past 9999 give empty output. (3) output over 511 bytes is empty. (4) `%Z` is `UTC` (jiff falls back to UTC); offset and wall time match.
 - Evidence: reviewer-14's probes on b6b2721 against reference tmux 3.8 (notes on `medium_fmt_time_cites_d_004_but_compat` and `low_unknown_tz_name_renders_z_as_utc_ref`).
 - Category: Deferred
+
+### D-005: a loop nested in a loop of the same kind does not disturb the outer order
+
+- Test / assertion: `crates/vtmux-core/tests/loop_cases.sh`, the row citing D-005 (`#{S:#{S/n:#{session_name}}-#{session_name} }`).
+- tmux behaviour: `sort_get_sessions`, `sort_get_winlinks_session`, `sort_get_panes_window` and `sort_get_clients` (sort.c:461-600) return one static array per kind, which every call refills and sorts in place. A nested loop of the same kind therefore re-sorts the array the outer loop is walking, and the outer loop reads the inner order from then on. With sessions zeta, alpha, mike (IDs 0, 1, 2) the outer loop visits zeta, then reads index 1 and 2 of the name-sorted array: `alphamikezeta-zeta alphamikezeta-mike alphamikezeta-zeta`, so mike is visited once, zeta twice and alpha never.
+- vtmux behaviour: each loop sorts its own list; the outer loop visits each session once in its own order: `alphamikezeta-zeta alphamikezeta-alpha alphamikezeta-mike`.
+- Evidence: reference tmux 3.8, the `loop_cases.sh` topology (reference value kept in the row's comment).
+- Category: Do not copy tmux bug (the outer loop skips and repeats items; copying it means sharing a mutable list across nested expansions).

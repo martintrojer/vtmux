@@ -1,10 +1,11 @@
 //! The evaluator: `format_expand1` (format.c:6708) and `format_replace` (6019) over the
 //! typed AST.
 
+use super::loops::Overlay;
 use super::text;
 use super::{
-    CmpOp, EnvScope, Eval, Format, FormatContext, LOOP_LIMIT, Node, Post, Reexpand, SearchFlags,
-    Value, VarMods, colour, is_true, num, parse,
+    CmpOp, EnvScope, Eval, Format, LOOP_LIMIT, Node, Post, Reexpand, SearchFlags, Value, VarMods,
+    colour, is_true, num, parse,
 };
 use std::fmt::Write as _;
 
@@ -12,50 +13,6 @@ use std::fmt::Write as _;
 const MAX_WIDTH: i64 = 10_000;
 const MAX_REPEAT: i64 = 10_000;
 const MAX_REPEAT_SIZE: usize = 65_536;
-
-/// The context of one loop iteration: extra variables over the parent context.
-struct Overlay<'a> {
-    parent: &'a dyn FormatContext,
-    vars: Vec<(&'static str, String)>,
-}
-
-impl FormatContext for Overlay<'_> {
-    fn get(&self, name: &str) -> Option<String> {
-        self.vars
-            .iter()
-            .find(|(k, _)| *k == name)
-            .map(|(_, v)| v.clone())
-            .or_else(|| self.parent.get(name))
-    }
-
-    fn get_without_environ(&self, name: &str) -> Option<String> {
-        self.vars
-            .iter()
-            .find(|(k, _)| *k == name)
-            .map(|(_, v)| v.clone())
-            .or_else(|| self.parent.get_without_environ(name))
-    }
-
-    fn time(&self, name: &str) -> Option<i64> {
-        self.parent.time(name)
-    }
-
-    fn environ(&self, scope: EnvScope) -> Option<Vec<super::EnvVar>> {
-        self.parent.environ(scope)
-    }
-
-    fn window_name_exists(&self, name: &str) -> Option<bool> {
-        self.parent.window_name_exists(name)
-    }
-
-    fn session_name_exists(&self, name: &str) -> bool {
-        self.parent.session_name_exists(name)
-    }
-
-    fn search_pane(&self, pattern: &str, flags: SearchFlags) -> Option<u32> {
-        self.parent.search_pane(pattern, flags)
-    }
-}
 
 fn flag01(b: bool) -> String {
     String::from(if b { "1" } else { "0" })
@@ -243,6 +200,13 @@ impl Eval<'_> {
                         .unwrap_or_default()
                 }
             }
+            Value::Loop {
+                kind,
+                sort,
+                all,
+                active,
+            } => self.run_loop(*kind, sort, all, active.as_ref(), inner)?,
+            Value::Options { flags, body } => self.options_loop(flags.as_ref(), body, inner),
             Value::Environ { flags, body } => {
                 let flags = flags.as_ref().map(|f| self.expand(f, inner));
                 let scope = match flags.as_deref() {
@@ -259,24 +223,19 @@ impl Eval<'_> {
                 for (i, var) in vars.iter().enumerate() {
                     let overlay = Overlay {
                         parent: self.ctx,
-                        vars: vec![
+                        vars: [
                             ("environ_name", var.name.clone()),
                             ("environ_value", var.value.clone().unwrap_or_default()),
                             ("environ_hidden", flag01(var.hidden)),
                             ("environ_removed", flag01(var.value.is_none())),
                             ("loop_last_flag", flag01(i == last)),
                             ("loop_index", i.to_string()),
-                        ],
+                        ]
+                        .into_iter()
+                        .map(|(k, v)| (k.to_owned(), v))
+                        .collect(),
                     };
-                    let mut sub = Eval {
-                        ctx: &overlay,
-                        clock: self.clock,
-                        start: self.start,
-                        wall: self.wall,
-                        now: self.now,
-                        time_mode: self.time_mode,
-                    };
-                    out.push_str(&sub.expand(body, inner));
+                    out.push_str(&self.expand_in(&overlay, body, inner));
                 }
                 out
             }

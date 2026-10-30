@@ -11,7 +11,8 @@
 //! arithmetic (`e`), glob/ERE/fuzzy matching (`m`), ERE substitution (`s`),
 //! literals/characters (`l`, `a`), paths (`b`, `d`), length/width (`n`, `w`),
 //! trimming/padding (`=`, `p`), colours/quoting (`c`, `q`), repeats (`R`),
-//! environment loops (`V`), name tests (`N`) and pane-search hooks (`C`).
+//! environment loops (`V`), session/window/pane/client/option loops (`S`, `W`, `P`,
+//! `L`, `O`, see [`loops`]), name tests (`N`) and pane-search hooks (`C`).
 //! `E` re-expands; `T` is currently like `E` (its strftime pass is deferred).
 //! Bare `t` formats a time variable as `ctime` text. [`expand_time`] runs
 //! strftime over the template first. Escapes and `#[style]` pass through.
@@ -24,6 +25,7 @@ mod colour;
 mod colour_names;
 mod eval;
 mod fuzzy;
+mod loops;
 mod matching;
 mod mods;
 mod num;
@@ -43,6 +45,8 @@ pub use crate::time::{FixedWallClock, SystemWallClock, Tm, WallClock};
 
 #[cfg(test)]
 mod golden;
+#[cfg(test)]
+mod loop_golden;
 
 /// `FORMAT_LOOP_LIMIT` (format.c:137): the deepest allowed nesting of expansions.
 pub(crate) const LOOP_LIMIT: usize = 100;
@@ -129,6 +133,77 @@ pub trait FormatContext {
     /// (`window_pane_search`, window.c:2123).
     fn search_pane(&self, _pattern: &str, _flags: SearchFlags) -> Option<u32> {
         None
+    }
+
+    /// `#{S:...}`: every session in the server's own order (by name), each as the
+    /// context `format_defaults(c, s, NULL, NULL)` builds (format.c:5258).
+    fn sessions(&self) -> Vec<LoopItem<'_>> {
+        Vec::new()
+    }
+
+    /// `#{W:...}`: the target session's windows in index order; `None` when there is no
+    /// session, which ends the whole expansion (format.c:5366).
+    fn windows(&self) -> Option<Vec<LoopItem<'_>>> {
+        None
+    }
+
+    /// `#{P:...}`: the target window's panes in window order; `None` when there is no
+    /// window, which ends the whole expansion (format.c:5448).
+    fn panes(&self) -> Option<Vec<LoopItem<'_>>> {
+        None
+    }
+
+    /// `#{L:...}`: the attached clients in the order they connected (format.c:5779).
+    fn clients(&self) -> Vec<LoopItem<'_>> {
+        Vec::new()
+    }
+
+    /// `#{O:...}`: the entries of one options tree in name order, or `None` when there
+    /// is no such tree (no session, window or pane for the scope).
+    fn options(&self, _scope: OptionScope) -> Option<OptionsLoop<'_>> {
+        None
+    }
+}
+
+pub use loops::{LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop};
+
+/// A borrowed context is a context, so a loop child can be `Box::new(&ctx)`.
+impl<T: FormatContext + ?Sized> FormatContext for &T {
+    fn get(&self, name: &str) -> Option<String> {
+        (**self).get(name)
+    }
+    fn time(&self, name: &str) -> Option<i64> {
+        (**self).time(name)
+    }
+    fn get_without_environ(&self, name: &str) -> Option<String> {
+        (**self).get_without_environ(name)
+    }
+    fn environ(&self, scope: EnvScope) -> Option<Vec<EnvVar>> {
+        (**self).environ(scope)
+    }
+    fn window_name_exists(&self, name: &str) -> Option<bool> {
+        (**self).window_name_exists(name)
+    }
+    fn session_name_exists(&self, name: &str) -> bool {
+        (**self).session_name_exists(name)
+    }
+    fn search_pane(&self, pattern: &str, flags: SearchFlags) -> Option<u32> {
+        (**self).search_pane(pattern, flags)
+    }
+    fn sessions(&self) -> Vec<LoopItem<'_>> {
+        (**self).sessions()
+    }
+    fn windows(&self) -> Option<Vec<LoopItem<'_>>> {
+        (**self).windows()
+    }
+    fn panes(&self) -> Option<Vec<LoopItem<'_>>> {
+        (**self).panes()
+    }
+    fn clients(&self) -> Vec<LoopItem<'_>> {
+        (**self).clients()
+    }
+    fn options(&self, scope: OptionScope) -> Option<OptionsLoop<'_>> {
+        (**self).options(scope)
     }
 }
 
@@ -262,6 +337,19 @@ enum Value {
     /// `c`: a colour as hex or, with `f`/`b` flags, as an SGR sequence.
     Colour {
         flags: Vec<Format>,
+        body: Format,
+    },
+    /// `S`, `W`, `P`, `L`: the body once per session, window, pane or client;
+    /// `active` (the second of `all,active`) for the current one.
+    Loop {
+        kind: loops::LoopKind,
+        sort: loops::SortMod,
+        all: Format,
+        active: Option<Format>,
+    },
+    /// `O`: the body once per option (or array item) of one tree.
+    Options {
+        flags: Option<Format>,
         body: Format,
     },
     /// `V`: the body once per environment entry.
