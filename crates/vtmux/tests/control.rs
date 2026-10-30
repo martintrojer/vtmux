@@ -265,6 +265,22 @@ fn attached_display_in_guard() {
     });
 }
 
+/// `display` without -p on a control client prints `%message <msg>`
+/// inside the guard (cmd-display-message.c:163-169).
+#[test]
+fn display_message_without_p_is_percent_message() {
+    compare("display_message_without_p_is_percent_message", |w| {
+        let mut c = w.control(&["new", "-s", "c", "-n", "w", "cat"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        c.send("display hello");
+        c.wait("%end", |t| {
+            t.lines().filter(|l| l.starts_with("%end")).count() == 2
+        });
+        let (out, err, code) = c.close();
+        (normalise_guards(&out), err, code)
+    });
+}
+
 /// (3) An unknown command on stdin is a guarded `parse error: ` block
 /// (control.c:672-680) and does not change the exit status.
 #[test]

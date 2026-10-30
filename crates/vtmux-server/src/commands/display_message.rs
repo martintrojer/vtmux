@@ -58,8 +58,13 @@ pub fn exec(
     }
     if args.flag('p') {
         item.print(&msg);
+    } else if item.client.is_some_and(|c| server.is_control(c)) && args.value('c').is_none() {
+        // cmd-display-message.c:163-169: a control target client gets
+        // `%message <msg>` through server_client_print, so it lands inside
+        // the command's %begin/%end guard.
+        item.print(&format!("%message {msg}"));
     }
-    // Without -p the message goes to the target client's status line; an
+    // Otherwise the message goes to the target client's status line; an
     // unattached command client has none, so nothing is shown.
     Ok(())
 }
