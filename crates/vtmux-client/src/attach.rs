@@ -140,13 +140,15 @@ impl Output {
         self.stdout.len() >= self.high_water
     }
 
-    /// Tell the server about frames written since the last ack.
-    fn ack(&mut self, stream: &mut UnixStream) -> io::Result<()> {
+    /// Tell the server about frames written since the last ack. Advisory:
+    /// once the server has sent Exit and closed, the write fails (EPIPE or
+    /// ECONNRESET, seen on macOS) while Exit is still unread, so a failure
+    /// is not an error; the next read reports what the server said.
+    fn ack(&mut self, stream: &mut UnixStream) {
         if self.done > self.acked {
-            send(stream, &ClientMsg::FrameAck { seq: self.done })?;
+            let _ = send(stream, &ClientMsg::FrameAck { seq: self.done });
             self.acked = self.done;
         }
-        Ok(())
     }
 }
 
@@ -256,7 +258,7 @@ fn relay(
         {
             return Ok(exit);
         }
-        out.ack(stream)?;
+        out.ack(stream);
     }
 }
 
@@ -315,7 +317,7 @@ impl Socket {
                     Err(e) => return Err(io::Error::other(e)),
                 }
             }
-            out.ack(stream)?;
+            out.ack(stream);
         }
         Ok(None)
     }

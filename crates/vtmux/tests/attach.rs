@@ -174,7 +174,16 @@ impl Attached {
         let end = Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(s) = self.child.try_wait().unwrap() {
-                assert_eq!(s.exit_code(), code);
+                let text = self.text();
+                let tail: String = text
+                    .chars()
+                    .rev()
+                    .take(400)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                assert_eq!(s.exit_code(), code, "client output tail: {tail:?}");
                 break;
             }
             assert!(Instant::now() < end);
