@@ -52,3 +52,11 @@ product reasons" category.
 - vtmux behaviour: (1) `(^a|b)+` on `abab` matches 0:2. (2) without backreferences, captures follow glibc's `set_regs` and `(a*){2}` gives `\1` = 2:2. Backreference patterns use a backtracker whose captures can differ: `(a*){2}\1` on `aa` matches 0:2, where glibc reports no match. Anchors inside repeated groups can also change captures. (3) `\a` with `REG_ICASE` matches `a`. (4) empty-match progression steps one character. (5) `[a-[:digit:]]` matches `5`.
 - Evidence: review_fmt_regex notes; probe scripts in that review (`/tmp/rv8probe`, out of tree).
 - Category: Deferred
+
+### D-004: time formatting: C locale, year range, long strftime output, unknown TZ names
+
+- Test / assertion: `crates/vtmux-core/tests/time_cases.sh` (rows citing D-004); hand probes from review_fmt_time (reviewer-14).
+- tmux behaviour: tmux calls `setlocale(LC_TIME, "")` and glibc `strftime`/`localtime_r` (format.c:4694-4700, 6728-6741). (1) A non-C `LANG` changes `%c %x %r %p %a %b`: `LANG=en_GB.UTF-8` gives `Fri 30 Oct 2026 14:32:28 GMT` for `%c`; `LANG=de_DE.UTF-8` gives `Do Okt` for `%a %b`. (2) Years past 9999 format normally (`@big=999999999999` gives `33658 Fri`). (3) `t/f` output longer than 511 bytes makes `strftime` fail and tmux prints its half-written stack buffer. (4) An unparseable `TZ` (`TZ=Invalid/Zone`) keeps the leading letters as the abbreviation: `%Z` is `Invalid`, with offset `+0000`.
+- vtmux behaviour: (1) C locale always (`Fri Oct 30 14:32:28 2026`, `Thu Oct`); `#{t:}` (ctime) is C in both. (2) years past 9999 give empty output. (3) output over 511 bytes is empty. (4) `%Z` is `UTC` (jiff falls back to UTC); offset and wall time match.
+- Evidence: reviewer-14's probes on b6b2721 against reference tmux 3.8 (notes on `medium_fmt_time_cites_d_004_but_compat` and `low_unknown_tz_name_renders_z_as_utc_ref`).
+- Category: Deferred
