@@ -151,7 +151,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("last-window", Some("last"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("link-window", Some("linkw"), "abdks:t:", 0, Some(0), "[-abdk] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, false),
     cmd("list-buffers", Some("lsb"), "F:f:O:r", 0, Some(0), "[-F format] [-f filter] [-O order]", None, None, false, false),
-    cmd("list-clients", Some("lsc"), "F:f:O:rt:", 0, Some(0), "[-F format] [-f filter] [-O order][-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, false),
+    cmd("list-clients", Some("lsc"), "F:f:O:rt:", 0, Some(0), "[-F format] [-f filter] [-O order][-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("list-commands", Some("lscm"), "F:", 0, Some(1), "[-F format] [command]", None, None, true, false),
     cmd("list-keys", Some("lsk"), "1aF:NO:P:rT:", 0, Some(1), "[-1aNr] [-F format] [-O order] [-P prefix-string][-T key-table] [key]", None, None, true, false),
     cmd("list-panes", Some("lsp"), "aF:f:O:rst:", 0, Some(0), "[-asr] [-F format] [-f filter] [-O order][-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
@@ -189,12 +189,12 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("send-prefix", None, "2t:", 0, Some(0), "[-2] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("server-access", None, "adglrw", 0, Some(1), "[-adglrw] [-t target-pane] [user|group]", None, None, false, false),
     cmd("set-buffer", Some("setb"), "ab:t:n:w", 0, Some(1), "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]", None, None, false, false),
-    cmd("set-environment", Some("setenv"), "Fhgrt:u", 1, Some(2), "[-Fhgru] [-t target-session] variable [value]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, false),
+    cmd("set-environment", Some("setenv"), "Fhgrt:u", 1, Some(2), "[-Fhgru] [-t target-session] variable [value]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, true),
     cmd("set-hook", None, "agpERTt:uB:w", 0, Some(2), "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
     cmd("set-option", Some("set"), "aFgopqst:uUw", 1, Some(2), "[-aFgopqsuUw] [-t target-pane] option [value]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("set-window-option", Some("setw"), "aFgoqt:u", 1, Some(2), "[-aFgoqu] [-t target-window] option [value]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, true),
     cmd("show-buffer", Some("showb"), "b:", 0, Some(0), "[-b buffer-name]", None, None, false, false),
-    cmd("show-environment", Some("showenv"), "hgst:", 0, Some(1), "[-hgs] [-t target-session] [variable]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, false),
+    cmd("show-environment", Some("showenv"), "hgst:", 0, Some(1), "[-hgs] [-t target-session] [variable]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, true),
     cmd("show-hooks", None, "BF:gpt:w", 0, Some(1), "[-Bgpw] [-F format] [-t target-pane] [hook]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
     cmd("show-messages", Some("showmsgs"), "JTt:", 0, Some(0), "[-JT] [-t target-client]", None, None, false, false),
     cmd("show-options", Some("show"), "AgF:Hpqst:vw", 0, Some(1), "[-AgHpqsvw] [-F format] [-t target-pane] [option]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
@@ -346,7 +346,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 39);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 42);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

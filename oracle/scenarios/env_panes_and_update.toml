@@ -1,0 +1,25 @@
+name = "env_panes_and_update"
+# A pane started after set-environment sees session beats global, a session
+# -r hides a global, hidden and -u variables are absent. New sessions carry
+# the update-environment variables of their client: with the option emptied
+# nothing but the -e ones.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "30", "-y", "3", "cat"] },
+  { run = ["setenv", "-g", "GV", "global"] },
+  { run = ["setenv", "-g", "BOTH", "global"] },
+  { run = ["setenv", "SV", "session"] },
+  { run = ["setenv", "BOTH", "session"] },
+  { run = ["setenv", "-r", "GV"] },
+  { run = ["setenv", "-h", "HV", "hidden"] },
+  { run = ["setenv", "RV", "removed"] },
+  { run = ["setenv", "-u", "RV"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "e", "sh", "-c", "printf '[%s|%s|%s|%s|%s]' \"$SV\" \"${GV-unset}\" \"$HV\" \"${RV-unset}\" \"$BOTH\"; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "a:e"] },
+  { run = ["set", "-g", "update-environment", ""] },
+  { run = ["new", "-d", "-s", "b", "-e", "X=1", "cat"] },
+  { run = ["showenv", "-t", "b"] },
+  { run = ["set", "-g", "update-environment", "FOO_* GONE"] },
+  { run = ["new", "-d", "-s", "c", "cat"] },
+  { run = ["showenv", "-t", "c"] },
+]

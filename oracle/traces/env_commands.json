@@ -1,0 +1,436 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "env_commands",
+  "inputs": {
+    "name": "env_commands",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "main",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "FOO",
+          "bar"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-g",
+          "GVAR",
+          "gval"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-g",
+          "GVAR"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-g",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "ESC",
+          "a$b`c\"d\\e"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-s",
+          "ESC"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-F",
+          "EXP",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "EXP"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-h",
+          "SECRET",
+          "s3cr"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "SECRET"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-h",
+          "SECRET"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-r",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-s",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-u",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "A=B",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-u",
+          "FOO",
+          "val"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-r",
+          "FOO",
+          "val"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "NOVAL"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "nosuch",
+          "FOO"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-t",
+          "nosuch",
+          "FOO",
+          "bar"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "main"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "FOO=bar\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "GVAR=gval\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown variable: FOO\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ESC=\"a\\$b\\`c\\\"d\\\\e\"; export ESC;\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "EXP=main\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "SECRET=s3cr\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "-FOO\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "unset FOO;\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown variable: FOO\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "empty variable name\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "variable name contains =\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't specify a value with -u\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't specify a value with -r\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no value specified\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no such session: nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no such session: nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "-DISPLAY\nESC=a$b`c\"d\\e\nEXP=main\n-KRB5CCNAME\n-MSYSTEM\n-SSH_AGENT_PID\n-SSH_ASKPASS\n-SSH_AUTH_SOCK\n-SSH_CONNECTION\n-WAYLAND_DISPLAY\n-WINDOWID\n-XAUTHORITY\n-XDG_CURRENT_DESKTOP\n-XDG_SESSION_DESKTOP\n-XDG_SESSION_TYPE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

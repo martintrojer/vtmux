@@ -59,6 +59,10 @@ impl World {
         self.attach_sized(args, 40, 10)
     }
     fn attach_sized(&self, args: &[&str], cols: u16, rows: u16) -> Attached {
+        self.attach_env(args, cols, rows, &[])
+    }
+    /// `attach_sized` with extra variables in the client's environment.
+    fn attach_env(&self, args: &[&str], cols: u16, rows: u16, extra: &[(&str, &str)]) -> Attached {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -72,6 +76,9 @@ impl World {
         cmd.args(args);
         cmd.env_clear();
         for (k, v) in self.env() {
+            cmd.env(k, v);
+        }
+        for (k, v) in extra {
             cmd.env(k, v);
         }
         let child = pair.slave.spawn_command(cmd).unwrap();
@@ -600,5 +607,63 @@ fn select_layout_string_is_fitted_to_the_client() {
                     .any(|l| l.trim() == want)
             });
         }
+    }
+}
+
+/// `update-environment` from the option, applied when a client attaches
+/// (cmd-attach-session.c:135,159): matches are copied (fnmatch), a name that
+/// matches nothing is marked removed, `-E` leaves the session alone, and
+/// list-clients sees the attached client.
+#[test]
+fn update_environment_on_attach() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let show = |args: &[&str]| {
+            let mut a = vec!["showenv", "-t", "main"];
+            a.extend_from_slice(args);
+            let o = w.cli(&a);
+            String::from_utf8_lossy(&[o.stdout, o.stderr].concat()).into_owned()
+        };
+        assert!(w.cli(&["new", "-d", "-s", "main", "cat"]).status.success());
+        assert!(
+            w.cli(&["set", "-g", "update-environment", "MYVAR ABSENTVAR TEST_*"])
+                .status
+                .success()
+        );
+        w.cli(&["setenv", "-t", "main", "MYVAR", "oldvalue"]);
+        w.cli(&["setenv", "-t", "main", "ABSENTVAR", "pre-existing"]);
+        let mut a = w.attach_env(
+            &["attach", "-t", "main"],
+            40,
+            10,
+            &[
+                ("MYVAR", "fromclient"),
+                ("TEST_GLOB", "globval"),
+                ("OTHER", "nope"),
+            ],
+        );
+        a.wait(|_| !w.cli(&["lsc", "-F", "x"]).stdout.is_empty());
+        assert_eq!(show(&["MYVAR"]), "MYVAR=fromclient\n");
+        assert_eq!(show(&["TEST_GLOB"]), "TEST_GLOB=globval\n");
+        assert_eq!(show(&["ABSENTVAR"]), "-ABSENTVAR\n");
+        assert_eq!(show(&["OTHER"]), "unknown variable: OTHER\n");
+        let lsc = w.cli(&["lsc", "-t", "main", "-F", "#{session_name}"]);
+        assert_eq!(String::from_utf8_lossy(&lsc.stdout), "main\n");
+        assert!(w.cli(&["detach-client", "-s", "main"]).status.success());
+        a.exited(0);
+
+        w.cli(&["setenv", "-t", "main", "MYVAR", "oldvalue2"]);
+        w.cli(&["setenv", "-t", "main", "ABSENTVAR", "pre2"]);
+        let mut b = w.attach_env(
+            &["attach", "-E", "-t", "main"],
+            40,
+            10,
+            &[("MYVAR", "fromclientE")],
+        );
+        b.wait(|_| !w.cli(&["lsc", "-F", "x"]).stdout.is_empty());
+        assert_eq!(show(&["MYVAR"]), "MYVAR=oldvalue2\n");
+        assert_eq!(show(&["ABSENTVAR"]), "ABSENTVAR=pre2\n");
+        assert!(w.cli(&["detach-client", "-s", "main"]).status.success());
+        b.exited(0);
     }
 }

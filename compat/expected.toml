@@ -100,8 +100,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."control-client-exit.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."control-client-new-layouts.sh"]
 status = "xfail"
@@ -203,12 +202,10 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."environ-update.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."environ.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."find-window.sh"]
 status = "xfail"

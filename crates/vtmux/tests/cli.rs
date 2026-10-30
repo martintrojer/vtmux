@@ -2023,3 +2023,214 @@ fn panes_respawn() {
         runs
     });
 }
+
+/// set-environment / show-environment (cmd-set-environment.c,
+/// cmd-show-environment.c): both scopes, `-h`, `-r`, `-u`, `-F`, `-s` and
+/// its escaping, listing, every argument and target error. `cat` keeps the
+/// session alive.
+#[test]
+fn environment_commands() {
+    compare("environment_commands", |w| {
+        steps(
+            w,
+            &[
+                &["new", "-d", "-s", "main", "cat"],
+                &["setenv", "FOO", "bar"],
+                &["showenv", "FOO"],
+                &["set-environment", "-g", "GVAR", "gval"],
+                &["show-environment", "-g", "GVAR"],
+                &["show-environment", "-g", "FOO"],
+                &["set-environment", "FOO", "baz"],
+                &["show-environment", "FOO"],
+                &["set-environment", "ESC", "a$b`c\"d\\e"],
+                &["show-environment", "-s", "ESC"],
+                &["show-environment", "ESC"],
+                &[
+                    "set-environment",
+                    "-t",
+                    "main",
+                    "-F",
+                    "EXP",
+                    "#{session_name}",
+                ],
+                &["show-environment", "EXP"],
+                &["set-environment", "-h", "SECRET", "s3cr"],
+                &["show-environment", "SECRET"],
+                &["show-environment", "-h", "SECRET"],
+                &["show-environment", "-h", "FOO"],
+                &["set-environment", "-r", "FOO"],
+                &["show-environment", "FOO"],
+                &["show-environment", "-s", "FOO"],
+                &["show-environment", "-hs", "SECRET"],
+                &["set-environment", "-u", "FOO"],
+                &["show-environment", "FOO"],
+                &["set-environment", "-u", "NEVERSET"],
+                &["set-environment", "-r", "ONLYCLEARED"],
+                &["show-environment", "ONLYCLEARED"],
+                &["set-environment", "-g", "LISTA", "1"],
+                &["set-environment", "-g", "LISTB", "2"],
+                &["set-environment", "-gh", "LISTHID", "3"],
+                &["set-environment", "-g", "-r", "LISTC"],
+                &["show-environment", "-g", "LISTA"],
+                &["show-environment", "-gh"],
+                &["show-environment", "-s", "-t", "main"],
+                &["show-environment", "-t", "main"],
+                &["set-environment", "", "x"],
+                &["set-environment", "A=B", "x"],
+                &["set-environment", "-u", "FOO", "val"],
+                &["set-environment", "-r", "FOO", "val"],
+                &["set-environment", "NOVAL"],
+                &[
+                    "set-environment",
+                    "-F",
+                    "FE",
+                    "#{session_name}-#{pane_index}",
+                ],
+                &["show-environment", "FE"],
+                &["set-environment", "-g", "-F", "GE", "#{session_name}"],
+                &["show-environment", "-g", "GE"],
+                &["show-environment", "MISSING"],
+                &["show-environment", "-t", "nosuch", "FOO"],
+                &["set-environment", "-t", "nosuch", "FOO", "bar"],
+                &["set-environment", "-g", "-t", "nosuch", "G2", "v"],
+                &["show-environment", "-g", "-t", "nosuch", "G2"],
+                &["show-environment", "-g", "-t", "nosuch"],
+                &["set-environment"],
+                &["show-environment", "a", "b"],
+                &["show-environment", "-z"],
+            ],
+        )
+        .into_iter()
+        .map(|mut r| {
+            // The global environment is the client's: only compare the
+            // variables this test set.
+            if r.stdout.lines().count() > 20 {
+                r.stdout = r
+                    .stdout
+                    .lines()
+                    .filter(|l| l.starts_with("LIST") || l.starts_with("GVAR"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+            r
+        })
+        .collect()
+    });
+}
+
+/// A pane started after set-environment sees the variable; `-r` and `-u`
+/// ones, and hidden ones, are absent (`environ_for_session`, `environ_push`).
+/// The session scope beats the global one, and a session `-r` hides a global
+/// variable (`environ_copy` of a removal).
+#[test]
+fn environment_reaches_new_panes() {
+    compare("environment_reaches_new_panes", |w| {
+        let show = "printf '[%s|%s|%s|%s|%s|%s|%s]' \"$SV\" \"$GV\" \"$HV\" \"$RV\" \"$UV\" \"$BOTH\" \"${GR-unset}\"; exec cat";
+        let mut runs = steps(
+            w,
+            &[
+                &["new", "-d", "-s", "a", "cat"],
+                &["setenv", "SV", "session"],
+                &["setenv", "-g", "GV", "global"],
+                &["setenv", "-h", "HV", "hidden"],
+                &["setenv", "RV", "removed"],
+                &["setenv", "-r", "RV"],
+                &["setenv", "UV", "unset"],
+                &["setenv", "-u", "UV"],
+                &["setenv", "-g", "BOTH", "global"],
+                &["setenv", "BOTH", "session"],
+                &["setenv", "-g", "GR", "g"],
+                &["setenv", "-r", "GR"],
+                &["neww", "-d", "-n", "e", show],
+            ],
+        );
+        w.wait_for_text("a:e", "[");
+        runs.push(w.run(&["capturep", "-p", "-t", "a:e"]));
+        runs.push(w.run(&["splitw", "-d", "-t", "a:e", show]));
+        w.wait_for_text("a:e.1", "[");
+        runs.push(w.run(&["capturep", "-p", "-t", "a:e.1"]));
+        runs
+    });
+}
+
+/// `update-environment` with a custom list is applied by new-session (not
+/// with `-E`), including fnmatch patterns and the removal marker for a
+/// pattern that matches nothing (cmd-new-session.c:282-283, environ.c:186).
+#[test]
+fn update_environment_on_new_session() {
+    compare("update_environment_on_new_session", |w| {
+        let env = [
+            ("MYVAR", "fromclient"),
+            ("TEST_GLOB", "globval"),
+            ("OTHER", "nope"),
+        ];
+        let mut runs = steps(
+            w,
+            &[
+                &["new", "-d", "-s", "base", "cat"],
+                &["set", "-g", "update-environment", "MYVAR ABSENTVAR TEST_*"],
+                &["show", "-g", "update-environment"],
+            ],
+        );
+        runs.push(w.raw_env(
+            &[
+                "-L",
+                &w.label,
+                "-f",
+                "/dev/null",
+                "new",
+                "-d",
+                "-s",
+                "two",
+                "cat",
+            ],
+            &env,
+        ));
+        runs.push(w.raw_env(
+            &[
+                "-L",
+                &w.label,
+                "-f",
+                "/dev/null",
+                "new",
+                "-d",
+                "-E",
+                "-s",
+                "three",
+                "cat",
+            ],
+            &env,
+        ));
+        runs.extend(steps(
+            w,
+            &[
+                &["showenv", "-t", "two", "MYVAR"],
+                &["showenv", "-t", "two", "TEST_GLOB"],
+                &["showenv", "-t", "two", "ABSENTVAR"],
+                &["showenv", "-t", "two", "OTHER"],
+                &["showenv", "-t", "two", "DISPLAY"],
+                &["showenv", "-t", "three"],
+                &["showenv", "-t", "base", "MYVAR"],
+            ],
+        ));
+        runs
+    });
+}
+
+/// list-clients without clients prints nothing; `-O` is validated.
+#[test]
+fn list_clients_without_clients() {
+    compare("list_clients_without_clients", |w| {
+        steps(
+            w,
+            &[
+                &["new", "-d", "-s", "a", "cat"],
+                &["lsc"],
+                &["list-clients", "-F", "#{client_name}"],
+                &["list-clients", "-O", "bogus"],
+                &["list-clients", "-t", "a"],
+                &["list-clients", "-t", "nosuch"],
+            ],
+        )
+    });
+}

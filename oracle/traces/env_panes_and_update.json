@@ -1,0 +1,324 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "env_panes_and_update",
+  "inputs": {
+    "name": "env_panes_and_update",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "30",
+          "-y",
+          "3",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-g",
+          "GV",
+          "global"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-g",
+          "BOTH",
+          "global"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "SV",
+          "session"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "BOTH",
+          "session"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-r",
+          "GV"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-h",
+          "HV",
+          "hidden"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "RV",
+          "removed"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-u",
+          "RV"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "e",
+          "sh",
+          "-c",
+          "printf '[%s|%s|%s|%s|%s]' \"$SV\" \"${GV-unset}\" \"$HV\" \"${RV-unset}\" \"$BOTH\"; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a:e"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "update-environment",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-e",
+          "X=1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "update-environment",
+          "FOO_* GONE"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "c",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "c"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[session|unset||unset|session]\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "X=1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "-FOO_*\n-GONE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
