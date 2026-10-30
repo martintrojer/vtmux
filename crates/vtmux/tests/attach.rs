@@ -1281,7 +1281,11 @@ fn colours_below_256_are_downgraded_like_tmux() {
 
 /// BELs in everything the client wrote to its terminal so far.
 fn bels(a: &Attached) -> usize {
-    a.bytes.lock().unwrap().iter().filter(|b| **b == 7).count()
+    a.bytes
+        .lock()
+        .unwrap()
+        .iter()
+        .fold(0, |n, b| n + usize::from(*b == 7))
 }
 
 /// The status line (last row) of the client's screen.
@@ -1332,7 +1336,7 @@ fn alerts_bell_forwarding_and_status() {
                 "b",
                 "sh",
                 "-c",
-                r#"read x; printf '\007'; exec cat"#,
+                r"read x; printf '\007'; exec cat",
             ]);
             if !opt.is_empty() {
                 w.cli(&["set", "-g", opt[0], opt[1]]);
