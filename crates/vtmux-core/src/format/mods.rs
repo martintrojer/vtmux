@@ -11,7 +11,7 @@ use super::{CmpOp, CondArm, Format, Post, Value, VarMods};
 /// the whole `#{...}` a [`super::Node::Deferred`].
 pub(super) const SUPPORTED: &[&str] = &[
     "E", "T", "||", "&&", "==", "!=", "<", ">", "<=", ">=", "!", "!!", "e", "l", "a", "b", "d",
-    "n", "w", "=", "p", "c", "q", "R", "V", "N", "C", "t",
+    "n", "w", "=", "p", "c", "q", "R", "V", "N", "C", "t", "m", "s",
 ];
 
 /// An argument as a template (`format_unescape` then `format_expand1`, at expansion).
@@ -145,7 +145,10 @@ fn chain(
             Value::And(parts)
         });
     }
-    if let Some(op) = last(&["==", "!=", "<", ">", "<=", ">="]) {
+    if let Some(op) = last(&["==", "!=", "<", ">", "<=", ">=", "m"]) {
+        if op.name == "m" {
+            return super::matching::build_match(op, body, inner, deferred);
+        }
         // format_choose: no comma is a syntax error.
         let (left, right) = choose(body)?;
         let op = match op.name.as_str() {
@@ -242,5 +245,6 @@ fn post(list: &[RawMod], inner: usize, deferred: &mut Vec<String>) -> Post {
             _ => {}
         }
     }
+    super::matching::add_substitutions(&mut p, list, inner, deferred);
     p
 }

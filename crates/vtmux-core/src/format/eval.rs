@@ -91,6 +91,9 @@ impl Eval<'_> {
             let ast = parse::template(&v, inner, &mut Vec::new());
             v = self.expand(&ast, inner);
         }
+        for s in &post.substitutions {
+            v = self.substitute(s, &v, inner);
+        }
         if let Some(limit) = &post.limit {
             let limit = self.number(limit, inner);
             let marker = post.marker.as_ref().map(|m| self.expand(m, inner));
@@ -181,6 +184,7 @@ impl Eval<'_> {
     #[allow(clippy::too_many_lines)]
     fn value(&mut self, value: &Value, inner: usize) -> Option<String> {
         Some(match value {
+            Value::Match(m) => self.pattern_match(m, inner),
             Value::Var { name, vm } => self.find(name, vm, inner).unwrap_or_default(),
             Value::Inner(f) => self.expand(f, inner),
             Value::Literal(s) => s.clone(),

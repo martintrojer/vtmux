@@ -32,6 +32,8 @@ impl Parser {
         if depth > 64 {
             return Err(Error::Limit);
         }
+        let incoming = self.closed.clone();
+        let mut completed = incoming.clone();
         let mut alternatives = Vec::new();
         loop {
             let mut seq = Vec::new();
@@ -50,8 +52,11 @@ impl Parser {
             if self.peek() != Some('|') {
                 break;
             }
+            completed.extend(self.closed.iter().copied());
             self.at += 1;
+            self.closed.clone_from(&incoming);
         }
+        self.closed.extend(completed);
         Ok(if alternatives.len() == 1 {
             alternatives.pop().unwrap()
         } else {
@@ -103,7 +108,12 @@ impl Parser {
         })
     }
     fn quantify(&mut self, mut expr: Expr) -> Result<Expr, Error> {
+        let mut count = 0;
         while let Some(c @ ('*' | '+' | '?' | '{')) = self.peek() {
+            count += 1;
+            if count > 64 {
+                return Err(Error::Limit);
+            }
             if matches!(expr, Expr::Anchor(_)) {
                 return Err(Error::Syntax);
             }

@@ -122,7 +122,20 @@ impl Regex {
             // max_by_key would choose the last tied path; preserve the first greedy path.
             let mut best: Option<State> = None;
             for s in states {
-                if best.as_ref().is_none_or(|b| s.pos > b.pos) {
+                if best.as_ref().is_none_or(|b| {
+                    s.pos > b.pos
+                        || (s.pos == b.pos
+                            && s.captures
+                                .iter()
+                                .zip(&b.captures)
+                                .find_map(|(a, b)| match (a, b) {
+                                    (Some(a), None) if a.is_empty() => Some(true),
+                                    (None, Some(b)) if b.is_empty() => Some(false),
+                                    (a, b) if a != b => Some(false),
+                                    _ => None,
+                                })
+                                .unwrap_or(false))
+                }) {
                     best = Some(s);
                 }
             }
