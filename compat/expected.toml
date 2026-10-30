@@ -114,8 +114,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."control-client-run-shell-exit.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."control-client-sanity.sh"]
 status = "xfail"

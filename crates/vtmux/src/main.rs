@@ -5,16 +5,16 @@
 mod cli;
 
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use vtmux_core::cmd;
-use vtmux_core::error::EdgeError;
+use vtmux_core::error::{EdgeError, strerror};
 use vtmux_core::protocol::{
-    self, ClientFlags, ClientMsg, Hello, PROTOCOL_VERSION, ServerMsg, TtyInfo,
+    self, ClientFlags, ClientMsg, ControlMode, Hello, PROTOCOL_VERSION, ServerMsg, TtyInfo,
 };
 use vtmux_core::socket::{self, Invocation, RealEnv, RealFs};
 use vtmux_server::ServerConfig;
@@ -281,7 +281,9 @@ fn main() -> ExitCode {
         Ok(s) => s,
         Err(e) => return edge_exit(&e),
     };
-
+    if let Err(code) = check_control_tty(cli.control) {
+        return code;
+    }
     let hello = Hello {
         version: PROTOCOL_VERSION,
         invocation,
@@ -299,7 +301,71 @@ fn main() -> ExitCode {
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);
     }
-    relay(&mut stream)
+    match cli.control {
+        ControlMode::None => relay(&mut stream),
+        _ => control_relay(&mut stream),
+    }
+}
+
+/// client.c:343-348: `-CC` puts stdin's terminal in raw mode, after the
+/// server is up. vtmux otherwise runs `-CC` as `-C` (iTerm2 `-CC` is out of
+/// M0 scope: no DCS wrapping, output on stdout).
+fn check_control_tty(mode: ControlMode) -> Result<(), ExitCode> {
+    if mode != ControlMode::ControlControl {
+        return Ok(());
+    }
+    rustix::termios::tcgetattr(io::stdin()).map_err(|e| {
+        write_err(format!("tcgetattr failed: {}", strerror(&io::Error::from(e))).as_bytes());
+        ExitCode::from(1)
+    })?;
+    Ok(())
+}
+
+/// Copy stdin to the server as `Stdin` messages, then `StdinEof`.
+fn pump_stdin(mut stream: UnixStream) {
+    let mut buf = [0u8; 16 * 1024];
+    let mut stdin = io::stdin().lock();
+    loop {
+        let msg = match stdin.read(&mut buf) {
+            Ok(0) | Err(_) => ClientMsg::StdinEof,
+            Ok(n) => ClientMsg::Stdin(buf[..n].to_vec()),
+        };
+        let eof = msg == ClientMsg::StdinEof;
+        if protocol::write_msg(&mut stream, &msg).is_err() || eof {
+            return;
+        }
+    }
+}
+
+/// A control client (`-C`): stdin goes to the server, the server's
+/// protocol stream to stdout; on exit print `%exit [reason]`
+/// (client.c:417-422).
+fn control_relay(stream: &mut UnixStream) -> ExitCode {
+    if let Ok(writer) = stream.try_clone() {
+        std::thread::spawn(move || pump_stdin(writer));
+    }
+    let (code, reason) = loop {
+        match protocol::read_msg::<ServerMsg>(stream) {
+            Ok(Some(ServerMsg::Stdout(b) | ServerMsg::Frame(b))) => {
+                let mut out = io::stdout().lock();
+                let _ = out.write_all(&b);
+                let _ = out.flush();
+            }
+            Ok(Some(ServerMsg::Stderr(b))) => {
+                let _ = io::stderr().lock().write_all(&b);
+            }
+            Ok(Some(ServerMsg::Exit { code, message })) => break (code, message),
+            Ok(Some(ServerMsg::Ready)) => {}
+            Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
+        }
+    };
+    let mut out = io::stdout().lock();
+    let _ = match reason {
+        Some(r) => writeln!(out, "%exit {r}"),
+        None => writeln!(out, "%exit"),
+    };
+    let _ = out.flush();
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
 /// Print what the server sends until `Exit`.

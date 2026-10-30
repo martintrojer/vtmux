@@ -66,14 +66,16 @@ pub struct ServerConfig {
     pub default_socket: bool,
 }
 
-struct Client {
+pub(crate) struct Client {
     stream: UnixStream,
     inbuf: Vec<u8>,
     outbuf: Vec<u8>,
     /// Exit has been queued; close once the output is flushed.
     closing: bool,
-    hello: Option<Hello>,
-    attached: Option<SessionId>,
+    pub(crate) hello: Option<Hello>,
+    pub(crate) attached: Option<SessionId>,
+    /// Control mode (`-C`) state; `None` for terminal and command clients.
+    pub(crate) control: Option<crate::control::ControlState>,
     prefix: bool,
     pasting: bool,
     decoder: crate::input::Decoder,
@@ -112,8 +114,11 @@ pub struct Server {
     poll: Poll,
     listener: UnixListener,
     signals: Signals,
-    clients: BTreeMap<ClientId, Client>,
+    pub(crate) clients: BTreeMap<ClientId, Client>,
     next_client: usize,
+    /// The last command number handed out (cmd-queue.c `cmdq_next`'s
+    /// static `number`): every fired command takes one.
+    pub(crate) cmd_number: u32,
     /// The global `default-shell` (tmux.c `getshell`).
     shell: PathBuf,
     config: ServerConfig,
@@ -229,6 +234,7 @@ impl Server {
             signals,
             clients: BTreeMap::new(),
             next_client: 0,
+            cmd_number: 0,
             config,
             config_loaded: false,
             backlog: std::collections::BTreeSet::new(),
@@ -278,6 +284,7 @@ impl Server {
             }
             self.check_window_names();
             self.render_clients();
+            self.control_tick();
             if self.should_exit() {
                 self.exit_clients();
                 return Ok(());
@@ -311,7 +318,9 @@ impl Server {
         if self.shutdown {
             return self.clients.values().all(|c| c.outbuf.is_empty());
         }
-        self.config_loaded
+        // A client that left before saying Hello (`-CC` without a tty)
+        // still counts: tmux exits once it has no sessions and no clients.
+        (self.config_loaded || self.next_client > 0)
             && self.model.sessions.is_empty()
             && self
                 .clients
@@ -357,6 +366,7 @@ impl Server {
                             closing: false,
                             hello: None,
                             attached: None,
+                            control: None,
                             prefix: false,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
@@ -420,7 +430,7 @@ impl Server {
     }
 
     /// Queue a message; write what the socket takes now.
-    fn send(&mut self, id: ClientId, msg: &ServerMsg) {
+    pub(crate) fn send(&mut self, id: ClientId, msg: &ServerMsg) {
         let Some(c) = self.clients.get_mut(&id) else {
             return;
         };
@@ -489,7 +499,8 @@ impl Server {
                 }
             }
             ClientMsg::Resize { cols, rows } => self.resize_client(id, cols, rows),
-            ClientMsg::Stdin(_) | ClientMsg::StdinEof => {}
+            ClientMsg::Stdin(bytes) => self.control_stdin(id, &bytes),
+            ClientMsg::StdinEof => self.control_stdin_eof(id),
             ClientMsg::Detach => self.detach_client(id),
         }
     }
@@ -501,7 +512,7 @@ impl Server {
         self.finish_client(id, 1);
     }
 
-    fn finish_client(&mut self, id: ClientId, code: i32) {
+    pub(crate) fn finish_client(&mut self, id: ClientId, code: i32) {
         self.send(
             id,
             &ServerMsg::Exit {
@@ -538,8 +549,14 @@ impl Server {
                 .and_then(|(_, v)| v.parse().ok()),
         };
         let argv = hello.argv.clone();
+        let control = hello.flags.control != vtmux_core::protocol::ControlMode::None;
         if let Some(c) = self.clients.get_mut(&id) {
             c.hello = Some(hello);
+        }
+        if control {
+            // The argv command runs with guard flags 0 (cmd-queue.c:594).
+            self.control_start(id);
+            item.control = Some(0);
         }
         // Config causes wait for an attached session (cfg.c
         // cfg_show_causes): a command client never sees them.
@@ -555,7 +572,11 @@ impl Server {
                 Err(e) => item.error(self, cmd_error_bytes(&e)),
             }
         }
-        self.deliver(id, item);
+        if control {
+            self.control_command_done(id, item);
+        } else {
+            self.deliver(id, item);
+        }
     }
 
     fn deliver(&mut self, id: ClientId, item: Item) {
@@ -663,6 +684,10 @@ impl Server {
     }
 
     pub fn detach_client(&mut self, id: ClientId) {
+        if self.is_control(id) {
+            self.control_detach(id);
+            return;
+        }
         let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
             return;
         };
@@ -688,7 +713,12 @@ impl Server {
 
     /// M0 prefix table: C-b d detaches; other prefixed keys are ignored.
     pub fn on_client_input(&mut self, id: ClientId, bytes: &[u8]) -> Result<(), EdgeError> {
-        let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+        let Some(s) = self
+            .clients
+            .get(&id)
+            .filter(|c| c.control.is_none())
+            .and_then(|c| c.attached)
+        else {
             return Ok(());
         };
         let (_, _, p) = self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
@@ -752,6 +782,7 @@ impl Server {
         let attached: Vec<_> = self
             .clients
             .iter()
+            .filter(|(_, c)| c.control.is_none())
             .filter_map(|(&id, c)| c.attached.map(|s| (id, s)))
             .collect();
         for (id, s) in attached {
@@ -822,6 +853,12 @@ impl Server {
                 self.send(id, &ServerMsg::Frame(frame));
             }
         }
+    }
+
+    /// The session client `id` is attached to.
+    #[must_use]
+    pub fn client_session(&self, id: ClientId) -> Option<SessionId> {
+        self.clients.get(&id)?.attached
     }
 
     /// Most recent attached client (`cmd_find_current_client`, M0 one client).
@@ -970,6 +1007,7 @@ impl Server {
             },
         );
         let activity = self.model.touch();
+        let before = self.control_links();
         self.model.insert_session(Session {
             id,
             name,
@@ -980,13 +1018,29 @@ impl Server {
             current: 0,
             env: env.for_process(),
         });
+        self.control_links_changed(&before);
         Ok(id)
     }
 
     /// `server_destroy_session` + `session_destroy`: its panes' processes
     /// get SIGHUP when their PTYs close.
     pub fn destroy_session(&mut self, s: SessionId) {
-        for pane in self.model.remove_session(s) {
+        let before = self.control_links();
+        let panes = self.model.remove_session(s);
+        self.control_links_changed(&before);
+        for pane in panes {
+            self.close_pane_io(pane);
+        }
+    }
+
+    /// `server_destroy_pane`: remove the pane, and with it an emptied
+    /// window and session.
+    fn destroy_pane(&mut self, p: PaneId) {
+        self.hangup_pane(p);
+        let before = self.control_links();
+        let pane = self.model.remove_pane(p);
+        self.control_links_changed(&before);
+        if let Some(pane) = pane {
             self.close_pane_io(pane);
         }
     }
@@ -1053,6 +1107,7 @@ impl Server {
                     if !replies.is_empty() {
                         io.write(&replies);
                     }
+                    self.control_output(p, &bytes);
                 }
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
@@ -1065,10 +1120,7 @@ impl Server {
         if closed {
             // window_pane_error_callback: the PTY is gone; destroy the pane
             // (server_destroy_pane, remain-on-exit off).
-            self.hangup_pane(p);
-            if let Some(pane) = self.model.remove_pane(p) {
-                self.close_pane_io(pane);
-            }
+            self.destroy_pane(p);
         }
     }
 
@@ -1137,10 +1189,7 @@ impl Server {
                             .and_then(|x| x.io.as_ref())
                             .is_none_or(|io| io.readable_bytes() == 0);
                         if drained && self.model.panes.contains_key(&p) {
-                            self.hangup_pane(p);
-                            if let Some(pane) = self.model.remove_pane(p) {
-                                self.close_pane_io(pane);
-                            }
+                            self.destroy_pane(p);
                         }
                     }
                 }
@@ -1180,8 +1229,13 @@ impl Server {
                 pane.changed = false;
                 pane.last_rename = Some(now);
             }
-            if let Some(window) = self.model.windows.get_mut(&w) {
-                window.name = name;
+            // window_set_name only on a change (names.c:94-99), which
+            // fires window-renamed.
+            if let Some(window) = self.model.windows.get_mut(&w)
+                && window.name != name
+            {
+                window.name.clone_from(&name);
+                self.control_window_renamed(w, &name);
             }
         }
     }
