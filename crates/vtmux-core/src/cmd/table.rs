@@ -183,7 +183,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("run-shell", Some("run"), "bd:Ct:Es:c:", 0, None, "[-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
     cmd("save-buffer", Some("saveb"), "ab:", 1, Some(1), "[-a] [-b buffer-name] path", None, None, false, false),
     cmd("select-layout", Some("selectl"), "Enopt:", 0, Some(1), "[-Enop] [-t target-pane] [layout-name]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
-    cmd("select-pane", Some("selectp"), "DdegLlMmP:RT:t:UZ", 0, Some(0), "[-DdeLlMmRUZ] [-T title] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("select-pane", Some("selectp"), "DdegLlMmP:RT:t:UZ", 0, Some(0), "[-DdeLlMmRUZ] [-T title] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("select-window", Some("selectw"), "lnpTt:", 0, Some(0), "[-lnpT] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
     cmd("send-keys", Some("send"), "c:FHKlMN:Rt:X", 0, None, "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("send-prefix", None, "2t:", 0, Some(0), "[-2] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
@@ -320,7 +320,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 12);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 13);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

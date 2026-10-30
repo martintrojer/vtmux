@@ -175,6 +175,10 @@ fn attach_detach_frames_and_exit() {
             r"printf '\033]2;t\033\\'; printf '$ '; exec cat",
         ]);
         a.wait(|a| pane_text(a).contains("$"));
+        a.wait(|a| pane_text(a).lines().nth(9).is_some_and(|r| r.starts_with("[a] 0:w*")));
+        let status = vtmux_vt::snapshot(&a.screen());
+        assert_eq!(status.cell(0,9).unwrap().style.fg, vtmux_vt::Color::Palette(0));
+        assert_eq!(status.cell(0,9).unwrap().style.bg, vtmux_vt::Color::Palette(2));
         a.keys(b"echo hi\r");
         a.wait(|a| pane_text(a).contains("echo hi\necho hi"));
         a.keys(b"\x02d");
