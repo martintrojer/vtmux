@@ -20,7 +20,7 @@ use crate::error::EdgeError;
 use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
@@ -97,6 +97,13 @@ pub enum ClientMsg {
     Stdin(Vec<u8>),
     StdinEof,
     Detach,
+    /// The first `seq` [`ServerMsg::Frame`]s on this connection have been
+    /// written to the terminal in full. The server counts the frame bytes
+    /// not yet acknowledged as the client's queue (backpressure, D14), so
+    /// buffers between the server and the terminal cannot hide a slow one.
+    FrameAck {
+        seq: u64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -268,6 +275,12 @@ impl<'a> Reader<'a> {
     fn u32(&mut self) -> Result<u32, ProtocolError> {
         Ok(u32::from_le_bytes(
             self.take(4)?.try_into().expect("4 bytes"),
+        ))
+    }
+
+    fn u64(&mut self) -> Result<u64, ProtocolError> {
+        Ok(u64::from_le_bytes(
+            self.take(8)?.try_into().expect("8 bytes"),
         ))
     }
 
@@ -467,7 +480,7 @@ impl Message for ClientMsg {
         1 + match self {
             Self::Hello(h) => h.len(),
             Self::Input(b) | Self::Stdin(b) => 4 + b.len(),
-            Self::Resize { .. } => 8,
+            Self::Resize { .. } | Self::FrameAck { .. } => 8,
             Self::StdinEof | Self::Detach => 0,
         }
     }
@@ -493,6 +506,10 @@ impl Message for ClientMsg {
             }
             Self::StdinEof => out.push(4),
             Self::Detach => out.push(5),
+            Self::FrameAck { seq } => {
+                out.push(6);
+                out.extend_from_slice(&seq.to_le_bytes());
+            }
         }
     }
 
@@ -507,6 +524,7 @@ impl Message for ClientMsg {
             3 => Self::Stdin(r.bytes()?),
             4 => Self::StdinEof,
             5 => Self::Detach,
+            6 => Self::FrameAck { seq: r.u64()? },
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -604,6 +622,8 @@ mod tests {
             ClientMsg::Stdin(b"display -p hi\n".to_vec()),
             ClientMsg::StdinEof,
             ClientMsg::Detach,
+            ClientMsg::FrameAck { seq: 0 },
+            ClientMsg::FrameAck { seq: u64::MAX - 1 },
         ]
     }
 
@@ -808,7 +828,7 @@ mod tests {
         // client.c:659-668 shape, vtmux numbers.
         assert_eq!(
             err.to_string(),
-            "protocol version mismatch (client 0, server 1)"
+            "protocol version mismatch (client 0, server 2)"
         );
     }
 }

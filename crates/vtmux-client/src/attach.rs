@@ -1,4 +1,5 @@
 //! Attached client: raw input, signals and encoded server frames, never a grid.
+use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
@@ -82,29 +83,69 @@ fn send(stream: &mut UnixStream, msg: &ClientMsg) -> io::Result<()> {
     result
 }
 
-/// Pending terminal output, written without blocking.
+/// Pending terminal output, written without blocking, and the frames the
+/// terminal has taken in full (acknowledged to the server, D14).
 #[derive(Default)]
 struct Output {
     stdout: Vec<u8>,
+    /// Bytes ever written to the terminal.
+    written: u64,
+    /// Stream offset at which each pending frame has been fully written.
+    frame_ends: VecDeque<u64>,
+    /// Frames fully written, and how many of those the server knows about.
+    done: u64,
+    acked: u64,
+    /// Stop reading the socket above this much unwritten output.
+    high_water: usize,
 }
 
 impl Output {
-    fn push(&mut self, bytes: &[u8]) -> io::Result<()> {
+    fn push(&mut self, bytes: &[u8], frame: bool) -> io::Result<()> {
         self.stdout.extend_from_slice(bytes);
+        if frame {
+            self.frame_ends
+                .push_back(self.written + self.stdout.len() as u64);
+        }
         self.flush()
     }
 
     /// Write what the terminal takes now; the rest waits for `STDOUT`.
     fn flush(&mut self) -> io::Result<()> {
-        let written = write_some(io::stdout().as_fd(), &self.stdout)?;
-        self.stdout.drain(..written);
+        let n = write_some(io::stdout().as_fd(), &self.stdout)?;
+        self.wrote(n);
         Ok(())
     }
 
     /// Wait for the terminal to take everything (exit path).
     fn finish(&mut self) -> io::Result<()> {
         write_all_waiting(io::stdout().as_fd(), &self.stdout)?;
-        self.stdout.clear();
+        self.wrote(self.stdout.len());
+        Ok(())
+    }
+
+    fn wrote(&mut self, n: usize) {
+        self.stdout.drain(..n);
+        self.written += n as u64;
+        while self
+            .frame_ends
+            .front()
+            .is_some_and(|&end| end <= self.written)
+        {
+            self.frame_ends.pop_front();
+            self.done += 1;
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.stdout.len() >= self.high_water
+    }
+
+    /// Tell the server about frames written since the last ack.
+    fn ack(&mut self, stream: &mut UnixStream) -> io::Result<()> {
+        if self.done > self.acked {
+            send(stream, &ClientMsg::FrameAck { seq: self.done })?;
+            self.acked = self.done;
+        }
         Ok(())
     }
 }
@@ -141,9 +182,14 @@ fn write_all_waiting(fd: BorrowedFd<'_>, mut bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// Above this much unwritten terminal output the client stops reading the
-/// socket, so a stalled terminal pushes back on the server (D14).
-const OUTPUT_HIGH_WATER: usize = 1 << 20;
+/// Above `cols*rows*8` unwritten bytes (the server's block threshold,
+/// tty.c `TTY_BLOCK_START`) the client stops reading the socket, so a slow
+/// terminal backs up into the server, where blocking applies (D14).
+fn high_water() -> usize {
+    rustix::termios::tcgetwinsize(io::stdin()).map_or(1 << 16, |ws| {
+        (usize::from(ws.ws_col) * usize::from(ws.ws_row) * 8).max(4096)
+    })
+}
 
 fn relay(
     stream: &mut UnixStream,
@@ -153,6 +199,7 @@ fn relay(
 ) -> io::Result<(i32, Option<String>)> {
     let mut events = Events::with_capacity(16);
     let mut socket = Socket::default();
+    out.high_water = high_water();
     send_size(stream)?;
     loop {
         match poll.poll(&mut events, None) {
@@ -181,7 +228,10 @@ fn relay(
                 SIGNALS => {
                     for sig in signals.pending() {
                         match sig {
-                            SIGWINCH => send_size(stream)?,
+                            SIGWINCH => {
+                                out.high_water = high_water();
+                                send_size(stream)?;
+                            }
                             SIGTERM | SIGHUP => {
                                 let _ = send(stream, &ClientMsg::Detach);
                                 socket.signal_exit = Some(
@@ -201,11 +251,12 @@ fn relay(
             }
         }
         if socket.readable
-            && out.stdout.len() < OUTPUT_HIGH_WATER
+            && !out.full()
             && let Some(exit) = socket.pump(stream, out)?
         {
             return Ok(exit);
         }
+        out.ack(stream)?;
     }
 }
 
@@ -226,7 +277,7 @@ impl Socket {
         out: &mut Output,
     ) -> io::Result<Option<(i32, Option<String>)>> {
         let mut bytes = [0; 16384];
-        while out.stdout.len() < OUTPUT_HIGH_WATER {
+        while !out.full() {
             match stream.read(&mut bytes) {
                 Ok(0) => return Ok(Some((1, Some("server exited unexpectedly".into())))),
                 Ok(n) => self.input.extend_from_slice(&bytes[..n]),
@@ -243,7 +294,8 @@ impl Socket {
                     Ok((msg, used)) => {
                         self.input.drain(..used);
                         match msg {
-                            ServerMsg::Frame(b) | ServerMsg::Stdout(b) => out.push(&b)?,
+                            ServerMsg::Frame(b) => out.push(&b, true)?,
+                            ServerMsg::Stdout(b) => out.push(&b, false)?,
                             ServerMsg::Stderr(b) => {
                                 // Keep ordering with frames already queued.
                                 out.finish()?;
@@ -263,6 +315,7 @@ impl Socket {
                     Err(e) => return Err(io::Error::other(e)),
                 }
             }
+            out.ack(stream)?;
         }
         Ok(None)
     }
