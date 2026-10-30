@@ -1391,9 +1391,28 @@ fn windows_base_index_and_renumber() {
         let f = "#{window_index}:#{window_name}#{window_flags}";
         let lsw = |w: &World| w.run(&["lsw", "-F", f]);
         let mut runs = vec![
-            w.run(&["start", ";", "set", "-g", "base-index", "1"]),
+            // One invocation: `start ; set` alone leaves an empty server that
+            // exit-empty may stop before the next client connects, on tmux
+            // and vtmux alike ("server exited unexpectedly" flake).
             w.run(&[
-                "new", "-d", "-s", "a", "-n", "w1", "-x", "80", "-y", "24", "cat",
+                "start",
+                ";",
+                "set",
+                "-g",
+                "base-index",
+                "1",
+                ";",
+                "new",
+                "-d",
+                "-s",
+                "a",
+                "-n",
+                "w1",
+                "-x",
+                "80",
+                "-y",
+                "24",
+                "cat",
             ]),
             w.run(&["neww", "-d", "-n", "x", "cat"]),
             w.run(&["neww", "-n", "y", "cat"]),
