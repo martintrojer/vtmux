@@ -177,6 +177,7 @@ fn move_to_new_window(
             zoom: None,
             last_layout: None,
             old_layout: None,
+            pending_size: None,
         },
     );
     if let Some(n) = name {

@@ -51,6 +51,9 @@ pub fn exec(
             model.set_current(s, index);
         }
     }
+    // cmd-select-window.c:147: the new current window takes any size
+    // recalculate_sizes left pending.
+    server.recalculate_sizes();
     Ok(())
 }
 

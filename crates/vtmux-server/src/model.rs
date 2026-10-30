@@ -71,6 +71,9 @@ pub struct Window {
     /// `w->old_layout`: the layout string before the last select-layout,
     /// for `select-layout -o`.
     pub old_layout: Option<String>,
+    /// `WINDOW_RESIZE` with `new_sx`/`new_sy`: the size `recalculate_sizes`
+    /// chose, applied once the window is current in an attached session.
+    pub pending_size: Option<(u32, u32)>,
 }
 
 impl Window {
@@ -733,6 +736,7 @@ impl Model {
         let Some(window) = self.windows.get_mut(&w) else {
             return;
         };
+        window.pending_size = None;
         window.layout.resize_window(sx, sy);
         self.fix_panes(w);
         if let Some(p) = zoomed {

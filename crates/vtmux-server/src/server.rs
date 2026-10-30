@@ -411,6 +411,7 @@ impl Server {
             }
             self.resume_woken();
             self.check_window_names();
+            self.check_window_resizes();
             self.render_clients();
             self.control_tick();
             if self.wants_flush() {
@@ -902,9 +903,9 @@ impl Server {
         Ok(())
     }
 
-    /// `recalculate_sizes` latest semantics (M0 one attached client): the
-    /// status lines cost their rows; both emulator and kernel PTY get the
-    /// same dimensions.
+    /// `MSG_RESIZE` (server-client.c:2712-2730): the client's terminal
+    /// takes its new size and every window is fitted again
+    /// (`recalculate_sizes`); the loop's check pass applies it.
     pub(crate) fn resize_client(&mut self, id: ClientId, cols: u32, rows: u32) {
         let Some(client) = self.clients.get_mut(&id) else {
             return;
@@ -914,15 +915,7 @@ impl Server {
             tty.rows = rows.max(1);
         }
         client.compositor.invalidate();
-        let Some(session) = client.attached else {
-            return;
-        };
-        let Some((_, window, _)) = self.model.current_of(session) else {
-            return;
-        };
-        let lines = self.status_line_size(&self.clients[&id]);
-        self.model
-            .resize_window(window, cols.max(1), rows.saturating_sub(lines).max(1));
+        self.recalculate_sizes();
     }
 
     /// `status_line_size` (status.c:113-122) with `CLIENT_STATUSOFF`
@@ -945,10 +938,7 @@ impl Server {
     /// (`recalculate_sizes`) and every attached client redrawn
     /// (`server_redraw_client`).
     pub fn push_option_changes(&mut self) {
-        let windows: Vec<_> = self.model.windows.keys().copied().collect();
-        for w in windows {
-            self.recalculate_window(w);
-        }
+        self.recalculate_sizes();
         for c in self.clients.values_mut() {
             if c.attached.is_some() {
                 c.compositor.invalidate();
@@ -956,9 +946,21 @@ impl Server {
         }
     }
 
-    /// `recalculate_size` (resize.c:367-424) for one window with `latest`
-    /// semantics: the last terminal client attached to a session that links
-    /// `w` sizes it, less its status lines; no such client leaves it alone.
+    /// `recalculate_sizes` (resize.c:426-466): [`Self::recalculate_window`]
+    /// for every window.
+    pub fn recalculate_sizes(&mut self) {
+        let windows: Vec<_> = self.model.windows.keys().copied().collect();
+        for w in windows {
+            self.recalculate_window(w);
+        }
+    }
+
+    /// `recalculate_size(w, 0)` (resize.c:359-424) with `latest` semantics:
+    /// the last terminal client attached to a session that links `w` sizes
+    /// it, less its status lines; no such client leaves it alone. The size
+    /// is only recorded (`WINDOW_RESIZE`) when it differs from the one
+    /// already pending, else from the window's own;
+    /// [`Self::check_window_resizes`] applies it.
     pub fn recalculate_window(&mut self, w: WindowId) {
         let size = self
             .clients
@@ -975,14 +977,34 @@ impl Server {
                 let lines = self.status_line_size(c);
                 Some((tty.cols.max(1), tty.rows.saturating_sub(lines).max(1)))
             });
-        let Some((sx, sy)) = size else {
+        let Some(size) = size else {
             return;
         };
-        let Some(window) = self.model.windows.get(&w) else {
+        let Some(window) = self.model.windows.get_mut(&w) else {
             return;
         };
-        if (window.sx(), window.sy()) != (sx, sy) {
-            self.model.resize_window(w, sx, sy);
+        if window.pending_size.unwrap_or((window.sx(), window.sy())) != size {
+            window.pending_size = Some(size);
+        }
+    }
+
+    /// `server_client_check_window_resize` (server-client.c:1953-1970),
+    /// run every loop before drawing: a window with a pending size takes
+    /// it once it is the current window of a session with a client
+    /// attached. A background window keeps its size (and its panes get no
+    /// SIGWINCH) until then.
+    fn check_window_resizes(&mut self) {
+        let current: Vec<WindowId> = self
+            .clients
+            .values()
+            .filter_map(|c| c.attached)
+            .filter_map(|s| self.model.current_of(s))
+            .map(|(_, w, _)| w)
+            .collect();
+        for w in current {
+            if let Some((sx, sy)) = self.model.windows.get(&w).and_then(|x| x.pending_size) {
+                self.model.resize_window(w, sx, sy);
+            }
         }
     }
 
@@ -1022,6 +1044,9 @@ impl Server {
             c.attached = None;
             c.closing = true;
         }
+        // server_client_set_session(c, NULL) then recalculate_sizes
+        // (server-client.c:2733-2738): the clients left size the windows.
+        self.recalculate_sizes();
         self.flush_client(id);
     }
 
@@ -1609,6 +1634,7 @@ impl Server {
                 zoom: None,
                 last_layout: None,
                 old_layout: None,
+                pending_size: None,
             },
         );
         self.model.fix_panes(window_id);
@@ -1714,6 +1740,7 @@ impl Server {
         for pane in panes {
             self.close_pane_io(pane);
         }
+        self.recalculate_sizes();
     }
 
     /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment

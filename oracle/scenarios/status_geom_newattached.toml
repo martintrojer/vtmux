@@ -1,0 +1,26 @@
+name = "status_geom_newattached"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh", "-c", "printf 'A '; exec cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-g", "status-format[0]", ""] },
+  { run = ["set", "-g", "status", "3"] },
+  { run = ["set", "-g", "status-format[1]", ""] },
+  { run = ["set", "-g", "status-format[2]", ""] },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { run = ["new-window", "-t", "a", "-n", "x", "sh", "-c", "printf 'N '; exec cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["select-window", "-t", "a:0"] },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index} #{window_width}x#{window_height}"] },
+  { run = ["set", "-g", "status", "on"] },
+  { run = ["set", "-g", "status", "on"] },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index} #{window_width}x#{window_height}"] },
+]
