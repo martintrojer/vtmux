@@ -1,15 +1,20 @@
 //! Attached client: raw input, signals and encoded server frames, never a grid.
-use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
+use std::io::{self, Read};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
 
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
-use signal_hook::consts::{SIGHUP, SIGTERM, SIGWINCH};
+use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::protocol::{self, ClientMsg, ProtocolError, ServerMsg};
 
 use crate::tty::RawTty;
+
+const STDIN: Token = Token(0);
+const SOCKET: Token = Token(1);
+const SIGNALS: Token = Token(2);
+const STDOUT: Token = Token(3);
 
 /// Called after Ready; the server owns startup and teardown escapes.
 #[must_use]
@@ -30,27 +35,43 @@ pub fn attach(stream: &mut UnixStream) -> i32 {
 
 fn run(stream: &mut UnixStream) -> io::Result<(i32, Option<String>)> {
     // Install signal handlers before entering raw mode: all returns drop the
-    // tty guard, including SIGTERM/SIGHUP (client.c client_signal).
-    let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH])?;
+    // tty guard, including SIGTERM/SIGHUP (client.c client_signal). SIGINT
+    // goes to proc_signal_cb and client_signal ignores it while attached;
+    // SIGQUIT is SIG_IGN (proc.c proc_set_signals:254-261). Catching it and
+    // doing nothing is the same for a process that never execs.
+    let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGQUIT])?;
     let mut poll = Poll::new()?;
     poll.registry()
-        .register(&mut signals, Token(2), Interest::READABLE)?;
+        .register(&mut signals, SIGNALS, Interest::READABLE)?;
     let _raw = RawTty::enter()?;
     let stdin = io::stdin();
-    poll.registry().register(
-        &mut SourceFd(&stdin.as_raw_fd()),
-        Token(0),
-        Interest::READABLE,
-    )?;
+    poll.registry()
+        .register(&mut SourceFd(&stdin.as_raw_fd()), STDIN, Interest::READABLE)?;
     poll.registry().register(
         &mut SourceFd(&stream.as_raw_fd()),
-        Token(1),
+        SOCKET,
         Interest::READABLE,
     )?;
+    // O_NONBLOCK on the tty is shared by stdin and stdout (one open file
+    // description), so frames are buffered and written on writability, as
+    // tmux's bufferevents do. A regular-file stdout cannot be registered and
+    // never blocks.
+    let stdout = io::stdout();
+    let _ = poll.registry().register(
+        &mut SourceFd(&stdout.as_raw_fd()),
+        STDOUT,
+        Interest::WRITABLE,
+    );
     stream.set_nonblocking(true)?;
-    let result = relay(stream, &mut poll, &mut signals);
+    let mut out = Output::default();
+    let result = relay(stream, &mut poll, &mut signals, &mut out);
+    // Teardown escapes are in the buffer: deliver them before the guard
+    // restores termios.
+    let flushed = out.finish();
     let _ = stream.set_nonblocking(false);
-    result
+    let result = result?;
+    flushed?;
+    Ok(result)
 }
 
 fn send(stream: &mut UnixStream, msg: &ClientMsg) -> io::Result<()> {
@@ -61,14 +82,77 @@ fn send(stream: &mut UnixStream, msg: &ClientMsg) -> io::Result<()> {
     result
 }
 
+/// Pending terminal output, written without blocking.
+#[derive(Default)]
+struct Output {
+    stdout: Vec<u8>,
+}
+
+impl Output {
+    fn push(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.stdout.extend_from_slice(bytes);
+        self.flush()
+    }
+
+    /// Write what the terminal takes now; the rest waits for `STDOUT`.
+    fn flush(&mut self) -> io::Result<()> {
+        let written = write_some(io::stdout().as_fd(), &self.stdout)?;
+        self.stdout.drain(..written);
+        Ok(())
+    }
+
+    /// Wait for the terminal to take everything (exit path).
+    fn finish(&mut self) -> io::Result<()> {
+        write_all_waiting(io::stdout().as_fd(), &self.stdout)?;
+        self.stdout.clear();
+        Ok(())
+    }
+}
+
+/// Write until done or `WouldBlock`; returns the bytes taken.
+fn write_some(fd: BorrowedFd<'_>, bytes: &[u8]) -> io::Result<usize> {
+    let mut done = 0;
+    while done < bytes.len() {
+        match rustix::io::write(fd, &bytes[done..]) {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(n) => done += n,
+            Err(rustix::io::Errno::INTR) => {}
+            Err(rustix::io::Errno::AGAIN) => break,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(done)
+}
+
+/// Write everything, polling for writability on `WouldBlock`.
+fn write_all_waiting(fd: BorrowedFd<'_>, mut bytes: &[u8]) -> io::Result<()> {
+    use rustix::event::{PollFd, PollFlags};
+    while !bytes.is_empty() {
+        let n = write_some(fd, bytes)?;
+        bytes = &bytes[n..];
+        if !bytes.is_empty() {
+            let mut fds = [PollFd::new(&fd, PollFlags::OUT)];
+            match rustix::event::poll(&mut fds, None) {
+                Ok(_) | Err(rustix::io::Errno::INTR) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Above this much unwritten terminal output the client stops reading the
+/// socket, so a stalled terminal pushes back on the server (D14).
+const OUTPUT_HIGH_WATER: usize = 1 << 20;
+
 fn relay(
     stream: &mut UnixStream,
     poll: &mut Poll,
     signals: &mut Signals,
+    out: &mut Output,
 ) -> io::Result<(i32, Option<String>)> {
     let mut events = Events::with_capacity(16);
-    let mut input = Vec::new();
-    let mut signal_exit = None;
+    let mut socket = Socket::default();
     send_size(stream)?;
     loop {
         match poll.poll(&mut events, None) {
@@ -77,13 +161,13 @@ fn relay(
         }
         for event in &events {
             match event.token() {
-                Token(0) => {
+                STDIN => {
                     let mut bytes = [0; 4096];
                     loop {
                         match io::stdin().read(&mut bytes) {
                             Ok(0) => {
                                 let _ = send(stream, &ClientMsg::Detach);
-                                signal_exit = Some("lost tty".into());
+                                socket.signal_exit = Some("lost tty".into());
                                 break;
                             }
                             Ok(n) => send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?,
@@ -93,63 +177,94 @@ fn relay(
                         }
                     }
                 }
-                Token(2) => {
+                STDOUT => out.flush()?,
+                SIGNALS => {
                     for sig in signals.pending() {
-                        if sig == SIGWINCH {
-                            send_size(stream)?;
-                        } else {
-                            let _ = send(stream, &ClientMsg::Detach);
-                            signal_exit = Some(
-                                if sig == SIGTERM {
-                                    "terminated"
-                                } else {
-                                    "lost tty"
-                                }
-                                .to_owned(),
-                            );
+                        match sig {
+                            SIGWINCH => send_size(stream)?,
+                            SIGTERM | SIGHUP => {
+                                let _ = send(stream, &ClientMsg::Detach);
+                                socket.signal_exit = Some(
+                                    if sig == SIGTERM {
+                                        "terminated"
+                                    } else {
+                                        "lost tty"
+                                    }
+                                    .to_owned(),
+                                );
+                            }
+                            _ => {} // SIGINT, SIGQUIT
                         }
                     }
                 }
-                _ => {
-                    let mut bytes = [0; 16384];
-                    loop {
-                        match stream.read(&mut bytes) {
-                            Ok(0) => return Ok((1, Some("server exited unexpectedly".into()))),
-                            Ok(n) => input.extend_from_slice(&bytes[..n]),
-                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                            Err(e) => return Err(e),
-                        }
-                        // Decode before another read so EOF cannot discard Exit.
-                        loop {
-                            match protocol::decode::<ServerMsg>(&input) {
-                                Ok((msg, used)) => {
-                                    input.drain(..used);
-                                    match msg {
-                                        ServerMsg::Frame(b) | ServerMsg::Stdout(b) => {
-                                            let mut out = io::stdout().lock();
-                                            out.write_all(&b)?;
-                                            out.flush()?;
-                                        }
-                                        ServerMsg::Stderr(b) => io::stderr().write_all(&b)?,
-                                        ServerMsg::Exit { code, message } => {
-                                            return Ok(if let Some(reason) = signal_exit {
-                                                (1, Some(reason))
-                                            } else {
-                                                (code, message)
-                                            });
-                                        }
-                                        ServerMsg::Ready => {}
-                                    }
-                                }
-                                Err(ProtocolError::Truncated) => break,
-                                Err(e) => return Err(io::Error::other(e)),
+                _ => socket.readable = true,
+            }
+        }
+        if socket.readable
+            && out.stdout.len() < OUTPUT_HIGH_WATER
+            && let Some(exit) = socket.pump(stream, out)?
+        {
+            return Ok(exit);
+        }
+    }
+}
+
+/// Server socket state. Registration is edge-triggered, so `readable`
+/// remembers unread data while reading is paused for backpressure.
+#[derive(Default)]
+struct Socket {
+    input: Vec<u8>,
+    readable: bool,
+    signal_exit: Option<String>,
+}
+
+impl Socket {
+    /// Read and dispatch until `WouldBlock`, the high-water mark or Exit.
+    fn pump(
+        &mut self,
+        stream: &mut UnixStream,
+        out: &mut Output,
+    ) -> io::Result<Option<(i32, Option<String>)>> {
+        let mut bytes = [0; 16384];
+        while out.stdout.len() < OUTPUT_HIGH_WATER {
+            match stream.read(&mut bytes) {
+                Ok(0) => return Ok(Some((1, Some("server exited unexpectedly".into())))),
+                Ok(n) => self.input.extend_from_slice(&bytes[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    self.readable = false;
+                    break;
+                }
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+            // Decode before another read so EOF cannot discard Exit.
+            loop {
+                match protocol::decode::<ServerMsg>(&self.input) {
+                    Ok((msg, used)) => {
+                        self.input.drain(..used);
+                        match msg {
+                            ServerMsg::Frame(b) | ServerMsg::Stdout(b) => out.push(&b)?,
+                            ServerMsg::Stderr(b) => {
+                                // Keep ordering with frames already queued.
+                                out.finish()?;
+                                write_all_waiting(io::stderr().as_fd(), &b)?;
                             }
+                            ServerMsg::Exit { code, message } => {
+                                return Ok(Some(if let Some(reason) = self.signal_exit.take() {
+                                    (1, Some(reason))
+                                } else {
+                                    (code, message)
+                                }));
+                            }
+                            ServerMsg::Ready => {}
                         }
                     }
+                    Err(ProtocolError::Truncated) => break,
+                    Err(e) => return Err(io::Error::other(e)),
                 }
             }
         }
+        Ok(None)
     }
 }
 
