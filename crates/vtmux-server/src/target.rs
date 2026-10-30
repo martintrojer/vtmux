@@ -8,7 +8,7 @@ use vtmux_core::cmd::{FindFlags, TargetKind, TargetSpec, strtonum};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 
-use crate::model::Model;
+use crate::model::{Model, Side};
 
 /// A resolved target (`struct cmd_find_state`). Every field is `None` when
 /// a `CANFAIL` lookup failed.
@@ -275,57 +275,54 @@ fn find_window(model: &Model, current: Found, part: &Part, only: bool) -> Option
     None
 }
 
-/// `cmd_find_get_pane_with_window` (cmd-find.c:741-813).
+/// `cmd_find_get_pane_with_window` (cmd-find.c:579-660).
 fn find_pane_in(model: &Model, w: WindowId, part: &str) -> Option<PaneId> {
     let window = model.windows.get(&w)?;
     if part.starts_with('%') {
         let id: PaneId = part.parse().ok()?;
         return (model.panes.get(&id)?.window == w).then_some(id);
     }
-    if matches!(
-        part,
-        "!" | "{up-of}" | "{down-of}" | "{left-of}" | "{right-of}"
-    ) {
-        // No last pane and no neighbours with one pane per window (M0).
-        return None;
+    let active = window.active();
+    let side = match part {
+        "!" => return window.panes.last.first().copied(),
+        "{up-of}" => Some(Side::Up),
+        "{down-of}" => Some(Side::Down),
+        "{left-of}" => Some(Side::Left),
+        "{right-of}" => Some(Side::Right),
+        _ => None,
+    };
+    if let Some(side) = side {
+        return model.neighbour(active, side);
     }
-    let panes: Vec<PaneId> = window.panes.panes.clone();
+    let panes = &window.panes.panes;
     if part.starts_with('+') || part.starts_with('-') {
         let n = if part.len() > 1 {
             usize::try_from(strtonum(&part[1..], 1, i64::from(i32::MAX)).ok()?).ok()?
         } else {
             1
         };
-        let pos = panes.iter().position(|p| *p == window.active())?;
+        // window_pane_next_by_number / previous_by_number: wrap round.
+        let pos = panes.iter().position(|p| *p == active)?;
         let len = panes.len();
         let target = if part.starts_with('+') {
-            (pos + n) % len
+            (pos + n % len) % len
         } else {
             (pos + len - n % len) % len
         };
         return Some(panes[target]);
     }
-    if let Ok(idx) = strtonum(part, 0, i64::from(i32::MAX))
-        && let Some(p) = panes.get(usize::try_from(idx).ok()?)
-    {
-        return Some(*p);
+    // window_pane_at_index counts from pane-base-index.
+    if let Ok(idx) = strtonum(part, 0, i64::from(i32::MAX)) {
+        let base = i64::from(model.pane_base_index(w));
+        if let Some(p) = idx
+            .checked_sub(base)
+            .and_then(|i| usize::try_from(i).ok())
+            .and_then(|i| panes.get(i))
+        {
+            return Some(*p);
+        }
     }
-    // window_find_string: positions resolve to the pane there (the only
-    // pane in M0).
-    let positions = [
-        "top",
-        "bottom",
-        "left",
-        "right",
-        "top-left",
-        "top-right",
-        "bottom-left",
-        "bottom-right",
-    ];
-    positions
-        .iter()
-        .any(|p| p.eq_ignore_ascii_case(part))
-        .then_some(window.active())
+    model.pane_at_position(w, part)
 }
 
 /// `cmd_find_get_pane` (cmd-find.c:643-676).

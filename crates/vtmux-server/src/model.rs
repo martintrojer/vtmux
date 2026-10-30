@@ -423,6 +423,192 @@ impl Model {
     }
 }
 
+/// A direction for [`Model::neighbour`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Model {
+    /// `window_pane_find_up/down/left/right` (window.c:2220-2440): the panes
+    /// whose edge touches `p`'s on that side (wrapping round the window),
+    /// overlapping it along the edge; the most recently active wins
+    /// (`window_pane_choose_best`). Scrollbars are not modelled, so the
+    /// full-size offset is the pane's own.
+    #[must_use]
+    pub fn neighbour(&self, p: PaneId, side: Side) -> Option<PaneId> {
+        let pane = self.panes.get(&p)?;
+        let w = self.windows.get(&pane.window)?;
+        let status = self.pane_status(w.id);
+        let (wsx, wsy) = (to_i64(w.sx()), to_i64(w.sy()));
+        let r = Rect::of(pane);
+        // The edge the neighbour's opposite side must sit on, and the span
+        // it must overlap.
+        let (edge, lo, hi) = match side {
+            Side::Up => {
+                let edge = match (status, r.y) {
+                    (PaneStatus::Top, 1) | (PaneStatus::Off, 0) => wsy + 1,
+                    (PaneStatus::Bottom, 0) => wsy,
+                    _ => r.y,
+                };
+                (edge, r.x, r.x + r.w)
+            }
+            Side::Down => {
+                let mut edge = r.y + r.h + 1;
+                match status {
+                    PaneStatus::Top if edge >= wsy => edge = 1,
+                    PaneStatus::Bottom if edge >= wsy - 1 => edge = 0,
+                    PaneStatus::Off if edge >= wsy => edge = 0,
+                    _ => {}
+                }
+                (edge, r.x, r.x + r.w)
+            }
+            Side::Left => {
+                let edge = if r.x == 0 { wsx + 1 } else { r.x };
+                (edge, r.y, r.y + r.h)
+            }
+            Side::Right => {
+                let mut edge = r.x + r.w + 1;
+                if edge >= wsx {
+                    edge = 0;
+                }
+                (edge, r.y, r.y + r.h)
+            }
+        };
+        w.panes
+            .panes
+            .iter()
+            .filter(|&&q| q != p)
+            .filter_map(|q| self.panes.get(q))
+            .filter(|q| {
+                let n = Rect::of(q);
+                let (at, start, len) = match side {
+                    Side::Up => (n.y + n.h + 1, n.x, n.w),
+                    Side::Down => (n.y, n.x, n.w),
+                    Side::Left => (n.x + n.w + 1, n.y, n.h),
+                    Side::Right => (n.x, n.y, n.h),
+                };
+                let end = start + len - 1;
+                at == edge
+                    && ((start < lo && end > hi)
+                        || (start >= lo && start <= hi)
+                        || (end >= lo && end <= hi))
+            })
+            // The first of equal active points, as the C loop's `>` keeps.
+            .fold(None::<&Pane>, |best, q| match best {
+                Some(b) if q.active_point <= b.active_point => Some(b),
+                _ => Some(q),
+            })
+            .map(|q| q.id)
+    }
+
+    /// `window_find_string` (window.c:930-969): `top`, `bottom-left` and the
+    /// other position names as the pane at that point of the window.
+    #[must_use]
+    pub fn pane_at_position(&self, w: WindowId, name: &str) -> Option<PaneId> {
+        let window = self.windows.get(&w)?;
+        let (sx, sy) = (window.sx(), window.sy());
+        let (mut x, mut y) = (sx / 2, sy / 2);
+        let (mut top, mut bottom) = (0, sy.saturating_sub(1));
+        match self.pane_status(w) {
+            PaneStatus::Top => top += 1,
+            PaneStatus::Bottom => bottom = bottom.saturating_sub(1),
+            PaneStatus::Off => {}
+        }
+        let right = sx.saturating_sub(1);
+        match name.to_ascii_lowercase().as_str() {
+            "top" => y = top,
+            "bottom" => y = bottom,
+            "left" => x = 0,
+            "right" => x = right,
+            "top-left" => (x, y) = (0, top),
+            "top-right" => (x, y) = (right, top),
+            "bottom-left" => (x, y) = (0, bottom),
+            "bottom-right" => (x, y) = (right, bottom),
+            _ => return None,
+        }
+        self.pane_at(w, to_i64(x), to_i64(y))
+    }
+
+    /// `window_get_active_at` (window.c:849-928) without modal panes:
+    /// floating panes first (with their border), then the pane status line
+    /// of a tiled pane, then any visible pane in z-order, tiled ones up to
+    /// and including their right and bottom border.
+    #[must_use]
+    pub fn pane_at(&self, w: WindowId, x: i64, y: i64) -> Option<PaneId> {
+        let window = self.windows.get(&w)?;
+        let status = self.pane_status(w);
+        let stack: Vec<&Pane> = window
+            .panes
+            .z_order
+            .iter()
+            .filter_map(|p| self.panes.get(p))
+            .collect();
+        let floating = |p: &Pane| window.is_floating(p.id);
+        let visible = |p: &Pane| window.is_visible(p.id);
+        let in_border = |r: Rect| x >= r.x - 1 && x <= r.x + r.w && y >= r.y - 1 && y <= r.y + r.h;
+        if let Some(p) = stack
+            .iter()
+            .find(|p| floating(p) && visible(p) && in_border(Rect::of(p)))
+        {
+            return Some(p.id);
+        }
+        if status == PaneStatus::Top
+            && let Some(p) = stack.iter().find(|p| {
+                let r = Rect::of(p);
+                visible(p) && !floating(p) && x >= r.x && x <= r.x + r.w && y == r.y - 1
+            })
+        {
+            return Some(p.id);
+        }
+        stack
+            .iter()
+            .find(|p| {
+                if !visible(p) {
+                    return false;
+                }
+                let r = Rect::of(p);
+                if floating(p) {
+                    return in_border(r);
+                }
+                let top = if status == PaneStatus::Top {
+                    r.y - 1
+                } else {
+                    r.y
+                };
+                x >= r.x && x <= r.x + r.w && y >= top && y <= r.y + r.h
+            })
+            .map(|p| p.id)
+    }
+}
+
+fn to_i64(v: u32) -> i64 {
+    i64::from(v)
+}
+
+/// A pane's rectangle in signed arithmetic, as the C compares it.
+#[derive(Clone, Copy)]
+struct Rect {
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+}
+
+impl Rect {
+    fn of(p: &Pane) -> Self {
+        Self {
+            x: i64::from(p.rect.xoff),
+            y: i64::from(p.rect.yoff),
+            w: i64::from(p.rect.sx),
+            h: i64::from(p.rect.sy),
+        }
+    }
+}
+
 impl Pane {
     /// `window_pane_resize` (window.c:1702-1740) plus the pane offsets: the
     /// terminal reflows and the PTY gets `TIOCSWINSZ` when the size changed.
