@@ -157,8 +157,9 @@ impl Compositor {
                 // cells is erased (EL to the end of the line, else ECH), not
                 // written: erased cells keep only the background and hold no
                 // text, which a terminal (and capture -e) can tell apart.
-                // Borders and fill are written cell by cell (`tty_cell`), so
-                // a literal space is never part of a run.
+                // compose::draw_line has already decided which pane and pane
+                // status cells tmux erases (empty text, background only);
+                // borders and fill keep their text, so they never join a run.
                 let run = (x..screen.cols)
                     .take_while(|&cx| {
                         screen.cell(cx, y).is_some_and(|c| {
