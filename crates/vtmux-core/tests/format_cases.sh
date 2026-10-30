@@ -232,11 +232,31 @@ row 'ok#{==:a}x'
 row '#{||:'
 row 'x#{?@x,a,b'
 
+# Truncation, the = modifier (format.c:6080-6089, 6627-6648; format-draw.c
+# format_trim_left/right).
+row 'x#{=3:@name}y'
+row '#{=3:@name}'
+row '#{=-3:@name}'
+row '#{=10:@name}'
+row '#{=0:@name}'
+row '#{=abc:@name}'
+row '#{=/3/...:@name}'
+row '#{=/-3/...:@name}'
+row '#{=/10/...:@name}'
+row '#{=/3/#{@x}:@name}'
+row '#{=#{@x}:@name}'
+row '#{=3:#{@name}}'
+row '#{=2:@cond}'
+row '#{=2;E:@cond}'
+row '#{E;=2:@cond}'
+row '#{=3:@esc}'
+row '#{=2:pane_title}'
+row '#{=21:pane_title}'
+row '"#{=21:pane_title}"'
+
 # Deferred modifiers expand to nothing in M0.
 rowdef '#{l:abc}'
 rowdef '#{l:abc}x' x
-rowdef 'x#{=3:@name}y' xy
-rowdef '#{=3:@name}'
 rowdef '#{s/h/j/:@name}'
 rowdef '#{!:@x}'
 rowdef '#{!!:@x}'

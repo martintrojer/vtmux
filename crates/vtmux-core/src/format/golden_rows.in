@@ -144,10 +144,27 @@ fn rows() -> Vec<(String, String)> {
         r("ok#{==:a}x", "ok"), // set -gF @out 'ok#{==:a}x' ; show -gv @out
         r("#{||:", ""), // set -gF @out '#{||:' ; show -gv @out
         r("x#{?@x,a,b", "x"), // set -gF @out 'x#{?@x,a,b' ; show -gv @out
+        r("x#{=3:@name}y", "xhely"), // set -gF @out 'x#{=3:@name}y' ; show -gv @out
+        r("#{=3:@name}", "hel"), // set -gF @out '#{=3:@name}' ; show -gv @out
+        r("#{=-3:@name}", "llo"), // set -gF @out '#{=-3:@name}' ; show -gv @out
+        r("#{=10:@name}", "hello"), // set -gF @out '#{=10:@name}' ; show -gv @out
+        r("#{=0:@name}", "hello"), // set -gF @out '#{=0:@name}' ; show -gv @out
+        r("#{=abc:@name}", "hello"), // set -gF @out '#{=abc:@name}' ; show -gv @out
+        r("#{=/3/...:@name}", "hel..."), // set -gF @out '#{=/3/...:@name}' ; show -gv @out
+        r("#{=/-3/...:@name}", "...llo"), // set -gF @out '#{=/-3/...:@name}' ; show -gv @out
+        r("#{=/10/...:@name}", "hello"), // set -gF @out '#{=/10/...:@name}' ; show -gv @out
+        r("#{=/3/#{@x}:@name}", "hel1"), // set -gF @out '#{=/3/#{@x}:@name}' ; show -gv @out
+        r("#{=#{@x}:@name}", "=1:@name"), // set -gF @out '#{=#{@x}:@name}' ; show -gv @out
+        r("#{=3:#{@name}}", "hel"), // set -gF @out '#{=3:#{@name}}' ; show -gv @out
+        r("#{=2:@cond}", "#{"), // set -gF @out '#{=2:@cond}' ; show -gv @out
+        r("#{=2;E:@cond}", "ye"), // set -gF @out '#{=2;E:@cond}' ; show -gv @out
+        r("#{E;=2:@cond}", "ye"), // set -gF @out '#{E;=2:@cond}' ; show -gv @out
+        r("#{=3:@esc}", "a#,"), // set -gF @out '#{=3:@esc}' ; show -gv @out
+        r("#{=2:pane_title}", "t"), // set -gF @out '#{=2:pane_title}' ; show -gv @out
+        r("#{=21:pane_title}", "t"), // set -gF @out '#{=21:pane_title}' ; show -gv @out
+        r("\"#{=21:pane_title}\"", "\"t\""), // set -gF @out '"#{=21:pane_title}"' ; show -gv @out
         r("#{l:abc}", ""), // deferred in M0; set -gF @out '#{l:abc}' ; show -gv @out gives "abc"
         r("#{l:abc}x", "x"), // deferred in M0; set -gF @out '#{l:abc}x' ; show -gv @out gives "abcx"
-        r("x#{=3:@name}y", "xy"), // deferred in M0; set -gF @out 'x#{=3:@name}y' ; show -gv @out gives "xhely"
-        r("#{=3:@name}", ""), // deferred in M0; set -gF @out '#{=3:@name}' ; show -gv @out gives "hel"
         r("#{s/h/j/:@name}", ""), // deferred in M0; set -gF @out '#{s/h/j/:@name}' ; show -gv @out gives "jello"
         r("#{!:@x}", ""), // deferred in M0; set -gF @out '#{!:@x}' ; show -gv @out gives "0"
         r("#{!!:@x}", ""), // deferred in M0; set -gF @out '#{!!:@x}' ; show -gv @out gives "1"
