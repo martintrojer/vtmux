@@ -32,10 +32,11 @@ pub fn exec(
     let quiet = args.flag('q');
     let mut paths = Vec::new();
     for raw in &args.positionals {
+        let raw = &*raw.text();
         let path = if args.flag('F') {
             super::expand(server, found, raw)
         } else {
-            raw.clone()
+            raw.to_owned()
         };
         if path == "-" {
             return Err(EdgeError::NotImplemented("source-file -".into()).into());
@@ -148,7 +149,7 @@ fn print_command(call: &CommandCall) -> String {
             parts.push(format!("-{f} {}", args_escape(v)));
         }
     }
-    parts.extend(args.positionals.iter().map(|p| args_escape(p)));
+    parts.extend(args.positionals.iter().map(|p| args_escape(&p.text())));
     if parts.is_empty() {
         call.entry.name.to_owned()
     } else {
@@ -173,6 +174,7 @@ pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
     };
     let parse = ParseOpts {
         parse_only: opts.parse_only,
+        one_group: false,
     };
     // Each line is its own group (cmd-parse.y cmd_parse_build_commands):
     // an error stops the rest of that line only.

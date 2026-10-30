@@ -42,6 +42,7 @@ pub fn exec(
     let mut bytes = Vec::new();
     for _ in 0..repeat {
         for arg in &args.positionals {
+            let arg = &*arg.text();
             if hex {
                 // -H: each argument is one hex byte; bad ones are skipped.
                 if let Ok(b) = u8::from_str_radix(arg, 16)

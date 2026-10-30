@@ -7,13 +7,55 @@
 //! -` parses; `new -d -x abc` fails later with `width invalid`), so the
 //! accessors below are what the server calls at execution time.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 
-use super::CmdError;
 use super::table::CmdEntry;
 use super::target::TargetSpec;
+use super::{CmdError, CommandList};
 use crate::error::EdgeError;
+
+/// One argument as the grammar delivers it (`struct args_value`,
+/// arguments.c): text, or a parsed `{ ... }` block (`ARGS_COMMANDS`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArgValue {
+    Str(String),
+    Commands(CommandList),
+}
+
+impl ArgValue {
+    /// The text of a string argument; `None` for a block.
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Str(s) => Some(s),
+            Self::Commands(_) => None,
+        }
+    }
+
+    /// `args_value_as_string` (arguments.c:100-115): a block is its printed
+    /// command list (`cmd_list_print` with no flags).
+    #[must_use]
+    pub fn text(&self) -> Cow<'_, str> {
+        match self {
+            Self::Str(s) => Cow::Borrowed(s),
+            Self::Commands(list) => Cow::Owned(list.print(super::PrintFlags::default())),
+        }
+    }
+}
+
+impl From<String> for ArgValue {
+    fn from(s: String) -> Self {
+        Self::Str(s)
+    }
+}
+
+impl PartialEq<&str> for ArgValue {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == Some(*other)
+    }
+}
 
 /// Parsed flags and positionals of one command.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -22,7 +64,59 @@ pub struct Args {
     /// a flag given without a value (booleans, and `x::` flags used bare).
     /// `-pp` is two entries, as `args_has` counts it (arguments.c:663-683).
     pub flags: BTreeMap<char, Vec<Option<String>>>,
-    pub positionals: Vec<String>,
+    pub positionals: Vec<ArgValue>,
+}
+
+/// What a positional may be (`enum args_parse_type`, tmux.h). tmux has a
+/// third, `ARGS_PARSE_COMMANDS`, that no 3.8 command uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ArgType {
+    Str,
+    CommandsOrString,
+}
+
+/// The per-command `args_parse` callback (`cmd_*_args_parse`): what
+/// positional `idx` may be, given the flags and positionals before it.
+/// Commands without a callback take strings only.
+fn arg_type(entry: &CmdEntry, args: &Args, idx: usize) -> ArgType {
+    use ArgType::{CommandsOrString as Cos, Str};
+    match entry.name {
+        // cmd-bind-key.c:47, cmd-choose-tree.c:115, cmd-command-prompt.c:75,
+        // cmd-confirm-before.c:59: every positional.
+        "bind-key" | "choose-tree" | "choose-client" | "choose-buffer" | "switch-mode"
+        | "display-panes" | "command-prompt" | "confirm-before" => Cos,
+        // cmd-if-shell.c:63: the two commands.
+        "if-shell" if idx == 1 || idx == 2 => Cos,
+        // cmd-run-shell.c:69: `-C` runs tmux commands.
+        "run-shell" if args.flag('C') => Cos,
+        // cmd-set-option.c:79: the value (hooks take commands) and, with
+        // `-B`, everything.
+        "set-option" | "set-window-option" | "set-hook" if args.flag('B') || idx == 1 => Cos,
+        // cmd-display-menu.c:70: `name [key] [command]` groups; an empty
+        // name is a separator and takes no key or command.
+        "display-menu" => {
+            let mut i = 0;
+            loop {
+                if i == idx {
+                    return Str;
+                }
+                let empty = args.positionals[i].text().is_empty();
+                i += 1;
+                if empty {
+                    continue;
+                }
+                if i == idx {
+                    return Str;
+                }
+                i += 1;
+                if i == idx {
+                    return Cos;
+                }
+                i += 1;
+            }
+        }
+        _ => Str,
+    }
 }
 
 /// Why a flag's number did not convert (`strtonum`'s `errstr`, plus the
@@ -118,7 +212,14 @@ impl Args {
     /// `args_string`: positional `idx`.
     #[must_use]
     pub fn positional(&self, idx: usize) -> Option<&str> {
-        self.positionals.get(idx).map(String::as_str)
+        self.positionals.get(idx)?.as_str()
+    }
+
+    /// `args_string` proper: positional `idx` as text, a block as its
+    /// printed commands.
+    #[must_use]
+    pub fn positional_text(&self, idx: usize) -> Option<Cow<'_, str>> {
+        self.positionals.get(idx).map(ArgValue::text)
     }
 
     /// `args_strtonum` without the format expansion: the flag's last value as
@@ -135,8 +236,16 @@ impl Args {
     }
 
     /// Port of `args_parse` (arguments.c:256-345) for `words` (the command
-    /// name first, as tmux passes it).
+    /// name first, as tmux passes it), all strings.
     pub fn parse(entry: &CmdEntry, words: &[String]) -> Result<Self, CmdError> {
+        let values: Vec<ArgValue> = words.iter().cloned().map(ArgValue::Str).collect();
+        Self::parse_values(entry, &values)
+    }
+
+    /// `args_parse` over values that may be `{ }` blocks. A block ends the
+    /// flags, cannot be a flag's value, and is only accepted as a positional
+    /// where the command's `args_parse` callback says so.
+    pub fn parse_values(entry: &CmdEntry, words: &[ArgValue]) -> Result<Self, CmdError> {
         let mut args = Self::default();
         let mut i = 1;
         while i < words.len() {
@@ -145,7 +254,17 @@ impl Args {
             }
         }
         // Everything left is positional; `--` was consumed above.
-        args.positionals = words.get(i..).unwrap_or_default().to_vec();
+        for value in words.get(i..).unwrap_or_default() {
+            let idx = args.positionals.len();
+            if matches!(value, ArgValue::Commands(_)) && arg_type(entry, &args, idx) == ArgType::Str
+            {
+                return Err(CmdError::ArgumentNotString {
+                    command: entry.name.to_owned(),
+                    index: idx + 1,
+                });
+            }
+            args.positionals.push(value.clone());
+        }
         let count = args.positionals.len();
         if count < entry.min_args {
             return Err(EdgeError::TooFewArgs {
@@ -171,11 +290,15 @@ impl Args {
 /// `Ok(true)` to keep going and `Ok(false)` when the flags have ended.
 fn parse_flags(
     entry: &CmdEntry,
-    words: &[String],
+    words: &[ArgValue],
     i: &mut usize,
     args: &mut Args,
 ) -> Result<bool, CmdError> {
-    let word = words[*i].as_bytes();
+    // A block is never a flag (arguments.c:218).
+    let ArgValue::Str(word_str) = &words[*i] else {
+        return Ok(false);
+    };
+    let word = word_str.as_bytes();
     // A lone "-" or a word not starting with '-' is the first positional.
     if word.first() != Some(&b'-') || word.len() == 1 {
         return Ok(false);
@@ -218,7 +341,7 @@ fn parse_flags(
         let optional = template.get(at + 2) == Some(&b':');
         // The rest of this word is the value (`-ta`); `pos` is on a char
         // boundary because flag letters are ASCII.
-        let rest = &words[*i - 1][pos..];
+        let rest = &word_str[pos..];
         let value = flag_argument(entry, words, i, rest, ch, optional)?;
         args.flags.entry(ch).or_default().push(value);
         return Ok(true);
@@ -230,7 +353,7 @@ fn parse_flags(
 /// takes one. `None` is an optional flag given without a value.
 fn flag_argument(
     entry: &CmdEntry,
-    words: &[String],
+    words: &[ArgValue],
     i: &mut usize,
     rest: &str,
     flag: char,
@@ -244,6 +367,12 @@ fn flag_argument(
             return Ok(None); // "either - or end"
         }
         return Err(CmdError::FlagNeedsValue {
+            command: entry.name.to_owned(),
+            flag,
+        });
+    };
+    let ArgValue::Str(next) = next else {
+        return Err(CmdError::FlagArgumentNotString {
             command: entry.name.to_owned(),
             flag,
         });

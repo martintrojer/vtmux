@@ -124,7 +124,11 @@ pub fn exec(
     let spec = NewSession {
         name: session_name,
         window_name,
-        argv: args.positionals.clone(),
+        argv: args
+            .positionals
+            .iter()
+            .map(|p| p.text().into_owned())
+            .collect(),
         cwd,
         cols,
         rows,
