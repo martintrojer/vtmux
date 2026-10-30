@@ -1,0 +1,8 @@
+name = "screen_pane_charset_shift"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh -c 'printf \"\\033)0\\033[31m\\016q            \\017            y\\033[0m\\n\\033(0\\0337\\033(B\\033[32ma\\0338            z\\033[0m\\n\\033(0\\033[34mq\\033[1\\042q            \\033[0\\042q            w\\033(B\\033[0m\\n\"; exec cat'"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+]

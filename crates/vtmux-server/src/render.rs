@@ -322,6 +322,7 @@ pub fn status(
             fg: Color::Default,
             ..base
         },
+        ..Cell::default()
     });
     // `#{T;=/#{status-left-length}:status-left}`, status-left-length 10.
     let left = cells(&vtmux_core::format::trim::trim_left(left, 10), base);
@@ -390,12 +391,14 @@ fn cells(text: &str, style: Style) -> Vec<Cell> {
                     text: c.to_string(),
                     width: u8::try_from(w).unwrap_or(1),
                     style,
+                    ..Cell::default()
                 });
                 if w == 2 {
                     out.push(Cell {
                         text: String::new(),
                         width: 0,
                         style,
+                        ..Cell::default()
                     });
                 }
             }
@@ -438,6 +441,7 @@ fn put_list(
         text: text.into(),
         width: 1,
         style,
+        ..Cell::default()
     };
     if start != 0 && width > 1 {
         row[offset] = marker("<");

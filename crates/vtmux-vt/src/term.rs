@@ -152,11 +152,11 @@ impl PaneTerm {
     /// model is exact while rows scroll off the top of a full-width region;
     /// see `DIVERGENCES-PENDING.md` for where Ghostty's grid differs.
     pub fn feed(&mut self, bytes: &[u8]) {
-        if self.history_lines == 0 {
-            self.term.vt_write(bytes);
-            return;
-        }
-        let step = (self.history_lines / 2).max(1);
+        let step = if self.history_lines == 0 {
+            usize::MAX
+        } else {
+            (self.history_lines / 2).max(1)
+        };
         let mut i = 0;
         while i < bytes.len() {
             let mut j = i;
@@ -188,12 +188,31 @@ impl PaneTerm {
                 }
                 self.feed_piece(&bytes[i..=i]);
                 i += 1;
+                if self.scan.take_resync() {
+                    self.sync_charset();
+                }
             }
+        }
+    }
+
+    /// Make Ghostty's DECSCA protection bit, which every printed cell copies
+    /// from the cursor, equal to tmux's `GRID_ATTR_CHARSET` for the next
+    /// print. `CSI 1 " q` first so the most recent protection mode is DEC
+    /// and ED/EL/ECH ignore the bit (Ghostty `setProtectedMode`); only
+    /// DECSED/DECSEL read it, and tmux implements neither.
+    fn sync_charset(&mut self) {
+        self.term.vt_write(b"\x1b[1\"q");
+        if !self.scan.charset.acs() {
+            self.term.vt_write(b"\x1b[0\"q");
         }
     }
 
     fn feed_piece(&mut self, piece: &[u8]) {
         if piece.is_empty() {
+            return;
+        }
+        if self.history_lines == 0 {
+            self.term.vt_write(piece);
             return;
         }
         let track = !self.alternate_on();
@@ -378,17 +397,78 @@ fn tmux_hsize(mut hsize: usize, limit: usize, lines: usize) -> usize {
     hsize
 }
 
+/// tmux's charset state: G0 and G1 each designated ACS (`ESC ( 0`, `ESC ) 0`)
+/// or not (`ESC ( B`, `ESC ) B`), SO/SI selecting one, saved and restored with
+/// the cursor (input.c `input_reset_cell`, `input_save_state`,
+/// `input_restore_state`, `input_print`).
+///
+/// Ghostty keeps no charset per cell, so it cannot say which cells tmux
+/// would flag `GRID_ATTR_CHARSET`, which `tty_draw_line` never erases. The
+/// flag is carried in the cell's DECSCA protection bit instead
+/// ([`PaneTerm::sync_charset`]); tmux ignores DECSCA, SPA and EPA, so a
+/// program's own use of them is overridden at once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Charset {
+    g0: bool,
+    g1: bool,
+    shifted: bool,
+    saved: (bool, bool, bool),
+}
+
+impl Charset {
+    fn acs(self) -> bool {
+        if self.shifted { self.g1 } else { self.g0 }
+    }
+
+    fn apply(&mut self, op: CharsetOp) {
+        match op {
+            CharsetOp::G0(on) => self.g0 = on,
+            CharsetOp::G1(on) => self.g1 = on,
+            CharsetOp::Shift(on) => self.shifted = on,
+            CharsetOp::Save => self.saved = (self.g0, self.g1, self.shifted),
+            CharsetOp::Restore => (self.g0, self.g1, self.shifted) = self.saved,
+            CharsetOp::Reset => *self = Self::default(),
+        }
+    }
+}
+
+/// A sequence that changes [`Charset`] or Ghostty's protection state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CharsetOp {
+    /// `ESC ( 0` / `ESC ( B`.
+    G0(bool),
+    /// `ESC ) 0` / `ESC ) B`.
+    G1(bool),
+    /// SO (true) / SI (false).
+    Shift(bool),
+    /// DECSC, `CSI s`.
+    Save,
+    /// DECRC, `CSI u`.
+    Restore,
+    /// RIS.
+    Reset,
+}
+
 /// Finds `CSI ? ... h|l` sequences that name the alternate screen (modes 47,
 /// 1047, 1049): the one place the primary history must be copied before
 /// libghostty hides it. A false positive costs only a copy; a miss loses the
 /// history while the alternate screen is up. Also finds `CSI 3 J` (ED3), which
-/// tmux applies to the primary history even under the alternate screen.
+/// tmux applies to the primary history even under the alternate screen, and
+/// the sequences that touch [`Charset`].
 #[derive(Debug, Default)]
 struct AltModeScanner {
     state: ScanState,
     private: bool,
     other: bool,
+    /// The CSI's intermediate byte (0x20-0x2f), if any.
+    intermediate: Option<u8>,
     params: Vec<u8>,
+    charset: Charset,
+    /// Ghostty's protection bit may differ from `charset`: set by a charset
+    /// change, and by what changes Ghostty's protection or cursor state
+    /// where tmux changes nothing (DECSCA, SPA, EPA, DECSTR, a screen
+    /// switch). Fixed once the parser is back in the ground state.
+    resync: bool,
 }
 
 /// What [`AltModeScanner`] found; reported on the sequence's final byte.
@@ -398,6 +478,8 @@ enum ScanEvent {
     AltMode(u8),
     /// `CSI 3 J`.
     ClearHistory,
+    /// Back in the ground state with [`AltModeScanner::take_resync`] due.
+    Resync,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -405,25 +487,54 @@ enum ScanState {
     #[default]
     Ground,
     Esc,
+    /// `ESC` then an intermediate byte (`(`, `)`, `#`, ...).
+    EscIntermediate(u8),
     Csi,
+    /// OSC, DCS, APC, PM or SOS: skipped to ST (or BEL).
+    Str,
 }
 
 impl AltModeScanner {
-    /// Feed one byte; `Some` when it ends an alternate-screen set or reset,
-    /// or an ED3.
+    /// Feed one byte; `Some` when it ends a sequence of interest.
     fn push(&mut self, b: u8) -> Option<ScanEvent> {
         match (self.state, b) {
-            (_, 0x18 | 0x1a) => self.state = ScanState::Ground,
+            (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
-            // Ground, and C0 controls inside a CSI (executed, not parameters).
-            (ScanState::Ground, _) | (ScanState::Csi, 0x00..=0x1f) => {}
+            // Strings are skipped; further intermediates change nothing we track.
+            (ScanState::Str, _) | (ScanState::EscIntermediate(_), 0x20..=0x2f) => {}
+            // SO and SI are executed anywhere outside a string, even inside
+            // an escape sequence.
+            (_, 0x0e | 0x0f) => self.charset_op(CharsetOp::Shift(b == 0x0e)),
+            // Ground, and other C0 controls inside a sequence (executed).
+            (ScanState::Ground, _)
+            | (ScanState::Csi | ScanState::Esc | ScanState::EscIntermediate(_), 0x00..=0x1f) => {}
             (ScanState::Esc, b'[') => {
                 self.state = ScanState::Csi;
                 self.private = false;
                 self.other = false;
+                self.intermediate = None;
                 self.params.clear();
             }
-            (ScanState::Esc, _) => self.state = ScanState::Ground,
+            (ScanState::Esc, b']' | b'P' | b'_' | b'^' | b'X') => self.state = ScanState::Str,
+            (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(b),
+            (ScanState::Esc, _) => {
+                self.state = ScanState::Ground;
+                match b {
+                    b'7' => self.charset_op(CharsetOp::Save),
+                    b'8' => self.charset_op(CharsetOp::Restore),
+                    b'c' => self.charset_op(CharsetOp::Reset),
+                    b'V' | b'W' => self.resync = true,
+                    _ => {}
+                }
+            }
+            (ScanState::EscIntermediate(i), _) => {
+                self.state = ScanState::Ground;
+                match (i, b) {
+                    (b'(', b'0' | b'B') => self.charset_op(CharsetOp::G0(b == b'0')),
+                    (b')', b'0' | b'B') => self.charset_op(CharsetOp::G1(b == b'0')),
+                    _ => {}
+                }
+            }
             (ScanState::Csi, b'?') if self.params.is_empty() && !self.private => {
                 self.private = true;
             }
@@ -434,27 +545,59 @@ impl AltModeScanner {
             }
             (ScanState::Csi, 0x40..=0x7e) => {
                 self.state = ScanState::Ground;
-                if !self.private
-                    && !self.other
-                    && b == b'J'
-                    && matches!(self.params.as_slice(), b"3" | b"3;0")
-                {
-                    return Some(ScanEvent::ClearHistory);
-                }
-                if self.private
-                    && !self.other
-                    && matches!(b, b'h' | b'l')
-                    && self
-                        .params
-                        .split(|c| *c == b';')
-                        .any(|p| matches!(p, b"47" | b"1047" | b"1049"))
-                {
-                    return Some(ScanEvent::AltMode(b));
-                }
+                return self.csi_event(b);
+            }
+            (ScanState::Csi, 0x20..=0x2f) => {
+                self.other = true;
+                self.intermediate = Some(b);
             }
             (ScanState::Csi, _) => self.other = true,
         }
-        None
+        (self.resync && self.state == ScanState::Ground).then_some(ScanEvent::Resync)
+    }
+
+    fn charset_op(&mut self, op: CharsetOp) {
+        self.charset.apply(op);
+        self.resync = true;
+    }
+
+    /// True once if Ghostty's protection bit needs setting from
+    /// [`Self::charset`]; only call in the ground state.
+    fn take_resync(&mut self) -> bool {
+        self.state == ScanState::Ground && std::mem::take(&mut self.resync)
+    }
+
+    fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
+        let op = match (self.private, self.intermediate, b) {
+            (false, Some(b'"'), b'q') | (false, Some(b'!'), b'p') => {
+                self.resync = true;
+                return Some(ScanEvent::Resync);
+            }
+            _ if self.other => None,
+            (false, None, b's') => Some(CharsetOp::Save),
+            (false, None, b'u') => Some(CharsetOp::Restore),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.charset_op(op);
+            return Some(ScanEvent::Resync);
+        }
+        if !self.private && b == b'J' && matches!(self.params.as_slice(), b"3" | b"3;0") {
+            return Some(ScanEvent::ClearHistory);
+        }
+        if self.private
+            && !self.other
+            && matches!(b, b'h' | b'l')
+            && self
+                .params
+                .split(|c| *c == b';')
+                .any(|p| matches!(p, b"47" | b"1047" | b"1049"))
+        {
+            // Ghostty keeps a cursor, so a protection bit, per screen.
+            self.resync = true;
+            return Some(ScanEvent::AltMode(b));
+        }
+        self.resync.then_some(ScanEvent::Resync)
     }
 }
 
@@ -795,6 +938,7 @@ mod tests {
                 .filter_map(|b| match s.push(*b)? {
                     ScanEvent::AltMode(f) => Some(f),
                     ScanEvent::ClearHistory => Some(b'J'),
+                    ScanEvent::Resync => None,
                 })
                 .collect::<Vec<u8>>()
         };
@@ -808,6 +952,36 @@ mod tests {
             find(b"\x1b[3J\x1b[3;0J\x1b[J\x1b[2J\x1b[?3J\x1b[3;1J"),
             b"JJ"
         );
+    }
+
+    /// tmux's charset state reaches the cell's protection bit, which a
+    /// snapshot reports as `acs`: G0/G1 designation, SO/SI, DECSC/DECRC,
+    /// RIS; DECSCA and EPA (ignored by tmux) cannot clear it, and erasing
+    /// still clears ACS cells.
+    #[test]
+    fn charset_state_follows_tmux() {
+        let acs = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 2, 0);
+            t.feed(bytes);
+            let s = crate::snapshot(&t);
+            (0..20)
+                .take_while(|&x| !s.cell(x, 0).unwrap().text.is_empty())
+                .map(|x| if s.cell(x, 0).unwrap().acs { '1' } else { '0' })
+                .collect::<String>()
+        };
+        assert_eq!(acs(b"a\x1b(0q\x1b(Bq"), "010");
+        assert_eq!(acs(b"\x1b)0a\x0eq\x0fq"), "010");
+        // Restoring also moves the cursor back over the first cell.
+        assert_eq!(acs(b"\x1b(0\x1b7\x1b(Ba\x1b8q"), "1");
+        assert_eq!(acs(b"\x1b7\x1b(0a\x1b8q"), "0");
+        assert_eq!(acs(b"\x1b(0\x1b[s\x1b(B\x1b[uq"), "1");
+        assert_eq!(acs(b"\x1b(0q\x1bcq"), "0");
+        assert_eq!(acs(b"\x1b(0q\x1b[0\"qq\x1bWq\x1b[!pq"), "1111");
+        assert_eq!(acs(b"\x1b[1\"qa"), "0");
+        // SO inside a CSI still takes effect after it.
+        assert_eq!(acs(b"\x1b)0\x1b[\x0e1mq"), "1");
+        assert_eq!(acs(b"\x1b(0qqq\x1b[1;2H\x1b[K\x1b[3G\x1b[X"), "1");
+        assert_eq!(acs(b"\x1b(0q\x1b[?1049hq\x1b(Bq\x1b[?1049lq"), "10");
     }
 
     #[test]

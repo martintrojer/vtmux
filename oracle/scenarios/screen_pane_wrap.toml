@@ -1,0 +1,8 @@
+name = "screen_pane_wrap"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh -c 'printf \"\\033[31mxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            y\\033[0m\\n\\033[32mzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\\033[44m            w\\033[0m\\n\\033[33mvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv            u            t\\033[0m\\n\"; exec cat'"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+]

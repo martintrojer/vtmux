@@ -85,3 +85,15 @@ and the probes from `review_vt_wrap`.
   screen it leaves the primary 6.
 - vtmux (Ghostty): a full reset drops scrollback, `history_size` 0.
 - Visible: `#{history_size}`, capture and copy mode after `reset` / `tput reset`.
+
+## P8. Selective erase spares DEC-graphics cells
+
+- Golden: none (no regress or oracle case uses DECSED/DECSEL).
+- tmux: has no `CSI ? J` / `CSI ? K` entry (input.c `input_csi_table`), so
+  selective erase does nothing; DECSCA (`CSI " q`), SPA and EPA are ignored.
+- vtmux: Ghostty keeps no charset per cell, so `PaneTerm` carries tmux's
+  `GRID_ATTR_CHARSET` in the cell's DECSCA protection bit (term.rs `Charset`,
+  needed by `tty_draw_line_get_empty`). Ghostty runs DECSED/DECSEL, which
+  erase the cells printed without `ESC ( 0` and keep the ones printed with it.
+  ED/EL/ECH are unaffected: the most recent protection mode is always DEC.
+- Visible: a program that sends `CSI ? J`/`CSI ? K` (rare; tmux drops them).

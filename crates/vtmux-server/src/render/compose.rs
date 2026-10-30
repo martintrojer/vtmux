@@ -79,6 +79,8 @@ impl Theme {
             text,
             width: c.width,
             style: self.style(&c.style),
+            acs: c.style.attrs.contains(Attrs::ACS),
+            link: c.style.link.is_some(),
         }
     }
 }
@@ -172,6 +174,8 @@ fn fill(base: &CellStyle, f: &styled::Cell) -> styled::Cell {
 /// Draw `scene` into the top `scene.rows` rows of `screen`.
 pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
     let cols = usize::from(screen.cols);
+    // The last row drawn left the terminal cursor past its last column.
+    let mut ended_written = false;
     for y in 0..scene.rows.min(screen.rows) {
         for x in 0..scene.cols.min(screen.cols) {
             let cell = match scene.get(x, y) {
@@ -198,6 +202,7 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
                         text,
                         width: 1,
                         style: theme.style(style),
+                        ..Cell::default()
                     }
                 }
                 SceneCell::Status { pane, offset, .. } => d
@@ -212,6 +217,7 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
         // fill are drawn cell by cell (`tty_cell`) and keep their text.
         let width = scene.cols.min(screen.cols);
         let mut x = 0;
+        let above_ended_written = std::mem::take(&mut ended_written);
         while x < width {
             let Some(key) = span_key(scene.get(x, y), x) else {
                 x += 1;
@@ -221,10 +227,32 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
                 .find(|&e| span_key(scene.get(e, y), e) != Some(key))
                 .unwrap_or(width);
             let row = usize::from(y) * cols;
-            draw_line(
+            let full = x == 0 && end == screen.cols;
+            // tty_draw_line's `wrapped`: a full-width row of a line the row
+            // above wrapped onto, with the terminal cursor left past the
+            // end of that row.
+            let wrapped = full
+                && above_ended_written
+                && match scene.get(x, y) {
+                    SceneCell::Pane { pane, py, .. } => py
+                        .checked_sub(1)
+                        .and_then(|above| {
+                            d.panes
+                                .get(pane)?
+                                .content
+                                .wrapped
+                                .get(usize::try_from(above).ok()?)
+                                .copied()
+                        })
+                        .unwrap_or(false),
+                    _ => false,
+                };
+            let written = draw_line(
                 &mut screen.cells[row + usize::from(x)..row + usize::from(end)],
                 d.bce,
+                wrapped,
             );
+            ended_written = full && written;
             x = end;
         }
     }
@@ -243,8 +271,9 @@ fn span_key(cell: &SceneCell, x: u16) -> Option<(bool, PaneId, i64)> {
 }
 
 /// tty-draw.c `tty_draw_line_get_empty`: blank (cleared or a single space),
-/// no attributes, and the background of the cell before it; the foreground
-/// does not count. Snapshots carry no tab flag or hyperlink.
+/// no attributes (the charset counts, `GRID_ATTR_CHARSET`), no hyperlink,
+/// and the background of the cell before it; the foreground does not count.
+/// Snapshots carry no tab flag.
 fn is_empty(c: &Cell, bg: Color) -> bool {
     let plain = Style {
         fg: c.style.fg,
@@ -252,7 +281,12 @@ fn is_empty(c: &Cell, bg: Color) -> bool {
         underline_color: c.style.underline_color,
         ..Style::default()
     };
-    c.width == 1 && (c.text.is_empty() || c.text == " ") && c.style.bg == bg && c.style == plain
+    c.width == 1
+        && !c.acs
+        && !c.link
+        && (c.text.is_empty() || c.text == " ")
+        && c.style.bg == bg
+        && c.style == plain
 }
 
 /// The cells of one span as the terminal shows them after tty-draw.c
@@ -261,9 +295,17 @@ fn is_empty(c: &Cell, bg: Color) -> bool {
 /// unless the terminal would need a fake BCE, and keep only the background,
 /// no text; shorter runs are spaces in the last cell's style. Erased cells
 /// are the only empty-text cells left, so the compositor erases them too.
-fn draw_line(cells: &mut [Cell], bce: bool) {
+///
+/// `wrapped` (the row continues a line wrapped onto it, see [`compose`])
+/// writes a leading run as spaces whatever its length; it lasts until the
+/// first flush, so only a run at the start of the row.
+///
+/// Returns whether the last cell was written, not erased: the terminal
+/// cursor is then past the end of the span.
+fn draw_line(cells: &mut [Cell], bce: bool, mut wrapped: bool) -> bool {
     // `last` starts as the default cell.
     let mut last_bg = Color::Default;
+    let mut written = false;
     let mut i = 0;
     while i < cells.len() {
         if cells[i].width == 0 {
@@ -276,6 +318,8 @@ fn draw_line(cells: &mut [Cell], bce: bool) {
             }
             last_bg = cells[i].style.bg;
             i += usize::from(cells[i].width);
+            wrapped = false;
+            written = true;
             continue;
         }
         let start = i;
@@ -283,7 +327,9 @@ fn draw_line(cells: &mut [Cell], bce: bool) {
             i += 1;
         }
         let last = cells[i - 1].style;
-        let erase = i - start >= 10 && (bce || last.bg == Color::Default);
+        let erase = !wrapped && i - start >= 10 && (bce || last.bg == Color::Default);
+        wrapped = false;
+        written = !erase;
         let cell = if erase {
             Cell {
                 text: String::new(),
@@ -292,16 +338,19 @@ fn draw_line(cells: &mut [Cell], bce: bool) {
                     bg: last.bg,
                     ..Style::default()
                 },
+                ..Cell::default()
             }
         } else {
             Cell {
                 text: " ".into(),
                 width: 1,
                 style: last,
+                ..Cell::default()
             }
         };
         cells[start..i].fill(cell);
     }
+    written
 }
 
 /// `window_make_pane_status`: the border line under the status line, then
@@ -369,6 +418,7 @@ mod tests {
                 bg,
                 ..Style::default()
             },
+            ..Cell::default()
         }
     }
 
@@ -382,7 +432,7 @@ mod tests {
             let mut row = vec![text_cell("x", red, blue)];
             row.extend((0..n).map(|_| text_cell(" ", red, blue)));
             row.push(text_cell("y", red, blue));
-            draw_line(&mut row, true);
+            draw_line(&mut row, true, false);
             let gap = &row[1..=n];
             if erased {
                 assert!(gap.iter().all(|c| c.text.is_empty()
@@ -406,20 +456,50 @@ mod tests {
         let mut row: Vec<Cell> = (0..12)
             .map(|_| text_cell(" ", Color::Default, blue))
             .collect();
-        draw_line(&mut row, true);
+        draw_line(&mut row, true, false);
         assert_eq!(row[0].text, " ", "first blue space follows a default bg");
         assert!(row[1..].iter().all(|c| c.text.is_empty()));
         let mut row: Vec<Cell> = (0..12)
             .map(|_| text_cell(" ", Color::Default, blue))
             .collect();
-        draw_line(&mut row, false);
+        draw_line(&mut row, false, false);
         assert!(row.iter().all(|c| c.text == " "));
         let mut row: Vec<Cell> = (0..12)
             .map(|_| text_cell(" ", Color::Default, Color::Default))
             .collect();
         row[5].style.bold = true;
-        draw_line(&mut row, true);
+        draw_line(&mut row, true, false);
         assert!(row.iter().all(|c| c.text == " "));
+    }
+
+    /// Spaces under DEC graphics or inside a hyperlink are not empty, so a
+    /// run of them is written with its foreground (`screen_pane_link_acs`).
+    #[test]
+    fn charset_and_link_spaces_are_not_empty() {
+        let red = Color::Palette(1);
+        for mark in [|c: &mut Cell| c.acs = true, |c: &mut Cell| c.link = true] {
+            let mut row: Vec<Cell> = (0..12)
+                .map(|_| text_cell(" ", red, Color::Default))
+                .collect();
+            row.iter_mut().for_each(mark);
+            draw_line(&mut row, true, false);
+            assert!(row.iter().all(|c| c.text == " " && c.style.fg == red));
+        }
+    }
+
+    /// A wrapped row writes its leading run as spaces in the last cell's
+    /// style; a later run is erased as usual (`screen_pane_wrap`).
+    #[test]
+    fn wrapped_row_writes_only_its_leading_run() {
+        let red = Color::Palette(1);
+        let mut row: Vec<Cell> = (0..12)
+            .map(|_| text_cell(" ", red, Color::Default))
+            .collect();
+        row.push(text_cell("y", red, Color::Default));
+        row.extend((0..12).map(|_| text_cell(" ", red, Color::Default)));
+        assert!(!draw_line(&mut row, true, true));
+        assert!(row[..12].iter().all(|c| c.text == " " && c.style.fg == red));
+        assert!(row[13..].iter().all(|c| c.text.is_empty()));
     }
 
     #[test]
