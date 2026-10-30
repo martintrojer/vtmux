@@ -1,6 +1,15 @@
 //! Compose the final picture before diffing it (D14). Never stream pane
 //! output directly: overlays and status are in the same snapshot.
+//!
+//! A window is drawn in two steps, as tmux's screen-redraw.c does: a
+//! [`scene::Scene`] says what every cell is (pane, border, pane status line,
+//! fill), then [`compose::compose`] draws it with the styles the model
+//! gives ([`window::Source`]).
 use std::fmt::Write as _;
+
+pub mod compose;
+pub mod scene;
+pub mod window;
 use vtmux_core::protocol::Hello;
 use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
 
@@ -144,6 +153,35 @@ impl Compositor {
                     continue;
                 }
                 let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
+                // tty-draw.c tty_draw_line_clear: a run of ten or more empty
+                // cells is erased (EL to the end of the line, else ECH), not
+                // written: erased cells keep only the background and hold no
+                // text, which a terminal (and capture -e) can tell apart.
+                // Borders and fill are written cell by cell (`tty_cell`), so
+                // a literal space is never part of a run.
+                let run = (x..screen.cols)
+                    .take_while(|&cx| {
+                        screen.cell(cx, y).is_some_and(|c| {
+                            c.text.is_empty()
+                                && c.width == 1
+                                && c.style == cell.style
+                                && (!same_size
+                                    || self.last.as_ref().and_then(|s| s.cell(cx, y)) != Some(c))
+                        })
+                    })
+                    .count();
+                let erasable = cell.style.bg == Color::Default || caps.bce;
+                if run >= 10 && erasable {
+                    set_style(&mut out, &mut style, cell.style, caps);
+                    let run = u16::try_from(run).unwrap_or(u16::MAX);
+                    if x + run == screen.cols {
+                        out.push_str("\x1b[K");
+                        break;
+                    }
+                    let _ = write!(out, "\x1b[{run}X");
+                    x += run;
+                    continue;
+                }
                 // tmux tty_draw_line clears long empty runs with BCE: the
                 // erased cells retain background, not foreground. Keep this
                 // observable distinction for the status gap (oracle trace).

@@ -1045,10 +1045,10 @@ impl Server {
                 self.exit_attached(id, 1, Some("server exited".into()));
                 continue;
             }
-            let Some((_, _, p)) = self.model.current_of(s) else {
+            if self.model.current_of(s).is_none() {
                 self.exit_attached(id, 0, Some("exited".into()));
                 continue;
-            };
+            }
             let client = &self.clients[&id];
             let Some(tty) = client.hello.as_ref().and_then(|h| h.tty.as_ref()) else {
                 continue;
@@ -1066,7 +1066,6 @@ impl Server {
             {
                 continue;
             }
-            let pane = &self.model.panes[&p];
             let mut screen = vtmux_vt::Snapshot {
                 cols,
                 rows,
@@ -1074,17 +1073,17 @@ impl Server {
                 cursor: None,
                 cursor_visible: true,
             };
-            let snap = vtmux_vt::snapshot(&pane.term);
-            for y in 0..snap.rows.min(rows.saturating_sub(1)) {
-                for x in 0..snap.cols.min(cols) {
-                    screen.cells[usize::from(y) * usize::from(cols) + usize::from(x)] =
-                        snap.cell(x, y).expect("pane cell").clone();
-                }
+            let source = crate::render::window::Source {
+                model: &self.model,
+                info: &self.info,
+                env: &self.global_env,
+            };
+            let area = rows.saturating_sub(1);
+            if let Some((scene, draw)) = source.window(s, cols, area, caps) {
+                let theme = source.theme(caps);
+                crate::render::compose::compose(&scene, &draw, &theme, &mut screen);
+                crate::render::window::cursor(&mut screen, &draw, &self.model, area);
             }
-            screen.cursor = snap
-                .cursor
-                .filter(|&(x, y)| x < cols && y < rows.saturating_sub(1));
-            screen.cursor_visible = snap.cursor_visible && screen.cursor.is_some();
             let found = crate::target::Found::from_session(&self.model, s);
             let ctx = self.format_ctx(found, Some(id));
             let left = vtmux_core::format::expand_str("[#{session_name}] ", &ctx);
@@ -1096,12 +1095,25 @@ impl Server {
             let windows: Vec<_> = session
                 .windows
                 .iter()
-                .map(|(&index, w)| {
+                .map(|(&index, &w)| {
+                    // The default window-status-format (options-table.c):
+                    // `#I:#W#{?window_flags,#{window_flags}, }`.
+                    let found = crate::target::Found {
+                        session: Some(s),
+                        index: Some(index),
+                        window: Some(w),
+                        ..Default::default()
+                    };
+                    let ctx = crate::format_ctx::Ctx::new(
+                        &self.model,
+                        &self.info,
+                        &self.global_env,
+                        found,
+                    );
                     (
-                        format!(
-                            "{index}:{}{}",
-                            self.model.windows[w].name,
-                            if index == session.current { "*" } else { " " }
+                        vtmux_core::format::expand_str(
+                            "#I:#W#{?window_flags,#{window_flags}, }",
+                            &ctx,
                         ),
                         index == session.current,
                     )
