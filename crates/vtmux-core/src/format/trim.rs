@@ -27,7 +27,10 @@ fn leading_hashes(s: &[u8], i: usize) -> (usize, usize, usize) {
 /// One step of the scan: a hash run, a style, a character or a dropped byte.
 enum Piece<'a> {
     /// `count` `#`s worth `width` columns.
-    Hashes { count: usize, width: usize },
+    Hashes {
+        count: usize,
+        width: usize,
+    },
     Style(&'a str),
     Char(&'a str, usize),
     Skip,

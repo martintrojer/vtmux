@@ -165,6 +165,23 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
         "source-file" => source_file::exec(server, item, args, found),
+        "select-pane" => {
+            if let Some(title) = args.value('T') {
+                let title = expand(server, found, title);
+                let title = crate::names::clean_name(&title);
+                let pane = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
+                server
+                    .model
+                    .panes
+                    .get_mut(&pane)
+                    .ok_or(EdgeError::NoCurrentTarget)?
+                    .term
+                    .feed(format!("\x1b]2;{title}\x1b\\").as_bytes());
+                Ok(())
+            } else {
+                Err(EdgeError::NotImplemented("select-pane except -T".into()).into())
+            }
+        }
         "attach-session" => {
             let spec = args.target('t');
             let found = target::resolve(

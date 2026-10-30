@@ -303,8 +303,8 @@ impl Eval<'_> {
     /// format.c:6080-6089 and 6627-6648. A width that is not a number in
     /// `-FORMAT_MAX_WIDTH..=FORMAT_MAX_WIDTH` (10000) is 0: no limit.
     fn trim(&mut self, t: &Trim, value: String, depth: usize) -> String {
-        let limit = crate::cmd::strtonum(&self.expand(&t.width, depth + 1), -10_000, 10_000)
-            .unwrap_or(0);
+        let limit =
+            crate::cmd::strtonum(&self.expand(&t.width, depth + 1), -10_000, 10_000).unwrap_or(0);
         if limit == 0 {
             return value;
         }

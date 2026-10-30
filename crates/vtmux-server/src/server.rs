@@ -75,6 +75,8 @@ struct Client {
     hello: Option<Hello>,
     attached: Option<SessionId>,
     prefix: bool,
+    caps: Option<crate::render::Caps>,
+    compositor: crate::render::Compositor,
 }
 
 /// What a new session needs ([`Server::create_session`]).
@@ -282,7 +284,11 @@ impl Server {
             return Some(Duration::ZERO);
         }
         let pending = self.model.panes.values().any(|p| p.changed);
-        pending.then_some(NAME_INTERVAL)
+        if self.clients.values().any(|c| c.attached.is_some()) {
+            Some(NAME_INTERVAL)
+        } else {
+            pending.then_some(NAME_INTERVAL)
+        }
     }
 
     /// `server_loop` (server.c:268-306): exit when told to, or when there
@@ -338,6 +344,8 @@ impl Server {
                             hello: None,
                             attached: None,
                             prefix: false,
+                            caps: None,
+                            compositor: crate::render::Compositor::default(),
                         },
                     );
                 }
@@ -555,12 +563,23 @@ impl Server {
             .clients
             .get_mut(&id)
             .ok_or(EdgeError::NoCurrentClient)?;
+        let caps = client
+            .hello
+            .as_ref()
+            .and_then(crate::render::Caps::from_hello)
+            .ok_or_else(|| {
+                EdgeError::OpenTerminalFailed(
+                    "unsupported terminal (M0: xterm, tmux-256color, screen)".into(),
+                )
+            })?;
+        client.caps = Some(caps);
+        client.compositor.invalidate();
         client.attached = Some(s);
         client.prefix = false;
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
         // set of modes, not their ordering.
-        self.send(id, &ServerMsg::Frame(b"\x1b[?1049h\x1b[22;0;0t\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h".to_vec()));
+        self.send(id, &ServerMsg::Frame(caps.startup()));
         Ok(())
     }
 
@@ -588,7 +607,9 @@ impl Server {
     }
 
     fn exit_attached(&mut self, id: ClientId, code: i32, message: Option<String>) {
-        self.send(id, &ServerMsg::Frame(b"\x1b[r\x1b[0m\x1b[?1l\x1b>\x1b[H\x1b[2J\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l\x1b[?1049l\x1b[23;0;0t\x1b[?2031l".to_vec()));
+        if let Some(caps) = self.clients.get(&id).and_then(|c| c.caps) {
+            self.send(id, &ServerMsg::Frame(caps.teardown()));
+        }
         self.send(id, &ServerMsg::Exit { code, message });
         if let Some(c) = self.clients.get_mut(&id) {
             c.attached = None;
@@ -644,18 +665,63 @@ impl Server {
                 continue;
             };
             let pane = &self.model.panes[&p];
-            let mut frame = b"\x1b[?25l\x1b[H".to_vec();
-            let bytes = vtmux_vt::capture(&pane.term, vtmux_vt::CaptureOpts::default());
-            for row in bytes
-                .split(|&b| b == b'\n')
-                .take(usize::from(pane.term.rows()))
-            {
-                frame.extend_from_slice(row);
-                frame.extend_from_slice(b"\x1b[K\r\n");
+            let client = &self.clients[&id];
+            let Some(tty) = client.hello.as_ref().and_then(|h| h.tty.as_ref()) else {
+                continue;
+            };
+            let Some(caps) = client.caps else { continue };
+            let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
+            let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
+            let mut screen = vtmux_vt::Snapshot {
+                cols,
+                rows,
+                cells: vec![vtmux_vt::Cell::default(); usize::from(cols) * usize::from(rows)],
+                cursor: None,
+                cursor_visible: true,
+            };
+            let snap = vtmux_vt::snapshot(&pane.term);
+            for y in 0..snap.rows.min(rows.saturating_sub(1)) {
+                for x in 0..snap.cols.min(cols) {
+                    screen.cells[usize::from(y) * usize::from(cols) + usize::from(x)] =
+                        snap.cell(x, y).expect("pane cell").clone();
+                }
             }
-            let (x, y) = pane.term.cursor();
-            frame.extend_from_slice(format!("\x1b[{};{}H\x1b[?25h", y + 1, x + 1).as_bytes());
-            self.send(id, &ServerMsg::Frame(frame));
+            screen.cursor = snap
+                .cursor
+                .filter(|&(x, y)| x < cols && y < rows.saturating_sub(1));
+            screen.cursor_visible = snap.cursor_visible && screen.cursor.is_some();
+            let found = crate::target::Found::from_session(&self.model, s);
+            let ctx = crate::format_ctx::Ctx::new(&self.model, &self.info, &self.global_env, found);
+            let left = vtmux_core::format::expand_str("[#{session_name}] ", &ctx);
+            let right = vtmux_core::format::trim::trim_left(
+                &vtmux_core::format::expand_time("\"#{=21:pane_title}\" %H:%M %d-%b-%y", &ctx),
+                40,
+            );
+            let session = &self.model.sessions[&s];
+            let windows: Vec<_> = session
+                .windows
+                .iter()
+                .map(|(&index, w)| {
+                    (
+                        format!(
+                            "{index}:{}{}",
+                            self.model.windows[w].name,
+                            if index == session.current { "*" } else { " " }
+                        ),
+                        index == session.current,
+                    )
+                })
+                .collect();
+            crate::render::status(&mut screen, &left, &windows, &right, caps);
+            let frame = self
+                .clients
+                .get_mut(&id)
+                .expect("client")
+                .compositor
+                .frame(screen, caps);
+            if !frame.is_empty() {
+                self.send(id, &ServerMsg::Frame(frame));
+            }
         }
     }
 
