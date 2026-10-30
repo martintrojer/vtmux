@@ -505,8 +505,10 @@ fn slow_terminal_detaches_promptly() {
             a.keys(b"\x02d");
             a.exited(0);
             let took = start.elapsed();
+            // 3 s: CI's macOS runner takes up to 1.6 s for either binary;
+            // the bug this pins took 5.9 s and more.
             assert!(
-                took < Duration::from_secs(1),
+                took < Duration::from_secs(3),
                 "{}: detach at {rate} B/s took {took:?}",
                 bin.display()
             );

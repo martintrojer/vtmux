@@ -203,8 +203,10 @@ pub(super) enum MatchError {
     Ambiguous,
     /// `options_parse` rejected the text. tmux leaves its `ambiguous`
     /// result unset on this path and its callers read it anyway: in the
-    /// reference build `set` says `ambiguous option` and `show` says
+    /// local reference build `set` says `ambiguous option` and `show` says
     /// `invalid option` (pinned by the `names-malformed` golden case).
+    /// Other builds differ (CI's Ubuntu `show` says `ambiguous`), so the
+    /// CLI cross-check treats the word as unspecified.
     Unparsable,
 }
 
