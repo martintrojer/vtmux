@@ -9,7 +9,6 @@ use vtmux_core::format;
 use vtmux_core::ids::{PaneId, SessionId};
 
 use super::Item;
-use crate::format_ctx::Ctx;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -92,14 +91,12 @@ pub fn exec(
         let Some(w) = wf.window else { continue };
         let panes = sorted(server, w, ord, args.flag('r'));
         for &p in &panes {
-            let mut ctx = Ctx::new(
-                &server.model,
-                &server.info,
-                &server.global_env,
+            let mut ctx = server.format_ctx(
                 Found {
                     pane: Some(p),
                     ..wf
                 },
+                item.client,
             );
             // `line` is the pane count (format_add(ft, "line", "%u", n)).
             ctx.extra.push(("line", panes.len().to_string()));
@@ -136,17 +133,7 @@ fn sorted(
         }
         return panes;
     }
-    // window_pane_zindex: floating panes above, plus one for a tiled pane.
-    let zindex = |p: PaneId| {
-        let mut i = 0;
-        for &q in &window.panes.z_order {
-            if q == p {
-                return i + u32::from(!window.is_floating(p));
-            }
-            i += u32::from(window.is_floating(q));
-        }
-        i
-    };
+    let zindex = |p: PaneId| model.pane_zindex(p).unwrap_or(0);
     let title = |p: PaneId| model.panes[&p].term.title();
     panes.sort_by(|&a, &b| {
         let (pa, pb) = (&model.panes[&a], &model.panes[&b]);

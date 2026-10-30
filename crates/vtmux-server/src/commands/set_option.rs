@@ -2,13 +2,14 @@
 //! option semantics live in the core (cmd-set-option.c `cmd_set_option_exec`).
 
 use std::path::Path;
+use std::rc::Rc;
 
 use vtmux_core::cmd::{CommandCall, ConfigEnv};
-use vtmux_core::format::{self, FormatContext};
+use vtmux_core::format::{self, FormatContext, LoopItem, OptionScope, OptionsLoop};
 use vtmux_core::options::{OptionError, OptionHost, OptionsStore, SetOutcome, Target, apply_set};
 
 use super::Item;
-use crate::format_ctx::{Ctx, ServerInfo};
+use crate::format_ctx::{ClientView, Ctx, ServerInfo};
 use crate::model::Model;
 use crate::server::{GlobalEnv, Server, check_shell};
 use crate::target::Found;
@@ -29,6 +30,20 @@ pub(super) struct Host<'a> {
     pub info: &'a ServerInfo,
     pub env: GlobalEnv<'a>,
     pub found: Found,
+    /// The attached clients and the target client (`format_single_from_target`).
+    pub clients: Rc<[ClientView]>,
+    pub client: Option<ClientView>,
+}
+
+/// The attached clients and the command's target client, for [`Host`].
+pub(super) fn client_parts(
+    server: &Server,
+    item: &Item,
+    found: Found,
+) -> (Rc<[ClientView]>, Option<ClientView>) {
+    let tc = server.target_client(item.client, item.origin);
+    let ctx = server.format_ctx(found, tc);
+    (ctx.clients, ctx.client)
 }
 
 struct Vars<'a, 'b> {
@@ -66,12 +81,36 @@ impl FormatContext for Vars<'_, '_> {
     fn time(&self, name: &str) -> Option<i64> {
         self.ctx.time(name)
     }
+
+    // The loops: children are fresh contexts (format_create), so the extras
+    // stay behind.
+    fn sessions(&self) -> Vec<LoopItem<'_>> {
+        self.ctx.sessions()
+    }
+
+    fn windows(&self) -> Option<Vec<LoopItem<'_>>> {
+        self.ctx.windows()
+    }
+
+    fn panes(&self) -> Option<Vec<LoopItem<'_>>> {
+        self.ctx.panes()
+    }
+
+    fn clients(&self) -> Vec<LoopItem<'_>> {
+        self.ctx.clients()
+    }
+
+    fn options(&self, scope: OptionScope) -> Option<OptionsLoop<'_>> {
+        self.ctx.options(scope)
+    }
 }
 
 impl OptionHost for Host<'_> {
     fn expand(&mut self, store: &OptionsStore, template: &str, extra: &[(&str, String)]) -> String {
         let mut ctx = Ctx::new(self.model, self.info, self.env.0, self.found);
         ctx.options = store;
+        ctx.clients = Rc::clone(&self.clients);
+        ctx.client.clone_from(&self.client);
         format::expand_str(template, &Vars { ctx, extra })
     }
 
@@ -86,10 +125,11 @@ impl OptionHost for Host<'_> {
 
 pub fn exec(
     server: &mut Server,
-    _item: &mut Item,
+    item: &mut Item,
     call: &CommandCall,
     found: Found,
 ) -> Result<SetOutcome, OptionError> {
+    let (clients, client) = client_parts(server, item, found);
     // Split ownership temporarily rather than cloning the full store for
     // every set. Always restore it, including on validation errors.
     let mut options = std::mem::replace(
@@ -105,6 +145,8 @@ pub fn exec(
             info: &server.info,
             env: GlobalEnv(&mut server.global_env),
             found,
+            clients,
+            client,
         },
     );
     server.model.options = options;

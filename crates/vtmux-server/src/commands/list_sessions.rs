@@ -5,7 +5,6 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::format;
 
 use super::Item;
-use crate::format_ctx::Ctx;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -65,7 +64,7 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
             session: Some(id),
             ..Found::default()
         };
-        let mut ctx = Ctx::new(&server.model, &server.info, &server.global_env, found);
+        let mut ctx = server.format_ctx(found, item.client);
         ctx.extra.push(("line", i.to_string()));
         if let Some(f) = filter {
             let v = format::expand_str(f, &ctx);

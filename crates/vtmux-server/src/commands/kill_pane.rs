@@ -5,7 +5,6 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::format;
 
 use super::Item;
-use crate::format_ctx::Ctx;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -38,14 +37,12 @@ pub fn exec(
         .collect();
     for p in others {
         if let Some(f) = filter {
-            let ctx = Ctx::new(
-                &server.model,
-                &server.info,
-                &server.global_env,
+            let ctx = server.format_ctx(
                 Found {
                     pane: Some(p),
                     ..found
                 },
+                None,
             );
             if !format::is_true(&format::expand_str(f, &ctx)) {
                 continue;

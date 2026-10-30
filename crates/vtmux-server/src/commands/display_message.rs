@@ -7,7 +7,6 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::format;
 
 use super::Item;
-use crate::format_ctx::Ctx;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -38,7 +37,16 @@ pub fn exec(
         .positional(0)
         .or(args.value('F'))
         .unwrap_or(if args.flag('j') { "" } else { TEMPLATE });
-    let ctx = Ctx::new(&server.model, &server.info, &server.global_env, found);
+    // cmd-display-message.c:117-126: -c when it is on the target session, else
+    // the best client for the session. (-c names are not resolved yet, so the
+    // calling client stands in for it.)
+    let tc = server.target_client(item.client, item.origin);
+    let client = match found.session {
+        s @ Some(_) if tc.and_then(|c| server.client_session(c)) == s => tc,
+        Some(s) => server.best_client(Some(s)),
+        None => None,
+    };
+    let ctx = server.format_ctx(found, client);
     if args.flag('a') {
         return Err(EdgeError::NotImplemented("display-message -a".into()).into());
     }
