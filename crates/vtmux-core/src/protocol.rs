@@ -20,7 +20,7 @@ use crate::error::EdgeError;
 use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
@@ -29,6 +29,8 @@ pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 /// The client's terminal, when it has one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TtyInfo {
+    /// `ttyname(3)` of stdin: the client's name (server-client.c:3016-3019).
+    pub name: String,
     pub term: String,
     pub cols: u32,
     pub rows: u32,
@@ -41,6 +43,9 @@ pub struct TtyInfo {
 pub struct Hello {
     pub version: u32,
     pub invocation: Invocation,
+    /// The client's process ID: a client without a tty is named
+    /// `client-PID` (server-client.c:3016-3019).
+    pub pid: u32,
     pub argv: Vec<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
@@ -377,10 +382,11 @@ fn put_strings(out: &mut Vec<u8>, v: &[String]) {
 
 impl TtyInfo {
     fn len(&self) -> usize {
-        4 + self.term.len() + 8 + strings_len(&self.features)
+        4 + self.name.len() + 4 + self.term.len() + 8 + strings_len(&self.features)
     }
 
     fn write(&self, out: &mut Vec<u8>) {
+        put_bytes(out, self.name.as_bytes());
         put_bytes(out, self.term.as_bytes());
         put_u32(out, self.cols);
         put_u32(out, self.rows);
@@ -389,6 +395,7 @@ impl TtyInfo {
 
     fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
         Ok(Self {
+            name: r.string()?,
             term: r.string()?,
             cols: r.u32()?,
             rows: r.u32()?,
@@ -405,6 +412,7 @@ impl Hello {
             Invocation::Tmux => 0,
             Invocation::Vtmux => 1,
         });
+        put_u32(out, self.pid);
         put_strings(out, &self.argv);
         put_bytes(out, self.cwd.as_os_str().as_bytes());
         put_len(out, self.env.len());
@@ -424,6 +432,7 @@ impl Hello {
 
     fn len(&self) -> usize {
         4 + 1
+            + 4
             + strings_len(&self.argv)
             + 4
             + self.cwd.as_os_str().len()
@@ -445,6 +454,7 @@ impl Hello {
             1 => Invocation::Vtmux,
             _ => return Err(ProtocolError::Malformed("bad invocation byte")),
         };
+        let pid = r.u32()?;
         let argv = r.strings()?;
         let cwd = PathBuf::from(std::ffi::OsString::from_vec(r.bytes()?));
         let n = r.count(8)?;
@@ -466,6 +476,7 @@ impl Hello {
         Ok(Self {
             version,
             invocation,
+            pid,
             argv,
             cwd,
             env,
@@ -585,6 +596,7 @@ mod tests {
         Hello {
             version: PROTOCOL_VERSION,
             invocation: Invocation::Vtmux,
+            pid: 4242,
             argv: vec!["new-session".into(), "-d".into(), "-s".into(), "ä".into()],
             cwd: PathBuf::from("/home/u"),
             env: vec![
@@ -602,6 +614,7 @@ mod tests {
 
     fn tty() -> TtyInfo {
         TtyInfo {
+            name: "/dev/pts/3".into(),
             term: "xterm-256color".into(),
             cols: 80,
             rows: 24,
@@ -809,7 +822,7 @@ mod tests {
             Err(ProtocolError::Malformed(_))
         ));
         // A corrupt vector count cannot reserve memory: Hello with argv count 2^32-1.
-        let mut hello = vec![0, 1, 0, 0, 0, 1];
+        let mut hello = vec![0, 1, 0, 0, 0, 1, 0, 0, 0, 0];
         hello.extend_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(
             decode::<ClientMsg>(&frame(&hello)),
@@ -828,7 +841,7 @@ mod tests {
         // client.c:659-668 shape, vtmux numbers.
         assert_eq!(
             err.to_string(),
-            "protocol version mismatch (client 0, server 2)"
+            "protocol version mismatch (client 0, server 3)"
         );
     }
 }

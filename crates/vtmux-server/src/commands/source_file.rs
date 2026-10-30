@@ -210,7 +210,9 @@ pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
     }
     for (line, calls) in groups {
         let before = server.causes.len();
-        super::run(server, item, &calls);
+        // wait-for refuses to block inside a file (wait_for.rs).
+        let resume = super::run(server, item, &calls);
+        debug_assert!(resume.is_none());
         for cause in &mut server.causes[before..] {
             *cause = format!("{file}:{line}: {cause}");
         }

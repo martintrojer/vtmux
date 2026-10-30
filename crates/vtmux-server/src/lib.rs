@@ -16,5 +16,6 @@ pub mod render;
 pub mod server;
 pub mod sys;
 pub mod target;
+pub mod wait;
 
 pub use server::{ClientId, Server, ServerConfig, run_server};
