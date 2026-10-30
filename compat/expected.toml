@@ -8,7 +8,7 @@
 
 [tests."alerts.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "alert flags and bell forwarding work (oracle alerts_*); the test sets alert-* hooks and vtmux has no set-hook or hook firing yet (Handle in handle_alerts, server.rs)"
 
 [tests."alternate-screen-resize.sh"]
 status = "pass"
