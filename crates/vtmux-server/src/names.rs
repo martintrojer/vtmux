@@ -121,7 +121,22 @@ pub fn args_escape(s: &str) -> String {
     }
     let mut escaped = vis(s);
     if quote == Some('"') {
+        // VIS_DQ: `"` gets a backslash (compat/vis.c:60), and so does a `$`
+        // that starts a variable (`$x`, `$_`, `${`; utf8.c:781-786).
         escaped = escaped.replace('"', "\\\"");
+        let chars: Vec<char> = escaped.chars().collect();
+        let mut out = String::with_capacity(escaped.len());
+        for (i, c) in chars.iter().enumerate() {
+            if *c == '$'
+                && chars
+                    .get(i + 1)
+                    .is_some_and(|n| n.is_ascii_alphabetic() || *n == '_' || *n == '{')
+            {
+                out.push('\\');
+            }
+            out.push(*c);
+        }
+        escaped = out;
     }
     let tilde = if escaped.starts_with('~') { "\\" } else { "" };
     match quote {
@@ -189,6 +204,8 @@ mod tests {
         assert_eq!(args_escape("a\"b"), "'a\"b'");
         assert_eq!(args_escape(";"), "\\;");
         assert_eq!(args_escape("~x"), "\\~x");
+        // Reference: `#{pane_start_command}` of `exec cat # a$b $1 ${c}`.
+        assert_eq!(args_escape("a$b $1 ${c} $_"), "\"a\\$b $1 \\${c} \\$_\"");
     }
 
     /// Reference: `LANG=C tmux display -p 'é漢x'` prints `___x`.
