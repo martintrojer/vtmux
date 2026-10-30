@@ -101,6 +101,9 @@ pub(crate) struct Client {
     pasting: bool,
     decoder: crate::input::Decoder,
     caps: Option<crate::render::Caps>,
+    /// The client's terminal once attached (`tty_open`): its features and
+    /// capabilities after `terminal-features` and `terminal-overrides`.
+    term: Option<vtmux_core::term_features::Term>,
     pub(crate) compositor: crate::render::Compositor,
 }
 
@@ -532,6 +535,7 @@ impl Server {
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
                             caps: None,
+                            term: None,
                             compositor: crate::render::Compositor::default(),
                         },
                     );
@@ -609,7 +613,13 @@ impl Server {
 
     /// The `update-environment` patterns as seen from `tree`, in key order.
     fn update_environment(&self, tree: TreeId) -> Vec<String> {
-        match self.model.options.get(tree, "update-environment") {
+        self.array_option(tree, "update-environment")
+    }
+
+    /// The items of an array option (or the one value of a plain option)
+    /// as seen from `tree`, in key order.
+    fn array_option(&self, tree: TreeId, name: &str) -> Vec<String> {
+        match self.model.options.get(tree, name) {
             Some(e) => match &e.value {
                 OptionValue::Array(items) => {
                     items.values().map(|v| v.to_text(e.def, false)).collect()
@@ -861,20 +871,25 @@ impl Server {
     /// `cmd_attach_session`: Ready precedes encoded terminal output.
     pub fn attach_client(&mut self, id: ClientId, s: SessionId) -> Result<(), EdgeError> {
         self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
+        // tty_open -> tty_term_create reads the options now, so a later
+        // `set terminal-features` does not reach this client.
+        let features = self.array_option(TreeId::Server, "terminal-features");
+        let overrides = self.array_option(TreeId::Server, "terminal-overrides");
         let client = self
             .clients
             .get_mut(&id)
             .ok_or(EdgeError::NoCurrentClient)?;
-        let caps = client
+        let (term, caps) = client
             .hello
             .as_ref()
-            .and_then(crate::render::Caps::from_hello)
+            .and_then(|h| crate::render::Caps::open_term(h, &features, &overrides))
             .ok_or_else(|| {
                 EdgeError::OpenTerminalFailed(
                     "unsupported terminal (M0: xterm, tmux-256color, screen)".into(),
                 )
             })?;
         client.caps = Some(caps);
+        client.term = Some(term);
         client.compositor.invalidate();
         client.attached = Some(s);
         // server_client_set_session: session_update_activity (server-client.c:468).
@@ -1081,8 +1096,10 @@ impl Server {
             match event {
                 crate::input::Event::Ignore => {}
                 crate::input::Event::Sync(sync) => {
-                    if let Some(caps) = &mut c.caps {
-                        caps.sync = sync;
+                    // tty_keys_sync: only a supported reply changes anything.
+                    if let (true, Some(term)) = (sync, &mut c.term) {
+                        term.sync_supported();
+                        c.caps = Some(crate::render::Caps::from_term(term));
                     }
                 }
                 crate::input::Event::Paste(start) => {
@@ -1422,12 +1439,6 @@ impl Server {
                 80
             },
             height: started.then(|| tty.map_or(24, |t| t.rows)),
-            colours: started.then(|| match c.caps {
-                Some(caps) if caps.rgb => 16_777_216,
-                Some(caps) if caps.theme_palette => 256,
-                _ if term_name.contains("256") => 16,
-                _ => 8,
-            }),
             term_name,
             tty: tty.map(|t| t.name.clone()).filter(|n| !n.is_empty()),
             control: c.control.is_some(),
@@ -1438,6 +1449,18 @@ impl Server {
             default_key_table: self.default_key_table(id),
             last_session: c.last_session,
             written: c.written,
+            termfeatures: c.term.as_ref().map_or_else(
+                || {
+                    // c->term_features before tty_open: what the client sent.
+                    let sent = c.hello.as_ref().and_then(|h| h.tty.as_ref());
+                    vtmux_core::term_features::Features::from_client(
+                        sent.map_or(&[][..], |t| &t.features),
+                    )
+                    .list()
+                },
+                |t| t.features().list(),
+            ),
+            colours: c.caps.map(|caps| caps.colours),
         }
     }
 

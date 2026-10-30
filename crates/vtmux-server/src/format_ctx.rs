@@ -67,7 +67,10 @@ pub struct ClientView {
     pub key_table: String,
     pub default_key_table: String,
     pub last_session: Option<SessionId>,
-    /// `format_cb_client_colours`, for a started terminal.
+    /// `#{client_termfeatures}` (`tty_get_features(c->term_features)`).
+    pub termfeatures: String,
+    /// `#{client_colours}`; `None` before the terminal is open
+    /// (format.c `format_cb_client_colours` needs `TTY_STARTED`).
     pub colours: Option<u32>,
     /// Frame bytes written (`c->written`).
     pub written: usize,
@@ -183,6 +186,8 @@ impl<'a> Ctx<'a> {
         let flag = |b: bool| u8::from(b).to_string();
         Some(match name {
             "client_name" => c.name.clone(),
+            "client_termfeatures" => c.termfeatures.clone(),
+            "client_colours" => c.colours?.to_string(),
             "client_session" => self.model.sessions.get(&c.session?)?.name.clone(),
             "client_last_session" => self.model.sessions.get(&c.last_session?)?.name.clone(),
             "client_width" => c.width.to_string(),
@@ -191,7 +196,6 @@ impl<'a> Ctx<'a> {
                 c.height?;
                 "0".to_owned()
             }
-            "client_colours" => c.colours?.to_string(),
             "client_termname" => c.term_name.clone(),
             "client_termtype" => String::new(),
             "client_tty" => c.tty.clone()?,

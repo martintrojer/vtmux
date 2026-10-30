@@ -1178,3 +1178,61 @@ fn session_attached_and_activity_variables() {
     assert!(outputs[0].contains("s1|1|TTY|1\n"), "{}", outputs[0]);
     assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// tty-term.c `tty_term_create` reads `terminal-features` once, when the client
+/// attaches (tty.c `tty_open`); `COLORTERM` adds `RGB`/`256` after it. The pane
+/// holds `38;2;1;2;3` red-ish text: a truecolour client gets it as is, a 256
+/// colour client as `38;5;16` (colour.c `colour_find_rgb`).
+#[test]
+fn terminal_features_apply_at_attach() {
+    // (features before attach, colorterm, features after attach, expect RGB)
+    let cases: [(&[&str], &str, &[&str], bool); 7] = [
+        (&["xterm*:RGB"], "", &[], true),
+        (&[], "", &["xterm*:RGB"], false),
+        (&["xterm*:bogus:RGB"], "", &[], false),
+        (&["xterm*:RGB::hyperlinks"], "", &[], true),
+        (&["xterm*:RGB", "xterm*:RGB@"], "", &[], false),
+        (&[], "truecolor", &[], true),
+        (&[], "24bit", &["xterm*:RGB@"], true),
+    ];
+    for bin in bins() {
+        for (before, colorterm, after, rgb) in cases {
+            let w = World::new(bin.clone());
+            let pane = r"printf '\033[38;2;1;2;3mX\033[0m'; exec cat";
+            assert!(
+                w.cli(&[
+                    "new", "-d", "-s", "a", "-x", "40", "-y", "10", "sh", "-c", pane
+                ])
+                .status
+                .success()
+            );
+            for (i, item) in before.iter().enumerate() {
+                let key = format!("terminal-features[{}]", 10 + i);
+                assert!(w.cli(&["set", "-s", &key, item]).status.success());
+            }
+            let extra: Vec<(&str, &str)> = if colorterm.is_empty() {
+                vec![]
+            } else {
+                vec![("COLORTERM", colorterm)]
+            };
+            let mut a = w.attach_env(&["attach", "-t", "a"], 40, 10, &extra);
+            a.wait(|_| !w.cli(&["lsc", "-F", "x"]).stdout.is_empty());
+            for (i, item) in after.iter().enumerate() {
+                let key = format!("terminal-features[{}]", 20 + i);
+                assert!(w.cli(&["set", "-s", &key, item]).status.success());
+            }
+            let wanted = if rgb { "38;2;1;2;3m" } else { "38;5;16m" };
+            a.wait(|a| a.text().contains(wanted));
+            let other = if rgb { "38;5;16m" } else { "38;2;1;2;3m" };
+            assert!(!a.text().contains(other), "{before:?} {colorterm}: {other}");
+            // #{client_termfeatures} and #{client_colours} agree with the reference.
+            let list = w.cli(&["lsc", "-F", "#{client_termfeatures}|#{client_colours}"]);
+            let list = String::from_utf8_lossy(&list.stdout).trim().to_owned();
+            let (features, colours) = list.split_once('|').unwrap();
+            assert_eq!(features.split(',').any(|f| f == "RGB"), rgb, "{list}");
+            assert_eq!(colours, if rgb { "16777216" } else { "16" }, "{list}");
+            a.keys(b"\x02d");
+            a.exited(0);
+        }
+    }
+}

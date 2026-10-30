@@ -11,10 +11,12 @@ pub mod compose;
 pub mod scene;
 pub mod window;
 use vtmux_core::protocol::Hello;
+use vtmux_core::term_features::{Cap, Term};
 use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
 
-/// M0 terminfo-free table for the three supported terminal families. Full
-/// overrides, theme detection and extended styles are M1 (D8).
+/// What the compositor needs of a client's terminal, from its
+/// [`Term`] (terminfo-free, D8): `terminal-features`, `terminal-overrides`,
+/// `-T` and `COLORTERM` have already been applied to it.
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent terminal capabilities"
@@ -27,40 +29,39 @@ pub struct Caps {
     pub sync: bool,
     pub bce: bool,
     pub xterm: bool,
+    /// `#{client_colours}`.
+    pub colours: u32,
 }
 impl Caps {
+    /// `tty_term_create` for a client's hello: `None` for a terminal vtmux
+    /// has no table for.
     #[must_use]
-    pub fn from_hello(hello: &Hello) -> Option<Self> {
+    pub fn open_term(
+        hello: &Hello,
+        features: &[String],
+        overrides: &[String],
+    ) -> Option<(Term, Self)> {
         let tty = hello.tty.as_ref()?;
-        let xterm = tty.term.starts_with("xterm");
-        if !xterm
-            && !matches!(
-                tty.term.as_str(),
-                "tmux-256color" | "screen" | "screen-256color"
-            )
-        {
-            return None;
-        }
-        let color = hello
+        let colorterm = hello
             .env
             .iter()
             .find(|(k, _)| k == "COLORTERM")
-            .map_or("", |(_, v)| v.as_str());
-        let feature = |s: &str| {
-            tty.features
-                .iter()
-                .any(|f| f.split([',', ':']).any(|x| x == s))
-        };
-        let rgb = color.eq_ignore_ascii_case("truecolor") || color == "24bit" || feature("RGB");
-        let theme_palette = rgb || color.contains("256") || feature("256");
-        Some(Self {
-            rgb,
-            palette: tty.term.contains("256") || theme_palette,
-            theme_palette,
-            sync: feature("sync"),
-            bce: xterm,
-            xterm,
-        })
+            .map(|(_, v)| v.as_str());
+        let term = Term::open(&tty.term, &tty.features, colorterm, features, overrides)?;
+        let caps = Self::from_term(&term);
+        Some((term, caps))
+    }
+    #[must_use]
+    pub fn from_term(term: &Term) -> Self {
+        Self {
+            rgb: term.rgb(),
+            palette: term.palette_size() >= 256,
+            theme_palette: term.colours256(),
+            sync: term.has(Cap::Sync),
+            bce: term.is_xterm(),
+            xterm: term.is_xterm(),
+            colours: term.colours(),
+        }
     }
     #[must_use]
     pub fn startup(self) -> Vec<u8> {
@@ -489,6 +490,7 @@ mod tests {
             sync: true,
             bce: true,
             xterm: true,
+            colours: 256,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -517,6 +519,7 @@ mod tests {
             sync: false,
             bce: true,
             xterm: true,
+            colours: 256,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");
@@ -543,6 +546,7 @@ mod tests {
             sync: false,
             bce: true,
             xterm: true,
+            colours: 256,
         };
         let mut screen = vtmux_vt::snapshot(&vtmux_vt::PaneTerm::new(cols, 2, 0));
         let windows: Vec<_> = windows.iter().map(|(t, c)| ((*t).to_owned(), *c)).collect();
