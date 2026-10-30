@@ -10,6 +10,7 @@ pub mod keys;
 pub mod layout;
 pub mod options;
 pub mod protocol;
+pub mod regex;
 pub mod socket;
 pub mod style;
 pub mod styled;
