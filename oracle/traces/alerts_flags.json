@@ -1,0 +1,362 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "alerts_flags",
+  "inputs": {
+    "name": "alerts_flags",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "x",
+          "sh",
+          "-c",
+          "while read x; do printf x; done"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "y",
+          "sh",
+          "-c",
+          "while read x; do printf '\\007'; done"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "monitor-activity",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:1",
+          "Enter"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:2",
+          "Enter"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:0",
+          "Enter"
+        ]
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} [#{window_activity_flag}#{window_bell_flag}#{window_silence_flag}] #{window_flags} (#{session_alert}) (#{session_alerts}) #{session_activity_flag}#{session_bell_flag}#{session_silence_flag}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:1",
+          "[#{window_activity_flag}][#{window_bell_flag}][#{window_flags}][#{window_raw_flags}]"
+        ]
+      },
+      {
+        "run": [
+          "next-window",
+          "-a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} [#{window_activity_flag}#{window_bell_flag}#{window_silence_flag}] #{window_flags} (#{session_alert}) (#{session_alerts}) #{session_activity_flag}#{session_bell_flag}#{session_silence_flag}"
+        ]
+      },
+      {
+        "run": [
+          "previous-window",
+          "-a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-C"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} [#{window_activity_flag}#{window_bell_flag}#{window_silence_flag}] #{window_flags} (#{session_alert}) (#{session_alerts}) #{session_activity_flag}#{session_bell_flag}#{session_silence_flag}"
+        ]
+      },
+      {
+        "run": [
+          "next-window",
+          "-a"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "monitor-bell",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:2",
+          "Enter"
+        ]
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} [#{window_activity_flag}#{window_bell_flag}#{window_silence_flag}] #{window_flags} (#{session_alert}) (#{session_alerts}) #{session_activity_flag}#{session_bell_flag}#{session_silence_flag}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 [100] ##* (#!) (0#,1#,2#!) 110\n1 [100] ## (#!) (0#,1#,2#!) 110\n2 [110] ##! (#!) (0#,1#,2#!) 110\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[1][0][##][#]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 [100] ##- (#!) (0#,1#,2#!) 110\n1 [100] ##* (#!) (0#,1#,2#!) 110\n2 [110] ##! (#!) (0#,1#,2#!) 110\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 [000] * () () 000\n1 [000] - () () 000\n2 [000]  () () 000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no next window\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 [000] * (#) (2#) 100\n1 [000] - (#) (2#) 100\n2 [100] ## (#) (2#) 100\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
