@@ -85,8 +85,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."command-order.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."conf-syntax.sh"]
 status = "xfail"
@@ -452,8 +451,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."new-session-base-index.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."new-session-command.sh"]
 status = "pass"
@@ -468,8 +466,7 @@ status = "pass"
 status = "pass"
 
 [tests."new-window-command.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."options-array.sh"]
 status = "xfail"
@@ -506,8 +503,7 @@ status = "skip"
 reason = "fails against reference tmux 3.8"
 
 [tests."renumber-window-limit.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."respawn-pane-control-lag.sh"]
 status = "xfail"
@@ -682,8 +678,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."window-index-limit.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."window-ops.sh"]
 status = "xfail"
