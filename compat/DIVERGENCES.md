@@ -68,3 +68,11 @@ product reasons" category.
 - vtmux behaviour: each loop sorts its own list; the outer loop visits each session once in its own order: `alphamikezeta-zeta alphamikezeta-alpha alphamikezeta-mike`.
 - Evidence: reference tmux 3.8, the `loop_cases.sh` topology (reference value kept in the row's comment).
 - Category: Do not copy tmux bug (the outer loop skips and repeats items; copying it means sharing a mutable list across nested expansions).
+
+### D-006: the wrap flag of the row above survives EL/ED/IL/DL
+
+- Test / assertion: none yet; reviewer-21's scenarios `rv21_v1..v4`, `rv21_w1`, `rv21_w3` (review_draw_borders_3, out of tree in `/tmp/rv21/`).
+- tmux behaviour: `grid_clear_lines` and `grid_move_lines` (grid.c) clear `GRID_LINE_WRAPPED` on the line above whenever a full-width clear or move touches a row, so EL 2, EL 0 or ED 0 from column 0, IL and DL all unwrap the row above. `tty_draw_line` then treats the rewritten row as not wrapped and erases a leading run of ≥ 10 blank cells with EL1 (the observer sees default fg on those blanks).
+- vtmux behaviour: libghostty-vt keeps the soft-wrap flag on the row above through those edits, so the compositor still sees a wrapped continuation and writes the leading run as spaces in the row's last style (the observer sees the old fg on blank, attribute-free cells). Text, attributes, cursor and every non-blank cell are identical.
+- Evidence: reviewer-21, oracle live, 40x10 pane, ref vs vtmux at 4c3bab8: `\e[31m` + 40 × `x` + 12 spaces + `y`, then `\e[2;1H\e[2K` + red 12 spaces + `y`: ref row 1 `\e[39m            \e[31my`, vtmux `            y` (red).
+- Category: Deferred (needs a wrap model that follows tmux's grid bookkeeping rather than Ghostty's; the only visible effect is the foreground colour of blank cells).
