@@ -183,6 +183,10 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             }
         }
         "attach-session" => {
+            // cmd-attach-session.c:66-69: checked before the target.
+            if server.model.sessions.is_empty() {
+                return Err(EdgeError::NoSessions.into());
+            }
             let spec = args.target('t');
             let found = target::resolve(
                 &server.model,
