@@ -667,3 +667,97 @@ fn update_environment_on_attach() {
         b.exited(0);
     }
 }
+
+/// The divider column of a left-right split at 40x10: (glyph, fg) for each
+/// window row.
+fn divider(a: &Attached, x: u16) -> Vec<(String, vtmux_vt::Color)> {
+    let snap = vtmux_vt::snapshot(&a.screen());
+    (0..9)
+        .map(|y| {
+            let c = snap.cell(x, y).unwrap();
+            (c.text.clone(), c.style.fg)
+        })
+        .collect()
+}
+
+/// screen-redraw.c `redraw_mark_two_pane_colours` and
+/// `redraw_draw_border_arrow`: with two panes the divider's top half
+/// (`wy <= sy/2`) is the left pane's, the bottom half the right pane's;
+/// only the active pane's half is green, and the arrow on its second row
+/// points at it. Selecting the other pane moves both.
+#[test]
+fn active_pane_change_moves_the_coloured_half_and_arrows() {
+    use vtmux_vt::Color::Palette;
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        for cmd in [
+            &["set", "-g", "pane-border-indicators", "both"][..],
+            &["splitw", "-h", "-t", "a", "cat"],
+            &["select-pane", "-t", "%0", "-T", "t"],
+            &["select-pane", "-t", "%1", "-T", "t"],
+        ] {
+            assert!(w.cli(cmd).status.success());
+        }
+        // 40 wide: panes of 20 and 19, divider at x 20; 9 window rows.
+        let line = |fg| ("│".to_owned(), fg);
+        let (grey, green) = (Palette(7), Palette(2));
+        let mut want: Vec<_> = (0..9)
+            .map(|y| line(if y <= 4 { grey } else { green }))
+            .collect();
+        want[1] = ("→".into(), grey);
+        a.wait(|a| divider(a, 20) == want);
+        assert!(w.cli(&["selectp", "-t", "%0"]).status.success());
+        let mut want: Vec<_> = (0..9)
+            .map(|y| line(if y <= 4 { green } else { grey }))
+            .collect();
+        want[1] = ("←".into(), green);
+        a.wait(|a| divider(a, 20) == want);
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
+
+/// With three panes there is no half-colouring: a border cell takes the
+/// active pane's style whenever it touches it
+/// (`redraw_get_pane_for_border_style`), and every arrow cell points at the
+/// active pane.
+#[test]
+fn active_pane_change_recolours_shared_borders() {
+    use vtmux_vt::Color::Palette;
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        for cmd in [
+            &["set", "-g", "pane-border-indicators", "arrows"][..],
+            &["splitw", "-h", "-t", "a", "cat"],
+            &["splitw", "-v", "-t", "a", "cat"],
+            &["select-pane", "-t", "%0", "-T", "t"],
+            &["select-pane", "-t", "%1", "-T", "t"],
+            &["select-pane", "-t", "%2", "-T", "t"],
+        ] {
+            assert!(w.cli(cmd).status.success());
+        }
+        let (grey, green) = (Palette(7), Palette(2));
+        // %2 (bottom right, rows 5-8) is active: the divider is green from
+        // the junction at row 4 down, with an arrow at row 6.
+        let row = |s: &str, fg| (s.to_owned(), fg);
+        let mut want: Vec<_> = (0..9)
+            .map(|y| row("│", if y < 4 { grey } else { green }))
+            .collect();
+        want[4] = row("├", green);
+        want[6] = row("→", green);
+        a.wait(|a| divider(a, 20) == want);
+        // %0 (left) is active: the whole divider is its border.
+        assert!(w.cli(&["selectp", "-t", "%0"]).status.success());
+        let mut want: Vec<_> = (0..9).map(|_| row("│", green)).collect();
+        want[4] = row("├", green);
+        want[1] = row("←", green);
+        want[6] = row("←", green);
+        a.wait(|a| divider(a, 20) == want);
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
