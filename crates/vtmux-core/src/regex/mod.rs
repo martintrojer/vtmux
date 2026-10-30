@@ -9,8 +9,7 @@
 //! Resource limits return `Error::Limit`: 64 nested groups or chained quantifiers,
 //! 128 total groups/quantifiers, about a million compiled NFA nodes after `{m,n}`
 //! expansion, and, for backreference patterns only, one million capture-weighted
-//! steps per start position and sixteen million per search
-//! (compat/DIVERGENCES.md D-001).
+//! steps per start position (compat/DIVERGENCES.md D-002).
 mod ctype;
 mod ctype_tables;
 mod nfa;
@@ -23,8 +22,6 @@ use std::ops::Range;
 
 /// Capture-weighted backtracking steps per start position (backreferences only).
 const BACKREF_START_BUDGET: usize = 1_000_000;
-/// Steps for one whole backreference search, about a second of work.
-const BACKREF_SEARCH_BUDGET: usize = 16_000_000;
 
 /// Malformed ERE, excessive nesting, or an exhausted matching work budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,21 +160,20 @@ impl Regex {
             }));
         }
         // Backreference patterns backtrack, as glibc does: each start position
-        // gets its own budget, and the whole search a ceiling on wall time.
-        let mut total = BACKREF_SEARCH_BUDGET;
+        // gets its own budget. There is no cross-start ceiling: a shared
+        // budget makes an ordinary backreference fail on long plain text
+        // (review_fmt_regex_2), and each start is already bounded.
         for start in text
             .char_indices()
             .map(|(i, _)| i)
             .chain(std::iter::once(text.len()))
         {
-            let mut budget = BACKREF_START_BUDGET.min(total);
+            let mut budget = BACKREF_START_BUDGET;
             let state = State {
                 pos: start,
                 captures: vec![None; self.groups + 1],
             };
-            let before = budget;
             let states = self.run(&self.expr, state, text, &mut budget)?;
-            total -= before - budget;
             // max_by_key would choose the last tied path; preserve the first greedy path.
             let mut best: Option<State> = None;
             for s in states {
