@@ -119,13 +119,12 @@ fn connect(path: &Path) -> io::Result<UnixStream> {
     UnixStream::connect(path)
 }
 
-// Linux errno values (asm-generic/errno*.h).
-const ENOENT: i32 = 2;
-const ENAMETOOLONG: i32 = 36;
-const ECONNREFUSED: i32 = 111;
+// errno values from the platform, never hard-coded: ECONNREFUSED is 111 on
+// Linux but 61 on macOS.
+const ENAMETOOLONG: i32 = rustix::io::Errno::NAMETOOLONG.raw_os_error();
 
 fn connect_error(path: &Path, e: io::Error) -> EdgeError {
-    if e.raw_os_error() == Some(ECONNREFUSED) {
+    if e.kind() == io::ErrorKind::ConnectionRefused {
         EdgeError::NoServer {
             path: path.to_owned(),
         }
@@ -154,7 +153,10 @@ fn connect_or_start(
             Ok(s) => return Ok(s),
             Err(e) => e,
         };
-        let absent = matches!(err.raw_os_error(), Some(ECONNREFUSED | ENOENT));
+        let absent = matches!(
+            err.kind(),
+            io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+        );
         if !absent || !start {
             return Err(connect_error(path, err));
         }
