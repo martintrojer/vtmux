@@ -11,8 +11,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."alternate-screen-resize.sh"]
-status = "xfail"
-reason = "needs split-window (M1); the M0 baseline pass was vacuous (the binary was an empty main that exited 0)"
+status = "pass"
 
 [tests."am-terminal.sh"]
 status = "xfail"
@@ -399,8 +398,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."kill-session-zoomed.sh"]
-status = "xfail"
-reason = "needs split-window and resize-pane -Z (M1); the M0 baseline pass was vacuous (empty main exited 0)"
+status = "pass"
 
 [tests."layout-custom.sh"]
 status = "xfail"
@@ -479,8 +477,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."options-scope.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."options-values.sh"]
 status = "pass"
