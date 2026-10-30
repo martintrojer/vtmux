@@ -88,6 +88,25 @@ fn regex_random_patterns_do_not_panic() {
 /// Review repros (`high_regex_work_budget_silently_turns`); expected spans from
 /// glibc 2.43 `regexec` in C.UTF-8 (python3 ctypes, as `tests/regex_cases.sh`).
 #[test]
+fn regex_backreferences_on_long_text_match_like_glibc() {
+    // review_fmt_regex_2: a shared cross-start budget made these fail with
+    // Limit after ~1.9k chars. glibc 2.43 regexec spans (via ctypes). The
+    // backtracker is quadratic here (D-002), so the second text is short.
+    let cases: [(&str, String, std::ops::Range<usize>); 2] = [
+        ("(\\w+) \\1", "w".repeat(1900) + " foo foo", 1901..1908),
+        ("([0-9]+)-\\1", "1".repeat(600) + " 12-12", 601..606),
+    ];
+    for (pattern, text, expected) in cases {
+        let found = Regex::new(pattern, false).unwrap().find(&text).unwrap();
+        assert_eq!(
+            found.and_then(|m| m.captures[0].clone()),
+            Some(expected),
+            "{pattern}"
+        );
+    }
+}
+
+#[test]
 fn regex_long_texts_match_like_glibc() {
     let ones = "1".repeat(710) + " 5%";
     let cases: [(&str, String, Option<std::ops::Range<usize>>); 7] = [
