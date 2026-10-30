@@ -7,6 +7,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+libc = "0.2"
+mio = { version = "1", features = ["os-poll", "os-ext", "net"] }
+rustix = { version = "1", features = ["std", "process", "termios", "fs", "pty", "system"] }
+signal-hook = "0.3"
+signal-hook-mio = { version = "0.2", features = ["support-v1_0"] }
+unicode-width = "0.2"
 vtmux-core.workspace = true
 vtmux-vt.workspace = true
 
