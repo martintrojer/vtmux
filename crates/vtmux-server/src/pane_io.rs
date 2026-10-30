@@ -104,6 +104,12 @@ impl PaneIo {
         !self.out.is_empty()
     }
 
+    /// Tell the pane program its new size (`TIOCSWINSZ`; the kernel sends
+    /// the foreground process group SIGWINCH).
+    pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
+        crate::sys::pty::resize(&self.master, cols, rows)
+    }
+
     /// Bytes waiting to be read (`FIONREAD`, window.c
     /// `window_pane_destroy_ready`).
     #[must_use]

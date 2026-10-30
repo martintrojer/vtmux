@@ -45,6 +45,12 @@ impl Environ {
         );
     }
 
+    /// `environ_find`: the entry, removals included.
+    #[must_use]
+    pub fn find(&self, name: &str) -> Option<&Entry> {
+        self.0.get(name)
+    }
+
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&str> {
         self.0.get(name)?.value.as_deref()

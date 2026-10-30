@@ -2,6 +2,7 @@
 //! `format_table` callbacks).
 
 use vtmux_core::format::{FormatContext, Tm};
+use vtmux_core::layout::PaneStatus;
 use vtmux_core::options::{OptionsStore, Target};
 
 use crate::environ::Environ;
@@ -66,7 +67,7 @@ impl<'a> Ctx<'a> {
         if target.pane.is_none()
             && let Some(w) = target.window.and_then(|w| model.windows.get(&w))
         {
-            target.pane = Some(w.active);
+            target.pane = Some(w.active());
         }
         Self {
             model,
@@ -109,31 +110,84 @@ impl<'a> Ctx<'a> {
         let current = self
             .session()
             .is_some_and(|s| Some(s.current) == self.target.index);
+        let flag = |b: bool| u8::from(b).to_string();
         Some(match name {
             "window_id" => w.id.to_string(),
             "window_index" => self.target.index?.to_string(),
             "window_name" => w.name.clone(),
-            "window_panes" => w.layout.panes().count().to_string(),
-            "window_width" => w.cols.to_string(),
-            "window_height" => w.rows.to_string(),
-            "window_active" => u8::from(current).to_string(),
-            "window_flags" => if current { "*" } else { "" }.to_owned(),
+            // window_count_panes(w, 1).
+            "window_panes" => w.panes.panes.len().to_string(),
+            "window_width" => w.sx().to_string(),
+            "window_height" => w.sy().to_string(),
+            "window_active" => flag(current),
+            "window_zoomed_flag" => flag(w.zoomed()),
+            // window_printable_flags (window.c:1359-1386) for the flags
+            // vtmux has: current and zoomed.
+            "window_flags" | "window_raw_flags" => {
+                let mut f = String::new();
+                if current {
+                    f.push('*');
+                }
+                if w.zoomed() {
+                    f.push('Z');
+                }
+                f
+            }
+            // format_cb_window_layout: the saved layout while zoomed.
+            "window_layout" => w.full_layout().dump_v2(&self.layout_panes(w))?,
+            "window_visible_layout" => w.layout.dump_v2(&self.layout_panes(w))?,
             _ => return None,
         })
     }
 
+    /// The window's pane state with its `pane-base-index`, for `"i"`.
+    fn layout_panes(&self, w: &crate::model::Window) -> vtmux_core::layout::WindowPanes {
+        let mut panes = w.panes.clone();
+        panes.base_index = self.model.pane_base_index(w.id);
+        panes
+    }
+
+    #[allow(clippy::too_many_lines)] // one arm per variable
     fn pane_value(&self, name: &str) -> Option<String> {
         let p = self.pane()?;
+        let w = self.model.windows.get(&p.window)?;
         let io = p.io.as_ref();
+        let flag = |b: bool| u8::from(b).to_string();
+        let r = p.rect;
+        let (wsx, wsy) = (i64::from(w.sx()), i64::from(w.sy()));
+        let (xoff, yoff) = (i64::from(r.xoff), i64::from(r.yoff));
+        let (sx, sy) = (i64::from(r.sx), i64::from(r.sy));
+        let status = self.model.pane_status(w.id);
         Some(match name {
             "pane_id" => p.id.to_string(),
             "pane_index" => self.model.pane_index(p.id)?.to_string(),
             "pane_pid" => p.pid.to_string(),
-            "pane_width" => p.term.cols().to_string(),
-            "pane_height" => p.term.rows().to_string(),
+            "pane_width" => r.sx.to_string(),
+            "pane_height" => r.sy.to_string(),
+            "pane_left" | "pane_x" => r.xoff.to_string(),
+            "pane_top" | "pane_y" => r.yoff.to_string(),
+            "pane_right" => (xoff + sx - 1).to_string(),
+            "pane_bottom" => (yoff + sy - 1).to_string(),
+            // format_cb_pane_at_* (format.c:1235-1275, 2220-2242).
+            "pane_at_left" => flag(xoff == 0),
+            "pane_at_right" => flag(xoff + sx == wsx),
+            "pane_at_top" => flag(if status == PaneStatus::Top {
+                yoff == 1
+            } else {
+                yoff == 0
+            }),
+            "pane_at_bottom" => flag(if status == PaneStatus::Bottom {
+                yoff + sy == wsy - 1
+            } else {
+                yoff + sy == wsy
+            }),
             "pane_title" => p.term.title(),
-            "pane_active" => u8::from(self.window().is_some_and(|w| w.active == p.id)).to_string(),
-            "pane_dead" => u8::from(p.exited && io.is_none()).to_string(),
+            "pane_active" => flag(w.active() == p.id),
+            "pane_last" => flag(w.panes.last.first() == Some(&p.id)),
+            "pane_floating_flag" => flag(w.is_floating(p.id)),
+            "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),
+            "pane_input_off" => flag(p.input_off),
+            "pane_dead" => flag(p.exited && io.is_none()),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),
             "pane_tty" => io
                 .and_then(|io| sys::pty::tty_name(&io.owned().try_clone_to_owned().ok()?))
@@ -158,7 +212,7 @@ impl<'a> Ctx<'a> {
                 .unwrap_or_default(),
             "cursor_x" => p.term.cursor().0.to_string(),
             "cursor_y" => p.term.cursor().1.to_string(),
-            "alternate_on" => u8::from(p.term.alternate_on()).to_string(),
+            "alternate_on" => flag(p.term.alternate_on()),
             "history_size" => p.term.history_size().to_string(),
             _ => return None,
         })
@@ -204,13 +258,12 @@ impl FormatContext for Ctx<'_> {
             // format_find falls back to the session, then global,
             // environment (format.c:4665-4675).
             .or_else(|| {
-                self.session()?
-                    .env
-                    .iter()
-                    .find(|(k, _)| k == name)
-                    .map(|(_, v)| v.clone())
+                let entry = self
+                    .session()
+                    .and_then(|s| s.env.find(name))
+                    .or_else(|| self.global_env.find(name))?;
+                entry.value.clone()
             })
-            .or_else(|| self.global_env.get(name).map(str::to_owned))
     }
 
     fn time(&self, name: &str) -> Option<i64> {

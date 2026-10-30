@@ -19,7 +19,8 @@ use signal_hook::consts::{SIGCHLD, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SI
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::cmd::{self, CmdError, ConfigEnv};
 use vtmux_core::error::EdgeError;
-use vtmux_core::ids::{PaneId, SessionId};
+use vtmux_core::ids::{PaneId, SessionId, WindowId};
+use vtmux_core::layout::{Geometry, Layout as CoreLayout, WindowPanes};
 use vtmux_core::options::{Defaults, OptionValue, OptionsStore, TreeId, Value};
 use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg};
 use vtmux_vt::PaneTerm;
@@ -27,7 +28,7 @@ use vtmux_vt::PaneTerm;
 use crate::commands::{self, After, Item, Output};
 use crate::environ::{Environ, session_environ};
 use crate::format_ctx::ServerInfo;
-use crate::model::{Layout, Model, Pane, Session, Window};
+use crate::model::{Model, Pane, Session, Window};
 use crate::names::parse_window_name;
 use crate::pane_io::{PaneIo, ReadResult};
 use crate::sys;
@@ -113,6 +114,32 @@ impl Unacked {
             self.acked += 1;
         }
     }
+}
+
+/// What a new pane needs ([`Server::spawn_pane`]).
+#[derive(Debug)]
+pub struct PaneSpawn<'a> {
+    pub pane: PaneId,
+    pub window: WindowId,
+    /// The session whose environment, options and ID the pane gets.
+    pub session: SessionId,
+    pub session_env: &'a Environ,
+    /// `-e NAME=value` for this pane only (split-window).
+    pub extra_env: &'a [String],
+    /// The command client's `PATH` (spawn.c:418-424).
+    pub client_path: Option<&'a str>,
+    pub argv: Vec<String>,
+    pub cwd: PathBuf,
+    /// The pane's rectangle; its size is the PTY's.
+    pub rect: Geometry,
+}
+
+/// The client's `PATH`, if it sent one.
+#[must_use]
+pub fn client_path(env: &[(String, String)]) -> Option<&str> {
+    env.iter()
+        .find(|(k, _)| k == "PATH")
+        .map(|(_, v)| v.as_str())
 }
 
 /// What a new session needs ([`Server::create_session`]).
@@ -699,33 +726,11 @@ impl Server {
         let Some(session) = client.attached else {
             return;
         };
-        let Some((_, window, pane)) = self.model.current_of(session) else {
+        let Some((_, window, _)) = self.model.current_of(session) else {
             return;
         };
-        let cols = u16::try_from(cols).unwrap_or(u16::MAX).max(1);
-        let rows = u16::try_from(rows.saturating_sub(1))
-            .unwrap_or(u16::MAX)
-            .max(1);
-        if let Some(window) = self.model.windows.get_mut(&window) {
-            window.cols = cols;
-            window.rows = rows;
-        }
-        if let Some(pane) = self.model.panes.get_mut(&pane)
-            && (pane.term.cols(), pane.term.rows()) != (cols, rows)
-        {
-            pane.term.resize(cols, rows);
-            if let Some(io) = &pane.io {
-                let _ = rustix::termios::tcsetwinsize(
-                    io.fd(),
-                    rustix::termios::Winsize {
-                        ws_col: cols,
-                        ws_row: rows,
-                        ws_xpixel: 0,
-                        ws_ypixel: 0,
-                    },
-                );
-            }
-        }
+        self.model
+            .resize_window(window, cols.max(1), rows.saturating_sub(1).max(1));
     }
 
     pub fn detach_session_clients(&mut self, session: SessionId) {
@@ -956,7 +961,6 @@ impl Server {
     // --------------------------------------------------------------- panes
 
     /// Create a session with one window and one pane.
-    #[allow(clippy::too_many_lines)] // spawn_window + spawn_pane, in order
     pub fn create_session(&mut self, spec: NewSession) -> io::Result<SessionId> {
         let id = self.model.session_ids.allocate();
         let name = spec.name.unwrap_or_else(|| {
@@ -983,32 +987,104 @@ impl Server {
         }
         let window_id = self.model.window_ids.allocate();
         let pane_id = self.model.pane_ids.allocate();
+        let pane = self.spawn_pane(&PaneSpawn {
+            pane: pane_id,
+            window: window_id,
+            session: id,
+            session_env: &env,
+            extra_env: &[],
+            client_path: client_path(&spec.client_env),
+            argv: spec.argv,
+            cwd: spec.cwd.clone(),
+            rect: Geometry::new(u32::from(spec.cols), u32::from(spec.rows), 0, 0),
+        })?;
 
-        // environ_for_session (environ.c:253-286) + spawn_pane additions.
+        // default_window_name (names.c:107-121).
+        let (window_name, auto_rename) = if let Some(n) = spec.window_name {
+            (n, false)
+        } else {
+            let cmd = crate::names::stringify_argv(&pane.argv);
+            let from = if cmd.is_empty() {
+                pane.shell.to_string_lossy().into_owned()
+            } else {
+                cmd
+            };
+            (parse_window_name(&from), true)
+        };
+        self.model.options.add_window(window_id);
+        self.model.options.add_pane(pane_id, window_id);
+        self.model.panes.insert(pane_id, pane);
+        self.model.windows.insert(
+            window_id,
+            Window {
+                id: window_id,
+                name: window_name,
+                auto_rename,
+                layout: CoreLayout::new(u32::from(spec.cols), u32::from(spec.rows), pane_id),
+                panes: WindowPanes::new(pane_id),
+                zoom: None,
+            },
+        );
+        self.model.fix_panes(window_id);
+        let activity = self.model.touch();
+        let before = self.control_links();
+        self.model.insert_session(Session {
+            id,
+            name,
+            created: now_epoch(),
+            activity,
+            cwd: spec.cwd,
+            windows: BTreeMap::from([(0, window_id)]),
+            current: 0,
+            env,
+        });
+        self.control_links_changed(&before);
+        Ok(id)
+    }
+
+    /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment
+    /// (`environ_for_session` plus the spawn additions), the shell from
+    /// `default-shell`, the PTY sized to `rect`, and a terminal whose title
+    /// starts as the host name (window.c:1479-1480). The caller links the
+    /// returned pane into the model.
+    pub fn spawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<Pane> {
         let mut child = self.global_env.clone();
-        env.copy_into(&mut child);
+        ps.session_env.copy_into(&mut child);
         child.set("TERM", "tmux-256color", false);
         child.set("TERM_PROGRAM", "tmux", false);
         child.set("TERM_PROGRAM_VERSION", "3.8", false);
         child.set("COLORTERM", "truecolor", false);
         child.set(
             "TMUX",
-            &format!("{},{},{}", self.socket.display(), std::process::id(), id.0),
+            &format!(
+                "{},{},{}",
+                self.socket.display(),
+                std::process::id(),
+                ps.session.0
+            ),
             false,
         );
-        child.set("TMUX_PANE", &pane_id.to_string(), false);
-        if let Some((_, path)) = spec.client_env.iter().find(|(k, _)| k == "PATH") {
+        for e in ps.extra_env {
+            if let Some((k, v)) = e.split_once('=') {
+                child.set(k, v, false);
+            }
+        }
+        child.set("TMUX_PANE", &ps.pane.to_string(), false);
+        // spawn.c:418-424: an unattached client's PATH replaces the
+        // session's, so `tmux new myprogram` finds myprogram.
+        if let Some(path) = ps.client_path {
             child.set("PATH", path, false);
         }
         if child.get("PATH").is_none() {
             child.set("PATH", "/usr/bin:/bin:/usr/sbin:/sbin", false);
         }
-        // spawn.c spawn_pane: shell and history budget come from the new
-        // session's inherited options, not the starting client's shell.
+        // The shell and history budget come from the session's options,
+        // not the starting client's shell.
+        let session_tree = TreeId::Session(ps.session);
         let configured_shell = self
             .model
             .options
-            .get(TreeId::Session(id), "default-shell")
+            .get(session_tree, "default-shell")
             .map_or_else(
                 || "/bin/sh".to_owned(),
                 |e| e.value.to_text(e.def, None, false),
@@ -1020,93 +1096,42 @@ impl Server {
         };
         child.set("SHELL", &shell.to_string_lossy(), false);
 
+        let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
+        let rows = u16::try_from(ps.rect.sy).unwrap_or(u16::MAX).max(1);
         let spawned = sys::pty::spawn(&sys::pty::SpawnSpec {
-            argv: spec.argv.clone(),
+            argv: ps.argv.clone(),
             shell: shell.clone(),
-            cwd: spec.cwd.clone(),
+            cwd: ps.cwd.clone(),
             home: find_home(&self.global_env),
             env: child.for_process(),
-            cols: spec.cols,
-            rows: spec.rows,
+            cols,
+            rows,
         })?;
         let io = PaneIo::new(spawned.master);
-        // window_pane_create (window.c:1479-1480): the title starts as the
-        // host name.
-        let history_limit = match self
-            .model
-            .options
-            .get(TreeId::Session(id), "history-limit")
-            .map(|e| &e.value)
-        {
-            Some(OptionValue::Single(Value::Number(n))) => usize::try_from(*n).unwrap_or(0),
-            _ => 0,
-        };
-        let mut term = PaneTerm::new(spec.cols, spec.rows, history_limit);
+        let history_limit =
+            usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
+        let mut term = PaneTerm::new(cols, rows, history_limit);
         let host = &self.info.host;
         if !host.chars().any(char::is_control) {
             term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
         }
-        io.register(self.poll.registry(), Token(PANE_BASE + pane_id.0 as usize))?;
-
-        // default_window_name (names.c:107-121).
-        let (window_name, auto_rename) = if let Some(n) = spec.window_name {
-            (n, false)
-        } else {
-            let cmd = crate::names::stringify_argv(&spec.argv);
-            let from = if cmd.is_empty() {
-                shell.to_string_lossy().into_owned()
-            } else {
-                cmd
-            };
-            (parse_window_name(&from), true)
-        };
-        self.model.options.add_window(window_id);
-        self.model.options.add_pane(pane_id, window_id);
-        self.model.panes.insert(
-            pane_id,
-            Pane {
-                id: pane_id,
-                window: window_id,
-                term,
-                io: Some(io),
-                pid: spawned.pid.as_raw_nonzero().get(),
-                argv: spec.argv,
-                shell,
-                cwd: spec.cwd.clone(),
-                exited: false,
-                changed: false,
-                last_rename: None,
-            },
-        );
-        self.model.windows.insert(
-            window_id,
-            Window {
-                id: window_id,
-                name: window_name,
-                auto_rename,
-                layout: Layout {
-                    tiled: vec![pane_id],
-                    floating: Vec::new(),
-                },
-                active: pane_id,
-                cols: spec.cols,
-                rows: spec.rows,
-            },
-        );
-        let activity = self.model.touch();
-        let before = self.control_links();
-        self.model.insert_session(Session {
-            id,
-            name,
-            created: now_epoch(),
-            activity,
-            cwd: spec.cwd,
-            windows: BTreeMap::from([(0, window_id)]),
-            current: 0,
-            env: env.for_process(),
-        });
-        self.control_links_changed(&before);
-        Ok(id)
+        io.register(self.poll.registry(), Token(PANE_BASE + ps.pane.0 as usize))?;
+        Ok(Pane {
+            id: ps.pane,
+            window: ps.window,
+            term,
+            io: Some(io),
+            pid: spawned.pid.as_raw_nonzero().get(),
+            argv: ps.argv.clone(),
+            shell,
+            cwd: ps.cwd.clone(),
+            exited: false,
+            changed: false,
+            last_rename: None,
+            rect: ps.rect,
+            input_off: false,
+            active_point: 0,
+        })
     }
 
     /// `server_destroy_session` + `session_destroy`: its panes' processes
@@ -1120,14 +1145,15 @@ impl Server {
         }
     }
 
-    /// `server_destroy_pane`: remove the pane, and with it an emptied
-    /// window and session.
-    fn destroy_pane(&mut self, p: PaneId) {
+    /// `server_destroy_pane` with remain-on-exit off: hang up the pane,
+    /// take it out of its window; the window and an emptied session go
+    /// with the last pane.
+    pub fn destroy_pane(&mut self, p: PaneId) {
         self.hangup_pane(p);
         let before = self.control_links();
-        let pane = self.model.remove_pane(p);
+        let panes = self.model.remove_pane(p);
         self.control_links_changed(&before);
-        if let Some(pane) = pane {
+        for pane in panes {
             self.close_pane_io(pane);
         }
     }
@@ -1297,7 +1323,7 @@ impl Server {
             if !window.auto_rename {
                 continue;
             }
-            let active = window.active;
+            let active = window.active();
             let Some(pane) = self.model.panes.get(&active) else {
                 continue;
             };
