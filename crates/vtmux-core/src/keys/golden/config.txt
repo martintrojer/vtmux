@@ -1,0 +1,1001 @@
+### block-multiline
+bind -T t a {
+  display a
+  display b
+}
+---
+a|display-message a \; display-message b
+%%
+### block-semicolons
+bind -T t a { display a ; display b
+display c }
+---
+a|display-message a \; display-message b \; display-message c
+%%
+### block-comment
+bind -T t a { display a # comment
+display b }
+---
+a|display-message a \; display-message b
+%%
+### block-trailing-space
+bind -T t a { display a ; display b } 
+---
+a|display-message a \; display-message b
+%%
+### block-if-two
+bind -T t a if -F 1 { display a
+ display b } { display c }
+---
+a|if-shell -F 1 { display-message a ;; display-message b } { display-message c }
+%%
+### block-if-lines
+bind -T t a if -F 1 {
+display a
+
+display b
+} {
+display c
+}
+---
+a|if-shell -F 1 { display-message a ;; display-message b } { display-message c }
+%%
+### block-if-semi
+bind -T t a if -F 1 { display a ; display b } { display c }
+---
+a|if-shell -F 1 { display-message a ; display-message b } { display-message c }
+%%
+### block-if-three
+bind -T t a if -F 1 { display a
+ display b ; display c
+ display d } { display e }
+---
+a|if-shell -F 1 { display-message a ;; display-message b ; display-message c ;; display-message d } { display-message e }
+%%
+### block-in-display
+bind -T t a display { a }
+---
+! command display-message: argument 1 must be "string"
+table t doesn't exist
+%%
+### block-empty-command
+bind -T t a { display }
+---
+a|display-message
+%%
+### block-empty
+bind -T t a {}
+---
+a|
+%%
+### block-empty-space
+bind -T t a { }
+---
+a|
+%%
+### block-only-semi
+bind -T t a { ; }
+---
+! syntax error
+table t doesn't exist
+%%
+### block-assign
+bind -T t a { A=1 }
+---
+a|
+%%
+### block-assign-use
+bind -T t a { A=1
+display $A }
+---
+a|display-message 1
+%%
+### block-in-set
+bind -T t a set @x { a }
+---
+a|set-option @x { attach-session }
+%%
+### block-nested-bad
+bind -T t a { { display } }
+---
+! syntax error
+table t doesn't exist
+%%
+### block-nested-arg
+bind -T t a { if -F 1 { display a } { display b } }
+---
+a|if-shell -F 1 { display-message a } { display-message b }
+%%
+### block-nested-deep
+bind -T t a { if -F 1 { if -F 1 { display a
+display b } } }
+---
+a|if-shell -F 1 { if-shell -F 1 { display-message a ;; display-message b } }
+%%
+### block-nested-unknown
+bind -T t a { display { x } }
+---
+! unknown command: x
+table t doesn't exist
+%%
+### block-tight
+bind -T t a {display}
+---
+a|display-message
+%%
+### block-tight-close
+bind -T t a { display a}
+---
+a|display-message a
+%%
+### block-extra-close
+bind -T t a { display a }}
+---
+! syntax error
+table t doesn't exist
+%%
+### block-unterminated
+bind -T t a { display a 
+---
+! syntax error
+table t doesn't exist
+%%
+### block-unterminated-lines
+bind -T t a { display a
+display b
+---
+! syntax error
+table t doesn't exist
+%%
+### block-semi-forms
+bind -T t a { display a;display b;; display c}
+---
+a|display-message a \; display-message b \; display-message c
+%%
+### block-bare-close
+bind -T t a display }
+---
+! syntax error
+table t doesn't exist
+%%
+### block-close-in-word
+bind -T t a display a}
+---
+! syntax error
+table t doesn't exist
+%%
+### block-close-quoted
+bind -T t a display "a}"
+---
+a|display-message "a}"
+%%
+### block-close-escaped
+bind -T t a display a\}
+---
+a|display-message "a}"
+%%
+### block-open-in-word
+bind -T t a display a{b
+---
+a|display-message "a{b"
+%%
+### block-open-quoted
+bind -T t a display '{'
+---
+a|display-message \{
+%%
+### block-open-escaped
+bind -T t a display \{
+---
+a|display-message \{
+%%
+### block-open-dangling
+bind -T t a { display { }
+---
+! syntax error
+table t doesn't exist
+%%
+### block-then-more-statement
+bind -T t a { display a } ; bind -T t b { display b }
+---
+a|display-message a
+b|display-message b
+%%
+### block-then-word
+bind -T t a { display a } display b
+---
+a|
+%%
+### block-two-blocks
+bind -T t a { display a } { display b }
+---
+a|
+%%
+### block-as-command-name
+{ display a }
+---
+! syntax error
+table t doesn't exist
+%%
+### block-after-command-then-fail
+display { a }
+---
+! command display-message: argument 1 must be "string"
+table t doesn't exist
+%%
+### block-bind-in-block
+bind -T t a { bind -T t b display }
+---
+a|bind-key -T t b display
+%%
+### block-run-C
+bind -T t a run -C { display a }
+---
+a|run-shell -C { display-message a }
+%%
+### block-run-no-C
+bind -T t a run { display a }
+---
+! command run-shell: argument 1 must be "string"
+table t doesn't exist
+%%
+### block-if-shell-first
+bind -T t a if { display a } { display b }
+---
+! command if-shell: argument 1 must be "string"
+table t doesn't exist
+%%
+### block-if-shell-third
+bind -T t a if -F 1 { display a } { display b } { display c }
+---
+! command if-shell: argument 4 must be "string"
+table t doesn't exist
+%%
+### block-if-shell-string
+bind -T t a if -F 1 "display a" "display b"
+---
+a|if-shell -F 1 "display a" "display b"
+%%
+### block-flag-value
+bind -T t a display -t { a }
+---
+! command display-message: -t argument must be a string
+table t doesn't exist
+%%
+### block-after-dashdash
+bind -T t a if -F 1 -- { display a }
+---
+a|if-shell -F 1 -- { display-message a }
+%%
+### block-set-value
+bind -T t a set -g @y { display a }
+---
+a|set-option -g @y { display-message a }
+%%
+### block-set-name
+bind -T t a set { display a } b
+---
+! command set-option: argument 1 must be "string"
+table t doesn't exist
+%%
+### block-display-menu
+bind -T t a display-menu -T title "Name" n { display a } "" "Other" o { display b }
+---
+a|display-menu -T title Name n { display-message a } '' Other o { display-message b }
+%%
+### block-display-menu-sep
+bind -T t a display-menu { x }
+---
+! unknown command: x
+table t doesn't exist
+%%
+### block-display-menu-key-block
+bind -T t a display-menu "Name" { x }
+---
+! unknown command: x
+table t doesn't exist
+%%
+### block-display-menu-sep-then
+bind -T t a display-menu "" { x }
+---
+! unknown command: x
+table t doesn't exist
+%%
+### block-display-menu-sep-block
+bind -T t a display-menu "" "Name" k { display a }
+---
+a|display-menu '' Name k { display-message a }
+%%
+### block-command-prompt
+bind -T t a command-prompt -p x { rename-session -- "%%" }
+---
+a|command-prompt -p x { rename-session "%%" }
+%%
+### block-command-prompt-string
+bind -T t a command-prompt -p x "rename-session -- %%"
+---
+a|command-prompt -p x "rename-session -- %%"
+%%
+### block-confirm
+bind -T t a confirm-before -p "kill? (y/n)" { kill-window }
+---
+a|confirm-before -p "kill? (y/n)" { kill-window }
+%%
+### block-choose-tree
+bind -T t a choose-tree -Zs { switch-client -t "%%" }
+---
+a|choose-tree -Zs { switch-client -t "%%" }
+%%
+### block-line-groups
+bind -T t a {
+display a
+display b ; display c
+display d
+} ; display e
+---
+a|display-message a \; display-message b \; display-message c \; display-message d
+%%
+### block-line-groups-2
+bind -T t a if -F 1 { display a ; display b
+display c ; display d } { display e ; display f
+display g }
+---
+a|if-shell -F 1 { display-message a ; display-message b ;; display-message c ; display-message d } { display-message e ; display-message f ;; display-message g }
+%%
+### block-line-groups-continuation
+bind -T t a if -F 1 { display a \
+ display b
+display c } { }
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### block-line-groups-quotes
+bind -T t a if -F 1 { display "a
+b"
+display c } { }
+---
+a|if-shell -F 1 { display-message a\nb ;; display-message c } {  }
+%%
+### block-line-groups-comments
+bind -T t a if -F 1 {
+# c
+display a
+# d
+display b } { }
+---
+a|if-shell -F 1 { display-message a ;; display-message b } {  }
+%%
+### block-line-groups-comment-after
+bind -T t a if -F 1 { display a # x
+display b } { }
+---
+a|if-shell -F 1 { display-message a ; display-message b } {  }
+%%
+### block-line-groups-comment-after-2
+bind -T t a if -F 1 { display a ; display b # x
+display c } { }
+---
+a|if-shell -F 1 { display-message a ;; display-message b ; display-message c } {  }
+%%
+### block-line-groups-blank
+bind -T t a if -F 1 { display a
+
+
+display b } { }
+---
+a|if-shell -F 1 { display-message a ;; display-message b } {  }
+%%
+### block-line-groups-crlf
+bind -T t a if -F 1 { display a
+display b } { }
+---
+a|if-shell -F 1 { display-message a ;; display-message b } {  }
+%%
+### block-line-groups-semi-eol
+bind -T t a if -F 1 { display a ;
+display b } { }
+---
+a|if-shell -F 1 { display-message a ;; display-message b } {  }
+%%
+### block-line-groups-assign
+bind -T t a if -F 1 { A=1
+display a
+B=2 ; display b } { }
+---
+a|if-shell -F 1 { display-message a ;; display-message b } {  }
+%%
+### block-line-groups-hidden
+bind -T t a if -F 1 { %hidden A=1
+display a } { }
+---
+a|if-shell -F 1 { display-message a } {  }
+%%
+### block-alias
+bind -T t a { splitp -h
+info }
+---
+a|split-window -h \; show-messages -JT
+%%
+### block-alias-in-argv
+bind -T t a if -F 1 { splitp } { choose-window }
+---
+a|if-shell -F 1 { split-window } { choose-tree -w }
+%%
+### print-flags-regroup
+bind -T t a choose-tree -sZ -O name
+---
+a|choose-tree -Zs -O name
+%%
+### print-flags-regroup-2
+bind -T t a choose-tree -Zs -O name -F x -f y
+---
+a|choose-tree -Zs -F x -O name -f y
+%%
+### print-flags-repeat
+bind -T t a send -X -N 3 -l foo
+---
+a|send-keys -Xl -N 3 foo
+%%
+### print-flags-values-order
+bind -T t a new-window -n x -e A=1 -c y -e B=2 -d
+---
+a|new-window -d -c y -e A=1 -e B=2 -n x
+%%
+### print-flags-glued
+bind -T t a resize-pane -D5 -U3 -x 20% -y10
+---
+a|resize-pane -D 5 -U 3 -x "20%" -y 10
+%%
+### print-flags-optional
+bind -T t a resize-pane -D
+---
+a|resize-pane -D --
+%%
+### print-flags-optional-then
+bind -T t a resize-pane -D -D5
+---
+a|resize-pane -D --
+%%
+### print-flags-optional-after
+bind -T t a resize-pane -D5 -D
+---
+a|resize-pane -D 5
+%%
+### print-flags-optional-two
+bind -T t a resize-pane -D -U
+---
+a|resize-pane -D -U --
+%%
+### print-flags-optional-dash
+bind -T t a resize-pane -D --
+---
+a|resize-pane -D --
+%%
+### print-flags-optional-with-flag
+bind -T t a resize-pane -D -Z
+---
+a|resize-pane -Z -D --
+%%
+### print-flags-optional-with-flag-2
+bind -T t a resize-pane -Z -D
+---
+a|resize-pane -Z -D --
+%%
+### print-flags-optional-neg
+bind -T t a resize-pane -D -5
+---
+a|resize-pane -D -5
+%%
+### print-flags-optional-neg-2
+bind -T t a resize-pane -D-5
+---
+a|resize-pane -D -5
+%%
+### print-flags-optional-mixed
+bind -T t a move-pane -D -U5 -L
+---
+a|move-pane -D -L -U 5
+%%
+### print-flags-dashdash
+bind -T t a display -p -- -x
+---
+a|display-message -p -x
+%%
+### print-flags-dash
+bind -T t a display -p -
+---
+a|display-message -p -
+%%
+### print-flags-count
+bind -T t a send -XX -l -l
+---
+a|send-keys -XXll
+%%
+### print-flags-glued-bool
+bind -T t a new-window -dPk
+---
+a|new-window -Pdk
+%%
+### print-alias-send
+bind -T t a send -X cancel
+---
+a|send-keys -X cancel
+%%
+### print-alias-lots
+bind -T t a neww \; splitw \; killp \; selectp -L \; has \; lsw
+---
+a|new-window \; split-window \; kill-pane \; select-pane -L \; has-session \; list-windows
+%%
+### print-alias-prefix
+bind -T t a displayp
+---
+a|display-panes
+%%
+### print-alias-abbrev
+bind -T t a new-w
+---
+a|new-window
+%%
+### print-alias-ambiguous
+bind -T t a new
+---
+a|new-session
+%%
+### print-alias-default-split
+bind -T t a split-pane -h
+---
+a|split-window -h
+%%
+### print-alias-default-server
+bind -T t a server-info
+---
+a|show-messages -JT
+%%
+### print-alias-default-choose
+bind -T t a choose-session
+---
+a|choose-tree -s
+%%
+### print-home
+bind -T t a display "$HOME"
+---
+a|display-message /home/vtmux-test
+%%
+### print-home-var
+bind -T t a display $HOME/x
+---
+a|display-message /home/vtmux-test/x
+%%
+### print-home-braces
+bind -T t a display ${HOME}x
+---
+a|display-message /home/vtmux-testx
+%%
+### print-home-tilde
+bind -T t a display ~/x
+---
+a|display-message /home/vtmux-test/x
+%%
+### print-home-tilde-alone
+bind -T t a display ~
+---
+a|display-message /home/vtmux-test
+%%
+### print-home-tilde-quoted
+bind -T t a display "~/x"
+---
+a|display-message /home/vtmux-test/x
+%%
+### print-home-tilde-single
+bind -T t a display '~/x'
+---
+a|display-message \~/x
+%%
+### print-home-tilde-user
+bind -T t a display ~nosuchuserxyz/x
+---
+! syntax error
+table t doesn't exist
+%%
+### print-var-unset
+bind -T t a display "[$NOSUCH_VAR_XYZ]"
+---
+a|display-message []
+%%
+### print-var-dollar-end
+bind -T t a display "a$"
+---
+a|display-message "a$"
+%%
+### print-var-dollar-digit
+bind -T t a display "$1" '$1' $2
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-var-dollar-sq
+bind -T t a display '$HOME'
+---
+a|display-message "\$HOME"
+%%
+### print-var-dollar-escaped
+bind -T t a display \$HOME
+---
+a|display-message "\$HOME"
+%%
+### print-quote-dollar-in-dq
+bind -T t a display "pw=$r"
+---
+a|display-message pw=
+%%
+### print-quote-dollar-sq
+bind -T t a display 'pw=#{pane_width}; r=$((pw * 100 / ww)); x'
+---
+a|display-message "pw=#{pane_width}; r=$((pw * 100 / ww)); x"
+%%
+### print-quote-dollar-sq-2
+bind -T t a run-shell 'pw=#{pane_width}; ww=#{window_width}; r=$((pw * 100 / ww)); if [ $r -lt 40 ]; then tmux resize-pane -x $((ww / 2)); fi'
+---
+a|run-shell "pw=#{pane_width}; ww=#{window_width}; r=$((pw * 100 / ww)); if [ \$r -lt 40 ]; then tmux resize-pane -x $((ww / 2)); fi"
+%%
+### print-quote-dollar-letter
+bind -T t a display 'a $b c' 'a $_ c' 'a ${b} c' 'a $1 c' 'a $ c' 'a $' '$a b'
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-dollar-trailing
+bind -T t a display 'a b $' 'a b$' 'a b$$'
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-space
+bind -T t a display "a b" "a  b" " a" "a " " "
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-single-char
+bind -T t a display ";" "#" "'" "\"" "%" "{" "}" "~" "$" " " "\\" "a" "-"
+---
+! unknown command: #
+table t doesn't exist
+%%
+### print-quote-single-char-2
+bind -T t a display \; \# \' \" \% \{ \} \~ \$ \\
+---
+! unknown command: #
+table t doesn't exist
+%%
+### print-quote-special
+bind -T t a display "a;b" "a#b" "a'b" "a%b" "a{b" "a}b" "a~b" "~a" "~a b" "a\"b" "a\"b c" "a\\b" "a\\b c"
+---
+! syntax error
+table t doesn't exist
+%%
+### print-quote-special-2
+bind -T t a display 'a"b' 'a b"c' '"' '""' '" "' "'" "''" "a'" "'a"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-empty
+bind -T t a display "" '' ""
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-empty-flag
+bind -T t a display -F "" x
+---
+a|display-message -F '' x
+%%
+### print-quote-empty-flag-2
+bind -T t a display -F ''
+---
+a|display-message -F ''
+%%
+### print-quote-tilde
+bind -T t a display \~ \~a '~' 'x~' "a ~b"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-tilde-dq
+bind -T t a display "\~a b" "\~ b" "~"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-control
+bind -T t a display "a\tb" "a\nb" "a\rb" "a\eb" "a\ab" "a\bb" "a\fb" "a\vb" "a\001b" "a\177b" "a\037b"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-control-quoted
+bind -T t a display "a b\tc" "a b\nc" "a b\033c" "a b\001c"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-nul
+bind -T t a display "a\000b" "a\0001b"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-utf8
+bind -T t a display é "é é" "日本語" "🙂" "a é" 'é é'
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-backslash
+bind -T t a display "a\\b" "\\" 'a\b' 'a\\b' "\\\\"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-backslash-spaced
+bind -T t a display "a \\ b" 'a \ b' "a\sb"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-hash-formats
+bind -T t a display "#{pane_id}" "#[bold]x" '#S' "#{?#{==:#{a},b},x,y}"
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-format-flags
+bind -T t a display -F "#{pane_id}" -t "{last}" x
+---
+a|display-message -F "#{pane_id}" -t "{last}" x
+%%
+### print-quote-percent
+bind -T t a command-prompt -I "%1" "%%" %% %1
+---
+! command command-prompt: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-equals
+bind -T t a display A=1 "A=1" -p a=b
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-quote-dash
+bind -T t a display -- -- - -a
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### print-semicolon-word
+bind -T t a display \;
+---
+a|display-message
+%%
+### print-semicolon-escaped-in-quote
+bind -T t a display "a;" ";b" "\;"
+---
+! unknown command: ;b
+table t doesn't exist
+%%
+### print-numbers
+bind -T t a send -N3 -t:.+ x
+---
+a|send-keys -N 3 -t :.+ x
+%%
+### print-targets
+bind -T t a select-pane -t:.+ \; select-window -t:=0 \; switch-client -t= \; swap-window -t@
+---
+a|select-pane -t :.+ \; select-window -t :=0 \; switch-client -t = \; swap-window -t @
+%%
+### print-long
+bind -T t a display-menu -T "#[align=centre]#{pane_index} (#{pane_id})" -x P -y P "Go" g { send -X history-top } "" "Other" o { send -X history-bottom }
+---
+a|display-menu -T "#[align=centre]#{pane_index} (#{pane_id})" -x P -y P Go g { send-keys -X history-top } '' Other o { send-keys -X history-bottom }
+%%
+### print-empty-after-flag
+bind -T t a new-window -n ""
+---
+a|new-window -n ''
+%%
+### print-spaces-in-flag-value
+bind -T t a new-window -n "a b" -c "/x y"
+---
+a|new-window -c "/x y" -n "a b"
+%%
+### print-flag-value-escape
+bind -T t a display -F "#{a};b" -c "$HOME"
+---
+a|display-message -F "#{a};b" -c /home/vtmux-test
+%%
+### print-flag-value-tilde
+bind -T t a new-window -c "~/x" -n ~
+---
+a|new-window -c /home/vtmux-test/x -n /home/vtmux-test
+%%
+### bind-note-quote
+bind -T t -N "a note; with \"stuff\"" a display
+---
+a|display-message
+%%
+### bind-note-utf8
+bind -T t -N "é 日" a display
+---
+a|display-message
+%%
+### bind-r
+bind -T t -r a display
+---
+a|display-message
+%%
+### bind-r-after
+bind -T t a display
+bind -T t -r b display
+---
+a|display-message
+b|display-message
+%%
+### bind-n-flag
+bind -n -T t a display
+---
+a|display-message
+%%
+### bind-note-repeat-nocmd
+bind -T t a display
+bind -T t -N later -r a
+---
+a|display-message
+%%
+### bind-error-in-middle
+bind -T t a display
+bind -T t b nosuchcommand
+bind -T t c display
+---
+! unknown command: nosuchcommand
+a|display-message
+c|display-message
+%%
+### bind-error-key
+bind -T t a display
+bind -T t nosuchkey display
+---
+! unknown key: nosuchkey
+a|display-message
+%%
+### bind-error-flag
+bind -T t a display -Z
+---
+! command display-message: unknown flag -Z
+table t doesn't exist
+%%
+### bind-error-args
+bind -T t a display a b
+---
+! command display-message: too many arguments (need at most 1)
+table t doesn't exist
+%%
+### bind-error-too-few
+bind
+---
+! command bind-key: too few arguments (need at least 1)
+table t doesn't exist
+%%
+### bind-error-syntax
+bind -T t a display }
+---
+! syntax error
+table t doesn't exist
+%%
+### bind-error-late-syntax
+bind -T t a display
+bind -T t b }
+---
+! syntax error
+table t doesn't exist
+%%
+### bind-error-unknown-cmd-in-block
+bind -T t a { nosuch }
+---
+! unknown command: nosuch
+table t doesn't exist
+%%
+### bind-error-flag-in-block
+bind -T t a { display -Z }
+---
+! command display-message: unknown flag -Z
+table t doesn't exist
+%%
+### bind-error-usage
+bind -T t a display -?
+---
+! usage: display-message [-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]
+table t doesn't exist
+%%
+### bind-error-arg-block-too-many
+bind -T t a display a { b }
+---
+! ambiguous command: b, could be: bind-key, break-pane
+table t doesn't exist
+%%
+### bind-key-string-error
+bind -T t a "display \" "
+---
+a|display-message " "
+%%
+### bind-key-command-alias
+bind -T t a info
+---
+a|show-messages -JT
+%%
+### unbind-in-config
+bind -T t a display
+bind -T t b display
+unbind -T t a
+---
+b|display-message
+%%
+### unbind-in-config-all
+bind -T t a display
+unbind -a -T t
+---
+table t doesn't exist
+%%
+### continuation-in-bind
+bind -T t a display \
+  -p x
+---
+a|display-message -p x
+%%
+### line-comment-after-bind
+bind -T t a choose-tree -s  # comment
+---
+a|choose-tree -s
+%%
+### two-binds-semicolon
+bind -T t a display a ; bind -T t b display b
+---
+a|display-message a
+b|display-message b
+%%
+### bind-owner-reload
+bind -T t R source-file "$HOME/.tmux.conf" \; display-message "Sourced $HOME/.tmux.conf"
+---
+R|source-file /home/vtmux-test/.tmux.conf \; display-message "Sourced /home/vtmux-test/.tmux.conf"
+%%
+### bind-owner-picker
+bind -T t M run-shell "$HOME/.config/tmux/scripts/move-pane-picker '#{pane_id}'"
+---
+M|run-shell "/home/vtmux-test/.config/tmux/scripts/move-pane-picker '#{pane_id}'"
+%%
+### bind-owner-pw
+bind -T t -r r run-shell 'pw=#{pane_width}; ww=#{window_width}; r=$((pw * 100 / ww)); if [ $r -lt 40 ]; then tmux resize-pane -x $((ww / 2)); elif [ $r -lt 60 ]; then tmux resize-pane -x $((ww * 2 / 3)); else tmux resize-pane -x $((ww / 3)); fi'
+---
+r|run-shell "pw=#{pane_width}; ww=#{window_width}; r=$((pw * 100 / ww)); if [ \$r -lt 40 ]; then tmux resize-pane -x $((ww / 2)); elif [ \$r -lt 60 ]; then tmux resize-pane -x $((ww * 2 / 3)); else tmux resize-pane -x $((ww / 3)); fi"
+%%
+### bind-owner-swap
+bind -T t -r S-Left select-pane -m \; select-pane -L \; swap-pane \; select-pane -M
+---
+S-Left|select-pane -m \; select-pane -L \; swap-pane \; select-pane -M
+%%
+### bind-owner-split
+bind -T t '"' split-window -v -c "#{pane_current_path}"
+---
+"|split-window -v -c "#{pane_current_path}"
+%%
+### bind-owner-popup
+bind -T t C-g display-popup -E -w 60% -h 80% "$HOME/.config/tmux/scripts/cheatsheet"
+---
+C-g|display-popup -E -h "80%" -w "60%" /home/vtmux-test/.config/tmux/scripts/cheatsheet
+%%
+### bind-owner-clipboard
+bind -T t v run-shell -b "$HOME/.tmux/plugins/tmux-fzf/scripts/clipboard.sh"
+---
+v|run-shell -b /home/vtmux-test/.tmux/plugins/tmux-fzf/scripts/clipboard.sh
+%%

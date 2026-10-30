@@ -24,13 +24,23 @@
 //! error stay applied. [`ParseOpts::parse_only`] (`source-file -n`,
 //! `CMD_PARSE_PARSEONLY`) skips the call.
 //!
-//! Not handled in M0 and reported as [`CmdError::Unsupported`]: `{ }` blocks,
-//! `%if` and friends, and arguments that are not valid UTF-8 (`\377`,
-//! `\U00110000`). Parse errors carry no `file:line:` prefix; the caller that
-//! knows the file adds it.
+//! `{ ... }` is an argument (`argument: '{' argument_statements`): the
+//! commands inside are parsed and built like the rest, into a nested
+//! [`CommandList`] ([`ArgValue::Commands`]). Which positionals accept one is
+//! per command (`Args::parse_values`). Commands also remember their source
+//! line, so the list can be grouped the way `cmd_parse_build_commands` does
+//! (a new group per line unless [`ParseOpts::one_group`]), which `;` versus
+//! `;;` in printed blocks shows. The line a command gets is the line after
+//! the lexer read the token that ended it, as bison's lookahead makes it:
+//! a trailing `# comment` has already moved to the next line by then.
+//!
+//! Not handled yet and reported as [`CmdError::Unsupported`]: `%if` and
+//! friends, and arguments that are not valid UTF-8 (`\377`, `\U00110000`).
+//! Parse errors carry no `file:line:` prefix; the caller that knows the file
+//! adds it.
 
 use super::table::{DEFAULT_COMMAND_ALIASES, find};
-use super::{Args, CmdError, CommandCall};
+use super::{ArgValue, Args, CmdError, CommandCall, CommandList};
 
 /// What the lexer needs from the host. vtmux-core does no I/O: the server
 /// implements this over its global environment and the system user database
@@ -55,11 +65,14 @@ pub struct ParseOpts {
     /// `CMD_PARSE_PARSEONLY` (`source-file -n`): assignments are checked but
     /// not applied.
     pub parse_only: bool,
+    /// `CMD_PARSE_ONEGROUP`: every command is in one group, whatever its
+    /// line (`cmd_parse_from_string` sets it).
+    pub one_group: bool,
 }
 
 /// The environment for text that cannot contain `$` or `~` (the default
-/// command aliases).
-struct NoEnv;
+/// command aliases, the default key bindings): every variable is unset.
+pub struct NoEnv;
 
 impl ConfigEnv for NoEnv {
     fn var(&self, _: &str) -> Option<String> {
@@ -73,36 +86,63 @@ impl ConfigEnv for NoEnv {
     fn set(&mut self, _: &str, _: &str, _: bool) {}
 }
 
+/// One command as the grammar reads it, before it is looked up (`struct
+/// cmd_parse_command`).
+struct RawCommand {
+    /// The lexer's line when the command was reduced.
+    line: u32,
+    args: Vec<RawArg>,
+}
+
+enum RawArg {
+    Str(String),
+    /// `{ ... }`, not built yet.
+    Block(Vec<RawCommand>),
+    /// An already parsed list (`cmd_parse_from_arguments` with a block).
+    Built(CommandList),
+}
+
 /// Parse an argument vector as `tmux a b ; c d` receives it.
 pub fn parse_argv(words: &[String]) -> Result<Vec<CommandCall>, CmdError> {
-    let mut commands: Vec<Vec<String>> = Vec::new();
-    let mut current: Vec<String> = Vec::new();
-    for word in words {
-        let mut word = word.clone();
+    let values: Vec<ArgValue> = words.iter().cloned().map(ArgValue::Str).collect();
+    parse_argv_values(&values)
+}
+
+/// `cmd_parse_from_arguments` (cmd-parse.y:1065-1136): the same for values
+/// that may already be `{ }` blocks (what `bind-key` passes on).
+pub fn parse_argv_values(values: &[ArgValue]) -> Result<Vec<CommandCall>, CmdError> {
+    let mut commands: Vec<RawCommand> = Vec::new();
+    let mut current: Vec<RawArg> = Vec::new();
+    let new = |args| RawCommand { line: 0, args };
+    for value in values {
         let mut end = false;
-        if word.ends_with(';') {
-            word.pop();
-            if word.ends_with('\\') {
-                // `\;` is a literal `;` (cmd-parse.y:1108-1110).
-                word.pop();
-                word.push(';');
-            } else {
-                end = true;
+        match value {
+            ArgValue::Str(word) => {
+                let mut word = word.clone();
+                if word.ends_with(';') {
+                    word.pop();
+                    if word.ends_with('\\') {
+                        // `\;` is a literal `;` (cmd-parse.y:1108-1110).
+                        word.pop();
+                        word.push(';');
+                    } else {
+                        end = true;
+                    }
+                }
+                if !end || !word.is_empty() {
+                    current.push(RawArg::Str(word));
+                }
             }
-        }
-        if !end || !word.is_empty() {
-            current.push(word);
+            ArgValue::Commands(list) => current.push(RawArg::Built(list.clone())),
         }
         if end {
-            commands.push(std::mem::take(&mut current));
+            commands.push(new(std::mem::take(&mut current)));
         }
     }
-    commands.push(current);
-    let mut out = Vec::new();
-    for words in &commands {
-        build_command(words, true, &mut out)?;
+    if !current.is_empty() {
+        commands.push(new(current));
     }
-    Ok(out)
+    build_commands(&commands, false, true)
 }
 
 /// Parse config text: one line, or several (a newline ends a statement
@@ -117,43 +157,108 @@ pub fn parse_config_with(
     env: &mut dyn ConfigEnv,
     opts: ParseOpts,
 ) -> Result<Vec<CommandCall>, CmdError> {
+    let raw = lex_commands(text, env, opts)?;
+    build_commands(&raw, opts.one_group, true)
+}
+
+/// `cmd_parse_from_string` (cmd-parse.y:1010-1027): text as a command
+/// string, every command in one group (`{ a \n b }` is `a ; b`).
+pub fn parse_string(text: &str, env: &mut dyn ConfigEnv) -> Result<CommandList, CmdError> {
+    let opts = ParseOpts {
+        parse_only: false,
+        one_group: true,
+    };
+    Ok(CommandList {
+        calls: parse_config_with(text, env, opts)?,
+    })
+}
+
+/// `cmd_parse_build_commands` (cmd-parse.y:937-1005): build each command,
+/// giving a new group to each run of commands from one line.
+fn build_commands(
+    cmds: &[RawCommand],
+    one_group: bool,
+    expand_alias: bool,
+) -> Result<Vec<CommandCall>, CmdError> {
     let mut out = Vec::new();
-    for words in lex_commands(text, env, opts)? {
-        build_command(&words, true, &mut out)?;
+    let mut group = 0;
+    let mut line = None;
+    for cmd in cmds {
+        if line.is_none() || (!one_group && line != Some(cmd.line)) {
+            group += 1;
+        }
+        line = Some(cmd.line);
+        for mut call in build_command(cmd, one_group, expand_alias)? {
+            call.group = group;
+            out.push(call);
+        }
     }
     Ok(out)
 }
 
 fn build_command(
-    words: &[String],
+    cmd: &RawCommand,
+    one_group: bool,
     expand_alias: bool,
-    out: &mut Vec<CommandCall>,
-) -> Result<(), CmdError> {
-    let Some(first) = words.first() else {
-        return Ok(());
-    };
-    if expand_alias
-        && let Some((_, text)) = DEFAULT_COMMAND_ALIASES.iter().find(|(a, _)| a == first)
-    {
-        // cmd_parse_expand_alias (cmd-parse.y:820-880): parse the alias text,
-        // append the remaining words to its last command, and build without
-        // expanding again.
-        let opts = ParseOpts { parse_only: true };
-        let mut expanded = lex_commands(text, &mut NoEnv, opts)?;
-        let Some(last) = expanded.last_mut() else {
-            return Ok(());
+) -> Result<Vec<CommandCall>, CmdError> {
+    if expand_alias {
+        // cmd_parse_expand_alias (cmd-parse.y:820-880): no first word, or a
+        // block as first word, is an empty list.
+        let Some(RawArg::Str(first)) = cmd.args.first() else {
+            return Ok(Vec::new());
         };
-        last.extend_from_slice(&words[1..]);
-        for command in &expanded {
-            build_command(command, false, out)?;
+        if let Some((_, text)) = DEFAULT_COMMAND_ALIASES.iter().find(|(a, _)| a == first) {
+            // Parse the alias text, append the remaining words to its last
+            // command, and build without expanding again.
+            let opts = ParseOpts {
+                parse_only: true,
+                one_group,
+            };
+            let mut expanded = lex_commands(text, &mut NoEnv, opts)?;
+            let Some(last) = expanded.last_mut() else {
+                return Ok(Vec::new());
+            };
+            last.args.extend(cmd.args[1..].iter().map(clone_raw));
+            return build_commands(&expanded, one_group, false);
         }
-        return Ok(());
+    }
+    // cmd_parse_build_command (cmd-parse.y:886-935).
+    let mut values = Vec::with_capacity(cmd.args.len());
+    for arg in &cmd.args {
+        values.push(match arg {
+            RawArg::Str(s) => ArgValue::Str(s.clone()),
+            RawArg::Block(block) => ArgValue::Commands(CommandList {
+                calls: build_commands(block, one_group, expand_alias)?,
+            }),
+            RawArg::Built(list) => ArgValue::Commands(list.clone()),
+        });
     }
     // cmd_parse (cmd.c:508-540).
+    let Some(ArgValue::Str(first)) = values.first() else {
+        return Err(CmdError::Lex("no command"));
+    };
     let entry = find(first)?;
-    let args = Args::parse(entry, words)?;
-    out.push(CommandCall { entry, args });
-    Ok(())
+    let args = Args::parse_values(entry, &values)?;
+    Ok(vec![CommandCall {
+        entry,
+        args,
+        group: 0,
+    }])
+}
+
+fn clone_raw(arg: &RawArg) -> RawArg {
+    match arg {
+        RawArg::Str(s) => RawArg::Str(s.clone()),
+        RawArg::Block(b) => RawArg::Block(
+            b.iter()
+                .map(|c| RawCommand {
+                    line: c.line,
+                    args: c.args.iter().map(clone_raw).collect(),
+                })
+                .collect(),
+        ),
+        RawArg::Built(l) => RawArg::Built(l.clone()),
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -163,6 +268,10 @@ enum Token {
     /// `\n`, or the newline tmux appends at the end of input.
     Eol,
     Semi,
+    /// `{`: opens a block argument.
+    LBrace,
+    /// `}`: closes it.
+    RBrace,
     /// A word (`TOKEN`) or `name=value` (`EQUALS`).
     Word {
         text: String,
@@ -185,6 +294,11 @@ struct Lexer<'a> {
     eof: bool,
     env: &'a mut dyn ConfigEnv,
     opts: ParseOpts,
+    /// `input->line`, as the lexer moves it (see the module docs).
+    line: u32,
+    /// A real newline was returned; the line moves on at the next token
+    /// (`ps->eol`).
+    eol: bool,
 }
 
 const MAX_NAME: usize = 1024 - 2;
@@ -227,6 +341,7 @@ impl Lexer<'_> {
                 continue;
             }
             if ch == Some(b'\n') && self.escapes % 2 == 1 {
+                self.line += 1;
                 self.escapes -= 1;
                 continue;
             }
@@ -240,6 +355,10 @@ impl Lexer<'_> {
     }
 
     fn next_token(&mut self) -> Result<Token, CmdError> {
+        if self.eol {
+            self.line += 1;
+            self.eol = false;
+        }
         loop {
             let Some(mut ch) = self.getc() else {
                 // Every input ends with a newline (cmd-parse.y:1292-1300).
@@ -262,10 +381,13 @@ impl Lexer<'_> {
                 }
             }
             match ch {
-                b'\n' => return Ok(Token::Eol),
+                b'\n' => {
+                    self.eol = true;
+                    return Ok(Token::Eol);
+                }
                 b';' => return Ok(Token::Semi),
-                b'{' => return Err(CmdError::Unsupported("{ } command blocks")),
-                b'}' => return Err(CmdError::Syntax),
+                b'{' => return Ok(Token::LBrace),
+                b'}' => return Ok(Token::RBrace),
                 b'#' => {
                     // A comment to the end of the line (continuations
                     // included: it reads through getc).
@@ -274,6 +396,9 @@ impl Lexer<'_> {
                         next = self.getc();
                     }
                     if next == Some(b'\n') {
+                        // Unlike a bare newline, this one moves the line
+                        // at once (cmd-parse.y:1330-1338).
+                        self.line += 1;
                         return Ok(Token::Eol);
                     }
                 }
@@ -355,6 +480,7 @@ impl Lexer<'_> {
             // Space and comments after a newline inside quotes are removed;
             // the newline stays (cmd-parse.y:1676-1699).
             if c == b'\n' {
+                self.line += 1;
                 buf.push(b'\n');
                 loop {
                     ch = self.getc();
@@ -586,33 +712,37 @@ impl Lexer<'_> {
     }
 }
 
-/// A `;`, newline or end of text ends a command. tmux quirk
+/// A `;`, newline, `}` or end of text ends a command. tmux quirk
 /// (cmd-parse.y:405-415, `commands ';' command`): when that command is a bare
 /// `NAME=value` it has no arguments, so the rule builds a fresh empty list
 /// and frees every command earlier in the same `;` chain, unbuilt and so
 /// unchecked (`x -- ; A=1` is not an `unknown command` error). The
 /// assignments already took effect when they were parsed.
 fn end_command(
-    items: &mut Vec<Vec<String>>,
-    current: &mut Vec<String>,
+    items: &mut Vec<RawCommand>,
+    current: &mut Vec<RawArg>,
+    line: u32,
     drop: bool,
     chain_start: usize,
 ) {
     if !current.is_empty() {
-        items.push(std::mem::take(current));
+        items.push(RawCommand {
+            line,
+            args: std::mem::take(current),
+        });
     } else if drop {
         items.truncate(chain_start);
     }
 }
 
-/// The grammar for the M0 subset: statements of commands and assignments
-/// separated by `;` and newlines (cmd-parse.y `statements`, `commands`,
-/// `command`, `hidden_assignment`).
+/// The grammar: statements of commands and assignments separated by `;` and
+/// newlines (cmd-parse.y `statements`, `commands`, `command`,
+/// `hidden_assignment`), with `{ ... }` blocks as arguments.
 fn lex_commands(
     text: &str,
     env: &mut dyn ConfigEnv,
     opts: ParseOpts,
-) -> Result<Vec<Vec<String>>, CmdError> {
+) -> Result<Vec<RawCommand>, CmdError> {
     let mut lexer = Lexer {
         input: text.as_bytes(),
         off: 0,
@@ -620,9 +750,17 @@ fn lex_commands(
         eof: false,
         env,
         opts,
+        line: 0,
+        eol: false,
     };
+    statements(&mut lexer, false)
+}
+
+/// The statements of the whole text, or of one block (`nested`, ended by
+/// its `}`).
+fn statements(lexer: &mut Lexer<'_>, nested: bool) -> Result<Vec<RawCommand>, CmdError> {
     let mut items = Vec::new();
-    let mut current: Vec<String> = Vec::new();
+    let mut current: Vec<RawArg> = Vec::new();
     // A command has started in this statement: a `;` is only valid after
     // one (`; display` is a syntax error, `display ;; display` is not).
     let mut started = false;
@@ -651,11 +789,33 @@ fn lex_commands(
                     }
                     started = true;
                 }
-                current.push(text);
+                current.push(RawArg::Str(text));
+            }
+            Token::LBrace => {
+                // Only an argument may be a block, never the command name.
+                if current.is_empty() {
+                    return Err(CmdError::Syntax);
+                }
+                let block = statements(lexer, true)?;
+                current.push(RawArg::Block(block));
+            }
+            Token::RBrace => {
+                if !nested {
+                    return Err(CmdError::Syntax);
+                }
+                end_command(
+                    &mut items,
+                    &mut current,
+                    lexer.line,
+                    assigned && drop_chain,
+                    chain_start,
+                );
+                return Ok(items);
             }
             Token::Hidden => {
-                // `statement: hidden_assignment`, then the newline: not part
-                // of a `;` list, so only a whole statement of its own.
+                // `statement: hidden_assignment`, then the newline (or the
+                // block's `}`): not part of a `;` list, so only a whole
+                // statement of its own.
                 if started || !current.is_empty() {
                     return Err(CmdError::Syntax);
                 }
@@ -663,8 +823,10 @@ fn lex_commands(
                     Token::Word { equals: true, text } => lexer.assign(&text, true)?,
                     _ => return Err(CmdError::Syntax),
                 }
-                if !matches!(lexer.next_token()?, Token::Eol) {
-                    return Err(CmdError::Syntax);
+                match lexer.next_token()? {
+                    Token::Eol => {}
+                    Token::RBrace if nested => return Ok(items),
+                    _ => return Err(CmdError::Syntax),
                 }
             }
             Token::Directive => {
@@ -681,6 +843,7 @@ fn lex_commands(
                 end_command(
                     &mut items,
                     &mut current,
+                    lexer.line,
                     assigned && drop_chain,
                     chain_start,
                 );
@@ -690,6 +853,7 @@ fn lex_commands(
                 end_command(
                     &mut items,
                     &mut current,
+                    lexer.line,
                     assigned && drop_chain,
                     chain_start,
                 );
@@ -697,7 +861,14 @@ fn lex_commands(
                 assigned = false;
                 chain_start = items.len();
             }
-            Token::End => return Ok(items),
+            Token::End => {
+                // A block still open at the end of the text.
+                return if nested {
+                    Err(CmdError::Syntax)
+                } else {
+                    Ok(items)
+                };
+            }
         }
     }
 }
@@ -707,7 +878,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::cmd::{NumError, strtonum};
+    use crate::cmd::{NumError, PrintFlags, strtonum};
 
     /// Test environment: fixed variables and homes.
     struct FakeEnv {
@@ -744,8 +915,14 @@ mod tests {
         }
     }
 
-    const RUN: ParseOpts = ParseOpts { parse_only: false };
-    const PARSE_ONLY: ParseOpts = ParseOpts { parse_only: true };
+    const RUN: ParseOpts = ParseOpts {
+        parse_only: false,
+        one_group: false,
+    };
+    const PARSE_ONLY: ParseOpts = ParseOpts {
+        parse_only: true,
+        one_group: false,
+    };
 
     fn parse(text: &str) -> Result<Vec<CommandCall>, CmdError> {
         parse_config_with(text, &mut env(), RUN)
@@ -759,7 +936,10 @@ mod tests {
     fn shape(calls: &[CommandCall]) -> Vec<(&'static str, Vec<String>)> {
         calls
             .iter()
-            .map(|c| (c.entry.name, c.args.positionals.clone()))
+            .map(|c| {
+                let pos = c.args.positionals.iter().map(|v| v.text().into_owned());
+                (c.entry.name, pos.collect())
+            })
             .collect()
     }
 
@@ -908,7 +1088,7 @@ mod tests {
 
     #[test]
     fn argv_empty_is_no_commands() {
-        assert!(parse_argv(&[]).unwrap().is_empty());
+        assert!(matches!(parse_argv(&[]).unwrap().as_slice(), []));
     }
 
     /// Everything is parsed before anything runs, so an error in the second
@@ -1028,7 +1208,7 @@ mod tests {
         let a = parsed(&["display", "-pt", "a", "msg"]).args;
         assert!(a.flag('p'));
         assert_eq!(a.value('t'), Some("a"));
-        assert_eq!(a.positionals, ["msg"]);
+        assert_eq!(a.positionals, [ArgValue::Str("msg".to_owned())]);
         // `-ta` where the value is the rest of the word: `-pta`.
         assert_eq!(parsed(&["display", "-pta"]).args.value('t'), Some("a"));
     }
@@ -1331,14 +1511,11 @@ mod tests {
         );
     }
 
-    /// Typed "unsupported in M0" errors, the allowed escape hatch in the
-    /// brief: blocks, conditionals, non-UTF-8 words. Reference
-    /// accepts all of them.
+    /// Typed "unsupported" errors, the allowed escape hatch in the brief:
+    /// conditionals and non-UTF-8 words. Reference accepts all of them.
     #[test]
     fn config_m0_unsupported_is_typed() {
         for text in [
-            "bind x { display -p a }",
-            "display { -p a }",
             "%if 1\ndisplay -p x\n%endif",
             "display -p \\377",
             "display -p \\U00110000",
@@ -1430,7 +1607,7 @@ mod tests {
         (
             calls
                 .iter()
-                .flat_map(|c| c.args.positionals.clone())
+                .flat_map(|c| c.args.positionals.iter().map(|v| v.text().into_owned()))
                 .collect(),
             e,
         )
@@ -1555,6 +1732,146 @@ mod tests {
             argv_err(&["split-window", "-Q"]),
             "command split-window: unknown flag -Q"
         );
+    }
+
+    // ---- { } blocks and the canonical printer ----
+    // Reference: crates/vtmux-core/tests/keys_cases.sh (`config.txt`), which
+    // checks the same through `bind-key` and `list-keys` against tmux 3.8.
+
+    /// The commands of the block that is `calls[0]`'s positional `idx`.
+    fn block(calls: &[CommandCall], idx: usize) -> &CommandList {
+        match &calls[0].args.positionals[idx] {
+            ArgValue::Commands(list) => list,
+            ArgValue::Str(s) => panic!("{s:?} is not a block"),
+        }
+    }
+
+    #[test]
+    fn block_is_a_nested_command_list() {
+        let calls = parse("if -F 1 { display a ; display b } { display c }").unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].entry.name, "if-shell");
+        assert_eq!(calls[0].args.positionals[0], "1");
+        let then = block(&calls, 1);
+        assert_eq!(
+            then.calls.iter().map(|c| c.entry.name).collect::<Vec<_>>(),
+            ["display-message", "display-message"]
+        );
+        assert_eq!(block(&calls, 2).calls.len(), 1);
+        // A block as a string is its printed commands (args_value_as_string).
+        assert_eq!(
+            calls[0].args.positional_text(1).unwrap(),
+            "display-message a ; display-message b"
+        );
+        assert_eq!(calls[0].args.positional(1), None);
+    }
+
+    #[test]
+    fn block_print_and_groups() {
+        // One line is one group (`;`); each line of a block is its own
+        // (`;;`) unless the text is parsed as a string.
+        let calls = parse("if -F 1 { display a ; display b\ndisplay c } { }").unwrap();
+        let list = block(&calls, 1);
+        assert_eq!(
+            list.print(PrintFlags::default()),
+            "display-message a ; display-message b ;; display-message c"
+        );
+        assert_eq!(
+            list.print(PrintFlags {
+                escaped: true,
+                no_groups: false
+            }),
+            "display-message a \\; display-message b \\;\\; display-message c"
+        );
+        assert_eq!(
+            list.print(PrintFlags::LIST_KEYS),
+            "display-message a \\; display-message b \\; display-message c"
+        );
+        let one = parse_string("display a ; display b\ndisplay c", &mut env()).unwrap();
+        assert_eq!(
+            one.print(PrintFlags::default()),
+            "display-message a ; display-message b ; display-message c"
+        );
+        assert_eq!(block(&calls, 2).print(PrintFlags::default()), "");
+    }
+
+    #[test]
+    fn block_errors() {
+        // A block is only accepted where the command's args_parse says so.
+        assert_eq!(
+            cfg_err("display { a }"),
+            "command display-message: argument 1 must be \"string\""
+        );
+        assert_eq!(
+            cfg_err("if -F 1 a b c"),
+            "command if-shell: too many arguments (need at most 3)"
+        );
+        // Position 4 is checked before the count is (reference: `if -F 1 a b
+        // { display c }` -> `argument 4 must be "string"`).
+        assert_eq!(
+            cfg_err("if -F 1 a b { display c }"),
+            "command if-shell: argument 4 must be \"string\""
+        );
+        assert_eq!(
+            cfg_err("display -t { a }"),
+            "command display-message: -t argument must be a string"
+        );
+        assert_eq!(
+            cfg_err("run { display a }"),
+            "command run-shell: argument 1 must be \"string\""
+        );
+        assert!(parse("run -C { display a }").is_ok());
+        for text in [
+            "{ display a }",
+            "display a }",
+            "bind a { display a",
+            "bind a { { x } }",
+        ] {
+            assert!(
+                matches!(
+                    parse(text).unwrap_err(),
+                    CmdError::Syntax | CmdError::Edge(_)
+                ),
+                "{text}"
+            );
+        }
+        // The block is built before the arity is checked, so its own
+        // errors come first.
+        assert!(cfg_err("if -F 1 a b { c }").starts_with("ambiguous command: c,"));
+        assert_eq!(cfg_err("bind a { ; }"), "syntax error");
+        assert_eq!(cfg_err("bind a { display a }}"), "syntax error");
+    }
+
+    #[test]
+    fn block_edge_forms_parse() {
+        for text in [
+            "bind a {}",
+            "bind a { }",
+            "bind a {display}",
+            "bind a { display a;display b;; display c}",
+            "bind a { A=1 }",
+            "bind a { %hidden A=1\ndisplay a }",
+            "bind a display \"a}\"",
+            "bind a display a\\}",
+            "bind a display '{'",
+            "bind a { display a } ; bind b { display b }",
+            "bind a { display a } display b",
+        ] {
+            assert!(parse(text).is_ok(), "{text}: {:?}", parse(text).err());
+        }
+    }
+
+    #[test]
+    fn print_regroups_flags_and_expands_aliases() {
+        let p = |text: &str| parse(text).unwrap()[0].print();
+        assert_eq!(p("choose-tree -sZ -O name"), "choose-tree -Zs -O name");
+        assert_eq!(p("send -X cancel"), "send-keys -X cancel");
+        assert_eq!(p("splitp -h"), "split-window -h");
+        assert_eq!(p("display"), "display-message");
+        assert_eq!(p("send -N3 -X -l foo"), "send-keys -Xl -N 3 foo");
+        assert_eq!(p("resize-pane -D -D5"), "resize-pane -D --");
+        assert_eq!(p("display ~/x"), "display-message /home/me/x");
+        assert_eq!(p("display 'a $b'"), "display-message \"a \\$b\"");
     }
 
     // ---- robustness ----

@@ -14,28 +14,49 @@
 //! only. Everything tmux interprets at execution time (numbers, sizes,
 //! targets, formats) stays raw text in [`Args`] for the server to interpret.
 //!
+//! `{ ... }` blocks parse to nested [`CommandList`]s ([`ArgValue::Commands`]),
+//! and [`print`] turns commands back into the canonical text `list-keys`
+//! shows (`cmd_list_print`, `args_print`, `args_escape`).
+//!
 //! Errors are [`CmdError`]. Most are [`EdgeError`]s; the few tmux messages
 //! `EdgeError` has no variant for live here until it grows them.
 
 pub mod args;
 pub mod parse;
+pub mod print;
 pub mod table;
 pub mod target;
 
 use std::fmt;
 
-pub use args::{Args, NumError, strtonum};
-pub use parse::{ConfigEnv, ParseOpts, parse_argv, parse_config_with};
+pub use args::{ArgValue, Args, NumError, strtonum};
+pub use parse::{
+    ConfigEnv, NoEnv, ParseOpts, parse_argv, parse_argv_values, parse_config_with, parse_string,
+};
+pub use print::{PrintFlags, args_escape};
 pub use table::{CmdEntry, FindFlags, FindSpec, TMUX_COMMANDS};
 pub use target::{TargetKind, TargetSpec};
 
 use crate::error::EdgeError;
 
-/// One parsed command: its table entry and its raw arguments.
-#[derive(Clone, Debug)]
+/// One parsed command: its table entry and its arguments.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandCall {
     pub entry: &'static CmdEntry,
     pub args: Args,
+    /// Which group of its list the command belongs to (`cmd->group`). A
+    /// command list printed with groups separates commands of different
+    /// groups with ` ;; ` instead of ` ; `. The parser starts a new group at
+    /// each source line unless [`ParseOpts::one_group`] is set. Only
+    /// equality inside one list means anything.
+    pub group: u32,
+}
+
+/// A parsed command list (`struct cmd_list`): what a `{ }` block is, and
+/// what a key binding runs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommandList {
+    pub calls: Vec<CommandCall>,
 }
 
 /// Why text did not become commands, or why a command cannot run. `Display`
@@ -60,8 +81,14 @@ pub enum CmdError {
     Syntax,
     /// A lexer message (`invalid octal escape`, `invalid \u argument`, ...).
     Lex(&'static str),
-    /// Valid tmux syntax that vtmux M0 does not handle yet (`{ }` blocks,
-    /// `%if`, a non-UTF-8 argument).
+    /// `command C: argument N must be "string"`: a `{ }` block where the
+    /// command's `args_parse` callback wants text (arguments.c:310-316).
+    ArgumentNotString { command: String, index: usize },
+    /// `command C: -t argument must be a string`: a block as a flag's value
+    /// (arguments.c:166).
+    FlagArgumentNotString { command: String, flag: char },
+    /// Valid tmux syntax that vtmux does not handle yet (`%if`, a non-UTF-8
+    /// argument).
     Unsupported(&'static str),
     /// The command exists in tmux 3.8 but vtmux does not run it yet.
     NotImplemented(String),
@@ -81,6 +108,12 @@ impl fmt::Display for CmdError {
                 } else {
                     f.write_str("\u{fffd}")
                 }
+            }
+            Self::ArgumentNotString { command, index } => {
+                write!(f, "command {command}: argument {index} must be \"string\"")
+            }
+            Self::FlagArgumentNotString { command, flag } => {
+                write!(f, "command {command}: -{flag} argument must be a string")
             }
             Self::Usage { name, usage } => write!(f, "usage: {name} {usage}"),
             Self::Syntax => f.write_str("syntax error"),

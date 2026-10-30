@@ -1,0 +1,323 @@
+Tab	=Tab
+Enter	=Enter
+Escape	=Escape
+Space	=Space
+BSpace	=BSpace
+BTab	=BTab
+tab	=Tab
+ENTER	=Enter
+escape	=Escape
+space	=Space
+C-i	=C-i
+C-I	=C-I
+C-m	=C-m
+C-j	=C-j
+C-[	=C-[
+M-C-[	=C-M-[
+C-]	=C-]
+C-\	=C-\
+C-^	=C-^
+C-_	=C-_
+C-@	=C-@
+C-?	=C-?
+C-Space	=C-Space
+C-Tab	=C-Tab
+C-Escape	=C-Escape
+^[	=C-[
+^a	=C-a
+^A	=C-a
+^?	=C-?
+^1	=C-1
+^@	=C-@
+^ab	!unknown key: ^ab
+^	=^
+^Tab	=C-Tab
+^C-a	=C-a
+^M-a	=C-M-a
+C-a	=C-a
+C-A	=C-A
+C-z	=C-z
+C-Z	=C-Z
+c-a	=C-a
+m-a	=M-a
+s-a	=S-a
+M-a	=M-a
+M-A	=M-A
+S-a	=S-a
+S-A	=S-A
+C-M-a	=C-M-a
+M-C-a	=C-M-a
+C-M-S-a	=C-M-S-a
+S-C-M-a	=C-M-S-a
+C-C-a	=C-a
+C-S-C-a	=C-S-a
+C-	!unknown key: C-
+M-	!unknown key: M-
+S-	!unknown key: S-
+C--	=C--
+C-M--	=C-M--
+X-a	!unknown key: X-a
+C-X-a	!unknown key: C-X-a
+CM-a	!unknown key: CM-a
+C-ab	!unknown key: C-ab
+C- 	=C-Space
+C-  	!unknown key: C-  
+a	=a
+A	=A
+z	=z
+Z	=Z
+0	=0
+9	=9
+!	=!
+"	="
+#	=#
+$	=$
+%	=%
+&	=&
+'	='
+(	=(
+)	=)
+*	=*
++	=+
+,	=,
+-	=-
+.	=.
+/	=/
+:	=:
+;	!command bind-key: too few arguments (need at least 1)
+<	=<
+=	==
+>	=>
+?	=?
+@	=@
+[	=[
+\	=\
+]	=]
+^	=^
+_	=_
+`	=`
+{	={
+|	=|
+}	=}
+~	=~
+ 	=Space
+a 	!unknown key: a 
+ a	!unknown key:  a
+ab	!unknown key: ab
+abc	!unknown key: abc
+F1	=F1
+F2	=F2
+F9	=F9
+F10	=F10
+F11	=F11
+F12	=F12
+F13	!unknown key: F13
+f1	=F1
+M-F1	=M-F1
+C-F1	=C-F1
+S-F1	=S-F1
+C-S-M-F1	=C-M-S-F1
+M-f12	=M-F12
+IC	=IC
+Insert	=IC
+DC	=DC
+Delete	=DC
+Home	=Home
+End	=End
+NPage	=NPage
+PageDown	=NPage
+PgDn	=NPage
+PPage	=PPage
+PageUp	=PPage
+PgUp	=PPage
+ic	=IC
+insert	=IC
+M-IC	=M-IC
+M-Insert	=M-IC
+M-PgUp	=M-PPage
+S-Home	=S-Home
+C-End	=C-End
+Up	=Up
+Down	=Down
+Left	=Left
+Right	=Right
+up	=Up
+M-Up	=M-Up
+C-Up	=C-Up
+S-Up	=S-Up
+C-S-Up	=C-S-Up
+M-C-Up	=C-M-Up
+C-M-Up	=C-M-Up
+M-S-Down	=M-S-Down
+KP/	=KP/
+KP*	=KP*
+KP-	=KP-
+KP7	=KP7
+KP8	=KP8
+KP9	=KP9
+KP+	=KP+
+KP4	=KP4
+KP5	=KP5
+KP6	=KP6
+KP1	=KP1
+KP2	=KP2
+KP3	=KP3
+KPEnter	=KPEnter
+KP0	=KP0
+KP.	=KP.
+kp5	=KP5
+M-KP5	=M-KP5
+KPenter	=KPEnter
+[NUL]	=[NUL]
+[SOH]	=[SOH]
+[nul]	=[NUL]
+[LF]	=[LF]
+[ESC]	!unknown key: [ESC]
+[US]	=[US]
+[BS]	=[BS]
+[ASC]	=[ASC]
+[SO]	=[SO]
+None	!unknown key: None
+NONE	!unknown key: NONE
+Any	=Any
+any	=Any
+ANY	=Any
+C-Any	!unknown key: C-Any
+Unknown	!unknown key: Unknown
+FocusIn	!unknown key: FocusIn
+PasteStart	!unknown key: PasteStart
+Mouse	!unknown key: Mouse
+Dragging	!unknown key: Dragging
+x	=x
+y	=y
+MouseDown1Pane	=MouseDown1Pane
+MouseDown2Pane	=MouseDown2Pane
+MouseDown3Pane	=MouseDown3Pane
+MouseDown4Pane	!unknown key: MouseDown4Pane
+MouseDown5Pane	!unknown key: MouseDown5Pane
+MouseDown6Pane	=MouseDown6Pane
+MouseDown11Pane	=MouseDown11Pane
+MouseDown12Pane	!unknown key: MouseDown12Pane
+MouseUp1Status	=MouseUp1Status
+MouseUp3StatusLeft	=MouseUp3StatusLeft
+MouseDrag1Border	=MouseDrag1Border
+MouseDragEnd1Pane	=MouseDragEnd1Pane
+WheelUpPane	=WheelUpPane
+WheelDownPane	=WheelDownPane
+WheelUpStatus	=WheelUpStatus
+WheelDownStatusDefault	=WheelDownStatusDefault
+WheelUp1Pane	!unknown key: WheelUp1Pane
+SecondClick1Pane	=SecondClick1Pane
+DoubleClick1Pane	=DoubleClick1Pane
+TripleClick1Pane	=TripleClick1Pane
+DoubleClick1Status	=DoubleClick1Status
+MouseDown1ScrollbarUp	=MouseDown1ScrollbarUp
+MouseDrag1ScrollbarSlider	=MouseDrag1ScrollbarSlider
+MouseDown1ScrollbarDown	=MouseDown1ScrollbarDown
+MouseDown1Empty	=MouseDown1Empty
+MouseDown1Control0	=MouseDown1Control0
+MouseDown1Control9	=MouseDown1Control9
+MouseDown1Control10	!unknown key: MouseDown1Control10
+mousedown1pane	=MouseDown1Pane
+MOUSEDOWN1PANE	=MouseDown1Pane
+C-MouseDrag1Pane	=C-MouseDrag1Pane
+M-MouseDrag1Pane	=M-MouseDrag1Pane
+S-WheelUpPane	=S-WheelUpPane
+C-M-WheelDownPane	=C-M-WheelDownPane
+MouseMovePane	!unknown key: MouseMovePane
+MouseMove1Pane	!unknown key: MouseMove1Pane
+User0	=User0
+User1	=User1
+User5	=User5
+User999	=User999
+User1000	=User100
+User1001	!unknown key: User1001
+user5	!unknown key: user5
+USER5	!unknown key: USER5
+User 5	=User5
+User+5	=User5
+User-1	!unknown key: User-1
+User-4294967295	=User1
+User0x5	=User0
+User5abc	=User5
+User	!unknown key: User
+User-	!unknown key: User-
+User5 	=User5
+ User5	!unknown key:  User5
+C-User5	=C-User5
+M-User5	=M-User5
+0x0	=[NUL]
+0x00	=[NUL]
+0x1	=[SOH]
+0x1f	=[US]
+0x20	= 
+0x41	=A
+0x61	=a
+0x7e	=~
+0x7f	=
+0x80	=
+0x9f	=
+0xa0	= 
+0xe9	=é
+0xff	=ÿ
+0x100	=Ā
+0x300	=̀
+0x7ff	=߿
+0x800	=ࠀ
+0xfff	=࿿
+0x2200	=∀
+0x200b	=​
+0x65e5	=日
+0xd7ff	=퟿
+0xd800	!unknown key: 0xd800
+0xdfff	!unknown key: 0xdfff
+0xe000	=
+0xfffe	=￾
+0xffff	=￿
+0x10000	=𐀀
+0x1f600	=😀
+0x1f4a9	=💩
+0xfffff	=󿿿
+0x10ffff	=􏿿
+0x140000	!unknown key: 0x140000
+0x1fffff	!unknown key: 0x1fffff
+0x200000	!unknown key: 0x200000
+0x7fffffff	!unknown key: 0x7fffffff
+0xffffffff	!unknown key: 0xffffffff
+0x100000041	=A
+0xFFFFFFFFFF	!unknown key: 0xFFFFFFFFFF
+0xFFFFFFFFFFFFFFFFFF	!unknown key: 0xFFFFFFFFFFFFFFFFFF
+0x0x41	=A
+0x0x	!unknown key: 0x0x
+0x0xg	!unknown key: 0x0xg
+0xg	!unknown key: 0xg
+0x	!unknown key: 0x
+0X41	!unknown key: 0X41
+0x 41	=A
+0x  41	=A
+0x41zz	=A
+0x00041	=A
+0x-41	!unknown key: 0x-41
+0x+41	=A
+0x41,5	=A
+C-0x41	!unknown key: C-0x41
+M-0x41	!unknown key: M-0x41
+0xz	!unknown key: 0xz
+é	=é
+É	=É
+ñ	=ñ
+日	=日
+🙂	=🙂
+∀	=∀
+␀	=␀
+‌	=‌
+é́	!unknown key: é́
+C-é	=C-é
+M-é	=M-é
+S-é	=S-é
+C-M-é	=C-M-é
+C-日	=C-日
+M-🙂	=M-🙂
+ab日	!unknown key: ab日
+é 	!unknown key: é 
+^é	=C-é
