@@ -11,6 +11,9 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 
 [dev-dependencies]
 tempfile = "3"
+# Test-only: the styled-row goldens replay the reference client's terminal bytes
+# through PaneTerm. The library itself stays free of FFI (D10).
+vtmux-vt.workspace = true
 
 [lints]
 workspace = true
