@@ -66,6 +66,8 @@ pub struct CommandList {
 pub enum CmdError {
     /// Unknown or ambiguous command, unknown flag, arity.
     Edge(EdgeError),
+    /// Runtime option validation (cmd-set-option.c, cmd-show-options.c).
+    Option(crate::options::OptionError),
     /// `command C: -t expects an argument` (arguments.c:181).
     FlagNeedsValue { command: String, flag: char },
     /// `command C: invalid flag -X`: a non-alphanumeric flag byte
@@ -98,6 +100,7 @@ impl fmt::Display for CmdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Edge(e) => e.fmt(f),
+            Self::Option(e) => e.fmt(f),
             Self::FlagNeedsValue { command, flag } => {
                 write!(f, "command {command}: -{flag} expects an argument")
             }
@@ -144,8 +147,15 @@ impl std::error::Error for CmdError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Edge(e) => Some(e),
+            Self::Option(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+impl From<crate::options::OptionError> for CmdError {
+    fn from(e: crate::options::OptionError) -> Self {
+        Self::Option(e)
     }
 }
 

@@ -462,8 +462,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."new-session-environment.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."new-session-no-client.sh"]
 status = "pass"
@@ -484,8 +483,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."options-values.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."osc-11colours.sh"]
 status = "xfail"

@@ -1,0 +1,14 @@
+name = "options_spawn_defaults"
+steps = [
+  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["set", "-g", "history-limit", "0"] },
+  { run = ["new", "-d", "-s", "b", "-x", "20", "-y", "3", "cat"] },
+  { run = ["send", "-t", "b", "-l", "1\r2\r3\r4\r5\r6\r7\r8\r9\r10\r"] },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "b", "#{history_size}"] },
+  { run = ["set", "-s", "exit-empty", "off"] },
+  { run = ["kill-session", "-t", "a"] },
+  { run = ["kill-session", "-t", "b"] },
+  { run = ["show", "-sv", "exit-empty"] },
+  { run = ["set", "-s", "exit-empty", "on"] },
+]

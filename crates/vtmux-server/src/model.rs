@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use vtmux_core::ids::{IdAllocator, PaneId, SessionId, WindowId};
+use vtmux_core::options::{Defaults, OptionsStore};
 use vtmux_vt::PaneTerm;
 
 use crate::pane_io::PaneIo;
@@ -97,6 +98,7 @@ pub struct Pane {
 /// The server's sessions, windows and panes.
 #[derive(Debug)]
 pub struct Model {
+    pub options: OptionsStore,
     pub sessions: BTreeMap<SessionId, Session>,
     /// Name -> ID: the listing order (tmux sorts sessions by name).
     pub by_name: BTreeMap<String, SessionId>,
@@ -111,6 +113,7 @@ pub struct Model {
 impl Default for Model {
     fn default() -> Self {
         Self {
+            options: OptionsStore::new(&Defaults::default()),
             sessions: BTreeMap::new(),
             by_name: BTreeMap::new(),
             windows: BTreeMap::new(),
@@ -167,6 +170,7 @@ impl Model {
     }
 
     pub fn insert_session(&mut self, session: Session) {
+        self.options.add_session(session.id);
         self.by_name.insert(session.name.clone(), session.id);
         self.sessions.insert(session.id, session);
     }
@@ -177,13 +181,18 @@ impl Model {
         let Some(session) = self.sessions.remove(&id) else {
             return Vec::new();
         };
+        self.options.remove_session(id);
         self.by_name.remove(&session.name);
         let mut gone = Vec::new();
         for w in session.windows.values() {
             if self.sessions_with(*w).next().is_none()
                 && let Some(window) = self.windows.remove(w)
             {
-                gone.extend(window.layout.panes().filter_map(|p| self.panes.remove(&p)));
+                self.options.remove_window(*w);
+                for p in window.layout.panes() {
+                    self.options.remove_pane(p);
+                    gone.extend(self.panes.remove(&p));
+                }
             }
         }
         gone
@@ -194,6 +203,7 @@ impl Model {
     /// -> `session_detach`, server-fn.c).
     pub fn remove_pane(&mut self, id: PaneId) -> Option<Pane> {
         let pane = self.panes.remove(&id)?;
+        self.options.remove_pane(id);
         let wid = pane.window;
         let empty = self.windows.get_mut(&wid).is_none_or(|w| {
             w.layout.remove(id);
@@ -206,6 +216,7 @@ impl Model {
         });
         if empty {
             self.windows.remove(&wid);
+            self.options.remove_window(wid);
             let mut dead = Vec::new();
             for s in self.sessions.values_mut() {
                 s.windows.retain(|_, w| *w != wid);

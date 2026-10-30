@@ -15,6 +15,8 @@ mod kill_session;
 mod list_sessions;
 mod new_session;
 mod send_keys;
+mod set_option;
+mod show_options;
 pub mod source_file;
 
 use std::path::PathBuf;
@@ -192,6 +194,12 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             } else {
                 Err(EdgeError::NotImplemented("select-pane except -T".into()).into())
             }
+        }
+        "set-option" | "set-window-option" => {
+            set_option::exec(server, item, call, found).map_err(Into::into)
+        }
+        "show-options" | "show-window-options" => {
+            show_options::exec(server, item, call, found).map_err(Into::into)
         }
         "attach-session" => {
             // cmd-attach-session.c:66-69: checked before the target.

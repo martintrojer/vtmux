@@ -1,0 +1,23 @@
+name = "options_arrays"
+steps = [
+  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["show", "-g", "terminal-features"] },
+  { run = ["set", "-g", "terminal-features[10]", "xterm*:RGB:usstyle:hyperlinks"] },
+  { run = ["show", "-gv", "terminal-features[10]"] },
+  { run = ["set", "-ag", "terminal-features[10]", "clipboard"] },
+  { run = ["show", "-g", "terminal-features[10]"] },
+  { run = ["set", "-go", "terminal-features[10]", "ignored"] },
+  { run = ["set", "-goq", "terminal-features[10]", "ignored"] },
+  { run = ["set", "-gu", "terminal-features[10]"] },
+  { run = ["show", "-g", "terminal-features"] },
+  { run = ["set", "-g", "terminal-features", "one,two"] },
+  { run = ["set", "-ag", "terminal-features", "three"] },
+  { run = ["show", "-g", "-F", "#{option_name}[#{option_array_key}]=#{option_value}", "terminal-features"] },
+  { run = ["set", "-p", "-t", "%0", "cursor-style", "bar"] },
+  { run = ["set", "-w", "-t", "@0", "cursor-style", "block"] },
+  { run = ["set", "-wU", "-t", "@0", "cursor-style"] },
+  { run = ["show", "-pA", "-t", "%0", "cursor-style"] },
+  { run = ["set", "-g", "@not-array[1]", "x"] },
+  { run = ["set", "-gq", "no-such-option", "x"] },
+  { run = ["show", "-gH", "after-select-pane"] },
+]

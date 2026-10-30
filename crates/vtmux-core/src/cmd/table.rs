@@ -191,15 +191,15 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("set-buffer", Some("setb"), "ab:t:n:w", 0, Some(1), "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]", None, None, false, false),
     cmd("set-environment", Some("setenv"), "Fhgrt:u", 1, Some(2), "[-Fhgru] [-t target-session] variable [value]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, false),
     cmd("set-hook", None, "agpERTt:uB:w", 0, Some(2), "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
-    cmd("set-option", Some("set"), "aFgopqst:uUw", 1, Some(2), "[-aFgopqsuUw] [-t target-pane] option [value]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
-    cmd("set-window-option", Some("setw"), "aFgoqt:u", 1, Some(2), "[-aFgoqu] [-t target-window] option [value]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, false),
+    cmd("set-option", Some("set"), "aFgopqst:uUw", 1, Some(2), "[-aFgopqsuUw] [-t target-pane] option [value]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
+    cmd("set-window-option", Some("setw"), "aFgoqt:u", 1, Some(2), "[-aFgoqu] [-t target-window] option [value]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, true),
     cmd("show-buffer", Some("showb"), "b:", 0, Some(0), "[-b buffer-name]", None, None, false, false),
     cmd("show-environment", Some("showenv"), "hgst:", 0, Some(1), "[-hgs] [-t target-session] [variable]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, false),
     cmd("show-hooks", None, "BF:gpt:w", 0, Some(1), "[-Bgpw] [-F format] [-t target-pane] [hook]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
     cmd("show-messages", Some("showmsgs"), "JTt:", 0, Some(0), "[-JT] [-t target-client]", None, None, false, false),
-    cmd("show-options", Some("show"), "AgF:Hpqst:vw", 0, Some(1), "[-AgHpqsvw] [-F format] [-t target-pane] [option]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
+    cmd("show-options", Some("show"), "AgF:Hpqst:vw", 0, Some(1), "[-AgHpqsvw] [-F format] [-t target-pane] [option]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("show-prompt-history", Some("showphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, false),
-    cmd("show-window-options", Some("showw"), "F:gvt:", 0, Some(1), "[-gv] [-F format] [-t target-window] [option]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, false),
+    cmd("show-window-options", Some("showw"), "F:gvt:", 0, Some(1), "[-gv] [-F format] [-t target-window] [option]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, true),
     cmd("source-file", Some("source"), "t:Fnqv", 1, None, "[-Fnqv] [-t target-pane] path ...", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("split-window", Some("splitw"), "bB:c:de:EfF:hIkl:m:p:PR:s:S:t:T:vWZ", 0, None, "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("start-server", Some("start"), "", 0, Some(0), "", None, None, true, true),
@@ -310,6 +310,10 @@ mod tests {
             ("send-keys", Some("send")),
             ("start-server", Some("start")),
             ("source-file", Some("source")),
+            ("set-option", Some("set")),
+            ("set-window-option", Some("setw")),
+            ("show-options", Some("show")),
+            ("show-window-options", Some("showw")),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);
@@ -320,7 +324,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 13);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 17);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
