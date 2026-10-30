@@ -86,10 +86,35 @@ impl Caps {
 #[derive(Default)]
 pub struct Compositor {
     last: Option<Snapshot>,
+    /// The client is not keeping up: compose nothing until it drains.
+    blocked: bool,
 }
 impl Compositor {
     pub fn invalidate(&mut self) {
         self.last = None;
+    }
+    /// Backpressure (D14), tty.c `tty_block_maybe` and `TTY_BLOCK_START` /
+    /// `TTY_BLOCK_STOP`: once `queued` bytes for the client reach
+    /// `1 + cols*rows*8`, stop composing; when they fall under
+    /// `1 + cols*rows/8`, resume with a full redraw (tmux sets
+    /// `CLIENT_ALLREDRAWFLAGS` and `tty_invalidate`). tmux drops its queued
+    /// output instead; vtmux's queue is whole protocol messages, so it keeps
+    /// them and composes nothing more, which bounds the queue the same way.
+    pub fn ready(&mut self, queued: usize, cols: u16, rows: u16) -> bool {
+        let cells = usize::from(cols) * usize::from(rows);
+        if self.blocked {
+            if queued > cells / 8 {
+                return false;
+            }
+            self.blocked = false;
+            self.invalidate();
+            return true;
+        }
+        if queued > cells * 8 {
+            self.blocked = true;
+            return false;
+        }
+        true
     }
     /// One frame per tick. The caller supplies a fully composed screen;
     /// therefore changes behind opaque overlays cannot escape into a frame.
@@ -415,6 +440,35 @@ mod tests {
         let frame = compositor.frame(screen, caps);
         assert!(frame.contains(&b'X'));
         assert!(!frame.contains(&b'O'));
+    }
+
+    /// tty.c:82-83 thresholds for an 80x24 client: block at 15361 queued
+    /// bytes, unblock under 241, then one full frame, not a diff.
+    #[test]
+    fn blocks_at_start_and_redraws_fully_under_stop() {
+        let caps = Caps {
+            rgb: false,
+            palette: true,
+            theme_palette: false,
+            sync: false,
+            bce: true,
+            xterm: true,
+        };
+        let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
+        pane.feed(b"one");
+        let mut c = Compositor::default();
+        assert!(c.ready(15_360, 80, 24));
+        let first = c.frame(vtmux_vt::snapshot(&pane), caps);
+        assert!(!c.ready(15_361, 80, 24));
+        assert!(!c.ready(241, 80, 24), "still blocked until under STOP");
+        pane.feed(b"\r\ntwo");
+        let screen = vtmux_vt::snapshot(&pane);
+        assert!(c.ready(240, 80, 24));
+        assert!(c.ready(15_360, 80, 24), "unblocked again");
+        let redraw = c.frame(screen.clone(), caps);
+        let fresh = Compositor::default().frame(screen, caps);
+        assert_eq!(redraw, fresh, "unblocking redraws every cell");
+        assert_ne!(redraw, first);
     }
 
     fn status_row(cols: u16, windows: &[(&str, bool)], right: &str) -> (String, Snapshot) {

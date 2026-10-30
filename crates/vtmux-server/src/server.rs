@@ -796,7 +796,6 @@ impl Server {
                 self.exit_attached(id, 0, Some("exited".into()));
                 continue;
             };
-            let pane = &self.model.panes[&p];
             let client = &self.clients[&id];
             let Some(tty) = client.hello.as_ref().and_then(|h| h.tty.as_ref()) else {
                 continue;
@@ -804,6 +803,17 @@ impl Server {
             let Some(caps) = client.caps else { continue };
             let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
             let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
+            let queued = client.outbuf.len();
+            if !self
+                .clients
+                .get_mut(&id)
+                .expect("client")
+                .compositor
+                .ready(queued, cols, rows)
+            {
+                continue;
+            }
+            let pane = &self.model.panes[&p];
             let mut screen = vtmux_vt::Snapshot {
                 cols,
                 rows,
