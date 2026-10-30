@@ -25,7 +25,7 @@ pub fn exec(
     if args.flag('E') && count != 0 && !empty_command {
         return Err(EdgeError::Message("command cannot be given for empty pane".into()).into());
     }
-    let (Some(s), Some(current)) = (found.session, found.index) else {
+    let Some(s) = found.session else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
     let session_only = Found {
@@ -56,9 +56,11 @@ pub fn exec(
     let mut index = found.new_index;
     let before = args.flag('b');
     if args.flag('a') || before {
-        // winlink_shuffle_up from the target's winlink (the current window
-        // when the target named a free index); no room keeps the target's.
-        index = server.model.shuffle_up(s, current, before).or(index);
+        // winlink_shuffle_up from the target's winlink (cmd-new-window.c:
+        // 130-131); a free index names none and no room keeps the target's.
+        if let Some(wl) = found.index {
+            index = server.model.shuffle_up(s, wl, before).or(index);
+        }
     }
     let cwd = match args.value('c') {
         Some(c) => {

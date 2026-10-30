@@ -22,7 +22,8 @@ pub struct Found {
     /// For a `CMD_FIND_WINDOW_INDEX` lookup (new-window), the index the
     /// target asked for (`fs->idx`), which may be free; `None` when it named
     /// no index (no target, or only a session). `index` is then still the
-    /// session's current window (cmd-find.c:375-379).
+    /// session's current window (cmd-find.c:375-379), except for a free
+    /// numeric index, where it is `None` (cmd-find.c:450-459).
     pub new_index: Option<u32>,
 }
 
@@ -527,7 +528,9 @@ fn find_index_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
             .windows
             .contains_key(&u32::try_from(idx).ok()?)
     {
-        return at_current(idx);
+        // cmd-find.c:450-459: `fs->wl` is overwritten with the (absent)
+        // winlink at the index, so the target names no window.
+        return at_current(idx).map(|f| Found { index: None, ..f });
     }
     find_window_in(model, s, part).map(|f| Found {
         new_index: f.index,
