@@ -1,6 +1,6 @@
 # AGENTS.md
 
-vtmux is a drop-in tmux 3.8 replacement in Rust on libghostty-vt. The design and every decision (D1–D22) are in [`docs/specs/2026-10-29-vtmux.md`](docs/specs/2026-10-29-vtmux.md). Read it before changing behaviour; a change that contradicts a decision needs the spec updated first.
+vtmux is a drop-in tmux 3.8 replacement in Rust on libghostty-vt. The design and every decision (D1–D22) are in [`docs/specs/2026-10-29-vtmux.md`](docs/specs/2026-10-29-vtmux.md). Read it before changing behaviour; [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains how the crates and processes fit; a change that contradicts a decision needs the spec updated first.
 
 ## Gates
 
