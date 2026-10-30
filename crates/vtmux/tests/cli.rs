@@ -140,6 +140,58 @@ impl World {
         );
     }
 
+    /// The pane's `stty size` must come to agree with `#{pane_height}
+    /// #{pane_width}`: send Enter to a `while read` loop running `stty
+    /// size` until its last line is that size (max 5 s). tmux sends
+    /// TIOCSWINSZ from a 250 ms timer (server-client.c
+    /// `server_client_check_pane_resize`), so the first answer may be old.
+    /// Returns the size seen.
+    fn pty_size_agrees(&self, target: &str) -> String {
+        let want = self
+            .run(&[
+                "display",
+                "-p",
+                "-t",
+                target,
+                "#{pane_height} #{pane_width}",
+            ])
+            .stdout
+            .trim()
+            .to_owned();
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            self.run(&["send-keys", "-t", target, "Enter"]);
+            std::thread::sleep(Duration::from_millis(100));
+            let screen = self.run(&["capture-pane", "-p", "-t", target]).stdout;
+            if screen.lines().rev().find(|l| !l.trim().is_empty()) == Some(want.as_str()) {
+                return want;
+            }
+        }
+        panic!(
+            "stty size in {target} never became {want:?} ({})",
+            self.bin.display()
+        );
+    }
+
+    /// Poll until `target` is on the alternate screen (max 5 s).
+    fn wait_alternate(&self, target: &str) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(5) {
+            if self
+                .run(&["display", "-p", "-t", target, "#{alternate_on}"])
+                .stdout
+                == "1\n"
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!(
+            "{target} never entered the alternate screen ({})",
+            self.bin.display()
+        );
+    }
+
     /// Poll until the server is gone (`ls` fails).
     fn wait_gone(&self) {
         let start = Instant::now();
@@ -907,4 +959,144 @@ fn pane_targets() {
         runs.push(w.run(&["display", "-p", "-t", "a.{down-of}", "#{pane_id}"]));
         runs
     });
+}
+
+/// resize-pane -x/-y (cells and percentages), -U/-D/-L/-R with and
+/// without counts (a positional count, cmd-resize-pane.c:152-158), the
+/// errors (`width invalid`, `height too small`, `adjustment too large`,
+/// arguments.c `args_string_percentage`), and zoom: -Z toggles,
+/// `window_zoomed_flag` and `window_flags` `*Z`, the saved layout in
+/// `#{window_layout}` against `#{window_visible_layout}`, and what unzooms
+/// (resize-pane, select-pane to a hidden pane, split-window, kill-pane) or
+/// re-zooms (select-pane -Z, last-pane -Z, split-window -Z) (window.c
+/// `window_zoom`, `window_push_zoom`, `window_pop_zoom`).
+#[test]
+fn panes_resize_and_zoom() {
+    compare("panes_resize_and_zoom", |w| {
+        let l =
+            "#{pane_id} #{pane_left},#{pane_top} #{pane_width}x#{pane_height} #{pane_zoomed_flag}";
+        let z = "#{window_zoomed_flag} #{window_flags} #{pane_id} #{window_panes}";
+        let steps: &[&[&str]] = &[
+            &[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+            ],
+            &["splitw", "-d", "cat"],
+            &["splitw", "-h", "-d", "-t", "%0", "cat"],
+            &["resizep", "-t", "%0", "-R", "5"],
+            &["resizep", "-t", "%0", "-D", "2"],
+            &["resizep", "-t", "%2", "-L", "3", "-U", "1"],
+            &["lsp", "-F", l],
+            &["resizep", "-t", "%1", "-U"],
+            &["resizep", "-t", "%1", "-D", "4"],
+            &["resizep", "-t", "%2", "-L4"],
+            &["lsp", "-F", l],
+            &["resizep", "-t", "%0", "-x", "50%"],
+            &["resizep", "-t", "%1", "-y", "30%"],
+            &["lsp", "-F", l],
+            &["resizep", "-t", "%0", "-x", "10", "-y", "5"],
+            &["resizep", "-t", "%0", "-U", "5", "3"],
+            &["lsp", "-F", l],
+            &["resizep", "-t", "%0", "-x", "0"],
+            &["resizep", "-t", "%0", "-y", "1000"],
+            &["lsp", "-F", l],
+            &["resizep", "-x", "abc"],
+            &["resizep", "-y", "-1"],
+            &["resizep", "-x", "1001%"],
+            &["resizep", "-x", ""],
+            &["resizep", "-U", "abc"],
+            &["resizep", "-U", "99999999999"],
+            &["resizep", "-x", "20", "-L", "x"],
+            &["lsp", "-F", l],
+            &["display", "-p", "#{window_layout}"],
+            &["resizep", "-Z", "-t", "%2"],
+            &["display", "-p", z],
+            &["lsp", "-F", l],
+            &["display", "-p", "#{window_layout}|#{window_visible_layout}"],
+            &["resizep", "-t", "%0", "-R", "2"],
+            &["display", "-p", z],
+            &["resizep", "-Z", "-t", "%1"],
+            &["resizep", "-Z"],
+            &["display", "-p", z],
+            &["resizep", "-Z", "-t", "%1"],
+            &["selectp", "-t", "%0"],
+            &["display", "-p", z],
+            &["resizep", "-Z"],
+            &["selectp", "-t", "%1", "-Z"],
+            &["display", "-p", z],
+            &["lastp", "-Z"],
+            &["display", "-p", z],
+            &["lastp"],
+            &["display", "-p", z],
+            &["resizep", "-Z"],
+            &["selectp", "-L"],
+            &["display", "-p", z],
+            &["resizep", "-Z", "-t", "%0"],
+            &["splitw", "-d", "cat"],
+            &["display", "-p", z],
+            &["lsp", "-F", l],
+            &["resizep", "-Z"],
+            &["splitw", "-Z", "cat"],
+            &["display", "-p", z],
+            &["splitw", "-Z", "-d", "-h", "cat"],
+            &["display", "-p", z],
+            &["lsp", "-F", l],
+            &["killp"],
+            &["display", "-p", z],
+            &["lsp", "-F", l],
+            &["resizep", "-Z"],
+            &["killp", "-a"],
+            &["display", "-p", z],
+            &["resizep", "-Z"],
+            &["display", "-p", z],
+        ];
+        steps.iter().map(|a| w.run(a)).collect()
+    });
+}
+
+/// The pane program sees its cell size: `stty size` in the pane agrees
+/// with `#{pane_height} #{pane_width}` after a split, a resize, a zoom and
+/// an unzoom (`window_pane_resize` -> `TIOCSWINSZ`), including a pane that is
+/// on the alternate screen (alternate-screen-resize.sh).
+#[test]
+fn panes_pty_sizes() {
+    compare("panes_pty_sizes", |w| {
+        // `alt` puts the program on the alternate screen first.
+        let lp = "while read x; do [ \"$x\" = alt ] && printf '\\033[?1049h'; stty size; done";
+        let mut runs = vec![w.run(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "20", lp,
+        ])];
+        runs.push(Run::seen(w.pty_size_agrees("%0")));
+        runs.push(w.run(&["splitw", "-h", "-d", lp]));
+        runs.push(Run::seen(w.pty_size_agrees("%0")));
+        runs.push(Run::seen(w.pty_size_agrees("%1")));
+        runs.push(w.run(&["splitw", "-v", "-d", "-t", "%0", "-l", "30%", lp]));
+        runs.push(Run::seen(w.pty_size_agrees("%0")));
+        runs.push(Run::seen(w.pty_size_agrees("%2")));
+        runs.push(w.run(&["resizep", "-t", "%1", "-L", "7"]));
+        runs.push(Run::seen(w.pty_size_agrees("%0")));
+        runs.push(Run::seen(w.pty_size_agrees("%1")));
+        runs.push(w.run(&["resizep", "-Z", "-t", "%2"]));
+        runs.push(Run::seen(w.pty_size_agrees("%2")));
+        runs.push(w.run(&["resizep", "-Z"]));
+        runs.push(Run::seen(w.pty_size_agrees("%2")));
+        runs.push(w.run(&["killp", "-t", "%0"]));
+        runs.push(Run::seen(w.pty_size_agrees("%2")));
+        // A program on the alternate screen still gets the new size.
+        runs.push(w.run(&["send-keys", "-t", "%1", "alt", "Enter"]));
+        w.wait_alternate("%1");
+        runs.push(w.run(&["resizep", "-t", "%1", "-x", "20"]));
+        runs.push(Run::seen(w.pty_size_agrees("%1")));
+        runs
+    });
+}
+
+impl Run {
+    /// A value a helper observed, as a run for the transcript.
+    fn seen(stdout: String) -> Self {
+        Self {
+            stdout,
+            stderr: String::new(),
+            code: 0,
+        }
+    }
 }
