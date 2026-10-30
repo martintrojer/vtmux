@@ -66,8 +66,14 @@ impl World {
 
     /// Run with explicit global args (no `-L` added).
     fn raw(&self, args: &[&str]) -> Run {
+        self.raw_env(args, &[])
+    }
+
+    /// `raw` with extra environment variables for the client.
+    fn raw_env(&self, args: &[&str], env: &[(&str, &str)]) -> Run {
         let out = Command::new(&self.bin)
             .args(args)
+            .envs(env.iter().copied())
             .current_dir(self.dir())
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
@@ -407,6 +413,57 @@ fn startup_config() {
             w.raw(&["-L", &w.label, "-f", c, "start"]),
             w.run(&["ls", "-F", "#{session_name}"]),
         ]
+    });
+}
+
+/// A multi-word command is run as `execvp` does (spawn.c:552), so an
+/// executable without a shebang runs through `/bin/sh` (ENOEXEC fallback),
+/// given by path and found through the pane's `PATH`.
+#[test]
+fn spawn_script_without_shebang() {
+    use std::os::unix::fs::PermissionsExt;
+    compare("spawn_script_without_shebang", |w| {
+        let bin = w.dir().join("bin");
+        std::fs::create_dir_all(&bin).expect("mkdir");
+        let script = bin.join("nsb");
+        std::fs::write(&script, "echo ran-$1\nsleep 30\n").expect("write script");
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let path = script.to_str().expect("utf-8");
+        let path_env = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        // The server (started by this client) takes its global environment,
+        // and so the pane's `PATH`, from the client.
+        let mut runs = vec![w.raw_env(
+            &[
+                "-L",
+                &w.label,
+                "-f",
+                "/dev/null",
+                "new",
+                "-d",
+                "-s",
+                "b",
+                "-x",
+                "30",
+                "-y",
+                "3",
+                "nsb",
+                "Y",
+                "Y",
+            ],
+            &[("PATH", &path_env)],
+        )];
+        w.wait_for_text("b", "ran-Y");
+        runs.push(w.run(&["capture-pane", "-p", "-t", "b"]));
+        runs.push(w.run(&[
+            "new", "-d", "-s", "a", "-x", "30", "-y", "3", path, "X", "X",
+        ]));
+        w.wait_for_text("a", "ran-X");
+        runs.push(w.run(&["capture-pane", "-p", "-t", "a"]));
+        runs
     });
 }
 

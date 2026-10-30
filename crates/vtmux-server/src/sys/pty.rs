@@ -103,6 +103,11 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     envp.push(std::ptr::null());
     envp.push(std::ptr::null());
     let candidates = exec_candidates(&program, &spec.env, direct)?;
+    // execvp's ENOEXEC fallback argv: `sh <file> args...`, slot 1 filled in
+    // with the candidate path by the child.
+    let sh = cstring(b"sh")?;
+    let mut sh_argv: Vec<*const libc::c_char> = vec![sh.as_ptr(), std::ptr::null()];
+    sh_argv.extend(argv_ptrs.iter().skip(1));
     let fd_limit = fd_limit();
     let ws = libc::winsize {
         ws_row: spec.rows,
@@ -140,6 +145,8 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
                 pwd_slot,
                 argv: &argv_ptrs,
                 candidates: &candidates,
+                sh_argv: &mut sh_argv,
+                direct,
                 fd_limit,
             })
         }
@@ -227,6 +234,10 @@ struct Child<'a> {
     pwd_slot: usize,
     argv: &'a [*const libc::c_char],
     candidates: &'a [CString],
+    /// `["sh", <file>, argv[1..]..., null]` for the ENOEXEC fallback.
+    sh_argv: &'a mut [*const libc::c_char],
+    /// A multi-word command, run as `execvp` does (spawn.c:552).
+    direct: bool,
     fd_limit: libc::c_int,
 }
 
@@ -282,9 +293,34 @@ unsafe fn child(c: &mut Child<'_>) -> ! {
         close_from(3, c.fd_limit);
         for path in c.candidates {
             libc::execve(path.as_ptr(), c.argv.as_ptr(), c.envp.as_ptr());
+            let mut errno = last_errno();
+            if c.direct && errno == libc::ENOEXEC {
+                // execvp (glibc, macOS): a file the kernel cannot execute
+                // is run as `/bin/sh <file> args...`.
+                c.sh_argv[1] = path.as_ptr();
+                libc::execve(c"/bin/sh".as_ptr(), c.sh_argv.as_ptr(), c.envp.as_ptr());
+                errno = last_errno();
+            }
+            // execvp keeps searching on these (EACCES is remembered, which
+            // only matters for the error it returns); anything else ends it.
+            if !matches!(
+                errno,
+                libc::EACCES
+                    | libc::ENOENT
+                    | libc::ESTALE
+                    | libc::ENOTDIR
+                    | libc::ENODEV
+                    | libc::ETIMEDOUT
+            ) {
+                break;
+            }
         }
         libc::_exit(1)
     }
+}
+
+fn last_errno() -> libc::c_int {
+    io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
 
 /// `closefrom(first)`: `close_range` where the kernel has it, else a loop
