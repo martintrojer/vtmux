@@ -1385,6 +1385,35 @@ fn windows_single_and_free_index() {
 /// windows above, kills in the middle with renumbering off and on, the
 /// current window and last-window stack following a renumber, kill-window
 /// -a renumbering every session, and -S selecting an existing window.
+/// Pane output updates the window's activity (input.c:1053
+/// `window_update_activity`), so `#{W/t:}` and `lsw -O activity` order by it.
+#[test]
+fn window_activity_follows_pane_output() {
+    compare("window_activity_follows_pane_output", |w| {
+        let order = |w: &World| {
+            vec![
+                w.run(&["display", "-p", "#{W/t:#{window_name} }"]),
+                w.run(&["lsw", "-O", "activity", "-F", "#{window_name}"]),
+            ]
+        };
+        let mut runs = vec![w.run(&[
+            "new", "-d", "-s", "s1", "-n", "a", "cat", ";", "neww", "-d", "-t", "s1:1", "-n", "b",
+            "cat", ";", "neww", "-d", "-t", "s1:2", "-n", "c", "cat",
+        ])];
+        // Activity stamps have one-second resolution in tmux.
+        std::thread::sleep(Duration::from_millis(1100));
+        runs.push(w.run(&["send-keys", "-t", "s1:1", "hello", "Enter"]));
+        w.wait_for_text("s1:1", "hello");
+        std::thread::sleep(Duration::from_millis(1100));
+        runs.push(w.run(&["select-window", "-t", "s1:2"]));
+        std::thread::sleep(Duration::from_millis(1100));
+        runs.push(w.run(&["send-keys", "-t", "s1:0", "x", "Enter"]));
+        w.wait_for_text("s1:0", "x");
+        runs.extend(order(w));
+        runs
+    });
+}
+
 #[test]
 fn windows_base_index_and_renumber() {
     compare("windows_base_index_and_renumber", |w| {

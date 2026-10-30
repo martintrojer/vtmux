@@ -1621,6 +1621,14 @@ impl Server {
                     if !replies.is_empty() {
                         io.write(&replies);
                     }
+                    // input_parse_buffer -> window_update_activity on every
+                    // non-empty read (input.c:1053): W/t sorts and lsw -O
+                    // activity order by it.
+                    let window = pane.window;
+                    let stamp = self.model.touch();
+                    if let Some(w) = self.model.windows.get_mut(&window) {
+                        w.activity = stamp;
+                    }
                     self.control_output(p, &bytes);
                 }
                 ReadResult::WouldBlock => break,
