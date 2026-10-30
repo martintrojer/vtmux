@@ -1,0 +1,19 @@
+name = "status_draw_justify"
+size = [50, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "xy", "cat"] },
+  { run = ["set", "-g", "status-left", "L"] },
+  { run = ["set", "-g", "status-right", "RIGHTSIDE"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["set", "-g", "status-justify", "centre"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-justify", "right"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-justify", "absolute-centre"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-right", "#[align=centre]C#[align=absolute-centre]A"] },
+  { run = ["set", "-g", "status-justify", "left"] },
+  { screen = {} },
+]

@@ -1,0 +1,25 @@
+name = "status_draw_styles"
+size = [50, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "y", "cat"] },
+  { run = ["set", "-g", "status-left", "#[fg=red,bg=white,bold]LEFT#[default] #[align=right]R#[fg=blue]!"] },
+  { run = ["set", "-g", "status-left-length", "30"] },
+  { run = ["set", "-g", "status-left-style", "underscore"] },
+  { run = ["set", "-g", "status-right", "#[reverse]rr"] },
+  { run = ["set", "-g", "status-right-style", "fg=yellow"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["set", "-g", "window-status-current-style", "fg=black,bg=red,bold"] },
+  { run = ["set", "-g", "window-status-style", "fg=green"] },
+  { run = ["set", "-g", "window-status-separator", "#[fg=white]|"] },
+  { screen = {} },
+  { run = ["set", "-g", "window-status-current-format", "<#I #W>"] },
+  { run = ["set", "-g", "window-status-format", "(#I)"] },
+  { run = ["set", "-g", "window-status-last-style", "italics"] },
+  { run = ["selectw", "-t", "a:2"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-left-length", "3"] },
+  { screen = {} },
+]

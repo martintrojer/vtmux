@@ -1,0 +1,17 @@
+name = "status_draw_default"
+size = [60, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat"] },
+  { run = ["select-pane", "-t", "a:1", "-T", "u"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "v"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_flags}][#{P:#{pane_flags}|}]"] },
+  { run = ["set", "-t", "a", "status", "3"] },
+  { screen = {} },
+  { run = ["selectw", "-t", "a:1"] },
+  { screen = {} },
+]

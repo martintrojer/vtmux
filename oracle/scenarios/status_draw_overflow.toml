@@ -1,0 +1,21 @@
+name = "status_draw_overflow"
+size = [30, 5]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "one", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "two", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "three", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "four", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "five", "cat"] },
+  { run = ["set", "-g", "status-right", "right"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["selectw", "-t", "a:2"] },
+  { screen = {} },
+  { run = ["selectw", "-t", "a:4"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-justify", "right"] },
+  { run = ["selectw", "-t", "a:2"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-justify", "centre"] },
+  { screen = {} },
+]
