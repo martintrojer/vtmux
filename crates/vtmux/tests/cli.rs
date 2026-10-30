@@ -1170,7 +1170,10 @@ fn wait_for_channels_and_locks() {
             w.run(&["wait-for", "-S", "y"]),
             w.run(&["wait-for", "y"]),
         ];
+        // The second waiter starts once the first is listed, so the order
+        // of the list is fixed.
         let wa = w.spawn(&["wait-for", "c", ";", "display", "-p", "A"]);
+        runs.push(w.waiters(&["c"], &[wa.id()], "client-0\n"));
         let wb = w.spawn(&["wait-for", "c", ";", "display", "-p", "B"]);
         let pids = [wa.id(), wb.id()];
         runs.push(w.waiters(&["c"], &pids, "client-0\nclient-1\n"));
