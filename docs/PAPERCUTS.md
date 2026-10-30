@@ -5,6 +5,8 @@ Long-standing tmux usability defects that vtmux fixes without breaking complianc
 | Paper cut | tmux reference | vtmux fix | Option | Status |
 |---|---|---|---|---|
 | Active pane is hard to see: shared borders are half-coloured, arrows are one cell | `pane-border-indicators`, `screen-redraw.c` (`style_wp`, `redraw_mark_border_arrows`) | Focus ring: outer frame, active pane enclosed by heavy lines in the active colour | `vtmux-focus-ring` (D23) | planned (M1) |
+| Cursor flickers under heavy pane output: it jumps around the screen as updates are written | tmux forwards each pane update to the terminal as it happens (`tty.c` `tty_cmd_*`, cursor moved per write) and only brackets them in synchronized output (`?2026`, `tty_sync_start/end`) in some paths (`tty_cmd_syncstart`, `screen-redraw.c:1772`) | The compositor (D14) builds one diffed frame per client tick and writes it in a single burst: cursor hidden at frame start, placed once at the end, the whole frame inside `?2026` when the terminal supports it | none (rendering-only, invisible to scripts) | planned (M1, client compositor) |
+| Popup borders flicker when panes under them scroll | With an overlay (popup/menu) up, tmux can't use terminal scroll/insert/delete (`c->overlay_check != NULL` forces `tty_draw_pane` in `tty_cmd_insertcharacter`, `tty_cmd_deletecharacter`, scroll paths), so it redraws the pane lines, overwriting the popup, then redraws the overlay | Popups are composited into the same frame as the panes, so a cell under a popup is never written: the terminal only ever sees the final picture | none (rendering-only) | planned (M1, popups) |
 
 ## Candidates
 
