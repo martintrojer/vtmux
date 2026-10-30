@@ -613,6 +613,46 @@ fn select_layout_string_is_fitted_to_the_client() {
     }
 }
 
+/// resize.c:410-421 and server-client.c:1953-1970: select-layout on a
+/// background window only marks its new size (`WINDOW_RESIZE`); the window
+/// keeps the layout string's size until select-window makes it current
+/// (reviewer-17 attach3.py).
+#[test]
+fn select_layout_on_a_background_window_waits_until_selected() {
+    const V2: &str = r#"{"V":2,"L":{"t":"h","w":100,"h":30,"x":0,"y":0,"c":[{"t":"p","w":50,"h":30,"x":0,"y":0,"i":0},{"t":"p","w":49,"h":30,"x":51,"y":0,"i":1}]}}"#;
+    for bin in bins() {
+        let w = World::new(bin);
+        let a = w.attach_sized(&["new", "-s", "a", "-n", "w", "cat"], 80, 24);
+        let size = |t: &str| {
+            String::from_utf8_lossy(
+                &w.cli(&["display", "-p", "-t", t, "#{window_width}x#{window_height}"])
+                    .stdout,
+            )
+            .trim()
+            .to_owned()
+        };
+        a.wait(|_| size("a:0") == "80x23");
+        for args in [
+            &["neww", "-d", "-t", "a:1", "cat"][..],
+            &["splitw", "-d", "-h", "-t", "a:1", "cat"],
+            &["selectl", "-t", "a:1", V2],
+        ] {
+            let out = w.cli(args);
+            assert!(out.status.success(), "{args:?}: {out:?}");
+        }
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(size("a:1"), "100x30");
+        assert!(w.cli(&["selectw", "-t", "a:1"]).status.success());
+        a.wait(|_| size("a:1") == "80x23");
+        let panes = String::from_utf8_lossy(
+            &w.cli(&["lsp", "-t", "a:1", "-F", "#{pane_width}x#{pane_height}"])
+                .stdout,
+        )
+        .into_owned();
+        assert_eq!(panes, "40x23\n39x23\n");
+    }
+}
+
 /// `update-environment` from the option, applied when a client attaches
 /// (cmd-attach-session.c:135,159): matches are copied (fnmatch), a name that
 /// matches nothing is marked removed, `-E` leaves the session alone, and
