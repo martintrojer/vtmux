@@ -1,0 +1,1199 @@
+### show-s
+$ show-s
+backspace C-?
+buffer-limit 50
+clear-on-attach on
+command-alias[0] split-pane=split-window
+command-alias[1] splitp=split-window
+command-alias[2] "server-info=show-messages -JT"
+command-alias[3] "info=show-messages -JT"
+command-alias[4] "choose-window=choose-tree -w"
+command-alias[5] "choose-session=choose-tree -s"
+codepoint-widths
+copy-command ''
+default-client-command new-session
+default-terminal tmux-256color
+editor /usr/bin/vi
+escape-time 10
+exit-empty on
+exit-unattached off
+extended-keys off
+extended-keys-format xterm
+focus-events off
+get-clipboard buffer
+history-file ''
+input-buffer-size 1048576
+message-limit 1000
+prefix-timeout 0
+prompt-history-limit 100
+set-clipboard external
+terminal-overrides[0] linux*:AX@
+terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+terminal-features[1] screen*:title
+terminal-features[2] rxvt*:ignorefkeys
+theme detect
+dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+dark-theme-white "#{?#{e|>=:#{client_colours},256},gray90,white}"
+dark-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray70,white}"
+dark-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray15,black}"
+dark-theme-green "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+dark-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+dark-theme-red "#{?#{e|>=:#{client_colours},256},indianred,red}"
+dark-theme-blue "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+dark-theme-cyan "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+dark-theme-magenta "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+light-theme-black "#{?#{e|>=:#{client_colours},256},gray10,black}"
+light-theme-white "#{?#{e|>=:#{client_colours},256},gray95,white}"
+light-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray80,white}"
+light-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray45,black}"
+light-theme-green "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+light-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+light-theme-red "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+light-theme-blue "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+light-theme-cyan "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+light-theme-magenta "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+user-keys
+variation-selector-always-wide on
+%%
+### show-g
+$ show-g
+activity-action other
+assume-paste-time 1
+base-index 0
+bell-action any
+default-command ''
+default-shell /bin/sh
+default-size 80x24
+destroy-unattached off
+detach-on-destroy on
+display-time 750
+focus-follows-mouse off
+history-limit 2000
+initial-repeat-time 0
+key-table root
+lock-after-time 0
+lock-command "lock -np"
+message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+message-line 0
+message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+mouse on
+prefix C-b
+prefix2 None
+renumber-windows off
+repeat-time 500
+set-titles off
+set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+silence-action other
+status on
+status-bg default
+status-fg default
+status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+status-format[1] "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}"
+status-format[2] "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{q/h:session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{q/h:session_alert}#[pop-default]#[norange list=on default] }"
+status-interval 15
+status-justify left
+status-keys emacs
+status-left "[#{session_name}] "
+status-left-length 10
+status-left-style default
+status-position bottom
+status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+status-right-length 40
+status-right-style default
+status-style bg=themegreen,fg=themeblack
+prompt-cursor-colour ''
+prompt-command-cursor-colour ''
+prompt-cursor-style default
+prompt-command-cursor-style default
+update-environment[0] DISPLAY
+update-environment[1] KRB5CCNAME
+update-environment[2] MSYSTEM
+update-environment[3] SSH_ASKPASS
+update-environment[4] SSH_AUTH_SOCK
+update-environment[5] SSH_AGENT_PID
+update-environment[6] SSH_CONNECTION
+update-environment[7] WAYLAND_DISPLAY
+update-environment[8] WINDOWID
+update-environment[9] XAUTHORITY
+update-environment[10] XDG_CURRENT_DESKTOP
+update-environment[11] XDG_SESSION_DESKTOP
+update-environment[12] XDG_SESSION_TYPE
+visual-activity off
+visual-bell off
+visual-silence off
+word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+%%
+### show-gw
+$ show-gw
+cursor-colour ''
+cursor-style default
+menu-style bg=themedarkgrey,fg=themewhite
+menu-selected-style bg=themeyellow,fg=themeblack
+menu-border-style bg=themedarkgrey,fg=themelightgrey
+menu-border-lines single
+pane-status-current-style underscore
+pane-status-style default
+session-status-current-style underscore
+session-status-style default
+aggressive-resize off
+allow-passthrough off
+allow-rename off
+allow-set-title on
+alternate-screen on
+automatic-rename on
+automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+clock-mode-colour themeblue
+clock-mode-style 24
+display-panes-active-colour themered
+display-panes-border-style bg=themedarkgrey,fg=themelightgrey
+display-panes-colour themeblue
+display-panes-format "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
+display-panes-time 1000
+copy-mode-match-style bg=themecyan,fg=themeblack
+copy-mode-current-match-style bg=thememagenta,fg=themeblack
+copy-mode-mark-style bg=themeyellow,fg=themeblack
+copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+copy-mode-position-style "#{E:mode-style}"
+copy-mode-selection-style "#{E:mode-style}"
+copy-mode-current-line-number-style fg=themeyellow
+copy-mode-current-line-style default
+copy-mode-line-number-style fg=themelightgrey,dim
+copy-mode-line-numbers off
+fill-character "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}"
+main-pane-height 24
+main-pane-width 80
+mode-keys emacs
+mode-style noattr,bg=themeyellow,fg=themeblack
+monitor-activity off
+monitor-bell on
+monitor-silence 0
+other-pane-height 0
+other-pane-width 0
+pane-active-border-style "fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"
+pane-base-index 0
+pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+pane-border-indicators colour
+pane-border-lines single
+pane-border-status off
+pane-border-style fg=themelightgrey
+pane-colours
+pane-scrollbars off
+pane-scrollbars-timeout 500
+pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+pane-scrollbars-position right
+popup-style bg=themedarkgrey,fg=themewhite
+popup-border-style bg=themedarkgrey,fg=themelightgrey
+popup-border-lines single
+remain-on-exit off
+remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+scroll-on-clear on
+switch-mode-match-style "bg=cyan fg=black"
+synchronize-panes off
+tiled-layout-max-columns 0
+tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+tree-mode-selection-style "#{E:mode-style}"
+window-active-style default
+window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-size latest
+window-style default
+window-status-activity-style reverse
+window-status-bell-style reverse
+window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-current-style underscore
+window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-last-style default
+window-status-separator " "
+window-status-style default
+wrap-search on
+xterm-keys on
+%%
+### show-sH
+$ show-sH
+backspace C-?
+buffer-limit 50
+clear-on-attach on
+command-alias[0] split-pane=split-window
+command-alias[1] splitp=split-window
+command-alias[2] "server-info=show-messages -JT"
+command-alias[3] "info=show-messages -JT"
+command-alias[4] "choose-window=choose-tree -w"
+command-alias[5] "choose-session=choose-tree -s"
+codepoint-widths
+copy-command ''
+default-client-command new-session
+default-terminal tmux-256color
+editor /usr/bin/vi
+escape-time 10
+exit-empty on
+exit-unattached off
+extended-keys off
+extended-keys-format xterm
+focus-events off
+get-clipboard buffer
+history-file ''
+input-buffer-size 1048576
+message-limit 1000
+prefix-timeout 0
+prompt-history-limit 100
+set-clipboard external
+terminal-overrides[0] linux*:AX@
+terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title
+terminal-features[1] screen*:title
+terminal-features[2] rxvt*:ignorefkeys
+theme detect
+dark-theme-black "#{?#{e|>=:#{client_colours},256},gray5,black}"
+dark-theme-white "#{?#{e|>=:#{client_colours},256},gray90,white}"
+dark-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray70,white}"
+dark-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray15,black}"
+dark-theme-green "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+dark-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+dark-theme-red "#{?#{e|>=:#{client_colours},256},indianred,red}"
+dark-theme-blue "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+dark-theme-cyan "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+dark-theme-magenta "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+light-theme-black "#{?#{e|>=:#{client_colours},256},gray10,black}"
+light-theme-white "#{?#{e|>=:#{client_colours},256},gray95,white}"
+light-theme-light-grey "#{?#{e|>=:#{client_colours},256},gray80,white}"
+light-theme-dark-grey "#{?#{e|>=:#{client_colours},256},gray45,black}"
+light-theme-green "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+light-theme-yellow "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+light-theme-red "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+light-theme-blue "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+light-theme-cyan "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+light-theme-magenta "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+user-keys
+variation-selector-always-wide on
+%%
+### show-gH
+$ show-gH
+activity-action other
+assume-paste-time 1
+base-index 0
+bell-action any
+default-command ''
+default-shell /bin/sh
+default-size 80x24
+destroy-unattached off
+detach-on-destroy on
+display-time 750
+focus-follows-mouse off
+history-limit 2000
+initial-repeat-time 0
+key-table root
+lock-after-time 0
+lock-command "lock -np"
+message-command-style "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+message-format "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+message-line 0
+message-style "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+mouse on
+prefix C-b
+prefix2 None
+renumber-windows off
+repeat-time 500
+set-titles off
+set-titles-string "#S:#I:#W - \"#T\" #{session_alerts}"
+silence-action other
+status on
+status-bg default
+status-fg default
+status-format[0] "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+status-format[1] "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}"
+status-format[2] "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{q/h:session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{q/h:session_alert}#[pop-default]#[norange list=on default] }"
+status-interval 15
+status-justify left
+status-keys emacs
+status-left "[#{session_name}] "
+status-left-length 10
+status-left-style default
+status-position bottom
+status-right "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+status-right-length 40
+status-right-style default
+status-style bg=themegreen,fg=themeblack
+prompt-cursor-colour ''
+prompt-command-cursor-colour ''
+prompt-cursor-style default
+prompt-command-cursor-style default
+update-environment[0] DISPLAY
+update-environment[1] KRB5CCNAME
+update-environment[2] MSYSTEM
+update-environment[3] SSH_ASKPASS
+update-environment[4] SSH_AUTH_SOCK
+update-environment[5] SSH_AGENT_PID
+update-environment[6] SSH_CONNECTION
+update-environment[7] WAYLAND_DISPLAY
+update-environment[8] WINDOWID
+update-environment[9] XAUTHORITY
+update-environment[10] XDG_CURRENT_DESKTOP
+update-environment[11] XDG_SESSION_DESKTOP
+update-environment[12] XDG_SESSION_TYPE
+visual-activity off
+visual-bell off
+visual-silence off
+word-separators "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+after-bind-key
+after-capture-pane
+after-copy-mode
+after-display-message
+after-display-panes
+after-kill-pane
+after-list-buffers
+after-list-clients
+after-list-keys
+after-list-panes
+after-list-sessions
+after-list-windows
+after-load-buffer
+after-lock-server
+after-new-session
+after-new-window
+after-paste-buffer
+after-pipe-pane
+after-refresh-client
+after-rename-session
+after-rename-window
+after-resize-pane
+after-resize-window
+after-save-buffer
+after-select-layout
+after-select-pane
+after-select-window
+after-send-keys
+after-set-buffer
+after-set-environment
+after-set-hook
+after-set-option
+after-show-environment
+after-show-messages
+after-show-options
+after-split-window
+after-swap-window
+after-unbind-key
+alert-activity
+alert-bell
+alert-silence
+client-active
+client-attached
+client-created
+client-closed
+client-detached
+client-focus-in
+client-focus-out
+client-resized
+client-session-changed
+client-light-theme
+client-dark-theme
+command-error
+marked-pane-changed
+session-closed
+session-created
+session-added-to-group
+session-renamed
+session-removed-from-group
+session-window-changed
+window-linked
+window-unlinked
+%%
+### show-gwH
+$ show-gwH
+cursor-colour ''
+cursor-style default
+menu-style bg=themedarkgrey,fg=themewhite
+menu-selected-style bg=themeyellow,fg=themeblack
+menu-border-style bg=themedarkgrey,fg=themelightgrey
+menu-border-lines single
+pane-status-current-style underscore
+pane-status-style default
+session-status-current-style underscore
+session-status-style default
+aggressive-resize off
+allow-passthrough off
+allow-rename off
+allow-set-title on
+alternate-screen on
+automatic-rename on
+automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+clock-mode-colour themeblue
+clock-mode-style 24
+display-panes-active-colour themered
+display-panes-border-style bg=themedarkgrey,fg=themelightgrey
+display-panes-colour themeblue
+display-panes-format "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
+display-panes-time 1000
+copy-mode-match-style bg=themecyan,fg=themeblack
+copy-mode-current-match-style bg=thememagenta,fg=themeblack
+copy-mode-mark-style bg=themeyellow,fg=themeblack
+copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+copy-mode-position-style "#{E:mode-style}"
+copy-mode-selection-style "#{E:mode-style}"
+copy-mode-current-line-number-style fg=themeyellow
+copy-mode-current-line-style default
+copy-mode-line-number-style fg=themelightgrey,dim
+copy-mode-line-numbers off
+fill-character "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}"
+main-pane-height 24
+main-pane-width 80
+mode-keys emacs
+mode-style noattr,bg=themeyellow,fg=themeblack
+monitor-activity off
+monitor-bell on
+monitor-silence 0
+other-pane-height 0
+other-pane-width 0
+pane-active-border-style "fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"
+pane-base-index 0
+pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+pane-border-indicators colour
+pane-border-lines single
+pane-border-status off
+pane-border-style fg=themelightgrey
+pane-colours
+pane-scrollbars off
+pane-scrollbars-timeout 500
+pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+pane-scrollbars-position right
+popup-style bg=themedarkgrey,fg=themewhite
+popup-border-style bg=themedarkgrey,fg=themelightgrey
+popup-border-lines single
+remain-on-exit off
+remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+scroll-on-clear on
+switch-mode-match-style "bg=cyan fg=black"
+synchronize-panes off
+tiled-layout-max-columns 0
+tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+tree-mode-selection-style "#{E:mode-style}"
+window-active-style default
+window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-size latest
+window-style default
+window-status-activity-style reverse
+window-status-bell-style reverse
+window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-current-style underscore
+window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-last-style default
+window-status-separator " "
+window-status-style default
+wrap-search on
+xterm-keys on
+pane-activity
+pane-bell
+pane-command-finished
+pane-command-started
+pane-created
+pane-died
+pane-exited
+pane-focus-in
+pane-focus-out
+pane-mode-changed
+pane-mode-entered
+pane-mode-exited
+pane-moved
+pane-prompt-closed
+pane-prompt-opened
+pane-resized
+pane-set-clipboard
+pane-shell-prompt
+pane-title-changed
+window-created
+window-closed
+window-layout-changed
+window-pane-changed
+window-renamed
+window-resized
+window-unzoomed
+window-zoomed
+%%
+### showw-g
+$ showw-g
+cursor-colour ''
+cursor-style default
+menu-style bg=themedarkgrey,fg=themewhite
+menu-selected-style bg=themeyellow,fg=themeblack
+menu-border-style bg=themedarkgrey,fg=themelightgrey
+menu-border-lines single
+pane-status-current-style underscore
+pane-status-style default
+session-status-current-style underscore
+session-status-style default
+aggressive-resize off
+allow-passthrough off
+allow-rename off
+allow-set-title on
+alternate-screen on
+automatic-rename on
+automatic-rename-format "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+clock-mode-colour themeblue
+clock-mode-style 24
+display-panes-active-colour themered
+display-panes-border-style bg=themedarkgrey,fg=themelightgrey
+display-panes-colour themeblue
+display-panes-format "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
+display-panes-time 1000
+copy-mode-match-style bg=themecyan,fg=themeblack
+copy-mode-current-match-style bg=thememagenta,fg=themeblack
+copy-mode-mark-style bg=themeyellow,fg=themeblack
+copy-mode-position-format "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+copy-mode-position-style "#{E:mode-style}"
+copy-mode-selection-style "#{E:mode-style}"
+copy-mode-current-line-number-style fg=themeyellow
+copy-mode-current-line-style default
+copy-mode-line-number-style fg=themelightgrey,dim
+copy-mode-line-numbers off
+fill-character "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}"
+main-pane-height 24
+main-pane-width 80
+mode-keys emacs
+mode-style noattr,bg=themeyellow,fg=themeblack
+monitor-activity off
+monitor-bell on
+monitor-silence 0
+other-pane-height 0
+other-pane-width 0
+pane-active-border-style "fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"
+pane-base-index 0
+pane-border-format "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+pane-border-indicators colour
+pane-border-lines single
+pane-border-status off
+pane-border-style fg=themelightgrey
+pane-colours
+pane-scrollbars off
+pane-scrollbars-timeout 500
+pane-scrollbars-style bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+pane-scrollbars-position right
+popup-style bg=themedarkgrey,fg=themewhite
+popup-border-style bg=themedarkgrey,fg=themelightgrey
+popup-border-lines single
+remain-on-exit off
+remain-on-exit-format "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+scroll-on-clear on
+switch-mode-match-style "bg=cyan fg=black"
+synchronize-panes off
+tiled-layout-max-columns 0
+tree-mode-border-style bg=themedarkgrey,fg=themelightgrey
+tree-mode-preview-format "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+tree-mode-preview-style "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+tree-mode-selection-style "#{E:mode-style}"
+window-active-style default
+window-pane-current-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-pane-status-format "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-size latest
+window-style default
+window-status-activity-style reverse
+window-status-bell-style reverse
+window-status-current-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-current-style underscore
+window-status-format "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-last-style default
+window-status-separator " "
+window-status-style default
+wrap-search on
+xterm-keys on
+%%
+### show-session
+$ show
+%%
+### show-window
+$ show-w
+%%
+### show-pane
+$ show-p
+%%
+### show-A
+$ show-A
+activity-action* other
+assume-paste-time* 1
+base-index* 0
+bell-action* any
+default-command* ''
+default-shell* /bin/sh
+default-size* 80x24
+destroy-unattached* off
+detach-on-destroy* on
+display-time* 750
+focus-follows-mouse* off
+history-limit* 2000
+initial-repeat-time* 0
+key-table* root
+lock-after-time* 0
+lock-command* "lock -np"
+message-command-style* "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+message-format* "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+message-line* 0
+message-style* "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+mouse* on
+prefix* C-b
+prefix2* None
+renumber-windows* off
+repeat-time* 500
+set-titles* off
+set-titles-string* "#S:#I:#W - \"#T\" #{session_alerts}"
+silence-action* other
+status* on
+status-bg* default
+status-fg* default
+status-format[0]* "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]"
+status-format[1]* "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}"
+status-format[2]* "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{q/h:session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{q/h:session_alert}#[pop-default]#[norange list=on default] }"
+status-interval* 15
+status-justify* left
+status-keys* emacs
+status-left* "[#{session_name}] "
+status-left-length* 10
+status-left-style* default
+status-position* bottom
+status-right* "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+status-right-length* 40
+status-right-style* default
+status-style* bg=themegreen,fg=themeblack
+prompt-cursor-colour* ''
+prompt-command-cursor-colour* ''
+prompt-cursor-style* default
+prompt-command-cursor-style* default
+update-environment[0]* DISPLAY
+update-environment[1]* KRB5CCNAME
+update-environment[2]* MSYSTEM
+update-environment[3]* SSH_ASKPASS
+update-environment[4]* SSH_AUTH_SOCK
+update-environment[5]* SSH_AGENT_PID
+update-environment[6]* SSH_CONNECTION
+update-environment[7]* WAYLAND_DISPLAY
+update-environment[8]* WINDOWID
+update-environment[9]* XAUTHORITY
+update-environment[10]* XDG_CURRENT_DESKTOP
+update-environment[11]* XDG_SESSION_DESKTOP
+update-environment[12]* XDG_SESSION_TYPE
+visual-activity* off
+visual-bell* off
+visual-silence* off
+word-separators* "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+%%
+### show-wA
+$ show-wA
+cursor-colour* ''
+cursor-style* default
+menu-style* bg=themedarkgrey,fg=themewhite
+menu-selected-style* bg=themeyellow,fg=themeblack
+menu-border-style* bg=themedarkgrey,fg=themelightgrey
+menu-border-lines* single
+pane-status-current-style* underscore
+pane-status-style* default
+session-status-current-style* underscore
+session-status-style* default
+aggressive-resize* off
+allow-passthrough* off
+allow-rename* off
+allow-set-title* on
+alternate-screen* on
+automatic-rename* on
+automatic-rename-format* "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+clock-mode-colour* themeblue
+clock-mode-style* 24
+display-panes-active-colour* themered
+display-panes-border-style* bg=themedarkgrey,fg=themelightgrey
+display-panes-colour* themeblue
+display-panes-format* "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
+display-panes-time* 1000
+copy-mode-match-style* bg=themecyan,fg=themeblack
+copy-mode-current-match-style* bg=thememagenta,fg=themeblack
+copy-mode-mark-style* bg=themeyellow,fg=themeblack
+copy-mode-position-format* "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+copy-mode-position-style* "#{E:mode-style}"
+copy-mode-selection-style* "#{E:mode-style}"
+copy-mode-current-line-number-style* fg=themeyellow
+copy-mode-current-line-style* default
+copy-mode-line-number-style* fg=themelightgrey,dim
+copy-mode-line-numbers* off
+fill-character* "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}"
+main-pane-height* 24
+main-pane-width* 80
+mode-keys* emacs
+mode-style* noattr,bg=themeyellow,fg=themeblack
+monitor-activity* off
+monitor-bell* on
+monitor-silence* 0
+other-pane-height* 0
+other-pane-width* 0
+pane-active-border-style* "fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"
+pane-base-index* 0
+pane-border-format* "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+pane-border-indicators* colour
+pane-border-lines* single
+pane-border-status* off
+pane-border-style* fg=themelightgrey
+pane-colours*
+pane-scrollbars* off
+pane-scrollbars-timeout* 500
+pane-scrollbars-style* bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+pane-scrollbars-position* right
+popup-style* bg=themedarkgrey,fg=themewhite
+popup-border-style* bg=themedarkgrey,fg=themelightgrey
+popup-border-lines* single
+remain-on-exit* off
+remain-on-exit-format* "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+scroll-on-clear* on
+switch-mode-match-style* "bg=cyan fg=black"
+synchronize-panes* off
+tiled-layout-max-columns* 0
+tree-mode-border-style* bg=themedarkgrey,fg=themelightgrey
+tree-mode-preview-format* "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+tree-mode-preview-style* "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+tree-mode-selection-style* "#{E:mode-style}"
+window-active-style* default
+window-pane-current-status-format* "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-pane-status-format* "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+window-size* latest
+window-style* default
+window-status-activity-style* reverse
+window-status-bell-style* reverse
+window-status-current-format* "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-current-style* underscore
+window-status-format* "#I:#W#{?window_flags,#{window_flags}, }"
+window-status-last-style* default
+window-status-separator* " "
+window-status-style* default
+wrap-search* on
+xterm-keys* on
+%%
+### show-pA
+$ show-pA
+cursor-colour* ''
+cursor-style* default
+allow-passthrough* off
+allow-rename* off
+allow-set-title* on
+alternate-screen* on
+copy-mode-position-format* "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+pane-active-border-style* "fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"
+pane-border-format* "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+pane-border-lines* single
+pane-border-status* off
+pane-border-style* fg=themelightgrey
+pane-colours*
+pane-scrollbars-style* bg=themedarkgrey,fg=themelightgrey,width=1,pad=0
+remain-on-exit* off
+remain-on-exit-format* "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+scroll-on-clear* on
+switch-mode-match-style* "bg=cyan fg=black"
+synchronize-panes* off
+tree-mode-preview-format* "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+window-active-style* default
+window-style* default
+%%
+### show-hooks-g
+$ show-hooks-g
+after-bind-key
+after-capture-pane
+after-copy-mode
+after-display-message
+after-display-panes
+after-kill-pane
+after-list-buffers
+after-list-clients
+after-list-keys
+after-list-panes
+after-list-sessions
+after-list-windows
+after-load-buffer
+after-lock-server
+after-new-session
+after-new-window
+after-paste-buffer
+after-pipe-pane
+after-refresh-client
+after-rename-session
+after-rename-window
+after-resize-pane
+after-resize-window
+after-save-buffer
+after-select-layout
+after-select-pane
+after-select-window
+after-send-keys
+after-set-buffer
+after-set-environment
+after-set-hook
+after-set-option
+after-show-environment
+after-show-messages
+after-show-options
+after-split-window
+after-swap-window
+after-unbind-key
+alert-activity
+alert-bell
+alert-silence
+client-active
+client-attached
+client-created
+client-closed
+client-detached
+client-focus-in
+client-focus-out
+client-resized
+client-session-changed
+client-light-theme
+client-dark-theme
+command-error
+marked-pane-changed
+session-closed
+session-created
+session-added-to-group
+session-renamed
+session-removed-from-group
+session-window-changed
+window-linked
+window-unlinked
+%%
+### show-hooks-gw
+$ show-hooks-gw
+pane-activity
+pane-bell
+pane-command-finished
+pane-command-started
+pane-created
+pane-died
+pane-exited
+pane-focus-in
+pane-focus-out
+pane-mode-changed
+pane-mode-entered
+pane-mode-exited
+pane-moved
+pane-prompt-closed
+pane-prompt-opened
+pane-resized
+pane-set-clipboard
+pane-shell-prompt
+pane-title-changed
+window-created
+window-closed
+window-layout-changed
+window-pane-changed
+window-renamed
+window-resized
+window-unzoomed
+window-zoomed
+%%
+### show-gv
+$ show-gv
+other
+1
+0
+any
+
+/bin/sh
+80x24
+off
+on
+750
+off
+2000
+0
+root
+0
+lock -np
+bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}
+#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}
+0
+bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}
+on
+C-b
+None
+off
+500
+off
+#S:#I:#W - "#T" #{session_alerts}
+other
+on
+default
+default
+#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]
+#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}
+#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{q/h:session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{q/h:session_alert}#[pop-default]#[norange list=on default] }
+15
+left
+emacs
+[#{session_name}] 
+10
+default
+bottom
+#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}"#{=21:pane_title}" %H:%M %d-%b-%y
+40
+default
+bg=themegreen,fg=themeblack
+
+
+default
+default
+DISPLAY
+KRB5CCNAME
+MSYSTEM
+SSH_ASKPASS
+SSH_AUTH_SOCK
+SSH_AGENT_PID
+SSH_CONNECTION
+WAYLAND_DISPLAY
+WINDOWID
+XAUTHORITY
+XDG_CURRENT_DESKTOP
+XDG_SESSION_DESKTOP
+XDG_SESSION_TYPE
+off
+off
+off
+!"#$%&'()*+,-./:;<=>?@[\]^`{|}~
+%%
+### show-sv
+$ show-sv
+C-?
+50
+on
+split-pane=split-window
+splitp=split-window
+server-info=show-messages -JT
+info=show-messages -JT
+choose-window=choose-tree -w
+choose-session=choose-tree -s
+
+new-session
+tmux-256color
+/usr/bin/vi
+10
+on
+off
+off
+xterm
+off
+buffer
+
+1048576
+1000
+0
+100
+external
+linux*:AX@
+xterm*:clipboard:ccolour:cstyle:focus:title
+screen*:title
+rxvt*:ignorefkeys
+detect
+#{?#{e|>=:#{client_colours},256},gray5,black}
+#{?#{e|>=:#{client_colours},256},gray90,white}
+#{?#{e|>=:#{client_colours},256},gray70,white}
+#{?#{e|>=:#{client_colours},256},gray15,black}
+#{?#{e|>=:#{client_colours},256},yellowgreen,green}
+#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}
+#{?#{e|>=:#{client_colours},256},indianred,red}
+#{?#{e|>=:#{client_colours},256},skyblue3,blue}
+#{?#{e|>=:#{client_colours},256},cadetblue,cyan}
+#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}
+#{?#{e|>=:#{client_colours},256},gray10,black}
+#{?#{e|>=:#{client_colours},256},gray95,white}
+#{?#{e|>=:#{client_colours},256},gray80,white}
+#{?#{e|>=:#{client_colours},256},gray45,black}
+#{?#{e|>=:#{client_colours},256},seagreen,green}
+#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}
+#{?#{e|>=:#{client_colours},256},indianred4,red}
+#{?#{e|>=:#{client_colours},256},steelblue,blue}
+#{?#{e|>=:#{client_colours},256},darkcyan,cyan}
+#{?#{e|>=:#{client_colours},256},purple4,magenta}
+on
+%%
+### show-F-all
+$ show-s-F#{option_name}|#{option_value}|#{option_is_array}|#{option_is_string}|#{option_has_value}|#{option_array_key}
+backspace|C-?|0|0|1|
+buffer-limit|50|0|0|1|
+clear-on-attach|on|0|0|1|
+command-alias|split-pane=split-window|1|1|1|0
+command-alias|splitp=split-window|1|1|1|1
+command-alias|server-info=show-messages -JT|1|1|1|2
+command-alias|info=show-messages -JT|1|1|1|3
+command-alias|choose-window=choose-tree -w|1|1|1|4
+command-alias|choose-session=choose-tree -s|1|1|1|5
+codepoint-widths||1|1|0|
+copy-command||0|1|1|
+default-client-command|new-session|0|0|1|
+default-terminal|tmux-256color|0|1|1|
+editor|/usr/bin/vi|0|1|1|
+escape-time|10|0|0|1|
+exit-empty|on|0|0|1|
+exit-unattached|off|0|0|1|
+extended-keys|off|0|0|1|
+extended-keys-format|xterm|0|0|1|
+focus-events|off|0|0|1|
+get-clipboard|buffer|0|0|1|
+history-file||0|1|1|
+input-buffer-size|1048576|0|0|1|
+message-limit|1000|0|0|1|
+prefix-timeout|0|0|0|1|
+prompt-history-limit|100|0|0|1|
+set-clipboard|external|0|0|1|
+terminal-overrides|linux*:AX@|1|1|1|0
+terminal-features|xterm*:clipboard:ccolour:cstyle:focus:title|1|1|1|0
+terminal-features|screen*:title|1|1|1|1
+terminal-features|rxvt*:ignorefkeys|1|1|1|2
+theme|detect|0|0|1|
+dark-theme-black|#{?#{e|>=:#{client_colours},256},gray5,black}|0|1|1|
+dark-theme-white|#{?#{e|>=:#{client_colours},256},gray90,white}|0|1|1|
+dark-theme-light-grey|#{?#{e|>=:#{client_colours},256},gray70,white}|0|1|1|
+dark-theme-dark-grey|#{?#{e|>=:#{client_colours},256},gray15,black}|0|1|1|
+dark-theme-green|#{?#{e|>=:#{client_colours},256},yellowgreen,green}|0|1|1|
+dark-theme-yellow|#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}|0|1|1|
+dark-theme-red|#{?#{e|>=:#{client_colours},256},indianred,red}|0|1|1|
+dark-theme-blue|#{?#{e|>=:#{client_colours},256},skyblue3,blue}|0|1|1|
+dark-theme-cyan|#{?#{e|>=:#{client_colours},256},cadetblue,cyan}|0|1|1|
+dark-theme-magenta|#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}|0|1|1|
+light-theme-black|#{?#{e|>=:#{client_colours},256},gray10,black}|0|1|1|
+light-theme-white|#{?#{e|>=:#{client_colours},256},gray95,white}|0|1|1|
+light-theme-light-grey|#{?#{e|>=:#{client_colours},256},gray80,white}|0|1|1|
+light-theme-dark-grey|#{?#{e|>=:#{client_colours},256},gray45,black}|0|1|1|
+light-theme-green|#{?#{e|>=:#{client_colours},256},seagreen,green}|0|1|1|
+light-theme-yellow|#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}|0|1|1|
+light-theme-red|#{?#{e|>=:#{client_colours},256},indianred4,red}|0|1|1|
+light-theme-blue|#{?#{e|>=:#{client_colours},256},steelblue,blue}|0|1|1|
+light-theme-cyan|#{?#{e|>=:#{client_colours},256},darkcyan,cyan}|0|1|1|
+light-theme-magenta|#{?#{e|>=:#{client_colours},256},purple4,magenta}|0|1|1|
+user-keys||1|1|0|
+variation-selector-always-wide|on|0|0|1|
+%%
+### show-F-hooks
+$ show-gH-F#{option_name}|#{option_is_hook}|#{option_has_value}
+activity-action|0|1
+assume-paste-time|0|1
+base-index|0|1
+bell-action|0|1
+default-command|0|1
+default-shell|0|1
+default-size|0|1
+destroy-unattached|0|1
+detach-on-destroy|0|1
+display-time|0|1
+focus-follows-mouse|0|1
+history-limit|0|1
+initial-repeat-time|0|1
+key-table|0|1
+lock-after-time|0|1
+lock-command|0|1
+message-command-style|0|1
+message-format|0|1
+message-line|0|1
+message-style|0|1
+mouse|0|1
+prefix|0|1
+prefix2|0|1
+renumber-windows|0|1
+repeat-time|0|1
+set-titles|0|1
+set-titles-string|0|1
+silence-action|0|1
+status|0|1
+status-bg|0|1
+status-fg|0|1
+status-format|0|1
+status-format|0|1
+status-format|0|1
+status-interval|0|1
+status-justify|0|1
+status-keys|0|1
+status-left|0|1
+status-left-length|0|1
+status-left-style|0|1
+status-position|0|1
+status-right|0|1
+status-right-length|0|1
+status-right-style|0|1
+status-style|0|1
+prompt-cursor-colour|0|1
+prompt-command-cursor-colour|0|1
+prompt-cursor-style|0|1
+prompt-command-cursor-style|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+update-environment|0|1
+visual-activity|0|1
+visual-bell|0|1
+visual-silence|0|1
+word-separators|0|1
+after-bind-key|1|0
+after-capture-pane|1|0
+after-copy-mode|1|0
+after-display-message|1|0
+after-display-panes|1|0
+after-kill-pane|1|0
+after-list-buffers|1|0
+after-list-clients|1|0
+after-list-keys|1|0
+after-list-panes|1|0
+after-list-sessions|1|0
+after-list-windows|1|0
+after-load-buffer|1|0
+after-lock-server|1|0
+after-new-session|1|0
+after-new-window|1|0
+after-paste-buffer|1|0
+after-pipe-pane|1|0
+after-refresh-client|1|0
+after-rename-session|1|0
+after-rename-window|1|0
+after-resize-pane|1|0
+after-resize-window|1|0
+after-save-buffer|1|0
+after-select-layout|1|0
+after-select-pane|1|0
+after-select-window|1|0
+after-send-keys|1|0
+after-set-buffer|1|0
+after-set-environment|1|0
+after-set-hook|1|0
+after-set-option|1|0
+after-show-environment|1|0
+after-show-messages|1|0
+after-show-options|1|0
+after-split-window|1|0
+after-swap-window|1|0
+after-unbind-key|1|0
+alert-activity|1|0
+alert-bell|1|0
+alert-silence|1|0
+client-active|1|0
+client-attached|1|0
+client-created|1|0
+client-closed|1|0
+client-detached|1|0
+client-focus-in|1|0
+client-focus-out|1|0
+client-resized|1|0
+client-session-changed|1|0
+client-light-theme|1|0
+client-dark-theme|1|0
+command-error|1|0
+marked-pane-changed|1|0
+session-closed|1|0
+session-created|1|0
+session-added-to-group|1|0
+session-renamed|1|0
+session-removed-from-group|1|0
+session-window-changed|1|0
+window-linked|1|0
+window-unlinked|1|0
+%%

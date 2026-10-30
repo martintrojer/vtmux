@@ -8,6 +8,7 @@ pub mod format;
 pub mod ids;
 pub mod keys;
 pub mod layout;
+pub mod options;
 pub mod protocol;
 pub mod socket;
 pub mod style;
