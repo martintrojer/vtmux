@@ -27,7 +27,7 @@ pub fn exec(
     if args.flag('W') {
         return Err(EdgeError::NotImplemented("break-pane -W".into()).into());
     }
-    let (Some(src_s), Some(src_idx), Some(w), Some(wp)) =
+    let (Some(src_s), Some(mut src_idx), Some(w), Some(wp)) =
         (source.session, source.index, source.window, source.pane)
     else {
         return Err(EdgeError::NoCurrentTarget.into());
@@ -48,11 +48,21 @@ pub fn exec(
             .index
             .or_else(|| server.model.sessions.get(&dst_s).map(|s| s.current))
             .unwrap_or(0);
+        // tmux keeps the source winlink pointer across winlink_shuffle_up
+        // (cmd-break-pane.c:120-145), so a source in the shuffled run
+        // [start, first free) is unlinked from its new index.
+        let start = if before { from } else { from.saturating_add(1) };
+        let shifted = src_s == dst_s
+            && src_idx >= start
+            && (start..=src_idx).all(|i| server.model.sessions[&dst_s].windows.contains_key(&i));
         // winlink_shuffle_up failing returns an error without a message.
         let Some(i) = server.model.shuffle_up(dst_s, from, before) else {
             item.status = 1;
             return Ok(());
         };
+        if shifted {
+            src_idx += 1;
+        }
         idx = Some(i);
     }
     server.model.unzoom(w);
