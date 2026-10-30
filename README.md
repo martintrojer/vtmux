@@ -1,6 +1,6 @@
 # vtmux
 
-**Drop-in tmux. Modern core. Bugs fixed.**
+**Drop-in tmux replacement. Modern core. Bugs fixed.**
 
 A drop-in replacement for tmux 3.8, written in Rust on [libghostty-vt](https://github.com/ghostty-org/ghostty). Same CLI, config, formats, hooks and control mode. Your `.tmux.conf` and plugins work unchanged.
 
