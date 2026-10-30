@@ -23,6 +23,7 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
+use crate::cmd::NumError;
 use crate::socket::{SocketError, path_line};
 
 /// What C's `strerror` would print for `err`: Rust appends ` (os error N)`
@@ -72,6 +73,38 @@ pub enum EdgeError {
         min: usize,
     },
     InvalidOption(String),
+    /// `can't find window: X` (cmd-find.c:1265-1268).
+    WindowNotFound(String),
+    /// `can't find pane: X` (cmd-find.c:1270-1273).
+    PaneNotFound(String),
+    /// `no current target`: nothing to default to (cmd-find.c:986).
+    NoCurrentTarget,
+    /// `no current client` (cmd-find.c:1017).
+    NoCurrentClient,
+    /// `invalid session name: X` (cmd-new-session.c:115).
+    InvalidSessionName(String),
+    /// `invalid window name: X` (cmd-new-session.c:104).
+    InvalidWindowName(String),
+    /// A numeric argument rejected by `strtonum`: `width invalid`,
+    /// `height too small` (cmd-new-session.c:226-252), `delay missing`.
+    BadNumber {
+        what: &'static str,
+        cause: NumError,
+    },
+    /// `only one of -F or argument must be given` (cmd-display-message.c:92).
+    FormatAndArgument,
+    /// `command or window name given with target` (cmd-new-session.c:97).
+    TargetWithCommand,
+    /// `open terminal failed: CAUSE` (cmd-new-session.c:204).
+    OpenTerminalFailed(String),
+    /// `create window failed: CAUSE` (cmd-new-session.c:300).
+    CreateWindowFailed(String),
+    /// `invalid sort order` (cmd-list-sessions.c:74).
+    InvalidSortOrder,
+    /// `-f only valid with -a` (cmd-kill-session.c:62).
+    FilterNeedsAll,
+    /// A tmux 3.8 feature vtmux does not do yet.
+    NotImplemented(String),
     VersionMismatch {
         client: u32,
         server: u32,
@@ -120,6 +153,20 @@ impl fmt::Display for EdgeError {
                 )
             }
             Self::InvalidOption(s) => write!(f, "invalid option: {s}"),
+            Self::WindowNotFound(s) => write!(f, "can't find window: {s}"),
+            Self::PaneNotFound(s) => write!(f, "can't find pane: {s}"),
+            Self::NoCurrentTarget => f.write_str("no current target"),
+            Self::NoCurrentClient => f.write_str("no current client"),
+            Self::InvalidSessionName(s) => write!(f, "invalid session name: {s}"),
+            Self::InvalidWindowName(s) => write!(f, "invalid window name: {s}"),
+            Self::BadNumber { what, cause } => write!(f, "{what} {cause}"),
+            Self::FormatAndArgument => f.write_str("only one of -F or argument must be given"),
+            Self::TargetWithCommand => f.write_str("command or window name given with target"),
+            Self::OpenTerminalFailed(s) => write!(f, "open terminal failed: {s}"),
+            Self::CreateWindowFailed(s) => write!(f, "create window failed: {s}"),
+            Self::InvalidSortOrder => f.write_str("invalid sort order"),
+            Self::FilterNeedsAll => f.write_str("-f only valid with -a"),
+            Self::NotImplemented(s) => write!(f, "not implemented in vtmux yet: {s}"),
             Self::VersionMismatch { client, server } => {
                 write!(
                     f,
@@ -177,6 +224,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // one assertion per variant
     fn display_is_the_tmux_line() {
         let enoent = || io::Error::from_raw_os_error(2);
         let p = || PathBuf::from("/tmp/tmux-1000/x");
@@ -244,6 +292,40 @@ mod tests {
                 min: 1
             }),
             "command set-option: too few arguments (need at least 1)"
+        );
+        // Reference strings: `capturep -t nope`, `capturep -t a:5`,
+        // `capturep -t a.3`, `start ; has -t a`, `new -d -x abc`,
+        // `new -d -x 0`, `new -d -s 'tab<TAB>x'`, `display -F x y`.
+        assert_eq!(
+            s(&EdgeError::PaneNotFound("nope".into())),
+            "can't find pane: nope"
+        );
+        assert_eq!(
+            s(&EdgeError::WindowNotFound("5".into())),
+            "can't find window: 5"
+        );
+        assert_eq!(s(&EdgeError::NoCurrentTarget), "no current target");
+        assert_eq!(
+            s(&EdgeError::BadNumber {
+                what: "width",
+                cause: NumError::Invalid
+            }),
+            "width invalid"
+        );
+        assert_eq!(
+            s(&EdgeError::BadNumber {
+                what: "width",
+                cause: NumError::TooSmall
+            }),
+            "width too small"
+        );
+        assert_eq!(
+            s(&EdgeError::InvalidSessionName("tab\tx".into())),
+            "invalid session name: tab\tx"
+        );
+        assert_eq!(
+            s(&EdgeError::FormatAndArgument),
+            "only one of -F or argument must be given"
         );
         assert_eq!(
             s(&EdgeError::InvalidOption("nope".into())),
