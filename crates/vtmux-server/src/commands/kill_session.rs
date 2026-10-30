@@ -18,7 +18,8 @@ pub fn exec(
         return Err(EdgeError::FilterNeedsAll.into());
     }
     if args.flag('C') {
-        // No alerts in M0: clearing them is a no-op.
+        // Every window of the session loses its alert flags.
+        server.model.alerts_clear_session(s);
         return Ok(());
     }
     if args.flag('a') {

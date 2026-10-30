@@ -178,8 +178,11 @@ fn move_to_new_window(
             last_layout: None,
             old_layout: None,
             pending_size: None,
+            alerts: crate::alerts::WindowAlerts::default(),
         },
     );
+    // window_create -> window_update_activity.
+    m.alerts_queue(new_w, crate::alerts::ACTIVITY);
     if let Some(n) = name {
         let n = clean_name(n);
         m.options.set_table_value(

@@ -25,6 +25,7 @@ use vtmux_core::options::{Defaults, OptionValue, OptionsStore, TreeId, Value};
 use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg};
 use vtmux_vt::PaneTerm;
 
+use crate::alerts;
 use crate::commands::{self, After, Item, Output};
 use crate::environ::Environ;
 use crate::format_ctx::{ClientView, Ctx, ServerInfo};
@@ -408,6 +409,8 @@ impl Server {
                 self.pane_readable(p);
             }
             self.expire_repeat(Instant::now());
+            self.model.alerts_timers(Instant::now());
+            self.run_alerts();
             let ids: Vec<_> = self.clients.keys().copied().collect();
             for id in ids {
                 let _ = self.on_client_input(id, &[]);
@@ -429,7 +432,21 @@ impl Server {
         }
     }
 
+    /// The poll timeout: the sooner of the loop's own needs and the next
+    /// silence timer (`alerts_reset`'s `event_add`).
     fn next_timeout(&self) -> Option<Duration> {
+        let own = self.own_timeout();
+        let silence = self
+            .model
+            .alerts_deadline()
+            .map(|d| d.saturating_duration_since(Instant::now()));
+        match (own, silence) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn own_timeout(&self) -> Option<Duration> {
         if !self.backlog.is_empty() || !self.woken.is_empty() {
             return Some(Duration::ZERO);
         }
@@ -915,7 +932,87 @@ impl Server {
             self.resize_client(id, tty.cols, tty.rows);
         }
         self.update_focus(self.model.current_of(s).map(|(_, w, _)| w));
+        self.session_attached_alerts(s);
         Ok(())
+    }
+
+    /// The sessions with a client (`s->attached != 0`).
+    fn attached_sessions(&self) -> std::collections::BTreeSet<SessionId> {
+        self.clients.values().filter_map(|c| c.attached).collect()
+    }
+
+    /// `server_client_set_session` (server-client.c:471-472): the current
+    /// window's winlink loses its alert flags and the rest are checked
+    /// again now there is a client.
+    pub(crate) fn session_attached_alerts(&mut self, s: SessionId) {
+        if let Some(session) = self.model.sessions.get_mut(&s) {
+            let current = session.current;
+            session.link_alerts.remove(&current);
+        }
+        let attached = self.attached_sessions();
+        let alerts = self.model.alerts_check_session(s, &attached);
+        self.handle_alerts(&alerts);
+    }
+
+    /// `alerts_callback`: check the windows queued since the last turn.
+    fn run_alerts(&mut self) {
+        let attached = self.attached_sessions();
+        let alerts = self.model.alerts_run(&attached);
+        self.handle_alerts(&alerts);
+    }
+
+    /// The part of the alert checks that reaches clients: the
+    /// `alert-*` hooks and `alerts_set_message`.
+    fn handle_alerts(&mut self, alerts: &[alerts::Alert]) {
+        for a in alerts {
+            // TODO(hooks): events_fire_winlink(a.kind.hook(), wl) once
+            // hooks run; alert-activity, alert-bell and alert-silence are
+            // in the options table and can be set, but nothing runs them.
+            if a.message {
+                self.alerts_set_message(a);
+            }
+        }
+    }
+
+    /// `alerts_set_message` (alerts.c:296-326): each terminal client of
+    /// the session gets a bell, a message or both, by `visual-*`.
+    fn alerts_set_message(&mut self, a: &alerts::Alert) {
+        const OFF: i64 = 0;
+        const BOTH: i64 = 2;
+        let visual = self
+            .model
+            .number_option(TreeId::Session(a.session), a.kind.visual());
+        let current = self
+            .model
+            .sessions
+            .get(&a.session)
+            .is_some_and(|s| s.current == a.index);
+        let text = if current {
+            format!("{} in current window", a.kind.title())
+        } else {
+            format!("{} in window {}", a.kind.title(), a.index)
+        };
+        let ids: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.attached == Some(a.session) && c.control.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            if visual == OFF || visual == BOTH {
+                // tty_putcode(TTYC_BEL).
+                self.send(id, &ServerMsg::Frame(vec![7]));
+            }
+            if visual == OFF {
+                continue;
+            }
+            // TODO(status_msg): status_message_set(c, -1, 1, 0, 0, ...);
+            // until that API lands the text is parked in `message`, which
+            // nothing draws yet.
+            if let Some(c) = self.clients.get_mut(&id) {
+                c.message = Some(text.clone());
+            }
+        }
     }
 
     /// `MSG_RESIZE` (server-client.c:2712-2730): the client's terminal
@@ -1543,6 +1640,7 @@ impl Server {
             current: index,
             last: Vec::new(),
             env,
+            link_alerts: BTreeMap::new(),
         });
         if let Some((x, y)) = spec.default_size {
             // cmd-new-session.c:274-280: -x/-y become the session's
@@ -1605,8 +1703,11 @@ impl Server {
                 last_layout: None,
                 old_layout: None,
                 pending_size: None,
+                alerts: crate::alerts::WindowAlerts::default(),
             },
         );
+        // window_create -> window_update_activity.
+        self.model.alerts_queue(window_id, crate::alerts::ACTIVITY);
         self.model.fix_panes(window_id);
     }
 
@@ -1929,6 +2030,7 @@ impl Server {
                 ReadResult::Data(bytes) => {
                     pane.term.feed(&bytes);
                     pane.changed = true;
+                    let belled = pane.term.take_bells() != 0;
                     let replies = pane.term.take_replies();
                     if !replies.is_empty() {
                         io.write(&replies);
@@ -1940,6 +2042,11 @@ impl Server {
                     let stamp = self.model.touch();
                     if let Some(w) = self.model.windows.get_mut(&window) {
                         w.activity = stamp;
+                    }
+                    self.model.alerts_queue(window, alerts::ACTIVITY);
+                    if belled {
+                        // input_c0_dispatch BEL: alerts_queue(WINDOW_BELL).
+                        self.model.alerts_queue(window, alerts::BELL);
                     }
                     self.control_output(p, &bytes);
                 }

@@ -317,6 +317,7 @@ impl Server {
             self.update_focus(Some(w));
         }
         self.update_focus(self.client_window(id));
+        self.session_attached_alerts(s);
     }
 
     /// Keys `send-keys -K` gave a client: handled as typed, after the
