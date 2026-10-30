@@ -340,6 +340,25 @@ impl<'a> Ctx<'a> {
             "pane_title" => p.term.title(),
             "pane_active" => flag(w.active() == p.id),
             "pane_last" => flag(w.panes.last.first() == Some(&p.id)),
+            // window_pane_printable_flags (window.c:1389-1409) for the
+            // flags vtmux has: active, last, zoomed, floating (no
+            // float-over-zoom or modal panes).
+            "pane_flags" => {
+                let mut f = String::new();
+                if w.active() == p.id {
+                    f.push('*');
+                }
+                if w.panes.last.first() == Some(&p.id) {
+                    f.push('-');
+                }
+                if w.zoom.as_ref().is_some_and(|z| z.pane == p.id) {
+                    f.push('Z');
+                }
+                if w.is_floating(p.id) {
+                    f.push('F');
+                }
+                f
+            }
             "pane_floating_flag" => flag(w.is_floating(p.id)),
             "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),
             "pane_input_off" => flag(p.input_off),

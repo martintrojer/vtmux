@@ -1320,11 +1320,8 @@ impl Server {
         screen.cursor_visible = window.cursor_visible;
     }
 
-    /// The status lines at rows `y..y + lines`. `status_redraw`
-    /// (status.c:268-300): a line with no or an empty format is blank in
-    /// the status style. A set `status-format[0]` is drawn as the default
-    /// format; the other lines stay blank until status-format is drawn
-    /// through `format_draw`.
+    /// The status lines at rows `y..y + lines` (status.c `status_redraw`),
+    /// expanded in the client's format tree.
     fn draw_status(
         &self,
         id: ClientId,
@@ -1334,63 +1331,13 @@ impl Server {
         y: u16,
         lines: u16,
     ) {
-        for (i, row) in (0..lines).zip(y..) {
-            crate::render::status_blank(screen, row, caps);
-            if i == 0 && self.status_format_set(s, 0) {
-                let (left, windows, right) = self.default_status(id, s);
-                crate::render::status(screen, row, &left, &windows, &right, caps);
-            }
-        }
-    }
-
-    /// The default `status-format[0]` sections: status-left, the window
-    /// list (current entry flagged) and status-right.
-    fn default_status(&self, id: ClientId, s: SessionId) -> (String, Vec<(String, bool)>, String) {
-        let found = crate::target::Found::from_session(&self.model, s);
-        let ctx = self.format_ctx(found, Some(id));
-        let left = vtmux_core::format::expand_str("[#{session_name}] ", &ctx);
-        let right = vtmux_core::format::trim::trim_left(
-            &vtmux_core::format::expand_time("\"#{=21:pane_title}\" %H:%M %d-%b-%y", &ctx),
-            40,
-        );
-        let session = &self.model.sessions[&s];
-        let windows = session
-            .windows
-            .iter()
-            .map(|(&index, &w)| {
-                // The default window-status-format (options-table.c):
-                // `#I:#W#{?window_flags,#{window_flags}, }`.
-                let found = crate::target::Found {
-                    session: Some(s),
-                    index: Some(index),
-                    window: Some(w),
-                    ..Default::default()
-                };
-                let ctx =
-                    crate::format_ctx::Ctx::new(&self.model, &self.info, &self.global_env, found);
-                (
-                    vtmux_core::format::expand_str("#I:#W#{?window_flags,#{window_flags}, }", &ctx),
-                    index == session.current,
-                )
-            })
-            .collect();
-        (left, windows, right)
-    }
-
-    /// Whether `status-format[line]` is set and non-empty for session `s`.
-    fn status_format_set(&self, s: SessionId, line: u32) -> bool {
-        match self
-            .model
-            .options
-            .get(TreeId::Session(s), "status-format")
-            .map(|e| &e.value)
-        {
-            Some(OptionValue::Array(items)) => matches!(
-                items.get(&vtmux_core::options::ArrayKey::Index(line)),
-                Some(Value::String(f)) if !f.is_empty()
-            ),
-            _ => false,
-        }
+        let source = crate::render::window::Source {
+            model: &self.model,
+            info: &self.info,
+            env: &self.global_env,
+        };
+        let ctx = self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
+        crate::render::status::draw(&source, &ctx, s, caps, screen, y, lines);
     }
 
     /// The session client `id` is attached to.

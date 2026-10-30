@@ -44,7 +44,7 @@ impl Source<'_> {
 
     /// `options_string_to_style` + `style_apply`: the option expanded and
     /// parsed over the default cell; an invalid style is the default.
-    fn style(&self, tree: TreeId, name: &str, ctx: &Ctx<'_>) -> CellStyle {
+    pub(crate) fn style(&self, tree: TreeId, name: &str, ctx: &Ctx<'_>) -> CellStyle {
         let text = self.string(tree, name);
         let text = if text.contains("#{") {
             vtmux_core::format::expand_str(&text, ctx)
