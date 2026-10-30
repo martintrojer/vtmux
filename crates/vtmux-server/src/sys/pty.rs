@@ -103,9 +103,10 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     envp.push(std::ptr::null());
     envp.push(std::ptr::null());
     let candidates = exec_candidates(&program, &spec.env, direct)?;
-    // execvp's ENOEXEC fallback argv: `sh <file> args...`, slot 1 filled in
+    // execvp's ENOEXEC fallback argv: `/bin/sh <file> args...` (glibc
+    // maybe_script_execute passes _PATH_BSHELL as argv[0]), slot 1 filled in
     // with the candidate path by the child.
-    let sh = cstring(b"sh")?;
+    let sh = cstring(b"/bin/sh")?;
     let mut sh_argv: Vec<*const libc::c_char> = vec![sh.as_ptr(), std::ptr::null()];
     sh_argv.extend(argv_ptrs.iter().skip(1));
     let fd_limit = fd_limit();
@@ -211,8 +212,14 @@ fn exec_candidates(
         .map_or("/usr/bin:/bin", |(_, v)| v.as_str());
     path.split(':')
         .map(|dir| {
-            let dir = if dir.is_empty() { "." } else { dir };
-            cstring(&[dir.as_bytes(), b"/", name].concat())
+            // glibc execvpe tries the bare name for an empty PATH component
+            // (leading, trailing or `::`), not `./name`; the difference shows
+            // in a script's $0 and /proc/<pid>/cmdline.
+            if dir.is_empty() {
+                Ok(program.clone())
+            } else {
+                cstring(&[dir.as_bytes(), b"/", name].concat())
+            }
         })
         .collect()
 }
@@ -234,7 +241,7 @@ struct Child<'a> {
     pwd_slot: usize,
     argv: &'a [*const libc::c_char],
     candidates: &'a [CString],
-    /// `["sh", <file>, argv[1..]..., null]` for the ENOEXEC fallback.
+    /// `["/bin/sh", <file>, argv[1..]..., null]` for the ENOEXEC fallback.
     sh_argv: &'a mut [*const libc::c_char],
     /// A multi-word command, run as `execvp` does (spawn.c:552).
     direct: bool,
