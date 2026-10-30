@@ -31,6 +31,39 @@ fn regex_glibc_goldens() {
 }
 
 #[test]
+fn regex_resource_limits_are_errors_not_panics() {
+    for pattern in [
+        "a".to_owned() + &"*".repeat(50_000),
+        "a".to_owned() + &"{1}".repeat(50_000),
+        "()".repeat(40_000),
+        "(a?)".repeat(1000),
+        "(".repeat(64) + "a" + &"*".repeat(64) + &")*".repeat(65),
+    ] {
+        assert!(
+            matches!(Regex::new(&pattern, false), Err(Error::Limit)),
+            "{pattern:.30}"
+        );
+    }
+    let text = "a".repeat(2_000_000) + "b";
+    assert_eq!(
+        Regex::new("b", false)
+            .unwrap()
+            .find(&text)
+            .unwrap()
+            .unwrap()
+            .captures[0],
+        Some(2_000_000..2_000_001)
+    );
+    assert!(
+        Regex::new("x", false)
+            .unwrap()
+            .find(&text)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
 fn regex_random_patterns_do_not_panic() {
     let mut seed = 0x1234_5678_u64;
     let alphabet = b"ab.[]()|*+?{}^$\\:0123,-";
