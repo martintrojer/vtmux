@@ -68,7 +68,7 @@ fn best_with_window(model: &Model, w: WindowId) -> Option<Found> {
         session: Some(s),
         index: Some(index),
         window: Some(w),
-        pane: model.windows.get(&w).map(|win| win.active),
+        pane: model.windows.get(&w).map(crate::model::Window::active),
     })
 }
 
@@ -91,7 +91,10 @@ pub fn current(model: &Model, origin: Origin) -> Option<Found> {
         && let Some(pane) = model.panes.get(&p)
         && let Some(mut f) = best_with_window(model, pane.window)
     {
-        f.pane = model.windows.get(&pane.window).map(|w| w.active);
+        f.pane = model
+            .windows
+            .get(&pane.window)
+            .map(crate::model::Window::active);
         return Some(f);
     }
     best_session(model, None).map(|s| Found::from_session(model, s))
@@ -182,7 +185,7 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
             session: Some(s),
             index: Some(index),
             window: Some(*w),
-            pane: model.windows.get(w).map(|x| x.active),
+            pane: model.windows.get(w).map(crate::model::Window::active),
         })
     };
     if window.starts_with('@') {
@@ -286,14 +289,14 @@ fn find_pane_in(model: &Model, w: WindowId, part: &str) -> Option<PaneId> {
         // No last pane and no neighbours with one pane per window (M0).
         return None;
     }
-    let panes: Vec<PaneId> = window.layout.panes().collect();
+    let panes: Vec<PaneId> = window.panes.panes.clone();
     if part.starts_with('+') || part.starts_with('-') {
         let n = if part.len() > 1 {
             usize::try_from(strtonum(&part[1..], 1, i64::from(i32::MAX)).ok()?).ok()?
         } else {
             1
         };
-        let pos = panes.iter().position(|p| *p == window.active)?;
+        let pos = panes.iter().position(|p| *p == window.active())?;
         let len = panes.len();
         let target = if part.starts_with('+') {
             (pos + n) % len
@@ -322,7 +325,7 @@ fn find_pane_in(model: &Model, w: WindowId, part: &str) -> Option<PaneId> {
     positions
         .iter()
         .any(|p| p.eq_ignore_ascii_case(part))
-        .then_some(window.active)
+        .then_some(window.active())
 }
 
 /// `cmd_find_get_pane` (cmd-find.c:643-676).
@@ -347,7 +350,7 @@ fn find_pane(model: &Model, current: Found, part: &Part, only: bool) -> Option<F
         f.pane = f
             .window
             .and_then(|w| model.windows.get(&w))
-            .map(|w| w.active);
+            .map(crate::model::Window::active);
         return Some(f);
     }
     None

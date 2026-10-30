@@ -351,8 +351,8 @@ unsafe fn close_from(first: libc::c_int, limit: libc::c_int) {
     }
 }
 
-/// `TIOCSWINSZ` on a pane's master.
-pub fn resize(master: &OwnedFd, cols: u16, rows: u16) -> io::Result<()> {
+/// `TIOCSWINSZ` on a pane's master (window.c `window_pane_send_resize`).
+pub fn resize(master: impl std::os::fd::AsFd, cols: u16, rows: u16) -> io::Result<()> {
     rustix::termios::tcsetwinsize(
         master,
         rustix::termios::Winsize {
