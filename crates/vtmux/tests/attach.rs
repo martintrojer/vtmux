@@ -1129,7 +1129,7 @@ fn focus_events_bump_activity_and_reach_the_pane() {
 #[test]
 fn session_attached_and_activity_variables() {
     const F: &str = "#{session_name}|#{session_attached}|#{session_attached_list}|\
-         #{e|-:#{session_activity},#{session_created}}";
+         #{?#{e|>:#{session_activity},#{session_created}},later,same}";
     let mut outputs = Vec::new();
     for bin in bins() {
         let mut w = World::new(bin);
@@ -1175,7 +1175,7 @@ fn session_attached_and_activity_variables() {
         "{}",
         outputs[0]
     );
-    assert!(outputs[0].contains("s1|1|TTY|1\n"), "{}", outputs[0]);
+    assert!(outputs[0].contains("s1|1|TTY|later\n"), "{}", outputs[0]);
     assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }
 
