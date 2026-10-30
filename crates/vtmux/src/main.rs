@@ -320,7 +320,11 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
                 }
                 return ExitCode::from(u8::try_from(code).unwrap_or(1));
             }
-            Ok(Some(ServerMsg::Ready)) => {}
+            Ok(Some(ServerMsg::Ready)) => {
+                return ExitCode::from(
+                    u8::try_from(vtmux_client::attach::attach(stream)).unwrap_or(1),
+                );
+            }
             Ok(None) | Err(_) => {
                 // client.c: CLIENT_EXIT_LOST_SERVER.
                 write_err(b"server exited unexpectedly");

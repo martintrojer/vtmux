@@ -539,17 +539,23 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 name = "vtmux"
 version = "0.0.0"
 dependencies = [
+ "portable-pty",
  "rustix",
  "tempfile",
  "vtmux-client",
  "vtmux-core",
  "vtmux-server",
+ "vtmux-vt",
 ]
 
 [[package]]
 name = "vtmux-client"
 version = "0.0.0"
 dependencies = [
+ "mio",
+ "rustix",
+ "signal-hook",
+ "signal-hook-mio",
  "vtmux-core",
 ]
 
