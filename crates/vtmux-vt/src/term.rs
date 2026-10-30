@@ -307,6 +307,13 @@ impl PaneTerm {
             .unwrap_or_default()
     }
 
+    /// DECCKM is set: cursor keys are sent as `ESC O x` (tmux's
+    /// `MODE_KCURSOR`, input-keys.c:652-655).
+    #[must_use]
+    pub fn app_cursor(&self) -> bool {
+        self.term.mode(Mode::DECCKM).unwrap_or(false)
+    }
+
     /// True while the alternate screen is active (`#{alternate_on}`).
     #[must_use]
     pub fn alternate_on(&self) -> bool {
