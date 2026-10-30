@@ -17,41 +17,42 @@ The design decisions behind this (D1–D23) are in the [spec](specs/2026-10-29-v
                  │   ↑ keys, mouse, terminal replies
                  │   ↓ escape sequences for the final screen
  ┌───────────────┴──────────────────────┐
- │ vtmux client (crates/vtmux-client)    │  raw tty mode; just a pipe:
- │  stdin → Input / Resize               │   forwards input bytes,
- │  Frame → stdout, then FrameAck        │   writes frames as they come
+ │ vtmux client (crates/vtmux-client)   │  raw tty mode; just a pipe:
+ │  stdin → Input / Resize              │   forwards input bytes,
+ │  Frame → stdout, then FrameAck       │   writes frames as they come
  └───────────────┬──────────────────────┘
                  │ Unix socket  $TMUX_TMPDIR/tmux-UID/<label>
                  │ vtmux's own framed protocol (vtmux-core::protocol)
                  │   Hello{argv,env,tty} · Input · Resize · FrameAck
                  │   Frame · Stdout · Stderr · Exit
- ┌───────────────┴──────────────────────────────────────────────────┐
- │ vtmux server (crates/vtmux-server)  one thread, mio event loop    │
- │                                                                   │
- │  input.rs: decode keys ─► key tables (prefix/root) ─► command     │
- │                        └► encode key for the pane's mode ──┐      │
- │                                                            │      │
- │  model: sessions ─► windows (core Layout) ─► panes         │      │
- │  options · formats · targets · hooks (vtmux-core, pure)    │      │
- │                                                            ▼      │
- │  ┌─ pane %0 ─────────────────┐   ┌─ pane %1 ────────────────┐     │
- │  │ PaneTerm (crates/vtmux-vt) │   │ PaneTerm                 │     │
- │  │  libghostty-vt Terminal   │   │  libghostty-vt Terminal  │ …   │
- │  │  grid + scrollback        │   │                          │     │
- │  │  tmux-shaped replies      │   │                          │     │
- │  │   (DA, CPR) ────────┐     │   │                          │     │
- │  └───▲─────────────────┼─────┘   └───▲──────────────────────┘     │
- │      │ output bytes    │ replies     │                            │
- │  render.rs compositor: every pane's grid + borders + status       │
- │    + popups → one screen per client → diff against last frame     │
- │    → encode for that client's terminal (Caps) inside ?2026 sync   │
- │    → Frame (blocks when the client's terminal falls behind)       │
- └──────┼─────────────────────┼─────────┼────────────────────────────┘
-        │ PTY #2              │         │ PTY #3 …
- ┌──────┴──────┐        ┌─────┴───────┐
- │ shell / nvim│        │ shell       │   TERM=tmux-256color
- │ (pane %0)   │        │ (pane %1)   │   TMUX=<socket>,<pid>,<session>
- └─────────────┘        └─────────────┘
+ ┌───────────────┴────────────────────────────────────────────────────┐
+ │ vtmux server (crates/vtmux-server)  one thread, mio event loop     │
+ │                                                                    │
+ │  input.rs: decode keys ─► key tables (prefix/root) ─► command      │
+ │                        └► encode for the active pane ─► its PTY    │
+ │                                                                    │
+ │  model: sessions ─► windows (core Layout) ─► panes                 │
+ │  options · formats · targets · hooks (vtmux-core, pure)            │
+ │                                                                    │
+ │  render.rs compositor, once per tick:                              │
+ │    every pane's grid + borders + status line + popups              │
+ │    → one screen per client → diff against the last frame           │
+ │    → encode for the client's terminal (Caps), inside ?2026 sync    │
+ │    → Frame (held back while the client's terminal is behind)       │
+ │                        ▲ reads the grids                           │
+ │  ┌─ pane %0 ───────────┴──────┐   ┌─ pane %1 ──────────────────┐   │
+ │  │ PaneTerm (crates/vtmux-vt) │   │ PaneTerm                   │   │
+ │  │  libghostty-vt Terminal    │   │  libghostty-vt Terminal    │ … │
+ │  │  grid + scrollback         │   │  grid + scrollback         │   │
+ │  │  answers queries (DA, CPR) │   │                            │   │
+ │  │  the way tmux does         │   │                            │   │
+ │  └──────┬─────────────────────┘   └──────┬─────────────────────┘   │
+ └─────────┼────────────────────────────────┼─────────────────────────┘
+           │ PTY #2                         │ PTY #3 …
+      ┌────┴─────────┐                 ┌────┴─────────┐
+      │ shell / nvim │                 │ shell        │   TERM=tmux-256color
+      │ (pane %0)    │                 │ (pane %1)    │   TMUX=<socket>,<pid>,<session>
+      └──────────────┘                 └──────────────┘
 ```
 
 ## The crates
