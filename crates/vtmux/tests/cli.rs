@@ -642,12 +642,29 @@ fn options_core_probes_over_cli() {
         }
         compare(name, |w| {
             let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
-            runs.extend(commands.iter().map(|argv| w.run(argv)));
+            runs.extend(commands.iter().map(|argv| {
+                let mut r = w.run(argv);
+                if name == "names-malformed" {
+                    r.stderr = unparsable_option_error(&r.stderr);
+                }
+                r
+            }));
             runs
         });
         checked += 1;
     }
     assert_eq!(checked, 48);
+}
+
+/// For a name `options_parse` rejects, `options_match` returns without
+/// setting `*ambiguous` and set/show read it anyway (options.c:784-799,
+/// cmd-show-options.c:125-133), so the word depends on how the reference
+/// was compiled: `invalid` for `show` on this host's build, `ambiguous` on
+/// CI's Ubuntu build. Only the word is unspecified; the message and exit
+/// still compare. vtmux pins the local build (options/table.rs
+/// `MatchError::Unparsable`).
+fn unparsable_option_error(stderr: &str) -> String {
+    stderr.replace("ambiguous option: ", "invalid option: ")
 }
 
 /// spawn.c `spawn_pane` reads default-shell and history-limit for each new
