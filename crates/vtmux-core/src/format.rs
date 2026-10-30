@@ -10,7 +10,8 @@
 //! Supported: variables and the `#S #I ...` aliases, `#{?c,v,...}`, `#{||:...}`,
 //! `#{&&:...}`, `#{==:a,b}`, `#{!=:a,b}`, `#{E:x}`, `#{T:x}` (like `E`: the
 //! strftime pass is deferred), `#{t:x}` (a time variable as `ctime` text), the
-//! `##` `#,` `#}` escapes and `#[style]` pass-through. [`expand_time`] is
+//! `##` `#,` `#}` escapes, `#{=N:x}` / `#{=/N/marker:x}` truncation and
+//! `#[style]` pass-through. [`expand_time`] is
 //! `format_expand_time`: a `strftime` pass over the template first. Every other modifier parses to [`Node::Deferred`] and expands
 //! to nothing; [`Parsed::deferred`] lists them so the server can log them.
 //! `#(cmd)` also expands to nothing (jobs are the server's business, D9) and is
@@ -18,6 +19,7 @@
 
 mod parse;
 mod time;
+pub mod trim;
 
 pub use time::Tm;
 
@@ -111,6 +113,8 @@ enum Node {
     Replace {
         value: Value,
         reexpand: bool,
+        /// The `=` modifier.
+        trim: Option<Box<Trim>>,
     },
     /// An unsupported modifier list (first modifier named); expands to nothing.
     Deferred(String),
@@ -138,6 +142,14 @@ enum Value {
         arms: Vec<CondArm>,
         default: Option<Format>,
     },
+}
+
+/// `#{=N:...}` / `#{=/N/marker:...}`: keep the first `N` columns (the last
+/// `-N`), adding `marker` when something was cut (format.c:6627-6648).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Trim {
+    width: Format,
+    marker: Option<Format>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,12 +235,19 @@ impl Eval<'_> {
                 Node::Text(t) => out.push_str(t),
                 Node::Deferred(_) => {}
                 Node::Abort => break,
-                Node::Replace { value, reexpand } => {
+                Node::Replace {
+                    value,
+                    reexpand,
+                    trim,
+                } => {
                     let mut v = self.value(value, depth);
                     if *reexpand {
                         // format.c:6606: expand the result again, one level down.
                         let ast = parse::template(&v, depth + 1, &mut Vec::new());
                         v = self.expand(&ast, depth + 1);
+                    }
+                    if let Some(t) = trim {
+                        v = self.trim(t, v, depth);
                     }
                     out.push_str(&v);
                 }
@@ -281,6 +300,31 @@ impl Eval<'_> {
 }
 
 impl Eval<'_> {
+    /// format.c:6080-6089 and 6627-6648. A width that is not a number in
+    /// `-FORMAT_MAX_WIDTH..=FORMAT_MAX_WIDTH` (10000) is 0: no limit.
+    fn trim(&mut self, t: &Trim, value: String, depth: usize) -> String {
+        let limit = crate::cmd::strtonum(&self.expand(&t.width, depth + 1), -10_000, 10_000)
+            .unwrap_or(0);
+        if limit == 0 {
+            return value;
+        }
+        let n = usize::try_from(limit.unsigned_abs()).expect("<= 10000");
+        let cut = if limit > 0 {
+            trim::trim_left(&value, n)
+        } else {
+            trim::trim_right(&value, n)
+        };
+        let Some(marker) = t.marker.as_ref().filter(|_| cut != value) else {
+            return cut;
+        };
+        let marker = self.expand(marker, depth + 1);
+        if limit > 0 {
+            cut + &marker
+        } else {
+            marker + &cut
+        }
+    }
+
     /// format.c:4681-4709: a time variable, or a variable whose value is a
     /// positive number, as `ctime`; anything else (zero, negative, text,
     /// missing) is empty.
@@ -327,7 +371,7 @@ mod tests {
     #[test]
     fn deferred_modifiers_are_reported() {
         let p = parse("a#{l:x}b#{=3:@n}#{s/a/b/;E:@n}#(true)#{@v}");
-        assert_eq!(p.deferred, ["l", "=", "s", "#()"]);
+        assert_eq!(p.deferred, ["l", "s", "#()"]);
         assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "abv");
         assert_eq!(
             parse("#{?@x,a,b}#{E:@y}#{||:1,0}#S").deferred,
