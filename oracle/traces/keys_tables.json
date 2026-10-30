@@ -1,0 +1,529 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "keys_tables",
+  "inputs": {
+    "name": "keys_tables",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "w",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-x",
+          "select-window",
+          "-t",
+          ":9"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-y",
+          "display",
+          "-p",
+          "hello"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-N",
+          "rep",
+          "-r",
+          "R",
+          "display",
+          "-p",
+          "rep"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-T",
+          "mine",
+          "z",
+          "display",
+          "-p",
+          "mine-z"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "prefix2",
+          "C-a"
+        ]
+      },
+      {
+        "run": [
+          "lsk",
+          "-T",
+          "mine"
+        ]
+      },
+      {
+        "run": [
+          "lsk",
+          "-N",
+          "R"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "send-keys -K M-x"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%error"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "send-keys -K M-y"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p '#{client_key_table} #{client_prefix}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "send-keys -K C-b R"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p '#{client_key_table} #{client_prefix}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "send-keys -K R z"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "send-keys -K C-a Escape"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p '#{client_key_table} #{client_prefix}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -T mine"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "send-keys -K z"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -T nope"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%error"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -t b"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p '#{client_session} #{client_last_session}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -l"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -n"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p '#{client_session} #{client_last_session}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "unbind",
+          "-a",
+          "-T",
+          "mine"
+        ]
+      },
+      {
+        "run": [
+          "lsk",
+          "-T",
+          "mine"
+        ]
+      },
+      {
+        "run": [
+          "unbind",
+          "-q",
+          "-T",
+          "mine",
+          "z"
+        ]
+      },
+      {
+        "run": [
+          "switch-client",
+          "-T",
+          "prefix"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key  -T mine z display-message -p mine-z\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "C-b R rep\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 0",
+          "can't find window: 9",
+          "%error <TIME> #3 0",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%begin <TIME> #5 0",
+          "hello",
+          "%end <TIME> #5 0",
+          "%begin <TIME> #6 1",
+          "root 0",
+          "%end <TIME> #6 1",
+          "%begin <TIME> #7 1",
+          "%end <TIME> #7 1",
+          "%begin <TIME> #8 0",
+          "rep",
+          "%end <TIME> #8 0",
+          "%begin <TIME> #9 1",
+          "prefix 1",
+          "%end <TIME> #9 1",
+          "%begin <TIME> #10 1",
+          "%end <TIME> #10 1",
+          "%begin <TIME> #11 0",
+          "rep",
+          "%end <TIME> #11 0",
+          "%output %0 z",
+          "%begin <TIME> #12 1",
+          "%end <TIME> #12 1",
+          "%begin <TIME> #13 1",
+          "root 0",
+          "%end <TIME> #13 1",
+          "%begin <TIME> #14 1",
+          "%end <TIME> #14 1",
+          "%begin <TIME> #15 1",
+          "%end <TIME> #15 1",
+          "%begin <TIME> #16 0",
+          "mine-z",
+          "%end <TIME> #16 0",
+          "%begin <TIME> #17 1",
+          "table nope doesn't exist",
+          "%error <TIME> #17 1",
+          "%begin <TIME> #18 1",
+          "%end <TIME> #18 1",
+          "%session-changed $1 b",
+          "%begin <TIME> #19 1",
+          "b a",
+          "%end <TIME> #19 1",
+          "%begin <TIME> #20 1",
+          "%end <TIME> #20 1",
+          "%session-changed $0 a",
+          "%begin <TIME> #21 1",
+          "%end <TIME> #21 1",
+          "%session-changed $1 b",
+          "%begin <TIME> #22 1",
+          "b a",
+          "%end <TIME> #22 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "table mine doesn't exist\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no current client\n",
+        "exit": 1
+      }
+    }
+  ]
+}

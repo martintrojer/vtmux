@@ -1,0 +1,199 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "keys_attached",
+  "inputs": {
+    "name": "keys_attached",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "sh",
+          "-c",
+          "stty raw -echo; exec cat -v"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-x",
+          "rename-window",
+          "mx"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "prefix2",
+          "C-a"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u0002%"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{window_panes}"
+        ]
+      },
+      {
+        "keys": "\u001bx"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{window_name}"
+        ]
+      },
+      {
+        "keys": "\u0001\""
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{window_panes}"
+        ]
+      },
+      {
+        "keys": "\u0002j|"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "keys": "\u0002d"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "mx\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "$ |\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

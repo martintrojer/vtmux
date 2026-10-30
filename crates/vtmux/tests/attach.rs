@@ -13,6 +13,8 @@ struct World {
     bin: PathBuf,
     label: String,
     home: tempfile::TempDir,
+    /// `TERM` for the client.
+    term: &'static str,
 }
 impl World {
     fn new(bin: PathBuf) -> Self {
@@ -25,6 +27,7 @@ impl World {
                 SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ),
             home: tempfile::tempdir().unwrap(),
+            term: "xterm-256color",
         }
     }
     fn args(&self) -> Vec<String> {
@@ -39,7 +42,7 @@ impl World {
         vec![
             ("HOME", self.home.path().display().to_string()),
             ("SHELL", "/bin/sh".into()),
-            ("TERM", "xterm-256color".into()),
+            ("TERM", self.term.into()),
             ("PS1", "$ ".into()),
             ("ENV", "/dev/null".into()),
             ("LC_ALL", "C.UTF-8".into()),
@@ -760,4 +763,193 @@ fn active_pane_change_recolours_shared_borders() {
         a.keys(b"\x02d");
         a.exited(0);
     }
+}
+
+fn display(w: &World, f: &str) -> String {
+    String::from_utf8_lossy(&w.cli(&["display", "-p", "-t", "a", f]).stdout)
+        .trim()
+        .to_owned()
+}
+
+/// server-client.c `server_client_key_callback`: the prefix and prefix2
+/// switch to the prefix table, `C-b %` splits (the default binding), a
+/// root binding runs, an unbound key after the prefix is swallowed.
+#[test]
+fn prefix_root_and_prefix2_bindings() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "stty raw -echo; exec cat -v",
+        ]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert!(
+            w.cli(&["bind", "-n", "M-x", "rename-window", "mx"])
+                .status
+                .success()
+        );
+        assert!(w.cli(&["set", "-g", "prefix2", "C-a"]).status.success());
+        a.keys(b"\x02%");
+        a.wait(|_| display(&w, "#{window_panes}") == "2");
+        a.keys(b"\x1bx");
+        a.wait(|_| display(&w, "#{window_name}") == "mx");
+        // prefix2 then `"`: a second split.
+        a.keys(b"\x01\"");
+        a.wait(|_| display(&w, "#{window_panes}") == "3");
+        // An unbound key after the prefix does not reach the pane; the
+        // next key does.
+        a.keys(b"\x02j");
+        thread::sleep(Duration::from_millis(100));
+        a.keys(b"|");
+        a.wait(|_| pane_line(&w).ends_with('|'));
+        assert!(!pane_line(&w).contains('j'), "{}", pane_line(&w));
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
+
+/// `bind -r`: after the prefix, the key repeats without it within
+/// repeat-time; once repeat-time passes the key goes to the pane
+/// (server-client.c `server_client_repeat_timer`).
+#[test]
+fn repeat_keys_within_and_after_repeat_time() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "stty raw -echo; exec cat -v",
+        ]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert!(w.cli(&["set", "-g", "@n", "0"]).status.success());
+        assert!(
+            w.cli(&["bind", "-r", "R", "set", "-gF", "@n", "#{e|+:#{@n},1}"])
+                .status
+                .success()
+        );
+        assert!(w.cli(&["set", "-g", "repeat-time", "400"]).status.success());
+        a.keys(b"\x02R");
+        a.wait(|_| display(&w, "#{@n}") == "1");
+        assert_eq!(
+            display(&w, "#{client_key_table} #{client_prefix}"),
+            "prefix 1"
+        );
+        a.keys(b"R");
+        a.wait(|_| display(&w, "#{@n}") == "2");
+        a.wait_for(Duration::from_secs(2), |_| {
+            display(&w, "#{client_key_table} #{client_prefix}") == "root 0"
+        });
+        a.keys(b"R");
+        a.wait(|_| pane_line(&w) == "R");
+        assert_eq!(display(&w, "#{@n}"), "2");
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
+
+/// `switch-client -T` from a binding moves the client into a table; the
+/// next key is looked up there, then the client goes back to root.
+#[test]
+fn switch_client_table_then_key() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "stty raw -echo; exec cat -v",
+        ]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert!(
+            w.cli(&["bind", "-T", "mine", "z", "rename-window", "zz"])
+                .status
+                .success()
+        );
+        assert!(
+            w.cli(&["bind", "-n", "M-m", "switch-client", "-T", "mine"])
+                .status
+                .success()
+        );
+        a.keys(b"\x1bm");
+        a.wait(|_| display(&w, "#{client_key_table}") == "mine");
+        a.keys(b"z");
+        a.wait(|_| display(&w, "#{window_name}") == "zz");
+        assert_eq!(display(&w, "#{client_key_table}"), "root");
+        // A key that is not in the table is swallowed.
+        a.keys(b"\x1bmq|");
+        a.wait(|_| pane_line(&w) == "|");
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
+
+/// list-clients' default template (cmd-list-clients.c:31-36) and the
+/// client_* variables (format.c `format_cb_client_*`) for a terminal client
+/// (TERM=screen, 100x30) and a control client. The tty and the client
+/// pid differ per run and are replaced; `client_termfeatures` is the
+/// terminal-features work's and not compared.
+#[test]
+fn list_clients_default_template_and_client_variables() {
+    const F: &str = "#{client_name}|w=#{client_width} h=#{client_height} tn=#{client_termname} \
+         tt=#{client_termtype} f=#{client_flags} cm=#{client_control_mode} tty=#{client_tty} \
+         ro=#{client_readonly} u8=#{client_utf8} kt=#{client_key_table} pfx=#{client_prefix} \
+         ls=#{client_last_session} s=#{client_session} uid=#{==:#{client_uid},#{uid}} \
+         user=#{==:#{client_user},#{user}} col=#{client_colours} cw=#{client_cell_width} \
+         ch=#{client_cell_height} disc=#{client_discarded} pid=#{?client_pid,y,n} \
+         act=#{?client_activity,y,n} cr=#{?client_created,y,n} wr=#{?client_written,y,n}";
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let mut w = World::new(bin);
+        w.term = "screen";
+        let a = w.attach_sized(&["new", "-s", "s1", "-n", "w", "cat"], 100, 30);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        let mut control = Command::new(&w.bin)
+            .args(w.args())
+            .args(["-C", "new", "-s", "s2", "cat"])
+            .env_clear()
+            .envs(w.env())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let listed = |w: &World| String::from_utf8_lossy(&w.cli(&["lsc"]).stdout).into_owned();
+        let start = Instant::now();
+        while listed(&w).lines().count() < 2 {
+            assert!(start.elapsed() < Duration::from_secs(5), "{}", listed(&w));
+            thread::sleep(Duration::from_millis(20));
+        }
+        let pid = control.id();
+        let tty = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_tty}"]).stdout)
+            .lines()
+            .find(|l| !l.is_empty())
+            .unwrap()
+            .to_owned();
+        let norm = |s: String| {
+            s.replace(&tty, "TTY")
+                .replace(&format!("client-{pid}"), "client-PID")
+        };
+        let mut out = norm(listed(&w));
+        out.push_str(&norm(
+            String::from_utf8_lossy(&w.cli(&["lsc", "-F", F]).stdout).into_owned(),
+        ));
+        outputs.push(out);
+        drop(control.stdin.take());
+        let _ = control.wait();
+    }
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }

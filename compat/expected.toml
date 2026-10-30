@@ -107,8 +107,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."control-client-popup.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."control-client-run-shell-exit.sh"]
 status = "pass"
@@ -415,8 +414,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."list-keys-sort-name.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."menu-mouse.sh"]
 status = "xfail"
