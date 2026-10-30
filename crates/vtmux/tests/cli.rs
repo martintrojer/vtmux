@@ -2404,7 +2404,7 @@ fn alerts_activity_and_bell_flags() {
 }
 
 /// `bell-action`/`activity-action` decide which windows alert
-/// (alerts_action_applies); the flag is set either way for a background
+/// (`alerts_action_applies`); the flag is set either way for a background
 /// window, but only an applying action alerts.
 #[test]
 fn alerts_actions_apply_by_window() {
