@@ -535,7 +535,6 @@ impl Drawer {
 /// `default_colours` is tmux's last argument: every style's colours are reset
 /// to `base`'s (used by mode-tree and prompts, never by the status line).
 #[must_use]
-#[expect(clippy::too_many_lines, reason = "one loop, as format_draw")]
 pub fn draw(
     base: &CellStyle,
     available: usize,
@@ -543,6 +542,29 @@ pub fn draw(
     want_ranges: bool,
     default_colours: bool,
 ) -> Line {
+    draw_onto(
+        base,
+        vec![Cell::blank(base); available],
+        expanded,
+        want_ranges,
+        default_colours,
+    )
+}
+
+/// [`draw`] over a row that already holds cells: `format_draw` into a screen
+/// with content, as `window_make_pane_status` (window-border.c) does over
+/// the border line. Columns no section covers keep what `under` had; an
+/// unterminated style leaves `under` as it is.
+#[must_use]
+#[expect(clippy::too_many_lines, reason = "one loop, as format_draw")]
+pub fn draw_onto(
+    base: &CellStyle,
+    under: Vec<Cell>,
+    expanded: &str,
+    want_ranges: bool,
+    default_colours: bool,
+) -> Line {
+    let available = under.len();
     let mut base_default = CellStyle {
         link: None,
         ..base.clone()
@@ -550,7 +572,7 @@ pub fn draw(
     let mut current_default = base_default.clone();
     let mut sy = Style::new(&current_default);
     let mut d = Drawer {
-        row: vec![Cell::blank(base); available],
+        row: under,
         sections: Default::default(),
         frs: Vec::new(),
     };
@@ -604,7 +626,7 @@ pub fn draw(
         let Some(len) = skip_to_bracket(&bytes[cp + 2..]) else {
             // No terminating `]`: tmux gives up and draws nothing.
             return Line {
-                cells: vec![Cell::blank(base); available],
+                cells: d.row,
                 ranges: Vec::new(),
             };
         };
@@ -2908,6 +2930,30 @@ mod tests {
         }
         assert!(cases >= 10, "{cases}");
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// `draw_onto` keeps the row under columns no section covers, and an
+    /// unterminated style leaves the row as it was (window-border.c
+    /// `window_make_pane_status` draws the format over the border line).
+    #[test]
+    fn draw_onto_keeps_the_row_underneath() {
+        let line = |text: &str| Cell {
+            text: text.to_owned(),
+            width: 1,
+            style: CellStyle::default(),
+        };
+        let under = vec![line("-"); 5];
+        let text = |l: Line| l.cells.iter().map(|c| c.text.clone()).collect::<String>();
+        let base = CellStyle::default();
+        assert_eq!(
+            text(draw_onto(&base, under.clone(), "ab", false, false)),
+            "ab---"
+        );
+        assert_eq!(
+            text(draw_onto(&base, under.clone(), "a#[fg=red", false, false)),
+            "-----"
+        );
+        assert_eq!(text(draw(&base, 5, "ab", false, false)), "ab   ");
     }
 
     #[test]
