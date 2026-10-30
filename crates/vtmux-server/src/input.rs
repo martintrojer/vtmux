@@ -20,6 +20,7 @@ impl Decoder {
     pub fn feed(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);
     }
+    #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
         self.pending.map(|t| t + Duration::from_millis(10))
     }
@@ -46,6 +47,7 @@ fn key(base: Base) -> Key {
         shift: false,
     }
 }
+#[allow(clippy::too_many_lines)] // terminal sequence dispatch table
 fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
     if bytes[0] != 0x1b {
         return character(bytes, expired).map(|(k, n)| (Event::Key(k), n));
@@ -164,7 +166,7 @@ fn character(bytes: &[u8], expired: bool) -> Option<(Key, usize)> {
     if b < 128 {
         let mut k = key(Base::Char(char::from(b)));
         if b == 127 {
-            k.base = Base::Named(Named::Backspace)
+            k.base = Base::Named(Named::Backspace);
         } else if b < 32 && !matches!(b, 9 | 13 | 27) {
             k.base = Base::Char(if b == 0 {
                 ' '
@@ -198,11 +200,11 @@ mod tests {
         let now = Instant::now();
         let mut d = Decoder::default();
         d.feed(b"\x1b[");
-        assert!(d.drain(now).is_empty());
+        assert_eq!(d.drain(now), Vec::new());
         d.feed(b"A");
         assert_eq!(d.drain(now), vec![Event::Key(key(Base::Named(Named::Up)))]);
         d.feed(b"\xe4\xb8");
-        assert!(d.drain(now).is_empty());
+        assert_eq!(d.drain(now), Vec::new());
         d.feed(b"\x96");
         assert_eq!(d.drain(now), vec![Event::Key(key(Base::Char('世')))]);
         d.feed(b"\x1b[?62;4c\x1b[>84;0;0c\x1b]11;rgb:0/0/0\x1b\\\x1b[?2026;2$y\x1b[200~\x1b[201~");
@@ -218,7 +220,7 @@ mod tests {
             ]
         );
         d.feed(b"\x1b");
-        assert!(d.drain(now).is_empty());
+        assert_eq!(d.drain(now), Vec::new());
         assert_eq!(
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]

@@ -70,7 +70,10 @@ fn relay(
     let mut input = Vec::new();
     send_size(stream)?;
     loop {
-        poll.poll(&mut events, None)?;
+        match poll.poll(&mut events, None) {
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            result => result?,
+        }
         for event in &events {
             match event.token() {
                 Token(0) => {
