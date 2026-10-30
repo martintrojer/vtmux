@@ -2,10 +2,9 @@
 //! (cmd-select-layout.c:71-154): a named layout, a layout string (v1 or
 //! v2), the next/previous named layout, `-E` to spread the cells around the
 //! target pane evenly, and `-o` to go back to the layout before the last
-//! select-layout.
-//!
-//! `recalculate_sizes` after a change is not run: a layout string that
-//! resizes the window keeps that size even with a client attached.
+//! select-layout. Every change ends in `recalculate_sizes`
+//! (cmd-select-layout.c:146), so a layout string of another size is fitted
+//! back to an attached client.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -26,6 +25,23 @@ pub fn exec(
     found: Found,
     cycle: Option<bool>,
 ) -> Result<(), CmdError> {
+    let Some(w) = found.window else {
+        return Err(EdgeError::NoCurrentTarget.into());
+    };
+    if select(server, item, args, found, cycle)? {
+        server.recalculate_window(w);
+    }
+    Ok(())
+}
+
+/// The layout change itself; `true` where tmux jumps to `changed:`.
+fn select(
+    server: &mut Server,
+    item: &Item,
+    args: &Args,
+    found: Found,
+    cycle: Option<bool>,
+) -> Result<bool, CmdError> {
     let (Some(w), Some(wp)) = (found.window, found.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
@@ -46,12 +62,12 @@ pub fn exec(
             NamedLayout::previous(window.last_layout)
         };
         apply_named(server, w, which);
-        return Ok(());
+        return Ok(true);
     }
     if args.flag('E') {
         window.layout.spread_out(wp);
         server.model.fix_panes(w);
-        return Ok(());
+        return Ok(true);
     }
     let undo = args.flag('o');
     let name = match args.positional(0) {
@@ -66,11 +82,11 @@ pub fn exec(
         };
         if let Some(which) = named {
             apply_named(server, w, which);
-            return Ok(());
+            return Ok(true);
         }
     }
     let Some(name) = name else {
-        return Ok(());
+        return Ok(false);
     };
     let window = server.model.windows.get_mut(&w).expect("target window");
     let before = window.panes.active;
@@ -86,7 +102,7 @@ pub fn exec(
         server.model.stamp_active(active);
     }
     server.model.fix_panes(w);
-    Ok(())
+    Ok(true)
 }
 
 /// `layout_dump` of the window's layout (`None` where tmux's is NULL).

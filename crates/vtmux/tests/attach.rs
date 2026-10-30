@@ -556,3 +556,49 @@ fn slow_terminal_screen_is_correct_after_the_flood() {
         "vtmux screen differs from reference"
     );
 }
+
+/// cmd-select-layout.c:146: a layout string of another size ends in
+/// `recalculate_sizes`, so an attached window is fitted back to the client
+/// (80x24 less the status line) and the panes' PTYs follow (reviewer-15
+/// attach.py).
+#[test]
+fn select_layout_string_is_fitted_to_the_client() {
+    const V2: &str = r#"{"V":2,"L":{"t":"h","w":100,"h":30,"x":0,"y":0,"c":[{"t":"p","w":50,"h":30,"x":0,"y":0,"i":0},{"t":"p","w":49,"h":30,"x":51,"y":0,"i":1}]}}"#;
+    for bin in bins() {
+        let w = World::new(bin);
+        let a = w.attach_sized(&["new", "-s", "a", "-n", "w", "sh"], 80, 24);
+        a.wait(|a| pane_text(a).contains('$'));
+        assert!(
+            w.cli(&["splitw", "-d", "-h", "-t", "a", "sh"])
+                .status
+                .success()
+        );
+        let size = |f: &str| {
+            String::from_utf8_lossy(&w.cli(&["display", "-p", "-t", "a", f]).stdout)
+                .trim()
+                .to_owned()
+        };
+        a.wait(|_| size("#{window_width}x#{window_height}") == "80x23");
+        let out = w.cli(&["selectl", "-t", "a", V2]);
+        assert!(out.status.success(), "{out:?}");
+        a.wait(|_| size("#{window_width}x#{window_height}") == "80x23");
+        let panes = String::from_utf8_lossy(
+            &w.cli(&["lsp", "-t", "a", "-F", "#{pane_width}x#{pane_height}"])
+                .stdout,
+        )
+        .into_owned();
+        assert_eq!(panes, "40x23\n39x23\n");
+        for (pane, want) in [("a:0.0", "23 40"), ("a:0.1", "23 39")] {
+            assert!(
+                w.cli(&["send-keys", "-t", pane, "stty size", "Enter"])
+                    .status
+                    .success()
+            );
+            a.wait(|_| {
+                String::from_utf8_lossy(&w.cli(&["capture-pane", "-p", "-t", pane]).stdout)
+                    .lines()
+                    .any(|l| l.trim() == want)
+            });
+        }
+    }
+}
