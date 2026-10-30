@@ -7,6 +7,7 @@ pub(super) fn parse(pattern: &str, ignore_case: bool) -> Result<(Expr, usize), E
         at: 0,
         groups: 0,
         closed: Vec::new(),
+        quantifiers: 0,
         ignore_case,
     };
     let expr = p.alt(0)?;
@@ -17,6 +18,7 @@ struct Parser {
     at: usize,
     groups: usize,
     closed: Vec<usize>,
+    quantifiers: usize,
     ignore_case: bool,
 }
 impl Parser {
@@ -57,6 +59,8 @@ impl Parser {
             self.closed.clone_from(&incoming);
         }
         self.closed.extend(completed);
+        self.closed.sort_unstable();
+        self.closed.dedup();
         Ok(if alternatives.len() == 1 {
             alternatives.pop().unwrap()
         } else {
@@ -67,6 +71,9 @@ impl Parser {
         Ok(match self.take().ok_or(Error::Syntax)? {
             '(' => {
                 self.groups += 1;
+                if self.groups > 128 {
+                    return Err(Error::Limit);
+                }
                 let n = self.groups;
                 let expr = self.alt(depth + 1)?;
                 if self.take() != Some(')') {
@@ -111,7 +118,8 @@ impl Parser {
         let mut count = 0;
         while let Some(c @ ('*' | '+' | '?' | '{')) = self.peek() {
             count += 1;
-            if count > 64 {
+            self.quantifiers += 1;
+            if count > 64 || self.quantifiers > 128 {
                 return Err(Error::Limit);
             }
             if matches!(expr, Expr::Anchor(_)) {

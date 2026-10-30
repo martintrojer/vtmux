@@ -24,7 +24,9 @@ def capture(p, t, icase):
     entries = ['None' if m.so < 0 else f'Some({m.so}..{m.eo})' for m in matches]
     return 'Ok(Some(vec![' + ', '.join(entries) + ']))'
 cases = [
-('', ''), ('', 'abc'), ('|(){2}', ''), ('(|())b{0}|', 'ab'),
+('', ''), ('', 'abc'), ('(|x)(.*)', 'xy'), ('(|a)a*', 'aa'),
+('(|[^a]+)\\w+', 'ba'), ('|()', ''), ('(()|a)*', 'a'),
+('(a)|\\1', 'a'), ('(a)|b\\1', 'a'), ('|(){2}', ''), ('(|())b{0}|', 'ab'),
 ('(){1,2}|\\w{1,2}\\1{1,2}', 'abaa'), ('(|(b{0}){0,1}(|){1,2})*', ''), ('a', 'bba'), ('a', 'bbb'), ('a|ab', 'ab'),
 ('(a|ab)', 'ab'), ('ab|a', 'ab'), ('a|aa|aaa', 'aaa'),
 ('(a*)(a*)', 'aaa'), ('(ab|a)(bc|c)?', 'abc'),

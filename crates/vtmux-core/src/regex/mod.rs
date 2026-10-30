@@ -3,6 +3,9 @@
 //! order. Captures keep greedy traversal order when whole-match lengths tie.
 //! `REG_NEWLINE` is off: dot and negated brackets include newlines.
 //! Character properties are glibc's reference UTF-8 locale, not the host locale.
+//! Resource limits return `Error::Limit`: 64 nested groups or chained quantifiers,
+//! 128 total groups/quantifiers, and one million capture-weighted evaluation steps.
+//! Consequently pathological or very large inputs may fail where glibc succeeds.
 mod ctype;
 mod ctype_tables;
 mod parse;
@@ -108,6 +111,23 @@ impl Regex {
 
     pub fn find(&self, text: &str) -> Result<Option<Match>, Error> {
         let text = text.split('\0').next().unwrap_or_default();
+        // Flat literal patterns need no state exploration, even for multi-megabyte text.
+        if !self.ignore_case
+            && let Expr::Seq(parts) = &self.expr
+        {
+            let literal: Option<String> = parts
+                .iter()
+                .map(|p| match p {
+                    Expr::Literal(c) => Some(*c),
+                    _ => None,
+                })
+                .collect();
+            if let Some(literal) = literal {
+                return Ok(text.find(&literal).map(|start| Match {
+                    captures: vec![Some(start..start + literal.len())],
+                }));
+            }
+        }
         let mut budget = 1_000_000usize;
         for start in text
             .char_indices()
@@ -129,6 +149,12 @@ impl Regex {
                                 .iter()
                                 .zip(&b.captures)
                                 .find_map(|(a, b)| match (a, b) {
+                                    (Some(a), Some(b)) if a.is_empty() && !b.is_empty() => {
+                                        Some(false)
+                                    }
+                                    (Some(a), Some(b)) if !a.is_empty() && b.is_empty() => {
+                                        Some(true)
+                                    }
                                     (Some(a), None) if a.is_empty() => Some(true),
                                     (None, Some(b)) if b.is_empty() => Some(false),
                                     (a, b) if a != b => Some(false),
@@ -157,7 +183,7 @@ impl Regex {
         text: &str,
         budget: &mut usize,
     ) -> Result<Vec<State>, Error> {
-        *budget = budget.checked_sub(1).ok_or(Error::Limit)?;
+        *budget = budget.checked_sub(self.groups + 1).ok_or(Error::Limit)?;
         let next = text[s.pos..].chars().next();
         match expr {
             Expr::Empty => Ok(vec![s]),
@@ -246,7 +272,7 @@ impl Regex {
                 let mut seen = std::collections::HashSet::new();
                 let mut out = Vec::new();
                 while let Some((state, count, emit)) = stack.pop() {
-                    *budget = budget.checked_sub(1).ok_or(Error::Limit)?;
+                    *budget = budget.checked_sub(self.groups + 1).ok_or(Error::Limit)?;
                     if emit {
                         if count >= *min {
                             out.push(state);
@@ -263,8 +289,8 @@ impl Regex {
                     let children = self.run(expr, state.clone(), text, budget)?;
                     for next in children.into_iter().rev() {
                         if next.pos == state.pos {
-                            if count < (*min).max(1) {
-                                stack.push((next, (*min).max(1), true));
+                            if next != state || count < *min {
+                                stack.push((next, count.max(*min), false));
                             }
                         } else {
                             stack.push((next, count + 1, false));

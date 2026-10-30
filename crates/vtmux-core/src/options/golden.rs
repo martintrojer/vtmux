@@ -343,11 +343,8 @@ fn options_env_defaults_match_reference() {
     }
 }
 
-/// Options set from a template whose format modifiers vtmux-core does not
-/// evaluate yet (`s/.../.../`, task `fmt_regex`). Each must still differ from
-/// the reference; when one stops differing, take it off this list.
-const PENDING_FORMAT_MODIFIERS: &[&str] =
-    &["@tsesh_key_pick", "@tsesh_key_last", "@tsesh_key_root"];
+/// No pending format modifiers: `s/.../.../` is evaluated by `fmt_regex`.
+const PENDING_FORMAT_MODIFIERS: &[&str] = &[];
 
 /// The owner's two configs (shell commands and `source-file` removed),
 /// applied in order, then every server, session and window option listed.
