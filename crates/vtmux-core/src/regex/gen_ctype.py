@@ -55,7 +55,7 @@ for name in ["alpha", "upper", "lower", "punct", "space", "blank", "cntrl"]:
         print(f"    ({lo:#x}, {hi:#x}),")
     print("];")
     print()
-for name, fn in [("TOUPPER", libc.towupper)]:
+for name, fn in [("TOUPPER", libc.towupper), ("TOLOWER", libc.towlower)]:
     print(f"pub(super) const {name}: &[(u32, u32)] = &[")
     for c in CODES:
         m = fn(c)

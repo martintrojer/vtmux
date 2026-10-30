@@ -9,7 +9,7 @@ mod parse;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use ctype::{Class, equal, upper};
+pub(crate) use ctype::{Class, equal, lower, upper};
 use std::ops::Range;
 
 /// Malformed ERE, excessive nesting, or an exhausted matching work budget.

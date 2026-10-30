@@ -91,6 +91,14 @@ fn mapped(table: &[(u32, u32)], c: char) -> char {
         .unwrap_or(c)
 }
 
+pub(crate) fn lower(c: char) -> char {
+    if c.is_ascii() {
+        c.to_ascii_lowercase()
+    } else {
+        mapped(tables::TOLOWER, c)
+    }
+}
+
 pub(crate) fn upper(c: char) -> char {
     if c.is_ascii() {
         c.to_ascii_uppercase()
