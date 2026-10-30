@@ -1236,3 +1236,45 @@ fn terminal_features_apply_at_attach() {
         }
     }
 }
+
+/// `tty_check_fg`/`tty_check_bg`: a client with fewer than 256 colours gets
+/// `colour_256to16`, aixterm colours only from 16, bold for bright foregrounds
+/// at 8 (reviewer-26 raw.py). The observer's screen is the same under both.
+#[test]
+fn colours_below_256_are_downgraded_like_tmux() {
+    // fg 38;5;200 on default, 38;5;16 on 48;5;200, rgb 1;2;3, aixterm 91 on 101,
+    // 38;5;244 on 47 (grey on white).
+    let pane = r"printf '\033[38;5;200mA\033[0m \033[38;5;16;48;5;200mB\033[0m \033[38;2;1;2;3mC\033[0m \033[91;101mD\033[0m \033[38;5;244;47mE\033[0m'; exec cat";
+    for term in ["xterm", "screen", "xterm-16color", "xterm-88color"] {
+        let mut screens = Vec::new();
+        for bin in bins() {
+            let w = World::new(bin);
+            assert!(
+                w.cli(&[
+                    "new", "-d", "-s", "a", "-x", "40", "-y", "10", "sh", "-c", pane
+                ])
+                .status
+                .success()
+            );
+            let mut a = w.attach_env(&["attach", "-t", "a"], 40, 10, &[("TERM", term)]);
+            a.wait(|a| {
+                vtmux_vt::snapshot(&a.screen())
+                    .cell(8, 0)
+                    .is_some_and(|c| c.text == "E")
+            });
+            let screen = vtmux_vt::snapshot(&a.screen());
+            let row: Vec<_> = (0..9)
+                .map(|x| {
+                    let c = screen.cell(x, 0).unwrap();
+                    (c.text.clone(), c.style.fg, c.style.bg, c.style.bold)
+                })
+                .collect();
+            screens.push(row);
+            a.keys(b"\x02d");
+            a.exited(0);
+        }
+        assert_eq!(screens[0], screens[1], "{term}: vtmux vs reference");
+        // 200 is bright magenta in 16 colours: aixterm or plain, never 38;5;n.
+        assert_ne!(screens[0][0].1, vtmux_vt::Color::Palette(200), "{term}");
+    }
+}

@@ -10,6 +10,7 @@ use std::fmt::Write as _;
 pub mod compose;
 pub mod scene;
 pub mod window;
+use vtmux_core::colour::{self, Colour, tty::Depth};
 use vtmux_core::protocol::Hello;
 use vtmux_core::term_features::{Cap, Term};
 use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
@@ -24,7 +25,8 @@ use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
 #[derive(Clone, Copy, Debug)]
 pub struct Caps {
     pub rgb: bool,
-    pub palette: bool,
+    /// `Term::palette_size`: what `tty_check_fg` believes the terminal has.
+    pub palette_colours: u32,
     pub theme_palette: bool,
     pub sync: bool,
     pub bce: bool,
@@ -55,7 +57,7 @@ impl Caps {
     pub fn from_term(term: &Term) -> Self {
         Self {
             rgb: term.rgb(),
-            palette: term.palette_size() >= 256,
+            palette_colours: term.palette_size(),
             theme_palette: term.colours256(),
             sync: term.has(Cap::Sync),
             bce: term.is_xterm(),
@@ -229,8 +231,16 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
         return;
     }
     out.push_str("\x1b[0m");
+    // tty_check_fg/bg: colours the terminal cannot show are downgraded; an
+    // aixterm foreground on a terminal without them is bold instead.
+    let depth = Depth {
+        rgb: caps.rgb,
+        colours: caps.palette_colours,
+    };
+    let (fg, bright) = colour::tty::check_fg(core_colour(wanted.fg), core_colour(wanted.bg), depth);
+    let bg = colour::tty::check_bg(core_colour(wanted.bg), depth);
     for (on, code) in [
-        (wanted.bold, 1),
+        (wanted.bold || bright, 1),
         (wanted.faint, 2),
         (wanted.italic, 3),
         (wanted.underline != Underline::None, 4),
@@ -243,60 +253,38 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
             let _ = write!(out, "\x1b[{code}m");
         }
     }
-    color(out, wanted.fg, false, caps);
-    color(out, wanted.bg, true, caps);
+    color(out, fg, false);
+    color(out, bg, true);
     *current = wanted;
 }
-fn color(out: &mut String, c: Color, bg: bool, caps: Caps) {
-    let base = if bg { 40 } else { 30 };
+/// A cell colour as `tty_check_fg`/`tty_check_bg` take it: palette 0-7 and
+/// 8-15 are the plain and aixterm colours.
+fn core_colour(c: Color) -> Colour {
     match c {
-        Color::Default => {}
-        Color::Palette(n) if n < 8 => {
-            let _ = write!(out, "\x1b[{}m", base + u16::from(n));
-        }
-        Color::Palette(n) if n < 16 => {
-            let _ = write!(out, "\x1b[{}m", base + 60 + u16::from(n) - 8);
-        }
-        Color::Palette(n) => {
-            let n = if caps.palette { n } else { n % 8 };
-            let _ = write!(out, "\x1b[{};5;{n}m", base + 8);
-        }
-        Color::Rgb(r, g, b) if caps.rgb => {
-            let _ = write!(out, "\x1b[{};2;{r};{g};{b}m", base + 8);
-        }
-        Color::Rgb(r, g, b) => color(out, Color::Palette(rgb_palette(r, g, b)), bg, caps),
+        Color::Default => Colour::Default,
+        Color::Palette(n @ 0..=7) => Colour::Ansi(n),
+        Color::Palette(n @ 8..=15) => Colour::Bright(n - 8),
+        Color::Palette(n) => Colour::Palette(n),
+        Color::Rgb(r, g, b) => Colour::Rgb(r, g, b),
     }
 }
-#[allow(clippy::many_single_char_names)] // RGB components and cube coordinates
-fn rgb_palette(r: u8, g: u8, b: u8) -> u8 {
-    // colour.c colour_find_rgb: closest cube or grey.
-    let cube = |v: u8| {
-        if v < 48 {
-            0
-        } else if v < 114 {
-            1
-        } else {
-            (v - 35) / 40
+/// The SGR parameters of a colour already fitted to the terminal.
+fn color(out: &mut String, c: Colour, bg: bool) {
+    let base = if bg { 40 } else { 30 };
+    match c {
+        Colour::Ansi(n) => {
+            let _ = write!(out, "\x1b[{}m", base + u16::from(n));
         }
-    };
-    let q = [cube(r), cube(g), cube(b)];
-    let levels = [0i32, 95, 135, 175, 215, 255];
-    let dist = |red: i32, green: i32, blue: i32| {
-        (red - i32::from(r)).pow(2) + (green - i32::from(g)).pow(2) + (blue - i32::from(b)).pow(2)
-    };
-    let avg = (i32::from(r) + i32::from(g) + i32::from(b)) / 3;
-    let grey = ((avg - 3) / 10).clamp(0, 23);
-    let v = 8 + 10 * grey;
-    if dist(v, v, v)
-        < dist(
-            levels[q[0] as usize],
-            levels[q[1] as usize],
-            levels[q[2] as usize],
-        )
-    {
-        232 + u8::try_from(grey).unwrap()
-    } else {
-        16 + 36 * q[0] + 6 * q[1] + q[2]
+        Colour::Bright(n) => {
+            let _ = write!(out, "\x1b[{}m", base + 60 + u16::from(n));
+        }
+        Colour::Palette(n) => {
+            let _ = write!(out, "\x1b[{};5;{n}m", base + 8);
+        }
+        Colour::Rgb(r, g, b) => {
+            let _ = write!(out, "\x1b[{};2;{r};{g};{b}m", base + 8);
+        }
+        _ => {}
     }
 }
 
@@ -485,7 +473,7 @@ mod tests {
     fn diff_and_sync_are_one_final_picture() {
         let caps = Caps {
             rgb: false,
-            palette: true,
+            palette_colours: 256,
             theme_palette: false,
             sync: true,
             bce: true,
@@ -514,7 +502,7 @@ mod tests {
     fn blocks_at_start_and_redraws_fully_under_stop() {
         let caps = Caps {
             rgb: false,
-            palette: true,
+            palette_colours: 256,
             theme_palette: false,
             sync: false,
             bce: true,
@@ -541,7 +529,7 @@ mod tests {
     fn status_row(cols: u16, windows: &[(&str, bool)], right: &str) -> (String, Snapshot) {
         let caps = Caps {
             rgb: false,
-            palette: true,
+            palette_colours: 256,
             theme_palette: false,
             sync: false,
             bce: true,

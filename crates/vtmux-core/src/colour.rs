@@ -13,6 +13,8 @@
 
 use std::fmt;
 
+pub mod tty;
+
 /// A colour a style can name.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Colour {
