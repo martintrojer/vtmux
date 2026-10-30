@@ -386,10 +386,7 @@ impl Server {
             cs.notify(format!("%session-changed {s} {name}").into_bytes());
         }
         // server_client_set_session: session_update_activity (server-client.c:468).
-        let stamp = self.model.touch();
-        if let Some(session) = self.model.sessions.get_mut(&s) {
-            session.activity = stamp;
-        }
+        self.model.touch_session(s);
         self.control_flush(id);
     }
 

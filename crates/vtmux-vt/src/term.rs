@@ -354,6 +354,12 @@ impl PaneTerm {
         self.term.mode(Mode::DECCKM).unwrap_or(false)
     }
 
+    /// `?1004h`: the pane asked for focus reports (`MODE_FOCUSON`).
+    #[must_use]
+    pub fn focus_events(&self) -> bool {
+        self.term.mode(Mode::FOCUS_EVENT).unwrap_or(false)
+    }
+
     /// Bracketed paste markers are accepted by the pane (input-keys.c).
     #[must_use]
     pub fn bracketed_paste(&self) -> bool {

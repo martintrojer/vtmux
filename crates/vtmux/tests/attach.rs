@@ -953,3 +953,188 @@ fn list_clients_default_template_and_client_variables() {
     }
     assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+const CAT: [&str; 3] = ["sh", "-c", "stty raw -echo; exec cat -v"];
+
+fn kt(w: &World) -> String {
+    String::from_utf8_lossy(
+        &w.cli(&[
+            "lsc",
+            "-F",
+            "#{client_key_table}|#{client_prefix}|#{session_name}",
+        ])
+        .stdout,
+    )
+    .trim()
+    .to_owned()
+}
+
+/// cmd-attach-session.c:162, cmd-new-session.c:344 and options.c:1399: a
+/// client attaching, or the `key-table` option changing, puts every client
+/// in the session's `key-table`; the first unbound key then goes to the pane
+/// and `client_prefix` agrees with the table.
+#[test]
+fn key_table_option_resets_the_client_table() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let new = |name: &str| {
+            let mut v = vec!["new", "-d", "-s", name, "-n", "w"];
+            v.extend(CAT);
+            assert!(w.cli(&v).status.success());
+        };
+        new("a");
+        assert!(
+            w.cli(&["set", "-g", "key-table", "custom"])
+                .status
+                .success()
+        );
+        assert!(
+            w.cli(&["bind", "-T", "custom", "x", "rename-window", "xx"])
+                .status
+                .success()
+        );
+        // attach-session: the table comes from the option.
+        let mut at = w.attach(&["attach", "-t", "a"]);
+        at.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert_eq!(kt(&w), "custom|0|a");
+        // An unbound key is passed to the pane, not swallowed.
+        at.keys(b"q");
+        at.wait(|_| pane_line(&w) == "q");
+        // The option changing moves the attached client at once.
+        assert!(w.cli(&["set", "-g", "key-table", "other"]).status.success());
+        assert_eq!(kt(&w), "other|0|a");
+        assert!(w.cli(&["set", "-gu", "key-table"]).status.success());
+        assert_eq!(kt(&w), "root|0|a");
+        assert!(
+            w.cli(&["set", "-g", "key-table", "custom"])
+                .status
+                .success()
+        );
+        assert_eq!(kt(&w), "custom|0|a");
+        drop(at);
+        // new-session with a terminal: the client starts in `custom`.
+        let mut v = vec!["new", "-s", "b", "-n", "w"];
+        v.extend(CAT);
+        let mut at = w.attach(&v);
+        at.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert_eq!(kt(&w), "custom|0|b");
+        at.keys(b"x");
+        at.wait(|_| display_t(&w, "b", "#{window_name}") == "xx");
+        assert_eq!(kt(&w), "custom|0|b");
+    }
+}
+
+fn display_t(w: &World, t: &str, f: &str) -> String {
+    String::from_utf8_lossy(&w.cli(&["display", "-p", "-t", t, f]).stdout)
+        .trim()
+        .to_owned()
+}
+
+/// server-client.c:1465-1469 and 1523: a focus report from the terminal
+/// counts as client activity (and session activity) and is forwarded to the
+/// active pane when the program there turned on focus reporting (?1004h)
+/// (tty-keys.c:1030-1039, window.c `window_pane_update_focus`).
+#[test]
+fn focus_events_bump_activity_and_reach_the_pane() {
+    for bin in bins() {
+        let mut w = World::new(bin);
+        w.term = "screen";
+        let mut at = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "stty raw -echo; printf '\\033[?1004h'; exec cat -v",
+        ]);
+        at.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert!(w.cli(&["set", "-g", "focus-events", "on"]).status.success());
+        let activity = |w: &World| -> (i64, i64, String) {
+            let out = w.cli(&[
+                "lsc",
+                "-F",
+                "#{client_activity} #{session_activity} #{client_flags}",
+            ]);
+            let out = String::from_utf8_lossy(&out.stdout).into_owned();
+            let mut p = out.trim().splitn(3, ' ');
+            (
+                p.next().unwrap().parse().unwrap(),
+                p.next().unwrap().parse().unwrap(),
+                p.next().unwrap().to_owned(),
+            )
+        };
+        let (c0, s0, flags) = activity(&w);
+        assert_eq!(flags, "attached,focused,UTF-8");
+        thread::sleep(Duration::from_millis(1100));
+        at.keys(b"\x1b[O");
+        at.wait(|_| pane_line(&w) == "^[[O");
+        let (c1, s1, flags) = activity(&w);
+        assert!(c1 > c0 && s1 > s0, "{c0} {c1} {s0} {s1}");
+        assert_eq!(flags, "attached,UTF-8");
+        thread::sleep(Duration::from_millis(1100));
+        at.keys(b"\x1b[I");
+        at.wait(|_| pane_line(&w) == "^[[O^[[I");
+        let (c2, s2, flags) = activity(&w);
+        assert!(c2 > c1 && s2 > s1, "{c1} {c2} {s1} {s2}");
+        assert_eq!(flags, "attached,focused,UTF-8");
+    }
+}
+
+/// `#{session_attached}`, `#{session_attached_list}`, list-sessions'
+/// `(attached)` and `#{session_activity}` (format.c `format_cb_session_*`,
+/// `session_update_activity`): they follow the client when it switches
+/// session.
+#[test]
+fn session_attached_and_activity_variables() {
+    const F: &str = "#{session_name}|#{session_attached}|#{session_attached_list}|\
+         #{e|-:#{session_activity},#{session_created}}";
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let mut w = World::new(bin);
+        w.term = "screen";
+        let mut v = vec!["new", "-d", "-s", "s1", "-n", "w"];
+        v.extend(CAT);
+        assert!(w.cli(&v).status.success());
+        v[3] = "s2";
+        assert!(w.cli(&v).status.success());
+        thread::sleep(Duration::from_millis(1100));
+        assert!(
+            w.cli(&["bind", "-n", "M-s", "switch-client", "-t", "s2"])
+                .status
+                .success()
+        );
+        let mut at = w.attach(&["attach", "-t", "s1"]);
+        at.wait(|a| a.text().contains("\x1b[?1049h"));
+        let tty = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_tty}"]).stdout)
+            .trim()
+            .to_owned();
+        let snapshot = |w: &World| {
+            let list = String::from_utf8_lossy(&w.cli(&["ls"]).stdout).into_owned();
+            // Drop the creation time: `(created ...)`.
+            let list: String = list
+                .lines()
+                .flat_map(|l| {
+                    let a = l.find("(created ").unwrap();
+                    let b = a + l[a..].find(')').unwrap() + 1;
+                    [&l[..a], &l[b..], "\n"]
+                })
+                .collect();
+            let formatted = String::from_utf8_lossy(&w.cli(&["ls", "-F", F]).stdout).into_owned();
+            format!("{list}{formatted}").replace(&tty, "TTY")
+        };
+        let mut out = snapshot(&w);
+        at.keys(b"\x1bs");
+        at.wait(|_| kt(&w).ends_with("|s2"));
+        out.push_str(&snapshot(&w));
+        outputs.push(out);
+    }
+    assert!(
+        outputs[0].contains("s1: 1 windows  (attached)"),
+        "{}",
+        outputs[0]
+    );
+    assert!(outputs[0].contains("s1|1|TTY|1\n"), "{}", outputs[0]);
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+}

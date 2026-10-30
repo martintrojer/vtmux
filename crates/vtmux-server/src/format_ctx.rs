@@ -59,6 +59,8 @@ pub struct ClientView {
     /// `c->ttyname`; `None` without a tty.
     pub tty: Option<String>,
     pub control: bool,
+    /// `CLIENT_FOCUSED`: the terminal reported focus (tty-keys.c).
+    pub focused: bool,
     pub utf8: bool,
     pub pid: u32,
     /// The key table the client is in, and its default table.
@@ -73,9 +75,12 @@ pub struct ClientView {
 
 impl ClientView {
     /// `server_client_get_flags` (server-client.c:3163-3199) for the flags
-    /// vtmux clients have: every listed client is attached and focused.
+    /// vtmux clients have: every listed client is attached.
     fn flags(&self) -> String {
-        let mut flags = vec!["attached", "focused"];
+        let mut flags = vec!["attached"];
+        if self.focused {
+            flags.push("focused");
+        }
         if self.control {
             flags.push("control-mode");
         }
@@ -213,6 +218,10 @@ impl<'a> Ctx<'a> {
         })
     }
 
+    fn attached_to(&self, s: SessionId) -> impl Iterator<Item = &ClientView> {
+        self.clients.iter().filter(move |c| c.session == Some(s))
+    }
+
     fn session_value(&self, name: &str) -> Option<String> {
         let s = self.session()?;
         Some(match name {
@@ -220,8 +229,18 @@ impl<'a> Ctx<'a> {
             "session_id" => s.id.to_string(),
             "session_windows" => s.windows.len().to_string(),
             "session_created" => s.created.to_string(),
-            "session_attached" | "session_grouped" => "0".to_owned(),
-            "session_group" | "session_attached_list" => String::new(),
+            "session_activity" => s.activity_secs.to_string(),
+            "session_grouped" => "0".to_owned(),
+            "session_group" => String::new(),
+            // s->attached: the clients attached to it (format.c
+            // format_cb_session_attached, recalculate_sizes).
+            "session_attached" => self.attached_to(s.id).count().to_string(),
+            // format_cb_session_attached_list: their names, in client order.
+            "session_attached_list" => self
+                .attached_to(s.id)
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
             "session_path" => s.cwd.to_string_lossy().into_owned(),
             _ => return None,
         })
@@ -418,7 +437,8 @@ impl FormatContext for Ctx<'_> {
 
     fn time(&self, name: &str) -> Option<i64> {
         match name {
-            "session_created" | "session_activity" => self.session().map(|s| s.created),
+            "session_created" => self.session().map(|s| s.created),
+            "session_activity" => self.session().map(|s| s.activity_secs),
             "client_activity" => self.client.as_ref().map(|c| c.activity_secs),
             "client_created" => self.client.as_ref().map(|c| c.created_secs),
             _ => None,

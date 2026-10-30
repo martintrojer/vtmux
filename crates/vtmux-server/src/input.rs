@@ -9,6 +9,8 @@ pub enum Event {
     Key(Key),
     Paste(bool),
     Sync(bool),
+    /// `KEYC_FOCUS_IN` / `KEYC_FOCUS_OUT` (`CSI I` / `CSI O`).
+    Focus(bool),
     Ignore,
 }
 /// `escape-time` default (options-table.c).
@@ -171,6 +173,9 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
                 return Some((Event::Key(k), end + 1));
             }
             if matches!(final_byte, b'I' | b'O') {
+                if bytes[1] == b'[' && body.is_empty() {
+                    return Some((Event::Focus(final_byte == b'I'), end + 1));
+                }
                 return Some((Event::Ignore, end + 1));
             }
         } else if !expired {
@@ -264,6 +269,16 @@ mod tests {
         assert_eq!(
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]
+        );
+    }
+
+    #[test]
+    fn focus_reports_are_events() {
+        let mut d = Decoder::default();
+        d.feed(b"\x1b[I\x1b[O");
+        assert_eq!(
+            d.drain(Instant::now()),
+            vec![Event::Focus(true), Event::Focus(false)]
         );
     }
 
