@@ -1,9 +1,10 @@
 use super::*;
+type Captures = Vec<Option<Range<usize>>>;
 type Row = (
     &'static str,
     &'static str,
     bool,
-    Result<Option<Vec<Option<Range<usize>>>>, Error>,
+    Result<Option<Captures>, Error>,
 );
 include!("golden.in");
 
@@ -81,5 +82,77 @@ fn regex_random_patterns_do_not_panic() {
             let _ = r.find("aaabé\nbbb");
         }
         seed = seed.wrapping_add(1);
+    }
+}
+
+/// Review repros (`high_regex_work_budget_silently_turns`); expected spans from
+/// glibc 2.43 `regexec` in C.UTF-8 (python3 ctypes, as `tests/regex_cases.sh`).
+#[test]
+fn regex_long_texts_match_like_glibc() {
+    let ones = "1".repeat(710) + " 5%";
+    let cases: [(&str, String, Option<std::ops::Range<usize>>); 7] = [
+        ("[0-9]+%", ones.clone(), Some(711..713)),
+        ("[a-z]+:", "a".repeat(710) + " b:", Some(711..713)),
+        ("\\w+@", "a".repeat(710) + " b@", Some(711..713)),
+        ("[^ ]+ x", "y".repeat(1000) + " x", Some(0..1002)),
+        ("(a|b)*c", "ab".repeat(168) + " c", Some(337..338)),
+        (".*z|q", "y".repeat(1000) + "q", Some(1000..1001)),
+        ("[0-9]+%", "1".repeat(710), None),
+    ];
+    for (pattern, text, expected) in cases {
+        let found = Regex::new(pattern, false).unwrap().find(&text).unwrap();
+        assert_eq!(
+            found.map(|m| m.captures[0].clone().unwrap()),
+            expected,
+            "{pattern}"
+        );
+    }
+}
+
+/// 100k-character texts: each search must finish in well under a second
+/// even in a debug build (no work cap applies to these patterns).
+#[test]
+fn regex_without_backreferences_is_linear() {
+    let digits = "1".repeat(100_000);
+    let pairs = "x".repeat(50_000) + "," + &"y".repeat(50_000);
+    let cases: [(&str, String, Option<Captures>); 5] = [
+        (
+            "[0-9]+%",
+            digits.clone() + " 5%",
+            Some(vec![Some(100_001..100_003)]),
+        ),
+        ("[0-9]+%", digits, None),
+        (
+            "(a|b)*c",
+            "ab".repeat(50_000) + " c",
+            Some(vec![Some(100_001..100_002), None]),
+        ),
+        (
+            "(.*),(.*)",
+            pairs,
+            Some(vec![
+                Some(0..100_001),
+                Some(0..50_000),
+                Some(50_001..100_001),
+            ]),
+        ),
+        ("(x+x+)+y", "x".repeat(100_000), None),
+    ];
+    for (pattern, text, expected) in cases {
+        let regex = Regex::new(pattern, false).unwrap();
+        let started = std::time::Instant::now();
+        let found = regex.find(&text).unwrap().map(|m| m.captures);
+        let elapsed = started.elapsed();
+        assert_eq!(found, expected, "{pattern}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(1),
+            "{pattern}: {elapsed:?}"
+        );
+        let started = std::time::Instant::now();
+        assert_eq!(regex.is_match(&text), Ok(expected.is_some()), "{pattern}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "{pattern}"
+        );
     }
 }

@@ -3,17 +3,28 @@
 //! order. Captures keep greedy traversal order when whole-match lengths tie.
 //! `REG_NEWLINE` is off: dot and negated brackets include newlines.
 //! Character properties are glibc's reference UTF-8 locale, not the host locale.
+//! Patterns without backreferences run on a linear-time NFA (`nfa.rs`) with no
+//! work cap. Backreference patterns backtrack, as glibc does, with a work budget
+//! per start position.
 //! Resource limits return `Error::Limit`: 64 nested groups or chained quantifiers,
-//! 128 total groups/quantifiers, and one million capture-weighted evaluation steps.
-//! Consequently pathological or very large inputs may fail where glibc succeeds.
+//! 128 total groups/quantifiers, about a million compiled NFA nodes after `{m,n}`
+//! expansion, and, for backreference patterns only, one million capture-weighted
+//! steps per start position and sixteen million per search
+//! (compat/DIVERGENCES.md D-001).
 mod ctype;
 mod ctype_tables;
+mod nfa;
 mod parse;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use ctype::{Class, equal, lower, upper};
 use std::ops::Range;
+
+/// Capture-weighted backtracking steps per start position (backreferences only).
+const BACKREF_START_BUDGET: usize = 1_000_000;
+/// Steps for one whole backreference search, about a second of work.
+const BACKREF_SEARCH_BUDGET: usize = 16_000_000;
 
 /// Malformed ERE, excessive nesting, or an exhausted matching work budget.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +97,8 @@ pub struct Regex {
     expr: Expr,
     groups: usize,
     ignore_case: bool,
+    /// `None` for backreference patterns, which use the backtracker.
+    nfa: Option<nfa::Nfa>,
 }
 /// Byte ranges into the original input; capture 0 is the whole match.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,11 +115,26 @@ impl Regex {
     pub fn new(pattern: &str, ignore_case: bool) -> Result<Self, Error> {
         let (expr, groups) =
             parse::parse(pattern.split('\0').next().unwrap_or_default(), ignore_case)?;
+        let nfa = if has_backref(&expr) {
+            None
+        } else {
+            Some(nfa::Nfa::compile(&expr, groups, ignore_case)?)
+        };
         Ok(Self {
             expr,
             groups,
             ignore_case,
+            nfa,
         })
+    }
+
+    /// `regexec` with `REG_NOSUB`: whether any match exists.
+    pub fn is_match(&self, text: &str) -> Result<bool, Error> {
+        let text = text.split('\0').next().unwrap_or_default();
+        match &self.nfa {
+            Some(nfa) => Ok(nfa.span(text).is_some()),
+            None => self.find(text).map(|m| m.is_some()),
+        }
     }
 
     pub fn find(&self, text: &str) -> Result<Option<Match>, Error> {
@@ -128,17 +156,28 @@ impl Regex {
                 }));
             }
         }
-        let mut budget = 1_000_000usize;
+        if let Some(nfa) = &self.nfa {
+            return Ok(nfa.span(text).and_then(|(start, end)| {
+                nfa.captures(text, start, end)
+                    .map(|captures| Match { captures })
+            }));
+        }
+        // Backreference patterns backtrack, as glibc does: each start position
+        // gets its own budget, and the whole search a ceiling on wall time.
+        let mut total = BACKREF_SEARCH_BUDGET;
         for start in text
             .char_indices()
             .map(|(i, _)| i)
             .chain(std::iter::once(text.len()))
         {
+            let mut budget = BACKREF_START_BUDGET.min(total);
             let state = State {
                 pos: start,
                 captures: vec![None; self.groups + 1],
             };
+            let before = budget;
             let states = self.run(&self.expr, state, text, &mut budget)?;
+            total -= before - budget;
             // max_by_key would choose the last tied path; preserve the first greedy path.
             let mut best: Option<State> = None;
             for s in states {
@@ -222,6 +261,8 @@ impl Regex {
                 let Some(r) = &s.captures[*n] else {
                     return Ok(vec![]);
                 };
+                // The comparison is work too: charge its length.
+                *budget = budget.checked_sub(r.len()).ok_or(Error::Limit)?;
                 let mut at = s.pos;
                 for c in text[r.clone()].chars() {
                     let Some(n) = text[at..].chars().next() else {
@@ -309,4 +350,13 @@ fn unique(states: Vec<State>) -> Vec<State> {
         .into_iter()
         .filter(|s| seen.insert(s.clone()))
         .collect()
+}
+
+fn has_backref(expr: &Expr) -> bool {
+    match expr {
+        Expr::Backref(_) => true,
+        Expr::Seq(parts) | Expr::Alt(parts) => parts.iter().any(has_backref),
+        Expr::Group(_, e) | Expr::Repeat { expr: e, .. } => has_backref(e),
+        _ => false,
+    }
 }
