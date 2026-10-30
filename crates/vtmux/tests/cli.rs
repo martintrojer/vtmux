@@ -1535,3 +1535,406 @@ fn windows_spawn_and_names() {
         runs
     });
 }
+
+/// Runs each argv in order (all through `World::run`).
+fn steps(w: &World, steps: &[&[&str]]) -> Vec<Run> {
+    steps.iter().map(|a| w.run(a)).collect()
+}
+
+/// select-layout, next-layout, previous-layout (cmd-select-layout.c:71-154):
+/// named layouts and their prefixes, the next/previous cycle from
+/// `w->lastlayout`, `-o` undo (twice is a toggle), no name re-applying the
+/// last named layout, `-E`, v2 strings that resize the window and set the
+/// active and last panes, a v1 string from a control client round-tripped
+/// back through select-layout, and the parse errors as `cause: string`
+/// (layout-custom.c, json.c).
+#[test]
+fn layouts_select_and_strings() {
+    compare("layouts_select_and_strings", |w| {
+        let layout = &[
+            "display",
+            "-p",
+            "#{window_width}x#{window_height} #{window_layout}",
+        ][..];
+        let lsp = &[
+            "lsp",
+            "-F",
+            "#{pane_id} #{pane_width}x#{pane_height} #{pane_left},#{pane_top} #{pane_active}#{pane_last}",
+        ][..];
+        let v2 = r#"{"V":2,"L":{"t":"h","w":100,"h":30,"x":0,"y":0,"c":[{"t":"p","w":50,"h":30,"x":0,"y":0,"i":1},{"t":"v","w":49,"h":30,"x":51,"y":0,"c":[{"t":"p","w":49,"h":15,"x":51,"y":0,"a":true,"i":0},{"t":"p","w":49,"h":14,"x":51,"y":16,"l":0,"i":2}]}]}}"#;
+        let v1 = "55bb,80x24,0,0{56x24,0,0,0,23x24,57,0[23x12,57,0,1,23x11,57,13,2]}";
+        let v1_bad = "55bb,80x24,0,0{56x24,0,0,0,23x24,57,0[23x12,57,0,1,23x11,57,13,3]}";
+        let mut runs = steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+                ],
+                &["selectl", "bogus"],
+                &["selectl", r#"{"V":3}"#],
+                &["selectl", "tiled"],
+                &["splitw", "-d", "cat"],
+                &["splitw", "-d", "cat"],
+                &["selectl", "even-horizontal"],
+                layout,
+                &["selectl", "-o"],
+                layout,
+                &["selectl", "-o"],
+                layout,
+                &["selectl"],
+                &["nextl"],
+                layout,
+                &["prevl"],
+                &["prevl"],
+                layout,
+                &["selectl", "-n"],
+                &["selectl", "-p"],
+                &["selectl", "-E"],
+                layout,
+                &["selectl", "even"],
+                &["selectl", "main-h"],
+                &["selectl", "main-vertical-m"],
+                layout,
+                &["selectl", "-t", "%2", "-E"],
+                layout,
+                &["selectl", v2],
+                layout,
+                lsp,
+                &["selectl", v1],
+                layout,
+                lsp,
+                &["selectl", v1_bad],
+                &["selectl", "bad,80x24,0,0"],
+                &[
+                    "selectl",
+                    r#"{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0}}"#,
+                ],
+                &["selectl", r#"{"V":2"#],
+                &[
+                    "selectl",
+                    r#"{"V":2,"L":{"t":"q","w":80,"h":24,"x":0,"y":0}}"#,
+                ],
+                &["selectl", "-t", "%5", "tiled"],
+                &["selectl", "-t", "a:9", "tiled"],
+                &["nextl", "-t", "a:9"],
+                &["selectl", "-o", "x"],
+                &["resizep", "-Z"],
+                &["selectl", "tiled"],
+                &["display", "-p", "#{window_zoomed_flag} #{window_layout}"],
+                &["killp", "-a"],
+                &["selectl", "-E"],
+                &["nextl"],
+                layout,
+            ],
+        );
+        // The full layout as a v1 string, as a control client sees it, fed
+        // back through select-layout after a change.
+        runs.extend(steps(
+            w,
+            &[
+                &["splitw", "-h", "-d", "cat"],
+                &["splitw", "-v", "-d", "-t", "%2", "cat"],
+                &["selectl", "-t", "a", "main-horizontal"],
+            ],
+        ));
+        let current = w.run(&["display", "-p", "#{window_layout}"]).stdout;
+        runs.push(w.run(&["selectl", "even-vertical"]));
+        runs.push(w.run(&["selectl", current.trim_end()]));
+        runs.push(w.run(layout));
+        runs.push(w.run(&["kill-server"]));
+        runs
+    });
+}
+
+/// swap-pane (cmd-swap-pane.c:57-210): -D/-U with the tiled neighbour
+/// (wrapping), a pane with itself, -s/-t in one window, -d keeping the
+/// active pane, across windows of two sessions (cells, sizes, active and
+/// last panes), and -Z keeping a zoomed window zoomed.
+#[test]
+fn panes_swap() {
+    compare("panes_swap", |w| {
+        let lsp = &[
+            "lsp",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}",
+        ][..];
+        steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+                ],
+                &[
+                    "new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat",
+                ],
+                &["swapp", "-t", "a"],
+                &["swapp", "-t", "a", "-D"],
+                &["splitw", "-d", "-t", "a", "cat"],
+                &["splitw", "-d", "-t", "a", "-h", "cat"],
+                &["swapp", "-s", "%0", "-t", "%0"],
+                &["swapp", "-t", "a", "-D"],
+                lsp,
+                &["swapp", "-t", "a", "-U"],
+                lsp,
+                &["swapp", "-s", "%0", "-t", "%3"],
+                lsp,
+                &["swapp", "-d", "-s", "%2", "-t", "%3"],
+                lsp,
+                &["splitw", "-t", "b", "cat"],
+                &["splitw", "-d", "-t", "b", "-h", "cat"],
+                &["swapp", "-s", "a:0.1", "-t", "b:0.0"],
+                lsp,
+                &["display", "-p", "-t", "a", "#{window_layout}"],
+                &["display", "-p", "-t", "b", "#{window_layout}"],
+                &["swapp", "-d", "-s", "a:0.0", "-t", "b:0.2"],
+                lsp,
+                &["resizep", "-Z", "-t", "b:0.1"],
+                &["swapp", "-Z", "-t", "b:0.1", "-D"],
+                &[
+                    "display",
+                    "-p",
+                    "-t",
+                    "b",
+                    "#{window_zoomed_flag} #{pane_id}",
+                ],
+                &["swapp", "-t", "b:0.0", "-U"],
+                &[
+                    "display",
+                    "-p",
+                    "-t",
+                    "b",
+                    "#{window_zoomed_flag} #{pane_id}",
+                ],
+                &["resizep", "-Z", "-t", "b:0.0"],
+                &["swapp", "-Z", "-t", "b:0.0", "-s", "a:0.0"],
+                &[
+                    "display",
+                    "-p",
+                    "-t",
+                    "b",
+                    "#{window_zoomed_flag} #{pane_id}",
+                ],
+                lsp,
+                &["swapp", "-s", "%9"],
+                &["swapp", "-t", "%9"],
+                &["swapp", "-s", "c:0"],
+                &["kill-server"],
+            ],
+        )
+    });
+}
+
+/// break-pane (cmd-break-pane.c:89-209) and join-pane/move-pane
+/// (cmd-join-pane.c:420-539): a pane out to a new window (default name,
+/// automatic-rename kept; -n turns it off), -d, -a/-b shuffling, -P/-F, a
+/// one-pane window relinked into another session, the `index in use` and
+/// `same index` errors, join and move across windows and sessions with
+/// -h -b -f -d -l -p, an emptied window or session going away, and the
+/// `source and target panes must be different` and geometry errors.
+#[test]
+#[allow(clippy::too_many_lines)] // one step list
+fn panes_break_join() {
+    compare("panes_break_join", |w| {
+        let lsw = &[
+            "lsw",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index} #{window_id} #{window_name} [#{window_flags}] #{window_panes} #{automatic-rename}",
+        ][..];
+        let lsp = &[
+            "lsp",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}",
+        ][..];
+        let here = &[
+            "display",
+            "-p",
+            "#{session_name}:#{window_index}.#{pane_index} #{pane_id}",
+        ][..];
+        steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+                ],
+                &[
+                    "new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat",
+                ],
+                &["splitw", "-t", "a", "-d", "cat"],
+                &["splitw", "-t", "a", "-d", "cat"],
+                &["breakp", "-t", "a:0", "-s", "a:0.1"],
+                &["breakp", "-s", "a:0.1"],
+                lsw,
+                here,
+                &[
+                    "breakp", "-d", "-s", "a:0.1", "-t", "a:5", "-n", "five", "-P",
+                ],
+                &[
+                    "breakp",
+                    "-s",
+                    "a:5",
+                    "-t",
+                    "a:7",
+                    "-P",
+                    "-F",
+                    "#{window_id} #{pane_id} #{window_index}",
+                ],
+                lsw,
+                &["breakp", "-s", "a:7", "-t", "b", "-n", "moved"],
+                &["breakp", "-s", "a:0", "-t", "b:1"],
+                &["breakp", "-s", "b:1", "-t", "b:1"],
+                &["breakp", "-n", "a:b", "-s", "a:1"],
+                &["breakp", "-s", "b:1", "-t", "a:", "-n", "back"],
+                lsw,
+                &["neww", "-d", "-t", "a:3", "-n", "three", "cat"],
+                &["splitw", "-t", "a:0", "-d", "cat"],
+                &["splitw", "-t", "a:0", "-d", "cat"],
+                &["breakp", "-s", "a:0.1", "-t", "a:3", "-a", "-n", "after"],
+                &[
+                    "breakp", "-s", "a:0.1", "-t", "a:3", "-b", "-d", "-n", "before",
+                ],
+                lsw,
+                &["breakp", "-s", "a:3", "-t", "b:4", "-n", "single", "-P"],
+                lsw,
+                here,
+                &["joinp"],
+                &["joinp", "-s", "a:0", "-t", "a:0"],
+                &["joinp", "-s", "a:4", "-t", "a:0"],
+                lsw,
+                lsp,
+                here,
+                &[
+                    "joinp", "-h", "-b", "-d", "-l", "10", "-s", "b:0", "-t", "a:0.0",
+                ],
+                lsp,
+                &["movep", "-f", "-s", "a:0.0", "-t", "a:0.2"],
+                lsp,
+                &["movep", "-l", "abc", "-s", "a:0.0", "-t", "a:0.1"],
+                &["joinp", "-p", "200", "-s", "a:0.0", "-t", "a:0.1"],
+                &["movep", "-l", "200", "-s", "a:0.0", "-t", "a:0.1"],
+                &["movep", "-b", "-f", "-h", "-s", "a:0.2", "-t", "a:0.0"],
+                &[
+                    "joinp", "-v", "-p", "25", "-d", "-s", "a:0.0", "-t", "a:0.2",
+                ],
+                &["display", "-p", "-t", "a:0", "#{window_layout}"],
+                lsp,
+                &["joinp", "-t", "a:0.1", "-s", "%99"],
+                &["movep", "-X", "3", "-t", "a:0.0"],
+                &["movep", "-M"],
+                &["resizep", "-Z", "-t", "a:0.0"],
+                &["joinp", "-d", "-s", "b:4", "-t", "a:0.1"],
+                &[
+                    "display",
+                    "-p",
+                    "-t",
+                    "a:0",
+                    "#{window_zoomed_flag} #{window_panes}",
+                ],
+                lsw,
+                &["ls", "-F", "#{session_name} #{session_windows}"],
+                &["kill-server"],
+            ],
+        )
+    });
+}
+
+/// respawn-pane (cmd-respawn-pane.c:46-100, spawn.c:312-345): a live pane
+/// without -k is an error; -k keeps the pane ID, place, title and history,
+/// takes a new command, -c and -e; no command reuses the last one; the old
+/// process's exit leaves the respawned pane alone; the screen is reset
+/// (alternate screen off, cursor home).
+#[test]
+fn panes_respawn() {
+    compare("panes_respawn", |w| {
+        let mut runs = vec![w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "-x",
+            "60",
+            "-y",
+            "10",
+            "seq 1 12; printf '\\033]2;mytitle\\033\\\\'; exec cat",
+        ])];
+        w.wait_for_text("a:0", "12");
+        runs.extend(steps(
+            w,
+            &[
+                &["display", "-p", "#{history_size} [#{pane_title}]"],
+                &["respawnp"],
+                &["respawnp", "-t", "a:0.0"],
+                &["respawnp", "-E", "-t", "a:0.0"],
+                &["respawnp", "-k", "-t", "%77"],
+                &["respawnp", "-k", "printf X; exec cat"],
+            ],
+        ));
+        w.wait_for_text("a:0", "X");
+        runs.extend(steps(
+            w,
+            &[
+                &["display", "-p", "#{pane_id} #{history_size} [#{pane_title}] #{cursor_x},#{cursor_y} #{pane_start_command}"],
+                &["capturep", "-p"],
+                &["capturep", "-p", "-S", "-", "-E", "-1"],
+                &["respawnp", "-k", "printf '\\033[?1049hA'; exec cat"],
+            ],
+        ));
+        w.wait_alternate("a:0");
+        runs.push(w.run(&["respawnp", "-k", "printf B; exec cat"]));
+        w.wait_for_text("a:0", "B");
+        runs.extend(steps(
+            w,
+            &[
+                &["display", "-p", "#{alternate_on} #{pane_id}"],
+                &["splitw", "-d", "-t", "a:0", "cat"],
+            ],
+        ));
+        std::fs::create_dir_all(w.dir().join("sub")).expect("mkdir");
+        let sub = w.dir().join("sub");
+        let sub = sub.to_str().expect("utf-8");
+        runs.push(w.run(&[
+            "respawnp",
+            "-k",
+            "-c",
+            sub,
+            "-e",
+            "FOO=bar",
+            "-t",
+            "a:0.1",
+            "printf '%s:' \"$FOO\"; pwd; exec cat",
+        ]));
+        w.wait_for_text("a:0.1", "bar:");
+        runs.push(w.run(&["capturep", "-p", "-t", "a:0.1", "-E", "0"]));
+        // No -e this time; -c sticks (the pane's directory).
+        runs.push(w.run(&["respawnp", "-k", "-t", "a:0.1"]));
+        w.wait_for_text("a:0.1", ":TMP/sub");
+        runs.extend(steps(
+            w,
+            &[
+                &["capturep", "-p", "-t", "a:0.1", "-E", "0"],
+                &[
+                    "lsp",
+                    "-F",
+                    "#{pane_index} #{pane_id} #{pane_dead} #{pane_start_command}",
+                ],
+                // A pane respawned with a command that exits goes away.
+                &["respawnp", "-k", "-t", "a:0.1", "exit 0"],
+            ],
+        ));
+        let start = Instant::now();
+        while w.run(&["display", "-p", "#{window_panes}"]).stdout != "1\n"
+            && start.elapsed() < Duration::from_secs(5)
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        runs.extend(steps(
+            w,
+            &[&["lsp", "-F", "#{pane_index} #{pane_id}"], &["kill-server"]],
+        ));
+        runs
+    });
+}
