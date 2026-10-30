@@ -359,3 +359,52 @@ fn uid() -> String {
     let out = Command::new("id").arg("-u").output().expect("id -u");
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
+
+/// Config files: `~user` resolves through the passwd database (NSS:
+/// on Fedora Atomic `bin` lives in /usr/lib/passwd, not /etc/passwd), an
+/// assignment applies before later lines are parsed, `%hidden` values
+/// expand but stay out of formats' process view, `-n` parses without
+/// applying, `-v` prints each command, and a parse error is
+/// `file:line: message` (cmd-parse.y `yylex_token_tilde`, 224-270;
+/// cmd-source-file.c).
+#[test]
+fn source_file_config_env() {
+    compare("source_file_config_env", |w| {
+        let conf = w.dir().join("a.conf");
+        std::fs::write(
+            &conf,
+            "X=1\ndisplay -p ~bin/$X\n%hidden Y=2\ndisplay -p \"$Y\"\n",
+        )
+        .expect("write");
+        let bad = w.dir().join("b.conf");
+        std::fs::write(&bad, "display -p a\nnosuch\n").expect("write");
+        let (c, b) = (conf.to_str().expect("utf-8"), bad.to_str().expect("utf-8"));
+        vec![
+            w.run(&["new", "-d", "-s", "a"]),
+            w.run(&["source", "-n", c]),
+            w.run(&["display", "-p", "[#{X}]"]),
+            w.run(&["source", c]),
+            w.run(&["display", "-p", "[#{X}] [#{Y}]"]),
+            w.run(&["source", "-nv", c]),
+            w.run(&["source", b]),
+            w.run(&["source", "/nonexistent.conf"]),
+            w.run(&["source", "-q", "/nonexistent.conf"]),
+        ]
+    });
+}
+
+/// A startup config runs before the first command, without a client:
+/// `new` in it is detached, errors are kept for an attached session and
+/// never reach a command client (cfg.c `start_cfg`, `cfg_show_causes`).
+#[test]
+fn startup_config() {
+    compare("startup_config", |w| {
+        let conf = w.dir().join("start.conf");
+        std::fs::write(&conf, "new -s test\ndisplay hello\nnosuch\n").expect("write");
+        let c = conf.to_str().expect("utf-8");
+        vec![
+            w.raw(&["-L", &w.label, "-f", c, "start"]),
+            w.run(&["ls", "-F", "#{session_name}"]),
+        ]
+    });
+}

@@ -200,7 +200,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("show-options", Some("show"), "AgF:Hpqst:vw", 0, Some(1), "[-AgHpqsvw] [-F format] [-t target-pane] [option]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
     cmd("show-prompt-history", Some("showphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, false),
     cmd("show-window-options", Some("showw"), "F:gvt:", 0, Some(1), "[-gv] [-F format] [-t target-window] [option]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, false),
-    cmd("source-file", Some("source"), "t:Fnqv", 1, None, "[-Fnqv] [-t target-pane] path ...", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
+    cmd("source-file", Some("source"), "t:Fnqv", 1, None, "[-Fnqv] [-t target-pane] path ...", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("split-window", Some("splitw"), "bB:c:de:EfF:hIkl:m:p:PR:s:S:t:T:vWZ", 0, None, "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("start-server", Some("start"), "", 0, Some(0), "", None, None, true, true),
     cmd("suspend-client", Some("suspendc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, false),
@@ -309,6 +309,7 @@ mod tests {
             ("new-session", Some("new")),
             ("send-keys", Some("send")),
             ("start-server", Some("start")),
+            ("source-file", Some("source")),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);
@@ -319,7 +320,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 11);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 12);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

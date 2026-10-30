@@ -17,7 +17,7 @@ use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
 use signal_hook::consts::{SIGCHLD, SIGHUP, SIGINT, SIGTERM};
 use signal_hook_mio::v1_0::Signals;
-use vtmux_core::cmd::{self, CmdError, ConfigEnv, ParseOpts};
+use vtmux_core::cmd::{self, CmdError, ConfigEnv};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId};
 use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg};
@@ -94,6 +94,8 @@ pub struct Server {
     pub global_env: Environ,
     /// `kill-server` ran: exit once replies are out.
     pub shutdown: bool,
+    /// Nesting of `source-file` (cmd-source-file.c depth limit).
+    pub source_depth: usize,
     /// Errors from config files, shown to the first client
     /// (cfg.c `cfg_add_cause`).
     pub causes: Vec<String>,
@@ -107,6 +109,10 @@ pub struct Server {
     shell: PathBuf,
     config: ServerConfig,
     config_loaded: bool,
+    /// Panes that still had output when their read budget ran out. mio is
+    /// edge-triggered, so they are read again on the next turn instead of
+    /// waiting for an event that will not come.
+    backlog: std::collections::BTreeSet<PaneId>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -201,6 +207,7 @@ impl Server {
             shell: default_shell(&config.environ),
             global_env,
             shutdown: false,
+            source_depth: 0,
             causes: Vec::new(),
             socket,
             poll,
@@ -210,6 +217,7 @@ impl Server {
             next_client: 0,
             config,
             config_loaded: false,
+            backlog: std::collections::BTreeSet::new(),
         })
     }
 
@@ -247,6 +255,9 @@ impl Server {
                     }
                 }
             }
+            for p in std::mem::take(&mut self.backlog) {
+                self.pane_readable(p);
+            }
             self.check_window_names();
             if self.should_exit() {
                 self.exit_clients();
@@ -256,6 +267,9 @@ impl Server {
     }
 
     fn next_timeout(&self) -> Option<Duration> {
+        if !self.backlog.is_empty() {
+            return Some(Duration::ZERO);
+        }
         let pending = self.model.panes.values().any(|p| p.changed);
         pending.then_some(NAME_INTERVAL)
     }
@@ -489,11 +503,8 @@ impl Server {
         if let Some(c) = self.clients.get_mut(&id) {
             c.hello = Some(hello);
         }
-        // Config causes go to the first client (cfg_show_causes).
-        for cause in std::mem::take(&mut self.causes) {
-            item.print(&cause);
-        }
-        item.status = 0;
+        // Config causes wait for an attached session (cfg.c
+        // cfg_show_causes): a command client never sees them.
         if argv.is_empty() {
             // No command: new-session (server_client_default_command).
             match cmd::parse_argv(&["new-session".to_owned()]) {
@@ -541,67 +552,19 @@ impl Server {
 
     // ------------------------------------------------------------- config
 
-    /// cfg.c `start_cfg` / `load_cfg`: each file is parsed, then run with
-    /// no client; errors become causes `file:line: message`.
+    /// cfg.c `start_cfg` / `load_cfg`: each file runs with no client;
+    /// errors become causes `file:line: message`.
     fn load_config(&mut self, cwd: &Path) {
         self.config_loaded = true;
         let files = self.config.config_files.clone();
+        let quiet = self.config.config_quiet;
+        let mut item = Item::new(None, cwd.to_owned());
+        let opts = commands::source_file::LoadOpts {
+            quiet,
+            ..Default::default()
+        };
         for file in files {
-            let text = match std::fs::read(&file) {
-                Ok(t) => t,
-                Err(e) => {
-                    if !(e.kind() == io::ErrorKind::NotFound && self.config.config_quiet) {
-                        self.causes.push(format!(
-                            "{}: {}",
-                            file.display(),
-                            vtmux_core::error::strerror(&e)
-                        ));
-                    }
-                    continue;
-                }
-            };
-            self.source_text(
-                &file.to_string_lossy(),
-                &String::from_utf8_lossy(&text),
-                cwd,
-                None,
-            );
-        }
-    }
-
-    /// Parse and run config text line by line, so assignments apply before
-    /// later lines are parsed (cmd-parse.y applies them while parsing).
-    /// tmux parses the whole file before running any of it, so a parse
-    /// error anywhere stops the file before any command runs.
-    pub fn source_text(&mut self, file: &str, text: &str, cwd: &Path, client: Option<ClientId>) {
-        let mut calls = Vec::new();
-        let mut line_no = 1;
-        for line in split_statements(text) {
-            let parsed = cmd::parse_config_with(
-                &line.text,
-                &mut GlobalEnv(&mut self.global_env),
-                ParseOpts::default(),
-            );
-            match parsed {
-                Ok(c) => calls.extend(c.into_iter().map(|c| (line_no, c))),
-                Err(e) => {
-                    // Reported at the statement's first line.
-                    self.causes.push(format!(
-                        "{file}:{line_no}: {}",
-                        String::from_utf8_lossy(&cmd_error_bytes(&e))
-                    ));
-                    return;
-                }
-            }
-            line_no += line.lines;
-        }
-        let mut item = Item::new(client, cwd.to_owned());
-        for (line, call) in calls {
-            let before = self.causes.len();
-            commands::run(self, &mut item, std::slice::from_ref(&call));
-            for cause in &mut self.causes[before..] {
-                *cause = format!("{file}:{line}: {cause}");
-            }
+            commands::source_file::load(self, &mut item, &file, opts);
         }
     }
 
@@ -779,9 +742,16 @@ impl Server {
         self.pane_output_queued(p);
     }
 
+    /// Read a bounded amount from pane `p` (tmux reads once per libevent
+    /// callback), so a pane flooding output cannot starve clients.
     fn pane_readable(&mut self, p: PaneId) {
+        const READS_PER_TURN: usize = 1;
         let mut closed = false;
-        loop {
+        for turn in 0.. {
+            if turn == READS_PER_TURN {
+                self.backlog.insert(p);
+                break;
+            }
             let Some(pane) = self.model.panes.get_mut(&p) else {
                 return;
             };
@@ -912,69 +882,6 @@ fn cmd_error_bytes(e: &CmdError) -> Vec<u8> {
     }
 }
 
-/// A statement of config text and how many physical lines it spans.
-struct Statement {
-    text: String,
-    lines: usize,
-}
-
-/// Split config text into newline-terminated statements, keeping quoted
-/// newlines and backslash continuations inside one statement, so each can
-/// be parsed (and its assignments applied) before the next.
-fn split_statements(text: &str) -> Vec<Statement> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut lines = 0;
-    let mut quote: Option<char> = None;
-    let mut chars = text.chars().peekable();
-    let mut comment = false;
-    while let Some(c) = chars.next() {
-        cur.push(c);
-        if comment {
-            if c == '\n' {
-                comment = false;
-            } else {
-                continue;
-            }
-        }
-        match (quote, c) {
-            (_, '\\') => {
-                if let Some(n) = chars.next() {
-                    cur.push(n);
-                    if n == '\n' {
-                        lines += 1;
-                    }
-                }
-            }
-            (None, '#')
-                if cur.len() == 1 || cur[..cur.len() - 1].ends_with([' ', '\t', '\n', ';']) =>
-            {
-                comment = true;
-            }
-            (None, '\'' | '"') => quote = Some(c),
-            (Some(q), c) if c == q => quote = None,
-            (_, '\n') => {
-                lines += 1;
-                if quote.is_none() {
-                    out.push(Statement {
-                        text: std::mem::take(&mut cur),
-                        lines,
-                    });
-                    lines = 0;
-                }
-            }
-            _ => {}
-        }
-    }
-    if !cur.is_empty() {
-        out.push(Statement {
-            text: cur,
-            lines: lines + 1,
-        });
-    }
-    out
-}
-
 /// Start the server on a socket the caller already bound
 /// ([`sys::daemon::bind_socket`]) and run it until it exits.
 #[must_use]
@@ -985,26 +892,5 @@ pub fn run_server(listener: StdListener, socket: PathBuf, config: ServerConfig) 
             Err(_) => 1,
         },
         Err(_) => 1,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn statements_split_on_unquoted_newlines() {
-        let s = split_statements("a\nb 'x\ny'\nc \\\nd\n# x 'q\ne\n");
-        let texts: Vec<_> = s.iter().map(|s| (s.text.as_str(), s.lines)).collect();
-        assert_eq!(
-            texts,
-            vec![
-                ("a\n", 1),
-                ("b 'x\ny'\n", 2),
-                ("c \\\nd\n", 2),
-                ("# x 'q\n", 1),
-                ("e\n", 1)
-            ]
-        );
     }
 }

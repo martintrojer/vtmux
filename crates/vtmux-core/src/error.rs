@@ -103,6 +103,8 @@ pub enum EdgeError {
     InvalidSortOrder,
     /// `-f only valid with -a` (cmd-kill-session.c:62).
     FilterNeedsAll,
+    /// `too many nested files` (cmd-source-file.c:186).
+    TooManyNestedFiles,
     /// A tmux 3.8 feature vtmux does not do yet.
     NotImplemented(String),
     VersionMismatch {
@@ -166,6 +168,7 @@ impl fmt::Display for EdgeError {
             Self::CreateWindowFailed(s) => write!(f, "create window failed: {s}"),
             Self::InvalidSortOrder => f.write_str("invalid sort order"),
             Self::FilterNeedsAll => f.write_str("-f only valid with -a"),
+            Self::TooManyNestedFiles => f.write_str("too many nested files"),
             Self::NotImplemented(s) => write!(f, "not implemented in vtmux yet: {s}"),
             Self::VersionMismatch { client, server } => {
                 write!(

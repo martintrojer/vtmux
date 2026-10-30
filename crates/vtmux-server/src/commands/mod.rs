@@ -15,6 +15,7 @@ mod kill_session;
 mod list_sessions;
 mod new_session;
 mod send_keys;
+pub mod source_file;
 
 use std::path::PathBuf;
 
@@ -163,6 +164,7 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
+        "source-file" => source_file::exec(server, item, args, found),
         "attach-session" => {
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
             attach(server, item, session)
