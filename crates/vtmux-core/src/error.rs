@@ -81,6 +81,8 @@ pub enum EdgeError {
     NoCurrentTarget,
     /// `no current client` (cmd-find.c:1017).
     NoCurrentClient,
+    /// `attach-session` with no sessions (cmd-attach-session.c:66-69).
+    NoSessions,
     /// `invalid session name: X` (cmd-new-session.c:115).
     InvalidSessionName(String),
     /// `invalid window name: X` (cmd-new-session.c:104).
@@ -159,6 +161,7 @@ impl fmt::Display for EdgeError {
             Self::PaneNotFound(s) => write!(f, "can't find pane: {s}"),
             Self::NoCurrentTarget => f.write_str("no current target"),
             Self::NoCurrentClient => f.write_str("no current client"),
+            Self::NoSessions => f.write_str("no sessions"),
             Self::InvalidSessionName(s) => write!(f, "invalid session name: {s}"),
             Self::InvalidWindowName(s) => write!(f, "invalid window name: {s}"),
             Self::BadNumber { what, cause } => write!(f, "{what} {cause}"),
