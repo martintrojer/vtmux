@@ -856,6 +856,33 @@ impl Server {
             .resize_window(window, cols.max(1), rows.saturating_sub(1).max(1));
     }
 
+    /// `recalculate_size` (resize.c:367-424) for one window with `latest`
+    /// semantics: the last terminal client attached to a session that links
+    /// `w` sizes it, less its status line; no such client leaves it alone.
+    pub fn recalculate_window(&mut self, w: WindowId) {
+        let size = self
+            .clients
+            .values()
+            .rev()
+            .filter(|c| c.control.is_none())
+            .filter(|c| {
+                c.attached
+                    .and_then(|s| self.model.sessions.get(&s))
+                    .is_some_and(|s| s.windows.values().any(|x| *x == w))
+            })
+            .find_map(|c| c.hello.as_ref()?.tty.as_ref())
+            .map(|tty| (tty.cols.max(1), tty.rows.saturating_sub(1).max(1)));
+        let Some((sx, sy)) = size else {
+            return;
+        };
+        let Some(window) = self.model.windows.get(&w) else {
+            return;
+        };
+        if (window.sx(), window.sy()) != (sx, sy) {
+            self.model.resize_window(w, sx, sy);
+        }
+    }
+
     pub fn detach_session_clients(&mut self, session: SessionId) {
         let ids: Vec<_> = self
             .clients
