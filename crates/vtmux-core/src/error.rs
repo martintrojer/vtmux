@@ -107,6 +107,10 @@ pub enum EdgeError {
     FilterNeedsAll,
     /// `too many nested files` (cmd-source-file.c:186).
     TooManyNestedFiles,
+    /// A command's `cmdq_error` text built from a cause (`no space for a new
+    /// pane`, `invalid tiled geometry too large`, `width invalid`): the
+    /// layout and argument helpers return tmux's cause strings.
+    Message(String),
     /// A tmux 3.8 feature vtmux does not do yet.
     NotImplemented(String),
     VersionMismatch {
@@ -172,6 +176,7 @@ impl fmt::Display for EdgeError {
             Self::InvalidSortOrder => f.write_str("invalid sort order"),
             Self::FilterNeedsAll => f.write_str("-f only valid with -a"),
             Self::TooManyNestedFiles => f.write_str("too many nested files"),
+            Self::Message(s) => f.write_str(s),
             Self::NotImplemented(s) => write!(f, "not implemented in vtmux yet: {s}"),
             Self::VersionMismatch { client, server } => {
                 write!(

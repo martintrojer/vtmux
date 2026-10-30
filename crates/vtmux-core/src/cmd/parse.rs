@@ -1722,15 +1722,15 @@ mod tests {
     /// a table entry that reports `not implemented`.
     #[test]
     fn non_m0_commands_parse_but_do_not_run() {
-        let calls = parse_argv(&words(&["split-window", "-h", "-t", "a", "vim"])).unwrap();
-        assert_eq!(calls[0].entry.name, "split-window");
+        let calls = parse_argv(&words(&["join-pane", "-h", "-t", "a", "-s", "b"])).unwrap();
+        assert_eq!(calls[0].entry.name, "join-pane");
         assert_eq!(
             calls[0].entry.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: split-window"
+            "not implemented in vtmux yet: join-pane"
         );
         assert_eq!(
-            argv_err(&["split-window", "-Q"]),
-            "command split-window: unknown flag -Q"
+            argv_err(&["join-pane", "-Q"]),
+            "command join-pane: unknown flag -Q"
         );
     }
 

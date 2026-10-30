@@ -38,6 +38,9 @@ const CELL_BYTES: usize = 8;
 pub struct PaneTerm {
     pub(crate) term: Terminal<'static, 'static>,
     replies: Rc<RefCell<Vec<u8>>>,
+    /// A title set by the server (`select-pane -T`); the next OSC 0/2 from
+    /// the program replaces it, as both write the one `s->title`.
+    title_override: Rc<RefCell<Option<String>>>,
     history_lines: usize,
     /// tmux's `hsize` for the primary grid, modelled (see [`PaneTerm::feed`]).
     hsize: usize,
@@ -73,6 +76,8 @@ impl PaneTerm {
 
         let replies = Rc::new(RefCell::new(Vec::new()));
         let sink = Rc::clone(&replies);
+        let title_override = Rc::new(RefCell::new(None));
+        let overridden = Rc::clone(&title_override);
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
@@ -93,6 +98,11 @@ impl PaneTerm {
                         },
                         tertiary: TertiaryDeviceAttributes::default(),
                     })
+                })
+            })
+            .and_then(|t| {
+                t.on_title_changed(move |_| {
+                    overridden.borrow_mut().take();
                 })
             })
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
@@ -120,6 +130,7 @@ impl PaneTerm {
         Self {
             term,
             replies,
+            title_override,
             history_lines,
             hsize: 0,
             pin: None,
@@ -292,10 +303,20 @@ impl PaneTerm {
     /// Pane title as tmux stores it (`screen_set_title`, screen.c:264-274).
     #[must_use]
     pub fn title(&self) -> String {
+        if let Some(t) = self.title_override.borrow().as_ref() {
+            return t.clone();
+        }
         self.term
             .title()
             .map(|t| clean_name(t, true))
             .unwrap_or_default()
+    }
+
+    /// Set the title from the server side (`select-pane -T`,
+    /// `split-window -T`): `screen_set_title(s, title, 0)`, a trusted
+    /// clean, so `#(` stays.
+    pub fn set_title(&mut self, title: &str) {
+        *self.title_override.borrow_mut() = Some(clean_name(title, false));
     }
 
     /// Path from OSC 7 as tmux stores it (`screen_set_path`, screen.c:278-288).
@@ -667,6 +688,18 @@ mod tests {
         t.feed(b"\x1b]2;a\\b#(x)\x07\x1b]7;file:///tmp/a b\x1b\\");
         assert_eq!(t.title(), "a\\\\b_(x)");
         assert_eq!(t.pwd(), "file:///tmp/a b");
+    }
+
+    #[test]
+    fn server_title_holds_until_the_program_sets_one() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"\x1b]2;prog\x07");
+        t.set_title("a#(b)\tc");
+        assert_eq!(t.title(), "a#(b)\\tc");
+        t.feed(b"x");
+        assert_eq!(t.title(), "a#(b)\\tc");
+        t.feed(b"\x1b]2;next\x07");
+        assert_eq!(t.title(), "next");
     }
 
     #[test]

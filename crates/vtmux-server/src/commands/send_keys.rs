@@ -55,7 +55,8 @@ pub fn exec(
             bytes.extend(send_keys_bytes(arg, literal, modes));
         }
     }
-    if let Some(io) = pane.io.as_mut() {
+    // window_pane_key (window.c:2095): nothing reaches an input-off pane.
+    if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
         io.write(&bytes);
     }
     server.pane_output_queued(p);

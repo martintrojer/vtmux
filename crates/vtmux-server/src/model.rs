@@ -126,6 +126,8 @@ pub struct Pane {
     /// `wp->xoff`, `wp->yoff`, `wp->sx`, `wp->sy` as `layout_fix_panes` set
     /// them.
     pub rect: Geometry,
+    /// `grid->hlimit`: the session's `history-limit` when the pane was made.
+    pub history_limit: usize,
     /// `PANE_INPUTOFF` (select-pane -d / -e).
     pub input_off: bool,
     /// `wp->active_point`: when the pane last became active, for picking the
@@ -266,6 +268,12 @@ impl Model {
     /// rectangle (less the pane status line) to its pane, resizing the
     /// terminal and the PTY of every pane whose size changed.
     pub fn fix_panes(&mut self, w: WindowId) {
+        self.fix_panes_except(w, None);
+    }
+
+    /// [`Self::fix_panes`] leaving `skip` alone (`layout_fix_panes(w, wp)`,
+    /// for a pane spawned zoomed, which keeps the window's size).
+    pub fn fix_panes_except(&mut self, w: WindowId, skip: Option<PaneId>) {
         let status = self.pane_status(w);
         let Some(window) = self.windows.get_mut(&w) else {
             return;
@@ -274,7 +282,7 @@ impl Model {
         if let Some(z) = &mut window.zoom {
             z.saved.opts.status = status;
         }
-        for p in &window.panes.panes {
+        for p in window.panes.panes.iter().filter(|p| Some(**p) != skip) {
             // Panes hidden by a zoom keep their last rectangle.
             let Some(rect) = window.layout.pane_rect(*p) else {
                 continue;
@@ -407,6 +415,28 @@ impl Model {
         if let Some(p) = zoomed {
             self.zoom(w, p);
         }
+    }
+
+    /// `window_push_zoom` (window.c:1108-1124): unzoom, and say whether
+    /// [`Self::pop_zoom`] should zoom again (`WINDOW_WASZOOMED`): `flag`
+    /// and either `always` or the window was zoomed.
+    pub fn push_zoom(&mut self, w: WindowId, always: bool, flag: bool) -> bool {
+        let zoomed = self.windows.get(&w).is_some_and(Window::zoomed);
+        self.unzoom(w);
+        flag && (always || zoomed)
+    }
+
+    /// `window_pop_zoom` (window.c:1126-1145): zoom the active pane again
+    /// if the matching push asked for it. vtmux has no float-over-zoom
+    /// panes, so the active pane is the one zoomed.
+    pub fn pop_zoom(&mut self, w: WindowId, was_zoomed: bool) -> bool {
+        if !was_zoomed {
+            return false;
+        }
+        let Some(active) = self.windows.get(&w).map(Window::active) else {
+            return false;
+        };
+        self.zoom(w, active)
     }
 
     /// `window_unzoom` (window.c:1022-1080): false when not zoomed.

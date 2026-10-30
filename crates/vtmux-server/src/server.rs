@@ -1129,6 +1129,7 @@ impl Server {
             changed: false,
             last_rename: None,
             rect: ps.rect,
+            history_limit,
             input_off: false,
             active_point: 0,
         })

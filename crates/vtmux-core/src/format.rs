@@ -349,7 +349,8 @@ pub fn expand_str(template: &str, ctx: &dyn FormatContext) -> String {
 }
 
 /// tmux's `format_true` (format.c:4893): neither empty nor `0`.
-fn is_true(s: &str) -> bool {
+#[must_use]
+pub fn is_true(s: &str) -> bool {
     !s.is_empty() && s != "0"
 }
 
