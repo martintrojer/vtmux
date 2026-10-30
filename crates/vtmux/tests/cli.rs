@@ -1840,6 +1840,62 @@ fn panes_break_join() {
     });
 }
 
+/// break-pane -a/-b of a one-pane window in its own session: the window's
+/// winlink moves across the shuffle (cmd-break-pane.c:120-145 keep `wl`
+/// through `winlink_shuffle_up`), so nothing is linked twice or lost; also
+/// zoomed and with -P (reviewer-15's repro).
+#[test]
+fn panes_break_one_pane_shuffle() {
+    compare("panes_break_one_pane_shuffle", |w| {
+        let lsw = &[
+            "lsw",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index} #{window_id} #{window_name} [#{window_flags}] #{window_panes}",
+        ][..];
+        let lsp = &[
+            "lsp",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index}.#{pane_index} #{pane_id}",
+        ][..];
+        steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+                ],
+                &["neww", "-d", "-t", "a:1", "-n", "x", "cat"],
+                &["neww", "-d", "-t", "a:2", "-n", "y", "cat"],
+                &["breakp", "-s", "a:2", "-t", "a:0", "-b", "-d"],
+                lsw,
+                lsp,
+                &["breakp", "-s", "a:0", "-t", "a:1", "-a", "-d"],
+                lsw,
+                &["breakp", "-s", "a:2", "-t", "a:0", "-a", "-P"],
+                lsw,
+                &[
+                    "display",
+                    "-p",
+                    "#{session_name}:#{window_index} #{window_id}",
+                ],
+                &["neww", "-d", "-t", "a:5", "-n", "z", "cat"],
+                &["breakp", "-s", "a:1", "-t", "a:2", "-a", "-d"],
+                lsw,
+                &[
+                    "new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat",
+                ],
+                &["neww", "-d", "-t", "b:1", "-n", "bx", "cat"],
+                &["resizep", "-Z", "-t", "b:1"],
+                &["breakp", "-s", "b:1", "-t", "b:0", "-b", "-P"],
+                lsw,
+                lsp,
+                &["kill-server"],
+            ],
+        )
+    });
+}
+
 /// respawn-pane (cmd-respawn-pane.c:46-100, spawn.c:312-345): a live pane
 /// without -k is an error; -k keeps the pane ID, place, title and history,
 /// takes a new command, -c and -e; no command reuses the last one; the old
