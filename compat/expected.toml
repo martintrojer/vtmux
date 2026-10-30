@@ -11,7 +11,8 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."alternate-screen-resize.sh"]
-status = "pass"
+status = "xfail"
+reason = "needs split-window (M1); the M0 baseline pass was vacuous (the binary was an empty main that exited 0)"
 
 [tests."am-terminal.sh"]
 status = "xfail"
@@ -30,8 +31,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."capture-pane-sgr0.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."capture-pane-time.sh"]
 status = "xfail"
@@ -90,7 +90,8 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."conf-syntax.sh"]
-status = "pass"
+status = "xfail"
+reason = "needs { } command blocks and %if in the config parser (core_cmd Unsupported); the M0 baseline pass was vacuous (empty main exited 0)"
 
 [tests."confirm-before-lock.sh"]
 status = "xfail"
@@ -273,8 +274,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."has-session-return.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."hooks-after.sh"]
 status = "xfail"
@@ -400,7 +400,8 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."kill-session-zoomed.sh"]
-status = "pass"
+status = "xfail"
+reason = "needs split-window and resize-pane -Z (M1); the M0 baseline pass was vacuous (empty main exited 0)"
 
 [tests."layout-custom.sh"]
 status = "xfail"
@@ -459,8 +460,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."new-session-command.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."new-session-environment.sh"]
 status = "xfail"
@@ -470,8 +470,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."new-session-size.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."new-window-command.sh"]
 status = "xfail"
@@ -587,8 +586,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."server-socket-error.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."session-group-resize.sh"]
 status = "xfail"
