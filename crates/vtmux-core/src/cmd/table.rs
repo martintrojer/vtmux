@@ -131,7 +131,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("clock-mode", None, "t:", 0, Some(0), "[-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("command-prompt", None, "1CbeFiklI:NPp:t:T:", 0, Some(1), "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]", None, None, false, false),
     cmd("confirm-before", Some("confirm"), "bc:p:t:y", 1, Some(1), "[-by] [-c confirm-key] [-p prompt] [-t target-client] command", None, None, false, false),
-    cmd("copy-mode", None, "dekHMqSs:t:u", 0, Some(0), "[-dekHMqSu] [-s src-pane] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, false),
+    cmd("copy-mode", None, "dekHMqSs:t:u", 0, Some(0), "[-dekHMqSu] [-s src-pane] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, true),
     cmd("customize-mode", None, "F:f:kNt:yZ", 0, Some(0), "[-kNZ] [-F format] [-f filter] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("delete-buffer", Some("deleteb"), "b:", 0, Some(0), "[-b buffer-name]", None, None, false, true),
     cmd("detach-client", Some("detach"), "aE:s:t:P", 0, Some(0), "[-aP] [-E shell-command] [-s target-session] [-t target-client]", None, Some(slot('s', TargetKind::Session, FindFlags::CANFAIL)), false, true),
@@ -346,7 +346,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 64);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 65);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
@@ -466,10 +466,10 @@ mod tests {
 
     #[test]
     fn non_m0_commands_are_not_implemented() {
-        let e = find("copy-mode").unwrap();
+        let e = find("clock-mode").unwrap();
         assert_eq!(
             e.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: copy-mode"
+            "not implemented in vtmux yet: clock-mode"
         );
         assert!(find("new-session").unwrap().ensure_implemented().is_ok());
     }

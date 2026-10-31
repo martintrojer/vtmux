@@ -4,8 +4,10 @@
 //! chosen by `switch-client -T`), `bind -r` repeat within `repeat-time`,
 //! `prefix-timeout`, and `Any`.
 //!
-//! Not here yet: pane modes (copy mode's tables), mouse keys, read-only
-//! clients, and `assume-paste-time` (every terminal vtmux attaches to has
+//! A pane in a mode looks keys up in the mode's table while the client is
+//! in its default table.
+//!
+//! Not here yet: mouse keys, read-only clients, and `assume-paste-time` (every terminal vtmux attaches to has
 //! bracketed paste, which turns it off: server-client.c:1352).
 
 use std::time::{Duration, Instant};
@@ -150,7 +152,17 @@ impl Server {
         if key == Key::FOCUS_IN || key == Key::FOCUS_OUT {
             return false;
         }
+        // server-client.c:1531-1537: a pane in a mode uses the mode's table
+        // instead of the default one.
         let mut table = self.clients[&id].keys.table.clone();
+        if table == self.default_key_table(id)
+            && let Some(mode_table) = self
+                .client_pane(id)
+                .and_then(|p| self.model.mode_key_table(p))
+        {
+            self.key_bindings.ensure_table(mode_table);
+            mode_table.clone_into(&mut table);
+        }
         let mut first = table.clone();
         'table_changed: loop {
             // The prefix always switches to the prefix table, unless there.

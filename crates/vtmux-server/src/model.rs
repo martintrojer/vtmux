@@ -174,6 +174,8 @@ pub struct Pane {
     pub resizes: Vec<((u32, u32), (u32, u32))>,
     /// `wp->resize_timer`: until when no queued size is sent.
     pub resize_timer: Option<Instant>,
+    /// `wp->modes`: the pane's modes, the one shown first.
+    pub modes: Vec<crate::mode::Mode>,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its
@@ -1209,6 +1211,14 @@ impl Pane {
         }
         self.resizes.push((from, (rect.sx, rect.sy)));
         self.term.resize(clamp16(rect.sx), clamp16(rect.sy));
+        // window_pane_resize: the shown mode follows.
+        if let Some(m) = self
+            .modes
+            .first_mut()
+            .and_then(crate::mode::Mode::as_copy_mut)
+        {
+            m.resize(&self.term);
+        }
     }
 
     /// `server_client_check_pane_resize` (server-client.c:1984-2041): once

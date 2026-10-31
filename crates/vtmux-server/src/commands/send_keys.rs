@@ -1,12 +1,16 @@
-//! `send-keys` (cmd-send-keys.c:155-268) for keys and literal text; modes,
-//! `-K`, `-M`, `-X` and `-R` are M1.
+//! `send-keys` (cmd-send-keys.c:155-268) for keys and literal text, `-K`,
+//! and `-X` and keys for a pane in a mode; `-M`, `-R` and `-F` are later.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 use vtmux_core::keys::Key as CoreKey;
 
+use vtmux_core::ids::PaneId;
+
 use super::Item;
+use crate::cmdq::{End, NewBatch};
 use crate::keys::{KeyModes, send_keys_bytes};
+use crate::mode::copy::{Action, CommandError};
 use crate::server::Server;
 use crate::target::Found;
 
@@ -19,7 +23,7 @@ pub fn exec(
     if args.flag('K') {
         return inject(server, item, args);
     }
-    for flag in ['M', 'X', 'R', 'F', 'c'] {
+    for flag in ['M', 'R', 'F', 'c'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("send-keys -{flag}")).into());
         }
@@ -35,6 +39,23 @@ pub fn exec(
     } else {
         1
     };
+    let in_mode = server
+        .model
+        .panes
+        .get(&p)
+        .is_some_and(|pane| !pane.modes.is_empty());
+    // The repeat count of a mode command (cmd-send-keys.c:191-197).
+    if args.flag('N') && in_mode && (args.flag('X') || args.positionals.is_empty()) {
+        let n = u32::try_from(repeat).unwrap_or(u32::MAX);
+        super::copy_mode::with_copy(server, p, |m, _| m.prefix = n);
+    }
+    if args.flag('X') {
+        return mode_command(server, args, p);
+    }
+    if in_mode {
+        mode_keys(server, item, args, p, repeat);
+        return Ok(());
+    }
     let literal = args.flag('l');
     let hex = args.flag('H');
     let Some(pane) = server.model.panes.get_mut(&p) else {
@@ -65,6 +86,85 @@ pub fn exec(
     }
     server.pane_output_queued(p);
     Ok(())
+}
+
+/// `send-keys -X`: a command for the pane's mode (`window_copy_command`).
+fn mode_command(server: &mut Server, args: &Args, p: PaneId) -> Result<(), CmdError> {
+    let words: Vec<String> = args
+        .positionals
+        .iter()
+        .map(|a| a.text().into_owned())
+        .collect();
+    let Some((name, rest)) = words.split_first() else {
+        // window_copy_command: no command, nothing to do.
+        return if server
+            .model
+            .panes
+            .get(&p)
+            .is_some_and(|x| !x.modes.is_empty())
+        {
+            Ok(())
+        } else {
+            Err(EdgeError::Message("not in a mode".into()).into())
+        };
+    };
+    let result = super::copy_mode::with_copy(server, p, |m, env| m.command(env, name, rest))
+        .ok_or_else(|| CmdError::from(EdgeError::Message("not in a mode".into())))?;
+    match result {
+        Ok(Action::Cancel) => server.reset_mode(p),
+        Ok(Action::Stay) => {}
+        Err(CommandError::NotImplemented(c)) => {
+            return Err(EdgeError::NotImplemented(format!("copy mode command {c}")).into());
+        }
+    }
+    Ok(())
+}
+
+/// Keys for a pane in a mode go through the mode's key table, not to the
+/// program (`cmd_send_keys_inject_key`, cmd-send-keys.c:93-104): a bound
+/// key runs its commands after this command, any other key does nothing.
+/// The commands run with the command's own current target, where tmux
+/// gives them the send-keys target.
+fn mode_keys(server: &mut Server, item: &mut Item, args: &Args, p: PaneId, repeat: i64) {
+    let Some(table) = server.model.mode_key_table(p) else {
+        return;
+    };
+    let mut keys = Vec::new();
+    for arg in &args.positionals {
+        let arg = &*arg.text();
+        let key = (!args.flag('l') && !args.flag('H'))
+            .then(|| CoreKey::from_name(arg))
+            .flatten()
+            .filter(|k| *k != CoreKey::NONE);
+        match key {
+            Some(k) => keys.push(k),
+            None if args.flag('H') => {}
+            None => keys.extend(arg.chars().map(CoreKey::from_char)),
+        }
+    }
+    let mut after = item.step;
+    for _ in 0..repeat {
+        for &key in &keys {
+            let Some(commands) = server
+                .key_bindings
+                .get(table, key)
+                .map(|b| b.commands.clone())
+            else {
+                continue;
+            };
+            // key_bindings_dispatch(bd, after, ...): a batch of its own
+            // right after this command, each key's after the last.
+            let mut batch = Item::new(item.client, item.cwd.clone());
+            batch.origin = item.origin;
+            batch.env.clone_from(&item.env);
+            batch.utf8 = item.utf8;
+            let batch = NewBatch::new(batch, commands.calls, End::Quiet);
+            after = match after {
+                Some(step) => server.cmdq_insert_batch(step, batch),
+                None => server.cmdq_append(item.client, batch),
+            };
+        }
+    }
 }
 
 /// `send-keys -K`: each key goes to the target client as if typed

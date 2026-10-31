@@ -1262,6 +1262,7 @@ impl Server {
                     // pane that asked for bracketed paste.
                     if let Some(p) = self.client_pane(id)
                         && self.model.panes[&p].term.bracketed_paste()
+                        && self.model.panes[&p].modes.is_empty()
                     {
                         self.write_pane(p, if start { b"\x1b[200~" } else { b"\x1b[201~" });
                     }
@@ -1375,6 +1376,11 @@ impl Server {
         let Some(pane) = self.model.panes.get(&p) else {
             return;
         };
+        // window_pane_key: a pane in a mode gives the key to the mode, and
+        // copy mode takes keys only through its table (no `key` callback).
+        if !pane.modes.is_empty() {
+            return;
+        }
         let modes = crate::keys::KeyModes {
             app_cursor: pane.term.app_cursor(),
         };
@@ -2216,6 +2222,7 @@ impl Server {
             active_point: 0,
             resizes: Vec::new(),
             resize_timer: None,
+            modes: Vec::new(),
         })
     }
 
@@ -2251,6 +2258,11 @@ impl Server {
     pub fn respawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<()> {
         let p = ps.pane;
         self.hangup_pane(p);
+        // spawn.c:328: the pane leaves its modes.
+        self.reset_mode_all(p);
+        if !self.model.panes.contains_key(&p) {
+            return Ok(());
+        }
         let fresh = self.spawn_pane(ps)?;
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return Ok(());

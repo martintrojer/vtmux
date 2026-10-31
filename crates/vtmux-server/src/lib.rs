@@ -13,6 +13,7 @@ pub mod input;
 pub mod jobs;
 pub mod key_dispatch;
 pub mod keys;
+pub mod mode;
 pub mod model;
 pub mod names;
 pub mod pane_io;
