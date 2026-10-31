@@ -12,7 +12,7 @@ use vtmux_core::keys::Key;
 use vtmux_core::options::TreeId;
 
 use crate::cmdq::{End, NewBatch};
-use crate::commands::command_prompt;
+use crate::commands::{command_prompt, confirm_before};
 use crate::prompt::{KeyEnv, KeyOutcome, Prompt};
 use crate::render::status::StatusPrompt;
 use crate::server::{ClientId, Server};
@@ -22,6 +22,7 @@ use crate::target::Found;
 #[derive(Debug)]
 pub(crate) enum Owner {
     Command(command_prompt::Pending),
+    Confirm(confirm_before::Pending),
 }
 
 /// What the owner wants after a line (`enum prompt_result`).
@@ -39,6 +40,7 @@ impl Owner {
     fn input(&mut self, server: &mut Server, c: ClientId, value: Option<String>) -> Reply {
         match self {
             Self::Command(p) => p.input(server, c, value),
+            Self::Confirm(p) => p.input(server, value.as_deref()),
         }
     }
 
@@ -46,6 +48,10 @@ impl Owner {
     fn free(self, server: &mut Server) {
         match self {
             Self::Command(p) => p.free(server),
+            // cmd_confirm_before_free does not continue the command
+            // (cmd-confirm-before.c:157-163): a prompt replaced or lost
+            // before an answer leaves it waiting, as in tmux.
+            Self::Confirm(_) => {}
         }
     }
 }
