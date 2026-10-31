@@ -499,8 +499,7 @@ reason = "fails against reference tmux 3.8"
 status = "pass"
 
 [tests."respawn-pane-control-lag.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."run-shell-cwd.sh"]
 status = "xfail"

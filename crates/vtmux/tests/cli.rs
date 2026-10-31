@@ -2031,6 +2031,64 @@ fn panes_break_one_pane_shuffle() {
     });
 }
 
+/// link-window, unlink-window, move-window, swap-window and rename-session
+/// (cmd-move-window.c, cmd-kill-window.c:75-82, cmd-swap-window.c,
+/// cmd-rename-session.c) against the reference: a window linked into two
+/// sessions (`window_linked*`, one `kill-window` taking both links, a rename
+/// seen from both), every flag, `unlink-window` without and with -k,
+/// `move-window -r` (quiet on a missing session) and the errors.
+#[test]
+#[allow(clippy::too_many_lines)] // one step list
+fn winlinks_link_unlink_move_swap_rename() {
+    compare("winlinks_link_unlink_move_swap_rename", |w| {
+        let lsw = &[
+            "lsw",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index} #{window_id} #{window_name} [#{window_flags}] linked=#{window_linked} #{window_linked_sessions} #{window_linked_sessions_list} #{session_many_attached}",
+        ][..];
+        steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat",
+                ],
+                &["neww", "-d", "-t", "a:1", "-n", "w1", "cat"],
+                &["neww", "-d", "-t", "a:2", "-n", "w2", "cat"],
+                &["new", "-d", "-s", "b", "-n", "b0", "cat"],
+                &["linkw", "-s", "a:1", "-t", "b:5"],
+                lsw,
+                &["linkw", "-s", "a:1", "-t", "b:5"],
+                &["linkw", "-s", "a:2", "-t", "b:5"],
+                &["linkw", "-k", "-s", "a:2", "-t", "b:5"],
+                &["linkw", "-a", "-d", "-s", "a:0", "-t", "b:0"],
+                lsw,
+                &["rename-window", "-t", "a:2", "shared"],
+                lsw,
+                &["unlinkw", "-t", "a:1"],
+                &["unlinkw", "-t", "b:5"],
+                &["unlinkw", "-t", "b:5"],
+                &["movew", "-r", "-t", "nosuch"],
+                &["movew", "-s", "a:0", "-t", "b:9"],
+                &["movew", "-r", "-t", "b"],
+                lsw,
+                &["swapw", "-d", "-s", "a:1", "-t", "b:1"],
+                &["swapw", "-s", "a:0", "-t", "a:1"],
+                lsw,
+                &["kill-window", "-t", "b:1"],
+                lsw,
+                &["rename", "-t", "a", "alpha"],
+                &["rename", "-t", "b", "alpha"],
+                &["rename", "-t", "alpha", "bad\ttab"],
+                &["ls", "-F", "#{session_name} #{session_windows}"],
+                &["unlinkw", "-k", "-t", "alpha:0"],
+                &["unlinkw", "-k", "-t", "b:0"],
+                &["kill-server"],
+            ],
+        )
+    });
+}
+
 /// respawn-pane (cmd-respawn-pane.c:46-100, spawn.c:312-345): a live pane
 /// without -k is an error; -k keeps the pane ID, place, title and history,
 /// takes a new command, -c and -e; no command reuses the last one; the old

@@ -500,6 +500,12 @@ impl Server {
         }
     }
 
+    /// `%session-renamed` (control-notify.c:250-267).
+    pub(crate) fn control_session_renamed(&mut self, s: SessionId, name: &str) {
+        let line = format!("%session-renamed {s} {name}").into_bytes();
+        self.control_notify(&|_| Some(line.clone()));
+    }
+
     /// `%window-renamed` / `%unlinked-window-renamed` (control-notify.c:178-203).
     pub(crate) fn control_window_renamed(&mut self, w: WindowId, name: &str) {
         let linking: BTreeSet<SessionId> = self.model.sessions_with(w).map(|s| s.id).collect();

@@ -1920,6 +1920,7 @@ impl Server {
             last: Vec::new(),
             env,
             link_alerts: BTreeMap::new(),
+            link_seq: BTreeMap::new(),
         });
         if let Some((x, y)) = spec.default_size {
             // cmd-new-session.c:274-280: -x/-y become the session's

@@ -2124,15 +2124,15 @@ mod tests {
     /// a table entry that reports `not implemented`.
     #[test]
     fn non_m0_commands_parse_but_do_not_run() {
-        let calls = parse_argv(&words(&["swap-window", "-d", "-t", "a", "-s", "b"])).unwrap();
-        assert_eq!(calls[0].entry.name, "swap-window");
+        let calls = parse_argv(&words(&["choose-tree", "-N", "-t", "a"])).unwrap();
+        assert_eq!(calls[0].entry.name, "choose-tree");
         assert_eq!(
             calls[0].entry.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: swap-window"
+            "not implemented in vtmux yet: choose-tree"
         );
         assert_eq!(
-            argv_err(&["swap-window", "-Q"]),
-            "command swap-window: unknown flag -Q"
+            argv_err(&["choose-tree", "-Q"]),
+            "command choose-tree: unknown flag -Q"
         );
     }
 
