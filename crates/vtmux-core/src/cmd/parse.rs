@@ -41,8 +41,8 @@
 //! [`parse_file`] parses a whole file as one text, so a `set` in the file
 //! is not seen by a later `%if`.
 //!
-//! Not handled yet and reported as [`CmdError::Unsupported`]: arguments
-//! that are not valid UTF-8 (`\377`, `\U00110000`). Parse errors from
+//! Words are bytes, as tmux's C strings are ([`crate::rawstr`]); byte 0xff
+//! is `EOF` except in a startup file ([`ParseOpts::from_file`]). Parse errors from
 //! [`parse_config_with`] carry no `file:line:` prefix; [`parse_file`]
 //! returns the line and the caller adds the prefix.
 
@@ -80,6 +80,11 @@ pub struct ParseOpts {
     /// `CMD_PARSE_ONEGROUP`: every command is in one group, whatever its
     /// line (`cmd_parse_from_string` sets it).
     pub one_group: bool,
+    /// `cmd_parse_from_file`: the text is read through `getc`, so byte 0xff
+    /// is a byte. Every other source (`cmd_parse_from_buffer` and
+    /// `_from_string`: `source-file`, `run -C`, control lines, key
+    /// bindings) reads it through a signed `char`, where 0xff is `EOF`.
+    pub from_file: bool,
 }
 
 /// The environment for text that cannot contain `$` or `~` (the default
@@ -261,6 +266,7 @@ pub fn parse_string(text: &str, env: &mut dyn ConfigEnv) -> Result<CommandList, 
     let opts = ParseOpts {
         parse_only: false,
         one_group: true,
+        from_file: false,
     };
     Ok(CommandList {
         calls: parse_config_with(text, env, opts)?,
@@ -351,6 +357,7 @@ fn build_command(
             let opts = ParseOpts {
                 parse_only: true,
                 one_group: b.one_group,
+                from_file: false,
             };
             let mut expanded = lex_commands(text, &mut NoEnv, opts, b.line).map_err(|e| e.1)?;
             let Some(last) = expanded.last_mut() else {
@@ -461,12 +468,16 @@ fn is_var(ch: u8, first: bool) -> bool {
 type Ch = Option<u8>;
 
 impl Lexer<'_> {
+    /// `yylex_getc1` (cmd-parse.y:1184-1199). From a buffer, `ps->buf` is
+    /// a (signed, on the reference's x86-64) `char`, so byte 0xff reads as
+    /// -1, `EOF`: it is consumed, and whatever is lexing sees the end of
+    /// input there, while reading goes on after it.
     fn getc1(&mut self) -> Ch {
         let ch = self.input.get(self.off).copied();
         if ch.is_some() {
             self.off += 1;
         }
-        ch
+        ch.filter(|&c| c != 0xff || self.opts.from_file)
     }
 
     fn ungetc(&mut self, ch: Ch) {
@@ -1286,7 +1297,7 @@ mod tests {
 
     /// argv words that are not UTF-8 keep their bytes (tmux's argv is C
     /// strings); flags, `;` and `\;` work on them as on text, and the text
-    /// accessors see them as reserved characters (`rawstr`).
+    /// accessors see them as `rawstr` text.
     #[test]
     fn argv_bytes_keep_non_utf8_words() {
         let words: Vec<Vec<u8>> = [
@@ -1368,10 +1379,12 @@ mod tests {
     const RUN: ParseOpts = ParseOpts {
         parse_only: false,
         one_group: false,
+        from_file: false,
     };
     const PARSE_ONLY: ParseOpts = ParseOpts {
         parse_only: true,
         one_group: false,
+        from_file: false,
     };
 
     fn parse(text: &str) -> Result<Vec<CommandCall>, CmdError> {

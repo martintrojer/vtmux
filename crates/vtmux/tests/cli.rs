@@ -4160,3 +4160,141 @@ fn non_utf8_names_are_rejected() {
         ]
     });
 }
+
+/// Valid UTF-8 in plane 16 (U+10FF80..=U+10FFFF, private use) is an ordinary
+/// character: names take it, `show` and `source -v` print it, `.` and `?`
+/// match it, `w`, `=N` and `p` count it, `\U0010FFFF` makes it (reviewer-52,
+/// `medium_rawstr_steals_valid_utf_8_u`: 91d2579 read it as four bytes).
+#[test]
+fn plane16_characters_are_ordinary_text() {
+    compare("plane16_characters_are_ordinary_text", |w| {
+        let p = "\u{10ff80}";
+        let q = "\u{10ffff}";
+        let apb = format!("a{p}b");
+        let file = w.dir().join("f");
+        std::fs::write(
+            &file,
+            "display -p \"a\\U0010FF80b\"\nset -g @u \"\\U0010FFFF\"\nshow -g @u\n",
+        )
+        .unwrap();
+        let f = file.to_str().unwrap();
+        // A fixed name for window 0: its automatic name races (D-012).
+        let mut steps = vec![w.run(&["new", "-d", "-s", "s", "-n", "w", "cat"])];
+        for n in [p, q, &apb] {
+            steps.push(w.run(&["new-window", "-d", "-n", n]));
+            steps.push(w.run(&["setb", "-b", n, "v"]));
+            steps.push(w.run(&["set", "-g", "@p", n]));
+            steps.push(w.run_bytes(&[b"show", b"-g", b"@p"]));
+            steps.push(w.run_bytes(&[b"display", b"-p", b"#{w:@p}|#{n:@p}|#{=2:@p}|#{p4:@p}|"]));
+            steps.push(w.run_bytes(&[
+                b"display",
+                b"-p",
+                b"#{s/./Z/:@p}|#{s/x*/-/:@p}|#{m/r:^a.b$,#{@p}}|#{m:a?b,#{@p}}|#{q:@p}",
+            ]));
+        }
+        steps.push(w.run(&["rename-session", p]));
+        steps.push(w.run_bytes(&[b"source", f.as_bytes()]));
+        steps.push(w.run_bytes(&[b"source", b"-nv", f.as_bytes()]));
+        steps.push(w.run_bytes(&[b"bind", b"-T", b"foo", b"x", b"display", apb.as_bytes()]));
+        steps.push(w.run_bytes(&[b"list-keys", b"-T", b"foo"]));
+        steps.push(w.run(&["lsw", "-F", "#{window_index}:#{window_name}"]));
+        steps.push(w.run(&["lsb", "-F", "#{buffer_name}"]));
+        steps.push(w.run(&["ls", "-F", "#{session_name}"]));
+        steps
+    });
+}
+
+/// `send-keys` writes what `utf8_fromcstr` makes of the argument: a byte
+/// that is not UTF-8 goes to the pane as it is, plane-16 characters as
+/// their four bytes (reviewer-52: 91d2579 wrote U+FFFD per byte).
+#[test]
+fn send_keys_passes_bytes_through() {
+    compare("send_keys_passes_bytes_through", |w| {
+        let got = w.dir().join("got");
+        let cmd = format!("stty raw -echo; cat > {}", got.display());
+        let mut steps = vec![w.run(&["new", "-d", "-s", "s", "-x", "60", "-y", "10", &cmd])];
+        // The pane's shell must be in raw mode before anything is sent.
+        std::thread::sleep(Duration::from_millis(500));
+        let args: [&[&[u8]]; 7] = [
+            &[b"-l", b"c\xe9d"],
+            &[b"-l", b"a\xffb\xc3\xa9"],
+            &[b"a\xffb"],
+            &[b"-l", "\u{10ff80}".as_bytes()],
+            &["\u{10ffff}".as_bytes()],
+            &[b"-l", b"\x80"],
+            &[b"-H", b"ff"],
+        ];
+        for a in args {
+            let mut full: Vec<&[u8]> = vec![b"send-keys", b"-t", b"s"];
+            full.extend_from_slice(a);
+            steps.push(w.run_bytes(&full));
+            steps.push(w.run_bytes(&[b"send-keys", b"-t", b"s", b"-l", b"|"]));
+        }
+        steps.push(w.run_bytes(&[b"send-keys", b"-t", b"s", b"-l", b"END"]));
+        let start = Instant::now();
+        let mut data = Vec::new();
+        while start.elapsed() < Duration::from_secs(5) {
+            data = std::fs::read(&got).unwrap_or_default();
+            if data.ends_with(b"END") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        steps.push(Run {
+            stdout: data.escape_ascii().to_string(),
+            stderr: String::new(),
+            code: 0,
+        });
+        steps
+    });
+}
+
+/// In a parsed command string tmux reads each byte as a signed `char`, so
+/// 0xff is `EOF` (cmd-parse.y `yylex_getc1`): it ends the word, the rest is
+/// another word, and a line holding one fails as `too many arguments`.
+/// `run -C`, `if-shell`, `bind`, `set-hook`, `source-file` and control
+/// lines all behave so; a startup `-f` file (`getc`) and argv keep the byte
+/// (reviewer-52, `low_0xff_in_a_parsed_command_string_is`).
+#[test]
+fn byte_0xff_ends_a_parsed_command_string() {
+    compare("byte_0xff_ends_a_parsed_command_string", |w| {
+        let cfg = w.dir().join("cfg");
+        std::fs::write(&cfg, b"set -g @a x\xffy\nset -g @b \"p\xffq\"\n").unwrap();
+        let f = w.dir().join("f");
+        std::fs::write(&f, b"display -p a\xffb\ndisplay -p next\n").unwrap();
+        let g = w.dir().join("g");
+        std::fs::write(&g, b"display -p \"a\xffb\"\ndisplay -p \"c\\377d\"\n").unwrap();
+        let (cfg, f, g) = (
+            cfg.to_str().unwrap().to_owned(),
+            f.to_str().unwrap().to_owned(),
+            g.to_str().unwrap().to_owned(),
+        );
+        let label = w.label.clone();
+        vec![
+            // `-f` replaces /dev/null: it is the startup config.
+            w.raw(&["-L", &label, "-f", &cfg, "new", "-d", "-s", "s", "cat"]),
+            w.run(&["show", "-g", "@a"]),
+            w.run(&["show", "-g", "@b"]),
+            w.run_bytes(&[b"display", b"-p", b"u\xffv"]),
+            w.run_bytes(&[b"run", b"-C", b"display -p \"q\xffr\""]),
+            w.run_bytes(&[b"run", b"-C", b"display -p a\xff"]),
+            w.run_bytes(&[b"run", b"-C", b"\xffdisplay -p a"]),
+            w.run_bytes(&[b"run", b"-C", b"display -p a\xff\ndisplay -p b"]),
+            w.run_bytes(&[b"run", b"-C", b"display -p a\xfeb"]),
+            w.run_bytes(&[b"bind", b"-T", b"foo", b"x", b"display -p a\xffb"]),
+            w.run_bytes(&[b"if", b"true", b"display -p 'a\xffb'"]),
+            w.run_bytes(&[
+                b"set-hook",
+                b"-g",
+                b"after-new-window",
+                b"display -p h\xffi",
+            ]),
+            w.run(&["source", &f]),
+            w.run(&["source", &g]),
+            w.run_io(
+                &[b"-C", b"attach", b"-t", b"s"],
+                Some(b"set -g @c a\xffb\nshow -gv @c\n"),
+            ),
+        ]
+    });
+}

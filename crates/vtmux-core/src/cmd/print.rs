@@ -19,6 +19,7 @@ use std::fmt::Write as _;
 
 use super::args::{ArgValue, Args};
 use super::{CommandCall, CommandList};
+use crate::rawstr::Unit;
 
 /// `CMD_LIST_PRINT_*` (tmux.h).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -214,32 +215,36 @@ pub fn args_escape(s: &str) -> String {
 /// `utf8_strvis` with the flags `args_escape` uses.
 fn vis(s: &str, double_quoted: bool) -> String {
     let mut out = String::with_capacity(s.len() + 2);
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if crate::rawstr::is_raw(c) {
-            let rest: String = chars.clone().take(3).collect();
-            let joined = format!("{c}{rest}");
-            let bytes = crate::rawstr::to_bytes(&joined);
-            // `utf8_open` takes F4 and glibc decodes it past U+10FFFF, so
-            // `utf8_strvis` copies such a character; Rust calls it invalid.
-            if matches!(
-                bytes.as_ref(),
-                [0xf4, 0x90..=0xbf, 0x80..=0xbf, 0x80..=0xbf, ..]
-            ) && rest.chars().take(3).all(crate::rawstr::is_raw)
-            {
-                out.push(c);
-                out.extend(chars.by_ref().take(3));
+    let mut units = crate::rawstr::unit_indices(s).peekable();
+    while let Some((at, u)) = units.next() {
+        let c = match u {
+            Unit::Byte(lead) => {
+                // `utf8_open` takes F4 and glibc decodes it past U+10FFFF, so
+                // `utf8_strvis` copies such a character; Rust calls it invalid.
+                let rest: Vec<Unit> = units.clone().take(3).map(|(_, u)| u).collect();
+                if lead == 0xf4
+                    && let [
+                        Unit::Byte(0x90..=0xbf),
+                        Unit::Byte(0x80..=0xbf),
+                        Unit::Byte(0x80..=0xbf),
+                    ] = rest[..]
+                {
+                    let (last, _) = units.nth(2).expect("three units peeked");
+                    let end = crate::rawstr::unit_at(s, last).map_or(s.len(), |(_, n)| last + n);
+                    out.push_str(&s[at..end]);
+                    continue;
+                }
+                // Any other byte that is not UTF-8 is octal.
+                let _ = write!(out, "\\{lead:03o}");
                 continue;
             }
-            // Any other byte that is not UTF-8 is octal.
-            let _ = write!(out, "\\{:03o}", bytes[0]);
-            continue;
-        }
+            Unit::Char(c) => c,
+        };
         if !c.is_ascii() {
             out.push(c);
             continue;
         }
-        let next = chars.peek().copied();
+        let next = units.peek().and_then(|&(_, u)| u.char());
         match c {
             '$' if double_quoted => {
                 // Only when another byte follows (`src < end - 1`).

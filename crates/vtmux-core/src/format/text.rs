@@ -4,7 +4,7 @@
 
 use super::parse::skip;
 use super::wcwidth::char_width;
-use crate::rawstr::is_raw;
+use crate::rawstr::{Unit, unit_at};
 use std::fmt::Write as _;
 
 /// `format_leading_hashes` (format-draw.c:648): the run of `#`s at `i`, its drawn
@@ -22,22 +22,20 @@ fn leading_hashes(b: &[u8], i: usize) -> (usize, usize, usize) {
     }
 }
 
-/// The character at byte `i` of `s` (`i` is on a boundary: only ASCII bytes are skipped
-/// one at a time).
-fn char_at(s: &str, i: usize) -> char {
-    s[i..].chars().next().unwrap_or('\0')
+/// The unit at byte `i` of `s` (`i` is on a boundary: only ASCII bytes are skipped
+/// one at a time) and its length in `s`.
+fn unit(s: &str, i: usize) -> (Unit, usize) {
+    unit_at(s, i).unwrap_or((Unit::Char('\0'), 1))
 }
 
-/// What one non-`#` character adds to a width: `Some(w)` for a drawn character, `None`
-/// for an ASCII control byte that format-draw.c skips.
-fn drawn_width(c: char) -> Option<usize> {
-    if is_raw(c) {
-        // A byte that is not UTF-8 is skipped (not copied, no width).
-        None
-    } else if c.is_ascii() {
-        (' '..='~').contains(&c).then_some(1)
-    } else {
-        Some(char_width(c))
+/// What one non-`#` unit adds to a width: `Some(w)` for a drawn character, `None`
+/// for an ASCII control byte that format-draw.c skips, or a byte that is not
+/// UTF-8 (not copied, no width).
+fn drawn_width(u: Unit) -> Option<usize> {
+    match u {
+        Unit::Byte(_) => None,
+        Unit::Char(c) if c.is_ascii() => (' '..='~').contains(&c).then_some(1),
+        Unit::Char(c) => Some(char_width(c)),
     }
 }
 
@@ -60,24 +58,24 @@ pub fn width(s: &str) -> usize {
                 i = e + 1;
             }
         } else {
-            let c = char_at(s, i);
-            if is_raw(c) {
+            match unit(s, i) {
                 // `format_width` has no re-scan: a lead byte takes the whole
                 // sequence it announces (utf8_open size), valid or not.
-                i += skip_sequence(s, i);
-            } else {
-                total += drawn_width(c).unwrap_or(0);
-                i += c.len_utf8();
+                (Unit::Byte(lead), _) => i += skip_sequence(s, i, lead),
+                (u, len) => {
+                    total += drawn_width(u).unwrap_or(0);
+                    i += len;
+                }
             }
         }
     }
     total
 }
 
-/// How many bytes of `s` from `i` (on a raw character) `format_width`
-/// consumes: `utf8_open`'s size for a lead byte, else the one byte.
-fn skip_sequence(s: &str, i: usize) -> usize {
-    let lead = crate::rawstr::to_bytes(&char_at(s, i).to_string())[0];
+/// How many bytes of `s` from `i` (on the byte `lead`, not UTF-8)
+/// `format_width` consumes: `utf8_open`'s size for a lead byte, else the one
+/// byte.
+fn skip_sequence(s: &str, i: usize, lead: u8) -> usize {
     let size = match lead {
         0xc2..=0xdf => 2,
         0xe0..=0xef => 3,
@@ -87,12 +85,11 @@ fn skip_sequence(s: &str, i: usize) -> usize {
     // `size` bytes of the text: whole characters, a split one ends with it.
     let mut bytes = 0;
     let mut end = i;
-    for c in s[i..].chars() {
-        if bytes >= size {
-            break;
-        }
-        bytes += if is_raw(c) { 1 } else { c.len_utf8() };
-        end += c.len_utf8();
+    while bytes < size
+        && let Some((u, len)) = unit_at(s, end)
+    {
+        bytes += u.byte_len();
+        end += len;
     }
     end - i
 }
@@ -120,14 +117,14 @@ pub fn trim_left(s: &str, limit: usize) -> String {
                 i = e + 1;
             }
         } else {
-            let c = char_at(s, i);
-            if let Some(w) = drawn_width(c) {
+            let (u, len) = unit(s, i);
+            if let Some(w) = drawn_width(u) {
                 if total + w <= limit {
-                    out.push(c);
+                    out.push_str(&s[i..i + len]);
                 }
                 total += w;
             }
-            i += c.len_utf8();
+            i += len;
         }
     }
     out
@@ -164,14 +161,14 @@ pub fn trim_right(s: &str, limit: usize) -> String {
                 i = e + 1;
             }
         } else {
-            let c = char_at(s, i);
-            if let Some(w) = drawn_width(c) {
+            let (u, len) = unit(s, i);
+            if let Some(w) = drawn_width(u) {
                 if total >= skip_cols {
-                    out.push(c);
+                    out.push_str(&s[i..i + len]);
                 }
                 total += w;
             }
-            i += c.len_utf8();
+            i += len;
         }
     }
     out
@@ -179,17 +176,13 @@ pub fn trim_right(s: &str, limit: usize) -> String {
 
 /// `utf8_cstrwidth` (utf8.c:964): width for padding, which does not know about styles.
 fn cstr_width(s: &str) -> usize {
-    s.chars()
-        .map(|c| {
-            if is_raw(c) {
-                // `utf8_cstrwidth` tests `*s > 0x1f` on a signed char: a
-                // byte that is not UTF-8 is negative, so it has no width.
-                0
-            } else if c.is_ascii() {
-                usize::from(c > '\x1f' && c != '\x7f')
-            } else {
-                char_width(c)
-            }
+    crate::rawstr::units(s)
+        .map(|u| match u {
+            // `utf8_cstrwidth` tests `*s > 0x1f` on a signed char: a byte
+            // that is not UTF-8 is negative, so it has no width.
+            Unit::Byte(_) => 0,
+            Unit::Char(c) if c.is_ascii() => usize::from(c > '\x1f' && c != '\x7f'),
+            Unit::Char(c) => char_width(c),
         })
         .sum()
 }
@@ -308,9 +301,16 @@ pub(super) fn args_escape(s: &str) -> String {
 /// flag when `dq`).
 fn vis(s: &str, dq: bool) -> String {
     let mut out = String::with_capacity(s.len() * 2);
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        let next = it.peek().copied();
+    let mut it = crate::rawstr::units(s).peekable();
+    while let Some(u) = it.next() {
+        let next = it.peek().copied().and_then(Unit::char);
+        let c = match u {
+            Unit::Byte(b) => {
+                let _ = write!(out, "\\{b:03o}");
+                continue;
+            }
+            Unit::Char(c) => c,
+        };
         match c {
             '$' if dq && next.is_some() => {
                 if next.is_some_and(|n| n.is_ascii_alphabetic() || n == '_' || n == '{') {
@@ -329,9 +329,6 @@ fn vis(s: &str, dq: bool) -> String {
             '\x0c' => out.push_str("\\f"),
             c if c.is_ascii() && !(' '..='~').contains(&c) => {
                 let _ = write!(out, "\\{:03o}", u32::from(c));
-            }
-            c if is_raw(c) => {
-                let _ = write!(out, "\\{:03o}", crate::rawstr::to_bytes(&c.to_string())[0]);
             }
             c => out.push(c),
         }

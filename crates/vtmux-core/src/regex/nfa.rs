@@ -9,7 +9,8 @@
 //! that span only: forward state log, backward sift (`prune_impossible_nodes`),
 //! then the greedy `set_regs` / `proceed_next_node` / `update_regs` walk.
 //! Each pass costs O(text × nodes), so these patterns need no work budget.
-use super::{Anchor, Bracket, Class, Error, Expr, equal};
+use super::{Anchor, Bracket, Error, Expr, is_word, unit_equal};
+use crate::rawstr::{Unit, unit_at, unit_before};
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -20,7 +21,7 @@ const MAX_TREE_NODES: usize = 1 << 20;
 
 #[derive(Debug, Clone, Copy)]
 enum Kind {
-    Literal(char),
+    Literal(Unit),
     Any,
     Bracket(usize),
     Open(usize),
@@ -355,15 +356,12 @@ impl Nfa {
 
     // ---- matching ------------------------------------------------------
 
-    fn accepts(&self, node: usize, c: char) -> bool {
-        match self.nodes[node].kind {
-            Kind::Literal(l) => equal(l, c, self.ignore_case),
-            // glibc's `.` and brackets never match a byte that is not UTF-8
-            // (a reserved character, `rawstr`).
-            Kind::Any => !crate::rawstr::is_raw(c),
-            Kind::Bracket(b) => {
-                !crate::rawstr::is_raw(c) && self.brackets[b].matches(c, self.ignore_case)
-            }
+    fn accepts(&self, node: usize, u: Unit) -> bool {
+        match (self.nodes[node].kind, u) {
+            (Kind::Literal(l), u) => unit_equal(l, u, self.ignore_case),
+            // glibc's `.` and brackets never match a byte that is not UTF-8.
+            (Kind::Any, Unit::Char(_)) => true,
+            (Kind::Bracket(b), Unit::Char(c)) => self.brackets[b].matches(c, self.ignore_case),
             _ => false,
         }
     }
@@ -380,9 +378,8 @@ impl Nfa {
         let Kind::Assert(a) = self.nodes[node].kind else {
             return true;
         };
-        let word = |c: char| c == '_' || Class::Alnum.contains(c);
-        let before = text[..pos].chars().next_back().is_some_and(word);
-        let after = text[pos..].chars().next().is_some_and(word);
+        let before = unit_before(text, pos).is_some_and(is_word);
+        let after = unit_at(text, pos).is_some_and(|(u, _)| is_word(u));
         match a {
             Assert::Start => pos == 0 && !not_bol,
             Assert::End => pos == text.len(),
@@ -429,7 +426,7 @@ impl Nfa {
                     }
                 }
             }
-            let Some(c) = text[pos..].chars().next() else {
+            let Some((c, len)) = unit_at(text, pos) else {
                 break;
             };
             seeds.clear();
@@ -443,7 +440,7 @@ impl Nfa {
             if seeds.is_empty() && best.is_some() {
                 break;
             }
-            pos += c.len_utf8();
+            pos += len;
         }
         best
     }
@@ -460,8 +457,7 @@ impl Nfa {
         if self.groups == 0 {
             return Some(vec![Some(start..end)]);
         }
-        let positions: Vec<usize> = text[start..end]
-            .char_indices()
+        let positions: Vec<usize> = crate::rawstr::unit_indices(&text[start..end])
             .map(|(i, _)| start + i)
             .chain(std::iter::once(end))
             .collect();
@@ -494,7 +490,7 @@ impl Nfa {
                 state.push(x);
                 stack.extend(self.nodes[x].edests.iter().copied());
             }
-            if let Some(c) = text[pos..end].chars().next() {
+            if let Some((c, _)) = unit_at(&text[..end], pos) {
                 seeds.extend(
                     state
                         .iter()
@@ -526,7 +522,7 @@ impl Nfa {
                     .filter(|&x| matches!(self.nodes[x].kind, Kind::End))
                     .collect()
             } else {
-                let c = text[positions[k]..].chars().next().unwrap();
+                let (c, _) = unit_at(text, positions[k]).unwrap();
                 log[k]
                     .iter()
                     .copied()
@@ -589,7 +585,7 @@ impl Nfa {
             }
             if self.consuming(cur) {
                 // Without a fail stack glibc checks only that the node accepts.
-                if k == last || !self.accepts(cur, text[pos..].chars().next()?) {
+                if k == last || !self.accepts(cur, unit_at(text, pos)?.0) {
                     return None;
                 }
                 cur = self.nodes[cur].next;

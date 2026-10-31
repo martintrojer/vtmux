@@ -22,19 +22,32 @@ enum Item {
 /// Match an entire string, with glibc's UTF-8 then byte fallback semantics.
 #[must_use]
 pub fn matches(pattern: &str, text: &str, ignore_case: bool) -> bool {
-    let pattern = pattern.split('\0').next().unwrap_or_default();
-    let text = text.split('\0').next().unwrap_or_default();
-    run(
-        &pattern.chars().collect::<Vec<_>>(),
-        &text.chars().collect::<Vec<_>>(),
-        ignore_case,
-        true,
-    ) || run(
-        &pattern.bytes().map(char::from).collect::<Vec<_>>(),
-        &text.bytes().map(char::from).collect::<Vec<_>>(),
-        ignore_case,
-        false,
-    )
+    use crate::rawstr::{c_str, is_utf8, to_bytes};
+    let (pattern, text) = (c_str(pattern), c_str(text));
+    // A string that is not UTF-8 has no wide form (`mbsrtowcs` fails): only
+    // the byte pass runs.
+    (is_utf8(pattern)
+        && is_utf8(text)
+        && run(
+            &pattern.chars().collect::<Vec<_>>(),
+            &text.chars().collect::<Vec<_>>(),
+            ignore_case,
+            true,
+        ))
+        || run(
+            &to_bytes(pattern)
+                .iter()
+                .copied()
+                .map(char::from)
+                .collect::<Vec<_>>(),
+            &to_bytes(text)
+                .iter()
+                .copied()
+                .map(char::from)
+                .collect::<Vec<_>>(),
+            ignore_case,
+            false,
+        )
 }
 
 fn fold(c: char, icase: bool, wide: bool) -> char {

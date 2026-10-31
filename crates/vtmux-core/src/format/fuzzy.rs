@@ -58,9 +58,12 @@ fn scan(text: &str) -> (Vec<Visible>, [usize; 4]) {
             }
             continue;
         }
-        let c = text[at..].chars().next().unwrap();
-        at += c.len_utf8();
-        if !c.is_ascii_control() {
+        let (u, len) = crate::rawstr::unit_at(text, at).unwrap();
+        at += len;
+        // A byte that is not UTF-8 is not drawn.
+        if let crate::rawstr::Unit::Char(c) = u
+            && !c.is_ascii_control()
+        {
             add(c, &style);
         }
     }

@@ -198,6 +198,10 @@ pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) 
     let parse = ParseOpts {
         parse_only: opts.parse_only,
         one_group: false,
+        // Only the startup config has a parse client, and only `load_cfg`
+        // reads with `cmd_parse_from_file` (cfg.c:96-123); `source-file`
+        // goes through `load_cfg_from_buffer`. Byte 0xff tells them apart.
+        from_file: opts.parse_client.is_some(),
     };
     // Each line is its own group (cmd-parse.y cmd_parse_build_commands):
     // an error stops the rest of that line only. `pi->c` is the item's

@@ -371,7 +371,7 @@ pub fn send_keys_bytes(arg: &str, literal: bool, modes: KeyModes) -> Vec<u8> {
     if !literal && let Some(key) = lookup(arg) {
         return encode(&key, modes);
     }
-    arg.as_bytes().to_vec()
+    vtmux_core::rawstr::to_bytes(arg).into_owned()
 }
 
 #[cfg(test)]

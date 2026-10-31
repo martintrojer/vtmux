@@ -67,8 +67,9 @@ pub fn exec(
     let mut bytes = Vec::new();
     for _ in 0..repeat {
         for arg in &args.positionals {
-            // `utf8_fromcstr` keeps no byte that is not UTF-8: each is U+FFFD.
-            let arg = &*vtmux_core::rawstr::to_lossy(&arg.text()).into_owned();
+            // `utf8_fromcstr` keeps a byte that is not UTF-8 as a one-byte
+            // character, and the pane gets it as it is.
+            let arg = &*arg.text();
             if hex {
                 // -H: each argument is one hex byte; bad ones are skipped.
                 if let Ok(b) = u8::from_str_radix(arg, 16)
