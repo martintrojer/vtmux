@@ -83,5 +83,7 @@ pub fn exec(
             shell,
         })
         .map_err(|e| EdgeError::Message(format!("respawn pane failed: fork failed: {e}")))?;
+    // cmd-respawn-pane.c:92: PANE_REDRAW.
+    server.model.redraw_panes.insert(wp);
     Ok(())
 }

@@ -421,6 +421,7 @@ impl Server {
             self.check_window_resizes();
             self.apply_redraws();
             self.render_clients();
+            self.model.redraw_panes.clear();
             self.control_tick();
             if self.wants_flush() {
                 // server_loop / server_send_exit: release every waiter.
@@ -944,7 +945,7 @@ impl Server {
         // server_client_set_session: status_timer_start, then
         // server_redraw_client.
         self.status_timer_start(id);
-        self.status_redraw_client(id);
+        self.redraw_client(id);
         Ok(())
     }
 
@@ -1035,7 +1036,7 @@ impl Server {
         }
         client.compositor.invalidate();
         // server-client.c:2729: server_redraw_client.
-        client.status.request_redraw();
+        client.status.request_full_redraw();
         self.recalculate_sizes();
     }
 
@@ -1063,7 +1064,7 @@ impl Server {
         for c in self.clients.values_mut() {
             if c.attached.is_some() {
                 c.compositor.invalidate();
-                c.status.request_redraw();
+                c.status.request_full_redraw();
             }
         }
     }
@@ -1385,7 +1386,19 @@ impl Server {
             let area = rows.saturating_sub(lines);
             let top = self.model.status_top(TreeId::Session(s));
             let scene_y = if top { lines } else { 0 };
-            self.draw_window(s, caps, &mut screen, scene_y, area);
+            // TTY_FREEZE (status.c:385-386, tty.c:1646): under a message
+            // pane output is not written, so the terminal keeps the pane
+            // content it shows until a full redraw (server_redraw_client)
+            // or the message clears. Borders and pane status lines still
+            // draw (CLIENT_REDRAWBORDERS is not frozen).
+            let client = self.clients.get_mut(&id).expect("client");
+            let held = client
+                .status
+                .hold_window()
+                .then(|| client.compositor.shown_rows(cols, rows, scene_y, area))
+                .flatten()
+                .map(<[vtmux_vt::Cell]>::to_vec);
+            self.draw_window(s, caps, &mut screen, scene_y, area, held.as_deref());
             self.draw_status(id, s, caps, &mut screen, lines, top);
             let frame = self
                 .clients
@@ -1400,7 +1413,9 @@ impl Server {
     }
 
     /// Session `s`'s current window composed into rows
-    /// `y..y + rows` of `screen`, with the active pane's cursor.
+    /// `y..y + rows` of `screen`, with the active pane's cursor. `held` is
+    /// what the terminal shows in those rows while pane output is frozen:
+    /// pane content cells keep it.
     fn draw_window(
         &self,
         s: SessionId,
@@ -1408,6 +1423,7 @@ impl Server {
         screen: &mut vtmux_vt::Snapshot,
         y: u16,
         rows: u16,
+        held: Option<&[vtmux_vt::Cell]>,
     ) {
         let source = crate::render::window::Source {
             model: &self.model,
@@ -1426,6 +1442,15 @@ impl Server {
         };
         crate::render::compose::compose(&scene, &draw, &theme, &mut window);
         crate::render::window::cursor(&mut window, &draw, &self.model, rows);
+        if let Some(held) = held {
+            for (i, (cell, shown)) in window.cells.iter_mut().zip(held).enumerate() {
+                if let Some(crate::render::scene::SceneCell::Pane { pane, .. }) = scene.cells.get(i)
+                    && !self.model.redraw_panes.contains(pane)
+                {
+                    cell.clone_from(shown);
+                }
+            }
+        }
         let at = usize::from(y) * cols;
         screen.cells[at..at + window.cells.len()].clone_from_slice(&window.cells);
         screen.cursor = window.cursor.map(|(x, cy)| (x, cy + y));
@@ -1470,9 +1495,13 @@ impl Server {
 
     /// `status_message_set(c, -1, 1, 0, 0, "%s", text)`: the message most
     /// callers show (errors from bound keys, alerts, `list-keys -1`):
-    /// `display-time`, styles ignored, keys clear it.
+    /// `display-time`, styles ignored, keys clear it, the pane area frozen.
     pub fn status_message_set(&mut self, id: ClientId, text: String) {
-        self.status_message(id, text, None, true, false);
+        let flags = crate::render::status::MessageFlags {
+            ignore_styles: true,
+            ..Default::default()
+        };
+        self.status_message(id, text, None, flags);
     }
 
     /// [`Self::status_message_set`] for every terminal client attached to
@@ -1497,8 +1526,7 @@ impl Server {
         id: ClientId,
         text: String,
         delay_ms: Option<u64>,
-        ignore_styles: bool,
-        ignore_keys: bool,
+        flags: crate::render::status::MessageFlags,
     ) {
         let Some(s) = self
             .clients
@@ -1512,8 +1540,7 @@ impl Server {
             u64::try_from(self.model.number_option(TreeId::Session(s), "display-time")).unwrap_or(0)
         });
         if let Some(c) = self.clients.get_mut(&id) {
-            c.status
-                .set_message(Instant::now(), text, delay, ignore_styles, ignore_keys);
+            c.status.set_message(Instant::now(), text, delay, flags);
         }
     }
 
@@ -1558,17 +1585,25 @@ impl Server {
         }
     }
 
-    /// `server_redraw_client` / `server_status_client`: vtmux composes the
-    /// whole screen each frame, so only the status needs telling.
+    /// `server_status_client`: the status lines are drawn again.
     pub(crate) fn status_redraw_client(&mut self, id: ClientId) {
         if let Some(c) = self.clients.get_mut(&id) {
             c.status.request_redraw();
         }
     }
 
+    /// `server_redraw_client`: the status and the pane area, even under a
+    /// message (`CLIENT_REDRAWWINDOW` draws through `TTY_FREEZE`).
+    pub(crate) fn redraw_client(&mut self, id: ClientId) {
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.status.request_full_redraw();
+        }
+    }
+
     /// Apply the redraws the model asked for (server-fn.c
     /// `server_redraw_*` and `server_status_*`) to the clients.
     fn apply_redraws(&mut self) {
+        use crate::model::Redraw;
         for r in std::mem::take(&mut self.model.redraws) {
             let ids: Vec<ClientId> = self
                 .clients
@@ -1576,11 +1611,11 @@ impl Server {
                 .filter(|(_, c)| {
                     let Some(s) = c.attached else { return false };
                     match r {
-                        crate::model::Redraw::Session(x) => x == s,
-                        crate::model::Redraw::Window(w) => {
+                        Redraw::Session(x) | Redraw::SessionStatus(x) => x == s,
+                        Redraw::Window(w) => {
                             self.model.current_of(s).is_some_and(|(_, cw, _)| cw == w)
                         }
-                        crate::model::Redraw::WindowStatus(w) => self
+                        Redraw::WindowStatus(w) => self
                             .model
                             .sessions
                             .get(&s)
@@ -1589,8 +1624,13 @@ impl Server {
                 })
                 .map(|(id, _)| *id)
                 .collect();
+            let full = matches!(r, Redraw::Session(_) | Redraw::Window(_));
             for id in ids {
-                self.status_redraw_client(id);
+                if full {
+                    self.redraw_client(id);
+                } else {
+                    self.status_redraw_client(id);
+                }
             }
         }
     }
@@ -1693,6 +1733,34 @@ impl Server {
         }
         let s = crate::target::current(&self.model, origin)?.session?;
         self.best_client(Some(s))
+    }
+
+    /// `cmd_find_client` (cmd-find.c:1308-1349) for a `-c` / `-t` client
+    /// name: the first attached client, in connection order, whose name
+    /// or tty is `target` (a trailing `:` dropped, `/dev/` optional).
+    /// `None` is the current client ([`Self::target_client`]).
+    pub fn find_client(
+        &self,
+        client: Option<ClientId>,
+        origin: Origin,
+        target: Option<&str>,
+    ) -> Option<ClientId> {
+        let Some(target) = target else {
+            return self.target_client(client, origin);
+        };
+        let target = target.strip_suffix(':').unwrap_or(target);
+        self.clients.iter().find_map(|(&id, c)| {
+            c.attached?;
+            let tty = c
+                .hello
+                .as_ref()
+                .and_then(|h| h.tty.as_ref())
+                .map_or("", |t| t.name.as_str());
+            let hit = self.client_name(id) == target
+                || (!tty.is_empty()
+                    && (tty == target || tty.strip_prefix("/dev/") == Some(target)));
+            hit.then_some(id)
+        })
     }
 
     /// A format context over `found` with `client` as `ft->c`.
@@ -2193,6 +2261,7 @@ impl Server {
                     let retitled = (pane.term.title(), pane.term.pwd()) != before;
                     pane.changed = true;
                     let belled = pane.term.take_bells() != 0;
+                    let redraw = pane.term.take_redraw();
                     let replies = pane.term.take_replies();
                     if !replies.is_empty() {
                         io.write(&replies);
@@ -2206,6 +2275,9 @@ impl Server {
                         w.activity = stamp;
                     }
                     self.model.alerts_queue(window, alerts::ACTIVITY);
+                    if redraw {
+                        self.model.redraw_panes.insert(p);
+                    }
                     if retitled {
                         self.model
                             .redraw(crate::model::Redraw::WindowStatus(window));

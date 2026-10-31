@@ -88,6 +88,17 @@ impl Compositor {
     pub fn invalidate(&mut self) {
         self.last = None;
     }
+    /// Rows `y..y + n` of the last frame sent, if it had this size: what
+    /// the terminal shows there.
+    #[must_use]
+    pub fn shown_rows(&self, cols: u16, rows: u16, y: u16, n: u16) -> Option<&[vtmux_vt::Cell]> {
+        let last = self
+            .last
+            .as_ref()
+            .filter(|s| (s.cols, s.rows) == (cols, rows))?;
+        let at = usize::from(y) * usize::from(cols);
+        last.cells.get(at..at + usize::from(n) * usize::from(cols))
+    }
     /// Backpressure (D14), tty.c `tty_block_maybe` and `TTY_BLOCK_START` /
     /// `TTY_BLOCK_STOP`: once `queued` bytes for the client reach
     /// `1 + cols*rows*8`, stop composing; when they fall under

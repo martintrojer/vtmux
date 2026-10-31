@@ -159,16 +159,21 @@ pub struct Pane {
     pub active_point: u64,
 }
 
-/// A status-line redraw tmux asks for (server-fn.c); the server applies
-/// them to its clients before the next frame.
+/// A redraw tmux asks for (server-fn.c); the server applies them to its
+/// clients before the next frame. The `*Status` kinds redraw only the
+/// status (`server_status_*`); the others the whole client
+/// (`server_redraw_*`), which also draws a pane area frozen under a
+/// message again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Redraw {
     /// `server_redraw_window`: clients whose current window this is.
     Window(WindowId),
     /// `server_status_window`: clients of every session that has it.
     WindowStatus(WindowId),
-    /// `server_redraw_session` / `server_status_session`.
+    /// `server_redraw_session`.
     Session(SessionId),
+    /// `server_status_session`.
+    SessionStatus(SessionId),
 }
 
 /// The server's sessions, windows and panes.
@@ -190,6 +195,10 @@ pub struct Model {
     pub(crate) alerts_list: Vec<WindowId>,
     /// Status redraws asked for since the last frame.
     pub(crate) redraws: Vec<Redraw>,
+    /// `PANE_REDRAW`: panes drawn whole at the next frame, even where pane
+    /// output is frozen under a message; cleared once every client drew
+    /// (server-client.c:1929-1940).
+    pub(crate) redraw_panes: std::collections::BTreeSet<PaneId>,
 }
 
 impl Default for Model {
@@ -207,6 +216,7 @@ impl Default for Model {
             active_points: 0,
             alerts_list: Vec::new(),
             redraws: Vec::new(),
+            redraw_panes: std::collections::BTreeSet::new(),
         }
     }
 }
