@@ -159,6 +159,18 @@ pub struct Pane {
     pub active_point: u64,
 }
 
+/// A status-line redraw tmux asks for (server-fn.c); the server applies
+/// them to its clients before the next frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Redraw {
+    /// `server_redraw_window`: clients whose current window this is.
+    Window(WindowId),
+    /// `server_status_window`: clients of every session that has it.
+    WindowStatus(WindowId),
+    /// `server_redraw_session` / `server_status_session`.
+    Session(SessionId),
+}
+
 /// The server's sessions, windows and panes.
 #[derive(Debug)]
 pub struct Model {
@@ -176,6 +188,8 @@ pub struct Model {
     active_points: u64,
     /// Windows queued for the next alert check (`alerts_list`).
     pub(crate) alerts_list: Vec<WindowId>,
+    /// Status redraws asked for since the last frame.
+    pub(crate) redraws: Vec<Redraw>,
 }
 
 impl Default for Model {
@@ -192,11 +206,19 @@ impl Default for Model {
             activity: 0,
             active_points: 0,
             alerts_list: Vec::new(),
+            redraws: Vec::new(),
         }
     }
 }
 
 impl Model {
+    /// Ask for a status redraw ([`Redraw`]).
+    pub fn redraw(&mut self, r: Redraw) {
+        if !self.redraws.contains(&r) {
+            self.redraws.push(r);
+        }
+    }
+
     /// The next activity stamp.
     pub fn touch(&mut self) -> u64 {
         self.activity += 1;
@@ -325,6 +347,8 @@ impl Model {
             pane.active_point = self.active_points;
             pane.changed = true;
         }
+        // window.c:782.
+        self.redraw(Redraw::Window(w));
         true
     }
 
@@ -431,6 +455,8 @@ impl Model {
             .collect();
         let mut gone = Vec::new();
         for s in linked {
+            // server-fn.c:255: server_redraw_session_group.
+            self.redraw(Redraw::Session(s));
             self.unzoom(w);
             while let Some(index) = self.index_of(s, w) {
                 if self.detach_window(s, index) {
@@ -721,6 +747,8 @@ impl Model {
         self.options.remove_pane(id);
         let pane = self.panes.remove(&id);
         self.fix_panes(wid);
+        // server-fn.c:435 / 567: server_redraw_window.
+        self.redraw(Redraw::Window(wid));
         pane.into_iter().collect()
     }
 
@@ -760,6 +788,8 @@ impl Model {
         window.pending_size = None;
         window.layout.resize_window(sx, sy);
         self.fix_panes(w);
+        // resize.c:80.
+        self.redraw(Redraw::Window(w));
         if let Some(p) = zoomed {
             self.zoom(w, p);
         }

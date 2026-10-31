@@ -80,8 +80,8 @@ pub fn list_keys(
         && tc.is_some_and(|c| !server.is_control(c) && server.client_session(c).is_some());
     for line in listed.printed() {
         if to_status {
-            if let Some(c) = tc.and_then(|c| server.clients.get_mut(&c)) {
-                c.message = Some(line.to_owned());
+            if let Some(c) = tc {
+                server.status_message_set(c, line.to_owned());
             }
         } else {
             item.print(line);

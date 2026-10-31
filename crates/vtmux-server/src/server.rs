@@ -94,9 +94,9 @@ pub(crate) struct Client {
     pub(crate) keys: crate::key_dispatch::ClientKeys,
     /// `c->last_session`.
     pub(crate) last_session: Option<SessionId>,
-    /// The status-line message an attached client was given
-    /// (`c->message_string`); shown once the status line draws messages.
-    pub(crate) message: Option<String>,
+    /// The status lines as drawn, the message shown over them, and their
+    /// redraw flag and timers (`c->status`, `c->message_string`).
+    pub(crate) status: crate::render::status::StatusLine,
     /// Frame bytes sent to the client (`c->written`).
     pub(crate) written: usize,
     pasting: bool,
@@ -409,6 +409,7 @@ impl Server {
                 self.pane_readable(p);
             }
             self.expire_repeat(Instant::now());
+            self.status_timers(Instant::now());
             self.model.alerts_timers(Instant::now());
             self.run_alerts();
             let ids: Vec<_> = self.clients.keys().copied().collect();
@@ -418,6 +419,7 @@ impl Server {
             self.resume_woken();
             self.check_window_names();
             self.check_window_resizes();
+            self.apply_redraws();
             self.render_clients();
             self.control_tick();
             if self.wants_flush() {
@@ -453,7 +455,13 @@ impl Server {
         if let Some(deadline) = self
             .clients
             .values()
-            .flat_map(|c| [c.decoder.deadline(), c.keys.repeat_deadline])
+            .flat_map(|c| {
+                [
+                    c.decoder.deadline(),
+                    c.keys.repeat_deadline,
+                    c.status.deadline(),
+                ]
+            })
             .flatten()
             .min()
         {
@@ -547,7 +555,7 @@ impl Server {
                             focused: true,
                             keys: crate::key_dispatch::ClientKeys::default(),
                             last_session: None,
-                            message: None,
+                            status: crate::render::status::StatusLine::default(),
                             written: 0,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
@@ -933,6 +941,10 @@ impl Server {
         }
         self.update_focus(self.model.current_of(s).map(|(_, w, _)| w));
         self.session_attached_alerts(s);
+        // server_client_set_session: status_timer_start, then
+        // server_redraw_client.
+        self.status_timer_start(id);
+        self.status_redraw_client(id);
         Ok(())
     }
 
@@ -1006,12 +1018,7 @@ impl Server {
             if visual == OFF {
                 continue;
             }
-            // TODO(status_msg): status_message_set(c, -1, 1, 0, 0, ...);
-            // until that API lands the text is parked in `message`, which
-            // nothing draws yet.
-            if let Some(c) = self.clients.get_mut(&id) {
-                c.message = Some(text.clone());
-            }
+            self.status_message_set(id, text.clone());
         }
     }
 
@@ -1027,6 +1034,8 @@ impl Server {
             tty.rows = rows.max(1);
         }
         client.compositor.invalidate();
+        // server-client.c:2729: server_redraw_client.
+        client.status.request_redraw();
         self.recalculate_sizes();
     }
 
@@ -1054,6 +1063,7 @@ impl Server {
         for c in self.clients.values_mut() {
             if c.attached.is_some() {
                 c.compositor.invalidate();
+                c.status.request_redraw();
             }
         }
     }
@@ -1218,6 +1228,11 @@ impl Server {
                     self.update_focus(self.client_window(id));
                 }
                 crate::input::Event::Key(key) => {
+                    // server_client_handle_key0: a message goes with the
+                    // key, or swallows it with -N.
+                    if c.status.key() {
+                        continue;
+                    }
                     let pasting = c.pasting;
                     self.touch_client(id);
                     if (pasting || !self.handle_key(id, key.to_core()))
@@ -1369,9 +1384,9 @@ impl Server {
             // top status (REDRAW_STATUS_TOP) and above a bottom one.
             let area = rows.saturating_sub(lines);
             let top = self.model.status_top(TreeId::Session(s));
-            let (scene_y, status_y) = if top { (lines, 0) } else { (0, area) };
+            let scene_y = if top { lines } else { 0 };
             self.draw_window(s, caps, &mut screen, scene_y, area);
-            self.draw_status(id, s, caps, &mut screen, status_y, lines);
+            self.draw_status(id, s, caps, &mut screen, lines, top);
             let frame = self
                 .clients
                 .get_mut(&id)
@@ -1417,24 +1432,167 @@ impl Server {
         screen.cursor_visible = window.cursor_visible;
     }
 
-    /// The status lines at rows `y..y + lines` (status.c `status_redraw`),
-    /// expanded in the client's format tree.
+    /// The client's status lines, or its message, over `screen`
+    /// ([`crate::render::status::draw`]), expanded in the client's format
+    /// tree when they need drawing again.
     fn draw_status(
-        &self,
+        &mut self,
         id: ClientId,
         s: SessionId,
         caps: crate::render::Caps,
         screen: &mut vtmux_vt::Snapshot,
-        y: u16,
         lines: u16,
+        top: bool,
     ) {
-        let source = crate::render::window::Source {
-            model: &self.model,
-            info: &self.info,
-            env: &self.global_env,
+        let Some(mut status) = self
+            .clients
+            .get_mut(&id)
+            .map(|c| std::mem::take(&mut c.status))
+        else {
+            return;
         };
-        let ctx = self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
-        crate::render::status::draw(&source, &ctx, s, caps, screen, y, lines);
+        {
+            let source = crate::render::window::Source {
+                model: &self.model,
+                info: &self.info,
+                env: &self.global_env,
+            };
+            let mut ctx =
+                self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
+            status.draw(&source, &mut ctx, s, caps, screen, lines, top);
+        }
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.status = status;
+        }
+    }
+
+    // ------------------------------------------------------ status line
+
+    /// `status_message_set(c, -1, 1, 0, 0, "%s", text)`: the message most
+    /// callers show (errors from bound keys, alerts, `list-keys -1`):
+    /// `display-time`, styles ignored, keys clear it.
+    pub fn status_message_set(&mut self, id: ClientId, text: String) {
+        self.status_message(id, text, None, true, false);
+    }
+
+    /// [`Self::status_message_set`] for every terminal client attached to
+    /// session `s`.
+    pub fn status_message_session(&mut self, s: SessionId, text: &str) {
+        let ids: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.attached == Some(s) && c.control.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            self.status_message_set(id, text.to_owned());
+        }
+    }
+
+    /// `status_message_set` (status.c:339-390) in full: `delay_ms` `None`
+    /// is the session's `display-time`, 0 waits for a key. A client with
+    /// no session or a control client shows nothing.
+    pub fn status_message(
+        &mut self,
+        id: ClientId,
+        text: String,
+        delay_ms: Option<u64>,
+        ignore_styles: bool,
+        ignore_keys: bool,
+    ) {
+        let Some(s) = self
+            .clients
+            .get(&id)
+            .filter(|c| c.control.is_none())
+            .and_then(|c| c.attached)
+        else {
+            return;
+        };
+        let delay = delay_ms.unwrap_or_else(|| {
+            u64::try_from(self.model.number_option(TreeId::Session(s), "display-time")).unwrap_or(0)
+        });
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.status
+                .set_message(Instant::now(), text, delay, ignore_styles, ignore_keys);
+        }
+    }
+
+    /// `status_timer_start(c)`: the client's `status-interval` timer from
+    /// its session's options.
+    pub(crate) fn status_timer_start(&mut self, id: ClientId) {
+        let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+            return;
+        };
+        let tree = TreeId::Session(s);
+        let on = self.model.status_lines(tree) != 0;
+        let interval =
+            u64::try_from(self.model.number_option(tree, "status-interval")).unwrap_or(0);
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.status.start_timer(Instant::now(), on, interval);
+        }
+    }
+
+    /// `status_timer_start_all`.
+    pub(crate) fn status_timer_start_all(&mut self) {
+        let ids: Vec<_> = self.clients.keys().copied().collect();
+        for id in ids {
+            self.status_timer_start(id);
+        }
+    }
+
+    /// The message and status timers that are due.
+    fn status_timers(&mut self, now: Instant) {
+        let ids: Vec<_> = self.clients.keys().copied().collect();
+        for id in ids {
+            let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+                continue;
+            };
+            let interval = u64::try_from(
+                self.model
+                    .number_option(TreeId::Session(s), "status-interval"),
+            )
+            .unwrap_or(0);
+            if let Some(c) = self.clients.get_mut(&id) {
+                c.status.tick(now, interval);
+            }
+        }
+    }
+
+    /// `server_redraw_client` / `server_status_client`: vtmux composes the
+    /// whole screen each frame, so only the status needs telling.
+    pub(crate) fn status_redraw_client(&mut self, id: ClientId) {
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.status.request_redraw();
+        }
+    }
+
+    /// Apply the redraws the model asked for (server-fn.c
+    /// `server_redraw_*` and `server_status_*`) to the clients.
+    fn apply_redraws(&mut self) {
+        for r in std::mem::take(&mut self.model.redraws) {
+            let ids: Vec<ClientId> = self
+                .clients
+                .iter()
+                .filter(|(_, c)| {
+                    let Some(s) = c.attached else { return false };
+                    match r {
+                        crate::model::Redraw::Session(x) => x == s,
+                        crate::model::Redraw::Window(w) => {
+                            self.model.current_of(s).is_some_and(|(_, cw, _)| cw == w)
+                        }
+                        crate::model::Redraw::WindowStatus(w) => self
+                            .model
+                            .sessions
+                            .get(&s)
+                            .is_some_and(|x| x.windows.values().any(|v| *v == w)),
+                    }
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            for id in ids {
+                self.status_redraw_client(id);
+            }
+        }
     }
 
     /// The session client `id` is attached to.
@@ -2028,7 +2186,11 @@ impl Server {
             let Some(io) = pane.io.as_mut() else { return };
             match io.read() {
                 ReadResult::Data(bytes) => {
+                    let before = (pane.term.title(), pane.term.pwd());
                     pane.term.feed(&bytes);
+                    // input.c:2725-2740: a new title (OSC 0/2) or path
+                    // (OSC 7) redraws the status of the window's sessions.
+                    let retitled = (pane.term.title(), pane.term.pwd()) != before;
                     pane.changed = true;
                     let belled = pane.term.take_bells() != 0;
                     let replies = pane.term.take_replies();
@@ -2044,6 +2206,10 @@ impl Server {
                         w.activity = stamp;
                     }
                     self.model.alerts_queue(window, alerts::ACTIVITY);
+                    if retitled {
+                        self.model
+                            .redraw(crate::model::Redraw::WindowStatus(window));
+                    }
                     if belled {
                         // input_c0_dispatch BEL: alerts_queue(WINDOW_BELL).
                         self.model.alerts_queue(window, alerts::BELL);
@@ -2190,6 +2356,8 @@ impl Server {
             {
                 window.name.clone_from(&name);
                 self.control_window_renamed(w, &name);
+                // names.c:100.
+                self.model.redraw(crate::model::Redraw::WindowStatus(w));
             }
         }
     }
