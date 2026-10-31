@@ -194,6 +194,8 @@ pub struct Model {
     pub session_ids: IdAllocator<SessionId>,
     pub window_ids: IdAllocator<WindowId>,
     pub pane_ids: IdAllocator<PaneId>,
+    /// The paste buffers (paste.c).
+    pub paste: crate::paste::PasteStore,
     activity: u64,
     /// `next_active_point` (window.c:63).
     active_points: u64,
@@ -220,6 +222,7 @@ impl Default for Model {
             session_ids: IdAllocator::new(),
             window_ids: IdAllocator::new(),
             pane_ids: IdAllocator::new(),
+            paste: crate::paste::PasteStore::default(),
             activity: 0,
             active_points: 0,
             link_stamp: 0,

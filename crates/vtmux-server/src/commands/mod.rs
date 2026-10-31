@@ -14,13 +14,17 @@
 
 mod break_pane;
 mod capture_pane;
+mod delete_buffer;
 mod display_message;
+mod file_io;
 mod join_pane;
 mod keys;
 mod kill_pane;
 mod kill_server;
 mod kill_session;
 mod kill_window;
+mod load_buffer;
+mod list_buffers;
 mod list_clients;
 mod list_panes;
 mod list_sessions;
@@ -28,16 +32,19 @@ mod list_windows;
 mod move_window;
 mod new_session;
 mod new_window;
+mod paste_buffer;
 mod rename_session;
 mod rename_window;
 mod resize_pane;
 mod respawn_pane;
 mod respawn_window;
 mod rotate_window;
+mod save_buffer;
 mod select_layout;
 mod select_pane;
 mod select_window;
 mod send_keys;
+mod set_buffer;
 mod set_environment;
 mod set_option;
 mod show_environment;
@@ -336,6 +343,13 @@ fn dispatch(
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
+        "set-buffer" => set_buffer::exec(server, item, args),
+        "delete-buffer" => delete_buffer::exec(server, args),
+        "show-buffer" => save_buffer::exec(server, item, args, found, true),
+        "save-buffer" => save_buffer::exec(server, item, args, found, false),
+        "load-buffer" => load_buffer::exec(server, item, args, found),
+        "paste-buffer" => paste_buffer::exec(server, args, found),
+        "list-buffers" => list_buffers::exec(server, item, args),
         "bind-key" | "unbind-key" => keys::bind_or_unbind(server, call),
         "list-keys" => keys::list_keys(server, item, args, found),
         "send-prefix" => keys::send_prefix(server, args, found),
@@ -480,6 +494,13 @@ fn reset_key_table(server: &mut Server, item: &Item, client: ClientId) {
     if !item.repeat {
         server.set_key_table(client, None);
     }
+}
+
+/// `buffer-limit`.
+fn buffer_limit(server: &Server) -> i64 {
+    server
+        .model
+        .number_option(vtmux_core::options::TreeId::Server, "buffer-limit")
 }
 
 /// `format_single` with the command's target.
