@@ -2427,3 +2427,55 @@ fn first_attach_after_split_waits_for_the_resize_timer() {
         Op::Winch("%1"),
     ]);
 }
+
+/// Entering the alternate screen flushes a pane's queued resize at once
+/// (`screen_write_alternateon`, screen-write.c:3157-3166); leaving it does not.
+/// The pane resizes twice 50 ms apart, so the second size waits on the
+/// 250 ms resize timer, then switches screens. The script records whether
+/// the last SIGWINCH came within 60 ms of the switch. To test leaving,
+/// the pane enters the alternate screen first, before the resizes.
+fn alternate_flush(before: &'static str, seq: &'static str) -> String {
+    let script = format!(
+        "w=0; trap 'w=$((w+1))' WINCH; printf '{before}P '; \
+         while [ ! -e go ]; do sleep 0.01; done; printf '{seq}'; n=$w; \
+         i=0; while [ $i -lt 6 ]; do sleep 0.01; i=$((i+1)); done; \
+         if [ $w -gt $n ]; then printf 'FAST.'; else printf 'SLOW.'; fi; \
+         sleep 100000 & while :; do wait; done"
+    );
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let dir = tempfile::tempdir().unwrap();
+        let go = dir.path().join("go");
+        let cmd = format!("cd {} && {script}", dir.path().display());
+        assert!(
+            w.cli(&[
+                "new", "-d", "-s", "a", "-x", "60", "-y", "20", "sh", "-c", &cmd
+            ])
+            .status
+            .success()
+        );
+        let mut a = w.attach_sized(&["attach", "-t", "a"], 60, 20);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        thread::sleep(Duration::from_millis(600));
+        a.resize(61, 20);
+        thread::sleep(Duration::from_millis(50));
+        a.resize(62, 20);
+        std::fs::write(&go, b"").unwrap();
+        thread::sleep(Duration::from_millis(600));
+        let o = w.cli(&["capture-pane", "-p", "-t", "a"]);
+        outputs.push(String::from_utf8_lossy(&o.stdout).into_owned());
+    }
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+    outputs.remove(0)
+}
+#[test]
+fn entering_the_alternate_screen_flushes_resizes() {
+    let on = alternate_flush("", "\\033[?1049h");
+    assert!(on.contains("FAST."), "{on}");
+}
+#[test]
+fn leaving_the_alternate_screen_waits_for_the_timer() {
+    let off = alternate_flush("\\033[?1049h", "\\033[?1049l");
+    assert!(off.contains("SLOW."), "{off}");
+}
