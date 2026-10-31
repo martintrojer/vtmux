@@ -43,7 +43,7 @@ impl Found {
         }
     }
 
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.session.is_some() && self.window.is_some() && self.pane.is_some()
     }
 }

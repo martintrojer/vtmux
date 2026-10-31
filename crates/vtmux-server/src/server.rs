@@ -297,24 +297,72 @@ fn find_home(env: &Environ) -> Option<PathBuf> {
 /// The server's [`ConfigEnv`]: `$VAR` from the global environment, `~`
 /// and `~user` through the passwd database (cmd-parse.y
 /// `yylex_token_variable`, `yylex_token_tilde`), assignments into the
-/// global environment.
-pub struct GlobalEnv<'a>(pub &'a mut Environ);
+/// global environment, and `%if` conditions expanded over the model.
+pub struct GlobalEnv<'a> {
+    pub env: &'a mut Environ,
+    model: &'a Model,
+    info: &'a ServerInfo,
+    /// `pi->c` and the state `cmd_find_from_client` finds for it
+    /// (cmd-parse.y:206-212). `None` is a parse with no client
+    /// (`cmd_parse_from_string(s, NULL)`): the best session.
+    client: Option<(Origin, Option<ClientView>, std::rc::Rc<[ClientView]>)>,
+}
+
+impl<'a> GlobalEnv<'a> {
+    /// A parse with no client (`cmd_parse_from_string(s, NULL)`).
+    pub fn new(env: &'a mut Environ, model: &'a Model, info: &'a ServerInfo) -> Self {
+        Self {
+            env,
+            model,
+            info,
+            client: None,
+        }
+    }
+
+    /// A parse for `client` running from `origin` (`pi->c`), whose
+    /// view and the attached clients come from [`Server::format_ctx`].
+    #[must_use]
+    pub fn for_client(
+        mut self,
+        origin: Origin,
+        client: Option<ClientView>,
+        clients: std::rc::Rc<[ClientView]>,
+    ) -> Self {
+        self.client = Some((origin, client, clients));
+        self
+    }
+}
 
 impl ConfigEnv for GlobalEnv<'_> {
     fn var(&self, name: &str) -> Option<String> {
-        self.0.get(name).map(str::to_owned)
+        self.env.get(name).map(str::to_owned)
     }
 
     fn home(&self, user: Option<&str>) -> Option<String> {
         let path = match user {
-            None => find_home(self.0)?,
+            None => find_home(self.env)?,
             Some(u) => sys::user::user_named(u)?.home,
         };
         Some(path.to_string_lossy().into_owned())
     }
 
     fn set(&mut self, name: &str, value: &str, hidden: bool) {
-        self.0.set(name, value, hidden);
+        self.env.set(name, value, hidden);
+    }
+
+    /// `expanded` (cmd-parse.y:197-217): `cmd_find_from_client` for the
+    /// parsing client, then `format_defaults` over that state.
+    /// vtmux never runs `#()` while expanding (D9), which matches
+    /// `FORMAT_NOJOBS`.
+    fn expand(&self, template: &str) -> String {
+        let origin = self.client.as_ref().map(|c| c.0).unwrap_or_default();
+        let found = crate::target::current(self.model, origin).unwrap_or_default();
+        let mut ctx = Ctx::new(self.model, self.info, self.env, found);
+        if let Some((_, client, clients)) = &self.client {
+            ctx.client.clone_from(client);
+            ctx.clients = std::rc::Rc::clone(clients);
+        }
+        vtmux_core::format::expand_str(template, &ctx)
     }
 }
 

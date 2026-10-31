@@ -88,8 +88,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."conf-syntax.sh"]
-status = "xfail"
-reason = "needs { } command blocks and %if in the config parser (core_cmd Unsupported); the M0 baseline pass was vacuous (empty main exited 0)"
+status = "pass"
 
 [tests."confirm-before-lock.sh"]
 status = "xfail"

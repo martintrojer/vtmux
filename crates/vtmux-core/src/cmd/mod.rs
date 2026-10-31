@@ -22,6 +22,8 @@
 //! `EdgeError` has no variant for live here until it grows them.
 
 pub mod args;
+#[cfg(test)]
+mod golden;
 pub mod parse;
 pub mod print;
 pub mod table;
@@ -31,7 +33,8 @@ use std::fmt;
 
 pub use args::{ArgValue, Args, NumError, strtonum};
 pub use parse::{
-    ConfigEnv, NoEnv, ParseOpts, parse_argv, parse_argv_values, parse_config_with, parse_string,
+    ConfigEnv, Group, NoEnv, ParseError, ParseOpts, PrintGroup, parse_argv, parse_argv_values,
+    parse_config_with, parse_file, parse_string,
 };
 pub use print::{PrintFlags, args_escape};
 pub use table::{CmdEntry, FindFlags, FindSpec, TMUX_COMMANDS};
@@ -89,7 +92,7 @@ pub enum CmdError {
     /// `command C: -t argument must be a string`: a block as a flag's value
     /// (arguments.c:166).
     FlagArgumentNotString { command: String, flag: char },
-    /// Valid tmux syntax that vtmux does not handle yet (`%if`, a non-UTF-8
+    /// Valid tmux syntax that vtmux does not handle yet (a non-UTF-8
     /// argument).
     Unsupported(&'static str),
     /// The command exists in tmux 3.8 but vtmux does not run it yet.
