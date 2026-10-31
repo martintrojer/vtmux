@@ -70,6 +70,9 @@ pub fn apply_show(
     let (entry, parent) = match store.tree(tree).get_only(&name) {
         Some(e) => (Some(e), false),
         None if args.flag('A') => (store.get(tree, &name), true),
+        // A global tree holds every tmux option; a vtmux one it does not
+        // hold reads as its default when named.
+        None if tree.is_global() => (super::vtmux::default_entry(&name), false),
         None => (None, false),
     };
     match entry {
@@ -95,7 +98,9 @@ pub fn apply_show(
 }
 
 /// `cmd_show_options_all` (cmd-show-options.c:344): the user options set in
-/// the tree, then every table option of the level in table order.
+/// the tree, then every table option of the level in table order, then the
+/// vtmux options set in the tree (or, with `-A`, above it): one never set
+/// is not listed, so a fresh server lists exactly what tmux does.
 #[allow(clippy::too_many_arguments)]
 fn show_all(
     store: &OptionsStore,
@@ -124,7 +129,8 @@ fn show_all(
             );
         }
     }
-    for def in table() {
+    let extensions = super::vtmux::EXTENSIONS.iter().map(|def| (def, true));
+    for (def, extension) in table().iter().map(|def| (def, false)).chain(extensions) {
         if !def.scope.includes(level) {
             continue;
         }
@@ -133,7 +139,7 @@ fn show_all(
         }
         let (entry, parent) = match store.tree(tree).get_only(def.name) {
             Some(e) => (e, false),
-            None if args.flag('A') => match store.get(tree, def.name) {
+            None if args.flag('A') => match store.get_inherited(tree, def.name, extension) {
                 Some(e) => (e, true),
                 None => continue,
             },

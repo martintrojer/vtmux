@@ -429,3 +429,57 @@ fn options_facts() {
          default-client-command new-session ; new-window -n \"x y\"\n"
     );
 }
+
+/// vtmux options (D23) are invisible until set: named lookups print the
+/// default, listings (with or without `-A`) leave them out, prefixes stay
+/// tmux's errors; once set at a scope they are listed there, and `-u`
+/// hides them again.
+#[test]
+fn vtmux_options_hidden_until_set() {
+    let listing = |sim: &mut Sim, args: &[&str]| {
+        sim.argv(args);
+        sim.take()
+    };
+    let mut sim = Sim::new();
+    let fresh: Vec<String> = [&["show", "-gw"][..], &["show", "-wA"], &["show", "-g"]]
+        .iter()
+        .map(|a| listing(&mut sim, a))
+        .collect();
+    assert!(fresh.iter().all(|l| !l.contains("vtmux")));
+    for c in [
+        &["show", "-gv", "vtmux-focus-ring"][..],
+        &["show", "-gw", "vtmux-focus-ring"],
+        &["show", "-w", "vtmux-focus-ring"],
+        &["show", "-wA", "vtmux-focus-ring"],
+        &["set", "-g", "vt", "on"],
+        &["show", "-g", "vtm"],
+        &["set", "-g", "vtmux-focus-ring", "bogus"],
+    ] {
+        sim.argv(c);
+    }
+    assert_eq!(
+        sim.take(),
+        "off\nvtmux-focus-ring off\nvtmux-focus-ring* off\n\
+         invalid option: vt\ninvalid option: vtm\nbad value: bogus\n"
+    );
+    sim.argv(&["set", "-gw", "vtmux-focus-ring", "on"]);
+    let set = listing(&mut sim, &["show", "-gw"]);
+    assert!(
+        set.ends_with("xterm-keys on\nvtmux-focus-ring on\n"),
+        "{set}"
+    );
+    assert_eq!(
+        listing(&mut sim, &["show", "-wA"]).lines().last(),
+        Some("vtmux-focus-ring* on")
+    );
+    assert!(!listing(&mut sim, &["show", "-w"]).contains("vtmux"));
+    sim.argv(&["set", "-w", "vtmux-focus-ring", "off"]);
+    assert_eq!(listing(&mut sim, &["show", "-w"]), "vtmux-focus-ring off\n");
+    sim.argv(&["set", "-gwu", "vtmux-focus-ring"]);
+    sim.argv(&["set", "-wu", "vtmux-focus-ring"]);
+    assert_eq!(listing(&mut sim, &["show", "-gw"]), fresh[0]);
+    assert_eq!(
+        listing(&mut sim, &["show", "-gv", "vtmux-focus-ring"]),
+        "off\n"
+    );
+}

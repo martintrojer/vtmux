@@ -211,11 +211,16 @@ pub(super) enum MatchError {
 }
 
 /// `options_match` (options.c:784): a user option, an exact table name, an
-/// old spelling, or an unambiguous prefix of a table name.
+/// old spelling, or an unambiguous prefix of a table name. A vtmux option
+/// matches by its exact name only, so tmux's prefixes and errors stay as
+/// they are.
 pub(super) fn match_name(s: &str) -> Result<Matched, MatchError> {
     let (name, key) = parse_name(s).ok_or(MatchError::Unparsable)?;
     if name.starts_with('@') {
         return Ok(Matched::User(name.to_owned(), key));
+    }
+    if let Some(def) = super::vtmux::find(name) {
+        return Ok(Matched::Table(def, key));
     }
     let name = map_name(name);
     let mut found = None;
@@ -282,5 +287,17 @@ mod tests {
         assert_eq!(match_name("a[]"), Err(MatchError::Unparsable));
         assert_eq!(match_name("a[1]b"), Err(MatchError::Unparsable));
         assert_eq!(match_name(""), Err(MatchError::Unparsable));
+    }
+
+    /// vtmux options are exact names, outside tmux's prefix space.
+    #[test]
+    fn vtmux_options_match_exactly() {
+        assert!(
+            matches!(match_name("vtmux-focus-ring"), Ok(Matched::Table(d, None)) if d.name == "vtmux-focus-ring")
+        );
+        for prefix in ["vt", "vtm", "vtmux", "vtmux-focus"] {
+            assert_eq!(match_name(prefix), Err(MatchError::Unknown), "{prefix}");
+        }
+        assert!(find("vtmux-focus-ring").is_none(), "not in tmux's table");
     }
 }
