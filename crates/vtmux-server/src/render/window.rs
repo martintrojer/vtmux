@@ -143,7 +143,7 @@ impl Source<'_> {
             draws.insert(
                 p,
                 PaneDraw {
-                    content: vtmux_vt::snapshot(&pane.term),
+                    content: self.pane_screen(pane, &ctx, caps),
                     index: self.model.pane_index(p),
                     lines,
                     border: self.style(TreeId::Pane(p), option, &ctx),
@@ -199,6 +199,58 @@ impl Source<'_> {
             bce: caps.bce,
         };
         Some((scene, draw))
+    }
+
+    /// What `pane` shows: its shown mode's screen, else its own.
+    fn pane_screen(&self, pane: &crate::model::Pane, ctx: &Ctx<'_>, caps: Caps) -> Snapshot {
+        match pane.modes.first().and_then(crate::mode::Mode::as_copy) {
+            Some(m) => self.copy_screen(pane, m, ctx, caps),
+            None => vtmux_vt::snapshot(&pane.term),
+        }
+    }
+
+    /// Copy mode's screen for `pane` (`window_copy_write_line`): the rows in
+    /// view, then `copy-mode-position-format` drawn over the top row in
+    /// `copy-mode-position-style` unless hidden, then the `$` of a cursor
+    /// past the last column. Line numbers are not drawn yet.
+    fn copy_screen(
+        &self,
+        pane: &crate::model::Pane,
+        m: &crate::mode::CopyMode,
+        ctx: &Ctx<'_>,
+        caps: Caps,
+    ) -> Snapshot {
+        // format_draw keeps what a section does not cover: those cells are
+        // marked and keep the pane's.
+        const KEEP: &str = "\u{0}";
+        let mut screen = m.screen(&pane.term);
+        let wtree = TreeId::Window(pane.window);
+        // `s->rupper < s->rlower`: a screen of one row has no indicator.
+        if m.shows_position() && screen.rows > 1 {
+            let format = self.string(wtree, "copy-mode-position-format");
+            let expanded = vtmux_core::format::expand_time(&format, ctx);
+            if !expanded.is_empty() {
+                let base = self.style(wtree, "copy-mode-position-style", ctx);
+                let theme = self.theme(caps);
+                let cols = usize::from(screen.cols);
+                let under = vec![
+                    styled::Cell {
+                        text: KEEP.into(),
+                        width: 1,
+                        style: base.clone(),
+                    };
+                    cols
+                ];
+                let drawn = styled::draw_onto(&base, under, &expanded, false, false);
+                for (x, c) in drawn.cells.iter().enumerate() {
+                    if c.text != KEEP {
+                        screen.cells[x] = theme.cell(c);
+                    }
+                }
+            }
+        }
+        m.mark_overflow(&mut screen);
+        screen
     }
 
     /// `window_pane_get_pane_lines`: a floating pane's own option, else the
