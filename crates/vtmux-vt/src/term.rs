@@ -56,9 +56,9 @@ fn osc133_mark(payload: &[u8]) -> Option<LineMark> {
 const CELL_WIDTH_PX: u32 = 16;
 const CELL_HEIGHT_PX: u32 = 32;
 
-/// Bytes in one libghostty-vt 0.2.2 pooled page (`PagePool.item_size`,
-/// PageList.zig). Measured by probing retention; `history_budget_keeps_the_limit`
-/// guards the number against a libghostty upgrade.
+/// Bytes in one pooled Ghostty page (`PagePool.item_size`, PageList.zig).
+/// Measured by probing retention (unchanged from ghostty a887df42c to
+/// 3bd54e025); `history_budget_steps_by_page` guards it against an upgrade.
 const PAGE_BYTES: usize = 401_408;
 /// Bytes of a page that hold styles, graphemes and hyperlinks rather than
 /// rows. Measured as ~27 KB at 200 columns; rounded up so row counts per page
@@ -620,6 +620,22 @@ impl PaneTerm {
             0
         } else {
             self.hsize
+        }
+    }
+
+    /// Cap the bytes Ghostty retains for history (`OPT_SCROLLBACK_MAX_BYTES`).
+    /// Lowering it prunes whole history pages at once; history ids, times
+    /// and `history_size` follow what is still retained. Ghostty keeps at
+    /// least about one page whatever the budget. `bytes` is raised to 1:
+    /// Ghostty's 0 erases history and stops keeping any, which is
+    /// `history-limit 0`'s job (see [`PaneTerm::new`]).
+    pub fn set_history_budget(&mut self, bytes: usize) {
+        let _ = self.term.set_scrollback_max_bytes(Some(bytes.max(1)));
+        let retained = self.term.scrollback_rows().unwrap_or(0);
+        self.hsize = self.hsize.min(retained);
+        while self.times.len() > retained {
+            self.times.pop_front();
+            self.times_base += 1;
         }
     }
 
@@ -1324,6 +1340,59 @@ mod tests {
         assert_eq!(acs(b"\x1b)0\x1b[\x0e1mq"), "1");
         assert_eq!(acs(b"\x1b(0qqq\x1b[1;2H\x1b[K\x1b[3G\x1b[X"), "1");
         assert_eq!(acs(b"\x1b(0q\x1b[?1049hq\x1b(Bq\x1b[?1049lq"), "10");
+    }
+
+    #[test]
+    fn history_budget_lowered_prunes_rows() {
+        let mut t = PaneTerm::new(80, 5, 2000);
+        t.feed(&b"x\r\n".repeat(2500));
+        let before = t.term.scrollback_rows().unwrap();
+        assert_eq!(t.history_size(), tmux_hsize(0, 2000, 2500 - 4));
+        let newest = t.history_id(t.history_size() - 1);
+
+        t.set_history_budget(3 * PAGE_BYTES);
+        let after = t.term.scrollback_rows().unwrap();
+        assert!(after < before && after < 2000, "{before} -> {after}");
+        assert_eq!(t.history_size(), after);
+        // The newest rows keep their ids.
+        assert_eq!(t.history_id(t.history_size() - 1), newest);
+
+        // Raising it again keeps what scrolls in from now on.
+        t.set_history_budget(usize::MAX);
+        t.feed(&b"x\r\n".repeat(2500));
+        assert!(t.term.scrollback_rows().unwrap() > 2500);
+        assert_eq!(t.history_size(), tmux_hsize(after, 2000, 2500));
+    }
+
+    #[test]
+    fn history_budget_of_zero_still_keeps_history() {
+        let mut t = PaneTerm::new(80, 5, 2000);
+        t.feed(&b"x\r\n".repeat(100));
+        t.set_history_budget(0);
+        assert_eq!(t.history_size(), 96);
+        t.feed(&b"x\r\n".repeat(10));
+        assert_eq!(t.history_size(), 106);
+    }
+
+    /// `PAGE_BYTES` is Ghostty's page: a budget of `k` pages keeps a page
+    /// more than one byte less does.
+    #[test]
+    fn history_budget_steps_by_page() {
+        let kept = |bytes: usize| {
+            let mut t = PaneTerm::new(80, 5, 100_000);
+            t.set_history_budget(bytes);
+            t.feed(&b"x\r\n".repeat(5000));
+            t.term.scrollback_rows().unwrap()
+        };
+        let pages = 3;
+        let fewer = kept(pages * PAGE_BYTES - 1);
+        let full = kept(pages * PAGE_BYTES);
+        let rows_per_page = (PAGE_BYTES - PAGE_OVERHEAD_BYTES) / (CELL_BYTES * 81);
+        assert!(
+            full - fewer >= rows_per_page,
+            "{fewer} -> {full}, page holds >= {rows_per_page}"
+        );
+        assert_eq!(kept(pages * PAGE_BYTES + PAGE_BYTES - 1), full);
     }
 
     #[test]
