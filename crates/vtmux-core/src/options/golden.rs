@@ -451,6 +451,8 @@ fn vtmux_options_hidden_until_set() {
         &["show", "-gw", "vtmux-focus-ring"],
         &["show", "-w", "vtmux-focus-ring"],
         &["show", "-wA", "vtmux-focus-ring"],
+        &["show", "-gA", "vtmux-focus-ring"],
+        &["show", "-gwA", "vtmux-focus-ring"],
         &["set", "-g", "vt", "on"],
         &["show", "-g", "vtm"],
         &["set", "-g", "vtmux-focus-ring", "bogus"],
@@ -460,6 +462,7 @@ fn vtmux_options_hidden_until_set() {
     assert_eq!(
         sim.take(),
         "off\nvtmux-focus-ring off\nvtmux-focus-ring* off\n\
+         vtmux-focus-ring off\nvtmux-focus-ring off\n\
          invalid option: vt\ninvalid option: vtm\nbad value: bogus\n"
     );
     sim.argv(&["set", "-gw", "vtmux-focus-ring", "on"]);
