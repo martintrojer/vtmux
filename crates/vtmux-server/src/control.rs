@@ -326,6 +326,7 @@ impl Server {
         item.origin = Origin {
             attached: client.attached,
             inside_pane: None,
+            current: None,
         };
         match cmd::parse_config_with(
             line,
@@ -516,6 +517,12 @@ impl Server {
             });
         }
     }
+
+    /// The control-mode sink of the event layer (control-notify.c
+    /// `control_build_events`). Notifications are still raised by hand
+    /// below until they move here.
+    #[allow(clippy::unused_self)] // until the notifications move here
+    pub(crate) fn control_event(&mut self, _ev: &crate::events::Event) {}
 
     /// `%session-renamed` (control-notify.c:250-267).
     pub(crate) fn control_session_renamed(&mut self, s: SessionId, name: &str) {

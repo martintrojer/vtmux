@@ -26,6 +26,7 @@ pub fn exec(
             found,
             clients,
             client,
+            formats: server.cmd_formats.clone(),
         },
     )?;
     for line in lines {

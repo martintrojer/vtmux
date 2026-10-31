@@ -152,6 +152,8 @@ pub fn exec(
     if !detached {
         super::attach(server, item, s, false)?;
     }
+    // cmd-new-session.c:361-362.
+    item.hook_target = Some(Some(Found::from_session(&server.model, s)));
     // Later commands in the batch see the new session as current: it
     // is the most recently active one (cmd_find_best_session).
     Ok(())

@@ -46,6 +46,57 @@ impl Found {
     pub(crate) fn valid(&self) -> bool {
         self.session.is_some() && self.window.is_some() && self.pane.is_some()
     }
+
+    /// `cmd_find_valid_state` against the model now: the session lives,
+    /// links the window at the index, and the window has the pane.
+    #[must_use]
+    pub fn still_valid(&self, model: &Model) -> bool {
+        let (Some(s), Some(i), Some(w), Some(p)) =
+            (self.session, self.index, self.window, self.pane)
+        else {
+            return false;
+        };
+        model
+            .sessions
+            .get(&s)
+            .is_some_and(|x| x.windows.get(&i) == Some(&w))
+            && model.panes.get(&p).is_some_and(|x| x.window == w)
+    }
+
+    /// `cmd_find_from_winlink`: session `s`'s window at `index`, its active
+    /// pane.
+    #[must_use]
+    pub fn from_winlink(model: &Model, s: SessionId, index: u32) -> Self {
+        let Some(&w) = model.sessions.get(&s).and_then(|x| x.windows.get(&index)) else {
+            return Self::default();
+        };
+        Self {
+            session: Some(s),
+            index: Some(index),
+            window: Some(w),
+            pane: model.windows.get(&w).map(crate::model::Window::active),
+            new_index: None,
+        }
+    }
+
+    /// `cmd_find_from_window`: the window in its best session.
+    #[must_use]
+    pub fn from_window(model: &Model, w: WindowId) -> Self {
+        best_with_window(model, w).unwrap_or_default()
+    }
+
+    /// `cmd_find_from_pane`: the pane's window in its best session.
+    #[must_use]
+    pub fn from_pane(model: &Model, p: PaneId) -> Self {
+        let Some(pane) = model.panes.get(&p) else {
+            return Self::default();
+        };
+        let mut f = Self::from_window(model, pane.window);
+        if f.window.is_some() {
+            f.pane = Some(p);
+        }
+        f
+    }
 }
 
 /// `cmd_find_best_session`: the most recently active session, optionally
@@ -87,10 +138,17 @@ fn best_with_window(model: &Model, w: WindowId) -> Option<Found> {
 pub struct Origin {
     pub attached: Option<SessionId>,
     pub inside_pane: Option<PaneId>,
+    /// The queue's current state (`cmdq_get_current`), which comes first
+    /// while it is valid (cmd-find.c:995-997): a hook's commands start
+    /// from the event's target.
+    pub current: Option<Found>,
 }
 
 #[must_use]
 pub fn current(model: &Model, origin: Origin) -> Option<Found> {
+    if let Some(f) = origin.current.filter(|f| f.still_valid(model)) {
+        return Some(f);
+    }
     if let Some(s) = origin.attached {
         let f = Found::from_session(model, s);
         return f.valid().then_some(f);

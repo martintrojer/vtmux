@@ -219,6 +219,8 @@ pub fn exec(
     }
     // window_pop_zoom: -Z zooms the (possibly new) active pane.
     server.model.pop_zoom(w, zoom);
+    // cmd-split-window.c:314-315.
+    item.hook_target = Some(Some(new_found));
     if args.flag('P') {
         let template = args.value('F').unwrap_or(TEMPLATE);
         let text = expand(server, new_found, template);

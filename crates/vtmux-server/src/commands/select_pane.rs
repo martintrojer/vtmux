@@ -12,7 +12,7 @@ use crate::target::Found;
 
 pub fn exec(
     server: &mut Server,
-    _item: &mut Item,
+    item: &mut Item,
     args: &Args,
     found: Found,
     last_pane: bool,
@@ -70,7 +70,18 @@ pub fn exec(
     if server.model.windows[&w].active() == wp {
         return Ok(());
     }
-    activate(server, w, wp, zflag);
+    // cmd-select-pane.c:283-285: the hook's target is the new pane when
+    // it became active, else the queue's current state.
+    let changed = activate(server, w, wp, zflag);
+    item.hook_target = Some(if changed {
+        Some(Found {
+            window: Some(w),
+            pane: Some(wp),
+            ..found
+        })
+    } else {
+        item.origin.current
+    });
     Ok(())
 }
 
@@ -106,10 +117,11 @@ fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<()
 /// Make `wp` active the way select-pane does: a hidden pane in a zoomed
 /// window unzooms it, and with `-Z` the zoom comes back on the new pane
 /// (`window_push_zoom(w, 0, Z)` .. `window_pop_zoom`).
-fn activate(server: &mut Server, w: WindowId, wp: PaneId, zflag: bool) {
+fn activate(server: &mut Server, w: WindowId, wp: PaneId, zflag: bool) -> bool {
     let visible = server.model.windows[&w].is_visible(wp);
     let was = !visible && server.model.push_zoom(w, false, zflag);
-    if server.model.set_active(w, wp) {
+    let changed = server.model.set_active(w, wp);
+    if changed {
         // cmd_select_pane_redraw: every client of a session with the
         // window redraws its status.
         server.model.redraw(Redraw::WindowStatus(w));
@@ -117,4 +129,5 @@ fn activate(server: &mut Server, w: WindowId, wp: PaneId, zflag: bool) {
     if !visible {
         server.model.pop_zoom(w, was);
     }
+    changed
 }

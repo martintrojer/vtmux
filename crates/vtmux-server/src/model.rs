@@ -226,6 +226,8 @@ pub struct Model {
     /// output is frozen under a message; cleared once every client drew
     /// (server-client.c:1929-1940).
     pub(crate) redraw_panes: std::collections::BTreeSet<PaneId>,
+    /// Events fired since the sinks last heard ([`crate::events`]).
+    pub events: Vec<crate::events::Event>,
 }
 
 impl Default for Model {
@@ -246,6 +248,7 @@ impl Default for Model {
             alerts_list: Vec::new(),
             redraws: Vec::new(),
             redraw_panes: std::collections::BTreeSet::new(),
+            events: Vec::new(),
         }
     }
 }
