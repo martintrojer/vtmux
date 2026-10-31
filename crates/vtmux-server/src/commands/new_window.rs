@@ -105,6 +105,8 @@ pub fn exec(
             client: server.target_client(item.client, item.origin),
         })
         .map_err(EdgeError::CreateWindowFailed)?;
+    // cmd-new-window.c:181-182.
+    item.hook_target = Some(Some(Found::from_winlink(&server.model, s, index)));
     if args.flag('P') {
         let w = server.model.sessions[&s].windows[&index];
         let new = Found {

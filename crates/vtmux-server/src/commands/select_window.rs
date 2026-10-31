@@ -59,6 +59,13 @@ pub fn exec(
     if changed {
         model.redraw(crate::model::Redraw::Session(s));
     }
+    // cmd-select-window.c:122-143: after-select-window always, with the
+    // session as current state once it changed.
+    item.hook_target = Some(if changed {
+        Some(Found::from_session(model, s))
+    } else {
+        item.origin.current
+    });
     // cmd-select-window.c:145-147: an attached calling client becomes the
     // new window's latest, and the window takes any size pending.
     if let Some(c) = super::latest_client(server, item) {

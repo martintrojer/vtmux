@@ -33,6 +33,8 @@ pub(super) struct Host<'a> {
     /// The attached clients and the target client (`format_single_from_target`).
     pub clients: Rc<[ClientView]>,
     pub client: Option<ClientView>,
+    /// A hook's formats (`cmdq_merge_formats`).
+    pub formats: Vec<(String, String)>,
 }
 
 /// The attached clients and the command's target client, for [`Host`].
@@ -111,6 +113,11 @@ impl OptionHost for Host<'_> {
         ctx.options = store;
         ctx.clients = Rc::clone(&self.clients);
         ctx.client.clone_from(&self.client);
+        ctx.extra.extend(
+            self.formats
+                .iter()
+                .map(|(k, v)| (k.clone().into(), v.clone())),
+        );
         format::expand_str(template, &Vars { ctx, extra })
     }
 
@@ -147,6 +154,7 @@ pub fn exec(
             found,
             clients,
             client,
+            formats: server.cmd_formats.clone(),
         },
     );
     server.model.options = options;

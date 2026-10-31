@@ -1007,15 +1007,6 @@ fn options_core_probes_over_cli() {
             .filter_map(|line| line.strip_prefix("$ "))
             .map(|line| line.split('\x1f').collect())
             .collect();
-        // TODO(hooks): set-hook -R / -E need the event layer.
-        if commands.iter().any(|argv| {
-            argv[0] == "set-hook"
-                && argv
-                    .iter()
-                    .any(|a| a.starts_with('-') && a.contains(['R', 'E']))
-        }) {
-            continue;
-        }
         compare(name, |w| {
             let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
             runs.extend(commands.iter().map(|argv| {
@@ -1029,7 +1020,7 @@ fn options_core_probes_over_cli() {
         });
         checked += 1;
     }
-    assert_eq!(checked, 51);
+    assert_eq!(checked, 52);
 }
 
 /// For a name `options_parse` rejects, `options_match` returns without
@@ -3802,5 +3793,135 @@ fn buffer_file_io_inside_source_file_uses_the_client() {
             "after",
         ]));
         runs
+    });
+}
+
+/// after-* hooks (cmd-queue.c `cmdq_insert_hook`, hooks.c `hooks_insert`):
+/// the hook's commands run right after the command, before the next one in
+/// its list, with the arguments and flags as `hook_*` formats and the
+/// command's target as current state; commands a hook runs fire no hooks;
+/// command-error on failure; a failing hook command does not fail the
+/// client; `set-hook -R` and `-E` run a hook now; fire counts.
+#[test]
+#[allow(clippy::too_many_lines)] // one scripted sequence
+fn hooks_after_commands() {
+    compare("hooks_after_commands", |w| {
+        let mut out = vec![w.run(&["new", "-d", "-s", "a", "-n", "w", "cat"])];
+        let mut run = |argv: &[&str]| out.push(w.run(argv));
+        run(&[
+            "set-hook",
+            "-g",
+            "after-rename-window",
+            "display -p \"#{hook}|#{hook_arguments}|#{hook_argument_0}|#{hook_flag_t}|#{session_name}:#{window_index}|#{command}\"",
+        ]);
+        run(&["rename-window", "-t", "a:0", "x"]);
+        run(&[
+            "set-hook",
+            "-ga",
+            "after-rename-window",
+            "set -g @o \"#{@o}H\"",
+        ]);
+        run(&["set", "-g", "@o", ""]);
+        run(&[
+            "rename-window",
+            "-t",
+            "a:0",
+            "y",
+            ";",
+            "set",
+            "-gF",
+            "@o",
+            "#{@o}N",
+        ]);
+        run(&["show", "-gv", "@o"]);
+        run(&["set-hook", "-g", "after-rename-window", "nosuchcmd"]);
+        run(&["rename-window", "-t", "a:0", "z"]);
+        run(&[
+            "set-hook",
+            "-g",
+            "after-rename-window",
+            "rename-window -t a:0 inner ; display -p \"#{window_name}\"",
+        ]);
+        run(&["rename-window", "-t", "a:0", "outer"]);
+        run(&["set-hook", "-R", "-t", "a", "after-rename-window"]);
+        run(&["set-hook", "-gu", "after-rename-window"]);
+        run(&[
+            "set-hook",
+            "-g",
+            "command-error",
+            "display -p \"E #{hook_arguments}\"",
+        ]);
+        run(&["rename-window", "-t", "nosuch:0", "q"]);
+        run(&["set-hook", "-gu", "command-error"]);
+        run(&[
+            "set-hook",
+            "-g",
+            "after-split-window",
+            "display -p \"#{hook_arguments}|#{hook_flag_e}|#{hook_flag_e_0}|#{hook_flag_e_1}|#{pane_index}\"",
+        ]);
+        run(&[
+            "split-window",
+            "-d",
+            "-t",
+            "a:0",
+            "-e",
+            "A=1",
+            "-e",
+            "B=2",
+            "cat",
+        ]);
+        run(&[
+            "set-hook",
+            "-g",
+            "after-select-pane",
+            "display -p \"sp #{hook_pane}|#{pane_index}|#{hook_flag_t}\"",
+        ]);
+        run(&["selectp", "-t", "a:0.1"]);
+        run(&["selectp", "-t", "a:0.1"]);
+        run(&[
+            "set-hook",
+            "-g",
+            "after-select-window",
+            "display -p \"sw #{window_index}\"",
+        ]);
+        run(&["neww", "-d", "-t", "a:3", "cat"]);
+        run(&["selectw", "-t", "a:3"]);
+        run(&[
+            "set-hook",
+            "-g",
+            "after-new-window",
+            "display -p \"nw #{window_index}\"",
+        ]);
+        run(&["neww", "-d", "-t", "a:5", "cat"]);
+        run(&[
+            "set-hook",
+            "-g",
+            "after-new-session",
+            "display -p \"ns #{session_name}\"",
+        ]);
+        run(&["new", "-d", "-s", "b", "cat"]);
+        run(&[
+            "set-hook",
+            "-g",
+            "@u",
+            "display -p \"u #{hook} #{session_name}\"",
+        ]);
+        run(&["set-hook", "-R", "-t", "b", "@u"]);
+        run(&["set-hook", "-E", "-t", "b", "@u"]);
+        run(&["set-hook", "-E", "window-renamed"]);
+        run(&[
+            "show-hooks",
+            "-gF",
+            "#{option_name}:#{hook_fire_count}",
+            "after-select-pane",
+        ]);
+        run(&[
+            "show-hooks",
+            "-gF",
+            "#{option_name}:#{hook_fire_count}",
+            "@u",
+        ]);
+        run(&["wait-for", "-E", "bogus"]);
+        out
     });
 }

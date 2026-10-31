@@ -273,6 +273,7 @@ impl Server {
         item.origin = Origin {
             attached: c.attached,
             inside_pane: None,
+            current: None,
         };
         if control {
             item.control = Some(0);

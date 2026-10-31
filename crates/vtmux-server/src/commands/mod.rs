@@ -121,6 +121,19 @@ pub struct Item {
     pub stdout: Stdout,
     /// `load-buffer -` has used the client's stdin.
     pub stdin_used: bool,
+    /// The running step's `CMDQ_STATE_NOHOOKS`.
+    pub no_hooks: bool,
+    /// The running command's resolved target (`item->target`).
+    pub found: Option<Found>,
+    /// A command that fires its own `after-` hook (new-session,
+    /// new-window, split-window, select-pane, select-window) sets the
+    /// hook's target here (`Some(None)`: an invalid current state, so the
+    /// event has no target).
+    pub hook_target: Option<Option<Found>>,
+    /// A hook batch on the global queue: each command borrows the current
+    /// client once its guard is written (cmd-queue.c:597-598), so its
+    /// output reaches that client without guards.
+    pub borrow_client: bool,
 }
 
 /// The client's stdout can be used once (`file_write_open` dups it and
@@ -157,6 +170,10 @@ impl Item {
             source: None,
             stdout: Stdout::Free,
             stdin_used: false,
+            no_hooks: false,
+            found: None,
+            hook_target: None,
+            borrow_client: false,
         }
     }
 
@@ -243,7 +260,33 @@ impl Item {
 /// guard with `%end`.
 pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
     let guard = server.control_begin(item);
+    item.hook_target = None;
+    if item.borrow_client {
+        item.client = server.target_client(None, item.origin);
+        item.control = item.client.filter(|&c| server.is_control(c)).map(|_| 0);
+    }
     let result = run_one(server, item, call);
+    // The events the command fired go to their sinks inside its guard
+    // (control notifications are deferred until it closes), then its
+    // after- or command-error hook (cmd-queue.c:625-653).
+    server.drain_events();
+    if !item.no_hooks {
+        let hook = match &result {
+            Ok(()) if call.entry.after_hook() || item.hook_target.is_some() => {
+                Some(format!("after-{}", call.entry.name))
+            }
+            Err(CmdError::Quiet) | Ok(()) => None,
+            Err(_) => Some("command-error".to_owned()),
+        };
+        if let Some(name) = hook {
+            let target = item.hook_target.unwrap_or_else(|| {
+                item.found
+                    .filter(|f| f.still_valid(&server.model))
+                    .or_else(|| target::current(&server.model, item.origin))
+            });
+            server.cmd_hook(&name, call, item.step, target);
+        }
+    }
     // A quiet failure (unbind-key -q) ends the group but never reached
     // cmdq_error: no message, no exit status.
     if let Err(e) = result.as_ref()
@@ -265,6 +308,7 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
     // cmdq_find_flag (cmd-queue.c:514-530): resolve the target before the
     // command runs; commands without a target slot get the client's
     // current state, failures ignored.
+    item.found = None;
     let found = match &call.entry.target {
         Some(spec) => {
             let value = call.args.target(spec.flag);
@@ -278,6 +322,7 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         }
         None => target::current(&server.model, item.origin).unwrap_or_default(),
     };
+    item.found = Some(found);
     let result = dispatch(server, item, call, source, found);
     if result.is_ok() {
         status_redraws(server, call, source, found);
@@ -416,9 +461,32 @@ fn dispatch(
         "run-shell" => run_shell::exec(server, item, args, found),
         "if-shell" => run_shell::if_shell(server, item, args, found),
         "set-hook" => match set_option::exec(server, item, call, found)? {
-            // set-hook -R / -E run hooks and events: not wired yet.
-            SetOutcome::RunHook(_) => Err(EdgeError::NotImplemented("set-hook -R".into()).into()),
-            SetOutcome::FireEvent(_) => Err(EdgeError::NotImplemented("set-hook -E".into()).into()),
+            // hooks_run (cmd-set-option.c:253-258).
+            SetOutcome::RunHook(name) => {
+                server.hooks_run(item.step, &name, found);
+                Ok(())
+            }
+            // cmd_set_hook_event_exec (cmd-set-option.c:91-131).
+            SetOutcome::FireEvent(name) => {
+                let mut ev = crate::events::Event::new(&name).target(found);
+                if let Some(c) = item.client {
+                    ev = ev.client("client", c, server.client_name(c));
+                }
+                if let Some(s) = found.session {
+                    ev = ev.session(&server.model, "session", s);
+                }
+                if let Some(w) = found.window {
+                    ev = ev.window(&server.model, "window", w);
+                }
+                if let Some(i) = found.index {
+                    ev = ev.int("window_index", i);
+                }
+                if let Some(p) = found.pane {
+                    ev = ev.pane("pane", p);
+                }
+                server.fire_event(&ev);
+                Ok(())
+            }
             SetOutcome::Changed(_) | SetOutcome::Unchanged => Ok(()),
         },
         "set-option" | "set-window-option" => {

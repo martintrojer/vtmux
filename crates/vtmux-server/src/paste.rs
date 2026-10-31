@@ -57,6 +57,9 @@ pub struct PasteStore {
     next_index: u32,
     /// `paste_next_order`.
     next_order: u64,
+    /// `paste-buffer-deleted` (true) and `paste-buffer-changed` events
+    /// not yet fired, in order (paste.c `paste_fire_event`).
+    changes: Vec<(bool, String)>,
 }
 
 impl PasteStore {
@@ -88,7 +91,14 @@ impl PasteStore {
 
     /// `paste_free`.
     pub fn remove(&mut self, name: &str) {
-        self.by_name.remove(name);
+        if self.by_name.remove(name).is_some() {
+            self.changes.push((true, name.to_owned()));
+        }
+    }
+
+    /// The paste events since the last call.
+    pub fn take_changes(&mut self) -> Vec<(bool, String)> {
+        std::mem::take(&mut self.changes)
     }
 
     fn automatic_count(&self) -> usize {
@@ -123,7 +133,7 @@ impl PasteStore {
                 break;
             }
             if self.by_name.get(&name).is_some_and(|b| b.automatic) {
-                self.by_name.remove(&name);
+                self.remove(&name);
             }
         }
         let name = loop {
@@ -134,6 +144,7 @@ impl PasteStore {
             }
         };
         let order = self.next_order();
+        self.changes.push((false, name.clone()));
         self.by_name.insert(
             name.clone(),
             PasteBuffer {
@@ -165,6 +176,8 @@ impl PasteStore {
         }
         let name = clean_name(name);
         let order = self.next_order();
+        self.remove(&name);
+        self.changes.push((false, name.clone()));
         self.by_name.insert(
             name.clone(),
             PasteBuffer {
@@ -197,10 +210,12 @@ impl PasteStore {
         if new == old {
             return Ok(());
         }
-        self.by_name.remove(&new);
+        self.remove(&new);
         if let Some(mut b) = self.by_name.remove(old) {
             b.name.clone_from(&new);
             b.automatic = false;
+            self.changes.push((true, old.to_owned()));
+            self.changes.push((false, new.clone()));
             self.by_name.insert(new, b);
         }
         Ok(())

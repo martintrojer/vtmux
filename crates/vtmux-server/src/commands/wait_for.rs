@@ -13,8 +13,7 @@ use crate::wait::Outcome;
 pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), CmdError> {
     let name = args.positional_text(0).unwrap_or_default().into_owned();
     if args.flag('E') {
-        // Event waits need hook events, which vtmux does not fire yet.
-        return Err(EdgeError::NotImplemented("wait-for -E".into()).into());
+        return event(server, item, args, &name);
     }
     if args.flag('l') {
         for c in server.waits.blocked(&name) {
@@ -65,5 +64,50 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
     if outcome == Outcome::Block {
         item.blocked = true;
     }
+    Ok(())
+}
+
+/// `cmd_wait_for_event` (cmd-wait-for.c:265-330): `-l` lists the clients
+/// waiting for event `name`, `-w` wakes one, otherwise the client waits
+/// until the event fires (and passes `-F`); `-v` prints its payload.
+fn event(server: &mut Server, item: &mut Item, args: &Args, name: &str) -> Result<(), CmdError> {
+    // hooks_valid_event_name.
+    let valid = name.starts_with('@') || vtmux_core::options::find(name).is_some_and(|d| d.hook);
+    if !valid {
+        return Err(EdgeError::Message(format!("invalid event: {name}")).into());
+    }
+    if args.flag('l') {
+        let names: Vec<String> = server
+            .event_waits
+            .iter()
+            .filter(|w| w.name == name)
+            .map(|w| server.client_name(w.client))
+            .collect();
+        for n in names {
+            item.print(&n);
+        }
+        return Ok(());
+    }
+    if let Some(waiter) = args.value('w') {
+        let at = server
+            .event_waits
+            .iter()
+            .position(|w| w.name == name && server.client_name(w.client) == waiter)
+            .ok_or_else(|| EdgeError::Message(format!("waiter {waiter} not found")))?;
+        let w = server.event_waits.remove(at);
+        server.cmdq_continue(w.step);
+        return Ok(());
+    }
+    let (Some(client), Some(step)) = (item.client, item.step) else {
+        return Err(EdgeError::Message("not able to wait".into()).into());
+    };
+    server.event_waits.push(crate::events::EventWait {
+        name: name.to_owned(),
+        step,
+        client,
+        filter: args.value('F').map(str::to_owned),
+        verbose: args.flag('v'),
+    });
+    item.blocked = true;
     Ok(())
 }

@@ -255,6 +255,11 @@ pub struct Server {
     /// Keys `send-keys -K` handed to a client, handled after the command
     /// (`server_client_handle_key_after`).
     pub(crate) injected_keys: Vec<(ClientId, vtmux_core::keys::Key)>,
+    /// The running hook command's formats (`state->formats`: `hook`,
+    /// `hook_*`), merged into its format trees (`cmdq_merge_formats`).
+    pub(crate) cmd_formats: Vec<(String, String)>,
+    /// Event sinks that come and go (`wait-for -E`).
+    pub(crate) event_waits: Vec<crate::events::EventWait>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -428,6 +433,8 @@ impl Server {
             files: BTreeMap::new(),
             key_bindings: vtmux_core::keys::KeyBindings::with_defaults(),
             injected_keys: Vec::new(),
+            cmd_formats: Vec::new(),
+            event_waits: Vec::new(),
         })
     }
 
@@ -732,6 +739,7 @@ impl Server {
             let _ = self.poll.registry().deregister(&mut c.stream);
         }
         self.waits.client_lost(id);
+        self.event_waits.retain(|w| w.client != id);
         self.cmdq_client_lost(id);
         self.source_depths.remove(&Some(id));
         // server-client.c:489-490.
@@ -931,6 +939,7 @@ impl Server {
                 .iter()
                 .find(|(k, _)| k == "TMUX_PANE")
                 .and_then(|(_, v)| v.parse().ok()),
+            current: None,
         };
         let mut item = Item::new(Some(id), hello.cwd.clone());
         item.env.clone_from(&hello.env);
@@ -1825,6 +1834,12 @@ impl Server {
     /// A format context over `found` with `client` as `ft->c`.
     pub fn format_ctx(&self, found: crate::target::Found, client: Option<ClientId>) -> Ctx<'_> {
         let mut ctx = Ctx::new(&self.model, &self.info, &self.global_env, found);
+        // cmdq_merge_formats: a hook's commands see its formats.
+        ctx.extra.extend(
+            self.cmd_formats
+                .iter()
+                .map(|(k, v)| (k.clone().into(), v.clone())),
+        );
         ctx.clients = self.client_views();
         ctx.client = client.and_then(|id| Some(self.client_view(id, self.clients.get(&id)?)));
         ctx

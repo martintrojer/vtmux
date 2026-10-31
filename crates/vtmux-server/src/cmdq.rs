@@ -78,10 +78,24 @@ pub enum End {
     Quiet,
 }
 
+/// What a step carries besides its batch (`struct cmdq_state`): the
+/// current target its commands start from, whether hooks are off, and
+/// the formats a hook adds (`hook`, `hook_*`). Commands a step inserts
+/// share its state (`cmdq_get_command(cmdlist, cmdq_get_state(item))`).
+#[derive(Debug, Default)]
+pub struct StepState {
+    /// `state->current`.
+    pub current: Option<crate::target::Found>,
+    /// `CMDQ_STATE_NOHOOKS`: a hook's commands fire no hooks.
+    pub no_hooks: bool,
+    pub formats: Vec<(String, String)>,
+}
+
 #[derive(Debug)]
 struct Step {
     id: StepId,
     batch: BatchId,
+    state: Option<Rc<StepState>>,
     /// Global group number; 0 for steps no error removes.
     group: u64,
     work: Option<Work>,
@@ -106,6 +120,8 @@ pub struct Cmdq {
     current: Option<(QueueId, StepId)>,
     /// Something became runnable since the last pass.
     dirty: bool,
+    /// The queue and state of the step firing now.
+    current_state: Option<(QueueId, Rc<StepState>)>,
 }
 
 impl Cmdq {
@@ -117,7 +133,12 @@ impl Cmdq {
     /// Steps for `groups` in `batch`: each group (a config line, or one
     /// parsed list) with its source, every group of every list a fresh
     /// global group.
-    fn command_steps(&mut self, batch: BatchId, groups: Groups) -> Vec<Step> {
+    fn command_steps(
+        &mut self,
+        batch: BatchId,
+        groups: Groups,
+        state: Option<&Rc<StepState>>,
+    ) -> Vec<Step> {
         let mut steps = Vec::new();
         for (source, calls) in groups {
             let base = self.next_group;
@@ -129,6 +150,7 @@ impl Cmdq {
                 steps.push(Step {
                     id,
                     batch,
+                    state: state.cloned(),
                     group,
                     work: Some(Work::Command {
                         call,
@@ -148,6 +170,7 @@ impl Cmdq {
         Step {
             id: self.step_id(),
             batch,
+            state: None,
             group: 0,
             work: Some(work),
             fired: false,
@@ -195,6 +218,21 @@ impl Cmdq {
         Some(self.queues.get(&q)?.get(i)?.batch)
     }
 
+    /// The state of a step.
+    fn state_of(&mut self, id: StepId) -> Option<Rc<StepState>> {
+        let (q, i) = self.find(id)?;
+        self.queues.get(&q)?.get(i)?.state.clone()
+    }
+
+    /// `cmdq_running(NULL)` is a step whose state turns hooks off: the
+    /// global queue is firing a hook's command.
+    #[must_use]
+    pub fn global_no_hooks(&self) -> bool {
+        self.current_state
+            .as_ref()
+            .is_some_and(|(q, st)| q.is_none() && st.no_hooks)
+    }
+
     /// `cmdq_remove_group`: later steps of `q` in `group`.
     fn remove_group(&mut self, q: QueueId, after: StepId, group: u64) {
         if group == 0 {
@@ -233,6 +271,8 @@ impl Cmdq {
 pub struct NewBatch {
     pub item: Item,
     pub groups: Groups,
+    /// The commands' state (`None`: a fresh one).
+    pub state: Option<Rc<StepState>>,
     /// Steps before the commands.
     pub before: Vec<Work>,
     pub end: End,
@@ -244,6 +284,7 @@ impl NewBatch {
         Self {
             item,
             groups: vec![(None, calls)],
+            state: None,
             before: Vec::new(),
             end,
         }
@@ -272,7 +313,7 @@ impl Server {
         let id = BatchId(q.next_batch);
         q.batches.insert(id, b.item);
         let mut steps: Vec<Step> = b.before.into_iter().map(|w| q.work_step(id, w)).collect();
-        steps.extend(q.command_steps(id, b.groups));
+        steps.extend(q.command_steps(id, b.groups, b.state.as_ref()));
         steps.push(q.work_step(id, Work::End(b.end)));
         steps
     }
@@ -280,8 +321,19 @@ impl Server {
     /// `cmdq_insert_after(after, ...)`: commands that join `after`'s batch
     /// and run right after it. Returns the last step inserted.
     pub(crate) fn cmdq_insert_commands(&mut self, after: StepId, groups: Groups) -> Option<StepId> {
+        let state = self.cmdq.state_of(after);
+        self.cmdq_insert_with_state(after, groups, state.as_ref())
+    }
+
+    /// [`Self::cmdq_insert_commands`] with a state of their own (a hook's).
+    pub(crate) fn cmdq_insert_with_state(
+        &mut self,
+        after: StepId,
+        groups: Groups,
+        state: Option<&Rc<StepState>>,
+    ) -> Option<StepId> {
         let batch = self.cmdq.batch_of(after)?;
-        let steps = self.cmdq.command_steps(batch, groups);
+        let steps = self.cmdq.command_steps(batch, groups, state);
         self.cmdq.insert_after(after, steps)
     }
 
@@ -371,6 +423,7 @@ impl Server {
                 return progressed;
             }
             let (id, batch, group) = (front.id, front.batch, front.group);
+            let state = front.state.clone();
             if front.fired {
                 // Continued after a wait: a client's file operation
                 // reports first, or keeps waiting while it is open.
@@ -392,11 +445,13 @@ impl Server {
                 let work = front.work.take();
                 progressed = true;
                 self.cmdq.current = Some((q, id));
+                self.cmdq.current_state = state.clone().map(|st| (q, st));
                 let wait = match work {
-                    Some(w) => self.fire(q, id, batch, group, w),
+                    Some(w) => self.fire(q, id, batch, group, w, state.as_deref()),
                     None => false,
                 };
                 self.cmdq.current = None;
+                self.cmdq.current_state = None;
                 if wait {
                     let woken = self
                         .cmdq
@@ -433,7 +488,15 @@ impl Server {
     }
 
     /// Fire one step; whether it waits.
-    fn fire(&mut self, q: QueueId, id: StepId, batch: BatchId, group: u64, work: Work) -> bool {
+    fn fire(
+        &mut self,
+        q: QueueId,
+        id: StepId,
+        batch: BatchId,
+        group: u64,
+        work: Work,
+        state: Option<&StepState>,
+    ) -> bool {
         match work {
             Work::Command { call, source } => {
                 let Some(mut item) = self.cmdq.batches.remove(&batch) else {
@@ -447,8 +510,29 @@ impl Server {
                     source.as_ref().map(|s| s.file.clone()),
                 );
                 item.source = source;
+                // The step's state over the batch's item for this command:
+                // a hook's commands start from the event's target, fire no
+                // hooks, see its formats and, having no CMDQ_STATE_CONTROL,
+                // get guard flags 0.
+                let saved = (item.origin.current, item.control, item.no_hooks);
+                if let Some(st) = state {
+                    item.origin.current = st.current;
+                    item.no_hooks = st.no_hooks;
+                    if st.no_hooks {
+                        item.control = item.control.map(|_| 0);
+                    }
+                    self.cmd_formats.clone_from(&st.formats);
+                }
                 let ok = commands::fire(self, &mut item, &call);
                 self.info.current_file = outer;
+                self.cmd_formats.clear();
+                if item.borrow_client {
+                    // The borrowed client's output, as end_quiet hands it.
+                    self.end_quiet(&mut item);
+                    item.client = None;
+                    item.control = None;
+                }
+                (item.origin.current, item.control, item.no_hooks) = saved;
                 self.flush_item(&mut item);
                 let wait = std::mem::take(&mut item.blocked);
                 if self.cmdq.queues.contains_key(&q) {

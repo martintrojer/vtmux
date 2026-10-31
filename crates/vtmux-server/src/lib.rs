@@ -8,6 +8,7 @@ pub mod cmdq;
 pub mod commands;
 pub mod control;
 pub mod environ;
+pub mod events;
 pub mod format_ctx;
 pub mod input;
 pub mod jobs;
