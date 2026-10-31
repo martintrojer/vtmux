@@ -365,6 +365,15 @@ impl Term {
         self.caps & cap.bit() != 0
     }
 
+    /// `tty_set_selection` (tty.c:2149-2166): `Ms` with the clipboard
+    /// name and the base64 of `data` (`tty_putcode_ss`), or `None` when the
+    /// terminal has no `Ms`.
+    #[must_use]
+    pub fn set_selection(&self, clip: &str, data: &[u8]) -> Option<Vec<u8>> {
+        let ms = self.ms.as_deref().filter(|_| self.has(Cap::Ms))?;
+        Some(expand_ss(ms, clip, &base64(data)))
+    }
+
     /// The terminal is xterm-derived: it has `XT` and `bce` in terminfo.
     #[must_use]
     pub fn is_xterm(&self) -> bool {
@@ -578,6 +587,66 @@ fn ms_is_valid(template: &str) -> bool {
     as_string[1] && as_string[2] && output
 }
 
+/// `tiparm_s(template, p1, p2)` for the `%` operations an `Ms` that
+/// passed [`ms_is_valid`] can use: `%pN` pushes a parameter, `%s` prints
+/// and `%l` prints the length of the top, `%%` is a `%`. Anything else is
+/// dropped, as the validity model does not evaluate it either.
+fn expand_ss(template: &str, p1: &str, p2: &str) -> Vec<u8> {
+    let bytes = template.as_bytes();
+    let mut out = Vec::new();
+    let mut stack: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'%' {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        match bytes.get(i) {
+            Some(b'%') => out.push(b'%'),
+            Some(b'p') => {
+                match bytes.get(i + 1) {
+                    Some(b'1') => stack.push(p1),
+                    Some(b'2') => stack.push(p2),
+                    _ => stack.push(""),
+                }
+                i += 1;
+            }
+            Some(b's') => out.extend_from_slice(stack.pop().unwrap_or("").as_bytes()),
+            Some(b'l') => {
+                let n = stack.pop().unwrap_or("").len();
+                out.extend_from_slice(n.to_string().as_bytes());
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// `b64_ntop`: standard base64 with padding.
+fn base64(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for (k, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            if k <= chunk.len() {
+                out.push(char::from(ALPHABET[(n >> shift) as usize & 63]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 /// `strunvis` (compat/unvis.c); the input unchanged when it is malformed,
 /// as `tty_term_apply` keeps it.
 fn unvis(s: &str) -> String {
@@ -660,3 +729,35 @@ fn ctrl(c: u8, base: u8) -> u8 {
 
 #[cfg(test)]
 mod golden;
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    /// Reference PTY probe: `setb -w hello-off` -> `\e]52;;aGVsbG8tb2Zm\a`.
+    #[test]
+    fn set_selection_is_osc52_with_base64() {
+        let term = Term::open("xterm-256color", &[], None, &[], &[]).unwrap();
+        assert_eq!(
+            term.set_selection("", b"hello-off").unwrap(),
+            b"\x1b]52;;aGVsbG8tb2Zm\x07"
+        );
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(&[0xff, 0x80]), "/4A=");
+        let swapped = Term::open(
+            "xterm-256color",
+            &[],
+            None,
+            &[],
+            &["xterm*:Ms=<%p2%s|%p1%s>".to_owned()],
+        )
+        .unwrap();
+        assert_eq!(swapped.set_selection("c", b"x").unwrap(), b"<eA==|c>");
+        let none =
+            Term::open("xterm-256color", &[], None, &[], &["xterm*:Ms@".to_owned()]).unwrap();
+        assert!(none.set_selection("", b"x").is_none());
+    }
+}
