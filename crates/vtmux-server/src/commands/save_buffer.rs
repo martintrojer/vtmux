@@ -42,12 +42,11 @@ pub fn exec(
     };
     if target == "-" {
         if attached || item.client.is_none() {
-            return Err(EdgeError::Message("Bad file descriptor: -".into()).into());
+            return file_io::bad_stdout(server, item).map_err(Into::into);
         }
         item.print_raw(data);
         return Ok(());
     }
     let path = file_io::path(server, item, &target);
-    file_io::write(&path, &data, args.flag('a'))
-        .map_err(|e| EdgeError::Message(file_io::describe(&e, &path)).into())
+    file_io::write(server, item, &path, &data, args.flag('a')).map_err(Into::into)
 }

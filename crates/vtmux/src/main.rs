@@ -3,6 +3,7 @@
 //! send the command, relay its output and exit with its status.
 
 mod cli;
+mod files;
 
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -266,7 +267,7 @@ fn main() -> ExitCode {
     // client_main (client.c:248-272): the command is parsed here only to
     // learn whether it starts a server; errors are the server's to report.
     let start = cli.command.is_empty()
-        || cmd::parse_argv(&cli.command)
+        || cmd::parse_argv_bytes(&cli.command)
             .is_ok_and(|calls| calls.iter().any(|c| c.entry.starts_server));
     let start = start && !cli.no_start;
 
@@ -364,7 +365,14 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
                 let _ = io::stderr().lock().write_all(&b);
             }
             Ok(Some(ServerMsg::Exit { code, message })) => break (code, message),
-            Ok(Some(ServerMsg::Ready)) => {}
+            // A control client's file I/O is the server's (file.c:321).
+            Ok(Some(
+                ServerMsg::Ready
+                | ServerMsg::ReadOpen { .. }
+                | ServerMsg::WriteOpen { .. }
+                | ServerMsg::WriteData(_)
+                | ServerMsg::WriteClose,
+            )) => {}
             Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
         }
     };
@@ -377,8 +385,10 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
-/// Print what the server sends until `Exit`.
+/// Print what the server sends until `Exit`, doing the file I/O it asks
+/// for (file.c, client side).
 fn relay(stream: &mut UnixStream) -> ExitCode {
+    let mut writing: Option<files::Write> = None;
     loop {
         match protocol::read_msg::<ServerMsg>(stream) {
             Ok(Some(ServerMsg::Stdout(b) | ServerMsg::Frame(b))) => {
@@ -400,6 +410,19 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
                     u8::try_from(vtmux_client::attach::attach(stream)).unwrap_or(1),
                 );
             }
+            Ok(Some(ServerMsg::WriteOpen { path, append })) => {
+                writing = Some(files::Write::open(&path, append));
+            }
+            Ok(Some(ServerMsg::WriteData(b))) => {
+                if let Some(w) = writing.as_mut() {
+                    w.write(&b);
+                }
+            }
+            Ok(Some(ServerMsg::WriteClose)) => {
+                let error = writing.take().map_or(libc_ebadf(), files::Write::close);
+                let _ = protocol::write_msg(stream, &ClientMsg::FileDone { error });
+            }
+            Ok(Some(ServerMsg::ReadOpen { path })) => files::read(stream, path.as_deref()),
             Ok(None) | Err(_) => {
                 // client.c: CLIENT_EXIT_LOST_SERVER.
                 write_err(b"server exited unexpectedly");
@@ -407,4 +430,8 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
             }
         }
     }
+}
+
+fn libc_ebadf() -> i32 {
+    rustix::io::Errno::BADF.raw_os_error()
 }

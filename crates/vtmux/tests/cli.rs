@@ -2857,3 +2857,166 @@ fn guarded_config(w: &World) -> String {
     .expect("write");
     path.to_str().expect("utf-8").to_owned()
 }
+
+impl World {
+    /// `run` with `input` on the client's stdin.
+    fn run_stdin(&self, args: &[&str], input: &[u8]) -> Run {
+        use std::io::Write as _;
+        let mut child = Command::new(&self.bin)
+            .args(["-L", &self.label, "-f", "/dev/null"])
+            .args(args)
+            .current_dir(self.dir())
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", self.dir())
+            .env("SHELL", "/bin/sh")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn binary");
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        let out = child.wait_with_output().expect("wait");
+        Run {
+            stdout: self.normalise(&String::from_utf8_lossy(&out.stdout)),
+            stderr: self.normalise(&String::from_utf8_lossy(&out.stderr)),
+            code: out.status.code().unwrap_or(-1),
+        }
+    }
+
+    /// `run` with raw (possibly non-UTF-8) command words.
+    fn run_bytes(&self, args: &[&[u8]]) -> Run {
+        use std::os::unix::ffi::OsStrExt;
+        let mut full: Vec<&std::ffi::OsStr> = ["-L", &self.label, "-f", "/dev/null"]
+            .into_iter()
+            .map(std::ffi::OsStr::new)
+            .collect();
+        full.extend(args.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
+        let out = Command::new(&self.bin)
+            .args(full)
+            .current_dir(self.dir())
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", self.dir())
+            .env("SHELL", "/bin/sh")
+            .output()
+            .expect("run binary");
+        Run {
+            // Bytes, escaped, so a lossy decode cannot hide a difference.
+            stdout: out.stdout.escape_ascii().to_string(),
+            stderr: self.normalise(&String::from_utf8_lossy(&out.stderr)),
+            code: out.status.code().unwrap_or(-1),
+        }
+    }
+}
+
+/// `load-buffer -` reads the command client's stdin (file.c `file_read`
+/// of `-`: `MSG_READ_OPEN` with `STDIN_FILENO`); empty stdin sets
+/// nothing; `save-buffer` to a missing directory and `load-buffer` of a
+/// missing file fail after the I/O. Reference: the same transcript.
+#[test]
+fn buffers_stdin_and_file_errors() {
+    compare("buffers_stdin_and_file_errors", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run_stdin(&["load-buffer", "-b", "b", "-"], b"x"),
+            w.run_stdin(&["load-buffer", "-b", "c", "-"], b""),
+            w.run_stdin(&["load-buffer", "-"], b"line\n\xff\x00tail"),
+            w.run(&["list-buffers"]),
+            w.run(&[
+                "save-buffer",
+                "-b",
+                "b",
+                "nodir/f",
+                ";",
+                "display",
+                "-p",
+                "after",
+            ]),
+            w.run(&["load-buffer", "nosuch", ";", "display", "-p", "after"]),
+            w.run(&["load-buffer", "."]),
+        ]
+    });
+}
+
+/// `set-buffer` stores the argv bytes as given (cmd-set-buffer.c:111-123):
+/// invalid UTF-8 is not replaced (reviewer-36: `\xff\x80` became EF BF BD
+/// twice). Reference: `buffer0: 14 bytes`, `showb` returns the bytes.
+#[test]
+fn set_buffer_keeps_non_utf8_bytes() {
+    compare("set_buffer_keeps_non_utf8_bytes", |w| {
+        let data = b"a\tb\x01c\x1b[31m\xc3\xa9\xff\x80";
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run_bytes(&[b"set-buffer", data]),
+            w.run_bytes(&[b"set-buffer", b"-a", b"-b", b"n", b"\xfe;"]),
+            w.run_bytes(&[b"list-buffers"]),
+            w.run_bytes(&[b"show-buffer"]),
+            w.run_bytes(&[b"save-buffer", b"-b", b"n", b"-"]),
+        ]
+    });
+}
+
+/// A `save-buffer` to a FIFO whose reader is slow must not hold up other
+/// commands: tmux has the command client write it (file.c:611, 635), and
+/// so does vtmux. 100000 bytes is more than the pipe holds, so the writer
+/// waits until the test drains the FIFO; meanwhile `display` answers.
+#[test]
+fn save_buffer_to_a_slow_fifo_does_not_stall_the_server() {
+    use std::io::Read as _;
+    use std::os::unix::fs::OpenOptionsExt;
+    compare(
+        "save_buffer_to_a_slow_fifo_does_not_stall_the_server",
+        |w| {
+            let fifo = w.dir().join("fifo");
+            let big = w.dir().join("big");
+            std::fs::write(&big, vec![b'z'; 100_000]).unwrap();
+            let status = Command::new("mkfifo").arg(&fifo).status().unwrap();
+            assert!(status.success());
+            let mut out = vec![
+                w.run(&["new", "-d", "-s", "a", "cat"]),
+                w.run(&["load-buffer", "-b", "w", big.to_str().unwrap()]),
+            ];
+            // The read end, open but not read yet.
+            let mut reader = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc_o_nonblock())
+                .open(&fifo)
+                .unwrap();
+            let writer = w.spawn(&["save-buffer", "-b", "w", fifo.to_str().unwrap()]);
+            std::thread::sleep(Duration::from_millis(300));
+            let start = Instant::now();
+            out.push(w.run(&["display", "-p", "alive"]));
+            assert!(
+                start.elapsed() < Duration::from_secs(2),
+                "display waited for the FIFO ({})",
+                w.bin.display()
+            );
+            let mut got = Vec::new();
+            let mut buf = [0u8; 8192];
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while got.len() < 100_000 && Instant::now() < deadline {
+                match reader.read(&mut buf) {
+                    Ok(0) => std::thread::sleep(Duration::from_millis(10)),
+                    Ok(n) => got.extend_from_slice(&buf[..n]),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            }
+            let done = writer.wait_with_output().unwrap();
+            out.push(Run {
+                stdout: format!("{} bytes", got.len()),
+                stderr: String::from_utf8_lossy(&done.stderr).into_owned(),
+                code: done.status.code().unwrap_or(-1),
+            });
+            out
+        },
+    );
+}
+
+/// `O_NONBLOCK` from the platform, never hard-coded.
+fn libc_o_nonblock() -> i32 {
+    rustix::fs::OFlags::NONBLOCK.bits().cast_signed()
+}

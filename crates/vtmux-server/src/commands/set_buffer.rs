@@ -1,5 +1,5 @@
 //! `set-buffer` (cmd-set-buffer.c:60-142): set, append to or rename a paste
-//! buffer. `-w` (OSC 52 to the client) is not implemented.
+//! buffer; `-w` also sends it to the target client's clipboard (OSC 52).
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -34,7 +34,8 @@ pub fn exec(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdErro
     if args.positionals.len() != 1 {
         return Err(EdgeError::Message("no data specified".into()).into());
     }
-    let new = args.positional_text(0).unwrap_or_default();
+    // The bytes as given (cmd-set-buffer.c:111-123 copies the C string).
+    let new = args.positional_bytes(0).unwrap_or_default();
     if new.is_empty() {
         return Ok(());
     }
@@ -44,18 +45,20 @@ pub fn exec(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdErro
     {
         data.extend_from_slice(&old.data);
     }
-    data.extend_from_slice(new.as_bytes());
+    data.extend_from_slice(&new);
+    // CMD_CLIENT_TFLAG|CMD_CLIENT_CANFAIL: resolved before the command.
+    let clip = args
+        .flag('w')
+        .then(|| server.find_client(item.client, item.origin, args.value('t')))
+        .flatten();
     server
         .model
         .paste
-        .set(data, bufname, limit)
+        .set(data.clone(), bufname, limit)
         .map_err(EdgeError::Message)?;
-    if args.flag('w')
-        && server
-            .find_client(item.client, item.origin, args.value('t'))
-            .is_some()
-    {
-        return Err(EdgeError::NotImplemented("set-buffer -w".into()).into());
+    // cmd-set-buffer.c:127-128: whatever set-clipboard says.
+    if let Some(c) = clip {
+        server.set_selection(c, &data);
     }
     Ok(())
 }

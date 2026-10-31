@@ -310,7 +310,13 @@ impl Socket {
                                     (code, message)
                                 }));
                             }
-                            ServerMsg::Ready => {}
+                            // File requests go to command clients only: an
+                            // attached client's I/O is the server's.
+                            ServerMsg::Ready
+                            | ServerMsg::ReadOpen { .. }
+                            | ServerMsg::WriteOpen { .. }
+                            | ServerMsg::WriteData(_)
+                            | ServerMsg::WriteClose => {}
                         }
                     }
                     Err(ProtocolError::Truncated) => break,

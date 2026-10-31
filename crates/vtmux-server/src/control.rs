@@ -213,6 +213,13 @@ impl Server {
         self.control_flush(id);
     }
 
+    /// `c->retval = 1` from a `cmdq_error` outside the command's guard.
+    pub(crate) fn control_retval(&mut self, id: ClientId, status: i32) {
+        if let Some(cs) = self.control_mut(id) {
+            cs.retval = cs.retval.max(status);
+        }
+    }
+
     /// Move an item's output into the control stream, as `control_write`
     /// lines (the output already ends in its newline).
     pub(crate) fn control_take_output(&mut self, id: ClientId, item: &mut Item) {

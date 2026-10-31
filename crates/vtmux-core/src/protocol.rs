@@ -14,13 +14,14 @@
 
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::error::EdgeError;
 use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
@@ -46,7 +47,9 @@ pub struct Hello {
     /// The client's process ID: a client without a tty is named
     /// `client-PID` (server-client.c:3016-3019).
     pub pid: u32,
-    pub argv: Vec<String>,
+    /// The command words as the shell passed them: bytes, not UTF-8
+    /// (tmux's argv is `char *`; `set-buffer` data keeps them).
+    pub argv: Vec<Vec<u8>>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
     pub tty: Option<TtyInfo>,
@@ -109,6 +112,13 @@ pub enum ClientMsg {
     FrameAck {
         seq: u64,
     },
+    /// Bytes read for the open [`ServerMsg::ReadOpen`] (`MSG_READ`).
+    ReadData(Vec<u8>),
+    /// The open file operation finished: `error` is an errno, 0 for
+    /// success (`MSG_READ_DONE`, `MSG_WRITE_CLOSE` acknowledged).
+    FileDone {
+        error: i32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +132,21 @@ pub enum ServerMsg {
         message: Option<String>,
     },
     Ready,
+    /// Read a file, or stdin when `path` is `None`, and send it back as
+    /// [`ClientMsg::ReadData`] then [`ClientMsg::FileDone`] (file.c
+    /// `MSG_READ_OPEN`: tmux has the command client do its file I/O).
+    ReadOpen {
+        path: Option<PathBuf>,
+    },
+    /// Open `path` for writing (create, truncate or append) for the
+    /// [`ServerMsg::WriteData`] that follow (`MSG_WRITE_OPEN`).
+    WriteOpen {
+        path: PathBuf,
+        append: bool,
+    },
+    WriteData(Vec<u8>),
+    /// No more data: close the file and answer [`ClientMsg::FileDone`].
+    WriteClose,
 }
 
 #[derive(Debug)]
@@ -308,6 +333,11 @@ impl<'a> Reader<'a> {
         Ok(self.take(n)?.to_vec())
     }
 
+    fn path(&mut self) -> Result<PathBuf, ProtocolError> {
+        use std::os::unix::ffi::OsStringExt;
+        Ok(PathBuf::from(std::ffi::OsString::from_vec(self.bytes()?)))
+    }
+
     fn string(&mut self) -> Result<String, ProtocolError> {
         String::from_utf8(self.bytes()?).map_err(|_| ProtocolError::Malformed("invalid UTF-8"))
     }
@@ -406,14 +436,16 @@ impl TtyInfo {
 
 impl Hello {
     fn write(&self, out: &mut Vec<u8>) {
-        use std::os::unix::ffi::OsStrExt;
         put_u32(out, self.version);
         out.push(match self.invocation {
             Invocation::Tmux => 0,
             Invocation::Vtmux => 1,
         });
         put_u32(out, self.pid);
-        put_strings(out, &self.argv);
+        put_len(out, self.argv.len());
+        for word in &self.argv {
+            put_bytes(out, word);
+        }
         put_bytes(out, self.cwd.as_os_str().as_bytes());
         put_len(out, self.env.len());
         for (k, v) in &self.env {
@@ -433,7 +465,8 @@ impl Hello {
     fn len(&self) -> usize {
         4 + 1
             + 4
-            + strings_len(&self.argv)
+            + 4
+            + self.argv.iter().map(|w| 4 + w.len()).sum::<usize>()
             + 4
             + self.cwd.as_os_str().len()
             + 4
@@ -447,7 +480,6 @@ impl Hello {
     }
 
     fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
-        use std::os::unix::ffi::OsStringExt;
         let version = r.u32()?;
         let invocation = match r.u8()? {
             0 => Invocation::Tmux,
@@ -455,8 +487,9 @@ impl Hello {
             _ => return Err(ProtocolError::Malformed("bad invocation byte")),
         };
         let pid = r.u32()?;
-        let argv = r.strings()?;
-        let cwd = PathBuf::from(std::ffi::OsString::from_vec(r.bytes()?));
+        let n = r.count(4)?;
+        let argv = (0..n).map(|_| r.bytes()).collect::<Result<_, _>>()?;
+        let cwd = r.path()?;
         let n = r.count(8)?;
         let env = (0..n)
             .map(|_| Ok((r.string()?, r.string()?)))
@@ -490,8 +523,9 @@ impl Message for ClientMsg {
     fn payload_len(&self) -> usize {
         1 + match self {
             Self::Hello(h) => h.len(),
-            Self::Input(b) | Self::Stdin(b) => 4 + b.len(),
+            Self::Input(b) | Self::Stdin(b) | Self::ReadData(b) => 4 + b.len(),
             Self::Resize { .. } | Self::FrameAck { .. } => 8,
+            Self::FileDone { .. } => 4,
             Self::StdinEof | Self::Detach => 0,
         }
     }
@@ -521,6 +555,14 @@ impl Message for ClientMsg {
                 out.push(6);
                 out.extend_from_slice(&seq.to_le_bytes());
             }
+            Self::ReadData(b) => {
+                out.push(7);
+                put_bytes(out, b);
+            }
+            Self::FileDone { error } => {
+                out.push(8);
+                out.extend_from_slice(&error.to_le_bytes());
+            }
         }
     }
 
@@ -536,6 +578,8 @@ impl Message for ClientMsg {
             4 => Self::StdinEof,
             5 => Self::Detach,
             6 => Self::FrameAck { seq: r.u64()? },
+            7 => Self::ReadData(r.bytes()?),
+            8 => Self::FileDone { error: r.i32()? },
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -544,9 +588,11 @@ impl Message for ClientMsg {
 impl Message for ServerMsg {
     fn payload_len(&self) -> usize {
         1 + match self {
-            Self::Stdout(b) | Self::Stderr(b) | Self::Frame(b) => 4 + b.len(),
+            Self::Stdout(b) | Self::Stderr(b) | Self::Frame(b) | Self::WriteData(b) => 4 + b.len(),
             Self::Exit { message, .. } => 4 + option_len(message.as_ref(), |m| 4 + m.len()),
-            Self::Ready => 0,
+            Self::Ready | Self::WriteClose => 0,
+            Self::ReadOpen { path } => option_len(path.as_ref(), |p| 4 + p.as_os_str().len()),
+            Self::WriteOpen { path, .. } => 4 + path.as_os_str().len() + 1,
         }
     }
 
@@ -570,6 +616,22 @@ impl Message for ServerMsg {
                 put_option(out, message.as_ref(), |o, m| put_bytes(o, m.as_bytes()));
             }
             Self::Ready => out.push(4),
+            Self::ReadOpen { path } => {
+                out.push(5);
+                put_option(out, path.as_ref(), |o, p| {
+                    put_bytes(o, p.as_os_str().as_bytes());
+                });
+            }
+            Self::WriteOpen { path, append } => {
+                out.push(6);
+                put_bytes(out, path.as_os_str().as_bytes());
+                out.push(u8::from(*append));
+            }
+            Self::WriteData(b) => {
+                out.push(7);
+                put_bytes(out, b);
+            }
+            Self::WriteClose => out.push(8),
         }
     }
 
@@ -583,6 +645,15 @@ impl Message for ServerMsg {
                 message: r.option(Reader::string)?,
             },
             4 => Self::Ready,
+            5 => Self::ReadOpen {
+                path: r.option(Reader::path)?,
+            },
+            6 => Self::WriteOpen {
+                path: r.path()?,
+                append: r.flag()?,
+            },
+            7 => Self::WriteData(r.bytes()?),
+            8 => Self::WriteClose,
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -597,7 +668,13 @@ mod tests {
             version: PROTOCOL_VERSION,
             invocation: Invocation::Vtmux,
             pid: 4242,
-            argv: vec!["new-session".into(), "-d".into(), "-s".into(), "ä".into()],
+            argv: vec![
+                b"new-session".to_vec(),
+                b"-d".to_vec(),
+                b"-s".to_vec(),
+                "ä".into(),
+                b"\xff\x80".to_vec(),
+            ],
             cwd: PathBuf::from("/home/u"),
             env: vec![
                 ("TERM".into(), "xterm-256color".into()),
@@ -637,6 +714,9 @@ mod tests {
             ClientMsg::Detach,
             ClientMsg::FrameAck { seq: 0 },
             ClientMsg::FrameAck { seq: u64::MAX - 1 },
+            ClientMsg::ReadData(b"from stdin\xff".to_vec()),
+            ClientMsg::FileDone { error: 0 },
+            ClientMsg::FileDone { error: 32 },
         ]
     }
 
@@ -654,6 +734,16 @@ mod tests {
                 message: Some("exited".into()),
             },
             ServerMsg::Ready,
+            ServerMsg::ReadOpen { path: None },
+            ServerMsg::ReadOpen {
+                path: Some(PathBuf::from("/tmp/f")),
+            },
+            ServerMsg::WriteOpen {
+                path: PathBuf::from("/tmp/\u{e9}"),
+                append: true,
+            },
+            ServerMsg::WriteData(vec![0, 1, 2]),
+            ServerMsg::WriteClose,
         ]
     }
 
@@ -841,7 +931,7 @@ mod tests {
         // client.c:659-668 shape, vtmux numbers.
         assert_eq!(
             err.to_string(),
-            "protocol version mismatch (client 0, server 3)"
+            "protocol version mismatch (client 0, server 4)"
         );
     }
 }
