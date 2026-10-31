@@ -215,6 +215,13 @@ pub fn lookup(s: &str) -> Option<Key> {
         }
         rest = &rest[2..];
     }
+    // key-string.c:268-290: `0xNN` is a character by number.
+    if rest.starts_with("0x") {
+        let core = CoreKey::from_name(rest).filter(|k| *k != CoreKey::NONE)?;
+        let found = Key::from_core(core)?;
+        key.base = found.base;
+        return Some(key);
+    }
     let mut chars = rest.chars();
     match (chars.next(), chars.next()) {
         (None, _) => None,

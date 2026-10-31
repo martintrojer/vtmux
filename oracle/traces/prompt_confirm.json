@@ -1,0 +1,593 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "prompt_confirm",
+  "inputs": {
+    "name": "prompt_confirm",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:1",
+          "-n",
+          "two",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-a",
+          "confirm-before",
+          "set -g @c yes"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-x",
+          "confirm-before",
+          "-c",
+          "x",
+          "-p",
+          "Sure?",
+          "set -g @c x"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-y",
+          "confirm-before",
+          "-y",
+          "set -g @c enter"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-b",
+          "confirm-before",
+          "-b",
+          "set -g @c bg"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u001ba"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "n"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@c"
+        ]
+      },
+      {
+        "keys": "\u001ba"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@c"
+        ]
+      },
+      {
+        "keys": "\u001bx"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@c"
+        ]
+      },
+      {
+        "keys": "\u001bx"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "x"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@c"
+        ]
+      },
+      {
+        "keys": "\u001by"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@c"
+        ]
+      },
+      {
+        "keys": "\u001ba"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@c"
+        ]
+      },
+      {
+        "keys": "\u001bb"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@c"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "a:1"
+        ]
+      },
+      {
+        "keys": "\u0002&"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index}:#{window_name}"
+        ]
+      },
+      {
+        "keys": "\u0002&"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index}:#{window_name}"
+        ]
+      },
+      {
+        "run": [
+          "confirm-before",
+          "-c",
+          "xx",
+          "ls"
+        ]
+      },
+      {
+        "run": [
+          "confirm-before",
+          "-t",
+          "nope",
+          "ls"
+        ]
+      },
+      {
+        "run": [
+          "confirm-before",
+          "-b",
+          "-c",
+          "\u0001",
+          "ls"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mConfirm 'set-option'? (y/n)\\e[39m"
+        ],
+        "cursor": [
+          28,
+          5
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:two \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:two \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "yes\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mSure?\\e[39m"
+        ],
+        "cursor": [
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "yes\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "enter\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "enter\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bg\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mkill-window two? (y/n)\\e[39m"
+        ],
+        "cursor": [
+          23,
+          5
+        ]
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] 0:w- \\e[4m1:two*\\e[0m\\e[30m\\e[42m\"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0:w\n1:two\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0:w\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid confirm key\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find client: nope\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid confirm key\n",
+        "exit": 1
+      }
+    }
+  ]
+}

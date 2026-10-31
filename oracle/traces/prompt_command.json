@@ -1,0 +1,549 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "prompt_command",
+  "inputs": {
+    "name": "prompt_command",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "rename-window abc def"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0017"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0001\u0006\u0006"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0014"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0005\u0019\u0019"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002\u0002\u000b"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[3~"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015rename-window xy\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{window_name}"
+        ]
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "set -g @x one\r"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001b[A"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[A"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[A\u001b[B"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[B"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0003"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "junk"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show-prompt-history"
+        ]
+      },
+      {
+        "run": [
+          "show-prompt-history",
+          "-T",
+          "search"
+        ]
+      },
+      {
+        "run": [
+          "show-prompt-history",
+          "-T",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "clear-prompt-history",
+          "-T",
+          "command"
+        ]
+      },
+      {
+        "run": [
+          "showphist",
+          "-T",
+          "command"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:\\e[39m"
+        ],
+        "cursor": [
+          1,
+          5
+        ]
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rename-window abc def\\e[39m"
+        ],
+        "cursor": [
+          22,
+          5
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rename-window abc\\e[39m"
+        ],
+        "cursor": [
+          19,
+          5
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rename-window abc\\e[39m"
+        ],
+        "cursor": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rneame-window abc\\e[39m"
+        ],
+        "cursor": [
+          4,
+          5
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rneame-window abc defdef\\e[39m"
+        ],
+        "cursor": [
+          25,
+          5
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rneame-window abc defd\\e[39m"
+        ],
+        "cursor": [
+          23,
+          5
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rneame-window abc de\\e[39m"
+        ],
+        "cursor": [
+          21,
+          5
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:xy*\\e[0m\\e[30m\\e[42m      \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "xy\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -g @x one\\e[39m"
+        ],
+        "cursor": [
+          14,
+          5
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:rename-window xy\\e[39m"
+        ],
+        "cursor": [
+          17,
+          5
+        ]
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -g @x one\\e[39m"
+        ],
+        "cursor": [
+          14,
+          5
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:\\e[39m"
+        ],
+        "cursor": [
+          1,
+          5
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:xy*\\e[0m\\e[30m\\e[42m      \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:junk\\e[39m"
+        ],
+        "cursor": [
+          5,
+          5
+        ]
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:xy*\\e[0m\\e[30m\\e[42m      \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "History for command:\n\n1: rename-window xy\n2: set -g @x one\n\nHistory for search:\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "History for search:\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid type: x\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "History for command:\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

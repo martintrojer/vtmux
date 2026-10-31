@@ -1,0 +1,145 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "keys_hex_meta",
+  "inputs": {
+    "name": "keys_hex_meta",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "stty raw -echo; exec cat -v"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "0x01",
+          "0x41",
+          "0x7F",
+          "0x263A"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-k",
+          "command-prompt",
+          "-k",
+          "-p",
+          "key",
+          "set -ga @k '%% '"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "keys": "\u001bk"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001bP"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001bk"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001b]"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@k"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^AA^?M-bM-^XM-:\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "M-P M-] \n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+# The status-line prompt (status.c status_prompt_set/redraw, prompt.c
+# prompt_draw): prefix-: draws `:` in message-style with the cursor after
+# the input; emacs editing (C-a, C-e, C-b, C-f, C-w, C-y, C-k, C-u, C-t,
+# Delete, BSpace); Enter runs the command;
+# Keys that open a prompt and keys for it are sent apart: tmux queues the
+# binding, so keys in the same read as `C-b :` reach the key tables (and
+# the pane) before the prompt opens; vtmux runs the binding at once. history recall with Up/Down
+# (prompt-history.c); show-prompt-history; Escape and C-c cancel.
+name = "prompt_command"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { attach = { session = "a" } },
+  { keys = "\u0002:" },
+  { screen = {} },
+  { keys = "rename-window abc def" },
+  { screen = {} },
+  { keys = "\u0017" },
+  { screen = {} },
+  { keys = "\u0001\u0006\u0006" },
+  { screen = {} },
+  { keys = "\u0014" },
+  { screen = {} },
+  { keys = "\u0005\u0019\u0019" },
+  { screen = {} },
+  { keys = "\u0002\u0002\u000b" },
+  { screen = {} },
+  { keys = "\u001b[3~\u007f\u007f" },
+  { screen = {} },
+  { keys = "\u0015rename-window xy\r" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_name}"] },
+  { keys = "\u0002:" },
+  { settle = {} },
+  { keys = "set -g @x one\r" },
+  { settle = {} },
+  { keys = "\u0002:" },
+  { settle = {} },
+  { keys = "\u001b[A" },
+  { screen = {} },
+  { keys = "\u001b[A" },
+  { screen = {} },
+  { keys = "\u001b[A\u001b[B" },
+  { screen = {} },
+  { keys = "\u001b[B" },
+  { screen = {} },
+  { keys = "\u0003" },
+  { screen = {} },
+  { keys = "\u0002:" },
+  { settle = {} },
+  { keys = "junk" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { screen = {} },
+  { run = ["show-prompt-history"] },
+  { run = ["show-prompt-history", "-T", "search"] },
+  { run = ["show-prompt-history", "-T", "x"] },
+  { run = ["clear-prompt-history", "-T", "command"] },
+  { run = ["showphist", "-T", "command"] },
+]

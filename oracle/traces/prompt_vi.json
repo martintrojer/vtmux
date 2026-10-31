@@ -1,0 +1,534 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "prompt_vi",
+  "inputs": {
+    "name": "prompt_vi",
+    "size": [
+      30,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "30",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-keys",
+          "vi"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "set -g @v foo-bar baz"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "0"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "www"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "bb"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "x"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "iQ"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b$"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "X"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "hhD"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "A!"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@v"
+        ]
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001bk"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "Sdisplay"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001bq"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "abcdefghijklmnopqrstuvwxyz0123456789"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b0"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0003"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -g @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          22,
+          5
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[33m\\e[40m:set -g @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          21,
+          5
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[33m\\e[40m:set -g @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          1,
+          5
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[33m\\e[40m:set -g @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          8,
+          5
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[33m\\e[40m:set -g @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          9,
+          5
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[33m\\e[40m:set -g @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[33m\\e[40m:set - @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -Q @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          7,
+          5
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -Q @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          7,
+          5
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -QX @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          8,
+          5
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -QXhhD @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          11,
+          5
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:set -QXhhDA! @v foo-bar baz\\e[39m"
+        ],
+        "cursor": [
+          13,
+          5
+        ]
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @v\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:\\e[39m"
+        ],
+        "cursor": [
+          1,
+          5
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:Sdisplay\\e[39m"
+        ],
+        "cursor": [
+          9,
+          5
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:Sdisplay\\e[39m"
+        ],
+        "cursor": [
+          9,
+          5
+        ]
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:ijklmnopqrstuvwxyz0123456789\\e[39m"
+        ],
+        "cursor": [
+          29,
+          5
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:ijklmnopqrstuvwxyz0123456789\\e[39m"
+        ],
+        "cursor": [
+          29,
+          5
+        ]
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4mw\\e[0m\\e[30m\\e[42m\"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,725 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "prompt_templates",
+  "inputs": {
+    "name": "prompt_templates",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-a",
+          "command-prompt",
+          "-p",
+          "name,val",
+          "-I",
+          "#{window_name},v",
+          "set -g @%1 '%2'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-s",
+          "command-prompt",
+          "-1",
+          "-p",
+          "key?",
+          "set -g @one '%%'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-n",
+          "command-prompt",
+          "-N",
+          "-p",
+          "num",
+          "-I",
+          "4",
+          "set -g @num '%%'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-k",
+          "command-prompt",
+          "-k",
+          "-p",
+          "press",
+          "set -g @key '%%'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-e",
+          "command-prompt",
+          "-e",
+          "-I",
+          "x",
+          "set -g @e '%%'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-l",
+          "command-prompt",
+          "-l",
+          "-p",
+          "a,b",
+          "set -g @l '%%'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-r",
+          "command-prompt",
+          "rename-window '%%'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "j",
+          "set",
+          "-g",
+          "@after",
+          "yes"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u001ba"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "1\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "x'y\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@w1"
+        ]
+      },
+      {
+        "keys": "\u001bs"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "Q"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@one"
+        ]
+      },
+      {
+        "keys": "\u001bn"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "2"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@num"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@after"
+        ]
+      },
+      {
+        "keys": "\u001bk"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[1;5A"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@key"
+        ]
+      },
+      {
+        "keys": "\u001be"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": ""
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@e"
+        ]
+      },
+      {
+        "keys": "\u001bl"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "z\r"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@l"
+        ]
+      },
+      {
+        "keys": "\u001br"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "nm\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "command-prompt",
+          "-b",
+          "-t",
+          "/dev/null",
+          "ls"
+        ]
+      },
+      {
+        "run": [
+          "command-prompt",
+          "-T",
+          "nope",
+          "ls"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mname w\\e[39m"
+        ],
+        "cursor": [
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mval v\\e[39m"
+        ],
+        "cursor": [
+          5,
+          5
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "vxy\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mkey?\\e[39m"
+        ],
+        "cursor": [
+          5,
+          5
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "Q\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mnum 4\\e[39m"
+        ],
+        "cursor": [
+          5,
+          5
+        ]
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mnum 42\\e[39m"
+        ],
+        "cursor": [
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "42\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "yes\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mpress\\e[39m"
+        ],
+        "cursor": [
+          6,
+          5
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "C-Up\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m(set) x\\e[39m"
+        ],
+        "cursor": [
+          7,
+          5
+        ]
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43ma,b\\e[39m"
+        ],
+        "cursor": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "z\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m(rename-window)\\e[39m"
+        ],
+        "cursor": [
+          16,
+          5
+        ]
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:nm*\\e[0m\\e[30m\\e[42m      \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find client: /dev/null\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown type: nope\n",
+        "exit": 1
+      }
+    }
+  ]
+}
