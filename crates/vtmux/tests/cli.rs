@@ -3926,3 +3926,32 @@ fn hooks_after_commands() {
         out
     });
 }
+
+/// pane-exited's `exit_signal` is `sig2name` of the signal (server-fn.c:
+/// 35-56, tmux.c:327-338): the number on glibc, which has no
+/// `sys_signame`, the lower-case name on the BSDs and macOS. Compared
+/// against the reference on this host, not an oracle trace, because the
+/// value depends on the platform.
+#[test]
+fn hooks_exit_signal() {
+    compare("hooks_exit_signal", |w| {
+        let mut out = vec![w.run(&["new", "-d", "-s", "a", "-n", "w", "cat"])];
+        let mut run = |argv: &[&str]| out.push(w.run(argv));
+        run(&["set", "-g", "@log", ""]);
+        run(&[
+            "set-hook",
+            "-g",
+            "pane-exited",
+            "set -agF @log '|#{hook_exit_signal}:#{hook_exit_status}:#{hook_exit_success}'",
+        ]);
+        run(&["set-hook", "-ga", "pane-exited", "wait-for -S exited"]);
+        for program in ["kill -TERM $$", "kill -KILL $$", "kill -HUP $$", "exit 0"] {
+            let program = format!("sh -c '{program}'");
+            run(&["neww", "-d", "-n", "x", &program]);
+            run(&["wait-for", "exited"]);
+        }
+        run(&["show", "-gv", "@log"]);
+        run(&["kill-server"]);
+        out
+    });
+}

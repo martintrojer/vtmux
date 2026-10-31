@@ -1,0 +1,855 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "hooks_payload",
+  "inputs": {
+    "name": "hooks_payload",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{command}|#{hook_event}"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-renamed",
+          "set -gF @e '#{hook_event}|#{hook}|#{command}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "after-rename-window",
+          "set -gF @f '#{hook_event}|#{hook}|#{command}'"
+        ]
+      },
+      {
+        "run": [
+          "renamew",
+          "-t",
+          "a:0",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@e"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@f"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-gu",
+          "window-renamed"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-gu",
+          "after-rename-window"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-exited",
+          "set -agF @log '|#{hook_event}:#{hook_exit_status}:#{hook_exit_success}:#{command}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-ga",
+          "pane-exited",
+          "wait-for -S exited"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "e",
+          "sh -c 'exit 4'"
+        ]
+      },
+      {
+        "wait_for": "exited"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-gu",
+          "pane-exited"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-t",
+          "a:0",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-layout-changed",
+          "set -agF @n L"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@n",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "selectl",
+          "-t",
+          "a:0",
+          "even-vertical"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@n",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "selectl",
+          "-t",
+          "a:0",
+          "-n"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@n",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "nextl",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@n",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "selectl",
+          "-t",
+          "a:0",
+          "-E"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@n",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "selectl",
+          "-t",
+          "a:0",
+          "even-horizontal"
+        ]
+      },
+      {
+        "run": [
+          "resizep",
+          "-t",
+          "a:0.0",
+          "-x",
+          "20"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@n",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "resizep",
+          "-t",
+          "a:0.0",
+          "-y",
+          "5"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@n",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "resizep",
+          "-t",
+          "a:0.0",
+          "-L",
+          "2",
+          "-U",
+          "1"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-gu",
+          "window-layout-changed"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "b0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "b"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "wait-for -v -E window-renamed"
+        }
+      },
+      {
+        "run": [
+          "renamew",
+          "-t",
+          "a:0",
+          "yy"
+        ]
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "selectl -t b:0 even-vertical"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "splitw -t b:0 cat"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "selectl -t b:0 even-vertical"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "display-message|\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "window-renamed|window-renamed|set-option\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after-rename-window|after-rename-window|rename-window\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|pane-exited:4:0:set-option\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "LL\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "LL\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "LL\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "L\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "LLLL\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "L\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "LL\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $1 b",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%unlinked-window-renamed @0 yy",
+          "event=window-renamed",
+          "new_name=yy",
+          "old_name=x",
+          "window=@0",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%layout-change @2 b260,80x24,0,0,3 b260,80x24,0,0,3 *",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%window-pane-changed @2 %4",
+          "%layout-change @2 41a3,80x24,0,0[80x12,0,0,3,80x11,0,13,4] 41a3,80x24,0,0[80x12,0,0,3,80x11,0,13,4] *",
+          "%begin <TIME> #5 1",
+          "%end <TIME> #5 1",
+          "%layout-change @2 41a3,80x24,0,0[80x12,0,0,3,80x11,0,13,4] 41a3,80x24,0,0[80x12,0,0,3,80x11,0,13,4] *",
+          "%layout-change @2 41a3,80x24,0,0[80x12,0,0,3,80x11,0,13,4] 41a3,80x24,0,0[80x12,0,0,3,80x11,0,13,4] *",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

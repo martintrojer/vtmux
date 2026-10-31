@@ -71,9 +71,14 @@ pub fn exec(
         }
     }
     let window = server.model.windows.get_mut(&w).expect("target window");
-    let result = window.layout.resize_pane_cmd(wp, &req);
+    let mut resized = 0;
+    let result = window.layout.resize_pane_cmd(wp, &req, &mut resized);
     server.model.fix_panes(w);
-    // cmd-resize-pane.c:187 (also after a failed adjustment).
+    // layout_resize_layout's own event for each cell resize (layout.c:1002),
+    // then cmd-resize-pane.c:187 (also after a failed adjustment).
+    for _ in 0..resized {
+        server.model.layout_changed(w);
+    }
     server.model.layout_changed(w);
     result.map_err(EdgeError::Message)?;
     if let Some(cause) = bad {

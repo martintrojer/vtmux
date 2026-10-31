@@ -118,14 +118,20 @@ fn dump(server: &Server, w: WindowId, v1: bool) -> Option<String> {
     window.layout.dump_v2(&panes)
 }
 
-/// `layout_set_select`: arrange and remember it as `w->lastlayout`.
+/// `layout_set_select`: arrange and remember it as `w->lastlayout`. An
+/// arrangement fires window-layout-changed itself (layout-set.c:201, 312,
+/// 411, 510, 610, 733), so with `changed:` the window gets two; a window of
+/// one pane is not arranged and gets one.
 fn apply_named(server: &mut Server, w: WindowId, which: NamedLayout) {
     let opts = set_opts(server, w);
     let window = server.model.windows.get_mut(&w).expect("target window");
     let panes = window.panes.panes.clone();
-    window.layout.select_named(which, &panes, &opts);
+    let arranged = window.layout.select_named(which, &panes, &opts);
     window.last_layout = Some(which);
     server.model.fix_panes(w);
+    if arranged {
+        server.model.layout_changed(w);
+    }
 }
 
 /// The window options layout-set.c reads.
