@@ -175,6 +175,11 @@ impl OptionsStore {
     /// everywhere, so it leaves the listings again.
     fn remove_or_default(&mut self, tree: TreeId, name: &str, key: Option<&ArrayKey>) {
         let term = self.term.clone();
+        if key.is_none() {
+            // A new entry (options_default / options_remove): no fires.
+            let full = super::table::find(name).map_or(name, |d| d.name);
+            self.hook_fires.remove(&(tree, full.to_owned()));
+        }
         let options = self.tree_mut(tree);
         let Some(entry) = options.get_only_mut(name) else {
             return;
