@@ -14,9 +14,10 @@ Record each gate run in the task note (`GATE: commit command scope`, `RESULT: ex
 
 ## Toolchain
 
-- Rust is pinned in `rust-toolchain.toml`; Zig is pinned in `mise.toml` (libghostty-vt 0.2.2 needs exactly 0.15.2). Zig 0.15.2 cannot link against the macOS 26 SDK, so CI's macOS job runs on `macos-14`; a local macOS 26 build needs an older SDK. Run cargo through `mise exec --` so the right Zig is on PATH. The first build of `libghostty-vt-sys` compiles ghostty from source (~30 s warm machine, longer cold).
+- Rust is pinned in `rust-toolchain.toml`; Zig is pinned in `mise.toml` (0.17.0: the ghostty commit's `build.zig.zon` requires that major.minor). Zig 0.17 targets macOS 15+, so CI's macOS job runs on `macos-15`. Run cargo through `mise exec --` so the right Zig is on PATH. The first build of `libghostty-vt-sys` clones ghostty and compiles it from source (~1 min warm machine, several cold).
 - `scripts/check.sh` also type-checks the other OS (`cargo check --target aarch64-apple-darwin` on Linux) when that target is installed. Install it (`rustup target add aarch64-apple-darwin`): macOS-only build breaks otherwise reach CI first.
 - CI: Linux runs the full `scripts/check.sh`. macOS must build, pass clippy and the unit tests; its tmux-comparison suites run but are informational until task `macos_attach_parity` closes (macOS-specific FIFO, locale and process-name gaps).
+- libghostty-vt is vendored in `third_party/libghostty-rs` (path dependency, outside the workspace, so the workspace lints and doctests skip it). `VENDOR.md` there records the pinned ghostty commit, every local change, and how to bump the pin.
 - The reference tmux 3.8 lives at `${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux` (built by `cargo xtask ref-tmux`), or `$VTMUX_REFERENCE_TMUX`. It is shared by every worktree. Never use the `tmux` on PATH as the reference: it is whatever mise installed. Building it needs libevent and ncurses headers, bison (configure requires yacc), pkg-config and a C compiler; on Fedora Atomic run the build inside the `vtmux-dev` toolbox (`toolbox run -c vtmux-dev mise exec -- ...`); the resulting binary runs on the host.
 - A fresh worktree needs `mise trust` once before `mise exec` works.
 
