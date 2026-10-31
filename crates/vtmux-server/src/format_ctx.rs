@@ -501,6 +501,49 @@ impl<'a> Ctx<'a> {
             "alternate_on" => flag(p.term.alternate_on()),
             "history_size" => p.term.history_size().to_string(),
             "history_limit" => p.history_limit.to_string(),
+            "pane_in_mode" => p.modes.len().to_string(),
+            "pane_mode" => p.modes.first()?.name().to_owned(),
+            _ => return self.copy_value(p, name),
+        })
+    }
+
+    /// The variables copy mode adds while it is the pane's shown mode
+    /// (`window_copy_formats`, window-copy.c:1106-1180). Selections and
+    /// search are not here yet, so those read as none.
+    fn copy_value(&self, p: &crate::model::Pane, name: &str) -> Option<String> {
+        let m = p.modes.first()?.as_copy()?;
+        let line_numbers = self
+            .model
+            .number_option(TreeId::Window(p.window), "copy-mode-line-numbers");
+        let (cx, cy) = m.cursor();
+        let (position, limit) = m.position(line_numbers);
+        Some(match name {
+            "scroll_position" => m.scroll_position().to_string(),
+            "copy_position" => position.to_string(),
+            "copy_position_limit" => limit.to_string(),
+            "copy_line_numbers" => u8::from(m.line_numbers_active(line_numbers)).to_string(),
+            "copy_cursor_x" => cx.to_string(),
+            "copy_cursor_y" => cy.to_string(),
+            "top_line_time" => m.top_line_time(&p.term).to_string(),
+            "copy_cursor_line" => m.cursor_line(&p.term),
+            "copy_cursor_word" => {
+                let separators = self
+                    .options
+                    .get(TreeId::GlobalSession, "word-separators")
+                    .map(|e| e.value.to_text(e.def, None, false))
+                    .unwrap_or_default();
+                m.cursor_word(&p.term, &separators)
+            }
+            "selection_mode" => "char".to_owned(),
+            "refresh_active"
+            | "rectangle_toggle"
+            | "selection_active"
+            | "selection_present"
+            | "search_present"
+            | "search_timed_out"
+            | "search_count"
+            | "search_count_partial" => "0".to_owned(),
+            "search_match" | "copy_cursor_hyperlink" => String::new(),
             _ => return None,
         })
     }
