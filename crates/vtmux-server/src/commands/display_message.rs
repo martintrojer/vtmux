@@ -1,6 +1,8 @@
-//! `display-message` (cmd-display-message.c:61-180), without a status
-//! line: `-p` prints, and with no attached client to show the message on,
-//! nothing is shown (`status_message_set` needs a target client).
+//! `display-message` (cmd-display-message.c:61-180): `-p` prints, a
+//! control client gets `%message`, and otherwise the target client shows
+//! it on its status line (`status_message_set`) for `-d` milliseconds or
+//! `display-time`. A command client with no attached client to show it on
+//! shows nothing.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -25,14 +27,17 @@ pub fn exec(
     if args.flag('F') && !args.positionals.is_empty() {
         return Err(EdgeError::FormatAndArgument.into());
     }
-    if let Some(d) = args.value('d') {
-        super::number_expanded(server, found, Some(d), 0, i64::from(u32::MAX)).map_err(
-            |cause| EdgeError::BadNumber {
-                what: "delay",
-                cause,
-            },
-        )?;
-    }
+    let delay = match args.value('d') {
+        Some(d) => Some(
+            super::number_expanded(server, found, Some(d), 0, i64::from(u32::MAX)).map_err(
+                |cause| EdgeError::BadNumber {
+                    what: "delay",
+                    cause,
+                },
+            )?,
+        ),
+        None => None,
+    };
     let template = args
         .positional(0)
         .or(args.value('F'))
@@ -71,8 +76,12 @@ pub fn exec(
         // `%message <msg>` through server_client_print, so it lands inside
         // the command's %begin/%end guard.
         item.print(&format!("%message {msg}"));
+    } else if let Some(tc) = tc {
+        // status_message_set(tc, delay, 0, Nflag, Cflag, ...): styles in
+        // the message apply. `-C` (do not freeze the pane output) is how
+        // vtmux always draws.
+        let delay = delay.map(|d| u64::try_from(d).unwrap_or(0));
+        server.status_message(tc, msg, delay, false, args.flag('N'));
     }
-    // Otherwise the message goes to the target client's status line; an
-    // unattached command client has none, so nothing is shown.
     Ok(())
 }

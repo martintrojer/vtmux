@@ -6,7 +6,7 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, WindowId};
 
 use super::{Item, expand};
-use crate::model::Side;
+use crate::model::{Redraw, Side};
 use crate::server::Server;
 use crate::target::Found;
 
@@ -52,12 +52,18 @@ pub fn exec(
         if let Some(p) = server.model.panes.get_mut(&wp) {
             p.input_off = args.flag('d') && !args.flag('e');
         }
+        server.model.redraw(Redraw::WindowStatus(w));
         return Ok(());
     }
     if let Some(t) = args.value('T') {
         let title = expand(server, found, t);
         if let Some(p) = server.model.panes.get_mut(&wp) {
+            // screen_set_title: a change redraws the status.
+            let before = p.term.title();
             p.term.set_title(&title);
+            if p.term.title() != before {
+                server.model.redraw(Redraw::WindowStatus(w));
+            }
         }
         return Ok(());
     }
@@ -90,6 +96,7 @@ fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<()
         if let Some(p) = server.model.panes.get_mut(&lastwp) {
             p.input_off = args.flag('d') && !args.flag('e');
         }
+        server.model.redraw(Redraw::WindowStatus(w));
         return Ok(());
     }
     activate(server, w, lastwp, zflag);
@@ -102,7 +109,11 @@ fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<()
 fn activate(server: &mut Server, w: WindowId, wp: PaneId, zflag: bool) {
     let visible = server.model.windows[&w].is_visible(wp);
     let was = !visible && server.model.push_zoom(w, false, zflag);
-    server.model.set_active(w, wp);
+    if server.model.set_active(w, wp) {
+        // cmd_select_pane_redraw: every client of a session with the
+        // window redraws its status.
+        server.model.redraw(Redraw::WindowStatus(w));
+    }
     if !visible {
         server.model.pop_zoom(w, was);
     }

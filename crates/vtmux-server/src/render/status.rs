@@ -1,53 +1,356 @@
-//! The client's status lines (status.c `status_redraw`): each
-//! `status-format[]` line expanded through the format engine and drawn with
-//! [`styled::draw`] (`format_draw`) over spaces in the status style, then
-//! written as one `tty_draw_line` span per row (screen-redraw.c:1793-1811).
+//! The client's status lines (status.c): `status_redraw` expands each
+//! `status-format[]` line through the format engine and draws it with
+//! [`styled::draw`] (`format_draw`) over spaces in the status style;
+//! `status_message_redraw` draws a message over a copy of those lines; the
+//! result is written as one `tty_draw_line` span per row
+//! (screen-redraw.c:1793-1811).
 //!
 //! Everything the status line shows (status-left/right and their styles and
 //! lengths, status-justify, the window list with window-status-* formats,
 //! styles and separator, the list markers) lives in the default
 //! `status-format[0]`, so it comes from the options, not from code here.
+//!
+//! As in tmux, the lines are not expanded every frame: [`StatusLine`] keeps
+//! what was drawn last and redraws only when asked (`CLIENT_REDRAWSTATUS`,
+//! from the `server_status_*` / `server_redraw_*` calls and the
+//! `status-interval` timer), so a change nothing announces stays unseen
+//! until the next tick.
+
+use std::time::{Duration, Instant};
 
 use vtmux_core::colour::Colour;
 use vtmux_core::ids::SessionId;
 use vtmux_core::options::{ArrayKey, OptionValue, TreeId, Value};
-use vtmux_core::style::CellStyle;
-use vtmux_core::styled;
+use vtmux_core::style::{Align, CellStyle, Style, Width};
+use vtmux_core::styled::{self, Cell};
 use vtmux_vt::Snapshot;
 
 use super::Caps;
-use super::compose::draw_line;
+use super::compose::draw_line_by;
 use super::window::Source;
 use crate::format_ctx::Ctx;
 
-/// Draw session `s`'s status lines into rows `y..y + lines` of `screen`.
-/// `ctx` is the client's status format tree (`format_create(c, NULL,
-/// FORMAT_NONE, FORMAT_STATUS)` + `format_defaults(ft, c, ...)`).
-pub fn draw(
+/// A status-line message (`c->message_string` and its flags).
+#[derive(Debug)]
+struct Message {
+    text: String,
+    /// `message_ignore_styles`: `#` is escaped, so `#[...]` in the text is
+    /// literal.
+    ignore_styles: bool,
+    /// `c->message_timer`; `None` waits for a key.
+    deadline: Option<Instant>,
+}
+
+/// A client's status line state (`struct status_line` plus the client's
+/// status flags and timers).
+#[derive(Debug)]
+pub struct StatusLine {
+    /// `CLIENT_REDRAWSTATUS`: redraw at the next frame.
+    redraw: bool,
+    /// `sl->screen`: the status lines as last drawn, one row per line. It
+    /// keeps its last content while the status is off.
+    screen: Vec<Vec<Cell>>,
+    /// `sl->active` while a message shows: the message over a copy of
+    /// `screen`.
+    active: Vec<Vec<Cell>>,
+    message: Option<Message>,
+    /// `c->message_ignore_keys`. Only a message with a delay sets it
+    /// (status.c:381-382), so a later `-d 0` message keeps the old value.
+    ignore_keys: bool,
+    /// `c->status.timer`: the next `status-interval` tick.
+    timer: Option<Instant>,
+}
+
+impl Default for StatusLine {
+    fn default() -> Self {
+        Self {
+            redraw: true,
+            screen: Vec::new(),
+            active: Vec::new(),
+            message: None,
+            ignore_keys: false,
+            timer: None,
+        }
+    }
+}
+
+impl StatusLine {
+    /// `server_status_client` / `server_redraw_client`.
+    pub fn request_redraw(&mut self) {
+        self.redraw = true;
+    }
+
+    /// `status_timer_start`: with the status on, tick now and every
+    /// `interval` seconds after; off, no timer.
+    pub fn start_timer(&mut self, now: Instant, on: bool, interval: u64) {
+        self.timer = None;
+        if on {
+            self.fire_timer(now, interval);
+        }
+    }
+
+    /// `status_timer_callback`: redraw unless a message is up, and come
+    /// back in `interval` seconds (0 stops the timer).
+    fn fire_timer(&mut self, now: Instant, interval: u64) {
+        if self.message.is_none() {
+            self.redraw = true;
+        }
+        self.timer = (interval != 0).then(|| now + Duration::from_secs(interval));
+    }
+
+    /// `status_message_set` with a resolved delay in milliseconds (0 waits
+    /// for a key).
+    pub fn set_message(
+        &mut self,
+        now: Instant,
+        text: String,
+        delay_ms: u64,
+        ignore_styles: bool,
+        ignore_keys: bool,
+    ) {
+        if delay_ms != 0 {
+            self.ignore_keys = ignore_keys;
+        }
+        self.message = Some(Message {
+            text,
+            ignore_styles,
+            deadline: (delay_ms != 0).then(|| now + Duration::from_millis(delay_ms)),
+        });
+        self.redraw = true;
+    }
+
+    /// `status_message_clear`.
+    pub fn clear_message(&mut self) {
+        if self.message.take().is_some() {
+            self.redraw = true;
+        }
+    }
+
+    /// The message shown, if any (`c->message_string`).
+    #[must_use]
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_ref().map(|m| m.text.as_str())
+    }
+
+    /// A key arrived (server-client.c:1786-1790): `true` when the message
+    /// swallows it; otherwise the message goes and the key carries on.
+    pub fn key(&mut self) -> bool {
+        if self.message.is_none() {
+            return false;
+        }
+        if self.ignore_keys {
+            return true;
+        }
+        self.clear_message();
+        false
+    }
+
+    /// Run the timers due at `now`: the message expires
+    /// (`status_message_callback`) and the status ticks, every `interval`
+    /// seconds.
+    pub fn tick(&mut self, now: Instant, interval: u64) {
+        if self
+            .message
+            .as_ref()
+            .and_then(|m| m.deadline)
+            .is_some_and(|d| d <= now)
+        {
+            self.clear_message();
+        }
+        if self.timer.is_some_and(|t| t <= now) {
+            self.fire_timer(now, interval);
+        }
+    }
+
+    /// When [`Self::tick`] next has something to do.
+    #[must_use]
+    pub fn deadline(&self) -> Option<Instant> {
+        let message = self.message.as_ref().and_then(|m| m.deadline);
+        match (message, self.timer) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// Session `s`'s status, as this client should show it in `screen`,
+    /// redrawn first when needed. `ctx` is the client's status format tree
+    /// (`format_create(c, NULL, FORMAT_NONE, FORMAT_STATUS)` +
+    /// `format_defaults(ft, c, ...)`); `lines` is `status_line_size(c)`; `top`
+    /// is `status-position top`. A message takes at least one row, over the
+    /// pane area when the status is off (screen-redraw.c:1795-1800); the
+    /// cursor is hidden while it shows (`TTY_NOCURSOR`).
+    #[expect(clippy::too_many_arguments, reason = "status_redraw's inputs")]
+    pub fn draw(
+        &mut self,
+        source: &Source<'_>,
+        ctx: &mut Ctx<'_>,
+        s: SessionId,
+        caps: Caps,
+        screen: &mut Snapshot,
+        lines: u16,
+        top: bool,
+    ) {
+        let cols = usize::from(screen.cols);
+        let lines = usize::from(lines);
+        if self.needs_redraw(cols, lines) {
+            self.redraw = false;
+            if let Some(m) = &self.message {
+                self.active = message_rows(source, ctx, s, &self.screen, m, cols, lines);
+            } else if lines != 0 {
+                self.screen = status_rows(source, ctx, s, cols, lines);
+            }
+        }
+        let rows = if self.message.is_some() {
+            screen.cursor_visible = false;
+            &self.active
+        } else if lines == 0 {
+            return;
+        } else {
+            &self.screen
+        };
+        let n = u16::try_from(rows.len()).unwrap_or(u16::MAX);
+        let y = if top {
+            0
+        } else {
+            screen.rows.saturating_sub(n)
+        };
+        let theme = source.theme(caps);
+        for (row, drawn) in (y..screen.rows).zip(rows) {
+            let cells = &mut screen.cells[usize::from(row) * cols..][..cols];
+            for (cell, drawn) in cells.iter_mut().zip(drawn) {
+                *cell = theme.cell(drawn);
+            }
+            let bgs: Vec<Colour> = drawn.iter().map(|c| c.style.bg).collect();
+            draw_line_by(cells, &bgs, Colour::Default, caps.bce, false);
+        }
+    }
+
+    /// Whether the next frame must draw the status again: asked for, or the
+    /// drawn lines no longer fit `cols` x `lines` (tmux redraws on every
+    /// size change, `server_redraw_client`).
+    fn needs_redraw(&self, cols: usize, lines: usize) -> bool {
+        let fits =
+            |rows: &[Vec<Cell>], n: usize| rows.len() == n && rows.iter().all(|r| r.len() == cols);
+        self.redraw
+            || if self.message.is_some() {
+                !fits(&self.active, lines.max(1))
+            } else {
+                lines != 0 && !fits(&self.screen, lines)
+            }
+    }
+}
+
+/// `status_redraw` (status.c:215-312): every line from its
+/// `status-format[]` entry over spaces in the status style.
+fn status_rows(
     source: &Source<'_>,
     ctx: &Ctx<'_>,
     s: SessionId,
-    caps: Caps,
-    screen: &mut Snapshot,
-    y: u16,
-    lines: u16,
-) {
+    cols: usize,
+    lines: usize,
+) -> Vec<Vec<Cell>> {
     let tree = TreeId::Session(s);
     let base = base_style(source, ctx, tree);
-    let theme = source.theme(caps);
-    let cols = usize::from(screen.cols);
-    for (i, row) in (0..u32::from(lines)).zip(y..screen.rows) {
-        // status.c:277-282: a line with no format is spaces in the style.
-        let expanded = format(source, tree, i)
-            .map(|f| vtmux_core::format::expand_time(&f, ctx))
-            .unwrap_or_default();
-        let line = styled::draw(&base, cols, &expanded, false, false);
-        let cells = &mut screen.cells[usize::from(row) * cols..][..cols];
-        for (cell, drawn) in cells.iter_mut().zip(&line.cells) {
-            *cell = theme.cell(drawn);
-        }
-        draw_line(cells, caps.bce, false);
+    (0..u32::try_from(lines).unwrap_or(u32::MAX))
+        .map(|i| {
+            // status.c:277-282: a line with no format is spaces in the style.
+            let expanded = format(source, tree, i)
+                .map(|f| vtmux_core::format::expand_time(&f, ctx))
+                .unwrap_or_default();
+            styled::draw(&base, cols, &expanded, false, false).cells
+        })
+        .collect()
+}
+
+/// `status_message_redraw` (status.c:461-532): `message-format` with
+/// `#{message}` set, drawn in `message-style` on the `message-line` row of
+/// a copy of the status lines, inside the area `message-style`'s `width`
+/// and `align` give.
+fn message_rows(
+    source: &Source<'_>,
+    ctx: &mut Ctx<'_>,
+    s: SessionId,
+    status: &[Vec<Cell>],
+    m: &Message,
+    cols: usize,
+    lines: usize,
+) -> Vec<Vec<Cell>> {
+    let tree = TreeId::Session(s);
+    let lines = lines.max(1);
+    // status_prompt_line_at: message-line, at most the last line.
+    let line = usize::try_from(source.model.number_option(tree, "message-line"))
+        .unwrap_or(0)
+        .min(lines - 1);
+    // screen_init + screen_write_fast_copy: what of the status fits, the
+    // rest default cells.
+    let blank = Cell {
+        text: " ".into(),
+        width: 1,
+        style: CellStyle::default(),
+    };
+    let mut rows: Vec<Vec<Cell>> = (0..lines)
+        .map(|y| {
+            (0..cols)
+                .map(|x| {
+                    status
+                        .get(y)
+                        .and_then(|r| r.get(x))
+                        .unwrap_or(&blank)
+                        .clone()
+                })
+                .collect()
+        })
+        .collect();
+    let (ax, aw) = message_area(source, tree, cols);
+    let text = if m.ignore_styles {
+        m.text.replace('#', "##")
+    } else {
+        m.text.clone()
+    };
+    ctx.extra.push(("message", text));
+    ctx.extra.push(("command_prompt", "0".into()));
+    let gc = source.style(tree, "message-style", ctx);
+    let template = source
+        .model
+        .options
+        .get(tree, "message-format")
+        .map(|e| e.value.to_text(e.def, None, false))
+        .unwrap_or_default();
+    let expanded = vtmux_core::format::expand_time(&template, ctx);
+    let row = &mut rows[line];
+    let under = row[ax..ax + aw].to_vec();
+    let drawn = styled::draw_onto(&gc, under, &expanded, false, false).cells;
+    row.splice(ax..ax + aw, drawn);
+    rows
+}
+
+/// `status_message_area` (status.c:412-450): `message-style` parsed
+/// without a format tree (`options_string_to_style(.., NULL)`), so a style
+/// with `#{` in it, like the default, fails and the area is the whole row.
+fn message_area(source: &Source<'_>, tree: TreeId, cols: usize) -> (usize, usize) {
+    let text = source
+        .model
+        .options
+        .get(tree, "message-style")
+        .map(|e| e.value.to_text(e.def, None, false))
+        .unwrap_or_default();
+    let base = CellStyle::default();
+    let mut sy = Style::new(&base);
+    if sy.parse(&base, &text).is_err() {
+        return (0, cols);
     }
+    let w = match sy.width {
+        Some(Width::Cells(n)) => usize::try_from(n).unwrap_or(usize::MAX),
+        Some(Width::Percent(p)) => cols * usize::from(p) / 100,
+        None => cols,
+    };
+    let w = if w == 0 || w > cols { cols } else { w };
+    let x = match sy.align {
+        Align::Centre | Align::AbsoluteCentre => (cols - w) / 2,
+        Align::Right => cols - w,
+        Align::Default | Align::Left => 0,
+    };
+    (x, w)
 }
 
 /// status.c:247-254: `status-style` applied over the default cell, then
@@ -80,5 +383,86 @@ fn format(source: &Source<'_>, tree: TreeId, line: u32) -> Option<String> {
             _ => None,
         },
         OptionValue::Single(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn drawn(sl: &mut StatusLine) -> bool {
+        std::mem::take(&mut sl.redraw)
+    }
+
+    /// status.c `status_timer_callback`: a tick every `status-interval`
+    /// seconds marks the status for redraw, and nothing in between does.
+    #[test]
+    fn status_interval_ticks_redraw() {
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        let mut sl = StatusLine::default();
+        assert!(drawn(&mut sl), "a new client draws its status");
+        sl.start_timer(t0, true, 2);
+        assert!(drawn(&mut sl), "starting the timer ticks at once");
+        assert_eq!(sl.deadline(), Some(t0 + s(2)));
+        sl.tick(t0 + s(1), 2);
+        assert!(!drawn(&mut sl), "nothing before the interval");
+        sl.tick(t0 + s(2), 2);
+        assert!(drawn(&mut sl));
+        assert_eq!(sl.deadline(), Some(t0 + s(4)));
+        sl.tick(t0 + s(3), 2);
+        assert!(!drawn(&mut sl));
+        sl.tick(t0 + s(4), 2);
+        assert!(drawn(&mut sl));
+    }
+
+    /// `status-interval 0` and `status off` keep no timer.
+    #[test]
+    fn status_interval_zero_or_status_off_has_no_timer() {
+        let t0 = Instant::now();
+        let mut sl = StatusLine::default();
+        sl.start_timer(t0, true, 0);
+        assert_eq!(sl.deadline(), None);
+        sl.start_timer(t0, false, 15);
+        assert_eq!(sl.deadline(), None);
+    }
+
+    /// A tick while a message shows does not redraw (the message stays),
+    /// but the timer carries on; the message clears after its delay.
+    #[test]
+    fn message_holds_off_the_tick_until_it_expires() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let mut sl = StatusLine::default();
+        sl.start_timer(t0, true, 1);
+        drawn(&mut sl);
+        sl.set_message(t0, "hello".into(), 1500, true, false);
+        assert!(drawn(&mut sl));
+        assert_eq!(sl.deadline(), Some(t0 + ms(1000)));
+        sl.tick(t0 + ms(1000), 1);
+        assert!(!drawn(&mut sl), "tick under a message");
+        assert_eq!(sl.message(), Some("hello"));
+        assert_eq!(sl.deadline(), Some(t0 + ms(1500)));
+        sl.tick(t0 + ms(1500), 1);
+        assert!(drawn(&mut sl), "the message cleared");
+        assert_eq!(sl.message(), None);
+    }
+
+    /// server-client.c:1786-1790 and status.c:381-382.
+    #[test]
+    fn keys_clear_or_are_swallowed() {
+        let t0 = Instant::now();
+        let mut sl = StatusLine::default();
+        sl.set_message(t0, "m".into(), 0, false, false);
+        assert_eq!(sl.deadline(), None, "-d 0 waits for a key");
+        assert!(!sl.key());
+        assert_eq!(sl.message(), None);
+        sl.set_message(t0, "n".into(), 500, false, true);
+        assert!(sl.key(), "-N swallows the key");
+        assert_eq!(sl.message(), Some("n"));
+        // A delay-0 message keeps the last ignore-keys setting.
+        sl.set_message(t0, "o".into(), 0, false, false);
+        assert!(sl.key());
+        assert_eq!(sl.message(), Some("o"));
     }
 }

@@ -268,6 +268,7 @@ impl Model {
             }
             if session.current != index || !attached.contains(&s) {
                 *flags |= kind.flag();
+                self.redraw(crate::model::Redraw::Session(s));
             }
             if !self.alerts_action_applies(s, index, kind) {
                 continue;
@@ -288,6 +289,7 @@ impl Model {
         if let Some(window) = self.windows.get_mut(&w) {
             window.alerts.flags &= !ALL;
         }
+        let mut cleared = Vec::new();
         for s in self.sessions.values_mut() {
             let indices: Vec<u32> = s
                 .windows
@@ -295,9 +297,18 @@ impl Model {
                 .filter(|(_, x)| **x == w)
                 .map(|(i, _)| *i)
                 .collect();
+            let mut any = false;
             for i in indices {
-                s.link_alerts.remove(&i);
+                any |= s.link_alerts.remove(&i).is_some_and(|f| f != 0);
             }
+            if any {
+                cleared.push(s.id);
+            }
+        }
+        // winlink_clear_flags: server_status_session for a link that had
+        // flags.
+        for s in cleared {
+            self.redraw(crate::model::Redraw::Session(s));
         }
     }
 

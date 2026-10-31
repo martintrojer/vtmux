@@ -91,6 +91,11 @@ impl Server {
         if let Some(c) = self.clients.get_mut(&id) {
             c.keys.table = name;
             c.keys.table_since = Instant::now();
+            // Every table change in the key callback is followed by
+            // server_status_client (server-client.c:1552-1686), as is the
+            // repeat timer's (2332): #{client_key_table} and
+            // #{client_prefix} show it.
+            c.status.request_redraw();
         }
     }
 
@@ -201,6 +206,8 @@ impl Server {
                         keys.last_key = Some(bkey);
                         keys.repeat_deadline = Some(Instant::now() + Duration::from_millis(time));
                     }
+                    // server-client.c:1635: server_status_client.
+                    self.status_redraw_client(id);
                     self.run_binding(id, &commands, repeat, key);
                     return true;
                 }
@@ -275,9 +282,7 @@ impl Server {
                     let upper = first.to_ascii_uppercase();
                     msg.replace_range(..1, &upper);
                 }
-                if let Some(c) = self.clients.get_mut(&id) {
-                    c.message = Some(msg);
-                }
+                self.status_message_set(id, msg);
             }
         }
     }
@@ -318,13 +323,21 @@ impl Server {
         }
         self.update_focus(self.client_window(id));
         self.session_attached_alerts(s);
+        // server_client_set_session: status_timer_start, then
+        // server_redraw_client.
+        self.status_timer_start(id);
+        self.status_redraw_client(id);
     }
 
     /// Keys `send-keys -K` gave a client: handled as typed, after the
     /// command (`server_client_handle_key_after`), with `KEYC_SENT`.
     pub(crate) fn handle_injected_keys(&mut self) {
         for (id, key) in std::mem::take(&mut self.injected_keys) {
-            if self.clients.get(&id).and_then(|c| c.attached).is_none() {
+            let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached.is_some()) else {
+                continue;
+            };
+            // server_client_handle_key0, as for typed keys.
+            if c.status.key() {
                 continue;
             }
             self.touch_client(id);

@@ -191,7 +191,6 @@ pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) -> Optio
     None
 }
 
-#[allow(clippy::too_many_lines)] // one dispatch arm per command
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {
     call.entry.ensure_implemented()?;
     let source = resolve_source(server, item, call)?;
@@ -211,6 +210,70 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
         }
         None => target::current(&server.model, item.origin).unwrap_or_default(),
     };
+    let result = dispatch(server, item, call, source, found);
+    if result.is_ok() {
+        status_redraws(server, call.entry.name, source, found);
+    }
+    result
+}
+
+/// The status redraws a command asks for when it succeeds
+/// (`server_redraw_*` and `server_status_*`, server-fn.c), for the
+/// commands that do not ask from inside: select-pane and the model's own
+/// changes (an active pane, a resize, a pane or window gone) do.
+fn status_redraws(server: &mut Server, name: &str, source: Found, found: Found) {
+    use crate::model::Redraw;
+    let mut ask = |r: Option<Redraw>| {
+        if let Some(r) = r {
+            server.model.redraw(r);
+        }
+    };
+    let session = |f: Found| f.session.map(Redraw::Session);
+    let window = |f: Found| f.window.map(Redraw::Window);
+    match name {
+        // cmd-new-window.c:122,168-170; cmd-select-window.c:124-141;
+        // cmd-kill-session.c:70 (-C).
+        "new-window" | "select-window" | "next-window" | "previous-window" | "last-window"
+        | "kill-session" => ask(session(found)),
+        // cmd-split-window.c:293-298.
+        "split-window" => {
+            ask(window(found));
+            ask(session(found));
+        }
+        // cmd-resize-pane.c:91,188; cmd-select-layout.c:146.
+        "resize-pane" | "select-layout" | "next-layout" | "previous-layout" => {
+            ask(window(found));
+        }
+        // cmd-swap-pane.c:185-208.
+        "swap-pane" => {
+            ask(window(source));
+            ask(window(found));
+        }
+        // cmd-break-pane.c:193-198.
+        "break-pane" => {
+            ask(session(source));
+            ask(session(found));
+        }
+        // cmd-join-pane.c:520-529.
+        "join-pane" | "move-pane" => {
+            ask(window(source));
+            ask(window(found));
+            ask(session(found));
+        }
+        // cmd-rename-window.c:65; cmd-respawn-pane.c:94.
+        "rename-window" | "respawn-pane" => ask(found.window.map(Redraw::WindowStatus)),
+        _ => {}
+    }
+}
+
+#[allow(clippy::too_many_lines)] // one dispatch arm per command
+fn dispatch(
+    server: &mut Server,
+    item: &mut Item,
+    call: &CommandCall,
+    source: Found,
+    found: Found,
+) -> Result<(), CmdError> {
     let args = &call.args;
     match call.entry.name {
         "new-session" => new_session::exec(server, item, args, found),
@@ -273,6 +336,11 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
             if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "monitor-silence") {
                 // options.c:1422: alerts_reset_all.
                 server.model.alerts_reset_all();
+            }
+            if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "status" || name == "status-interval")
+            {
+                // options.c:1409-1411.
+                server.status_timer_start_all();
             }
             if matches!(&result, Ok(SetOutcome::Changed(_))) {
                 server.push_option_changes();
