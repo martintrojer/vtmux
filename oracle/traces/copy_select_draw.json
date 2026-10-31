@@ -1,0 +1,986 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "copy_select_draw",
+  "inputs": {
+    "name": "copy_select_draw",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "sh",
+          "-c",
+          "i=1; while [ $i -le 12 ]; do echo line$i; i=$((i+1)); done; printf '\\033[1;31mred bold\\033[m plain \\033[4munder\\033[m end\\n'; echo 'abc世界def ghi'; echo 'short'; echo 'a much longer line of text'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-g",
+          "mode-keys",
+          "vi"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "#[align=right][#{copy_position}/#{copy_position_limit}]"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "4",
+          "cursor-up"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "start-of-line"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "2",
+          "cursor-right"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "begin-selection"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "2",
+          "cursor-down"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "2",
+          "cursor-right"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{selection_present}#{selection_active}] [#{selection_start_x},#{selection_start_y}] [#{selection_end_x},#{selection_end_y}] [#{copy_cursor_x},#{copy_cursor_y}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "rectangle-toggle"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "cursor-down"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "end-of-line"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{rectangle_toggle}] [#{copy_cursor_x},#{copy_cursor_y}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "copy-selection-no-clear"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "rectangle-off"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "other-end"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "6",
+          "cursor-up"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{selection_start_x},#{selection_start_y}] [#{selection_end_x},#{selection_end_y}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "3",
+          "scroll-up"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{selection_active}] [#{copy_cursor_x},#{copy_cursor_y}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "3",
+          "scroll-down"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "select-line"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "cursor-down"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-selection-style",
+          "fg=green,underscore"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "select-word"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mode-style",
+          "bg=blue"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-gu",
+          "copy-mode-selection-style"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "history-bottom"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "cursor-up"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "begin-selection"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "-N",
+          "3",
+          "cursor-up"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "clear-selection"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{selection_present}] [#{selection_mode}]"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[11] [2,12] [4,14] [4,6]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line9                              \\e[30m\\e[43m[0/8]",
+          "\\e[39m\\e[49mline10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mre\\e[0m\\e[30m\\e[43md bold plain under end",
+          "abc世界def ghi",
+          "short\\e[39m\\e[49m",
+          "a much longer line of text",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line9                              \\e[30m\\e[43m[0/8]",
+          "\\e[39m\\e[49mline10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mre\\e[0m\\e[30m\\e[43md b\\e[1m\\e[31m\\e[49mold\\e[0m plain \\e[4munder\\e[0m end",
+          "ab\\e[30m\\e[43mc世\\e[39m\\e[49m界def ghi",
+          "sh\\e[30m\\e[43mort\\e[39m\\e[49m",
+          "a \\e[30m\\e[43mmuc\\e[39m\\e[49mh longer line of text",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          4,
+          7
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[1] [40,7]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line9                              \\e[30m\\e[43m[0/8]",
+          "\\e[39m\\e[49mline10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mre\\e[0m\\e[30m\\e[43md bold plain under end",
+          "\\e[39m\\e[49mab\\e[30m\\e[43mc世界def ghi",
+          "\\e[39m\\e[49msh\\e[30m\\e[43mort",
+          "\\e[39m\\e[49ma \\e[30m\\e[43mmuch longer line of text             $",
+          "",
+          "\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          39,
+          7
+        ]
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "d bold plain under end\nc世界def ghi\nort\nmuch longer line of text\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line9                              \\e[30m\\e[43m[0/8]",
+          "\\e[39m\\e[49mline10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mre\\e[0m\\e[30m\\e[43md bold plain under end",
+          "abc世界def ghi",
+          "short",
+          "a much longer line of text\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          2,
+          4
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[2] [2,6] [25,15]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "li\\e[30m\\e[43mne7                              [2/8]",
+          "line8",
+          "line9",
+          "line10",
+          "line11",
+          "line12",
+          "red bold plain under end",
+          "abc世界def ghi",
+          "short",
+          "\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[5] [0] [2,0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line4                              \\e[30m\\e[43m[5/8]",
+          "\\e[39m\\e[49mline5",
+          "line6",
+          "li\\e[30m\\e[43mne7",
+          "line8",
+          "line9",
+          "line10",
+          "line11",
+          "line12",
+          "\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43mline7 \\e[39m\\e[49m                             \\e[30m\\e[43m[2/8]",
+          "\\e[39m\\e[49mline8",
+          "line9",
+          "line10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mred bold\\e[0m plain \\e[4munder\\e[0m end",
+          "abc世界def ghi",
+          "short",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          4,
+          0
+        ]
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43mline7                              [2/8]",
+          "line8 \\e[39m\\e[49m",
+          "line9",
+          "line10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mred bold\\e[0m plain \\e[4munder\\e[0m end",
+          "abc世界def ghi",
+          "short",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          4,
+          1
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line7                              \\e[30m\\e[43m[2/8]",
+          "\\e[4m\\e[32m\\e[49mline8\\e[0m",
+          "line9",
+          "line10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mred bold\\e[0m plain \\e[4munder\\e[0m end",
+          "abc世界def ghi",
+          "short",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          4,
+          1
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line9                              \\e[44m[0/8]",
+          "\\e[49mline10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mred \\e[44mbold\\e[0m\\e[44m plain \\e[4munder\\e[0m\\e[44m end",
+          "abc世界def ghi",
+          "short",
+          "a much longer line of text\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line9                              \\e[44m[0/8]",
+          "\\e[49mline10",
+          "line11",
+          "line12",
+          "\\e[1m\\e[31mred bold\\e[0m plain \\e[4munder\\e[0m end",
+          "abc世界def ghi",
+          "short",
+          "a much longer line of text",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[0] [char]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

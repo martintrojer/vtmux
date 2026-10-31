@@ -1954,3 +1954,92 @@ mod tests {
         assert_eq!(m.cursor_word(""), "");
     }
 }
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    fn env(vi: bool) -> Env {
+        Env {
+            vi,
+            line_numbers: 0,
+            separators: "-".into(),
+        }
+    }
+
+    fn mode(text: &str, vi: bool) -> CopyMode {
+        let mut t = PaneTerm::new(20, 4, 100);
+        t.feed(text.as_bytes());
+        CopyMode::new(&t, (20, 4), false, (false, false), vi)
+    }
+
+    fn run(m: &mut CopyMode, e: &Env, cmds: &[&str]) -> Option<Copied> {
+        let mut copied = None;
+        for c in cmds {
+            let mut words = c.split(' ');
+            let name = words.next().unwrap();
+            let args: Vec<String> = words.map(str::to_owned).collect();
+            copied = m.command(e, name, &args).unwrap().copied.or(copied);
+        }
+        copied
+    }
+
+    /// `screen_check_selection` and `window_copy_get_selection`: emacs leaves
+    /// out the character under the cursor, vi keeps it.
+    #[test]
+    fn emacs_drops_the_cursor_character_vi_keeps_it() {
+        for (vi, want) in [(false, "abc"), (true, "abcd")] {
+            let e = env(vi);
+            let mut m = mode("abcdef\r\n", vi);
+            let c = run(&mut m, &e, &["history-top", "begin-selection"]);
+            assert!(c.is_none());
+            for _ in 0..3 {
+                run(&mut m, &e, &["cursor-right"]);
+            }
+            assert_eq!(m.selected(3, 0), vi);
+            assert!(m.selected(0, 0) && !m.selected(4, 0));
+            let c = run(&mut m, &e, &["copy-selection-no-clear pfx"]).unwrap();
+            assert_eq!(
+                (c.data.as_slice(), c.prefix.as_deref()),
+                (want.as_bytes(), Some("pfx"))
+            );
+            assert!(m.selection().is_some());
+            run(&mut m, &e, &["copy-selection"]);
+            assert!(m.selection().is_none());
+        }
+    }
+
+    /// A rectangle takes the same columns of every line.
+    #[test]
+    fn rectangle_copies_columns() {
+        let e = env(true);
+        let mut m = mode("abcdef\r\nghijkl\r\n", true);
+        let c = run(
+            &mut m,
+            &e,
+            &[
+                "history-top",
+                "cursor-right",
+                "begin-selection",
+                "rectangle-toggle",
+                "cursor-down",
+                "cursor-right",
+                "copy-selection-and-cancel",
+            ],
+        )
+        .unwrap();
+        assert_eq!(c.data, b"bc\nhi");
+    }
+
+    /// A wide whitespace character covers both its cells (`grid_in_set`).
+    #[test]
+    fn wide_whitespace_is_one_character() {
+        let mut t = PaneTerm::new(20, 2, 100);
+        t.feed("aa\u{3000}bb".as_bytes());
+        let (g, _, _) = Grid::clone_of(&t, 20, 2, false);
+        assert_eq!(g.in_set(2, 0, WHITESPACE), 2);
+        assert_eq!(g.in_set(3, 0, WHITESPACE), 1);
+        assert_eq!(g.in_set(3, 0, "-"), 0);
+        assert_eq!(g.in_set(0, 0, "a"), 1);
+    }
+}
