@@ -6,6 +6,7 @@
 //! later work.
 
 pub mod copy;
+pub mod grid;
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::options::TreeId;
@@ -64,11 +65,10 @@ impl Model {
 
     /// The options copy mode reads for pane `p`.
     #[must_use]
-    pub fn copy_env(&self, p: PaneId) -> Option<copy::Env<'_>> {
+    pub fn copy_env(&self, p: PaneId) -> Option<copy::Env> {
         let pane = self.panes.get(&p)?;
         let w = TreeId::Window(pane.window);
         Some(copy::Env {
-            term: &pane.term,
             vi: self.number_option(w, "mode-keys") == 1,
             line_numbers: self.number_option(w, "copy-mode-line-numbers"),
         })
@@ -81,12 +81,16 @@ impl Model {
         Some(mode.key_table(self.mode_keys_vi(p)))
     }
 
-    /// A pane's mode changed: redraw the window and its status
-    /// (`window_pane_set_mode`, window.c:1787-1790).
+    /// A pane's mode changed: `PANE_CHANGED`, so the next name check
+    /// looks at it (`#{pane_in_mode}` in `automatic-rename-format`), and
+    /// redraw the window and its status (`window_pane_set_mode` and
+    /// `window_pane_reset_mode`, window.c:1785-1790, 1828-1832).
     fn mode_changed(&mut self, p: PaneId) {
-        let Some(w) = self.panes.get(&p).map(|pane| pane.window) else {
+        let Some(pane) = self.panes.get_mut(&p) else {
             return;
         };
+        pane.changed = true;
+        let w = pane.window;
         self.redraw_panes.insert(p);
         self.redraw(Redraw::Window(w));
         self.redraw(Redraw::WindowStatus(w));
@@ -134,7 +138,7 @@ impl Server {
         }
         let old = pane.modes.remove(0);
         if let Some(Mode::Copy(next)) = pane.modes.first_mut() {
-            next.resize(&pane.term);
+            next.resize(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         }
         self.model.mode_changed(p);
         if old.as_copy().is_some_and(|m| m.kill) {

@@ -223,7 +223,7 @@ impl Source<'_> {
         // format_draw keeps what a section does not cover: those cells are
         // marked and keep the pane's.
         const KEEP: &str = "\u{0}";
-        let mut screen = m.screen(&pane.term);
+        let mut screen = m.screen();
         let wtree = TreeId::Window(pane.window);
         // `s->rupper < s->rlower`: a screen of one row has no indicator.
         if m.shows_position() && screen.rows > 1 {
