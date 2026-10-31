@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
+use vtmux_core::ids::{PaneId, SessionId, WindowId};
 
 use super::{Item, expand};
 use crate::server::{PaneSpawn, Server, client_path};
@@ -25,25 +26,6 @@ pub fn exec(
     else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
-    // spawn.c:288-305: -c is expanded against the target session and made
-    // absolute from the client's directory; otherwise the pane's own.
-    let cwd = args.value('c').map(|c| {
-        let session_only = Found {
-            session: Some(s),
-            ..Found::default()
-        };
-        let c = expand(server, session_only, c);
-        if c.starts_with('/') {
-            PathBuf::from(c)
-        } else {
-            let mut base = item.cwd.clone().into_os_string();
-            if !c.is_empty() {
-                base.push("/");
-                base.push(&c);
-            }
-            PathBuf::from(base)
-        }
-    });
     let pane = &server.model.panes[&wp];
     if pane.io.is_some() && !args.flag('k') {
         let session = &server.model.sessions[&s].name;
@@ -56,6 +38,24 @@ pub fn exec(
     if args.flag('E') {
         return Err(EdgeError::NotImplemented("respawn-pane -E".into()).into());
     }
+    respawn(server, item, args, (s, w, wp), "pane")?;
+    // cmd-respawn-pane.c:92: PANE_REDRAW.
+    server.model.redraw_panes.insert(wp);
+    Ok(())
+}
+
+/// The part of `spawn_pane` (spawn.c:312-345) both respawn commands share:
+/// stop the pane's process and start the new command in it. `what` names
+/// the command in the error (`respawn pane failed: ...`).
+pub(super) fn respawn(
+    server: &mut Server,
+    item: &Item,
+    args: &Args,
+    (s, w, wp): (SessionId, WindowId, PaneId),
+    what: &str,
+) -> Result<(), CmdError> {
+    let cwd = start_dir(server, item, args, s);
+    let pane = &server.model.panes[&wp];
     let command: Vec<String> = if args.positionals.is_empty() {
         pane.argv.clone()
     } else {
@@ -82,8 +82,34 @@ pub fn exec(
             rect,
             shell,
         })
-        .map_err(|e| EdgeError::Message(format!("respawn pane failed: fork failed: {e}")))?;
-    // cmd-respawn-pane.c:92: PANE_REDRAW.
-    server.model.redraw_panes.insert(wp);
+        .map_err(|e| EdgeError::Message(format!("respawn {what} failed: fork failed: {e}")))?;
     Ok(())
+}
+
+/// `-c` as spawn.c:288-305 reads it: expanded against the target session
+/// and made absolute from the client's directory; `None` keeps the pane's
+/// own.
+pub(super) fn start_dir(
+    server: &Server,
+    item: &Item,
+    args: &Args,
+    s: SessionId,
+) -> Option<PathBuf> {
+    args.value('c').map(|c| {
+        let session_only = Found {
+            session: Some(s),
+            ..Found::default()
+        };
+        let c = expand(server, session_only, c);
+        if c.starts_with('/') {
+            PathBuf::from(c)
+        } else {
+            let mut base = item.cwd.clone().into_os_string();
+            if !c.is_empty() {
+                base.push("/");
+                base.push(&c);
+            }
+            PathBuf::from(base)
+        }
+    })
 }

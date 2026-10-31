@@ -1,0 +1,37 @@
+name = "wincmd_respawn"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "keep", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "two", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "three", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:1", "-h", "cat"] },
+  { run = ["selectp", "-t", "a:1.1"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_id} #{window_active}#{window_last_flag} #{window_panes} #{window_name}"] },
+  { run = ["lsp", "-t", "a:1", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
+  # Without -k a live window cannot be respawned.
+  { run = ["respawnw", "-t", "a:1"] },
+  { run = ["respawnw", "-E", "-t", "a:1"] },
+  { run = ["respawnw", "-t", "nosuch"] },
+  { run = ["respawnw", "-k", "-t", "nosuch"] },
+  { run = ["respawnw", "-k", "-t", "a:9"] },
+  # -k: one pane (the first, %1) left, full size, id and index kept; the
+  # window becomes the current one.
+  { run = ["respawnw", "-k", "-t", "a:1", "printf X; exec cat"] },
+  { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_id} #{window_active}#{window_last_flag} #{window_panes} #{window_name} #{window_layout}"] },
+  { run = ["lsp", "-t", "a:1", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top} #{pane_start_command} #{pane_dead}"] },
+  { run = ["display", "-p", "-t", "a:1", "#{pane_current_command}"] },
+  # New panes after a respawn get fresh ids.
+  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
+  { run = ["lsp", "-t", "a:1", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
+  # No command reuses the last one. (A zoomed window is left out: tmux
+  # frees the saved layout and dies on the next read, D-008.)
+  { run = ["respawnw", "-k", "-t", "a:1"] },
+  { run = ["display", "-p", "-t", "a:1", "#{window_zoomed_flag} #{window_panes} #{pane_id} #{pane_start_command}"] },
+  { run = ["lsp", "-t", "a:1", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
+  { run = ["display", "-p", "-t", "a:1", "#{window_layout}"] },
+  # -c and -e.
+  { run = ["respawnw", "-k", "-c", "/tmp", "-e", "FOO=bar", "-t", "a:1", "printf '%s:' \"$FOO\"; pwd; exec cat"] },
+  { run = ["respawnw", "-k", "-t", "a:0", "exit 0"] },
+  { run = ["ls"] },
+]

@@ -1,0 +1,503 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "wincmd_respawn",
+  "inputs": {
+    "name": "wincmd_respawn",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "keep",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "two",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "three",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:1",
+          "-h",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "selectp",
+          "-t",
+          "a:1.1"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_id} #{window_active}#{window_last_flag} #{window_panes} #{window_name}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a:1",
+          "-F",
+          "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-t",
+          "a:1"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-E",
+          "-t",
+          "a:1"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-t",
+          "nosuch"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-k",
+          "-t",
+          "nosuch"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-k",
+          "-t",
+          "a:9"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-k",
+          "-t",
+          "a:1",
+          "printf X; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_id} #{window_active}#{window_last_flag} #{window_panes} #{window_name} #{window_layout}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a:1",
+          "-F",
+          "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top} #{pane_start_command} #{pane_dead}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:1",
+          "#{pane_current_command}"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a:1",
+          "-F",
+          "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-k",
+          "-t",
+          "a:1"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:1",
+          "#{window_zoomed_flag} #{window_panes} #{pane_id} #{pane_start_command}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a:1",
+          "-F",
+          "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:1",
+          "#{window_layout}"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-k",
+          "-c",
+          "/tmp",
+          "-e",
+          "FOO=bar",
+          "-t",
+          "a:1",
+          "printf '%s:' \"$FOO\"; pwd; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "respawnw",
+          "-k",
+          "-t",
+          "a:0",
+          "exit 0"
+        ]
+      },
+      {
+        "run": [
+          "ls"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 @0 10 1 w\n1 @2 00 3 two\n2 @3 00 1 three\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 %2 01 40x12 0,0\n1 %5 10 39x12 41,0\n2 %4 00 80x11 0,13\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "respawn window failed: window a:1 still active\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "respawn window failed: window a:1 still active\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find window: 9\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 @0 01 1 w {\"V\":2,\"L\":{\"t\":\"p\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"%0\"}}\n1 @2 10 1 two {\"V\":2,\"L\":{\"t\":\"p\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"%2\"}}\n2 @3 00 1 three {\"V\":2,\"L\":{\"t\":\"p\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"%3\"}}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 %2 10 80x24 0,0 \"printf X; exec cat\" 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "cat\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 %2 10 80x12 0,0\n1 %6 00 80x11 0,13\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 1 %2 \"printf X; exec cat\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 %2 10 80x24 0,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "{\"V\":2,\"L\":{\"t\":\"p\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"%2\"}}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a: 2 windows (created <DATE>)\nkeep: 1 windows (created <DATE>)\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
