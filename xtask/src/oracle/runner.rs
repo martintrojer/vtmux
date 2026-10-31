@@ -160,6 +160,9 @@ pub struct Runner<'a> {
     pending_div: Option<Divergence>,
     /// Output total when an input was sent that should provoke output.
     expect_after: Option<usize>,
+    /// Output total when the last settle returned: what `settle { react }`
+    /// waits to exceed after a CLI step.
+    baseline: usize,
 }
 
 impl Drop for Runner<'_> {
@@ -213,6 +216,7 @@ impl<'a> Runner<'a> {
             items: Vec::new(),
             pending_div: None,
             expect_after: None,
+            baseline: 0,
         })
     }
 
@@ -406,6 +410,9 @@ impl<'a> Runner<'a> {
                     self.expect_after = Some(total);
                 }
                 Step::Settle(s) => {
+                    if s.react && self.expect_after.is_none() {
+                        self.expect_after = Some(self.baseline);
+                    }
                     if !self.settle(s.quiet_ms.map_or(DEFAULT_QUIET, Duration::from_millis)) {
                         self.push(
                             i,
@@ -618,6 +625,7 @@ impl<'a> Runner<'a> {
         let start = Instant::now();
         loop {
             if self.act.last.lock().unwrap().elapsed() >= quiet {
+                self.baseline = self.act.total.load(Ordering::SeqCst);
                 return true;
             }
             if start.elapsed() > SETTLE_LIMIT {

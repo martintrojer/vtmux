@@ -58,6 +58,12 @@
         }
       },
       {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -76,6 +82,12 @@
           "status",
           "off"
         ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -114,6 +126,12 @@
         ]
       },
       {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -148,6 +166,12 @@
           "-T",
           "t"
         ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -217,7 +241,7 @@
       }
     },
     {
-      "step": 5,
+      "step": 6,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -239,7 +263,7 @@
       }
     },
     {
-      "step": 6,
+      "step": 7,
       "observation": {
         "kind": "cli",
         "stdout": "0 40x9\n1 80x24\n",
@@ -248,7 +272,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -257,7 +281,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 10,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -279,28 +303,10 @@
       }
     },
     {
-      "step": 9,
-      "observation": {
-        "kind": "cli",
-        "stdout": "0 40x10\n1 80x24\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 10,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 11,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "0 40x10\n1 80x24\n",
         "stderr": "",
         "exit": 0
       }
@@ -316,6 +322,24 @@
     },
     {
       "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -337,7 +361,7 @@
       }
     },
     {
-      "step": 14,
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "0 40x7\n1 80x24\n",
@@ -346,7 +370,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 18,
       "observation": {
         "kind": "cli",
         "stdout": "P\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
@@ -355,7 +379,7 @@
       }
     },
     {
-      "step": 16,
+      "step": 19,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -364,7 +388,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 20,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -373,7 +397,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 22,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -395,7 +419,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 23,
       "observation": {
         "kind": "cli",
         "stdout": "0 40x7\n1 40x7\n",
@@ -404,7 +428,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 24,
       "observation": {
         "kind": "cli",
         "stdout": "P W1.\n\n\n\n\n\n\n",
@@ -413,7 +437,7 @@
       }
     },
     {
-      "step": 21,
+      "step": 25,
       "observation": {
         "kind": "cli",
         "stdout": "P W1.W2.W3.\n\n\n\n\n\n\n",

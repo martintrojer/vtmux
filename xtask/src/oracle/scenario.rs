@@ -38,7 +38,8 @@ pub enum Step {
     /// Bytes into a pane through `send-keys -l`.
     Feed(Feed),
     Resize([u16; 2]),
-    /// No output from any client for `quiet_ms` (default 150).
+    /// No output from any client for `quiet_ms` (default 150); with `react`,
+    /// first some output since the last settle.
     Settle(Settle),
     /// Run `wait-for <channel>`.
     WaitFor(String),
@@ -101,6 +102,11 @@ pub struct Feed {
 pub struct Settle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quiet_ms: Option<u64>,
+    /// Wait for output since the previous settle before the quiet period, so a
+    /// step that provokes a reaction (a CLI command, not just keys) is not
+    /// observed before the server has reacted to it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub react: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]

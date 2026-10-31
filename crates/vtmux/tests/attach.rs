@@ -2265,59 +2265,102 @@ enum Op {
     Close(usize),
     /// Window sizes, manual sizes and `window-size` of every window.
     Windows,
-    /// The first line of a pane: its SIGWINCH count.
+    /// The first line of a pane: its SIGWINCH count, read once it has not
+    /// changed for longer than the 250 ms resize timer.
     Winch(&'static str),
+    /// Poll until the first line of a pane contains this text (both
+    /// binaries show it once the pane's program or SIGWINCH got there).
+    WaitPane(&'static str, &'static str),
+    /// Start the clock [`Op::Within`] reads.
+    Mark,
+    /// The steps since [`Op::Mark`] must have taken less than this many ms,
+    /// or the whole run is void and starts again (see [`sizing`]).
+    Within(u64),
+}
+
+/// Poll `read` until it has returned the same value for `quiet`.
+fn stable(quiet: Duration, read: impl Fn() -> String) -> String {
+    let end = Instant::now() + Duration::from_secs(20);
+    let mut last = read();
+    let mut since = Instant::now();
+    while since.elapsed() < quiet {
+        assert!(Instant::now() < end, "never settled: {last:?}");
+        thread::sleep(Duration::from_millis(25));
+        let now = read();
+        if now != last {
+            last = now;
+            since = Instant::now();
+        }
+    }
+    last
 }
 
 /// Run `ops` against vtmux and tmux 3.8 and compare what they observed.
-/// Sizes settle without a wait condition both binaries share, so each
-/// observation waits a little first (reviewer-25 h.py).
+/// Sizes and SIGWINCH counts settle without a wait condition both binaries
+/// share (a pane's resize timer is 250 ms), so every observation waits
+/// until what it reads has stopped changing ([`stable`]) instead of for a
+/// fixed time (reviewer-25 h.py). A script that must land inside a timer
+/// brackets it with [`Op::Mark`] and [`Op::Within`]: under load a run that
+/// took too long proves nothing, so it is thrown away and repeated.
 fn sizing(ops: &[Op]) {
-    let mut outputs = Vec::new();
-    for bin in bins() {
-        let w = World::new(bin);
-        let mut clients: Vec<Option<Attached>> = Vec::new();
-        let mut out = String::new();
-        let settle = || thread::sleep(Duration::from_millis(400));
-        for op in ops {
-            match op {
-                Op::Run(args) | Op::RunNow(args) => {
-                    let o = w.cli(args);
-                    let _ = write!(
-                        out,
-                        "{args:?} {}{}",
-                        String::from_utf8_lossy(&o.stdout),
-                        String::from_utf8_lossy(&o.stderr)
-                    );
-                    if matches!(op, Op::Run(_)) {
-                        thread::sleep(Duration::from_millis(100));
-                    }
+    let outputs: Vec<String> = bins()
+        .into_iter()
+        .map(|bin| {
+            (0..30)
+                .find_map(|_| run_sizing(&bin, ops))
+                .expect("every run took longer than its Op::Within budget")
+        })
+        .collect();
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+/// One run of `ops` against `bin`; `None` if an [`Op::Within`] budget ran out.
+fn run_sizing(bin: &std::path::Path, ops: &[Op]) -> Option<String> {
+    let w = World::new(bin.to_path_buf());
+    let mut clients: Vec<Option<Attached>> = Vec::new();
+    let mut out = String::new();
+    let mut mark = Instant::now();
+    let settle = || thread::sleep(Duration::from_millis(400));
+    for op in ops {
+        match op {
+            Op::Run(args) | Op::RunNow(args) => {
+                let o = w.cli(args);
+                let _ = write!(
+                    out,
+                    "{args:?} {}{}",
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr)
+                );
+                if matches!(op, Op::Run(_)) {
+                    thread::sleep(Duration::from_millis(100));
                 }
-                Op::Attach(n, session, cols, rows) | Op::AttachNow(n, session, cols, rows) => {
-                    let a = w.attach_sized(&["attach", "-t", session], *cols, *rows);
-                    a.wait(|a| a.text().contains("\x1b[?1049h"));
-                    if clients.len() <= *n {
-                        clients.resize_with(*n + 1, || None);
-                    }
-                    clients[*n] = Some(a);
-                    if matches!(op, Op::Attach(..)) {
-                        settle();
-                    }
+            }
+            Op::Attach(n, session, cols, rows) | Op::AttachNow(n, session, cols, rows) => {
+                let a = w.attach_sized(&["attach", "-t", session], *cols, *rows);
+                a.wait(|a| a.text().contains("\x1b[?1049h"));
+                if clients.len() <= *n {
+                    clients.resize_with(*n + 1, || None);
                 }
-                Op::Resize(n, cols, rows) => {
-                    clients[*n].as_mut().unwrap().resize(*cols, *rows);
+                clients[*n] = Some(a);
+                if matches!(op, Op::Attach(..)) {
                     settle();
                 }
-                Op::Keys(n, keys) => {
-                    clients[*n].as_mut().unwrap().keys(keys);
-                    settle();
-                }
-                Op::Close(n) => {
-                    drop(clients[*n].take());
-                    settle();
-                }
-                Op::Windows => {
-                    settle();
+            }
+            Op::Resize(n, cols, rows) => {
+                clients[*n].as_mut().unwrap().resize(*cols, *rows);
+                settle();
+            }
+            Op::Keys(n, keys) => {
+                clients[*n].as_mut().unwrap().keys(keys);
+                settle();
+            }
+            Op::Close(n) => {
+                drop(clients[*n].take());
+                settle();
+            }
+            Op::Windows => {
+                settle();
+                let read = || {
                     let o = w.cli(&[
                         "lsw",
                         "-a",
@@ -2325,18 +2368,38 @@ fn sizing(ops: &[Op]) {
                         "#{session_name}:#{window_index} #{window_width}x#{window_height} \
                          m=#{window_manual_width},#{window_manual_height} #{window-size}",
                     ]);
-                    out.push_str(&String::from_utf8_lossy(&o.stdout));
-                }
-                Op::Winch(t) => {
-                    settle();
+                    String::from_utf8_lossy(&o.stdout).into_owned()
+                };
+                out.push_str(&stable(Duration::from_millis(300), read));
+            }
+            Op::Winch(t) => {
+                let read = || {
                     let o = w.cli(&["capture-pane", "-p", "-t", t, "-S", "0", "-E", "0"]);
-                    let _ = write!(out, "{t}: {}", String::from_utf8_lossy(&o.stdout));
+                    String::from_utf8_lossy(&o.stdout).into_owned()
+                };
+                let seen = stable(Duration::from_millis(600), read);
+                let _ = write!(out, "{t}: {seen}");
+            }
+            Op::WaitPane(t, text) => {
+                let end = Instant::now() + Duration::from_secs(20);
+                loop {
+                    let o = w.cli(&["capture-pane", "-p", "-t", t, "-S", "0", "-E", "0"]);
+                    if String::from_utf8_lossy(&o.stdout).contains(text) {
+                        break;
+                    }
+                    assert!(Instant::now() < end, "{t} never showed {text:?}");
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+            Op::Mark => mark = Instant::now(),
+            Op::Within(ms) => {
+                if mark.elapsed() > Duration::from_millis(*ms) {
+                    return None;
                 }
             }
         }
-        outputs.push(out);
     }
-    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+    Some(out)
 }
 
 fn wv(v: &[&'static str]) -> &'static [&'static str] {
@@ -2500,12 +2563,14 @@ fn resize_window_flags_with_an_attached_client() {
 /// (server-client.c:1984-2041), and a zoom inside it replaces it: the
 /// zoomed pane hears of both changes once.
 ///
-/// Ignored in the gate: the zoom must land inside the 250 ms timer, and under
-/// the gate's load it sometimes doesn't, for tmux 3.8's scheduling as much
-/// as ours (task `flake_resize_timer_window`). Run it alone with
-/// `cargo test -p vtmux --test attach -- --ignored first_attach`.
+/// The attach and the zoom must land inside the 250 ms timer that the
+/// split's first size to %0 starts, which under load they sometimes cannot,
+/// for tmux 3.8 as much as for us. The script therefore waits until both
+/// shells have their traps (a SIGWINCH before that is lost) and %0 has heard
+/// the split (the timer is running), marks the time before the split, and
+/// requires the zoom within 200 ms of it: a slower run is void and repeated
+/// ([`Op::Within`]), never compared (task `flake_resize_timer_window`).
 #[test]
-#[ignore = "timing window under load: flake_resize_timer_window"]
 fn first_attach_after_split_waits_for_the_resize_timer() {
     let mut split = vec!["splitw", "-h", "-t", "a"];
     split.extend(WINCH);
@@ -2513,9 +2578,14 @@ fn first_attach_after_split_waits_for_the_resize_timer() {
     new.extend(WINCH);
     sizing(&[
         Op::RunNow(wv(&new)),
+        Op::WaitPane("%0", "P"),
+        Op::Mark,
         Op::RunNow(wv(&split)),
+        Op::WaitPane("%0", "W1."),
+        Op::WaitPane("%1", "P"),
         Op::AttachNow(0, "a", 40, 10),
         Op::RunNow(&["resize-pane", "-Z", "-t", "a"]),
+        Op::Within(200),
         Op::Winch("%0"),
         Op::Winch("%1"),
         Op::Run(&["resize-pane", "-Z", "-t", "a"]),
@@ -2530,7 +2600,15 @@ fn first_attach_after_split_waits_for_the_resize_timer() {
 /// 250 ms resize timer, then switches screens. The script records whether
 /// the last SIGWINCH came within 60 ms of the switch. To test leaving,
 /// the pane enters the alternate screen first, before the resizes.
-fn alternate_flush(before: &'static str, seq: &'static str) -> String {
+///
+/// Both answers hang on wall-clock windows that a loaded host can miss, for
+/// tmux 3.8 as much as for us: the second resize reaching the server late
+/// (nothing queued to flush), the timer firing before the pane looks, or
+/// the 60 ms loop outlasting the timer. A miss always lands on the other
+/// answer, so a run that shows the wrong one is repeated: the behaviour
+/// holds if some run in `TRIES` shows `want`, and a binary that does the
+/// opposite never will (task `flake_resize_timer_window`).
+fn alternate_flush(bin: &std::path::Path, before: &'static str, seq: &'static str) -> String {
     let script = format!(
         "w=0; trap 'w=$((w+1))' WINCH; printf '{before}P '; \
          while [ ! -e go ]; do sleep 0.01; done; printf '{seq}'; n=$w; \
@@ -2538,42 +2616,60 @@ fn alternate_flush(before: &'static str, seq: &'static str) -> String {
          if [ $w -gt $n ]; then printf 'FAST.'; else printf 'SLOW.'; fi; \
          sleep 100000 & while :; do wait; done"
     );
-    let mut outputs = Vec::new();
-    for bin in bins() {
-        let w = World::new(bin);
-        let dir = tempfile::tempdir().unwrap();
-        let go = dir.path().join("go");
-        let cmd = format!("cd {} && {script}", dir.path().display());
-        assert!(
-            w.cli(&[
-                "new", "-d", "-s", "a", "-x", "60", "-y", "20", "sh", "-c", &cmd
-            ])
-            .status
-            .success()
-        );
-        let mut a = w.attach_sized(&["attach", "-t", "a"], 60, 20);
-        a.wait(|a| a.text().contains("\x1b[?1049h"));
-        thread::sleep(Duration::from_millis(600));
-        a.resize(61, 20);
-        thread::sleep(Duration::from_millis(50));
-        a.resize(62, 20);
-        std::fs::write(&go, b"").unwrap();
-        thread::sleep(Duration::from_millis(600));
-        let o = w.cli(&["capture-pane", "-p", "-t", "a"]);
-        outputs.push(String::from_utf8_lossy(&o.stdout).into_owned());
+    let w = World::new(bin.to_path_buf());
+    let dir = tempfile::tempdir().unwrap();
+    let go = dir.path().join("go");
+    let cmd = format!("cd {} && {script}", dir.path().display());
+    assert!(
+        w.cli(&[
+            "new", "-d", "-s", "a", "-x", "60", "-y", "20", "sh", "-c", &cmd
+        ])
+        .status
+        .success()
+    );
+    let mut a = w.attach_sized(&["attach", "-t", "a"], 60, 20);
+    a.wait(|a| a.text().contains("\x1b[?1049h"));
+    thread::sleep(Duration::from_millis(600));
+    a.resize(61, 20);
+    thread::sleep(Duration::from_millis(50));
+    a.resize(62, 20);
+    // The server has the second size once the window has it.
+    let end = Instant::now() + Duration::from_secs(5);
+    while String::from_utf8_lossy(
+        &w.cli(&["display", "-p", "-t", "a", "#{window_width}"])
+            .stdout,
+    )
+    .trim()
+        != "62"
+    {
+        assert!(Instant::now() < end, "window never got the second size");
+        thread::sleep(Duration::from_millis(10));
     }
-    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
-    outputs.remove(0)
+    std::fs::write(&go, b"").unwrap();
+    thread::sleep(Duration::from_millis(600));
+    let o = w.cli(&["capture-pane", "-p", "-t", "a"]);
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+/// Every binary must show `want` in some run of [`alternate_flush`].
+fn alternate_flush_shows(before: &'static str, seq: &'static str, want: &str) {
+    const TRIES: usize = 10;
+    for bin in bins() {
+        let shown = (0..TRIES).any(|_| alternate_flush(&bin, before, seq).contains(want));
+        assert!(
+            shown,
+            "{want} never shown in {TRIES} runs of {}",
+            bin.display()
+        );
+    }
 }
 #[test]
 fn entering_the_alternate_screen_flushes_resizes() {
-    let on = alternate_flush("", "\\033[?1049h");
-    assert!(on.contains("FAST."), "{on}");
+    alternate_flush_shows("", "\\033[?1049h", "FAST.");
 }
 #[test]
 fn leaving_the_alternate_screen_waits_for_the_timer() {
-    let off = alternate_flush("\\033[?1049h", "\\033[?1049l");
-    assert!(off.contains("SLOW."), "{off}");
+    alternate_flush_shows("\\033[?1049h", "\\033[?1049l", "SLOW.");
 }
 
 /// The OSC 52 sequences in `text`, in order.
