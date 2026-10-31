@@ -100,3 +100,11 @@ product reasons" category.
 - vtmux behaviour: vtmux has no view mode (`window-copy.c` modes are not implemented), so that output is dropped and `#{pane_mode}` stays empty. Output to a command client's stdout (no `-t`, without `-b`, from the CLI or a control client) is printed as tmux prints it. Config causes stay queued until the next `source-file` prints them.
 - Evidence: reference tmux 3.8, isolated: `new -d 'sleep 100'; run -t: 'echo foo'; display -p '#{pane_mode}'` -> `view-mode`; vtmux prints an empty line.
 - Category: Deferred
+
+### D-010: copy mode is partial (U1 of the copy-mode split)
+
+- Test / assertion: regress `copy-mode-*.sh` (all 9 stay xfail); oracle `copy_enter` and `copy_move` pin what exists.
+- tmux behaviour: window-copy.c has 99 commands, selections, search, jumps, marks, copy/pipe, line numbers, refresh, view mode and the mouse; it clones the pane's grid on entry (`window_copy_clone_screen`) and reflows that copy on resize.
+- vtmux behaviour: `copy-mode` (`-d -e -H -k -q -s -S -u`; `-M` is an error), the pane mode stack, keys through the `copy-mode`/`copy-mode-vi` tables, `send-keys -X` with `-N`, cursor/line/page/half-page/history-top/bottom/scroll movement, `goto-line`, `recentre-top-bottom`, `cancel`, scroll-exit, the copy-mode formats and the position indicator. Every other tmux copy command fails with `not implemented in vtmux yet: copy mode command NAME`, and the selection/search formats read as none. History is read live by row id rather than cloned (`PaneTerm::history_row`), so a row Ghostty drops while the view is open reads empty; on resize the view is taken again at the new size keeping its distance from the top, with no reflow of the cursor's text. `copy-mode -s` copies the source's rows without reflowing them to the target's width. `copy-mode -S` without a mouse event scrolls to the top of history (the slider position for `my = 0`). Line numbers are not drawn, so `line-numbers-on`/`-toggle` are not implemented.
+- Evidence: `cargo xtask oracle replay --only 'copy_*'`; cli.rs `copy_mode_formats` equals tmux 3.8.
+- Category: Deferred
