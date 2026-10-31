@@ -2479,3 +2479,83 @@ fn leaving_the_alternate_screen_waits_for_the_timer() {
     let off = alternate_flush("\\033[?1049h", "\\033[?1049l");
     assert!(off.contains("SLOW."), "{off}");
 }
+
+/// The OSC 52 sequences in `text`, in order.
+fn osc52(text: &str) -> Vec<String> {
+    text.match_indices("\x1b]52;")
+        .map(|(at, _)| {
+            let rest = &text[at..];
+            let end = rest.find('\x07').map_or(rest.len(), |e| e + 1);
+            rest[..end].escape_debug().to_string()
+        })
+        .collect()
+}
+
+/// `set-buffer -w` and `load-buffer -w` send the data to the target
+/// client's clipboard with OSC 52 (`tty_set_selection`, tty.c:2149-2166),
+/// whatever `set-clipboard` says (cmd-set-buffer.c:127-128,
+/// cmd-load-buffer.c:80-83); `load-buffer -` from stdin too; plain
+/// `set-buffer` sends nothing; a terminal without `Ms` gets nothing.
+#[test]
+fn set_and_load_buffer_w_send_osc52() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["set", "-g", "set-clipboard", "off"]);
+        let a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let file = w.home.path().join("f");
+        std::fs::write(&file, b"from file\xff").unwrap();
+        let mut seen = Vec::new();
+        for args in [
+            &["setb", "plain"][..],
+            &["setb", "-w", "hello-off"],
+            &["setb", "-a", "-w", "-b", "buffer0", "!"],
+            &["loadb", "-w", "-b", "f", file.to_str().unwrap()],
+        ] {
+            let out = w.cli(args);
+            seen.push(format!(
+                "{} exit {:?}",
+                args[..2].join(" "),
+                out.status.code()
+            ));
+        }
+        let mut child = Command::new(&w.bin)
+            .args(w.args())
+            .args(["loadb", "-w", "-"])
+            .env_clear()
+            .envs(w.env())
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(b"stdin").unwrap();
+        seen.push(format!("loadb - exit {:?}", child.wait().unwrap().code()));
+        a.wait(|a| osc52(&a.text()).len() >= 4);
+        thread::sleep(Duration::from_millis(200));
+        seen.extend(osc52(&a.text()));
+        results.push(seen);
+
+        // Ms removed: nothing is sent, the buffer is still set.
+        let w = World::new(bin);
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["set", "-g", "terminal-overrides", "xterm*:Ms@"]);
+        let a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let out = w.cli(&["setb", "-w", "x"]);
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(out.status.code(), Some(0));
+        assert!(osc52(&a.text()).is_empty(), "{:?}", a.text());
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(
+        results[0][5..],
+        [
+            r"\u{1b}]52;;aGVsbG8tb2Zm\u{7}",
+            // buffer0 is `plain`: -a -w sends the whole buffer.
+            r"\u{1b}]52;;cGxhaW4h\u{7}",
+            r"\u{1b}]52;;ZnJvbSBmaWxl/w==\u{7}",
+            r"\u{1b}]52;;c3RkaW4=\u{7}",
+        ]
+    );
+}

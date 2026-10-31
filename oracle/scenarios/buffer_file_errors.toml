@@ -1,0 +1,25 @@
+name = "buffer_file_errors"
+# File errors arrive after the guard closes (cmd-save-buffer.c:60-70,
+# cmd-load-buffer.c:61-90): save-buffer and load-buffer return
+# CMD_RETURN_WAIT and the done callback calls cmdq_error, so a control
+# client sees %end then the message. The exit status is still 1.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["set-buffer", "-b", "m", "data"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "save-buffer -b m /nonexistent/dir/f" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "load-buffer /nonexistent/dir/f" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "save-buffer -b m -" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "load-buffer -" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "save-buffer -b m /nonexistent/dir/f ; display -p next" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "display -p last" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["save-buffer", "-b", "m", "/nonexistent/dir/f", ";", "display", "-p", "after"] },
+  { run = ["load-buffer", "/nonexistent/dir/f"] },
+]

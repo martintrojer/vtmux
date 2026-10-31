@@ -16,7 +16,7 @@ mod break_pane;
 mod capture_pane;
 mod delete_buffer;
 mod display_message;
-mod file_io;
+pub(crate) mod file_io;
 mod join_pane;
 mod keys;
 mod kill_pane;
@@ -87,6 +87,10 @@ pub enum After {
 }
 
 /// The client a batch runs for: tmux's `cmdq_item` client side.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent cmdq_item states"
+)]
 #[derive(Debug)]
 pub struct Item {
     /// `None` for config files and other client-less runs.
@@ -108,6 +112,10 @@ pub struct Item {
     /// Run from a repeating key binding (`CMDQ_STATE_REPEAT`):
     /// `switch-client` then keeps the client's key table.
     pub repeat: bool,
+    /// The batch can park (`Server::run_batch`): a command may return
+    /// `CMD_RETURN_WAIT` and finish later. Key bindings and config files
+    /// cannot yet, so their file I/O completes at once.
+    pub can_wait: bool,
 }
 
 impl Item {
@@ -126,6 +134,7 @@ impl Item {
             control: None,
             blocked: false,
             repeat: false,
+            can_wait: false,
         }
     }
 

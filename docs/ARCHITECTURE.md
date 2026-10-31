@@ -23,8 +23,8 @@ The design decisions behind this (D1–D23) are in the [spec](specs/2026-10-29-v
  └───────────────┬──────────────────────┘
                  │ Unix socket  $TMUX_TMPDIR/tmux-UID/<label>
                  │ vtmux's own framed protocol (vtmux-core::protocol)
-                 │   Hello{argv,env,tty} · Input · Resize · FrameAck
-                 │   Frame · Stdout · Stderr · Exit
+                 │   Hello{argv,env,tty} · Input · Resize · FrameAck · ReadData · FileDone
+                 │   Frame · Stdout · Stderr · Exit · ReadOpen · WriteOpen/Data/Close
  ┌───────────────┴────────────────────────────────────────────────────┐
  │ vtmux server (crates/vtmux-server)  one thread, mio event loop     │
  │                                                                    │
@@ -95,6 +95,8 @@ The acknowledgements are the backpressure. When a client's terminal is slow or s
 3. The server parses the command line with `vtmux-core`, resolves targets against its model, runs the command, and replies with `Stdout`, `Stderr` and `Exit`.
 
 Those replies match tmux 3.8 byte for byte, including error messages and exit codes. This is the compliance edge that scripts and plugins depend on.
+
+As in tmux, a command client does its own file I/O: `load-buffer` and `save-buffer` on a path, and `load-buffer -` from its stdin, become `ReadOpen` / `WriteOpen` requests; the command waits (parked like `wait-for`) until the client answers `FileDone`, so a slow file such as a FIFO holds up only that client. Attached and control clients get the I/O done in the server, non-blocking.
 
 Control-mode clients (`vtmux -C`) use the same socket. They send command lines on stdin and get tmux's `%begin`/`%end`/`%error` guards, `%output`, and the other notifications instead of frames.
 

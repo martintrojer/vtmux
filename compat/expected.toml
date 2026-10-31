@@ -22,8 +22,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."buffers.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."capture-pane-hyperlink.sh"]
 status = "xfail"

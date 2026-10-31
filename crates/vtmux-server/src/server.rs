@@ -243,6 +243,8 @@ pub struct Server {
     pub waits: WaitChannels,
     /// Blocked batches, one per client at most.
     parked: BTreeMap<ClientId, Parked>,
+    /// The file operation a parked batch waits for (file.c `client_file`).
+    pub(crate) files: BTreeMap<ClientId, commands::file_io::FileOp>,
     /// Clients woken this turn (`cmdq_continue`); their batches resume at
     /// the end of the turn, as tmux resumes them in its next `cmdq_next`.
     woken: Vec<ClientId>,
@@ -416,6 +418,7 @@ impl Server {
             backlog: std::collections::BTreeSet::new(),
             waits: WaitChannels::default(),
             parked: BTreeMap::new(),
+            files: BTreeMap::new(),
             woken: Vec::new(),
             key_bindings: vtmux_core::keys::KeyBindings::with_defaults(),
             injected_keys: Vec::new(),
@@ -683,6 +686,7 @@ impl Server {
         self.attached_lost(id);
         // server-client.c:564.
         self.recalculate_sizes();
+        self.files.remove(&id);
     }
 
     /// The client's name (server-client.c:3016-3019): its tty, else
@@ -739,9 +743,14 @@ impl Server {
     fn resume_woken(&mut self) {
         while !self.woken.is_empty() {
             for id in std::mem::take(&mut self.woken) {
-                let Some(p) = self.parked.remove(&id) else {
+                let Some(mut p) = self.parked.remove(&id) else {
                     continue;
                 };
+                if !self.file_resume(id, &mut p.item) {
+                    // Still reading or writing: woken again by FileDone.
+                    self.parked.insert(id, p);
+                    continue;
+                }
                 let control_line = p.item.control == Some(1);
                 self.run_batch(id, p.item, p.rest);
                 if control_line && !self.parked.contains_key(&id) {
@@ -749,6 +758,22 @@ impl Server {
                 }
             }
         }
+    }
+
+    /// `tty_set_selection` (tty.c:2149-2166): OSC 52 through the client
+    /// terminal's `Ms`, whatever `set-clipboard` says, once its tty has
+    /// started.
+    pub(crate) fn set_selection(&mut self, id: ClientId, data: &[u8]) {
+        let Some(bytes) = self
+            .clients
+            .get(&id)
+            .filter(|c| c.attached.is_some() && c.caps.is_some())
+            .and_then(|c| c.term.as_ref())
+            .and_then(|t| t.set_selection("", data))
+        else {
+            return;
+        };
+        self.send(id, &ServerMsg::Frame(bytes));
     }
 
     /// Whether `id` has a blocked batch.
@@ -759,6 +784,7 @@ impl Server {
     /// Run a client's batch; park it if a command blocks, else hand its
     /// results back.
     pub(crate) fn run_batch(&mut self, id: ClientId, mut item: Item, mut calls: Vec<CommandCall>) {
+        item.can_wait = true;
         match commands::run(self, &mut item, &calls) {
             Some(at) => {
                 let rest = calls.split_off(at);
@@ -772,6 +798,9 @@ impl Server {
             None => match item.control {
                 Some(0) => self.control_command_done(id, item),
                 Some(_) => {
+                    // An error after the guard (file I/O, cmdq_error from
+                    // a done callback) still sets c->retval.
+                    self.control_retval(id, item.status);
                     self.control_take_output(id, &mut item);
                     self.control_flush(id);
                 }
@@ -857,6 +886,8 @@ impl Server {
             ClientMsg::Stdin(bytes) => self.control_stdin(id, &bytes),
             ClientMsg::StdinEof => self.control_stdin_eof(id),
             ClientMsg::Detach => self.detach_client(id),
+            ClientMsg::ReadData(bytes) => self.file_read_data(id, &bytes),
+            ClientMsg::FileDone { error } => self.file_done(id, error),
             ClientMsg::FrameAck { seq } => {
                 if let Some(c) = self.clients.get_mut(&id) {
                     c.unacked.ack(seq);
@@ -924,11 +955,11 @@ impl Server {
         // cfg_show_causes): a command client never sees them.
         // No command: new-session (server_client_default_command).
         let argv = if argv.is_empty() {
-            vec!["new-session".to_owned()]
+            vec![b"new-session".to_vec()]
         } else {
             argv
         };
-        match cmd::parse_argv(&argv) {
+        match cmd::parse_argv_bytes(&argv) {
             Ok(calls) => self.run_batch(id, item, calls),
             Err(e) => {
                 item.error(self, cmd_error_bytes(&e));

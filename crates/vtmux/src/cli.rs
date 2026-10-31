@@ -26,8 +26,9 @@ pub struct Cli {
     pub utf8: bool,
     /// `-T` feature strings and `-2` (`256`), parsed by the client task.
     pub features: Vec<String>,
-    /// The command words after the options.
-    pub command: Vec<String>,
+    /// The command words after the options, as given: tmux's argv is C
+    /// strings, so a word need not be UTF-8 (`set-buffer` keeps the bytes).
+    pub command: Vec<Vec<u8>>,
 }
 
 /// What `main` does instead of running a command.
@@ -132,7 +133,10 @@ pub fn parse(args: &[OsString], progname: &str) -> Result<Cli, Early> {
             }
         }
     }
-    cli.command = words[i..].to_vec();
+    cli.command = args[i..]
+        .iter()
+        .map(|a| std::os::unix::ffi::OsStrExt::as_bytes(a.as_os_str()).to_vec())
+        .collect();
     // tmux.c:491-494.
     if (cli.shell_command.is_some() || cli.no_fork) && !cli.command.is_empty() {
         return Err(Early::Usage(None));
@@ -154,14 +158,30 @@ mod tests {
         let cli = p(&["-L", "x", "-f/dev/null", "new", "-d", "-s", "a"]).unwrap();
         assert_eq!(cli.label.as_deref(), Some("x"));
         assert_eq!(cli.config_files, vec![PathBuf::from("/dev/null")]);
-        assert_eq!(cli.command, ["new", "-d", "-s", "a"]);
+        assert_eq!(cli.command, [&b"new"[..], b"-d", b"-s", b"a"]);
         // getopt stops at the first non-option: `-V` after `ls` is the
         // command's.
-        assert_eq!(p(&["ls", "-V"]).unwrap().command, ["ls", "-V"]);
-        assert_eq!(p(&["--", "-x"]).unwrap().command, ["-x"]);
+        assert_eq!(p(&["ls", "-V"]).unwrap().command, [&b"ls"[..], b"-V"]);
+        assert_eq!(p(&["--", "-x"]).unwrap().command, [b"-x"]);
         assert_eq!(p(&["-CC"]).unwrap().control, ControlMode::ControlControl);
         // `-fL`: L is -f's argument.
         assert_eq!(p(&["-fL"]).unwrap().config_files, vec![PathBuf::from("L")]);
+    }
+
+    /// Command words are passed on byte for byte (reviewer-36: `setb` of
+    /// `\xff\x80` stored EF BF BD twice).
+    #[test]
+    fn command_words_keep_their_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+        let args = vec![
+            OsString::from("setb"),
+            OsString::from_vec(b"a\xc3\xa9\xff\x80".to_vec()),
+        ];
+        let cli = parse(&args, "tmux").unwrap();
+        assert_eq!(
+            cli.command,
+            [b"setb".to_vec(), b"a\xc3\xa9\xff\x80".to_vec()]
+        );
     }
 
     /// Reference: `tmux -Z` -> `tmux: unknown option -- Z` + usage, exit 1;

@@ -1,0 +1,211 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "buffer_file_errors",
+  "inputs": {
+    "name": "buffer_file_errors",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "m",
+          "data"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "save-buffer -b m /nonexistent/dir/f"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "load-buffer /nonexistent/dir/f"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "save-buffer -b m -"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "load-buffer -"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "save-buffer -b m /nonexistent/dir/f ; display -p next"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p last"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "m",
+          "/nonexistent/dir/f",
+          ";",
+          "display",
+          "-p",
+          "after"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "/nonexistent/dir/f"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "No such file or directory: /nonexistent/dir/f",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "No such file or directory: /nonexistent/dir/f",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "Bad file descriptor: -",
+          "%begin <TIME> #5 1",
+          "%end <TIME> #5 1",
+          "Bad file descriptor: -",
+          "%begin <TIME> #6 1",
+          "%end <TIME> #6 1",
+          "No such file or directory: /nonexistent/dir/f",
+          "%begin <TIME> #7 1",
+          "next",
+          "%end <TIME> #7 1",
+          "%begin <TIME> #8 1",
+          "last",
+          "%end <TIME> #8 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after\n",
+        "stderr": "No such file or directory: /nonexistent/dir/f\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "No such file or directory: /nonexistent/dir/f\n",
+        "exit": 1
+      }
+    }
+  ]
+}
