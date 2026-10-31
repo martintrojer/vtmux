@@ -148,6 +148,9 @@ enum RawArg {
     Block(Vec<RawCommand>),
     /// An already parsed list (`cmd_parse_from_arguments` with a block).
     Built(CommandList),
+    /// A command-line word that is not UTF-8 (`parse_argv_values`): an
+    /// [`ArgValue::Bytes`].
+    Bytes(ArgValue),
     /// A word that is not UTF-8. Lexed like any other, but an `Args`
     /// string cannot hold it, so only building it fails: a word in a
     /// dropped `%if` branch never does.
@@ -163,6 +166,13 @@ impl RawArg {
 /// Parse an argument vector as `tmux a b ; c d` receives it.
 pub fn parse_argv(words: &[String]) -> Result<Vec<CommandCall>, CmdError> {
     let values: Vec<ArgValue> = words.iter().cloned().map(ArgValue::Str).collect();
+    parse_argv_values(&values)
+}
+
+/// [`parse_argv`] for the words as the client received them: bytes, which
+/// need not be UTF-8 (tmux's `argv` is C strings).
+pub fn parse_argv_bytes(words: &[Vec<u8>]) -> Result<Vec<CommandCall>, CmdError> {
+    let values: Vec<ArgValue> = words.iter().cloned().map(ArgValue::from_bytes).collect();
     parse_argv_values(&values)
 }
 
@@ -189,6 +199,25 @@ pub fn parse_argv_values(values: &[ArgValue]) -> Result<Vec<CommandCall>, CmdErr
                 }
                 if !end || !word.is_empty() {
                     current.push(RawArg::Str(word));
+                }
+            }
+            ArgValue::Bytes { raw, .. } => {
+                // The same `;` and `\;` handling, on bytes.
+                let mut word = raw.clone();
+                if word.last() == Some(&b';') {
+                    word.pop();
+                    if word.last() == Some(&b'\\') {
+                        word.pop();
+                        word.push(b';');
+                    } else {
+                        end = true;
+                    }
+                }
+                if !end || !word.is_empty() {
+                    current.push(match ArgValue::from_bytes(word) {
+                        ArgValue::Str(s) => RawArg::Str(s),
+                        bytes => RawArg::Bytes(bytes),
+                    });
                 }
             }
             ArgValue::Commands(list) => current.push(RawArg::Built(list.clone())),
@@ -338,11 +367,12 @@ fn build_command(
         // cmd_parse_expand_alias (cmd-parse.y:767-822): no first word, or a
         // block as first word, is an empty list.
         let first = match cmd.args.first() {
-            Some(RawArg::Str(first)) => first,
+            Some(RawArg::Str(first)) => first.as_str(),
             Some(RawArg::Invalid) => return Err(NOT_UTF8),
+            Some(RawArg::Bytes(v)) => v.as_str().unwrap_or_default(),
             _ => return Ok(Vec::new()),
         };
-        if let Some((_, text)) = DEFAULT_COMMAND_ALIASES.iter().find(|(a, _)| a == first) {
+        if let Some((_, text)) = DEFAULT_COMMAND_ALIASES.iter().find(|(a, _)| *a == first) {
             // Parse the alias text, append the remaining words to its last
             // command, and build without expanding again.
             let opts = ParseOpts {
@@ -369,11 +399,12 @@ fn build_command(
                 ArgValue::Commands(CommandList { calls: calls? })
             }
             RawArg::Built(list) => ArgValue::Commands(list.clone()),
+            RawArg::Bytes(b) => b.clone(),
             RawArg::Invalid => return Err(NOT_UTF8),
         });
     }
     // cmd_parse (cmd.c:508-540).
-    let Some(ArgValue::Str(first)) = values.first() else {
+    let Some(first) = values.first().and_then(ArgValue::as_str) else {
         return Err(CmdError::Lex("no command"));
     };
     let entry = find(first)?;
@@ -397,6 +428,7 @@ fn clone_raw(arg: &RawArg) -> RawArg {
                 .collect(),
         ),
         RawArg::Built(l) => RawArg::Built(l.clone()),
+        RawArg::Bytes(b) => RawArg::Bytes(b.clone()),
         RawArg::Invalid => RawArg::Invalid,
     }
 }
@@ -1273,6 +1305,36 @@ mod tests {
     use super::*;
     use crate::cmd::{NumError, PrintFlags, strtonum};
 
+    /// argv words that are not UTF-8 keep their bytes (tmux's argv is C
+    /// strings); flags, `;` and `\;` work on them as on text, and the text
+    /// accessors see a lossy copy.
+    #[test]
+    fn argv_bytes_keep_non_utf8_words() {
+        let words: Vec<Vec<u8>> = [
+            &b"setb"[..],
+            b"-b",
+            b"n\xff",
+            b"a\xff\x80\\;\xfe;",
+            b"display",
+            b"\xfe",
+        ]
+        .iter()
+        .map(|w| w.to_vec())
+        .collect();
+        let calls = parse_argv_bytes(&words).unwrap();
+        assert_eq!(calls.len(), 2);
+        let a = &calls[0].args;
+        assert_eq!(a.value('b'), Some("n\u{fffd}"));
+        // Only a trailing `;` ends the command; `\;` before it is literal.
+        assert_eq!(a.positional_bytes(0).unwrap().as_ref(), b"a\xff\x80\\;\xfe");
+        assert_eq!(
+            a.positional_text(0).unwrap(),
+            "a\u{fffd}\u{fffd}\\;\u{fffd}"
+        );
+        assert_eq!(calls[1].args.positional(0), Some("\u{fffd}"));
+        assert!(parse_argv_bytes(&[b"\xffcmd".to_vec()]).is_err());
+    }
+
     /// Test environment: fixed variables and homes.
     struct FakeEnv {
         vars: HashMap<String, String>,
@@ -2144,7 +2206,7 @@ mod tests {
     fn block(calls: &[CommandCall], idx: usize) -> &CommandList {
         match &calls[0].args.positionals[idx] {
             ArgValue::Commands(list) => list,
-            ArgValue::Str(s) => panic!("{s:?} is not a block"),
+            other => panic!("{other:?} is not a block"),
         }
     }
 
