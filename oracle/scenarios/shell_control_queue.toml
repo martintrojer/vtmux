@@ -1,0 +1,30 @@
+name = "shell_control_queue"
+# run-shell and if-shell from a control client (cmd-run-shell.c,
+# cmd-if-shell.c, cmd-queue.c). A waiting run-shell closes its guard first
+# (CMD_RETURN_WAIT is not an error) and its output follows %end; the
+# client's next line waits for it. Commands if-shell and run-shell -C make
+# are inserted after them (cmdq_insert_after), each in its own guard with
+# the stdin-line flag 1. A failing if-shell command is reported after the
+# guard. -b commands go to the end of the client's queue with guard
+# flags 0 (cmdq_get_command with a new state).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "run 'echo x; exit 2' ; display -p next" } },
+  { control_wait = { id = "c1", until = "next" } },
+  { control_send = { id = "c1", line = "if true 'display -p y' ; display -p after-if" } },
+  { control_wait = { id = "c1", until = "after-if" } },
+  { control_send = { id = "c1", line = "run -C 'display -p c1 ; display -p c2'" } },
+  { control_wait = { id = "c1", until = "c2" } },
+  { control_send = { id = "c1", line = "if -F 1 'display -p f'" } },
+  { control_wait = { id = "c1", until = "f" } },
+  { control_send = { id = "c1", line = "run -d 0.1 'echo late'" } },
+  { control_wait = { id = "c1", until = "late" } },
+  { control_send = { id = "c1", line = "if 'exit 1' 'display -p no' 'nosuch'" } },
+  { control_wait = { id = "c1", until = "unknown command" } },
+  { control_send = { id = "c1", line = "if -b true 'display -p bgif'" } },
+  { control_wait = { id = "c1", until = "bgif" } },
+  { control_send = { id = "c1", line = "run -b -C 'display -p bgc'" } },
+  { control_wait = { id = "c1", until = "bgc" } },
+  { control_close = { id = "c1" } },
+]

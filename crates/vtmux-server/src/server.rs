@@ -705,6 +705,11 @@ impl Server {
         }
         self.waits.client_lost(id);
         self.cmdq_client_lost(id);
+        self.source_depths.remove(&Some(id));
+        // server-client.c:489-490.
+        if self.cfg_client == Some(id) {
+            self.cfg_client = None;
+        }
         self.attached_lost(id);
         // server-client.c:564.
         self.recalculate_sizes();

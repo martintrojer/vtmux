@@ -141,7 +141,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("display-panes", Some("displayp"), "d:kNs:t:Z", 0, Some(1), "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, false),
     cmd("find-window", Some("findw"), "CiNrt:TZ", 1, Some(1), "[-CiNrTZ] [-t target-pane] match-string", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("has-session", Some("has"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
-    cmd("if-shell", Some("if"), "bFt:", 2, Some(3), "[-bF] [-t target-pane] shell-command command [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
+    cmd("if-shell", Some("if"), "bFt:", 2, Some(3), "[-bF] [-t target-pane] shell-command command [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("join-pane", Some("joinp"), "bdfhvp:l:s:t:", 0, Some(0), "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("kill-pane", Some("killp"), "af:t:", 0, Some(0), "[-a] [-f filter] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("kill-server", None, "", 0, Some(0), "", None, None, false, true),
@@ -180,7 +180,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("respawn-pane", Some("respawnp"), "c:e:Ekt:", 0, None, "[-Ek] [-c start-directory] [-e environment] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("respawn-window", Some("respawnw"), "c:e:Ekt:", 0, None, "[-Ek] [-c start-directory] [-e environment] [-t target-window] [shell-command [argument ...]]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("rotate-window", Some("rotatew"), "Dt:UZ", 0, Some(0), "[-DUZ] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
-    cmd("run-shell", Some("run"), "bd:Ct:Es:c:", 0, None, "[-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
+    cmd("run-shell", Some("run"), "bd:Ct:Es:c:", 0, None, "[-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("save-buffer", Some("saveb"), "ab:", 1, Some(1), "[-a] [-b buffer-name] path", None, None, false, true),
     cmd("select-layout", Some("selectl"), "Enopt:", 0, Some(1), "[-Enop] [-t target-pane] [layout-name]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("select-pane", Some("selectp"), "DdegLlMmP:RT:t:UZ", 0, Some(0), "[-DdeLlMmRUZ] [-T title] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
@@ -346,7 +346,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 62);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 64);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

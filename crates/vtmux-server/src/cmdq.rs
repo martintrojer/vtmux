@@ -180,9 +180,12 @@ impl Cmdq {
         if let Some((q, i)) = self.find(id)
             && let Some(step) = self.queues.get_mut(&q).and_then(|s| s.get_mut(i))
         {
-            step.waiting = false;
-            step.woken = true;
-            self.dirty = true;
+            // An item not fired yet has nothing to continue.
+            if step.fired {
+                step.waiting = false;
+                step.woken = true;
+                self.dirty = true;
+            }
         }
     }
 
@@ -249,13 +252,18 @@ impl NewBatch {
 
 impl Server {
     /// `cmdq_append`: a new batch at the end of queue `q`. Returns the ID of
-    /// its first step.
-    pub(crate) fn cmdq_append(&mut self, q: QueueId, batch: NewBatch) -> StepId {
+    /// its first step, `None` if `q`'s client has gone.
+    pub(crate) fn cmdq_append(&mut self, q: QueueId, batch: NewBatch) -> Option<StepId> {
+        // A client that has gone has no queue (`cmdq_fire_command` refuses
+        // a dead client's items).
+        if q.is_some_and(|c| !self.clients.contains_key(&c)) {
+            return None;
+        }
         let steps = self.batch_steps(batch);
         let first = steps[0].id;
         self.cmdq.queues.entry(q).or_default().extend(steps);
         self.cmdq.dirty = true;
-        first
+        Some(first)
     }
 
     fn batch_steps(&mut self, b: NewBatch) -> Vec<Step> {
@@ -294,6 +302,21 @@ impl Server {
     /// `cmdq_continue`: a waiting step may finish.
     pub(crate) fn cmdq_continue(&mut self, id: StepId) {
         self.cmdq.continue_step(id);
+    }
+
+    /// Run `f` on the batch item of step `id` (gone if its client left),
+    /// then hand its output on.
+    pub(crate) fn cmdq_with_item<R>(
+        &mut self,
+        id: StepId,
+        f: impl FnOnce(&mut Self, &mut Item) -> R,
+    ) -> Option<R> {
+        let batch = self.cmdq.batch_of(id)?;
+        let mut item = self.cmdq.batches.remove(&batch)?;
+        let r = f(self, &mut item);
+        self.flush_item(&mut item);
+        self.cmdq.batches.insert(batch, item);
+        Some(r)
     }
 
     /// Continue whatever client `id`'s queue waits on (`wait-for`, file

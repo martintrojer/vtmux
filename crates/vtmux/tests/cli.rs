@@ -1362,6 +1362,226 @@ fn source_file_waits_inside() {
     });
 }
 
+/// `run-shell` from the CLI (cmd-run-shell.c): output lines on stdout,
+/// a final line without a newline, `'cmd' returned N` / `terminated by
+/// signal N` with the client's exit status (`cmd_run_shell_callback`), stderr
+/// only with -E, `#{1}` arguments, -c and its fallback to home, -C parse
+/// and runtime errors, -d (and `invalid delay time`), the job environment
+/// (TERM from default-terminal, TMUX with the session ID), and the exit
+/// status only of the last run-shell.
+#[test]
+fn run_shell_cli() {
+    compare("run_shell_cli", |w| {
+        let tmp = w.dir().to_str().expect("utf-8").to_owned();
+        let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+        for args in [
+            &["run", "echo foo; echo bar"][..],
+            &["run", "printf abc"],
+            &["run", "exit 3"],
+            &["run", "kill -9 $$"],
+            &["run", "echo err >&2"],
+            &["run", "-E", "echo err >&2"],
+            &["run", "-d", "abc", "echo x"],
+            &["run", "-d", "0x", "echo x"],
+            &["run", "-d", "0.1", "echo delayed"],
+            &["run", "-d", "inf"],
+            &["run"],
+            &["run", "echo a", ";", "display", "-p", "b"],
+            &["run", "-C", "display -p hi"],
+            &["run", "-C", "nosuch"],
+            &["run", "-C", "{"],
+            &[
+                "run",
+                "-C",
+                "display -p a ; display -p b",
+                ";",
+                "display",
+                "-p",
+                "c",
+            ],
+            &["run", "echo #{session_name}:#{1}:#{2}", "x", "y"],
+            &[
+                "run",
+                "echo $TERM $TERM_PROGRAM $COLORTERM; echo $TMUX | cut -d, -f3",
+            ],
+            // job.c:141-146: a directory it cannot enter falls back to home.
+            &[
+                "run",
+                "-c",
+                "/nonexistent/dir",
+                "[ \"$(pwd)\" = \"$HOME\" ] && echo home",
+            ],
+            &["run", "-c", &tmp, "pwd"],
+            &["run", "-t", "nosuch", "echo hi"],
+            &["run", "exit 3", ";", "run", "true"],
+            &["run", "true", ";", "run", "exit 3"],
+        ] {
+            runs.push(w.run(args));
+        }
+        runs
+    });
+}
+
+/// `run-shell -b` returns at once and its output goes to a pane's view
+/// mode (D-009), not the client; `-b -C` commands run later on the global
+/// queue. `-t` sends output to the pane too.
+#[test]
+fn run_shell_background() {
+    compare("run_shell_background", |w| {
+        let mark = w.dir().join("mark");
+        let m = mark.to_str().expect("utf-8");
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "s", "cat"]),
+            w.run(&["run", "-b", &format!("sleep 0.2; echo bg >{m}")]),
+            w.run(&["run", "-t", "s", "echo to-pane"]),
+            w.run(&["run", "-b", "-C", "set -g @bgc done"]),
+        ];
+        let start = Instant::now();
+        while !mark.exists() && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        runs.push(Run::seen(
+            std::fs::read_to_string(&mark).unwrap_or_default(),
+        ));
+        runs.push(w.run(&["show", "-gv", "@bgc"]));
+        runs
+    });
+}
+
+/// `if-shell` (cmd-if-shell.c): the shell command's exit status picks the
+/// first or second command, string or `{ }` block, formats expanded in the
+/// shell command; -F tests the expanded text instead; the chosen commands
+/// run right after if-shell and before the rest of the list, their errors
+/// dropping only their own list; -b returns at once.
+#[test]
+fn if_shell_cli() {
+    compare("if_shell_cli", |w| {
+        let conf = w.dir().join("blocks.conf");
+        std::fs::write(
+            &conf,
+            "if true { set -g @blk yes } { set -g @blk no }\n\
+             if -F '#{==:a,b}' { set -g @blkf yes } { set -g @blkf no }\n\
+             if false { set -g @one yes }\n",
+        )
+        .expect("write");
+        let c = conf.to_str().expect("utf-8");
+        let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+        for args in [
+            &["if", "true", "display -p yes", "display -p no"][..],
+            &["if", "false", "display -p yes", "display -p no"],
+            &["if", "false", "display -p yes"],
+            &["if", "exit 2", "display -p y", "display -p n"],
+            &["if", "-F", "1", "display -p yes", "display -p no"],
+            &["if", "-F", "#{==:a,b}", "display -p yes", "display -p no"],
+            &["if", "-F", "", "display -p yes"],
+            &["if", "-F", "0", "display -p yes"],
+            &["if", "true", "{"],
+            &["if", "-F", "1", "nosuch"],
+            &["if", "true", "nosuch"],
+            &[
+                "if",
+                "true",
+                "display -p a ; nosuch ; display -p b",
+                ";",
+                "display",
+                "-p",
+                "c",
+            ],
+            &[
+                "if",
+                "-b",
+                "true",
+                "set -g @bg 1",
+                ";",
+                "display",
+                "-p",
+                "after",
+            ],
+            &[
+                "if",
+                "[ \"#{session_name}\" = s ]",
+                "display -p y",
+                "display -p n",
+            ],
+            &[
+                "if",
+                "true",
+                "run \"exit 4\"",
+                ";",
+                "display",
+                "-p",
+                "after",
+            ],
+            &["if", "-t", "nosuch", "true", "display -p y"],
+            &["if"],
+            &["source", c],
+            &["show", "-g", "@blk"],
+            &["show", "-g", "@blkf"],
+            &["show", "-g", "@one"],
+        ] {
+            runs.push(w.run(args));
+        }
+        runs
+    });
+}
+
+/// The startup config runs through the queue (cfg.c `start_cfg`): if-shell
+/// and run-shell wait inside it, a job during the config gets the outside
+/// `TERM` (job.c:88-91), and the client's own command runs only after it.
+/// Runtime errors become `file:line:` causes, printed by the next
+/// source-file; `-b` jobs do not hold the config up.
+#[test]
+fn startup_config_shell() {
+    compare("startup_config_shell", |w| {
+        let conf = w.dir().join("shell.conf");
+        let mark = w.dir().join("bgmark");
+        std::fs::write(
+            &conf,
+            format!(
+                "new -d -s keep cat\n\
+                 if '[ \"$TERM\" = xterm-test ]' 'set -g @term outside' 'set -g @term other'\n\
+                 run 'sleep 0.2'\n\
+                 set -g @after-run yes\n\
+                 run -b 'touch {}'\n\
+                 run -C nosuch\n\
+                 if true nosuch2\n\
+                 run 'exit 3'\n\
+                 if -F 1 'set -g @f 1'\n",
+                mark.display()
+            ),
+        )
+        .expect("write");
+        let c = conf.to_str().expect("utf-8");
+        let mut runs = vec![
+            // start-server is a client command like any other: it waits
+            // for the config (cfg_client_done) before it exits.
+            w.raw_env(
+                &[
+                    "-L",
+                    &w.label,
+                    "-f",
+                    c,
+                    "start",
+                    ";",
+                    "show",
+                    "-gv",
+                    "@after-run",
+                ],
+                &[("TERM", "xterm-test")],
+            ),
+            w.run(&["show", "-gv", "@term"]),
+            w.run(&["show", "-gv", "@f"]),
+            w.run(&["source", "/dev/null"]),
+        ];
+        let start = Instant::now();
+        while !mark.exists() && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        runs.push(Run::seen(mark.exists().to_string()));
+        runs
+    });
+}
+
 impl Run {
     /// A value a helper observed, as a run for the transcript.
     fn seen(stdout: String) -> Self {

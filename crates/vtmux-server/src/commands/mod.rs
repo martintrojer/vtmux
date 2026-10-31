@@ -39,6 +39,7 @@ mod resize_window;
 mod respawn_pane;
 mod respawn_window;
 mod rotate_window;
+mod run_shell;
 mod save_buffer;
 mod select_layout;
 mod select_pane;
@@ -403,6 +404,8 @@ fn dispatch(
         "switch-client" => keys::switch_client(server, item, args),
         "source-file" => source_file::exec(server, item, args, found),
         "wait-for" => wait_for::exec(server, item, args),
+        "run-shell" => run_shell::exec(server, item, args, found),
+        "if-shell" => run_shell::if_shell(server, item, args, found),
         "set-option" | "set-window-option" => {
             let result = set_option::exec(server, item, call, found);
             // options_push_changes (options.c:1437-1446): pane-border-status

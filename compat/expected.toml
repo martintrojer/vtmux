@@ -36,8 +36,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."cfg-client-lost.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."check-names.sh"]
 status = "xfail"
@@ -283,15 +282,13 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."if-shell-TERM.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."if-shell-error.sh"]
 status = "pass"
 
 [tests."if-shell-nested.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."input-cursor.sh"]
 status = "xfail"
@@ -500,12 +497,11 @@ status = "pass"
 status = "pass"
 
 [tests."run-shell-cwd.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."run-shell-output.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "run-shell output to a pane needs view mode (D-009); the CLI stdout, -t and server-survives-client-kill checks pass"
 
 [tests."screen-redraw-bidi.sh"]
 status = "xfail"
