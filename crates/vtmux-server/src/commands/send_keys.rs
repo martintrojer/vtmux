@@ -107,9 +107,18 @@ fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Re
                     | "search-backward-text"
             )
         })
-        && let Some(arg) = words.get_mut(1)
     {
-        *arg = super::expand(server, found, arg);
+        // The search string is the command's first argument after its own
+        // `--` (window_copy_expand_search_string reads `cs->wargs`, which
+        // args_parse built with `--` ending the options).
+        let at = if words.get(1).is_some_and(|w| w == "--") {
+            2
+        } else {
+            1
+        };
+        if let Some(arg) = words.get_mut(at) {
+            *arg = super::expand(server, found, arg);
+        }
     }
     let Some((name, rest)) = words.split_first() else {
         // window_copy_command: no command, nothing to do.

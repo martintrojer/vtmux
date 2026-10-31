@@ -409,6 +409,70 @@ fn send_keys_and_capture() {
 }
 
 /// Copy mode's format variables (window-copy.c `window_copy_formats`,
+/// `send-keys -FX search-* -- FMT` expands FMT for the pane, as the default
+/// vi `*` and `#` bindings rely on (`window_copy_expand_search_string` reads
+/// the command's own arguments, after its `--`; found in `review_copy_search`).
+#[test]
+fn send_keys_format_search_string() {
+    compare("send_keys_format_search_string", |w| {
+        let mut runs = vec![w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "40",
+            "-y",
+            "5",
+            "sh",
+            "-c",
+            "printf 'alpha beta alpha beta\\n'; exec cat",
+        ])];
+        w.wait_for_text("a", "beta");
+        for search in [
+            &[
+                "send-keys",
+                "-t",
+                "a",
+                "-FX",
+                "search-forward",
+                "--",
+                "#{copy_cursor_word}",
+            ][..],
+            &[
+                "send-keys",
+                "-t",
+                "a",
+                "-FX",
+                "search-forward",
+                "#{copy_cursor_word}",
+            ][..],
+            &[
+                "send-keys",
+                "-t",
+                "a",
+                "-FX",
+                "search-backward",
+                "--",
+                "#{copy_cursor_word}",
+            ][..],
+        ] {
+            runs.push(w.run(&["copy-mode", "-t", "a"]));
+            runs.push(w.run(&["send-keys", "-t", "a", "-X", "history-top"]));
+            runs.push(w.run(search));
+            runs.push(w.run(&[
+                "display",
+                "-p",
+                "-t",
+                "a",
+                "[#{pane_search_string}] #{copy_cursor_x}",
+            ]));
+            runs.push(w.run(&["send-keys", "-t", "a", "-X", "cancel"]));
+        }
+        runs
+    });
+}
+
 /// format.c `format_cb_pane_in_mode`/`pane_mode`), `send-keys -X` with a
 /// repeat count, mode keys through `send-keys`, and the errors outside a
 /// mode (cmd-send-keys.c:191-204), emacs and vi keys.
