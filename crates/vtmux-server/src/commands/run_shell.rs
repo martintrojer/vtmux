@@ -112,7 +112,7 @@ impl Done {
 /// (`args_make_commands_prepare`, arguments.c:807-809), so a parse error
 /// reads `file:line: error` (`cmd_parse_get_error`) before `cmdq_error`
 /// adds its own prefix.
-fn make_commands(
+pub(crate) fn make_commands(
     server: &mut Server,
     client: Option<ClientId>,
     origin: Origin,
