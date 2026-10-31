@@ -140,10 +140,12 @@ impl Source<'_> {
             } else {
                 "pane-border-style"
             };
+            let (content, selected) = self.pane_screen(pane, &ctx, caps);
             draws.insert(
                 p,
                 PaneDraw {
-                    content: self.pane_screen(pane, &ctx, caps),
+                    content,
+                    selected,
                     index: self.model.pane_index(p),
                     lines,
                     border: self.style(TreeId::Pane(p), option, &ctx),
@@ -201,18 +203,25 @@ impl Source<'_> {
         Some((scene, draw))
     }
 
-    /// What `pane` shows: its shown mode's screen, else its own.
-    fn pane_screen(&self, pane: &crate::model::Pane, ctx: &Ctx<'_>, caps: Caps) -> Snapshot {
+    /// What `pane` shows: its shown mode's screen, else its own, and which
+    /// cells are selected.
+    fn pane_screen(
+        &self,
+        pane: &crate::model::Pane,
+        ctx: &Ctx<'_>,
+        caps: Caps,
+    ) -> (Snapshot, Vec<bool>) {
         match pane.modes.first().and_then(crate::mode::Mode::as_copy) {
-            Some(m) => self.copy_screen(pane, m, ctx, caps),
-            None => vtmux_vt::snapshot(&pane.term),
+            Some(m) => (self.copy_screen(pane, m, ctx, caps), m.selection_mask()),
+            None => (vtmux_vt::snapshot(&pane.term), Vec::new()),
         }
     }
 
     /// Copy mode's screen for `pane` (`window_copy_write_line`): the rows in
     /// view, then `copy-mode-position-format` drawn over the top row in
     /// `copy-mode-position-style` unless hidden, then the `$` of a cursor
-    /// past the last column. Line numbers are not drawn yet.
+    /// past the last column. Selected cells take `copy-mode-selection-style`.
+    /// Line numbers are not drawn yet.
     fn copy_screen(
         &self,
         pane: &crate::model::Pane,
@@ -223,15 +232,17 @@ impl Source<'_> {
         // format_draw keeps what a section does not cover: those cells are
         // marked and keep the pane's.
         const KEEP: &str = "\u{0}";
-        let mut screen = m.screen(&|_| {});
         let wtree = TreeId::Window(pane.window);
+        let theme = self.theme(caps);
+        let sel = self.style(wtree, "copy-mode-selection-style", ctx);
+        let select = |c: &mut vtmux_vt::Cell| select_cell(&theme, &sel, c);
+        let mut screen = m.screen(&select);
         // `s->rupper < s->rlower`: a screen of one row has no indicator.
         if m.shows_position() && screen.rows > 1 {
             let format = self.string(wtree, "copy-mode-position-format");
             let expanded = vtmux_core::format::expand_time(&format, ctx);
             if !expanded.is_empty() {
                 let base = self.style(wtree, "copy-mode-position-style", ctx);
-                let theme = self.theme(caps);
                 let cols = usize::from(screen.cols);
                 let under = vec![
                     styled::Cell {
@@ -249,7 +260,7 @@ impl Source<'_> {
                 }
             }
         }
-        m.mark_overflow(&mut screen, &|_| {});
+        m.mark_overflow(&mut screen, &select);
         screen
     }
 
@@ -367,4 +378,34 @@ pub fn cursor(screen: &mut Snapshot, draw: &Draw, model: &Model, rows: u16) {
         screen.cursor = Some((x, y));
         screen.cursor_visible = d.content.cursor_visible;
     }
+}
+
+/// `screen_select_cell` (screen.c:641-661): the selection style over a
+/// cell, its default colours the cell's own; `noattr` drops the cell's
+/// attributes, else they are added to the style's.
+fn select_cell(theme: &super::compose::Theme, sel: &CellStyle, c: &mut vtmux_vt::Cell) {
+    use vtmux_core::style::Attrs;
+    let default = |x: Colour| matches!(x, Colour::Default | Colour::Terminal);
+    let mut style = theme.style(sel);
+    if default(sel.fg) {
+        style.fg = c.style.fg;
+    }
+    if default(sel.bg) {
+        style.bg = c.style.bg;
+    }
+    if !sel.attrs.contains(Attrs::NOATTR) {
+        let src = c.style;
+        style.bold |= src.bold;
+        style.faint |= src.faint;
+        style.italic |= src.italic;
+        style.blink |= src.blink;
+        style.inverse |= src.inverse;
+        style.invisible |= src.invisible;
+        style.strikethrough |= src.strikethrough;
+        style.overline |= src.overline;
+        if style.underline == vtmux_vt::Underline::None {
+            style.underline = src.underline;
+        }
+    }
+    c.style = style;
 }
