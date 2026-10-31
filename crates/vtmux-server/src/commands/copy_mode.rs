@@ -38,7 +38,8 @@ pub fn exec(
             usize::from(model.panes[&p].term.rows()),
         );
         let source = &model.panes[&swp].term;
-        CopyMode::new(source, size, swp != p, flags, vi)
+        let search = model.panes[&p].search.clone();
+        CopyMode::new(source, size, swp != p, flags, vi, search)
     });
     // window_copy_set_line_numbers(wp, 1): keys and commands, not the mouse.
     with_copy(server, p, |m, env| m.set_line_numbers(env, true, false));
@@ -79,6 +80,9 @@ pub(crate) fn with_copy<R>(
         .zip(mode.as_copy_mut())
         .map(|(env, m)| f(m, &env));
     if let Some(pane) = server.model.panes.get_mut(&p) {
+        if let Some(m) = mode.as_copy() {
+            pane.search.clone_from(&m.pane_search);
+        }
         pane.modes.insert(0, mode);
     }
     server.model.redraw_panes.insert(p);

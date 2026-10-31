@@ -2229,6 +2229,7 @@ impl Server {
             resizes: Vec::new(),
             resize_timer: None,
             modes: Vec::new(),
+            search: None,
         })
     }
 

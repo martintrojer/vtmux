@@ -372,7 +372,7 @@ impl Nfa {
     }
 
     /// Whether an epsilon node may be crossed at `pos` (anchors only).
-    fn passable(&self, node: usize, text: &str, pos: usize) -> bool {
+    fn passable(&self, node: usize, text: &str, pos: usize, not_bol: bool) -> bool {
         let Kind::Assert(a) = self.nodes[node].kind else {
             return true;
         };
@@ -380,7 +380,7 @@ impl Nfa {
         let before = text[..pos].chars().next_back().is_some_and(word);
         let after = text[pos..].chars().next().is_some_and(word);
         match a {
-            Assert::Start => pos == 0,
+            Assert::Start => pos == 0 && !not_bol,
             Assert::End => pos == text.len(),
             Assert::WordFirst => !before && after,
             Assert::WordLast => before && !after,
@@ -390,7 +390,7 @@ impl Nfa {
     }
 
     /// Leftmost start, then longest end: one pass, earliest start wins per node.
-    pub(super) fn span(&self, text: &str) -> Option<(usize, usize)> {
+    pub(super) fn span(&self, text: &str, not_bol: bool) -> Option<(usize, usize)> {
         let mut mark = vec![usize::MAX; self.nodes.len()];
         let mut seeds: Vec<(usize, usize)> = Vec::new();
         let mut cur: Vec<(usize, usize)> = Vec::new();
@@ -418,7 +418,7 @@ impl Nfa {
                         }
                         Kind::Literal(_) | Kind::Any | Kind::Bracket(_) => cur.push((n, start)),
                         _ => {
-                            if self.passable(n, text, pos) {
+                            if self.passable(n, text, pos, not_bol) {
                                 stack.extend(self.nodes[n].edests.iter().rev());
                             }
                         }
@@ -446,7 +446,13 @@ impl Nfa {
 
     /// Captures for the match `start..end`, as glibc's `set_regs` reports them.
     /// `None` when glibc's walk dead-ends (it then returns `REG_NOMATCH`).
-    pub(super) fn captures(&self, text: &str, start: usize, end: usize) -> Option<Captures> {
+    pub(super) fn captures(
+        &self,
+        text: &str,
+        start: usize,
+        end: usize,
+        not_bol: bool,
+    ) -> Option<Captures> {
         if self.groups == 0 {
             return Some(vec![Some(start..end)]);
         }
@@ -455,7 +461,7 @@ impl Nfa {
             .map(|(i, _)| start + i)
             .chain(std::iter::once(end))
             .collect();
-        let log = self.state_log(text, &positions);
+        let log = self.state_log(text, &positions, not_bol);
         let sifted = self.sift(text, &positions, &log);
         let mut captures = self.set_regs(text, &positions, &sifted)?;
         for g in 1..=self.groups {
@@ -467,7 +473,7 @@ impl Nfa {
     }
 
     /// Forward state log anchored at `positions[0]`; failing anchors are left out.
-    fn state_log(&self, text: &str, positions: &[usize]) -> Vec<Vec<usize>> {
+    fn state_log(&self, text: &str, positions: &[usize], not_bol: bool) -> Vec<Vec<usize>> {
         let end = *positions.last().unwrap();
         let mut log = Vec::with_capacity(positions.len());
         let mut mark = vec![usize::MAX; self.nodes.len()];
@@ -477,7 +483,7 @@ impl Nfa {
             let mut state = Vec::new();
             stack.append(&mut seeds);
             while let Some(x) = stack.pop() {
-                if mark[x] == k || (!self.consuming(x) && !self.passable(x, text, pos)) {
+                if mark[x] == k || (!self.consuming(x) && !self.passable(x, text, pos, not_bol)) {
                     continue;
                 }
                 mark[x] = k;

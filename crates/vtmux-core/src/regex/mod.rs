@@ -129,12 +129,18 @@ impl Regex {
     pub fn is_match(&self, text: &str) -> Result<bool, Error> {
         let text = text.split('\0').next().unwrap_or_default();
         match &self.nfa {
-            Some(nfa) => Ok(nfa.span(text).is_some()),
+            Some(nfa) => Ok(nfa.span(text, false).is_some()),
             None => self.find(text).map(|m| m.is_some()),
         }
     }
 
     pub fn find(&self, text: &str) -> Result<Option<Match>, Error> {
+        self.find_with(text, false)
+    }
+
+    /// `regexec` with `REG_NOTBOL` when `not_bol`: the text does not start a
+    /// line, so `^` does not match at its start.
+    pub fn find_with(&self, text: &str, not_bol: bool) -> Result<Option<Match>, Error> {
         let text = text.split('\0').next().unwrap_or_default();
         // Flat literal patterns need no state exploration, even for multi-megabyte text.
         if !self.ignore_case
@@ -154,8 +160,8 @@ impl Regex {
             }
         }
         if let Some(nfa) = &self.nfa {
-            return Ok(nfa.span(text).and_then(|(start, end)| {
-                nfa.captures(text, start, end)
+            return Ok(nfa.span(text, not_bol).and_then(|(start, end)| {
+                nfa.captures(text, start, end, not_bol)
                     .map(|captures| Match { captures })
             }));
         }
@@ -173,7 +179,7 @@ impl Regex {
                 pos: start,
                 captures: vec![None; self.groups + 1],
             };
-            let states = self.run(&self.expr, state, text, &mut budget)?;
+            let states = self.run(&self.expr, state, text, &mut budget, not_bol)?;
             // max_by_key would choose the last tied path; preserve the first greedy path.
             let mut best: Option<State> = None;
             for s in states {
@@ -217,6 +223,7 @@ impl Regex {
         mut s: State,
         text: &str,
         budget: &mut usize,
+        not_bol: bool,
     ) -> Result<Vec<State>, Error> {
         *budget = budget.checked_sub(self.groups + 1).ok_or(Error::Limit)?;
         let next = text[s.pos..].chars().next();
@@ -244,7 +251,7 @@ impl Regex {
                 let before = text[..s.pos].chars().next_back().is_some_and(word);
                 let after = next.is_some_and(word);
                 let yes = match a {
-                    Anchor::Start => s.pos == 0,
+                    Anchor::Start => s.pos == 0 && !not_bol,
                     Anchor::End => s.pos == text.len(),
                     Anchor::Boundary => before != after,
                     Anchor::NotBoundary => before == after,
@@ -274,7 +281,7 @@ impl Regex {
             }
             Expr::Group(n, expr) => {
                 let start = s.pos;
-                let mut out = self.run(expr, s, text, budget)?;
+                let mut out = self.run(expr, s, text, budget, not_bol)?;
                 for state in &mut out {
                     state.captures[*n] = Some(start..state.pos);
                 }
@@ -285,7 +292,7 @@ impl Regex {
                 for part in parts {
                     let mut out = Vec::new();
                     for state in states {
-                        out.extend(self.run(part, state, text, budget)?);
+                        out.extend(self.run(part, state, text, budget, not_bol)?);
                     }
                     states = unique(out);
                     if states.is_empty() {
@@ -297,7 +304,7 @@ impl Regex {
             Expr::Alt(parts) => {
                 let mut out = Vec::new();
                 for part in parts {
-                    out.extend(self.run(part, s.clone(), text, budget)?);
+                    out.extend(self.run(part, s.clone(), text, budget, not_bol)?);
                 }
                 Ok(unique(out))
             }
@@ -323,7 +330,7 @@ impl Regex {
                     if max.is_some_and(|m| count >= m) {
                         continue;
                     }
-                    let children = self.run(expr, state.clone(), text, budget)?;
+                    let children = self.run(expr, state.clone(), text, budget, not_bol)?;
                     for next in children.into_iter().rev() {
                         if next.pos == state.pos {
                             if next != state || count < *min {

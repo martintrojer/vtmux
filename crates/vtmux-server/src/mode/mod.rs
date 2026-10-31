@@ -83,6 +83,7 @@ impl Model {
             vi: self.number_option(w, "mode-keys") == 1,
             line_numbers: self.number_option(w, "copy-mode-line-numbers"),
             separators,
+            wrap_search: self.number_option(w, "wrap-search") != 0,
         })
     }
 

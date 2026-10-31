@@ -17,6 +17,7 @@ use super::compose::{Draw, PaneDraw, Theme, pane_status};
 use super::scene::{Indicators, Lines, Scene, ScenePane, WindowView};
 use crate::environ::Environ;
 use crate::format_ctx::{Ctx, ServerInfo};
+use crate::mode::copy::Paint;
 use crate::model::Model;
 use crate::target::Found;
 
@@ -212,7 +213,13 @@ impl Source<'_> {
         caps: Caps,
     ) -> (Snapshot, Vec<bool>) {
         match pane.modes.first().and_then(crate::mode::Mode::as_copy) {
-            Some(m) => (self.copy_screen(pane, m, ctx, caps), m.selection_mask()),
+            Some(m) => {
+                let vi = self
+                    .model
+                    .number_option(TreeId::Window(pane.window), "mode-keys")
+                    == 1;
+                (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
+            }
             None => (vtmux_vt::snapshot(&pane.term), Vec::new()),
         }
     }
@@ -220,7 +227,8 @@ impl Source<'_> {
     /// Copy mode's screen for `pane` (`window_copy_write_line`): the rows in
     /// view, then `copy-mode-position-format` drawn over the top row in
     /// `copy-mode-position-style` unless hidden, then the `$` of a cursor
-    /// past the last column. Selected cells take `copy-mode-selection-style`.
+    /// past the last column. The mark's line and search matches take their
+    /// styles, selected cells `copy-mode-selection-style`.
     /// Line numbers are not drawn yet.
     fn copy_screen(
         &self,
@@ -235,8 +243,28 @@ impl Source<'_> {
         let wtree = TreeId::Window(pane.window);
         let theme = self.theme(caps);
         let sel = self.style(wtree, "copy-mode-selection-style", ctx);
-        let select = |c: &mut vtmux_vt::Cell| select_cell(&theme, &sel, c);
-        let mut screen = m.screen(&select);
+        let styles = [
+            "copy-mode-mark-style",
+            "copy-mode-match-style",
+            "copy-mode-current-match-style",
+        ]
+        .map(|name| theme.style(&self.style(wtree, name, ctx)));
+        let paint = |c: &mut vtmux_vt::Cell, p: Paint| {
+            let (style, inverse) = match p {
+                Paint::Selection => return select_cell(&theme, &sel, c),
+                Paint::Mark { inverse } => (styles[0], inverse),
+                Paint::Match { inverse } => (styles[1], inverse),
+                Paint::CurrentMatch { inverse } => (styles[2], inverse),
+            };
+            // window_copy_update_style: the style's attributes and colours
+            // replace the cell's, the colours swapped on the mark's cell.
+            c.style = style;
+            if inverse {
+                std::mem::swap(&mut c.style.fg, &mut c.style.bg);
+            }
+        };
+        let vi = self.model.number_option(wtree, "mode-keys") == 1;
+        let mut screen = m.screen(vi, &paint);
         // `s->rupper < s->rlower`: a screen of one row has no indicator.
         if m.shows_position() && screen.rows > 1 {
             let format = self.string(wtree, "copy-mode-position-format");
@@ -260,7 +288,7 @@ impl Source<'_> {
                 }
             }
         }
-        m.mark_overflow(&mut screen, &select);
+        m.mark_overflow(&mut screen, &paint);
         screen
     }
 

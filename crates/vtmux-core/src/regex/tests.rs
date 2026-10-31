@@ -175,3 +175,17 @@ fn regex_without_backreferences_is_linear() {
         );
     }
 }
+
+/// `REG_NOTBOL`: `^` never matches at the start of the text, in the NFA and
+/// in the backtracker; `$` still does at its end.
+#[test]
+fn not_bol() {
+    for pattern in ["^ab", "^(a)\\1"] {
+        let text = if pattern.contains('\\') { "aa" } else { "ab" };
+        let r = Regex::new(pattern, false).unwrap();
+        assert!(r.find_with(text, false).unwrap().is_some(), "{pattern}");
+        assert!(r.find_with(text, true).unwrap().is_none(), "{pattern}");
+    }
+    let r = Regex::new("b$", false).unwrap();
+    assert!(r.find_with("ab", true).unwrap().is_some());
+}

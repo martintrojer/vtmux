@@ -27,6 +27,30 @@ pub(crate) enum HistoryRow<'a> {
     Frozen(&'a FrozenRow),
 }
 
+/// A line flag OSC 133 sets on the cursor's line (input.c:3264-3330).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineMark {
+    /// `GRID_LINE_START_PROMPT`: `OSC 133;A`, `N`, or `P` without `k=s`.
+    Prompt,
+    /// `GRID_LINE_START_OUTPUT`: `OSC 133;C`.
+    Output,
+}
+
+/// The mark an OSC 133 payload (after `133;`) sets, if any.
+fn osc133_mark(payload: &[u8]) -> Option<LineMark> {
+    match payload.first()? {
+        b'A' | b'N' => Some(LineMark::Prompt),
+        b'P' => {
+            // `k=s` is a secondary prompt (GRID_LINE_SECOND_PROMPT).
+            let at = payload.windows(4).position(|w| w == b";k=s");
+            let secondary = at.is_some_and(|i| matches!(payload.get(i + 4), None | Some(b';')));
+            (!secondary).then_some(LineMark::Prompt)
+        }
+        b'C' => Some(LineMark::Output),
+        _ => None,
+    }
+}
+
 /// Pixel size of one cell in XTWINOPS replies: tmux's `DEFAULT_XPIXEL` and
 /// `DEFAULT_YPIXEL` (tmux.h:122-123), used when no client reports a size.
 const CELL_WIDTH_PX: u32 = 16;
@@ -84,6 +108,13 @@ pub struct PaneTerm {
     /// (`PANE_REDRAW`): a screen switch (screen-write.c:3154-3197) or RIS
     /// (input.c:1411), since the last [`PaneTerm::take_redraw`].
     redraw: bool,
+    /// The lines OSC 133 marked on the primary screen, each pinned to its
+    /// row so the mark follows scrolling and reflow as tmux's line flags
+    /// follow the line. Ghostty's own semantic prompt state marks rows
+    /// differently (a `C` then an `A` on one line keeps only the prompt).
+    marks: Vec<(TrackedGridRef, LineMark)>,
+    /// The marks of the history copied when the alternate screen came up.
+    frozen_marks: Vec<(usize, LineMark)>,
 }
 
 impl PaneTerm {
@@ -174,6 +205,8 @@ impl PaneTerm {
             frozen: None,
             clear_primary_history: false,
             redraw: false,
+            marks: Vec::new(),
+            frozen_marks: Vec::new(),
         }
     }
 
@@ -214,6 +247,7 @@ impl PaneTerm {
                     // read the primary history.
                     ScanEvent::AltMode(b'h') if !self.alternate_on() => {
                         self.frozen = Some(self.freeze_history());
+                        self.frozen_marks = self.line_marks();
                     }
                     // tmux's ED3 clears the grid's history, which under the
                     // alternate screen is the primary one (input.c:1758).
@@ -227,8 +261,15 @@ impl PaneTerm {
                 if matches!(e, ScanEvent::ClearHistory | ScanEvent::Reset) {
                     self.generation += 1;
                 }
+                // RIS clears the grid, its line flags with it.
+                if e == ScanEvent::Reset && !self.alternate_on() {
+                    self.marks.clear();
+                }
                 self.feed_piece(&bytes[i..=i]);
                 i += 1;
+                if let ScanEvent::Osc133(mark) = e {
+                    self.mark_cursor_line(mark);
+                }
                 if matches!(e, ScanEvent::AltMode(_) | ScanEvent::Reset)
                     && (e == ScanEvent::Reset || self.alternate_on() != alternate)
                 {
@@ -369,6 +410,64 @@ impl PaneTerm {
         (0..self.hsize)
             .map(|y| FrozenRow::capture(&self.term, hidden + y, cols))
             .collect()
+    }
+
+    /// Pin `mark` to the cursor's line. Under the alternate screen the
+    /// mark would be on the alternate grid, which copy mode never reads
+    /// after the screen goes, so it is not kept.
+    fn mark_cursor_line(&mut self, mark: LineMark) {
+        if self.alternate_on() {
+            return;
+        }
+        let y = self.term.cursor_y().unwrap_or(0);
+        let point = Point::Active(PointCoordinate {
+            x: 0,
+            y: u32::from(y),
+        });
+        if let Ok(pin) = self.term.track_grid_ref(point) {
+            self.marks.push((pin, mark));
+        }
+        // Drop the marks of rows gone from history now and then.
+        if self.marks.len().is_power_of_two() && self.marks.len() >= 64 {
+            let floor = self.hidden_rows();
+            self.marks.retain(|(pin, _)| {
+                pin.point(PointSpace::Screen)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|p| usize::try_from(p.y).is_ok_and(|y| y >= floor))
+            });
+        }
+    }
+
+    /// Rows Ghostty retains above tmux's history.
+    fn hidden_rows(&self) -> usize {
+        self.term
+            .scrollback_rows()
+            .unwrap_or(0)
+            .saturating_sub(self.hsize)
+    }
+
+    /// The lines OSC 133 marked, as rows of tmux's grid (see
+    /// [`PaneTerm::row`]), oldest first. Under the alternate screen, those
+    /// of the primary history copied on entry.
+    #[must_use]
+    pub fn line_marks(&self) -> Vec<(usize, LineMark)> {
+        if self.alternate_on() {
+            return self.frozen_marks.clone();
+        }
+        let hidden = self.hidden_rows();
+        let last = self.hsize + usize::from(self.rows());
+        let mut out: Vec<(usize, LineMark)> = self
+            .marks
+            .iter()
+            .filter_map(|(pin, mark)| {
+                let p = pin.point(PointSpace::Screen).ok().flatten()?;
+                let y = usize::try_from(p.y).ok()?.checked_sub(hidden)?;
+                (y < last).then_some((y, *mark))
+            })
+            .collect();
+        out.sort_by_key(|&(y, _)| y);
+        out
     }
 
     /// History row `y` (0 = oldest tmux still has) while the alternate screen
@@ -599,6 +698,7 @@ enum CharsetOp {
 /// history while the alternate screen is up. Also finds `CSI 3 J` (ED3), which
 /// tmux applies to the primary history even under the alternate screen, and
 /// the sequences that touch [`Charset`].
+#[allow(clippy::struct_excessive_bools)] // independent parser flags
 #[derive(Debug, Default)]
 struct AltModeScanner {
     state: ScanState,
@@ -613,6 +713,10 @@ struct AltModeScanner {
     /// where tmux changes nothing (DECSCA, SPA, EPA, DECSTR, a screen
     /// switch). Fixed once the parser is back in the ground state.
     resync: bool,
+    /// The start of the OSC being skipped, kept to find OSC 133.
+    osc: Option<Vec<u8>>,
+    /// An ESC inside an OSC: a backslash next ends it (ST).
+    osc_esc: bool,
 }
 
 /// What [`AltModeScanner`] found; reported on the sequence's final byte.
@@ -626,6 +730,8 @@ enum ScanEvent {
     Reset,
     /// Back in the ground state with [`AltModeScanner::take_resync`] due.
     Resync,
+    /// An `OSC 133` that marks the cursor's line ended.
+    Osc133(LineMark),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -643,6 +749,31 @@ enum ScanState {
 impl AltModeScanner {
     /// Feed one byte; `Some` when it ends a sequence of interest.
     fn push(&mut self, b: u8) -> Option<ScanEvent> {
+        // An OSC's end: BEL, or ST (`ESC \`).
+        let osc_esc = std::mem::take(&mut self.osc_esc);
+        if self.osc.is_some() {
+            let ends = (self.state == ScanState::Str && b == 0x07)
+                || (osc_esc && self.state == ScanState::Esc && b == b'\\');
+            if ends {
+                self.state = ScanState::Ground;
+                let osc = self.osc.take().unwrap_or_default();
+                return osc
+                    .strip_prefix(b"133;")
+                    .and_then(osc133_mark)
+                    .map(ScanEvent::Osc133);
+            }
+            match (self.state, b) {
+                (ScanState::Str, 0x1b) => self.osc_esc = true,
+                (ScanState::Str, 0x18 | 0x1a) => self.osc = None,
+                (ScanState::Str, _) => {
+                    let osc = self.osc.as_mut().expect("osc");
+                    if osc.len() < 32 {
+                        osc.push(b);
+                    }
+                }
+                _ => self.osc = None,
+            }
+        }
         match (self.state, b) {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
@@ -661,7 +792,11 @@ impl AltModeScanner {
                 self.intermediate = None;
                 self.params.clear();
             }
-            (ScanState::Esc, b']' | b'P' | b'_' | b'^' | b'X') => self.state = ScanState::Str,
+            (ScanState::Esc, b']') => {
+                self.state = ScanState::Str;
+                self.osc = Some(Vec::new());
+            }
+            (ScanState::Esc, b'P' | b'_' | b'^' | b'X') => self.state = ScanState::Str,
             (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(b),
             (ScanState::Esc, _) => {
                 self.state = ScanState::Ground;
@@ -1096,6 +1231,26 @@ mod tests {
         assert!(t.take_redraw());
     }
 
+    /// OSC 133 marks the cursor's line (input.c `input_osc_133`), with BEL
+    /// or ST, and the mark follows the line into history.
+    #[test]
+    fn osc133_marks_follow_their_lines() {
+        let mut t = PaneTerm::new(20, 3, 100);
+        t.feed(b"\x1b]133;A\x07$ ls\r\n\x1b]133;C\x1b\\out\r\n");
+        t.feed(b"\x1b]133;P;k=s\x07> \x1b]133;D;0\x07x\r\n\x1b]133;P;k=i\x07$ ");
+        assert_eq!(
+            t.line_marks(),
+            [
+                (0, LineMark::Prompt),
+                (1, LineMark::Output),
+                (3, LineMark::Prompt)
+            ]
+        );
+        assert_eq!(t.history_size(), 1);
+        t.feed(b"\x1b[?1049h\x1b]133;A\x07");
+        assert_eq!(t.line_marks()[0], (0, LineMark::Prompt));
+    }
+
     #[test]
     fn alt_mode_scanner_matches_only_alternate_screen_modes() {
         let find = |bytes: &[u8]| {
@@ -1105,7 +1260,7 @@ mod tests {
                 .filter_map(|b| match s.push(*b)? {
                     ScanEvent::AltMode(f) => Some(f),
                     ScanEvent::ClearHistory => Some(b'J'),
-                    ScanEvent::Resync | ScanEvent::Reset => None,
+                    ScanEvent::Resync | ScanEvent::Reset | ScanEvent::Osc133(_) => None,
                 })
                 .collect::<Vec<u8>>()
         };

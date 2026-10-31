@@ -509,13 +509,21 @@ impl<'a> Ctx<'a> {
             "history_limit" => p.history_limit.to_string(),
             "pane_in_mode" => p.modes.len().to_string(),
             "pane_mode" => p.modes.first()?.name().to_owned(),
+            // format_cb_pane_search_string: the copy mode's own search
+            // while it is shown, else the pane's last.
+            "pane_search_string" => p
+                .modes
+                .first()
+                .and_then(crate::mode::Mode::as_copy)
+                .map_or(p.search.as_ref(), |m| m.pane_search.as_ref())
+                .map(|(s, _)| s.clone())
+                .unwrap_or_default(),
             _ => return self.copy_value(p, name),
         })
     }
 
     /// The variables copy mode adds while it is the pane's shown mode
-    /// (`window_copy_formats`, window-copy.c:1106-1180). Search is not
-    /// here yet, so it reads as none.
+    /// (`window_copy_formats`, window-copy.c:1106-1180).
     fn copy_value(&self, p: &crate::model::Pane, name: &str) -> Option<String> {
         let m = p.modes.first()?.as_copy()?;
         let line_numbers = self
@@ -548,12 +556,14 @@ impl<'a> Ctx<'a> {
             "selection_start_y" => m.selection()?.start.1.to_string(),
             "selection_end_x" => m.selection()?.end.0.to_string(),
             "selection_end_y" => m.selection()?.end.1.to_string(),
-            "refresh_active"
-            | "search_present"
-            | "search_timed_out"
-            | "search_count"
-            | "search_count_partial" => "0".to_owned(),
-            "search_match" | "copy_cursor_hyperlink" => String::new(),
+            "search_present" => u8::from(m.search_info().0).to_string(),
+            "search_timed_out" => u8::from(m.search_info().1).to_string(),
+            // Not set while the count is unknown (window-copy.c:1169-1172).
+            "search_count" => m.search_info().2?.0.to_string(),
+            "search_count_partial" => u8::from(m.search_info().2?.1).to_string(),
+            "search_match" => m.search_match(),
+            "refresh_active" => "0".to_owned(),
+            "copy_cursor_hyperlink" => String::new(),
             _ => return None,
         })
     }

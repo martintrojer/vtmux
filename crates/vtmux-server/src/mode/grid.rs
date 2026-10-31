@@ -7,7 +7,7 @@
 //! height moves the history boundary, a change of width reflows the lines
 //! (`grid_reflow`, grid.c:1318-1611).
 
-use vtmux_vt::{PaneTerm, Row};
+use vtmux_vt::{LineMark, PaneTerm, Row};
 
 /// One line of the copy.
 #[derive(Clone, Debug, Default)]
@@ -17,6 +17,10 @@ struct Line {
     row: Row,
     /// When it scrolled into history, 0 if never (`grid_line_time`).
     time: i64,
+    /// `GRID_LINE_START_PROMPT` and `GRID_LINE_START_OUTPUT`: OSC 133
+    /// marked the line. Reflow keeps them on a line's first part.
+    prompt: bool,
+    output: bool,
 }
 
 impl Line {
@@ -80,7 +84,7 @@ impl Grid {
                 n -= 1;
             }
         }
-        let lines = (0..n)
+        let mut lines: Vec<Line> = (0..n)
             .map(|y| Line {
                 row: used_cells(src.row(y)),
                 time: if y < hsize {
@@ -88,8 +92,18 @@ impl Grid {
                 } else {
                     0
                 },
+                prompt: false,
+                output: false,
             })
             .collect();
+        for (y, mark) in src.line_marks() {
+            if let Some(line) = lines.get_mut(y) {
+                match mark {
+                    LineMark::Prompt => line.prompt = true,
+                    LineMark::Output => line.output = true,
+                }
+            }
+        }
         let gsy = n - hsize;
         let (scx, scy) = src.cursor();
         let (cx, cy) = if usize::from(scy) > gsy - 1 {
@@ -134,6 +148,15 @@ impl Grid {
     #[must_use]
     pub fn time(&self, y: usize) -> i64 {
         self.lines.get(y).map_or(0, |l| l.time)
+    }
+
+    /// Whether OSC 133 marked line `y` as a prompt's start, or with
+    /// `output` as command output's start.
+    #[must_use]
+    pub fn starts(&self, y: usize, output: bool) -> bool {
+        self.lines
+            .get(y)
+            .is_some_and(|l| if output { l.output } else { l.prompt })
     }
 
     /// Resize to `sx` x `sy`, the cursor `(cx, cy)` (`cy` a line) kept on
@@ -418,6 +441,8 @@ mod tests {
                 wrapped,
             },
             time: 0,
+            prompt: false,
+            output: false,
         }
     }
 
