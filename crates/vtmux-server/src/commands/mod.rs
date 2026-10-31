@@ -212,29 +212,34 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
     };
     let result = dispatch(server, item, call, source, found);
     if result.is_ok() {
-        status_redraws(server, call.entry.name, source, found);
+        status_redraws(server, call, source, found);
     }
     result
 }
 
 /// The status redraws a command asks for when it succeeds
 /// (`server_redraw_*` and `server_status_*`, server-fn.c), for the
-/// commands that do not ask from inside: select-pane and the model's own
-/// changes (an active pane, a resize, a pane or window gone) do.
-fn status_redraws(server: &mut Server, name: &str, source: Found, found: Found) {
+/// commands that do not ask from inside: select-pane, select-window and
+/// the model's own changes (an active pane, a resize, a pane or window
+/// gone) do.
+fn status_redraws(server: &mut Server, call: &CommandCall, source: Found, found: Found) {
     use crate::model::Redraw;
+    let detached = call.args.flag('d');
     let mut ask = |r: Option<Redraw>| {
         if let Some(r) = r {
             server.model.redraw(r);
         }
     };
     let session = |f: Found| f.session.map(Redraw::Session);
+    let status = |f: Found| f.session.map(Redraw::SessionStatus);
     let window = |f: Found| f.window.map(Redraw::Window);
-    match name {
-        // cmd-new-window.c:122,168-170; cmd-select-window.c:124-141;
-        // cmd-kill-session.c:70 (-C).
-        "new-window" | "select-window" | "next-window" | "previous-window" | "last-window"
-        | "kill-session" => ask(session(found)),
+    match call.entry.name {
+        // cmd-new-window.c:168-170: a detached new window only redraws the
+        // status (found is the session's current window, not the new one).
+        "new-window" if detached => ask(status(found)),
+        // cmd-new-window.c:122,168; cmd-kill-session.c:70 (-C).
+        // select-window and friends ask themselves.
+        "new-window" | "kill-session" => ask(session(found)),
         // cmd-split-window.c:293-298.
         "split-window" => {
             ask(window(found));
@@ -258,7 +263,11 @@ fn status_redraws(server: &mut Server, name: &str, source: Found, found: Found) 
         "join-pane" | "move-pane" => {
             ask(window(source));
             ask(window(found));
-            ask(session(found));
+            ask(if detached {
+                status(found)
+            } else {
+                session(found)
+            });
         }
         // cmd-rename-window.c:65; cmd-respawn-pane.c:94.
         "rename-window" | "respawn-pane" => ask(found.window.map(Redraw::WindowStatus)),

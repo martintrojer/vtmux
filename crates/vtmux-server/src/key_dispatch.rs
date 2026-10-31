@@ -326,7 +326,7 @@ impl Server {
         // server_client_set_session: status_timer_start, then
         // server_redraw_client.
         self.status_timer_start(id);
-        self.status_redraw_client(id);
+        self.redraw_client(id);
     }
 
     /// Keys `send-keys -K` gave a client: handled as typed, after the

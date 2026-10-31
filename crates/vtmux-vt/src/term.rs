@@ -59,6 +59,10 @@ pub struct PaneTerm {
     /// history (input.c:1758), which libghostty cannot reach until the
     /// primary screen is back.
     clear_primary_history: bool,
+    /// The program did something tmux answers with a full pane redraw
+    /// (`PANE_REDRAW`): a screen switch (screen-write.c:3154-3197) or RIS
+    /// (input.c:1411), since the last [`PaneTerm::take_redraw`].
+    redraw: bool,
 }
 
 impl PaneTerm {
@@ -144,6 +148,7 @@ impl PaneTerm {
             scan: AltModeScanner::default(),
             frozen: None,
             clear_primary_history: false,
+            redraw: false,
         }
     }
 
@@ -178,6 +183,7 @@ impl PaneTerm {
             self.feed_piece(&bytes[i..j]);
             i = j;
             if let Some(e) = event {
+                let alternate = self.alternate_on();
                 match e {
                     // The alternate screen is about to switch: last chance to
                     // read the primary history.
@@ -195,6 +201,11 @@ impl PaneTerm {
                 }
                 self.feed_piece(&bytes[i..=i]);
                 i += 1;
+                if matches!(e, ScanEvent::AltMode(_) | ScanEvent::Reset)
+                    && (e == ScanEvent::Reset || self.alternate_on() != alternate)
+                {
+                    self.redraw = true;
+                }
                 if self.scan.take_resync() {
                     self.sync_charset();
                 }
@@ -391,6 +402,12 @@ impl PaneTerm {
         }
     }
 
+    /// Whether the program asked for a full pane redraw since the last call
+    /// (see the `redraw` field).
+    pub fn take_redraw(&mut self) -> bool {
+        std::mem::take(&mut self.redraw)
+    }
+
     /// How many BELs the program wrote since the last call.
     pub fn take_bells(&mut self) -> u32 {
         self.bells.replace(0)
@@ -496,6 +513,8 @@ enum ScanEvent {
     AltMode(u8),
     /// `CSI 3 J`.
     ClearHistory,
+    /// `ESC c` (RIS).
+    Reset,
     /// Back in the ground state with [`AltModeScanner::take_resync`] due.
     Resync,
 }
@@ -540,7 +559,10 @@ impl AltModeScanner {
                 match b {
                     b'7' => self.charset_op(CharsetOp::Save),
                     b'8' => self.charset_op(CharsetOp::Restore),
-                    b'c' => self.charset_op(CharsetOp::Reset),
+                    b'c' => {
+                        self.charset_op(CharsetOp::Reset);
+                        return Some(ScanEvent::Reset);
+                    }
                     b'V' | b'W' => self.resync = true,
                     _ => {}
                 }
@@ -947,6 +969,24 @@ mod tests {
         assert_eq!(t.history_size(), 6);
     }
 
+    /// screen-write.c:3154-3197 and input.c:1411: a screen switch or RIS
+    /// asks for a full pane redraw; setting a mode already set does not.
+    #[test]
+    fn screen_switch_and_reset_ask_for_a_redraw() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"plain\x1b[2J");
+        assert!(!t.take_redraw());
+        t.feed(b"\x1b[?1049h");
+        assert!(t.take_redraw());
+        assert!(!t.take_redraw());
+        t.feed(b"\x1b[?1049h");
+        assert!(!t.take_redraw(), "already on the alternate screen");
+        t.feed(b"\x1b[?1049l");
+        assert!(t.take_redraw());
+        t.feed(b"\x1bc");
+        assert!(t.take_redraw());
+    }
+
     #[test]
     fn alt_mode_scanner_matches_only_alternate_screen_modes() {
         let find = |bytes: &[u8]| {
@@ -956,7 +996,7 @@ mod tests {
                 .filter_map(|b| match s.push(*b)? {
                     ScanEvent::AltMode(f) => Some(f),
                     ScanEvent::ClearHistory => Some(b'J'),
-                    ScanEvent::Resync => None,
+                    ScanEvent::Resync | ScanEvent::Reset => None,
                 })
                 .collect::<Vec<u8>>()
         };

@@ -42,10 +42,11 @@ pub fn exec(
         .positional(0)
         .or(args.value('F'))
         .unwrap_or(if args.flag('j') { "" } else { TEMPLATE });
-    // cmd-display-message.c:117-126: -c when it is on the target session, else
-    // the best client for the session. (-c names are not resolved yet, so the
-    // calling client stands in for it.)
-    let tc = server.target_client(item.client, item.origin);
+    // CMD_CLIENT_CFLAG|CMD_CLIENT_CANFAIL (cmd-queue.c:600-607): -c names
+    // the client, quietly none when no client matches.
+    let tc = server.find_client(item.client, item.origin, args.value('c'));
+    // cmd-display-message.c:117-126: tc for the formats when it is on the
+    // target session, else the best client for the session.
     let client = match found.session {
         s @ Some(_) if tc.and_then(|c| server.client_session(c)) == s => tc,
         Some(s) => server.best_client(Some(s)),
@@ -71,17 +72,26 @@ pub fn exec(
     }
     if args.flag('p') {
         item.print(&msg);
-    } else if item.client.is_some_and(|c| server.is_control(c)) && args.value('c').is_none() {
+    } else if let Some(tc) = tc.filter(|&c| server.is_control(c)) {
         // cmd-display-message.c:163-169: a control target client gets
-        // `%message <msg>` through server_client_print, so it lands inside
-        // the command's %begin/%end guard.
-        item.print(&format!("%message {msg}"));
+        // `%message <msg>` through server_client_print; the calling client
+        // has it inside the command's %begin/%end guard.
+        let line = format!("%message {msg}");
+        if item.client == Some(tc) {
+            item.print(&line);
+        } else {
+            server.control_print(tc, &line);
+        }
     } else if let Some(tc) = tc {
         // status_message_set(tc, delay, 0, Nflag, Cflag, ...): styles in
-        // the message apply. `-C` (do not freeze the pane output) is how
-        // vtmux always draws.
+        // the message apply; -C leaves the pane area drawing under it.
         let delay = delay.map(|d| u64::try_from(d).unwrap_or(0));
-        server.status_message(tc, msg, delay, false, args.flag('N'));
+        let flags = crate::render::status::MessageFlags {
+            ignore_styles: false,
+            ignore_keys: args.flag('N'),
+            no_freeze: args.flag('C'),
+        };
+        server.status_message(tc, msg, delay, flags);
     }
     Ok(())
 }

@@ -268,7 +268,7 @@ impl Model {
             }
             if session.current != index || !attached.contains(&s) {
                 *flags |= kind.flag();
-                self.redraw(crate::model::Redraw::Session(s));
+                self.redraw(crate::model::Redraw::SessionStatus(s));
             }
             if !self.alerts_action_applies(s, index, kind) {
                 continue;
@@ -308,7 +308,7 @@ impl Model {
         // winlink_clear_flags: server_status_session for a link that had
         // flags.
         for s in cleared {
-            self.redraw(crate::model::Redraw::Session(s));
+            self.redraw(crate::model::Redraw::SessionStatus(s));
         }
     }
 

@@ -164,6 +164,15 @@ impl Server {
         }
     }
 
+    /// `server_client_print` to control client `id` outside the command
+    /// it runs: a line in its stream (`control_write`).
+    pub(crate) fn control_print(&mut self, id: ClientId, line: &str) {
+        if let Some(cs) = self.control_mut(id) {
+            cs.write_line(line.as_bytes());
+            self.control_flush(id);
+        }
+    }
+
     /// Is `id` a control client?
     pub(crate) fn is_control(&self, id: ClientId) -> bool {
         self.clients.get(&id).is_some_and(|c| c.control.is_some())

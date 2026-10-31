@@ -37,8 +37,21 @@ struct Message {
     /// `message_ignore_styles`: `#` is escaped, so `#[...]` in the text is
     /// literal.
     ignore_styles: bool,
-    /// `c->message_timer`; `None` waits for a key.
-    deadline: Option<Instant>,
+    /// `TTY_FREEZE`: pane output is not written to the terminal while the
+    /// message shows (tty.c:1646 `tty_client_ready`), so the pane area
+    /// keeps what it showed until a full redraw; `-C` turns it off.
+    freeze: bool,
+}
+
+/// How a message shows (`status_message_set`'s flags).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MessageFlags {
+    /// `#[...]` in the text is literal.
+    pub ignore_styles: bool,
+    /// Keys do not clear the message (`-N`).
+    pub ignore_keys: bool,
+    /// The pane area keeps drawing under the message (`-C`).
+    pub no_freeze: bool,
 }
 
 /// A client's status line state (`struct status_line` plus the client's
@@ -47,6 +60,9 @@ struct Message {
 pub struct StatusLine {
     /// `CLIENT_REDRAWSTATUS`: redraw at the next frame.
     redraw: bool,
+    /// `CLIENT_REDRAWWINDOW`: the pane area is drawn again at the next
+    /// frame even while frozen.
+    redraw_window: bool,
     /// `sl->screen`: the status lines as last drawn, one row per line. It
     /// keeps its last content while the status is off.
     screen: Vec<Vec<Cell>>,
@@ -54,6 +70,11 @@ pub struct StatusLine {
     /// `screen`.
     active: Vec<Vec<Cell>>,
     message: Option<Message>,
+    /// `c->message_timer`. Clearing a message leaves it running and a
+    /// `-d 0` message does not re-arm it (status.c:372-379,
+    /// `status_message_clear`), so an earlier timer still clears a later
+    /// message when it fires.
+    message_timer: Option<Instant>,
     /// `c->message_ignore_keys`. Only a message with a delay sets it
     /// (status.c:381-382), so a later `-d 0` message keeps the old value.
     ignore_keys: bool,
@@ -65,9 +86,11 @@ impl Default for StatusLine {
     fn default() -> Self {
         Self {
             redraw: true,
+            redraw_window: false,
             screen: Vec::new(),
             active: Vec::new(),
             message: None,
+            message_timer: None,
             ignore_keys: false,
             timer: None,
         }
@@ -78,6 +101,20 @@ impl StatusLine {
     /// `server_status_client` / `server_redraw_client`.
     pub fn request_redraw(&mut self) {
         self.redraw = true;
+    }
+
+    /// `server_redraw_client` (`CLIENT_ALLREDRAWFLAGS`): the status and the
+    /// pane area.
+    pub fn request_full_redraw(&mut self) {
+        self.redraw = true;
+        self.redraw_window = true;
+    }
+
+    /// Whether this frame keeps the pane area the terminal shows (frozen
+    /// and no full redraw asked for); the window redraw request is used up.
+    pub fn hold_window(&mut self) -> bool {
+        let redraw = std::mem::take(&mut self.redraw_window);
+        self.message.as_ref().is_some_and(|m| m.freeze) && !redraw
     }
 
     /// `status_timer_start`: with the status on, tick now and every
@@ -100,29 +137,25 @@ impl StatusLine {
 
     /// `status_message_set` with a resolved delay in milliseconds (0 waits
     /// for a key).
-    pub fn set_message(
-        &mut self,
-        now: Instant,
-        text: String,
-        delay_ms: u64,
-        ignore_styles: bool,
-        ignore_keys: bool,
-    ) {
+    pub fn set_message(&mut self, now: Instant, text: String, delay_ms: u64, flags: MessageFlags) {
+        self.clear_message();
         if delay_ms != 0 {
-            self.ignore_keys = ignore_keys;
+            self.message_timer = Some(now + Duration::from_millis(delay_ms));
+            self.ignore_keys = flags.ignore_keys;
         }
         self.message = Some(Message {
             text,
-            ignore_styles,
-            deadline: (delay_ms != 0).then(|| now + Duration::from_millis(delay_ms)),
+            ignore_styles: flags.ignore_styles,
+            freeze: !flags.no_freeze,
         });
         self.redraw = true;
     }
 
-    /// `status_message_clear`.
+    /// `status_message_clear`: the tty is unfrozen and the whole client
+    /// redrawn, as the pane area may have changed under the message.
     pub fn clear_message(&mut self) {
         if self.message.take().is_some() {
-            self.redraw = true;
+            self.request_full_redraw();
         }
     }
 
@@ -149,12 +182,8 @@ impl StatusLine {
     /// (`status_message_callback`) and the status ticks, every `interval`
     /// seconds.
     pub fn tick(&mut self, now: Instant, interval: u64) {
-        if self
-            .message
-            .as_ref()
-            .and_then(|m| m.deadline)
-            .is_some_and(|d| d <= now)
-        {
+        if self.message_timer.is_some_and(|d| d <= now) {
+            self.message_timer = None;
             self.clear_message();
         }
         if self.timer.is_some_and(|t| t <= now) {
@@ -165,8 +194,7 @@ impl StatusLine {
     /// When [`Self::tick`] next has something to do.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        let message = self.message.as_ref().and_then(|m| m.deadline);
-        match (message, self.timer) {
+        match (self.message_timer, self.timer) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
         }
@@ -394,6 +422,13 @@ mod tests {
         std::mem::take(&mut sl.redraw)
     }
 
+    fn flags(ignore_keys: bool) -> MessageFlags {
+        MessageFlags {
+            ignore_keys,
+            ..MessageFlags::default()
+        }
+    }
+
     /// status.c `status_timer_callback`: a tick every `status-interval`
     /// seconds marks the status for redraw, and nothing in between does.
     #[test]
@@ -436,7 +471,7 @@ mod tests {
         let mut sl = StatusLine::default();
         sl.start_timer(t0, true, 1);
         drawn(&mut sl);
-        sl.set_message(t0, "hello".into(), 1500, true, false);
+        sl.set_message(t0, "hello".into(), 1500, flags(false));
         assert!(drawn(&mut sl));
         assert_eq!(sl.deadline(), Some(t0 + ms(1000)));
         sl.tick(t0 + ms(1000), 1);
@@ -453,16 +488,75 @@ mod tests {
     fn keys_clear_or_are_swallowed() {
         let t0 = Instant::now();
         let mut sl = StatusLine::default();
-        sl.set_message(t0, "m".into(), 0, false, false);
+        sl.set_message(t0, "m".into(), 0, flags(false));
         assert_eq!(sl.deadline(), None, "-d 0 waits for a key");
         assert!(!sl.key());
         assert_eq!(sl.message(), None);
-        sl.set_message(t0, "n".into(), 500, false, true);
+        sl.set_message(t0, "n".into(), 500, flags(true));
         assert!(sl.key(), "-N swallows the key");
         assert_eq!(sl.message(), Some("n"));
         // A delay-0 message keeps the last ignore-keys setting.
-        sl.set_message(t0, "o".into(), 0, false, false);
+        sl.set_message(t0, "o".into(), 0, flags(false));
         assert!(sl.key());
         assert_eq!(sl.message(), Some("o"));
+    }
+
+    /// status.c:372-379: clearing a message leaves `c->message_timer`
+    /// running and a `-d 0` message does not re-arm it, so the earlier
+    /// timer clears the later message.
+    #[test]
+    fn an_earlier_timer_clears_a_wait_for_key_message() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let mut sl = StatusLine::default();
+        sl.set_message(t0, "first".into(), 500, flags(false));
+        sl.set_message(t0 + ms(100), "second".into(), 0, flags(false));
+        assert_eq!(sl.deadline(), Some(t0 + ms(500)));
+        sl.tick(t0 + ms(500), 0);
+        assert_eq!(sl.message(), None);
+        assert_eq!(sl.deadline(), None);
+
+        // A key clears the first message; the timer still fires.
+        sl.set_message(t0, "first".into(), 1500, flags(false));
+        assert!(!sl.key());
+        sl.set_message(t0 + ms(100), "second".into(), 0, flags(false));
+        sl.tick(t0 + ms(1000), 0);
+        assert_eq!(sl.message(), Some("second"));
+        sl.tick(t0 + ms(1500), 0);
+        assert_eq!(sl.message(), None);
+
+        // A later timed message re-arms it.
+        sl.set_message(t0, "first".into(), 500, flags(false));
+        sl.set_message(t0 + ms(100), "third".into(), 1000, flags(false));
+        sl.tick(t0 + ms(500), 0);
+        assert_eq!(sl.message(), Some("third"));
+        sl.tick(t0 + ms(1100), 0);
+        assert_eq!(sl.message(), None);
+    }
+
+    /// `TTY_FREEZE`: a message without `-C` holds the pane area until a
+    /// full redraw (`server_redraw_client`) or the message clears.
+    #[test]
+    fn a_message_freezes_the_pane_area_unless_no_freeze() {
+        let t0 = Instant::now();
+        let mut sl = StatusLine::default();
+        assert!(!sl.hold_window());
+        sl.set_message(t0, "m".into(), 0, flags(false));
+        assert!(sl.hold_window());
+        sl.request_full_redraw();
+        assert!(!sl.hold_window(), "a full redraw draws the panes once");
+        assert!(sl.hold_window());
+        sl.clear_message();
+        assert!(!sl.hold_window());
+        sl.set_message(
+            t0,
+            "c".into(),
+            0,
+            MessageFlags {
+                no_freeze: true,
+                ..MessageFlags::default()
+            },
+        );
+        assert!(!sl.hold_window(), "-C");
     }
 }

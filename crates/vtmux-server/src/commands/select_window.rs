@@ -30,6 +30,11 @@ pub fn exec(
     };
     let model = &mut server.model;
     let no = |what: &str| EdgeError::Message(format!("no {what} window"));
+    // server_redraw_session after a change: next/previous/last and -T fail
+    // when nothing changes, but plain select-window on the current window
+    // succeeds without a redraw (cmd-select-window.c:136-139,
+    // session_select returning 1).
+    let mut changed = true;
     if which == Which::Next || args.flag('n') {
         model
             .next_window(s, args.flag('a'))
@@ -48,8 +53,11 @@ pub fn exec(
         if args.flag('T') && model.sessions[&s].current == index {
             last(model, s).ok_or_else(|| no("last"))?;
         } else {
-            model.set_current(s, index);
+            changed = model.set_current(s, index) == Some(true);
         }
+    }
+    if changed {
+        model.redraw(crate::model::Redraw::Session(s));
     }
     // cmd-select-window.c:147: the new current window takes any size
     // recalculate_sizes left pending.
