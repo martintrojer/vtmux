@@ -127,10 +127,10 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("choose-client", None, "F:f:hiK:kNO:rt:yZ", 0, Some(1), "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("choose-tree", None, "F:f:GhK:kNO:rst:wyZ", 0, Some(1), "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("clear-history", Some("clearhist"), "Ht:", 0, Some(0), "[-H] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
-    cmd("clear-prompt-history", Some("clearphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, false),
+    cmd("clear-prompt-history", Some("clearphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, true),
     cmd("clock-mode", None, "t:", 0, Some(0), "[-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("command-prompt", None, "1CbeFiklI:NPp:t:T:", 0, Some(1), "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]", None, None, false, true),
-    cmd("confirm-before", Some("confirm"), "bc:p:t:y", 1, Some(1), "[-by] [-c confirm-key] [-p prompt] [-t target-client] command", None, None, false, false),
+    cmd("confirm-before", Some("confirm"), "bc:p:t:y", 1, Some(1), "[-by] [-c confirm-key] [-p prompt] [-t target-client] command", None, None, false, true),
     cmd("copy-mode", None, "dekHMqSs:t:u", 0, Some(0), "[-dekHMqSu] [-s src-pane] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, true),
     cmd("customize-mode", None, "F:f:kNt:yZ", 0, Some(0), "[-kNZ] [-F format] [-f filter] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("delete-buffer", Some("deleteb"), "b:", 0, Some(0), "[-b buffer-name]", None, None, false, true),
@@ -198,7 +198,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("show-hooks", None, "BF:gpt:w", 0, Some(1), "[-Bgpw] [-F format] [-t target-pane] [hook]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("show-messages", Some("showmsgs"), "JTt:", 0, Some(0), "[-JT] [-t target-client]", None, None, false, false),
     cmd("show-options", Some("show"), "AgF:Hpqst:vw", 0, Some(1), "[-AgHpqsvw] [-F format] [-t target-pane] [option]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
-    cmd("show-prompt-history", Some("showphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, false),
+    cmd("show-prompt-history", Some("showphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, true),
     cmd("show-window-options", Some("showw"), "F:gvt:", 0, Some(1), "[-gv] [-F format] [-t target-window] [option]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, true),
     cmd("source-file", Some("source"), "t:Fnqv", 1, None, "[-Fnqv] [-t target-pane] path ...", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("split-window", Some("splitw"), "bB:c:de:EfF:hIkl:m:p:PR:s:S:t:T:vWZ", 0, None, "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
@@ -409,7 +409,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 68);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 71);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

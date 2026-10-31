@@ -14,6 +14,7 @@
 mod break_pane;
 mod capture_pane;
 pub(crate) mod command_prompt;
+pub(crate) mod confirm_before;
 pub(crate) mod copy_mode;
 mod delete_buffer;
 mod detach_client;
@@ -35,6 +36,7 @@ mod move_window;
 mod new_session;
 mod new_window;
 mod paste_buffer;
+mod prompt_history;
 mod rename_session;
 mod rename_window;
 mod resize_pane;
@@ -542,6 +544,9 @@ fn dispatch(
         }
         "detach-client" => detach_client::exec(server, item, args),
         "command-prompt" => command_prompt::exec(server, item, args),
+        "confirm-before" => confirm_before::exec(server, item, args),
+        "show-prompt-history" => prompt_history::show(server, item, args),
+        "clear-prompt-history" => prompt_history::clear(server, args),
         other => Err(CmdError::NotImplemented(other.to_owned())),
     }
 }
