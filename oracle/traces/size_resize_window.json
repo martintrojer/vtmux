@@ -62,6 +62,12 @@
         }
       },
       {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -85,6 +91,12 @@
         ]
       },
       {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -102,19 +114,13 @@
           "-t",
           "a:0",
           "-L",
-          "5"
-        ]
-      },
-      {
-        "run": [
+          "5",
+          ";",
           "resize-window",
           "-t",
           "a:0",
-          "-R"
-        ]
-      },
-      {
-        "run": [
+          "-R",
+          ";",
           "resize-window",
           "-t",
           "a:0",
@@ -139,6 +145,12 @@
           "-D",
           "20"
         ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -184,6 +196,12 @@
         ]
       },
       {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -203,6 +221,12 @@
           "window-size",
           "latest"
         ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -299,7 +323,7 @@
       }
     },
     {
-      "step": 5,
+      "step": 6,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -326,7 +350,7 @@
       }
     },
     {
-      "step": 6,
+      "step": 7,
       "observation": {
         "kind": "cli",
         "stdout": "0 50x14 m=, latest\n1 80x24 m=, latest\n",
@@ -335,7 +359,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -344,7 +368,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 10,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -371,28 +395,10 @@
       }
     },
     {
-      "step": 9,
-      "observation": {
-        "kind": "cli",
-        "stdout": "0 30x10 m=30,10 manual\n1 80x24 m=, latest\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 10,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 11,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "0 30x10 m=30,10 manual\n1 80x24 m=, latest\n",
         "stderr": "",
         "exit": 0
       }
@@ -425,11 +431,11 @@
       }
     },
     {
-      "step": 15,
+      "step": 16,
       "observation": {
         "kind": "screen",
         "rows": [
-          "P W1.W2.W3.               \\e[32m│\\e[37m·······················",
+          "P W1.W2.W3.W4.            \\e[32m│\\e[37m·······················",
           "\\e[39m                          \\e[32m│\\e[37m·······················",
           "\\e[39m                          \\e[32m│\\e[37m·······················",
           "\\e[39m                          \\e[32m│\\e[37m·······················",
@@ -446,25 +452,16 @@
           "\\e[30m\\e[42m \\e[39m"
         ],
         "cursor": [
-          11,
+          14,
           0
         ]
-      }
-    },
-    {
-      "step": 16,
-      "observation": {
-        "kind": "cli",
-        "stdout": "0 26x27 m=26,27 manual\n1 80x24 m=, latest\n",
-        "stderr": "",
-        "exit": 0
       }
     },
     {
       "step": 17,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "0 26x27 m=26,27 manual\n1 80x24 m=, latest\n",
         "stderr": "",
         "exit": 0
       }
@@ -482,17 +479,26 @@
       "step": 19,
       "observation": {
         "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
         "stdout": "0 50x14 m=50,14 manual\n1 50x14 m=50,14 manual\n",
         "stderr": "",
         "exit": 0
       }
     },
     {
-      "step": 21,
+      "step": 23,
       "observation": {
         "kind": "screen",
         "rows": [
-          "P W1.W2.W3.W4.                                    \\e[32m│\\e[37m·········",
+          "P W1.W2.W3.W4.W5.                                 \\e[32m│\\e[37m·········",
           "\\e[39m                                                  \\e[32m│\\e[37m·········",
           "\\e[39m                                                  \\e[32m│\\e[37m·········",
           "\\e[39m                                                  \\e[32m│\\e[37m·········",
@@ -514,13 +520,13 @@
           "\\e[30m\\e[42m \\e[39m"
         ],
         "cursor": [
-          14,
+          17,
           0
         ]
       }
     },
     {
-      "step": 22,
+      "step": 24,
       "observation": {
         "kind": "cli",
         "stdout": "0 50x14 m=50,14 manual\n1 50x14 m=50,14 manual\n",
@@ -529,7 +535,7 @@
       }
     },
     {
-      "step": 23,
+      "step": 25,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -538,11 +544,11 @@
       }
     },
     {
-      "step": 24,
+      "step": 27,
       "observation": {
         "kind": "screen",
         "rows": [
-          "P W1.W2.W3.W4.W5.",
+          "P W1.W2.W3.W4.W5.W6.",
           "",
           "",
           "",
@@ -564,13 +570,13 @@
           "\\e[30m\\e[42m \\e[39m"
         ],
         "cursor": [
-          17,
+          20,
           0
         ]
       }
     },
     {
-      "step": 25,
+      "step": 28,
       "observation": {
         "kind": "cli",
         "stdout": "0 60x19 m=, latest\n1 50x14 m=50,14 manual\n",
@@ -579,16 +585,16 @@
       }
     },
     {
-      "step": 26,
+      "step": 29,
       "observation": {
         "kind": "cli",
-        "stdout": "P W1.W2.W3.W4.W5.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "stdout": "P W1.W2.W3.W4.W5.W6.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
         "stderr": "",
         "exit": 0
       }
     },
     {
-      "step": 27,
+      "step": 30,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -597,7 +603,7 @@
       }
     },
     {
-      "step": 28,
+      "step": 31,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -606,7 +612,7 @@
       }
     },
     {
-      "step": 29,
+      "step": 32,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -615,7 +621,7 @@
       }
     },
     {
-      "step": 30,
+      "step": 33,
       "observation": {
         "kind": "cli",
         "stdout": "",

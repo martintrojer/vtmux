@@ -47,7 +47,7 @@ steps = [ ... ]
 | `{ keys = "echo hi\r" }` | raw bytes to the attached client |
 | `{ feed = { pane = "%0", bytes } }` | `send-keys -l` |
 | `{ resize = [c, r] }` | resize the attached client's PTY |
-| `{ settle = {} }` | wait for the output a preceding input provoked, then 150 ms without output from any client (`quiet_ms` overrides) |
+| `{ settle = {} }` | wait for the output a preceding input provoked, then 150 ms without output from any client (`quiet_ms` overrides); `react = true` first waits for any output since the previous settle, for steps that provoke a reaction without keys (a CLI `resize-window` that sends a pane SIGWINCH after its 250 ms timer) |
 | `{ wait_for = "chan" }` | `wait-for chan`; observes like `run` |
 | `{ screen = {} }` | settle, then observe the attached client's screen |
 | `{ divergence = { id = "D-NNN", expect = {...} } }` | annotates the next observation: replay compares vtmux against `expect` (the documented behaviour from `compat/DIVERGENCES.md`), never skips it |
@@ -56,7 +56,11 @@ steps = [ ... ]
 
 Screens are observed by feeding the attached client's raw output into a `vtmux_vt::PaneTerm` of the scenario
 size and capturing it with escapes plus the cursor; grids are compared, never raw escape bytes (`\e` stands
-for ESC in stored rows). Sync uses quiescence and `wait-for`, no fixed sleeps.
+for ESC in stored rows). Sync uses quiescence and `wait-for`, no fixed sleeps. A scenario that prints pane SIGWINCH counts
+(`W1.W2.`) puts `{ settle = { react = true, quiet_ms = 500 } }` before each `screen`, so the 250 ms resize
+timer has run out and the count is final; one CLI step then provokes at most one SIGWINCH per pane
+between two observations (chain commands with `;` in one `run`, otherwise the timer coalesces them
+depending on load).
 
 ## Normalisation
 
