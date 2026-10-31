@@ -13,6 +13,7 @@
 
 mod break_pane;
 mod capture_pane;
+pub(crate) mod copy_mode;
 mod delete_buffer;
 mod display_message;
 pub(crate) mod file_io;
@@ -398,6 +399,7 @@ fn dispatch(
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
+        "copy-mode" => copy_mode::exec(server, item, args, source, found),
         "set-buffer" => set_buffer::exec(server, item, args),
         "delete-buffer" => delete_buffer::exec(server, args),
         "show-buffer" => save_buffer::exec(server, item, args, found, true),
