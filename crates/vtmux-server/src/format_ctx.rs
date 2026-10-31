@@ -104,7 +104,7 @@ pub struct Ctx<'a> {
     pub options: &'a OptionsStore,
     pub target: Found,
     /// Extra variables (`line` for `list-*`).
-    pub extra: Vec<(&'static str, String)>,
+    pub extra: Vec<(std::borrow::Cow<'static, str>, String)>,
     /// The attached clients, in connection order (`#{L:...}`).
     pub clients: Rc<[ClientView]>,
     /// The client the formats are for (`ft->c`): its session marks the active item

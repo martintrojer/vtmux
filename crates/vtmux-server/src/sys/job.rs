@@ -153,3 +153,78 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
         pid: Pid::from_raw(pid).expect("fork returned a positive pid"),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    /// Run `command` to completion: its output and wait status.
+    fn run(
+        command: &str,
+        cwd: Option<&str>,
+        show_stderr: bool,
+    ) -> (String, rustix::process::WaitStatus) {
+        let spawned = spawn(&JobSpec {
+            shell: PathBuf::from("/bin/sh"),
+            command: command.to_owned(),
+            cwd: cwd.map(PathBuf::from),
+            home: Some(PathBuf::from("/")),
+            env: vec![
+                ("FOO".into(), "bar".into()),
+                ("PWD".into(), "/stale".into()),
+            ],
+            show_stderr,
+        })
+        .expect("spawn");
+        let mut file = std::fs::File::from(spawned.fd);
+        let mut out = Vec::new();
+        let mut buf = [0u8; 256];
+        loop {
+            match file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => out.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(e) => panic!("read: {e}"),
+            }
+        }
+        let (_, status) =
+            rustix::process::waitpid(Some(spawned.pid), rustix::process::WaitOptions::empty())
+                .expect("waitpid")
+                .expect("status");
+        (String::from_utf8(out).expect("utf-8"), status)
+    }
+
+    #[test]
+    fn job_runs_with_env_cwd_and_status() {
+        // job.c:140-149: chdir and PWD; a missing directory falls back to
+        // home. stdin is the socket, shut for writing: `cat` sees EOF.
+        let (out, status) = run(
+            "echo $FOO; pwd; echo $PWD; cat; exit 3",
+            Some("/tmp"),
+            false,
+        );
+        assert_eq!(out, "bar\n/tmp\n/tmp\n");
+        assert_eq!(status.exit_status(), Some(3));
+        let (out, _) = run("pwd", Some("/nonexistent/dir"), false);
+        assert_eq!(out, "/\n");
+        // No cwd: the environment's PWD is passed as given (the shell
+        // itself may replace a stale one, so look at the raw environment).
+        #[cfg(target_os = "linux")]
+        let (out, _) = run("tr '\\0' '\\n' </proc/$$/environ | grep ^PWD=", None, false);
+        #[cfg(target_os = "linux")]
+        assert_eq!(out, "PWD=/stale\n");
+    }
+
+    #[test]
+    fn job_stderr_only_with_show_stderr() {
+        let (out, _) = run("echo out; echo err >&2", None, false);
+        assert_eq!(out, "out\n");
+        let (out, _) = run("echo out; echo err >&2", None, true);
+        assert_eq!(out, "out\nerr\n");
+        let (_, status) = run("kill -9 $$", None, false);
+        assert_eq!(status.terminating_signal(), Some(9));
+    }
+}

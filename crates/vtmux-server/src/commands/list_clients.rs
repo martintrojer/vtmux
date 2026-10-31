@@ -96,7 +96,7 @@ pub fn exec(
         }
         let found = session.map_or_else(Found::default, |s| Found::from_session(&server.model, s));
         let mut ctx = server.format_ctx(found, Some(*id));
-        ctx.extra.push(("line", i.to_string()));
+        ctx.extra.push(("line".into(), i.to_string()));
         if let Some(f) = filter {
             let v = format::expand_str(f, &ctx);
             if v.is_empty() || v == "0" {

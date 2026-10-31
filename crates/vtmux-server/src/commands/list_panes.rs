@@ -99,7 +99,7 @@ pub fn exec(
                 item.client,
             );
             // `line` is the pane count (format_add(ft, "line", "%u", n)).
-            ctx.extra.push(("line", panes.len().to_string()));
+            ctx.extra.push(("line".into(), panes.len().to_string()));
             if let Some(f) = filter
                 && !format::is_true(&format::expand_str(f, &ctx))
             {

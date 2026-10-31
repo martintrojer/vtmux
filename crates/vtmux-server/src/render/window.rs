@@ -30,7 +30,8 @@ pub struct Source<'a> {
 impl Source<'_> {
     fn ctx(&self, found: Found, caps: Caps) -> Ctx<'_> {
         let mut ctx = Ctx::new(self.model, self.info, self.env, found);
-        ctx.extra.push(("client_colours", caps.colours.to_string()));
+        ctx.extra
+            .push(("client_colours".into(), caps.colours.to_string()));
         ctx
     }
 
@@ -243,9 +244,9 @@ impl Source<'_> {
             caps,
         );
         ctx.extra
-            .push(("is_inside", if inside { "1" } else { "0" }.into()));
+            .push(("is_inside".into(), if inside { "1" } else { "0" }.into()));
         ctx.extra
-            .push(("is_outside", if inside { "0" } else { "1" }.into()));
+            .push(("is_outside".into(), if inside { "0" } else { "1" }.into()));
         let value = self.string(TreeId::Window(w), "fill-character");
         let expanded = vtmux_core::format::expand_str(&value, &ctx);
         let cell = styled::draw(&CellStyle::default(), 1, &expanded, false, false)

@@ -218,8 +218,8 @@ pub struct Server {
     /// Errors from config files, shown to the first client
     /// (cfg.c `cfg_add_cause`).
     pub causes: Vec<String>,
-    socket: PathBuf,
-    poll: Poll,
+    pub(crate) socket: PathBuf,
+    pub(crate) poll: Poll,
     listener: UnixListener,
     signals: Signals,
     pub(crate) clients: BTreeMap<ClientId, Client>,
@@ -240,6 +240,8 @@ pub struct Server {
     /// Keys a command handed to a client go in after this step
     /// (`server_client_handle_key_after`).
     pub(crate) key_after: Option<crate::cmdq::StepId>,
+    /// Running jobs and pending timers (job.c `all_jobs`).
+    pub(crate) jobs: crate::jobs::Jobs,
     /// Panes that still had output when their read budget ran out. mio is
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
@@ -420,6 +422,7 @@ impl Server {
             cfg_wait: None,
             cmdq: crate::cmdq::Cmdq::default(),
             key_after: None,
+            jobs: crate::jobs::Jobs::default(),
             backlog: std::collections::BTreeSet::new(),
             waits: WaitChannels::default(),
             files: BTreeMap::new(),
@@ -442,6 +445,9 @@ impl Server {
                 match event.token() {
                     LISTENER => self.accept(),
                     SIGNALS => self.on_signals(),
+                    Token(t) if (crate::jobs::JOB_BASE..CLIENT_BASE).contains(&t) => {
+                        self.job_readable(crate::jobs::JobId(t - crate::jobs::JOB_BASE));
+                    }
                     Token(t) if t >= CLIENT_BASE => {
                         let id = ClientId(t - CLIENT_BASE);
                         if event.is_readable() || event.is_read_closed() {
@@ -473,6 +479,7 @@ impl Server {
             for id in ids {
                 let _ = self.on_client_input(id, &[]);
             }
+            self.jobs_timers(Instant::now());
             self.cmdq_process();
             self.check_window_names();
             self.check_window_resizes();
@@ -507,6 +514,9 @@ impl Server {
                 .alerts_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.pane_resize_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.jobs
+                .deadline()
                 .map(|d| d.saturating_duration_since(now)),
         ]
         .into_iter()
@@ -562,8 +572,12 @@ impl Server {
     }
 
     /// `server_loop` (server.c:268-306): exit when told to, or when there
-    /// are no sessions left (`exit-empty`) and no client is waiting.
+    /// are no sessions left (`exit-empty`) and no client is waiting; either
+    /// way not while a job the server waits for runs (`job_still_running`).
     fn should_exit(&self) -> bool {
+        if self.jobs.still_running() {
+            return false;
+        }
         if self.shutdown {
             return self.clients.values().all(|c| c.outbuf.is_empty());
         }
@@ -576,6 +590,8 @@ impl Server {
     }
 
     fn exit_clients(&mut self) {
+        // server_exit -> job_kill_all (server.c:260).
+        self.jobs_kill_all();
         let ids: Vec<_> = self.clients.keys().copied().collect();
         for id in ids {
             self.flush_client(id);
@@ -1843,6 +1859,17 @@ impl Server {
 
     // --------------------------------------------------------------- panes
 
+    /// `default-terminal`, the `TERM` panes and jobs get.
+    pub(crate) fn default_terminal(&self) -> String {
+        self.model
+            .options
+            .get(TreeId::Server, "default-terminal")
+            .map_or_else(
+                || "tmux-256color".to_owned(),
+                |e| e.value.to_text(e.def, None, false),
+            )
+    }
+
     /// Create a session with one window and one pane.
     pub fn create_session(&mut self, spec: NewSession) -> io::Result<SessionId> {
         let id = self.model.session_ids.allocate();
@@ -2069,15 +2096,7 @@ impl Server {
         let mut child = self.global_env.clone();
         ps.session_env.copy_into(&mut child);
         // environ_for_session (environ.c:243-250): TERM from default-terminal.
-        let term = self
-            .model
-            .options
-            .get(TreeId::Server, "default-terminal")
-            .map_or_else(
-                || "tmux-256color".to_owned(),
-                |e| e.value.to_text(e.def, None, false),
-            );
-        child.set("TERM", &term, false);
+        child.set("TERM", &self.default_terminal(), false);
         child.set("TERM_PROGRAM", "tmux", false);
         child.set("TERM_PROGRAM_VERSION", "3.8", false);
         child.set("COLORTERM", "truecolor", false);
@@ -2375,6 +2394,13 @@ impl Server {
                         continue;
                     }
                     let raw = pid.as_raw_nonzero().get();
+                    let job_status = match (status.exit_status(), status.terminating_signal()) {
+                        (_, Some(sig)) => crate::jobs::JobStatus::Signaled(sig),
+                        (code, None) => crate::jobs::JobStatus::Exited(code.unwrap_or(0)),
+                    };
+                    if self.job_died(raw, job_status) {
+                        continue;
+                    }
                     let found = self
                         .model
                         .panes
