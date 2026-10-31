@@ -463,6 +463,81 @@ fn copy_mode_formats() {
     });
 }
 
+/// The selection formats (`window_copy_formats`, window-copy.c:1136-1158)
+/// through begin/stop/clear-selection, other-end, rectangle-toggle,
+/// selection-mode, select-word and select-line, and the buffers the copy
+/// commands make (prefixes, -P, append).
+#[test]
+fn copy_selection_formats() {
+    const F: &str = "[#{selection_present}#{selection_active}] [#{selection_mode}] \
+        [#{selection_start_x},#{selection_start_y}-#{selection_end_x},#{selection_end_y}] \
+        [#{rectangle_toggle}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]";
+    compare("copy_selection_formats", |w| {
+        let mut runs = vec![w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "30",
+            "-y",
+            "6",
+            "sh",
+            "-c",
+            "for i in 1 2 3 4 5 6; do echo line$i; done; echo 'foo bar-baz qux'; echo 'last'; exec cat",
+        ])];
+        w.wait_for_text("a", "last");
+        let mut step = |args: &[&str]| {
+            runs.push(w.run(args));
+            runs.push(w.run(&["display", "-p", "-t", "a", F]));
+        };
+        step(&["copy-mode", "-t", "a"]);
+        step(&["send-keys", "-t", "a", "-X", "-N", "2", "cursor-up"]);
+        step(&["send-keys", "-t", "a", "-X", "begin-selection"]);
+        step(&["send-keys", "-t", "a", "-X", "-N", "6", "cursor-right"]);
+        step(&["send-keys", "-t", "a", "-X", "other-end"]);
+        step(&["send-keys", "-t", "a", "-X", "cursor-up"]);
+        step(&["send-keys", "-t", "a", "-X", "rectangle-toggle"]);
+        step(&["send-keys", "-t", "a", "-X", "stop-selection"]);
+        step(&["send-keys", "-t", "a", "-X", "cursor-down"]);
+        step(&[
+            "send-keys",
+            "-t",
+            "a",
+            "-X",
+            "copy-selection-no-clear",
+            "pre",
+        ]);
+        step(&["send-keys", "-t", "a", "-X", "clear-selection"]);
+        step(&["send-keys", "-t", "a", "-X", "rectangle-off"]);
+        step(&["send-keys", "-t", "a", "-X", "select-word"]);
+        step(&["send-keys", "-t", "a", "-X", "selection-mode", "line"]);
+        step(&["send-keys", "-t", "a", "-X", "select-line"]);
+        step(&["send-keys", "-t", "a", "-X", "cursor-up"]);
+        step(&["send-keys", "-t", "a", "-X", "copy-selection"]);
+        step(&["send-keys", "-t", "a", "-X", "selection-mode", "W"]);
+        step(&["send-keys", "-t", "a", "-X", "selection-mode", "bogus"]);
+        step(&["send-keys", "-t", "a", "-X", "selection-mode", "a", "b"]);
+        step(&[
+            "send-keys",
+            "-t",
+            "a",
+            "-X",
+            "-N",
+            "2",
+            "copy-line",
+            "x#{pane_id}-",
+        ]);
+        step(&["send-keys", "-t", "a", "-X", "copy-end-of-line", "-P"]);
+        step(&["send-keys", "-t", "a", "-X", "begin-selection"]);
+        step(&["send-keys", "-t", "a", "-X", "next-word-end"]);
+        step(&["send-keys", "-t", "a", "-X", "append-selection"]);
+        step(&["send-keys", "-t", "a", "-X", "copy-selection-and-cancel"]);
+        runs.push(w.run(&["list-buffers", "-F", "#{buffer_name}=#{buffer_sample}"]));
+        runs
+    });
+}
+
 /// (9) Command lookup, flag and arity errors (the `task_0` shared facts).
 #[test]
 fn command_errors() {
