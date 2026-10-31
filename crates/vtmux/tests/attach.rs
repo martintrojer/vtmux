@@ -332,6 +332,81 @@ fn signal_exit_restores_terminal_modes() {
     }
 }
 
+/// A terminal client whose tty goes away is dropped by the server itself
+/// (tty.c:181-189 `tty_read_callback` -> `server_client_lost`): client-detached
+/// fires, with no `window_update_focus` and so no pane-focus-out. Only
+/// `MSG_EXITING` (C-b d, detach-client, SIGHUP) takes the focus away first.
+#[test]
+fn closing_the_tty_fires_no_focus_out() {
+    use rustix::fs::{Mode, OFlags, open};
+    use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+    use rustix::termios::{Winsize, tcsetwinsize};
+    use std::process::Stdio;
+    for bin in bins() {
+        let w = World::new(bin);
+        let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
+        ok(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]);
+        ok(&["set", "-g", "focus-events", "on"]);
+        ok(&["set", "-g", "@log", ""]);
+        for hook in ["pane-focus-in", "pane-focus-out", "client-detached"] {
+            ok(&[
+                "set-hook",
+                "-g",
+                hook,
+                "set -agF @log '|#{hook}:#{hook_pane}'",
+            ]);
+        }
+        let master =
+            openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC).unwrap();
+        grantpt(&master).unwrap();
+        unlockpt(&master).unwrap();
+        let slave_path = ptsname(&master, Vec::new()).unwrap();
+        let size = Winsize {
+            ws_row: 10,
+            ws_col: 40,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        tcsetwinsize(&master, size).unwrap();
+        let slave = || {
+            open(
+                slave_path.as_c_str(),
+                OFlags::RDWR | OFlags::NOCTTY,
+                Mode::empty(),
+            )
+            .unwrap()
+        };
+        let mut child = Command::new(&w.bin)
+            .args(w.args())
+            .args(["attach", "-t", "a"])
+            .env_clear()
+            .envs(w.env())
+            .stdin(Stdio::from(slave()))
+            .stdout(Stdio::from(slave()))
+            .stderr(Stdio::from(slave()))
+            .spawn()
+            .unwrap();
+        let log = || {
+            String::from_utf8_lossy(&w.cli(&["show", "-gv", "@log"]).stdout)
+                .trim()
+                .to_owned()
+        };
+        let end = Instant::now() + Duration::from_secs(5);
+        while !log().contains("pane-focus-in") && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        // The terminal goes away with the client still running.
+        drop(master);
+        let end = Instant::now() + Duration::from_secs(5);
+        while !log().contains("client-detached") && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(log(), "|pane-focus-in:%0|client-detached:%0");
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
 #[test]
 fn session_and_server_exit_messages() {
     for bin in bins() {

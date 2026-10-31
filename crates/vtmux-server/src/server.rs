@@ -257,6 +257,10 @@ pub struct Server {
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
     backlog: std::collections::BTreeSet<PaneId>,
+    /// Windows a lost client was looking at. tmux never looks at their
+    /// focus again until something changes them (`server_client_lost` runs
+    /// no `window_update_focus`), so [`Server::update_focus_all`] skips them.
+    focus_stale: std::collections::BTreeSet<WindowId>,
     /// `wait-for` channels.
     pub waits: WaitChannels,
     /// The file operation a parked batch waits for (file.c `client_file`).
@@ -424,6 +428,7 @@ impl Server {
             global_env,
             shutdown: false,
             source_depths: BTreeMap::new(),
+            focus_stale: std::collections::BTreeSet::new(),
             causes: Vec::new(),
             socket,
             poll,
@@ -758,6 +763,11 @@ impl Server {
         // server_client_lost (server-client.c:508-514): client-detached for
         // an attached client, client-closed for a control or terminal one,
         // while the client is still there to name.
+        if self.clients.get(&id).is_some_and(|c| c.attached.is_some())
+            && let Some(w) = self.client_window(id)
+        {
+            self.focus_stale.insert(w);
+        }
         if let Some(c) = self.clients.get(&id) {
             let terminal = c.hello.as_ref().is_some_and(|h| h.tty.is_some());
             let control = c.control.is_some();
@@ -1408,7 +1418,13 @@ impl Server {
         if self.model.number_option(TreeId::Server, "focus-events") == 0 {
             return;
         }
-        let windows: Vec<_> = self.model.windows.keys().copied().collect();
+        let windows: Vec<_> = self
+            .model
+            .windows
+            .keys()
+            .filter(|w| !self.focus_stale.contains(w))
+            .copied()
+            .collect();
         for w in windows {
             self.update_focus(Some(w));
         }
@@ -1443,6 +1459,7 @@ impl Server {
             return None;
         }
         let w = pane.window;
+        self.focus_stale.remove(&w);
         let active = self.model.windows.get(&w).map(Window::active) == Some(p);
         let focused = active
             && self.clients.values().any(|c| {

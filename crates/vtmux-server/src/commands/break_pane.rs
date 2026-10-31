@@ -145,6 +145,8 @@ fn move_to_new_window(
     let (sx, sy) = (old.sx(), old.sy());
     let opts = old.layout.opts;
     m.fix_panes(w);
+    // layout_close_pane always fires window-layout-changed (layout.c:1548).
+    m.layout_changed(w);
 
     let new_w = m.window_ids.allocate();
     m.options.add_window(new_w);
