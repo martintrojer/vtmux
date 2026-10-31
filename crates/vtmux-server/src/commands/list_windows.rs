@@ -86,7 +86,7 @@ pub fn exec(
     let mut out = Vec::new();
     for link in &links {
         let mut ctx = server.format_ctx(*link, item.client);
-        ctx.extra.push(("line", links.len().to_string()));
+        ctx.extra.push(("line".into(), links.len().to_string()));
         if let Some(f) = filter
             && !format::is_true(&format::expand_str(f, &ctx))
         {

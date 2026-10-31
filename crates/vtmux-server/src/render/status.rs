@@ -335,8 +335,8 @@ fn message_rows(
     } else {
         m.text.clone()
     };
-    ctx.extra.push(("message", text));
-    ctx.extra.push(("command_prompt", "0".into()));
+    ctx.extra.push(("message".into(), text));
+    ctx.extra.push(("command_prompt".into(), "0".into()));
     let gc = source.style(tree, "message-style", ctx);
     let template = source
         .model

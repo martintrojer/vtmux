@@ -10,6 +10,7 @@ pub mod control;
 pub mod environ;
 pub mod format_ctx;
 pub mod input;
+pub mod jobs;
 pub mod key_dispatch;
 pub mod keys;
 pub mod model;

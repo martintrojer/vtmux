@@ -1,0 +1,291 @@
+//! Jobs (job.c): shell commands the server runs for `run-shell` and
+//! `if-shell`, with their output captured and their exit status reported
+//! to a completion callback once both the output has closed and the
+//! process has been reaped (`job_error_callback`, `job_check_died`), in
+//! whichever order those happen.
+//!
+//! Also the one-shot timers `run-shell -d` waits on.
+
+use std::collections::BTreeMap;
+use std::io::{self, Read};
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::path::PathBuf;
+use std::time::Instant;
+
+use mio::unix::SourceFd;
+use mio::{Interest, Token};
+use vtmux_core::ids::SessionId;
+
+use crate::server::{ClientId, Server};
+use crate::sys;
+
+/// Job tokens are `JOB_BASE + id`, between the panes' and the clients'.
+pub(crate) const JOB_BASE: usize = 1 << 31;
+
+/// A job's ID (its token).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct JobId(pub usize);
+
+/// How the process ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JobStatus {
+    Exited(i32),
+    Signaled(i32),
+}
+
+impl JobStatus {
+    /// `WIFEXITED(status) && WEXITSTATUS(status) == 0`.
+    #[must_use]
+    pub fn success(self) -> bool {
+        self == Self::Exited(0)
+    }
+}
+
+/// The completion callback (`job_complete_cb`): the output and status.
+pub type Complete = Box<dyn FnOnce(&mut Server, Vec<u8>, JobStatus)>;
+
+/// A callback a timer runs.
+pub type Deferred = Box<dyn FnOnce(&mut Server)>;
+
+struct Job {
+    /// Our end of the socket pair, until the job closes its output.
+    fd: Option<OwnedFd>,
+    /// The process, until it is reaped.
+    pid: Option<i32>,
+    output: Vec<u8>,
+    status: Option<JobStatus>,
+    /// `JOB_NOWAIT`: the server may exit with it running.
+    nowait: bool,
+    complete: Option<Complete>,
+}
+
+/// Every running job and pending timer.
+#[derive(Default)]
+pub struct Jobs {
+    next: usize,
+    running: BTreeMap<JobId, Job>,
+    timers: Vec<(Instant, Deferred)>,
+}
+
+impl std::fmt::Debug for Jobs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Jobs")
+            .field("next", &self.next)
+            .field("running", &self.running.len())
+            .field("timers", &self.timers.len())
+            .finish()
+    }
+}
+
+impl Jobs {
+    /// `job_still_running`: a job the server waits for has not finished.
+    #[must_use]
+    pub fn still_running(&self) -> bool {
+        self.running
+            .values()
+            .any(|j| !j.nowait && j.fd.is_some() && j.pid.is_some())
+    }
+
+    /// The soonest timer.
+    #[must_use]
+    pub fn deadline(&self) -> Option<Instant> {
+        self.timers.iter().map(|(at, _)| *at).min()
+    }
+}
+
+/// What to run (`job_run`'s arguments).
+pub struct JobSpec {
+    pub command: String,
+    /// The session whose environment the job gets (`environ_for_session`).
+    pub session: Option<SessionId>,
+    pub cwd: PathBuf,
+    /// `JOB_SHOWSTDERR`.
+    pub show_stderr: bool,
+    /// `JOB_NOWAIT`.
+    pub nowait: bool,
+}
+
+#[expect(dead_code, reason = "run-shell and if-shell start jobs (next commit)")]
+impl Server {
+    /// `job_run` (job.c:70-232): `/bin/sh -c command` (run-shell and
+    /// if-shell do not ask for `JOB_DEFAULTSHELL`) in `cwd`, with the
+    /// session's environment.
+    pub(crate) fn job_run(&mut self, spec: &JobSpec, complete: Complete) -> io::Result<JobId> {
+        let spawned = sys::job::spawn(&sys::job::JobSpec {
+            shell: PathBuf::from("/bin/sh"),
+            command: spec.command.clone(),
+            cwd: Some(spec.cwd.clone()),
+            home: crate::server::find_home(&self.global_env),
+            env: self.job_environ(spec.session),
+            show_stderr: spec.show_stderr,
+        })?;
+        let id = JobId(self.jobs.next);
+        self.jobs.next += 1;
+        self.poll.registry().register(
+            &mut SourceFd(&spawned.fd.as_raw_fd()),
+            Token(JOB_BASE + id.0),
+            Interest::READABLE,
+        )?;
+        self.jobs.running.insert(
+            id,
+            Job {
+                fd: Some(spawned.fd),
+                pid: Some(spawned.pid.as_raw_nonzero().get()),
+                output: Vec::new(),
+                status: None,
+                nowait: spec.nowait,
+                complete: Some(complete),
+            },
+        );
+        // Output may already be waiting: edge-triggered events only
+        // report what arrives later.
+        self.job_readable(id);
+        Ok(id)
+    }
+
+    /// `environ_for_session(s, !cfg_finished)` (environ.c:253-286): the
+    /// global environment and the session's; once the config has run,
+    /// `TERM` and friends as a pane gets them (a config's if-shell sees
+    /// the outside `TERM`); `TMUX` with the session's ID or -1.
+    fn job_environ(&self, session: Option<SessionId>) -> Vec<(String, String)> {
+        let mut env = self.global_env.clone();
+        if let Some(s) = session.and_then(|s| self.model.sessions.get(&s)) {
+            s.env.copy_into(&mut env);
+        }
+        if self.cfg_finished {
+            env.set("TERM", &self.default_terminal(), false);
+            env.set("TERM_PROGRAM", "tmux", false);
+            env.set("TERM_PROGRAM_VERSION", "3.8", false);
+            env.set("COLORTERM", "truecolor", false);
+        }
+        let idx = session.map_or_else(|| "-1".to_owned(), |s| s.0.to_string());
+        env.set(
+            "TMUX",
+            &format!("{},{},{idx}", self.socket.display(), std::process::id()),
+            false,
+        );
+        env.for_process()
+    }
+
+    /// The job's output is readable: take all of it; at EOF the output is
+    /// closed, and the job completes if it has also been reaped.
+    pub(crate) fn job_readable(&mut self, id: JobId) {
+        let Some(job) = self.jobs.running.get_mut(&id) else {
+            return;
+        };
+        let Some(fd) = job.fd.as_ref() else {
+            return;
+        };
+        let mut file = std::fs::File::from(fd.try_clone().expect("dup job fd"));
+        let mut buf = [0u8; 16 * 1024];
+        let closed = loop {
+            match file.read(&mut buf) {
+                Ok(0) => break true,
+                Ok(n) => job.output.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break false,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => break true,
+            }
+        };
+        if !closed {
+            return;
+        }
+        if let Some(fd) = job.fd.take() {
+            let _ = self
+                .poll
+                .registry()
+                .deregister(&mut SourceFd(&fd.as_raw_fd()));
+        }
+        self.job_check_done(id);
+    }
+
+    /// `job_check_died`: whether `pid` was a job's; its status is kept and
+    /// the job completes if its output has closed.
+    pub(crate) fn job_died(&mut self, pid: i32, status: JobStatus) -> bool {
+        let Some((&id, job)) = self
+            .jobs
+            .running
+            .iter_mut()
+            .find(|(_, j)| j.pid == Some(pid))
+        else {
+            return false;
+        };
+        job.pid = None;
+        job.status = Some(status);
+        self.job_check_done(id);
+        true
+    }
+
+    fn job_check_done(&mut self, id: JobId) {
+        let done = self
+            .jobs
+            .running
+            .get(&id)
+            .is_some_and(|j| j.fd.is_none() && j.pid.is_none());
+        if !done {
+            return;
+        }
+        let Some(mut job) = self.jobs.running.remove(&id) else {
+            return;
+        };
+        if let Some(complete) = job.complete.take() {
+            complete(self, job.output, job.status.unwrap_or(JobStatus::Exited(0)));
+        }
+    }
+
+    /// `job_kill_all` (server.c:260): SIGTERM to every job still running.
+    pub(crate) fn jobs_kill_all(&mut self) {
+        for pid in self.jobs.running.values().filter_map(|j| j.pid) {
+            if let Some(pid) = rustix::process::Pid::from_raw(pid) {
+                let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+            }
+        }
+    }
+
+    /// Run `f` at `at` (`evtimer_add`, or `event_active` for now).
+    pub(crate) fn timer_add(&mut self, at: Instant, f: Deferred) {
+        self.jobs.timers.push((at, f));
+    }
+
+    /// Fire every timer that is due, in the order they were added.
+    pub(crate) fn jobs_timers(&mut self, now: Instant) {
+        let (due, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.jobs.timers)
+            .into_iter()
+            .partition(|(at, _)| *at <= now);
+        self.jobs.timers = rest;
+        for (_, f) in due {
+            f(self);
+        }
+    }
+
+    /// `server_client_get_cwd` (server-client.c:3082-3097): the startup
+    /// client's directory while the config loads; an unattached client's
+    /// own; the session's; the client's session's; home; `/`.
+    pub(crate) fn client_cwd(&self, c: Option<ClientId>, s: Option<SessionId>) -> PathBuf {
+        let hello_cwd = |c: ClientId| {
+            self.clients
+                .get(&c)
+                .and_then(|c| c.hello.as_ref())
+                .map(|h| h.cwd.clone())
+        };
+        if !self.cfg_finished
+            && let Some(cwd) = self.cfg_client.and_then(hello_cwd)
+        {
+            return cwd;
+        }
+        if let Some(c) = c
+            && self.client_session(c).is_none()
+            && let Some(cwd) = hello_cwd(c)
+        {
+            return cwd;
+        }
+        let session_cwd = |s: SessionId| self.model.sessions.get(&s).map(|s| s.cwd.clone());
+        if let Some(cwd) = s.and_then(session_cwd) {
+            return cwd;
+        }
+        if let Some(cwd) = c.and_then(|c| self.client_session(c)).and_then(session_cwd) {
+            return cwd;
+        }
+        crate::server::find_home(&self.global_env).unwrap_or_else(|| PathBuf::from("/"))
+    }
+}

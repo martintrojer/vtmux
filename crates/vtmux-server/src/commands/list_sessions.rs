@@ -50,7 +50,7 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
             ..Found::default()
         };
         let mut ctx = server.format_ctx(found, item.client);
-        ctx.extra.push(("line", i.to_string()));
+        ctx.extra.push(("line".into(), i.to_string()));
         if let Some(f) = filter {
             let v = format::expand_str(f, &ctx);
             if v.is_empty() || v == "0" {
