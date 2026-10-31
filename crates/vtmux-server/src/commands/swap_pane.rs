@@ -57,7 +57,18 @@ pub fn exec(server: &mut Server, args: &Args, source: Found, found: Found) -> Re
         m.push_zoom(src_w, false, zoom)
     };
     if src_wp != dst_wp {
+        let src_idx = source.index.filter(|_| !same);
         swap(server, args.flag('d'), (src_w, src_wp), (dst_w, dst_wp));
+        // cmd-swap-pane.c:191-197.
+        if !same {
+            let m = &mut server.model;
+            m.fire_pane_moved(src_wp, (src_w, src_idx), (dst_w, found.index));
+            m.fire_pane_moved(dst_wp, (dst_w, found.index), (src_w, src_idx));
+        }
+        server.model.layout_changed(src_w);
+        if !same {
+            server.model.layout_changed(dst_w);
+        }
     }
     server.model.pop_zoom(src_w, src_zoomed);
     if !same {

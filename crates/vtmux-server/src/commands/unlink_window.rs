@@ -21,7 +21,6 @@ pub fn exec(
     if !args.flag('k') && server.model.window_links(w).len() <= 1 {
         return Err(EdgeError::Message("window only linked to one session".into()).into());
     }
-    let links = server.control_links();
     // server_unlink_window: the session's only window cannot be detached,
     // so the session goes with it.
     let panes = if server.model.detach_window(s, index) {
@@ -33,7 +32,6 @@ pub fn exec(
     for pane in panes {
         server.close_pane_io(pane);
     }
-    server.control_links_changed(&links);
     server.recalculate_sizes();
     Ok(())
 }

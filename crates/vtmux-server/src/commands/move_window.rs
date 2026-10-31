@@ -51,7 +51,6 @@ pub fn exec(
     let dst_s = dst.session.ok_or(EdgeError::NoCurrentTarget)?;
     let mut idx = dst.new_index;
     let before = args.flag('b');
-    let mut links = server.control_links();
     if args.flag('a') || before {
         let from = dst
             .index
@@ -107,8 +106,6 @@ pub fn exec(
     }
     server.model.redraw(Redraw::Session(dst_s));
     // window-linked fires before the unlink's window-unlinked.
-    server.control_links_changed(&links);
-    links = server.control_links();
 
     if moving {
         // server_unlink_window: the source's only window cannot go, so the
@@ -125,7 +122,6 @@ pub fn exec(
     if !args.flag('s') && server.model.sessions.contains_key(&src_s) {
         server.model.renumber_if_set(src_s);
     }
-    server.control_links_changed(&links);
     server.recalculate_sizes();
     Ok(())
 }

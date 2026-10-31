@@ -63,6 +63,13 @@ pub fn exec(
             p.term.set_title(&title);
             if p.term.title() != before {
                 server.model.redraw(Redraw::WindowStatus(w));
+                // cmd-select-pane.c:259-266.
+                let ev = crate::events::Event::new("pane-title-changed")
+                    .target(Found::from_pane(&server.model, wp))
+                    .pane("pane", wp)
+                    .window(&server.model, "window", w)
+                    .text("new_title", title);
+                server.model.push_event(ev);
             }
         }
         return Ok(());

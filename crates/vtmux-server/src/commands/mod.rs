@@ -536,7 +536,7 @@ fn dispatch(
                 vtmux_core::cmd::FindFlags::NONE,
             )?;
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
-            attach(server, item, session, !args.flag('E'))
+            attach(server, item, session, !args.flag('E'), true)
         }
         "detach-client" => {
             if args.flag('s') {
@@ -597,10 +597,15 @@ pub fn attach(
     item: &mut Item,
     session: vtmux_core::ids::SessionId,
     update_env: bool,
+    fire_attached: bool,
 ) -> Result<(), CmdError> {
     let Some(client) = item.client else {
         return Ok(());
     };
+    // The sinks hear what happened so far (a new session's window-linked)
+    // while the client still has its old session, as in tmux, where events
+    // fire as they happen.
+    server.drain_events();
     if update_env && (item.control.is_some() || item.tty.is_some()) {
         server.update_session_environ(client, session);
     }
@@ -609,14 +614,22 @@ pub fn attach(
         server.control_attach(client, session);
         item.origin.attached = Some(session);
         reset_key_table(server, item, client);
-        return Ok(());
+    } else {
+        if item.tty.is_none() {
+            return Err(EdgeError::OpenTerminalFailed("not a terminal".into()).into());
+        }
+        server.attach_client(client, session)?;
+        item.after = After::Stay;
+        reset_key_table(server, item, client);
     }
-    if item.tty.is_none() {
-        return Err(EdgeError::OpenTerminalFailed("not a terminal".into()).into());
+    // cmd-attach-session.c:166-167 (attach-session only; new-session just
+    // sets CLIENT_ATTACHED, cmd-new-session.c:356-357).
+    if fire_attached {
+        server.fire_client("client-attached", client);
     }
-    server.attach_client(client, session)?;
-    item.after = After::Stay;
-    reset_key_table(server, item, client);
+    if let Some(c) = server.clients.get_mut(&client) {
+        c.was_attached = true;
+    }
     Ok(())
 }
 

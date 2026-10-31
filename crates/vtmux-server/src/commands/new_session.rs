@@ -73,7 +73,7 @@ pub fn exec(
             None => found.session,
         };
         if let Some(s) = existing {
-            return super::attach(server, item, s, !args.flag('E'));
+            return super::attach(server, item, s, !args.flag('E'), true);
         }
     }
     if let Some(n) = &session_name
@@ -150,7 +150,7 @@ pub fn exec(
         item.print(&text);
     }
     if !detached {
-        super::attach(server, item, s, false)?;
+        super::attach(server, item, s, false, false)?;
     }
     // cmd-new-session.c:361-362.
     item.hook_target = Some(Some(Found::from_session(&server.model, s)));

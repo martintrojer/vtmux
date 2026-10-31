@@ -74,7 +74,8 @@ impl Found {
             session: Some(s),
             index: Some(index),
             window: Some(w),
-            pane: model.windows.get(&w).map(crate::model::Window::active),
+            // A window being emptied (join-pane) has no active pane.
+            pane: model.windows.get(&w).and_then(|x| x.panes.active),
             new_index: None,
         }
     }
@@ -126,7 +127,7 @@ fn best_with_window(model: &Model, w: WindowId) -> Option<Found> {
         session: Some(s),
         index: Some(index),
         window: Some(w),
-        pane: model.windows.get(&w).map(crate::model::Window::active),
+        pane: model.windows.get(&w).and_then(|x| x.panes.active),
         new_index: None,
     })
 }

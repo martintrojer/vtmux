@@ -251,6 +251,22 @@ impl Model {
         self.push_event(ev);
     }
 
+    /// `window_set_name` (window.c:103-117, 431-440): the name, and
+    /// window-renamed with the old and new names.
+    pub fn set_window_name(&mut self, w: WindowId, name: &str) {
+        let Some(window) = self.windows.get_mut(&w) else {
+            return;
+        };
+        let old = std::mem::replace(&mut window.name, name.to_owned());
+        let ev = Event::new("window-renamed")
+            .target(Found::from_window(self, w))
+            .window(self, "window", w)
+            .text("old_name", old)
+            .text("new_name", name)
+            .linked_now(self, w);
+        self.push_event(ev);
+    }
+
     /// `window-layout-changed`.
     pub fn layout_changed(&mut self, w: WindowId) {
         self.fire_window("window-layout-changed", w);
@@ -295,6 +311,83 @@ impl Server {
         self.control_event(ev);
         self.hooks_event(ev);
         self.waits_event(ev);
+    }
+
+    /// `events_fire_client`'s target: `cmd_find_from_client`.
+    pub(crate) fn client_found(&self, c: ClientId) -> Found {
+        match self.clients.get(&c).and_then(|c| c.attached) {
+            Some(s) => Found::from_session(&self.model, s),
+            None => target::current(&self.model, target::Origin::default()).unwrap_or_default(),
+        }
+    }
+
+    /// `events_fire_client`.
+    pub(crate) fn fire_client(&mut self, name: &str, c: ClientId) {
+        let ev = self.client_event(name, c);
+        self.model.push_event(ev);
+    }
+
+    /// The payload `events_fire_client` and its friends start from.
+    pub(crate) fn client_event(&self, name: &str, c: ClientId) -> Event {
+        let fs = self.client_found(c);
+        let mut ev = Event::new(name)
+            .target(fs)
+            .client("client", c, self.client_name(c));
+        if let Some(s) = fs.session {
+            ev = ev.session(&self.model, "session", s);
+        }
+        if let Some(w) = fs.window {
+            ev = ev.window(&self.model, "window", w);
+        }
+        if let Some(i) = fs.index {
+            ev = ev.int("window_index", i);
+        }
+        if let Some(p) = fs.pane {
+            ev = ev.pane("pane", p);
+        }
+        ev
+    }
+
+    /// [`Self::client_event`] for a client on its way out: its session is
+    /// the one it left.
+    pub(crate) fn lost_client_event(&self, name: &str, c: ClientId) -> Event {
+        let left = self
+            .clients
+            .get(&c)
+            .and_then(|x| x.attached.or(x.left_session))
+            .filter(|s| self.model.sessions.contains_key(s));
+        let fs = left.map_or_else(
+            || self.client_found(c),
+            |s| Found::from_session(&self.model, s),
+        );
+        let mut ev = Event::new(name)
+            .target(fs)
+            .client("client", c, self.client_name(c));
+        if let Some(s) = fs.session {
+            ev = ev.session(&self.model, "session", s);
+        }
+        if let Some(w) = fs.window {
+            ev = ev.window(&self.model, "window", w);
+        }
+        if let Some(i) = fs.index {
+            ev = ev.int("window_index", i);
+        }
+        if let Some(p) = fs.pane {
+            ev = ev.pane("pane", p);
+        }
+        ev
+    }
+
+    /// `server_client_fire_session_changed` (server-client.c:395-419).
+    pub(crate) fn fire_session_changed(&mut self, c: ClientId, old: Option<SessionId>) {
+        let mut ev = self.client_event("client-session-changed", c);
+        if let Some((s, _)) = ev.get_session("session") {
+            ev = ev.session(&self.model, "new_session", s);
+        }
+        if let Some(o) = old {
+            ev = ev.session(&self.model, "old_session", o);
+        }
+        self.model.push_event(ev);
     }
 
     // ---------------------------------------------------------- hooks
