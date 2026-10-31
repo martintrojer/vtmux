@@ -13,6 +13,7 @@
 
 mod break_pane;
 mod capture_pane;
+pub(crate) mod command_prompt;
 pub(crate) mod copy_mode;
 mod delete_buffer;
 mod detach_client;
@@ -540,6 +541,7 @@ fn dispatch(
             attach(server, item, session, !args.flag('E'), true)
         }
         "detach-client" => detach_client::exec(server, item, args),
+        "command-prompt" => command_prompt::exec(server, item, args),
         other => Err(CmdError::NotImplemented(other.to_owned())),
     }
 }

@@ -24,6 +24,7 @@ pub mod prompt_history;
 pub mod render;
 pub mod resize;
 pub mod server;
+pub mod status_prompt;
 pub mod sys;
 pub mod target;
 pub mod wait;

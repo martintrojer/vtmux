@@ -117,6 +117,9 @@ pub(crate) struct Client {
     /// capabilities after `terminal-features` and `terminal-overrides`.
     term: Option<vtmux_core::term_features::Term>,
     pub(crate) compositor: crate::render::Compositor,
+    /// The command a status-line prompt answers to (`c->prompt`'s
+    /// callbacks); the prompt itself is in `status`.
+    pub(crate) prompt_owner: Option<crate::status_prompt::Owner>,
 }
 
 /// Frame bytes the client has not yet written to its terminal: in
@@ -276,6 +279,8 @@ pub struct Server {
     pub(crate) cmd_formats: Vec<(String, String)>,
     /// Event sinks that come and go (`wait-for -E`).
     pub(crate) event_waits: Vec<crate::events::EventWait>,
+    /// Every prompt type's history (prompt-history.c).
+    pub(crate) prompt_history: crate::prompt_history::History,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -452,6 +457,7 @@ impl Server {
             injected_keys: Vec::new(),
             cmd_formats: Vec::new(),
             event_waits: Vec::new(),
+            prompt_history: crate::prompt_history::History::default(),
         })
     }
 
@@ -699,6 +705,7 @@ impl Server {
                             was_attached: false,
                             left_session: None,
                             status: crate::render::status::StatusLine::default(),
+                            prompt_owner: None,
                             written: 0,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
@@ -781,6 +788,9 @@ impl Server {
             }
             self.drain_events();
         }
+        // server-client.c:494: status_prompt_clear, whose free callback
+        // continues a command waiting on the prompt.
+        self.status_prompt_clear(id);
         if let Some(mut c) = self.clients.remove(&id) {
             let _ = self.poll.registry().deregister(&mut c.stream);
         }
@@ -1439,6 +1449,11 @@ impl Server {
                         continue;
                     }
                     let pasting = c.pasting;
+                    // server-client.c:1826-1835: the prompt first, at once;
+                    // a key it takes skips the key callback.
+                    if self.status_prompt_key(id, key.to_core()) {
+                        continue;
+                    }
                     self.touch_client(id);
                     // server_client_update_latest (server-client.c:1708-1709)
                     // runs before the bound commands, which tmux queues

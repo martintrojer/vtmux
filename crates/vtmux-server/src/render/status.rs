@@ -29,6 +29,8 @@ use super::Caps;
 use super::compose::draw_line_by;
 use super::window::Source;
 use crate::format_ctx::Ctx;
+use crate::prompt::Prompt;
+use crate::target::Found;
 
 /// A status-line message (`c->message_string` and its flags).
 #[derive(Debug)]
@@ -37,10 +39,14 @@ struct Message {
     /// `message_ignore_styles`: `#` is escaped, so `#[...]` in the text is
     /// literal.
     ignore_styles: bool,
-    /// `TTY_FREEZE`: pane output is not written to the terminal while the
-    /// message shows (tty.c:1646 `tty_client_ready`), so the pane area
-    /// keeps what it showed until a full redraw; `-C` turns it off.
-    freeze: bool,
+}
+
+/// A status-line prompt (`c->prompt`): the editor and the target its
+/// formats are expanded for (`pr->state`).
+#[derive(Debug)]
+pub struct StatusPrompt {
+    pub editor: Prompt,
+    pub state: Found,
 }
 
 /// How a message shows (`status_message_set`'s flags).
@@ -56,6 +62,10 @@ pub struct MessageFlags {
 
 /// A client's status line state (`struct status_line` plus the client's
 /// status flags and timers).
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent CLIENT_* and TTY_* flags"
+)]
 #[derive(Debug)]
 pub struct StatusLine {
     /// `CLIENT_REDRAWSTATUS`: redraw at the next frame.
@@ -70,6 +80,18 @@ pub struct StatusLine {
     /// `screen`.
     active: Vec<Vec<Cell>>,
     message: Option<Message>,
+    /// `c->prompt`. A message shows over it.
+    prompt: Option<StatusPrompt>,
+    /// `sl->prompt_cx` and the prompt's line in `active`.
+    prompt_cursor: (u16, usize),
+    /// `TTY_FREEZE`: pane output is not written to the terminal while a
+    /// message or prompt shows (tty.c:1646 `tty_client_ready`), so the
+    /// pane area keeps what it showed until a full redraw; `-C` turns it
+    /// off. Clearing a message over a prompt leaves it (status.c:401-402).
+    frozen: bool,
+    /// `TTY_NOCURSOR`: set by a message, cleared with it unless a prompt
+    /// is up, and by clearing the prompt.
+    nocursor: bool,
     /// `c->message_timer`. Clearing a message leaves it running and a
     /// `-d 0` message does not re-arm it (status.c:372-379,
     /// `status_message_clear`), so an earlier timer still clears a later
@@ -90,6 +112,10 @@ impl Default for StatusLine {
             screen: Vec::new(),
             active: Vec::new(),
             message: None,
+            prompt: None,
+            prompt_cursor: (0, 0),
+            frozen: false,
+            nocursor: false,
             message_timer: None,
             ignore_keys: false,
             timer: None,
@@ -114,7 +140,7 @@ impl StatusLine {
     /// and no full redraw asked for); the window redraw request is used up.
     pub fn hold_window(&mut self) -> bool {
         let redraw = std::mem::take(&mut self.redraw_window);
-        self.message.as_ref().is_some_and(|m| m.freeze) && !redraw
+        self.frozen && !redraw
     }
 
     /// `status_timer_start`: with the status on, tick now and every
@@ -126,10 +152,10 @@ impl StatusLine {
         }
     }
 
-    /// `status_timer_callback`: redraw unless a message is up, and come
-    /// back in `interval` seconds (0 stops the timer).
+    /// `status_timer_callback`: redraw unless a message or prompt is up,
+    /// and come back in `interval` seconds (0 stops the timer).
     fn fire_timer(&mut self, now: Instant, interval: u64) {
-        if self.message.is_none() {
+        if self.message.is_none() && self.prompt.is_none() {
             self.redraw = true;
         }
         self.timer = (interval != 0).then(|| now + Duration::from_secs(interval));
@@ -146,17 +172,59 @@ impl StatusLine {
         self.message = Some(Message {
             text,
             ignore_styles: flags.ignore_styles,
-            freeze: !flags.no_freeze,
         });
+        if !flags.no_freeze {
+            self.frozen = true;
+        }
+        self.nocursor = true;
         self.redraw = true;
     }
 
-    /// `status_message_clear`: the tty is unfrozen and the whole client
-    /// redrawn, as the pane area may have changed under the message.
+    /// `status_message_clear`: the tty is unfrozen (unless a prompt is up)
+    /// and the whole client redrawn, as the pane area may have changed
+    /// under the message.
     pub fn clear_message(&mut self) {
         if self.message.take().is_some() {
+            if self.prompt.is_none() {
+                self.frozen = false;
+                self.nocursor = false;
+            }
             self.request_full_redraw();
         }
+    }
+
+    /// `status_prompt_set`: any message goes, then any prompt (returned,
+    /// for its owner to be told); the pane area freezes unless `-C`.
+    pub fn set_prompt(&mut self, prompt: StatusPrompt) -> Option<StatusPrompt> {
+        self.clear_message();
+        let old = self.clear_prompt();
+        if !prompt.editor.no_freeze {
+            self.frozen = true;
+        }
+        self.prompt = Some(prompt);
+        self.redraw = true;
+        old
+    }
+
+    /// `status_prompt_clear`: unfrozen and redrawn in full.
+    pub fn clear_prompt(&mut self) -> Option<StatusPrompt> {
+        let old = self.prompt.take()?;
+        self.frozen = false;
+        self.nocursor = false;
+        self.request_full_redraw();
+        Some(old)
+    }
+
+    /// The prompt shown, if any.
+    #[must_use]
+    pub fn prompt(&self) -> Option<&StatusPrompt> {
+        self.prompt.as_ref()
+    }
+
+    /// The prompt, to edit; the status is drawn again.
+    pub fn prompt_mut(&mut self) -> Option<&mut StatusPrompt> {
+        self.redraw |= self.prompt.is_some();
+        self.prompt.as_mut()
     }
 
     /// The message shown, if any (`c->message_string`).
@@ -224,12 +292,18 @@ impl StatusLine {
             self.redraw = false;
             if let Some(m) = &self.message {
                 self.active = message_rows(source, ctx, s, &self.screen, m, cols, lines);
+            } else if let Some(p) = &self.prompt {
+                let (rows, cursor) = prompt_rows(source, s, &self.screen, p, cols, lines);
+                self.active = rows;
+                self.prompt_cursor = cursor;
             } else if lines != 0 {
                 self.screen = status_rows(source, ctx, s, cols, lines);
             }
         }
-        let rows = if self.message.is_some() {
+        if self.nocursor {
             screen.cursor_visible = false;
+        }
+        let rows = if self.message.is_some() || self.prompt.is_some() {
             &self.active
         } else if lines == 0 {
             return;
@@ -242,6 +316,13 @@ impl StatusLine {
         } else {
             screen.rows.saturating_sub(n)
         };
+        if self.prompt.is_some() && self.message.is_none() && !self.nocursor {
+            // status_prompt_cursor (server-client.c:2220-2222).
+            let (x, line) = self.prompt_cursor;
+            let row = y.saturating_add(u16::try_from(line).unwrap_or(0));
+            screen.cursor = Some((x.min(screen.cols - 1), row.min(screen.rows - 1)));
+            screen.cursor_visible = true;
+        }
         let theme = source.theme(caps);
         for (row, drawn) in (y..screen.rows).zip(rows) {
             let cells = &mut screen.cells[usize::from(row) * cols..][..cols];
@@ -260,7 +341,7 @@ impl StatusLine {
         let fits =
             |rows: &[Vec<Cell>], n: usize| rows.len() == n && rows.iter().all(|r| r.len() == cols);
         self.redraw
-            || if self.message.is_some() {
+            || if self.message.is_some() || self.prompt.is_some() {
                 !fits(&self.active, lines.max(1))
             } else {
                 lines != 0 && !fits(&self.screen, lines)
@@ -290,6 +371,193 @@ fn status_rows(
         .collect()
 }
 
+/// What the status lines show under a message or prompt
+/// (`status_push_screen`, `screen_write_fast_copy`): what of the status
+/// fits in `lines` (at least one) rows of `cols`, the rest default cells.
+fn status_copy(status: &[Vec<Cell>], cols: usize, lines: usize) -> Vec<Vec<Cell>> {
+    let blank = Cell {
+        text: " ".into(),
+        width: 1,
+        style: CellStyle::default(),
+    };
+    (0..lines.max(1))
+        .map(|y| {
+            (0..cols)
+                .map(|x| {
+                    status
+                        .get(y)
+                        .and_then(|r| r.get(x))
+                        .unwrap_or(&blank)
+                        .clone()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// `status_prompt_line_at`: `message-line`, at most the last line.
+fn prompt_line(source: &Source<'_>, tree: TreeId, lines: usize) -> usize {
+    usize::try_from(source.model.number_option(tree, "message-line"))
+        .unwrap_or(0)
+        .min(lines.max(1) - 1)
+}
+
+/// `status_prompt_redraw` and `prompt_draw` (prompt.c:601-660): the
+/// expanded `message-format` (with `#{message}` the expanded prompt) then
+/// the visible part of the input, in the area `message-style` gives, over
+/// a copy of the status lines; and where the cursor goes, as a column and
+/// a line of the rows.
+///
+/// The formats are expanded in the prompt's own tree
+/// (`prompt_format_tree`): its target, no client, and `prompt_input`,
+/// `prompt_flags`, `prompt_type` and `command_prompt`.
+fn prompt_rows(
+    source: &Source<'_>,
+    s: SessionId,
+    status: &[Vec<Cell>],
+    prompt: &StatusPrompt,
+    cols: usize,
+    lines: usize,
+) -> (Vec<Vec<Cell>>, (u16, usize)) {
+    let tree = TreeId::Session(s);
+    let editor = &prompt.editor;
+    let mut rows = status_copy(status, cols, lines);
+    let line = prompt_line(source, tree, lines);
+    let (ax, aw) = message_area(source, tree, cols);
+
+    let mut ctx = Ctx::new(source.model, source.info, source.env, prompt.state);
+    for (k, v) in editor.format_vars() {
+        ctx.extra.push((k.into(), v));
+    }
+    let sy = prompt_style(source, tree, editor.command_mode(), &ctx);
+    // prompt_expand1.
+    let label = vtmux_core::format::expand_time(&editor.label, &ctx);
+    ctx.extra.push(("message".into(), label));
+    let template = source
+        .model
+        .options
+        .get(tree, "message-format")
+        .map(|e| e.value.to_text(e.def, None, false))
+        .unwrap_or_default();
+    let expanded = vtmux_core::format::expand_time(&template, &ctx);
+
+    // prompt_layout (prompt.c:464-556).
+    let label_width = styled::format_width(&expanded).min(aw);
+    let cells = editor.cells();
+    let pcursor = editor.cursor_width();
+    let pwidth: usize = cells.iter().map(|c| usize::from(c.1)).sum();
+    let avail = aw - label_width;
+    let (offset, input_width) = if avail == 0 {
+        (0, 0)
+    } else if pcursor >= avail {
+        (pcursor - avail + 1, avail)
+    } else {
+        (0, pwidth.min(avail))
+    };
+    let content_width = (label_width + input_width).min(aw);
+    let content_x = match sy.align {
+        Align::Centre | Align::AbsoluteCentre => ax + (aw - content_width) / 2,
+        Align::Right => ax + aw - content_width,
+        Align::Default | Align::Left => ax,
+    };
+    let input_x = content_x + label_width;
+    let cursor_x = input_x + pcursor - offset;
+
+    let row = &mut rows[line];
+    // screen_write_clearcharacter in the fill colour.
+    if sy.fill != Colour::Default {
+        for cell in &mut row[ax..ax + aw] {
+            *cell = Cell {
+                text: " ".into(),
+                width: 1,
+                style: CellStyle {
+                    bg: sy.fill,
+                    ..CellStyle::default()
+                },
+            };
+        }
+    }
+    if content_width != 0 {
+        if label_width != 0 {
+            let under = row[content_x..content_x + label_width].to_vec();
+            let drawn = styled::draw_onto(&sy.cell, under, &expanded, false, false).cells;
+            row.splice(content_x..content_x + label_width, drawn);
+        }
+        draw_input(row, input_x, &cells, offset, input_width, &sy.cell);
+    }
+    (rows, (u16::try_from(cursor_x).unwrap_or(u16::MAX), line))
+}
+
+/// `prompt_effective_style`: `message-style`, or `message-command-style`
+/// in vi command mode, expanded in the prompt's tree over the default
+/// cell; a style that does not parse is the default cell.
+fn prompt_style(source: &Source<'_>, tree: TreeId, command_mode: bool, ctx: &Ctx<'_>) -> Style {
+    let name = if command_mode {
+        "message-command-style"
+    } else {
+        "message-style"
+    };
+    let text = source
+        .model
+        .options
+        .get(tree, name)
+        .map(|e| e.value.to_text(e.def, None, false))
+        .unwrap_or_default();
+    let base = CellStyle::default();
+    let mut sy = Style::new(&base);
+    if sy
+        .parse(&base, &vtmux_core::format::expand_time(&text, ctx))
+        .is_err()
+    {
+        sy = Style::new(&base);
+    }
+    sy
+}
+
+/// `prompt_redraw_character`: the whole characters from column `offset`
+/// that fit in `width`, from `x` on; a control character is `^X`.
+fn draw_input(
+    row: &mut [Cell],
+    mut x: usize,
+    cells: &[(String, u8)],
+    offset: usize,
+    width: usize,
+    style: &CellStyle,
+) {
+    let mut used = 0;
+    let mut put = |text: String, w: u8| {
+        if let Some(cell) = row.get_mut(x) {
+            *cell = Cell {
+                text,
+                width: w,
+                style: style.clone(),
+            };
+        }
+        x += 1;
+    };
+    for (text, w) in cells {
+        let w = usize::from(*w);
+        if used < offset {
+            used += w;
+            continue;
+        }
+        if used + w > offset + width {
+            break;
+        }
+        used += w;
+        if text.starts_with('^') && text.len() == 2 {
+            for c in text.chars() {
+                put(c.to_string(), 1);
+            }
+        } else if w == 2 {
+            put(text.clone(), 2);
+            put(String::new(), 0);
+        } else {
+            put(text.clone(), 1);
+        }
+    }
+}
+
 /// `status_message_redraw` (status.c:461-532): `message-format` with
 /// `#{message}` set, drawn in `message-style` on the `message-line` row of
 /// a copy of the status lines, inside the area `message-style`'s `width`
@@ -304,31 +572,8 @@ fn message_rows(
     lines: usize,
 ) -> Vec<Vec<Cell>> {
     let tree = TreeId::Session(s);
-    let lines = lines.max(1);
-    // status_prompt_line_at: message-line, at most the last line.
-    let line = usize::try_from(source.model.number_option(tree, "message-line"))
-        .unwrap_or(0)
-        .min(lines - 1);
-    // screen_init + screen_write_fast_copy: what of the status fits, the
-    // rest default cells.
-    let blank = Cell {
-        text: " ".into(),
-        width: 1,
-        style: CellStyle::default(),
-    };
-    let mut rows: Vec<Vec<Cell>> = (0..lines)
-        .map(|y| {
-            (0..cols)
-                .map(|x| {
-                    status
-                        .get(y)
-                        .and_then(|r| r.get(x))
-                        .unwrap_or(&blank)
-                        .clone()
-                })
-                .collect()
-        })
-        .collect();
+    let line = prompt_line(source, tree, lines);
+    let mut rows = status_copy(status, cols, lines);
     let (ax, aw) = message_area(source, tree, cols);
     let text = if m.ignore_styles {
         m.text.replace('#', "##")

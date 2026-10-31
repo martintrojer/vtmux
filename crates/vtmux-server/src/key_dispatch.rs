@@ -347,7 +347,7 @@ impl Server {
                 continue;
             };
             // server_client_handle_key0, as for typed keys.
-            if c.status.key() {
+            if c.status.key() || self.status_prompt_key(id, key) {
                 continue;
             }
             self.touch_client(id);
