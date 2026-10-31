@@ -36,6 +36,7 @@ mod paste_buffer;
 mod rename_session;
 mod rename_window;
 mod resize_pane;
+mod resize_window;
 mod respawn_pane;
 mod respawn_window;
 mod rotate_window;
@@ -329,6 +330,7 @@ fn dispatch(
         "previous-window" => select_window::exec(server, item, args, found, Which::Previous),
         "last-window" => select_window::exec(server, item, args, found, Which::Last),
         "resize-pane" => resize_pane::exec(server, item, args, found),
+        "resize-window" => resize_window::exec(server, item, args, found),
         "select-layout" => select_layout::exec(server, item, args, found, None),
         "next-layout" => select_layout::exec(server, item, args, found, Some(true)),
         "previous-layout" => select_layout::exec(server, item, args, found, Some(false)),
@@ -493,6 +495,16 @@ pub fn attach(
 fn reset_key_table(server: &mut Server, item: &Item, client: ClientId) {
     if !item.repeat {
         server.set_key_table(client, None);
+    }
+}
+
+/// `cmdq_get_client` with a session, for `s->curw->window->latest = c`:
+/// the calling client, or for a run without one (a config file) the
+/// current client (`cmd_find_client(item, NULL, 1)`, cmd-queue.c:597-598).
+pub(crate) fn latest_client(server: &Server, item: &Item) -> Option<ClientId> {
+    match item.client {
+        Some(c) => server.client_session(c).is_some().then_some(c),
+        None => server.target_client(None, item.origin),
     }
 }
 

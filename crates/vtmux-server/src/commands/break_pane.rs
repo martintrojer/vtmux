@@ -93,7 +93,8 @@ pub fn exec(
         {
             return Err(EdgeError::Message(format!("index in use: {i}")).into());
         }
-        let new_w = move_to_new_window(server, w, wp, name);
+        let tc = server.target_client(item.client, item.origin);
+        let new_w = move_to_new_window(server, w, wp, name, tc);
         let index = server
             .model
             .link_window(dst_s, new_w, idx)
@@ -140,6 +141,7 @@ fn move_to_new_window(
     w: vtmux_core::ids::WindowId,
     wp: vtmux_core::ids::PaneId,
     name: Option<&str>,
+    latest: Option<crate::server::ClientId>,
 ) -> vtmux_core::ids::WindowId {
     let m = &mut server.model;
     let old = m.windows.get_mut(&w).expect("source window");
@@ -178,6 +180,9 @@ fn move_to_new_window(
             last_layout: None,
             old_layout: None,
             pending_size: None,
+            manual_size: (sx, sy),
+            // cmd-break-pane.c:166.
+            latest,
             alerts: crate::alerts::WindowAlerts::default(),
         },
     );

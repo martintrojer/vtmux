@@ -20,7 +20,7 @@ pub enum Which {
 
 pub fn exec(
     server: &mut Server,
-    _item: &mut Item,
+    item: &mut Item,
     args: &Args,
     found: Found,
     which: Which,
@@ -59,8 +59,11 @@ pub fn exec(
     if changed {
         model.redraw(crate::model::Redraw::Session(s));
     }
-    // cmd-select-window.c:147: the new current window takes any size
-    // recalculate_sizes left pending.
+    // cmd-select-window.c:145-147: an attached calling client becomes the
+    // new window's latest, and the window takes any size pending.
+    if let Some(c) = super::latest_client(server, item) {
+        server.set_latest(s, c);
+    }
     server.recalculate_sizes();
     Ok(())
 }

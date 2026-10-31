@@ -45,9 +45,15 @@ pub fn exec(
     if args.flag('S')
         && let Some(index) = select_existing(server, s, found.new_index, name.as_deref())?
     {
-        if !args.flag('d') {
-            server.model.set_current(s, index);
+        if args.flag('d') {
+            return Ok(());
         }
+        server.model.set_current(s, index);
+        // cmd-new-window.c:123-125.
+        if let Some(c) = super::latest_client(server, item) {
+            server.set_latest(s, c);
+        }
+        server.recalculate_sizes();
         return Ok(());
     }
     if args.flag('E') || empty_command {
@@ -96,6 +102,7 @@ pub fn exec(
             cwd,
             extra_env: &extra_env,
             client_path: item.client.and(client_path(&item.env)),
+            client: server.target_client(item.client, item.origin),
         })
         .map_err(EdgeError::CreateWindowFailed)?;
     if args.flag('P') {

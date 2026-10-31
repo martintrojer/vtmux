@@ -318,6 +318,18 @@ impl<'a> Ctx<'a> {
             "window_panes" => w.panes.panes.len().to_string(),
             "window_width" => w.sx().to_string(),
             "window_height" => w.sy().to_string(),
+            // format.c:3213-3226, 3415-3428: empty unless window-size manual.
+            "window_manual_width" | "window_manual_height" => {
+                let manual = self
+                    .model
+                    .number_option(TreeId::Window(w.id), "window-size")
+                    == 2;
+                match (manual, name) {
+                    (false, _) => String::new(),
+                    (true, "window_manual_width") => w.manual_size.0.to_string(),
+                    (true, _) => w.manual_size.1.to_string(),
+                }
+            }
             "window_zoomed_flag" => flag(w.zoomed()),
             "window_active" => flag(wl.is_some_and(|(s, i)| s.current == i)),
             "window_last_flag" => flag(wl.is_some_and(|(s, i)| s.last.first() == Some(&i))),

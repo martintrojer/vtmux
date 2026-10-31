@@ -16,6 +16,7 @@ pub mod names;
 pub mod pane_io;
 pub mod paste;
 pub mod render;
+pub mod resize;
 pub mod server;
 pub mod sys;
 pub mod target;

@@ -83,6 +83,12 @@ pub struct Window {
     /// `WINDOW_RESIZE` with `new_sx`/`new_sy`: the size `recalculate_sizes`
     /// chose, applied once the window is current in an attached session.
     pub pending_size: Option<(u32, u32)>,
+    /// `w->manual_sx`/`manual_sy`: the size `window-size manual` keeps;
+    /// the creation size until resize-window sets it.
+    pub manual_size: (u32, u32),
+    /// `w->latest`: the client that last used the window, which sizes it
+    /// under `window-size latest` when several clients see it.
+    pub latest: Option<crate::server::ClientId>,
     /// The window's alert state (`w->flags`, `alerts_queued`,
     /// `alerts_timer`).
     pub alerts: crate::alerts::WindowAlerts,
@@ -163,6 +169,11 @@ pub struct Pane {
     /// `wp->active_point`: when the pane last became active, for picking the
     /// most recent of several neighbours (`window_pane_choose_best`).
     pub active_point: u64,
+    /// `wp->resize_queue`: size changes not yet told to the program, each
+    /// `(from, to)`.
+    pub resizes: Vec<((u32, u32), (u32, u32))>,
+    /// `wp->resize_timer`: until when no queued size is sent.
+    pub resize_timer: Option<Instant>,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its
@@ -1188,20 +1199,82 @@ impl Rect {
 
 impl Pane {
     /// `window_pane_resize` (window.c:1702-1740) plus the pane offsets: the
-    /// terminal reflows and the PTY gets `TIOCSWINSZ` when the size changed.
+    /// terminal reflows at once; the program hears of a new size later,
+    /// from the queue [`Self::send_resizes`] works through.
     pub fn set_rect(&mut self, rect: Geometry) {
-        let resized = (self.rect.sx, self.rect.sy) != (rect.sx, rect.sy);
+        let from = (self.rect.sx, self.rect.sy);
         self.rect = rect;
-        if !resized {
+        if from == (rect.sx, rect.sy) {
             return;
         }
-        let cols = u16::try_from(rect.sx).unwrap_or(u16::MAX);
-        let rows = u16::try_from(rect.sy).unwrap_or(u16::MAX);
-        self.term.resize(cols, rows);
+        self.resizes.push((from, (rect.sx, rect.sy)));
+        self.term.resize(clamp16(rect.sx), clamp16(rect.sy));
+    }
+
+    /// `server_client_check_pane_resize` (server-client.c:1984-2041): once
+    /// the timer has run out, one size goes to the program and the timer
+    /// starts again (250 ms). Several queued sizes collapse to the last,
+    /// unless they end where they started: then the one before the last is
+    /// sent and the last stays queued for 10 ms later, so the program still
+    /// sees a change and redraws.
+    pub fn send_resizes(&mut self, now: Instant) {
+        if self.io.is_none() || self.resizes.is_empty() {
+            return;
+        }
+        if self.resize_timer.is_some_and(|t| t > now) {
+            return;
+        }
+        let first = self.resizes[0];
+        let last = self.resizes[self.resizes.len() - 1];
+        let mut delay = std::time::Duration::from_millis(250);
+        let to = if self.resizes.len() == 1 {
+            self.resizes.clear();
+            first.1
+        } else if last.1 != first.0 {
+            self.resizes.clear();
+            last.1
+        } else {
+            let to = self.resizes[self.resizes.len() - 2].1;
+            self.resizes.clear();
+            self.resizes.push(last);
+            delay = std::time::Duration::from_millis(10);
+            to
+        };
+        self.send_size(to);
+        self.resize_timer = Some(now + delay);
+    }
+
+    /// `screen_alternate_off` (screen-write.c:3157-3166): leaving the
+    /// alternate screen sends the pane's size at once if any was queued.
+    pub fn flush_resizes(&mut self) {
+        if self.resizes.is_empty() {
+            return;
+        }
+        self.resizes.clear();
+        self.resize_timer = None;
+        self.send_size((self.rect.sx, self.rect.sy));
+    }
+
+    /// When the queue next wants a turn of the loop.
+    #[must_use]
+    pub fn resize_deadline(&self) -> Option<Instant> {
+        if self.io.is_none() || self.resizes.is_empty() {
+            return None;
+        }
+        Some(self.resize_timer.unwrap_or_else(Instant::now))
+    }
+
+    /// `window_pane_send_resize`: `TIOCSWINSZ`; the kernel sends the
+    /// foreground process group SIGWINCH when the size differs.
+    fn send_size(&self, (sx, sy): (u32, u32)) {
         if let Some(io) = &self.io {
-            let _ = io.resize(cols, rows);
+            let _ = io.resize(clamp16(sx), clamp16(sy));
         }
     }
+}
+
+fn clamp16(n: u32) -> u16 {
+    u16::try_from(n).unwrap_or(u16::MAX)
 }
 
 /// Seconds since the epoch.

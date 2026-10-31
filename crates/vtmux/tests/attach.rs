@@ -1,5 +1,6 @@
 //! Real binary under a PTY; all runs have private labels and pinned env.
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Command;
@@ -148,6 +149,18 @@ struct Attached {
     size: (u16, u16),
 }
 impl Attached {
+    /// The terminal changes size; the kernel sends the client SIGWINCH.
+    fn resize(&mut self, cols: u16, rows: u16) {
+        self.master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        self.size = (cols, rows);
+    }
     fn keys(&mut self, b: &[u8]) {
         self.writer.write_all(b).unwrap();
         self.writer.flush().unwrap();
@@ -2138,4 +2151,279 @@ fn focus_ring_nested_tees() {
             ),
         ],
     );
+}
+
+/// A pane program that prints `P ` and then `W<n>.` on each SIGWINCH.
+const WINCH: [&str; 3] = [
+    "sh",
+    "-c",
+    "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf 'P '; sleep 100000 & while :; do wait; done",
+];
+
+/// One step of a sizing script ([`sizing`]).
+enum Op {
+    Run(&'static [&'static str]),
+    /// [`Op::Run`] without the pause after it.
+    RunNow(&'static [&'static str]),
+    /// [`Op::Attach`] without the pause after it: the next step lands
+    /// inside the panes' 250 ms resize timer.
+    AttachNow(usize, &'static str, u16, u16),
+    /// Attach client `n` to a session at this size.
+    Attach(usize, &'static str, u16, u16),
+    Resize(usize, u16, u16),
+    Keys(usize, &'static [u8]),
+    Close(usize),
+    /// Window sizes, manual sizes and `window-size` of every window.
+    Windows,
+    /// The first line of a pane: its SIGWINCH count.
+    Winch(&'static str),
+}
+
+/// Run `ops` against vtmux and tmux 3.8 and compare what they observed.
+/// Sizes settle without a wait condition both binaries share, so each
+/// observation waits a little first (reviewer-25 h.py).
+fn sizing(ops: &[Op]) {
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut clients: Vec<Option<Attached>> = Vec::new();
+        let mut out = String::new();
+        let settle = || thread::sleep(Duration::from_millis(400));
+        for op in ops {
+            match op {
+                Op::Run(args) | Op::RunNow(args) => {
+                    let o = w.cli(args);
+                    let _ = write!(
+                        out,
+                        "{args:?} {}{}",
+                        String::from_utf8_lossy(&o.stdout),
+                        String::from_utf8_lossy(&o.stderr)
+                    );
+                    if matches!(op, Op::Run(_)) {
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                }
+                Op::Attach(n, session, cols, rows) | Op::AttachNow(n, session, cols, rows) => {
+                    let a = w.attach_sized(&["attach", "-t", session], *cols, *rows);
+                    a.wait(|a| a.text().contains("\x1b[?1049h"));
+                    if clients.len() <= *n {
+                        clients.resize_with(*n + 1, || None);
+                    }
+                    clients[*n] = Some(a);
+                    if matches!(op, Op::Attach(..)) {
+                        settle();
+                    }
+                }
+                Op::Resize(n, cols, rows) => {
+                    clients[*n].as_mut().unwrap().resize(*cols, *rows);
+                    settle();
+                }
+                Op::Keys(n, keys) => {
+                    clients[*n].as_mut().unwrap().keys(keys);
+                    settle();
+                }
+                Op::Close(n) => {
+                    drop(clients[*n].take());
+                    settle();
+                }
+                Op::Windows => {
+                    settle();
+                    let o = w.cli(&[
+                        "lsw",
+                        "-a",
+                        "-F",
+                        "#{session_name}:#{window_index} #{window_width}x#{window_height} \
+                         m=#{window_manual_width},#{window_manual_height} #{window-size}",
+                    ]);
+                    out.push_str(&String::from_utf8_lossy(&o.stdout));
+                }
+                Op::Winch(t) => {
+                    settle();
+                    let o = w.cli(&["capture-pane", "-p", "-t", t, "-S", "0", "-E", "0"]);
+                    let _ = write!(out, "{t}: {}", String::from_utf8_lossy(&o.stdout));
+                }
+            }
+        }
+        outputs.push(out);
+    }
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+fn wv(v: &[&'static str]) -> &'static [&'static str] {
+    Vec::leak(v.to_vec())
+}
+
+/// Session `a` with windows 0 and 1 (80x24, both counting SIGWINCH).
+fn two_windows() -> Vec<Op> {
+    let mut new = vec!["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24"];
+    new.extend(WINCH);
+    let mut neww = vec!["neww", "-d", "-t", "a:1", "-n", "x"];
+    neww.extend(WINCH);
+    vec![Op::Run(wv(&new)), Op::Run(wv(&neww))]
+}
+
+/// Two clients of different sizes on one session under each `window-size`,
+/// with and without `aggressive-resize` (resize.c:131-276, 345-424):
+/// attaching, a resize, a key (`server_client_update_latest`), select-window
+/// from the CLI and a client leaving.
+fn two_clients_under(policy: &'static str) {
+    for aggressive in ["off", "on"] {
+        let mut ops = two_windows();
+        ops.extend([
+            Op::Run(wv(&["set", "-g", "window-size", policy])),
+            Op::Run(wv(&["setw", "-g", "aggressive-resize", aggressive])),
+            Op::Attach(0, "a", 50, 15),
+            Op::Windows,
+            Op::Attach(1, "a", 70, 20),
+            Op::Windows,
+            Op::Resize(0, 60, 25),
+            Op::Windows,
+            Op::Keys(0, b"x"),
+            Op::Windows,
+            Op::Run(&["selectw", "-t", "a:1"]),
+            Op::Windows,
+            Op::Winch("a:1"),
+            Op::Close(1),
+            Op::Windows,
+            Op::Winch("a:0"),
+        ]);
+        sizing(&ops);
+    }
+}
+#[test]
+fn window_size_latest_with_two_clients() {
+    two_clients_under("latest");
+}
+#[test]
+fn window_size_largest_with_two_clients() {
+    two_clients_under("largest");
+}
+#[test]
+fn window_size_smallest_with_two_clients() {
+    two_clients_under("smallest");
+}
+#[test]
+fn window_size_manual_with_two_clients() {
+    two_clients_under("manual");
+}
+
+/// A window linked into two sessions, each with a client of its own size:
+/// `aggressive-resize` only counts clients whose current window it is
+/// (resize.c:349-361).
+#[test]
+fn aggressive_resize_counts_only_clients_looking_at_the_window() {
+    for aggressive in ["off", "on"] {
+        let mut ops = two_windows();
+        let mut new_b = vec!["new", "-d", "-s", "b", "-n", "y"];
+        new_b.extend(WINCH);
+        ops.extend([
+            Op::Run(wv(&new_b)),
+            Op::Run(&["link-window", "-d", "-s", "a:1", "-t", "b:5"]),
+            Op::Run(wv(&["setw", "-g", "aggressive-resize", aggressive])),
+            Op::Run(&["set", "-g", "window-size", "smallest"]),
+            Op::Attach(0, "a", 50, 15),
+            Op::Attach(1, "b", 70, 20),
+            Op::Windows,
+            Op::Run(&["selectw", "-t", "b:5"]),
+            Op::Windows,
+            Op::Run(&["selectw", "-t", "a:1"]),
+            Op::Windows,
+            Op::Run(&["selectw", "-t", "b:0"]),
+            Op::Windows,
+            Op::Winch("a:1"),
+        ]);
+        sizing(&ops);
+    }
+}
+
+/// reviewer-25 `two_clients` (parked `minor_window_size_latest_ignores_w`):
+/// with two clients of different sizes on a session, select-window from
+/// the CLI sizes the new window by its latest client, which is the first
+/// to attach while the window was not current (w->latest is set by
+/// `server_client_set_session` only for the current window).
+#[test]
+fn latest_client_is_per_window() {
+    let mut ops = two_windows();
+    ops.extend([
+        Op::Attach(0, "a", 50, 15),
+        Op::Attach(1, "a", 70, 20),
+        Op::Windows,
+        Op::Run(&["selectw", "-t", "a:1"]),
+        Op::Windows,
+        Op::Winch("a:1"),
+        Op::Keys(0, b"x"),
+        Op::Windows,
+        Op::Close(1),
+        Op::Windows,
+        Op::Run(&["selectw", "-t", "a:0"]),
+        Op::Windows,
+        Op::Winch("a:0"),
+    ]);
+    sizing(&ops);
+}
+
+/// resize-window (cmd-resize-window.c:47-117) with a client attached:
+/// -x/-y, each of -L -R -U -D with and without a count, -A and -a, the
+/// manual size surviving a client resize, `window-size latest` again, and
+/// the errors.
+#[test]
+fn resize_window_flags_with_an_attached_client() {
+    let mut ops = two_windows();
+    ops.extend([Op::Attach(0, "a", 50, 15), Op::Windows]);
+    for args in [
+        wv(&["resizew", "-t", "a:0", "-x", "30", "-y", "10"]),
+        wv(&["resizew", "-t", "a:0", "-L", "5"]),
+        wv(&["resizew", "-t", "a:0", "-R"]),
+        wv(&["resizew", "-t", "a:0", "-U", "3"]),
+        wv(&["resizew", "-t", "a:0", "-D", "20"]),
+        wv(&["resizew", "-t", "a:0", "-L", "100"]),
+        wv(&["resizew", "-t", "a:0", "-A"]),
+        wv(&["resizew", "-t", "a:1", "-a"]),
+    ] {
+        ops.extend([Op::Run(args), Op::Windows]);
+    }
+    ops.extend([
+        Op::Winch("a:0"),
+        Op::Resize(0, 60, 20),
+        Op::Windows,
+        Op::Run(&["setw", "-t", "a:0", "window-size", "latest"]),
+        Op::Windows,
+        Op::Run(&["selectw", "-t", "a:1"]),
+        Op::Run(&["selectw", "-t", "a:0"]),
+        Op::Windows,
+        Op::Winch("a:0"),
+        Op::Run(&["resizew", "-t", "a:0", "-x", "0"]),
+        Op::Run(&["resizew", "-t", "a:0", "-y", "10001"]),
+        Op::Run(&["resizew", "-t", "a:0", "-x", "abc"]),
+        Op::Run(&["resizew", "-t", "a:0", "0"]),
+        Op::Run(&["resizew", "-t", "a:0", "-L", "x"]),
+        Op::Run(&["resizew", "-t", "nosuch"]),
+        Op::Windows,
+    ]);
+    sizing(&ops);
+}
+
+/// reviewer-23 `rv_zoom` (parked `minor_extra_sigwinch_to_split_panes_on`):
+/// a split pane is created at the window's size and its cell's size is
+/// queued (window.c:1156, 1702-1740), so sending it starts the 250 ms
+/// resize timer. The size an attach brings waits for that timer
+/// (server-client.c:1984-2041), and a zoom inside it replaces it: the
+/// zoomed pane hears of both changes once.
+#[test]
+fn first_attach_after_split_waits_for_the_resize_timer() {
+    let mut split = vec!["splitw", "-h", "-t", "a"];
+    split.extend(WINCH);
+    let mut new = vec!["new", "-d", "-s", "a", "-n", "w"];
+    new.extend(WINCH);
+    sizing(&[
+        Op::RunNow(wv(&new)),
+        Op::RunNow(wv(&split)),
+        Op::AttachNow(0, "a", 40, 10),
+        Op::RunNow(&["resize-pane", "-Z", "-t", "a"]),
+        Op::Winch("%0"),
+        Op::Winch("%1"),
+        Op::Run(&["resize-pane", "-Z", "-t", "a"]),
+        Op::Winch("%0"),
+        Op::Winch("%1"),
+    ]);
 }

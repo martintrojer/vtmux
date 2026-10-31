@@ -179,7 +179,7 @@ pub fn exec(
         rect,
         shell: None,
     });
-    let pane = match spawned {
+    let mut pane = match spawned {
         Ok(pane) => pane,
         Err(e) => {
             // spawn_pane's failure path removes the pane and its cell.
@@ -190,6 +190,14 @@ pub fn exec(
             return Err(EdgeError::Message(format!("create pane failed: {e}")).into());
         }
     };
+    // window_add_pane creates the pane at the window's size and
+    // layout_assign_pane resizes it to its cell (window.c:1156, 1702-1740):
+    // that queued size changes nothing for the program, which started at
+    // the cell's size, but sending it starts the pane's resize timer.
+    let created = (window_rect.sx, window_rect.sy);
+    if created != (rect.sx, rect.sy) {
+        pane.resizes.push((created, (rect.sx, rect.sy)));
+    }
     server.model.options.add_pane(new, w);
     server.model.panes.insert(new, pane);
     server.model.fix_panes_except(w, zoom.then_some(new));
