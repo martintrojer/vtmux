@@ -110,6 +110,9 @@ pub struct Ctx<'a> {
     /// The client the formats are for (`ft->c`): its session marks the active item
     /// of `#{S:all,active}`.
     pub client: Option<ClientView>,
+    /// The paste buffer the buffer variables describe (`ft->pb`); the top
+    /// automatic buffer when unset (`format_defaults`, format.c:7032).
+    pub buffer: Option<String>,
 }
 
 impl<'a> Ctx<'a> {
@@ -144,6 +147,7 @@ impl<'a> Ctx<'a> {
             extra: Vec::new(),
             clients: Rc::from([]),
             client: None,
+            buffer: None,
         }
     }
 
@@ -529,6 +533,24 @@ impl Ctx<'_> {
             .or_else(|| self.session_value(name))
             .or_else(|| self.window_value(name))
             .or_else(|| self.pane_value(name))
+            .or_else(|| self.buffer_value(name))
+    }
+
+    /// The buffer variables (format.c:1493-1535).
+    fn buffer_value(&self, name: &str) -> Option<String> {
+        let paste = &self.model.paste;
+        let b = match &self.buffer {
+            Some(n) => paste.get(n),
+            None => paste.top(),
+        }?;
+        Some(match name {
+            "buffer_name" => b.name.clone(),
+            "buffer_sample" => b.sample(),
+            "buffer_full" => b.full(),
+            "buffer_size" => b.data.len().to_string(),
+            "buffer_created" => b.created.to_string(),
+            _ => return None,
+        })
     }
 }
 
@@ -557,6 +579,14 @@ impl FormatContext for Ctx<'_> {
             "session_activity" => self.session().map(|s| s.activity_secs),
             "client_activity" => self.client.as_ref().map(|c| c.activity_secs),
             "client_created" => self.client.as_ref().map(|c| c.created_secs),
+            "buffer_created" => {
+                let paste = &self.model.paste;
+                match &self.buffer {
+                    Some(n) => paste.get(n),
+                    None => paste.top(),
+                }
+                .map(|b| b.created)
+            }
             _ => None,
         }
     }

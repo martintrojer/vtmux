@@ -287,7 +287,7 @@ fn default_shell(env: &[(String, String)]) -> PathBuf {
 use crate::model::now_epoch;
 
 /// `find_home` (tmux.c:366-384).
-fn find_home(env: &Environ) -> Option<PathBuf> {
+pub(crate) fn find_home(env: &Environ) -> Option<PathBuf> {
     env.get("HOME")
         .filter(|h| !h.is_empty())
         .map(PathBuf::from)

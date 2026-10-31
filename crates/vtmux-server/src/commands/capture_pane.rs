@@ -1,5 +1,5 @@
-//! `capture-pane` (cmd-capture-pane.c:254-485): `-p` to stdout with `-e`,
-//! `-J`, `-S`, `-E`. Paste buffers are M1.
+//! `capture-pane` (cmd-capture-pane.c:254-485): `-p` to stdout, else into a
+//! paste buffer (`-b`), with `-e`, `-J`, `-S`, `-E`.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -38,9 +38,6 @@ pub fn exec(
             return Err(EdgeError::NotImplemented(format!("capture-pane -{flag}")).into());
         }
     }
-    if !args.flag('p') {
-        return Err(EdgeError::NotImplemented("capture-pane into a buffer".into()).into());
-    }
     let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
     let start = line_ref(server, found, args.value('S'));
     let end = match args.value('E') {
@@ -57,6 +54,16 @@ pub fn exec(
         return Err(EdgeError::PaneNotFound(p.to_string()).into());
     };
     let mut buf = capture(&pane.term, opts);
+    if !args.flag('p') {
+        // cmd-capture-pane.c:471-481: the text, trailing newline kept, goes
+        // to a buffer named by -b (an automatic one otherwise).
+        let limit = super::buffer_limit(server);
+        return server
+            .model
+            .paste
+            .set(buf, args.value('b'), limit)
+            .map_err(|cause| EdgeError::Message(cause).into());
+    }
     // -p: drop one trailing newline, then print with a newline
     // (cmd-capture-pane.c:455-468).
     if buf.last() == Some(&b'\n') {

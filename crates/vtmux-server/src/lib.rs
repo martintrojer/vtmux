@@ -14,6 +14,7 @@ pub mod keys;
 pub mod model;
 pub mod names;
 pub mod pane_io;
+pub mod paste;
 pub mod render;
 pub mod server;
 pub mod sys;
