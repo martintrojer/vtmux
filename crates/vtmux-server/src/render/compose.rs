@@ -272,9 +272,9 @@ fn span_key(cell: &SceneCell, x: u16) -> Option<(bool, PaneId, i64)> {
 
 /// tty-draw.c `tty_draw_line_get_empty`: blank (cleared or a single space),
 /// no attributes (the charset counts, `GRID_ATTR_CHARSET`), no hyperlink,
-/// and the background of the cell before it; the foreground does not count.
-/// Snapshots carry no tab flag.
-fn is_empty(c: &Cell, bg: Color) -> bool {
+/// and the background of the cell before it (`bgs`, as the grid stores
+/// it); the foreground does not count. Snapshots carry no tab flag.
+fn is_empty<T: PartialEq>(c: &Cell, bg: &T, last: &T) -> bool {
     let plain = Style {
         fg: c.style.fg,
         bg: c.style.bg,
@@ -285,7 +285,7 @@ fn is_empty(c: &Cell, bg: Color) -> bool {
         && !c.acs
         && !c.link
         && (c.text.is_empty() || c.text == " ")
-        && c.style.bg == bg
+        && bg == last
         && c.style == plain
 }
 
@@ -302,9 +302,24 @@ fn is_empty(c: &Cell, bg: Color) -> bool {
 ///
 /// Returns whether the last cell was written, not erased: the terminal
 /// cursor is then past the end of the span.
-pub(crate) fn draw_line(cells: &mut [Cell], bce: bool, mut wrapped: bool) -> bool {
-    // `last` starts as the default cell.
-    let mut last_bg = Color::Default;
+pub(crate) fn draw_line(cells: &mut [Cell], bce: bool, wrapped: bool) -> bool {
+    let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
+    draw_line_by(cells, &bgs, Color::Default, bce, wrapped)
+}
+
+/// [`draw_line`] where "the same background" is decided on `bgs`, one per
+/// cell, starting from `default` (`defaults->bg`). tmux compares grid
+/// colours, before a theme colour becomes what the terminal is sent, so
+/// `bg=green` next to a theme green that resolves to the same colour still
+/// differs (status lines, where both meet).
+pub(crate) fn draw_line_by<T: PartialEq + Clone>(
+    cells: &mut [Cell],
+    bgs: &[T],
+    default: T,
+    bce: bool,
+    mut wrapped: bool,
+) -> bool {
+    let mut last_bg = default;
     let mut written = false;
     let mut i = 0;
     while i < cells.len() {
@@ -312,18 +327,18 @@ pub(crate) fn draw_line(cells: &mut [Cell], bce: bool, mut wrapped: bool) -> boo
             i += 1;
             continue;
         }
-        if !is_empty(&cells[i], last_bg) {
+        if !is_empty(&cells[i], &bgs[i], &last_bg) {
             if cells[i].text.is_empty() {
                 cells[i].text = " ".into();
             }
-            last_bg = cells[i].style.bg;
+            last_bg = bgs[i].clone();
             i += usize::from(cells[i].width);
             wrapped = false;
             written = true;
             continue;
         }
         let start = i;
-        while i < cells.len() && is_empty(&cells[i], last_bg) {
+        while i < cells.len() && is_empty(&cells[i], &bgs[i], &last_bg) {
             i += 1;
         }
         let last = cells[i - 1].style;
