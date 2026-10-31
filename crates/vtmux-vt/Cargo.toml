@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-libghostty-vt = "=0.2.2"
+libghostty-vt = { path = "../../third_party/libghostty-rs/libghostty-vt" }
 
 [lints]
 workspace = true
