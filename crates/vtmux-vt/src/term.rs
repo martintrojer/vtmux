@@ -56,10 +56,16 @@ fn osc133_mark(payload: &[u8]) -> Option<LineMark> {
 const CELL_WIDTH_PX: u32 = 16;
 const CELL_HEIGHT_PX: u32 = 32;
 
-/// Bytes in one pooled Ghostty page (`PagePool.item_size`, PageList.zig).
-/// Measured by probing retention (unchanged from ghostty a887df42c to
-/// 3bd54e025); `history_budget_steps_by_page` guards it against an upgrade.
-const PAGE_BYTES: usize = 401_408;
+/// Bytes in one pooled Ghostty page (`PagePool.item_size`, PageList.zig):
+/// the standard page layout rounded up to Zig's `std.heap.page_size_min`
+/// (`Page.layout`, page.zig), 4 KiB on Linux and x86-64 macOS, 16 KiB on
+/// aarch64 macOS. Measured by probing retention (unchanged from ghostty
+/// a887df42c to 3bd54e025); `history_budget_steps_by_page` guards it.
+const PAGE_BYTES: usize = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    409_600
+} else {
+    401_408
+};
 /// Bytes of a page that hold styles, graphemes and hyperlinks rather than
 /// rows. Measured as ~27 KB at 200 columns; rounded up so row counts per page
 /// are under-estimated, never over-estimated.
