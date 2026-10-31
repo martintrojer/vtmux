@@ -2565,3 +2565,68 @@ fn set_and_load_buffer_w_send_osc52() {
         ]
     );
 }
+
+/// The owner's copy-mode-vi bindings (`~/dotfiles/tmux/.tmux.conf`
+/// 137-143) typed on an attached client: `v` begins a selection, `C-v`
+/// makes it a rectangle, `y` copies it and leaves copy mode; the rectangle
+/// takes the same columns of each line. `M-Up`/`M-Down` (previous-prompt,
+/// next-prompt) are bound; what they do is the search unit's.
+#[test]
+fn owner_copy_mode_vi_bindings() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "printf 'abcdef\\nghijkl\\nmnopqr\\n'; exec cat",
+        ]);
+        a.wait(|_| display(&w, "#{cursor_y}") == "3");
+        for line in [
+            "setw -g mode-keys vi",
+            "bind -T copy-mode-vi v send -X begin-selection",
+            "bind -T copy-mode-vi y send -X copy-selection-and-cancel",
+            "bind -T copy-mode-vi C-v send -X rectangle-toggle",
+            "bind -T copy-mode-vi M-Up send -X previous-prompt",
+            "bind -T copy-mode-vi M-Down send -X next-prompt",
+        ] {
+            let args: Vec<&str> = line.split(' ').collect();
+            assert!(w.cli(&args).status.success(), "{line}");
+        }
+        for (k, cmd) in [("M-Up", "previous-prompt"), ("M-Down", "next-prompt")] {
+            let out = w.cli(&["list-keys", "-T", "copy-mode-vi", k]);
+            let line = String::from_utf8_lossy(&out.stdout).into_owned();
+            assert!(
+                line.ends_with(&format!("send-keys -X {cmd}\n")),
+                "{k}: {line}"
+            );
+        }
+        // Into copy mode, to the top left, then `l` once.
+        a.keys(b"\x02[");
+        a.wait(|_| display(&w, "#{pane_in_mode}") == "1");
+        a.keys(b"ggl");
+        a.wait(|_| display(&w, "#{copy_cursor_x},#{copy_cursor_y}") == "1,0");
+        a.keys(b"v");
+        a.wait(|_| display(&w, "#{selection_active}") == "1");
+        a.keys(b"\x16");
+        a.wait(|_| display(&w, "#{rectangle_toggle}") == "1");
+        a.keys(b"jll");
+        a.wait(|_| display(&w, "#{copy_cursor_x},#{copy_cursor_y}") == "3,1");
+        // The selected cells are drawn in mode-style (yellow background).
+        a.wait(|a| {
+            let s = vtmux_vt::snapshot(&a.screen());
+            let yellow = |x| s.cell(x, 1).map(|c| c.style.bg) == Some(vtmux_vt::Color::Palette(3));
+            (1..4).all(yellow) && !yellow(0) && !yellow(4)
+        });
+        a.keys(b"y");
+        a.wait(|_| display(&w, "#{pane_in_mode}") == "0");
+        let buffer = w.cli(&["show-buffer"]);
+        assert_eq!(String::from_utf8_lossy(&buffer.stdout), "bcd\nhij");
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}

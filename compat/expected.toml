@@ -146,28 +146,25 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."copy-mode-scroll-exit.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."copy-mode-selection-mode.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs search-forward and #{search_present} (copy_search, U3); its line-mode selection part passes with the search part (lines 37-47) removed and is pinned by oracle copy_select_mode"
 
 [tests."copy-mode-selection-scroll.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."copy-mode-test-emacs.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "D-011: Ghostty keeps no TAB cells, so copying a tab-indented line gives eight spaces where tmux copies a TAB (d_tab_capture); every other assertion passes"
 
 [tests."copy-mode-test-vi.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."copy-mode-unicode-whitespace.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "D-011: Ghostty prints U+0085 as a cell of its own where tmux combines it (wcwidth -1, C1, width 0) into the cell before, so next-word stops one column later (3,17 vs 2,17); every other assertion passes"
 
 [tests."cursor-test1.sh"]
 status = "xfail"
