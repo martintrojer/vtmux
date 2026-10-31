@@ -252,7 +252,7 @@ pub struct Model {
     /// (server-client.c:1929-1940).
     pub(crate) redraw_panes: std::collections::BTreeSet<PaneId>,
     /// Events fired since the sinks last heard ([`crate::events`]).
-    pub events: Vec<crate::events::Event>,
+    pub events: Vec<crate::events::Queued>,
 }
 
 impl Default for Model {
@@ -451,7 +451,14 @@ impl Model {
             pane.active_point = self.active_points;
             pane.changed = true;
         }
-        // window.c:782.
+        // window.c:776-786: the old pane's focus, the new one's, then
+        // window-pane-changed.
+        if self.focus_events() {
+            if let Some(o) = old {
+                self.push_focus_check(o);
+            }
+            self.push_focus_check(p);
+        }
         self.redraw(Redraw::Window(w));
         self.fire_pane_changed(w, p, old);
         true
@@ -731,6 +738,17 @@ impl Model {
         }
         // session_set_current: winlink_clear_flags, then
         // window_update_activity.
+        // session.c:516-520: the old window's focus, then the new one's.
+        if self.focus_events() {
+            let actives: Vec<PaneId> = old_w
+                .into_iter()
+                .chain([w])
+                .filter_map(|x| self.windows.get(&x).map(Window::active))
+                .collect();
+            for p in actives {
+                self.push_focus_check(p);
+            }
+        }
         self.alerts_clear_window(w);
         self.alerts_queue(w, crate::alerts::ACTIVITY);
         self.fire_window_changed(s, index, old_w.map(|ow| (ow, old)));
@@ -982,6 +1000,8 @@ impl Model {
         self.layout_changed(wid);
         if was_active && let Some(n) = next {
             self.fire_pane_changed(wid, n, Some(id));
+            // window.c:1219.
+            self.push_focus_check(n);
         }
         self.options.remove_pane(id);
         let pane = self.panes.remove(&id);

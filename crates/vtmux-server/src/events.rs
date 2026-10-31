@@ -207,7 +207,20 @@ impl Event {
 impl Model {
     /// Queue an event for the sinks.
     pub fn push_event(&mut self, ev: Event) {
-        self.events.push(ev);
+        self.events.push(Queued::Event(ev));
+    }
+
+    /// Queue `window_pane_update_focus` for `p`: it runs in order with the
+    /// events around it, as tmux runs it where the change happens.
+    pub fn push_focus_check(&mut self, p: PaneId) {
+        self.events.push(Queued::Focus(p));
+    }
+
+    /// `focus-events`, which gates the focus checks in
+    /// `window_set_active_pane` and `session_set_current`.
+    #[must_use]
+    pub fn focus_events(&self) -> bool {
+        self.number_option(TreeId::Server, "focus-events") != 0
     }
 
     /// `events_fire_session`: the target only while the session is alive.
@@ -273,6 +286,14 @@ impl Model {
     }
 }
 
+/// What [`Model::events`] holds: an event, or a pane whose focus is to be
+/// looked at then (it needs the clients, which the model has not got).
+#[derive(Clone, Debug)]
+pub enum Queued {
+    Event(Event),
+    Focus(PaneId),
+}
+
 /// A `wait-for -E` waiter (cmd-wait-for.c `struct wait_event_item`).
 #[derive(Debug)]
 pub struct EventWait {
@@ -299,18 +320,29 @@ impl Server {
             if self.model.events.is_empty() {
                 return;
             }
-            for ev in std::mem::take(&mut self.model.events) {
-                self.fire_event(&ev);
+            for q in std::mem::take(&mut self.model.events) {
+                match q {
+                    Queued::Event(ev) => self.fire_event(&ev),
+                    Queued::Focus(p) => {
+                        if let Some(ev) = self.pane_focus(p) {
+                            self.fire_event(&ev);
+                        }
+                    }
+                }
             }
         }
     }
 
     /// `events_fire`: control, then hooks, then the waiters there were
     /// when it fired.
+    /// Every payload names its event (events.c:99).
     pub(crate) fn fire_event(&mut self, ev: &Event) {
-        self.control_event(ev);
-        self.hooks_event(ev);
-        self.waits_event(ev);
+        let mut ev = ev.clone();
+        ev.items
+            .insert("event".to_owned(), Value::Text(ev.name.clone()));
+        self.control_event(&ev);
+        self.hooks_event(&ev);
+        self.waits_event(&ev);
     }
 
     /// `events_fire_client`'s target: `cmd_find_from_client`.
