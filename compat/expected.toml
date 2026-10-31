@@ -149,8 +149,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."copy-mode-selection-mode.sh"]
-status = "xfail"
-reason = "needs search-forward and #{search_present} (copy_search, U3); its line-mode selection part passes with the search part (lines 37-47) removed and is pinned by oracle copy_select_mode"
+status = "pass"
 
 [tests."copy-mode-selection-scroll.sh"]
 status = "pass"

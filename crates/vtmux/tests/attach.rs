@@ -2570,7 +2570,7 @@ fn set_and_load_buffer_w_send_osc52() {
 /// 137-143) typed on an attached client: `v` begins a selection, `C-v`
 /// makes it a rectangle, `y` copies it and leaves copy mode; the rectangle
 /// takes the same columns of each line. `M-Up`/`M-Down` (previous-prompt,
-/// next-prompt) are bound; what they do is the search unit's.
+/// next-prompt) are bound; [`owner_prompt_jumps`] types them.
 #[test]
 fn owner_copy_mode_vi_bindings() {
     for bin in bins() {
@@ -2626,6 +2626,56 @@ fn owner_copy_mode_vi_bindings() {
         a.wait(|_| display(&w, "#{pane_in_mode}") == "0");
         let buffer = w.cli(&["show-buffer"]);
         assert_eq!(String::from_utf8_lossy(&buffer.stdout), "bcd\nhij");
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
+
+/// The owner's `M-Up`/`M-Down` (previous-prompt, next-prompt) typed on an
+/// attached client over a shell that marks its prompts the way the
+/// owner's zsh does (`~/dotfiles/zsh/.zsh/tools.zsh`: OSC 133;A in
+/// PROMPT, 133;C from preexec), against tmux 3.8 and vtmux.
+#[test]
+fn owner_prompt_jumps() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "a() { printf '\\033]133;A\\007~ > '; }; \
+             a; printf 'echo hi\\n\\033]133;C\\007hi\\n'; \
+             a; printf 'true\\n\\033]133;C\\007'; \
+             a; printf 'ls\\n\\033]133;C\\007x\\ny\\n'; a; exec cat",
+        ]);
+        a.wait(|_| display(&w, "#{cursor_y}") == "6");
+        for line in [
+            "setw -g mode-keys vi",
+            "bind -T copy-mode-vi M-Up send -X previous-prompt",
+            "bind -T copy-mode-vi M-Down send -X next-prompt",
+        ] {
+            let args: Vec<&str> = line.split(' ').collect();
+            assert!(w.cli(&args).status.success(), "{line}");
+        }
+        a.keys(b"\x02[");
+        a.wait(|_| display(&w, "#{pane_in_mode}") == "1");
+        let at = |w: &World| display(w, "#{copy_cursor_y} #{copy_cursor_line}");
+        // M-Up (CSI 1;3A) from the last prompt: the prompt above, then
+        // the one above that; M-Down back down.
+        a.keys(b"\x1b[1;3A");
+        a.wait(|_| at(&w) == "3 ~ > ls");
+        a.keys(b"\x1b[1;3A");
+        a.wait(|_| at(&w) == "2 ~ > true");
+        a.keys(b"\x1b[1;3A\x1b[1;3A");
+        a.wait(|_| at(&w) == "0 ~ > echo hi");
+        a.keys(b"\x1b[1;3B");
+        a.wait(|_| at(&w) == "2 ~ > true");
+        a.keys(b"q");
+        a.wait(|_| display(&w, "#{pane_in_mode}") == "0");
         a.keys(b"\x02d");
         a.exited(0);
     }
