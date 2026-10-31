@@ -1441,3 +1441,325 @@ fn startup_config_conditions_see_the_attaching_client() {
         a.exited(0);
     }
 }
+
+/// The focus ring screen (D23): each row of the client's screen, then a
+/// style map of it: `A` a box-drawing cell in the active border colour
+/// (green), `b` one in the other border colour (grey), `.` anything else.
+fn ring_screen(a: &Attached) -> Vec<String> {
+    use vtmux_vt::Color::Palette;
+    let snap = vtmux_vt::snapshot(&a.screen());
+    let mut text = Vec::new();
+    let mut style = Vec::new();
+    for y in 0..snap.rows {
+        let (mut t, mut m) = (String::new(), String::new());
+        for x in 0..snap.cols {
+            let c = snap.cell(x, y).unwrap();
+            t.push_str(if c.text.is_empty() { " " } else { &c.text });
+            let boxed = c
+                .text
+                .chars()
+                .next()
+                .is_some_and(|ch| ('\u{2500}'..='\u{257f}').contains(&ch));
+            m.push(match (boxed, c.style.fg) {
+                (true, Palette(2)) => 'A',
+                (true, Palette(7) | vtmux_vt::Color::Default) => 'b',
+                (true, _) => '?',
+                (false, _) => '.',
+            });
+        }
+        text.push(t);
+        style.push(m);
+    }
+    text.extend(style);
+    text
+}
+
+/// Wait (at most 5 s) for the ring screen to be `want`, then compare it.
+fn ring_settles(a: &Attached, want: &[&str]) {
+    let end = Instant::now() + Duration::from_secs(5);
+    while ring_screen(a) != want && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(ring_screen(a), want);
+}
+
+/// A 20x8 client with the status line off, `cat` panes and `cmds` run.
+fn ring_world(cmds: &[&[&str]]) -> (World, Attached) {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let a = w.attach_sized(&["new", "-s", "a", "-n", "w", "cat"], 20, 8);
+    a.wait(|a| a.text().contains("\x1b[?1049h"));
+    for cmd in [
+        &["set", "-g", "status", "off"][..],
+        &["set", "-g", "vtmux-focus-ring", "on"],
+    ]
+    .iter()
+    .chain(cmds)
+    {
+        assert!(w.cli(cmd).status.success(), "{cmd:?}");
+    }
+    (w, a)
+}
+
+/// D23: one pane is framed whole, heavy and green; the window is 2 cells
+/// smaller each way. Turning the ring off gives the window its full size
+/// back, with no border at all.
+#[test]
+fn focus_ring_one_pane() {
+    let (w, a) = ring_world(&[]);
+    ring_settles(
+        &a,
+        &[
+            "┏━━━━━━━━━━━━━━━━━━┓",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┗━━━━━━━━━━━━━━━━━━┛",
+            "AAAAAAAAAAAAAAAAAAAA",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "AAAAAAAAAAAAAAAAAAAA",
+        ],
+    );
+    assert_eq!(display(&w, "#{window_width}x#{window_height}"), "18x6");
+    // A new window is fitted inside the ring too.
+    assert!(w.cli(&["neww", "-t", "a", "cat"]).status.success());
+    assert_eq!(display(&w, "#{window_width}x#{window_height}"), "18x6");
+    assert!(w.cli(&["kill-window", "-t", "a:1"]).status.success());
+    assert!(
+        w.cli(&["set", "-g", "vtmux-focus-ring", "off"])
+            .status
+            .success()
+    );
+    let blank = " ".repeat(20);
+    let dots = ".".repeat(20);
+    let want: Vec<&str> = [blank.as_str(); 8]
+        .into_iter()
+        .chain([dots.as_str(); 8])
+        .collect();
+    ring_settles(&a, &want);
+    assert_eq!(display(&w, "#{window_width}x#{window_height}"), "20x8");
+}
+
+/// D23, two panes split left-right: the active (right) pane's rectangle is
+/// heavy and green, including its side of the shared divider; the junctions
+/// mix weights (`┲`, `┺`).
+#[test]
+fn focus_ring_two_panes_left_right() {
+    let (_w, a) = ring_world(&[&["splitw", "-h", "-t", "a", "cat"]]);
+    ring_settles(
+        &a,
+        &[
+            "┌─────────┲━━━━━━━━┓",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "└─────────┺━━━━━━━━┛",
+            "bbbbbbbbbbAAAAAAAAAA",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "bbbbbbbbbbAAAAAAAAAA",
+        ],
+    );
+}
+
+/// D23, two panes split top-bottom: the bottom pane is enclosed.
+#[test]
+fn focus_ring_two_panes_top_bottom() {
+    let (_w, a) = ring_world(&[&["splitw", "-v", "-t", "a", "cat"]]);
+    ring_settles(
+        &a,
+        &[
+            "┌──────────────────┐",
+            "│                  │",
+            "│                  │",
+            "│                  │",
+            "┢━━━━━━━━━━━━━━━━━━┪",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┗━━━━━━━━━━━━━━━━━━┛",
+            "bbbbbbbbbbbbbbbbbbbb",
+            "b..................b",
+            "b..................b",
+            "b..................b",
+            "AAAAAAAAAAAAAAAAAAAA",
+            "A..................A",
+            "A..................A",
+            "AAAAAAAAAAAAAAAAAAAA",
+        ],
+    );
+}
+
+/// D23, three tiled panes, then the active pane moving: the heavy green
+/// rectangle follows it, and `pane-border-indicators both` (no arrows, no
+/// half-colouring) is ignored.
+#[test]
+fn focus_ring_three_panes_and_the_active_pane_moving() {
+    let (w, a) = ring_world(&[
+        &["set", "-g", "pane-border-indicators", "both"],
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["splitw", "-v", "-t", "a", "cat"],
+    ]);
+    ring_settles(
+        &a,
+        &[
+            "┌─────────┬────────┐",
+            "│         │        │",
+            "│         │        │",
+            "│         │        │",
+            "│         ┢━━━━━━━━┪",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "└─────────┺━━━━━━━━┛",
+            "bbbbbbbbbbbbbbbbbbbb",
+            "b.........b........b",
+            "b.........b........b",
+            "b.........b........b",
+            "b.........AAAAAAAAAA",
+            "b.........A........A",
+            "b.........A........A",
+            "bbbbbbbbbbAAAAAAAAAA",
+        ],
+    );
+    assert!(w.cli(&["selectp", "-t", "%0"]).status.success());
+    ring_settles(
+        &a,
+        &[
+            "┏━━━━━━━━━┱────────┐",
+            "┃         ┃        │",
+            "┃         ┃        │",
+            "┃         ┃        │",
+            "┃         ┠────────┤",
+            "┃         ┃        │",
+            "┃         ┃        │",
+            "┗━━━━━━━━━┹────────┘",
+            "AAAAAAAAAAAbbbbbbbbb",
+            "A.........A........b",
+            "A.........A........b",
+            "A.........A........b",
+            "A.........Abbbbbbbbb",
+            "A.........A........b",
+            "A.........A........b",
+            "AAAAAAAAAAAbbbbbbbbb",
+        ],
+    );
+}
+
+/// D23, zoomed: the ring wraps the zoomed pane alone, at the inset size.
+#[test]
+fn focus_ring_zoomed() {
+    let (w, a) = ring_world(&[
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["splitw", "-v", "-t", "a", "cat"],
+        &["resize-pane", "-Z", "-t", "%1"],
+    ]);
+    ring_settles(
+        &a,
+        &[
+            "┏━━━━━━━━━━━━━━━━━━┓",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┃                  ┃",
+            "┗━━━━━━━━━━━━━━━━━━┛",
+            "AAAAAAAAAAAAAAAAAAAA",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "A..................A",
+            "AAAAAAAAAAAAAAAAAAAA",
+        ],
+    );
+    assert_eq!(
+        display(
+            &w,
+            "#{window_zoomed_flag} #{P:#{?pane_active,#{pane_id}=#{pane_width}x#{pane_height},}}"
+        ),
+        "1 %1=18x6"
+    );
+}
+
+/// D23 with `pane-border-status top`: no row is reserved; each pane's
+/// status line sits on its top edge, the ring's edge for the top panes,
+/// and on the active pane's rectangle it keeps the heavy line and the
+/// active colour. `bottom` puts them on the bottom edges.
+#[test]
+fn focus_ring_pane_border_status() {
+    let (w, a) = ring_world(&[
+        &["set", "-g", "pane-border-format", "#{pane_index}"],
+        &["set", "-g", "pane-border-status", "top"],
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["splitw", "-v", "-t", "a", "cat"],
+    ]);
+    ring_settles(
+        &a,
+        &[
+            "┌──0──────┬──1─────┐",
+            "│         │        │",
+            "│         │        │",
+            "│         │        │",
+            "│         ┢━━2━━━━━┪",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "└─────────┺━━━━━━━━┛",
+            "bbb.bbbbbbbbb.bbbbbb",
+            "b.........b........b",
+            "b.........b........b",
+            "b.........b........b",
+            "b.........AAA.AAAAAA",
+            "b.........A........A",
+            "b.........A........A",
+            "bbbbbbbbbbAAAAAAAAAA",
+        ],
+    );
+    assert_eq!(
+        display(
+            &w,
+            "#{P:#{pane_id}=#{pane_width}x#{pane_height}@#{pane_left}/#{pane_top}|}"
+        ),
+        "%0=9x6@0/0|%1=8x3@10/0|%2=8x2@10/4|"
+    );
+    assert!(
+        w.cli(&["set", "-g", "pane-border-status", "bottom"])
+            .status
+            .success()
+    );
+    ring_settles(
+        &a,
+        &[
+            "┌─────────┬────────┐",
+            "│         │        │",
+            "│         │        │",
+            "│         │        │",
+            "│         ┢━━1━━━━━┪",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "└──0──────┺━━2━━━━━┛",
+            "bbbbbbbbbbbbbbbbbbbb",
+            "b.........b........b",
+            "b.........b........b",
+            "b.........b........b",
+            "b.........AAA.AAAAAA",
+            "b.........A........A",
+            "b.........A........A",
+            "bbb.bbbbbbAAA.AAAAAA",
+        ],
+    );
+}
