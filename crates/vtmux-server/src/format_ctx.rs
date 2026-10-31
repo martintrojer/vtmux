@@ -508,8 +508,8 @@ impl<'a> Ctx<'a> {
     }
 
     /// The variables copy mode adds while it is the pane's shown mode
-    /// (`window_copy_formats`, window-copy.c:1106-1180). Selections and
-    /// search are not here yet, so those read as none.
+    /// (`window_copy_formats`, window-copy.c:1106-1180). Search is not
+    /// here yet, so it reads as none.
     fn copy_value(&self, p: &crate::model::Pane, name: &str) -> Option<String> {
         let m = p.modes.first()?.as_copy()?;
         let line_numbers = self
@@ -534,11 +534,15 @@ impl<'a> Ctx<'a> {
                     .unwrap_or_default();
                 m.cursor_word(&separators)
             }
-            "selection_mode" => "char".to_owned(),
+            "selection_mode" => m.selection_mode().name().to_owned(),
+            "rectangle_toggle" => u8::from(m.rectangle()).to_string(),
+            "selection_active" => u8::from(m.selection().is_some_and(|s| s.active)).to_string(),
+            "selection_present" => u8::from(m.selection().is_some_and(|s| s.present)).to_string(),
+            "selection_start_x" => m.selection()?.start.0.to_string(),
+            "selection_start_y" => m.selection()?.start.1.to_string(),
+            "selection_end_x" => m.selection()?.end.0.to_string(),
+            "selection_end_y" => m.selection()?.end.1.to_string(),
             "refresh_active"
-            | "rectangle_toggle"
-            | "selection_active"
-            | "selection_present"
             | "search_present"
             | "search_timed_out"
             | "search_count"
