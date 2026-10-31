@@ -28,6 +28,7 @@ pub mod parse;
 pub mod print;
 pub mod table;
 pub mod target;
+pub mod template;
 
 use std::fmt;
 
