@@ -104,6 +104,11 @@ impl PasteStore {
     /// `paste_add` (paste.c:167-208): evict the oldest automatic buffers
     /// down to `limit`, then add `bufferN`. Empty data is dropped.
     pub fn add(&mut self, data: Vec<u8>, limit: i64) {
+        self.add_prefixed(data, "buffer", limit);
+    }
+
+    /// `paste_add` with a name prefix: the buffer is `<prefix>N`.
+    pub fn add_prefixed(&mut self, data: Vec<u8>, prefix: &str, limit: i64) {
         if data.is_empty() {
             return;
         }
@@ -122,7 +127,7 @@ impl PasteStore {
             }
         }
         let name = loop {
-            let name = format!("buffer{}", self.next_index);
+            let name = format!("{prefix}{}", self.next_index);
             self.next_index = self.next_index.wrapping_add(1);
             if !self.by_name.contains_key(&name) {
                 break name;
