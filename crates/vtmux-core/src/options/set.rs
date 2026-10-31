@@ -171,7 +171,8 @@ fn fire_event(
 impl OptionsStore {
     /// `options_remove_or_default` (options.c:1475): unset an option here,
     /// or one item of it. The global trees keep every table option, so
-    /// there "unset" is "back to the default".
+    /// there "unset" is "back to the default"; a vtmux option is removed
+    /// everywhere, so it leaves the listings again.
     fn remove_or_default(&mut self, tree: TreeId, name: &str, key: Option<&ArrayKey>) {
         let term = self.term.clone();
         let options = self.tree_mut(tree);
@@ -185,7 +186,9 @@ impl OptionsStore {
                 }
             }
             None => match entry.def {
-                Some(def) if tree.is_global() => options.set_default(def, &term),
+                Some(def) if tree.is_global() && !super::vtmux::is_extension(def) => {
+                    options.set_default(def, &term);
+                }
                 _ => {
                     let name = entry
                         .def

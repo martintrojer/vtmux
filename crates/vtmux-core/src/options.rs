@@ -32,6 +32,7 @@ mod set;
 mod show;
 mod table;
 mod value;
+mod vtmux;
 
 #[cfg(test)]
 mod golden;
@@ -325,8 +326,25 @@ impl OptionsStore {
     }
 
     /// `options_get`: the entry in `id` or the nearest ancestor that has it.
+    /// A vtmux option set nowhere reads as its default.
     #[must_use]
     pub fn get(&self, id: TreeId, name: &str) -> Option<&Entry> {
+        self.get_set(id, name)
+            .or_else(|| vtmux::default_entry(name))
+    }
+
+    /// [`Self::get`] for a listing: a vtmux option (`extension`) only where
+    /// a tree holds it.
+    fn get_inherited(&self, id: TreeId, name: &str, extension: bool) -> Option<&Entry> {
+        if extension {
+            self.get_set(id, name)
+        } else {
+            self.get(id, name)
+        }
+    }
+
+    /// [`Self::get`] without the vtmux defaults: only what a tree holds.
+    fn get_set(&self, id: TreeId, name: &str) -> Option<&Entry> {
         let mut at = Some(id);
         while let Some(t) = at {
             if let Some(e) = self.tree(t).get_only(name) {
@@ -358,7 +376,8 @@ impl OptionsStore {
     /// An option as a format variable (`format_find`, format.c:4624-4640):
     /// `name` or `name[key]`, searched in the server options, then the
     /// pane, window, global window, session and global session trees, each
-    /// with inheritance. Flags read as `1`/`0`.
+    /// with inheritance. Flags read as `1`/`0`. A vtmux option set nowhere
+    /// is unknown here, as it is to tmux.
     #[must_use]
     pub fn format_value(&self, name: &str, target: &Target) -> Option<String> {
         let (base, key) = table::parse_name(name)?;
@@ -369,7 +388,7 @@ impl OptionsStore {
         trees.extend(target.session.map(TreeId::Session));
         trees.push(TreeId::GlobalSession);
         trees.into_iter().find_map(|t| {
-            self.get(t, base)
+            self.get_set(t, base)
                 .map(|e| e.value.to_text(e.def, key.as_ref(), true))
         })
     }
