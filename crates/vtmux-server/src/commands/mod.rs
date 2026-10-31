@@ -116,6 +116,26 @@ pub struct Item {
     /// `CMD_RETURN_WAIT` and finish later. Key bindings and config files
     /// cannot yet, so their file I/O completes at once.
     pub can_wait: bool,
+    /// `source-file` runs the blocked command is inside, innermost first.
+    pub conts: Vec<source_file::Cont>,
+    /// What the command client's stdout has been used for.
+    pub stdout: Stdout,
+    /// `load-buffer -` has used the client's stdin.
+    pub stdin_used: bool,
+}
+
+/// The client's stdout can be used once (`file_write_open` dups it and
+/// closes the original, client.c:698-701): by the print stream, which
+/// stays open, or by one `save-buffer -` / `show-buffer`, after which
+/// prints go nowhere and a second use fails with `EBADF`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Stdout {
+    #[default]
+    Free,
+    /// `file_print` opened the print stream.
+    Printing,
+    /// A file write took stdout and closed it.
+    Closed,
 }
 
 impl Item {
@@ -135,12 +155,15 @@ impl Item {
             blocked: false,
             repeat: false,
             can_wait: false,
+            conts: Vec::new(),
+            stdout: Stdout::Free,
+            stdin_used: false,
         }
     }
 
     /// `cmdq_print`: a line on stdout.
     pub fn print(&mut self, text: &str) {
-        if self.client.is_none() {
+        if !self.can_print() {
             return;
         }
         let mut line = if self.utf8 {
@@ -154,9 +177,31 @@ impl Item {
 
     /// Raw bytes on stdout (`file_print_buffer`).
     pub fn print_raw(&mut self, bytes: Vec<u8>) {
-        if self.client.is_some() {
+        if self.can_print() {
             self.output.push(Output::Stdout(bytes));
         }
+    }
+
+    /// `file_print`: a client with stdout takes the print stream.
+    fn can_print(&mut self) -> bool {
+        if self.client.is_none() || self.stdout == Stdout::Closed {
+            return false;
+        }
+        if self.control.is_none() {
+            self.stdout = Stdout::Printing;
+        }
+        true
+    }
+
+    /// `file_write` of `-` for a command client: stdout is free only
+    /// once. The data goes out in order with the prints.
+    pub fn write_stdout(&mut self, bytes: Vec<u8>) -> bool {
+        if self.stdout != Stdout::Free {
+            return false;
+        }
+        self.stdout = Stdout::Closed;
+        self.output.push(Output::Stdout(bytes));
+        true
     }
 
     /// `cmdq_error` for a command client; config runs keep the cause.

@@ -41,10 +41,9 @@ pub fn exec(
         super::expand(server, found, &args.positional_text(0).unwrap_or_default())
     };
     if target == "-" {
-        if attached || item.client.is_none() {
+        if attached || item.client.is_none() || !item.write_stdout(data) {
             return file_io::bad_stdout(server, item).map_err(Into::into);
         }
-        item.print_raw(data);
         return Ok(());
     }
     let path = file_io::path(server, item, &target);

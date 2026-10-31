@@ -751,6 +751,14 @@ impl Server {
                     self.parked.insert(id, p);
                     continue;
                 }
+                if self.resume_conts(&mut p.item) {
+                    // Blocked again inside a source-file.
+                    if p.item.control.is_none() {
+                        self.send_output(id, &mut p.item);
+                    }
+                    self.parked.insert(id, p);
+                    continue;
+                }
                 let control_line = p.item.control == Some(1);
                 self.run_batch(id, p.item, p.rest);
                 if control_line && !self.parked.contains_key(&id) {
@@ -758,6 +766,23 @@ impl Server {
                 }
             }
         }
+    }
+
+    /// The `source-file` runs a woken batch was blocked inside continue,
+    /// innermost first, before the rest of the batch. Whether one blocked
+    /// again.
+    fn resume_conts(&mut self, item: &mut Item) -> bool {
+        item.can_wait = true;
+        let mut pending = std::mem::take(&mut item.conts).into_iter();
+        while let Some(cont) = pending.next() {
+            cont.drive(self, item);
+            // `drive` blocks the item and queues itself if it blocked.
+            if std::mem::take(&mut item.blocked) {
+                item.conts.extend(pending);
+                return true;
+            }
+        }
+        false
     }
 
     /// `tty_set_selection` (tty.c:2149-2166): OSC 52 through the client
