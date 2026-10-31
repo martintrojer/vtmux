@@ -1,0 +1,26 @@
+name = "status_msg_selectw"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
+  { run = ["select-pane", "-t", "a:0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["resize-pane", "-Z", "-t", "a:1"] },
+  { screen = {} },
+  # cmd-select-window.c:136-139: session_select returns 1 for the current
+  # window, so no server_redraw_session and the status stays stale.
+  { run = ["select-window", "-t", "a:0"] },
+  { screen = {} },
+  # new-window -d only redraws the status (server_status_session_group).
+  { run = ["display-message", "-d", "1500", "-t", "a", "m"] },
+  { run = ["send-keys", "-t", "a:0", "hello", "Enter"] },
+  { run = ["new-window", "-d", "-t", "a", "-n", "y", "cat"] },
+  { screen = {} },
+  { settle = { quiet_ms = 1700 } },
+  { screen = {} },
+  { run = ["next-window", "-t", "a"] },
+  { screen = {} },
+]

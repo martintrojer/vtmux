@@ -1,0 +1,40 @@
+name = "status_msg_freeze"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["splitw", "-h", "-d", "-t", "a", "cat"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # status_message_set without no_freeze: TTY_FREEZE holds pane output.
+  { run = ["display-message", "-d", "1500", "-t", "a", "m"] },
+  { run = ["send-keys", "-t", "a.0", "hello", "Enter"] },
+  { screen = {} },
+  # Borders still draw (CLIENT_REDRAWBORDERS), and a full redraw
+  # (server_redraw_window) draws the panes through the freeze.
+  { run = ["select-pane", "-t", "a.1"] },
+  { screen = {} },
+  { run = ["resize-pane", "-Z", "-t", "a.1"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a.1", "zoomed", "Enter"] },
+  { screen = {} },
+  # status_message_clear: CLIENT_ALLREDRAWFLAGS.
+  { settle = { quiet_ms = 1700 } },
+  { screen = {} },
+  { run = ["resize-pane", "-Z", "-t", "a.1"] },
+  # -C: no freeze.
+  { run = ["display-message", "-C", "-d", "1500", "-t", "a", "c"] },
+  { run = ["send-keys", "-t", "a.0", "drawn", "Enter"] },
+  { screen = {} },
+  { settle = { quiet_ms = 1700 } },
+  # A failed bound command freezes too (status_message_set(c, -1, 1, 0, 0)).
+  { run = ["bind", "-n", "F2", "select-window", "-t", ":9"] },
+  { run = ["set", "-g", "display-time", "1500"] },
+  { keys = "\u001bOQ" },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a.0", "frozen", "Enter"] },
+  { screen = {} },
+  { settle = { quiet_ms = 1700 } },
+  { screen = {} },
+]
