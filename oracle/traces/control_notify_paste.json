@@ -1,0 +1,221 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "control_notify_paste",
+  "inputs": {
+    "name": "control_notify_paste",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "s",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "s"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "set-buffer a"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "set-buffer -b n x"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "set-buffer -b n y"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "set-buffer -b n -n m"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "delete-buffer -b m"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "set -g buffer-limit 1"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "set-buffer b"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "set-buffer -a -b buffer1 q"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "capture-pane -t s"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 s",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%paste-buffer-changed buffer0",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%paste-buffer-changed n",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%paste-buffer-deleted n",
+          "%paste-buffer-changed n",
+          "%begin <TIME> #5 1",
+          "%end <TIME> #5 1",
+          "%paste-buffer-deleted n",
+          "%paste-buffer-changed m",
+          "%begin <TIME> #6 1",
+          "%end <TIME> #6 1",
+          "%paste-buffer-deleted m",
+          "%begin <TIME> #7 1",
+          "%end <TIME> #7 1",
+          "%begin <TIME> #8 1",
+          "%end <TIME> #8 1",
+          "%paste-buffer-deleted buffer0",
+          "%paste-buffer-changed buffer1",
+          "%begin <TIME> #9 1",
+          "%end <TIME> #9 1",
+          "%paste-buffer-deleted buffer1",
+          "%paste-buffer-changed buffer1",
+          "%begin <TIME> #10 1",
+          "%end <TIME> #10 1",
+          "%paste-buffer-changed buffer2",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+name = "control_notify_paste"
+# paste.c paste_fire_event -> control-notify.c:321-345: paste_add and
+# paste_set fire %paste-buffer-changed, paste_free %paste-buffer-deleted,
+# paste_rename both (old deleted, new changed); a replaced or evicted
+# buffer is deleted first.
+steps = [
+  { run = ["new", "-d", "-s", "s", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { control = { argv = ["attach", "-t", "s"], id = "c1" } },
+  { control_send = { id = "c1", line = "set-buffer a" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "set-buffer -b n x" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "set-buffer -b n y" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "set-buffer -b n -n m" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "delete-buffer -b m" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "set -g buffer-limit 1" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "set-buffer b" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "set-buffer -a -b buffer1 q" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "capture-pane -t s" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["kill-server"] },
+]

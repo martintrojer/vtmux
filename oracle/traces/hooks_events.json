@@ -1,0 +1,463 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "hooks_events",
+  "inputs": {
+    "name": "hooks_events",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "main",
+          "-n",
+          "m",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-created",
+          "set -gF @log '#{@log}|#{hook}:#{hook_session_name}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-closed",
+          "set -gF @log '#{@log}|#{hook}:#{hook_session_name}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-renamed",
+          "set -gF @log '#{@log}|#{hook}:#{hook_session_name}:#{hook_old_name}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-created",
+          "set -gF @log '#{@log}|#{hook}:#{hook_window_name}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-linked",
+          "set -gF @log '#{@log}|#{hook}:#{hook_session_name}:#{hook_window_index}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-unlinked",
+          "set -gF @log '#{@log}|#{hook}:#{hook_session_name}:#{hook_window_index}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-renamed",
+          "set -gF @log '#{@log}|#{hook}:#{hook_old_name}>#{hook_new_name}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-window-changed",
+          "set -gF @log '#{@log}|#{hook}:#{hook_old_window_index}>#{hook_new_window_index}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-exited",
+          "set -gF @log '#{@log}|#{hook}:#{hook_exit_status}:#{hook_exit_success}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "command-error",
+          "set -gF @log '#{@log}|#{hook}:#{command}'"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "t",
+          "-n",
+          "t0",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "t:1",
+          "-n",
+          "t1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-ga",
+          "pane-exited",
+          "wait-for -S exited"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "t:2",
+          "-n",
+          "t2",
+          "sh -c 'exit 3'"
+        ]
+      },
+      {
+        "wait_for": "exited"
+      },
+      {
+        "run": [
+          "rename-window",
+          "-t",
+          "t:0",
+          "tz"
+        ]
+      },
+      {
+        "run": [
+          "rename-session",
+          "-t",
+          "t",
+          "tt"
+        ]
+      },
+      {
+        "run": [
+          "selectw",
+          "-t",
+          "tt:1"
+        ]
+      },
+      {
+        "run": [
+          "linkw",
+          "-d",
+          "-s",
+          "tt:1",
+          "-t",
+          "main:5"
+        ]
+      },
+      {
+        "run": [
+          "unlinkw",
+          "-t",
+          "main:5"
+        ]
+      },
+      {
+        "run": [
+          "kill-window",
+          "-t",
+          "nosuch:9"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-t",
+          "tt"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find session: nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|window-created:t0|window-linked:t:0|session-created:t|window-created:t1|window-linked:t:1|window-created:t2|window-linked:t:2|pane-exited:3:0|window-unlinked:t:2|window-renamed:t0>tz|session-renamed:tt:t|session-window-changed:0>1|window-linked:main:5|window-unlinked:main:5|command-error:kill-window|session-closed:tt|window-unlinked:tt:1|window-unlinked:tt:0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,338 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "control_notify_session_window",
+  "inputs": {
+    "name": "control_notify_session_window",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:1",
+          "-n",
+          "w1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:2",
+          "-n",
+          "w2",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "b0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "b:1",
+          "-n",
+          "b1",
+          "cat"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "b"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "selectw -t b:0"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "neww -t b: -n nw cat"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "neww -d -t b: -n nd cat"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "linkw -s a:1 -t b:7"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "movew -s a:2 -t b:8"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "splitw -t b:0 cat"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "selectp -t b:0.0"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "killp -t b:0.1"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "resizep -t b:0.0 -x 10"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "rename-session -t a alpha"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "kill-session -t alpha"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $1 b",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%session-window-changed $1 @5",
+          "%window-add @5",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%window-add @6",
+          "%begin <TIME> #5 1",
+          "%end <TIME> #5 1",
+          "%window-add @1",
+          "%session-window-changed $1 @1",
+          "%begin <TIME> #6 1",
+          "%end <TIME> #6 1",
+          "%window-add @2",
+          "%session-window-changed $1 @2",
+          "%window-close @2",
+          "%begin <TIME> #7 1",
+          "%end <TIME> #7 1",
+          "%window-pane-changed @3 %7",
+          "%layout-change @3 c1a4,80x24,0,0[80x12,0,0,3,80x11,0,13,7] c1a4,80x24,0,0[80x12,0,0,3,80x11,0,13,7] ",
+          "%begin <TIME> #8 1",
+          "%end <TIME> #8 1",
+          "%window-pane-changed @3 %3",
+          "%begin <TIME> #9 1",
+          "%end <TIME> #9 1",
+          "%layout-change @3 b260,80x24,0,0,3 b260,80x24,0,0,3 ",
+          "%begin <TIME> #10 1",
+          "%end <TIME> #10 1",
+          "%layout-change @3 b260,80x24,0,0,3 b260,80x24,0,0,3 ",
+          "%begin <TIME> #11 1",
+          "%end <TIME> #11 1",
+          "%session-renamed $0 alpha",
+          "%begin <TIME> #12 1",
+          "%end <TIME> #12 1",
+          "%sessions-changed",
+          "%window-close @1",
+          "%unlinked-window-close @0",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
