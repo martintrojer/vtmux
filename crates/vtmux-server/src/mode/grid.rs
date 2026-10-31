@@ -118,6 +118,12 @@ impl Grid {
         self.sx
     }
 
+    /// The last line (`hsize + sy - 1`).
+    #[must_use]
+    pub fn last(&self) -> usize {
+        self.hsize + self.sy - 1
+    }
+
     /// Line `y`, empty past the end.
     #[must_use]
     pub fn row(&self, y: usize) -> &Row {

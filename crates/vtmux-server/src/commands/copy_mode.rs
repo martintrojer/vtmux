@@ -30,14 +30,15 @@ pub fn exec(
     } else {
         p
     };
-    let (scroll_exit, hide) = (args.flag('e'), args.flag('H'));
+    let flags = (args.flag('e'), args.flag('H'));
+    let vi = server.model.mode_keys_vi(p);
     server.model.set_copy_mode(p, args.flag('k'), |model| {
         let size = (
             usize::from(model.panes[&p].term.cols()),
             usize::from(model.panes[&p].term.rows()),
         );
         let source = &model.panes[&swp].term;
-        CopyMode::new(source, size, swp != p, scroll_exit, hide)
+        CopyMode::new(source, size, swp != p, flags, vi)
     });
     // window_copy_set_line_numbers(wp, 1): keys and commands, not the mouse.
     with_copy(server, p, |m, env| m.set_line_numbers(env, true, false));
@@ -64,7 +65,7 @@ pub fn exec(
 pub(crate) fn with_copy<R>(
     server: &mut Server,
     p: PaneId,
-    f: impl FnOnce(&mut CopyMode, crate::mode::copy::Env) -> R,
+    f: impl FnOnce(&mut CopyMode, &crate::mode::copy::Env) -> R,
 ) -> Option<R> {
     let pane = server.model.panes.get_mut(&p)?;
     if !matches!(pane.modes.first(), Some(Mode::Copy(_))) {
@@ -76,7 +77,7 @@ pub(crate) fn with_copy<R>(
         .model
         .copy_env(p)
         .zip(mode.as_copy_mut())
-        .map(|(env, m)| f(m, env));
+        .map(|(env, m)| f(m, &env));
     if let Some(pane) = server.model.panes.get_mut(&p) {
         pane.modes.insert(0, mode);
     }

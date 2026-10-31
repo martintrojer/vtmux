@@ -10,7 +10,7 @@ use vtmux_core::ids::PaneId;
 use super::Item;
 use crate::cmdq::{End, NewBatch};
 use crate::keys::{KeyModes, send_keys_bytes};
-use crate::mode::copy::{Action, CommandError};
+use crate::mode::copy::{Action, CommandError, Copied};
 use crate::server::Server;
 use crate::target::Found;
 
@@ -50,7 +50,7 @@ pub fn exec(
         super::copy_mode::with_copy(server, p, |m, _| m.prefix = n);
     }
     if args.flag('X') {
-        return mode_command(server, args, p);
+        return mode_command(server, args, found, p);
     }
     if in_mode {
         mode_keys(server, item, args, p, repeat);
@@ -89,7 +89,7 @@ pub fn exec(
 }
 
 /// `send-keys -X`: a command for the pane's mode (`window_copy_command`).
-fn mode_command(server: &mut Server, args: &Args, p: PaneId) -> Result<(), CmdError> {
+fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Result<(), CmdError> {
     let words: Vec<String> = args
         .positionals
         .iter()
@@ -110,14 +110,63 @@ fn mode_command(server: &mut Server, args: &Args, p: PaneId) -> Result<(), CmdEr
     };
     let result = super::copy_mode::with_copy(server, p, |m, env| m.command(env, name, rest))
         .ok_or_else(|| CmdError::from(EdgeError::Message("not in a mode".into())))?;
-    match result {
-        Ok(Action::Cancel) => server.reset_mode(p),
-        Ok(Action::Stay) => {}
+    let outcome = match result {
+        Ok(o) => o,
         Err(CommandError::NotImplemented(c)) => {
             return Err(EdgeError::NotImplemented(format!("copy mode command {c}")).into());
         }
+    };
+    if let Some(copied) = outcome.copied {
+        store_copy(server, found, p, copied);
+    }
+    if outcome.action == Action::Cancel {
+        server.reset_mode(p);
     }
     Ok(())
+}
+
+/// `window_copy_copy_buffer` and `window_copy_append_selection`
+/// (window-copy.c:6096-6123, 6183-6215): to the clipboard of every client
+/// showing the pane's window when `set-clipboard` is on or external, then
+/// into a new paste buffer, or onto the top one for an append.
+fn store_copy(server: &mut Server, found: Found, p: PaneId, copied: Copied) {
+    let clip = copied.clip
+        && server
+            .model
+            .number_option(vtmux_core::options::TreeId::Server, "set-clipboard")
+            != 0;
+    if clip {
+        let window = server.model.panes.get(&p).map(|pane| pane.window);
+        let clients: Vec<_> = server
+            .clients
+            .keys()
+            .copied()
+            .filter(|&c| server.client_window(c).is_some() && server.client_window(c) == window)
+            .collect();
+        for c in clients {
+            server.set_selection(c, &copied.data);
+        }
+    }
+    if !copied.paste {
+        return;
+    }
+    let limit = super::buffer_limit(server);
+    if copied.append {
+        let mut data = Vec::new();
+        let name = server.model.paste.top().map(|top| {
+            data.extend_from_slice(&top.data);
+            top.name.clone()
+        });
+        data.extend_from_slice(&copied.data);
+        let _ = server.model.paste.set(data, name.as_deref(), limit);
+        return;
+    }
+    // format_single on the prefix argument.
+    let prefix = copied.prefix.map(|t| super::expand(server, found, &t));
+    server
+        .model
+        .paste
+        .add_prefixed(copied.data, prefix.as_deref().unwrap_or("buffer"), limit);
 }
 
 /// Keys for a pane in a mode go through the mode's key table, not to the

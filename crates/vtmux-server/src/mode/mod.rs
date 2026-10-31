@@ -7,6 +7,7 @@
 
 pub mod copy;
 pub mod grid;
+pub mod reader;
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::options::TreeId;
@@ -68,9 +69,20 @@ impl Model {
     pub fn copy_env(&self, p: PaneId) -> Option<copy::Env> {
         let pane = self.panes.get(&p)?;
         let w = TreeId::Window(pane.window);
+        // cs->s: the session of the command's target, here the pane's first.
+        let session = self
+            .sessions_with(pane.window)
+            .next()
+            .map_or(TreeId::GlobalSession, |s| TreeId::Session(s.id));
+        let separators = self
+            .options
+            .get(session, "word-separators")
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default();
         Some(copy::Env {
             vi: self.number_option(w, "mode-keys") == 1,
             line_numbers: self.number_option(w, "copy-mode-line-numbers"),
+            separators,
         })
     }
 

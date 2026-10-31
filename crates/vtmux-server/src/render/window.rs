@@ -223,7 +223,7 @@ impl Source<'_> {
         // format_draw keeps what a section does not cover: those cells are
         // marked and keep the pane's.
         const KEEP: &str = "\u{0}";
-        let mut screen = m.screen();
+        let mut screen = m.screen(&|_| {});
         let wtree = TreeId::Window(pane.window);
         // `s->rupper < s->rlower`: a screen of one row has no indicator.
         if m.shows_position() && screen.rows > 1 {
@@ -249,7 +249,7 @@ impl Source<'_> {
                 }
             }
         }
-        m.mark_overflow(&mut screen);
+        m.mark_overflow(&mut screen, &|_| {});
         screen
     }
 
