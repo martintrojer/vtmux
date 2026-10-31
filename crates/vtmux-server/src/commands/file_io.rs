@@ -76,5 +76,8 @@ pub(super) fn describe(err: &io::Error, path: &std::path::Path) -> String {
 /// Whether the item's client is attached or a control client, for which
 /// tmux's `file_write` / `file_read` of `-` fail with `EBADF`.
 pub(super) fn is_attached(server: &Server, item: &Item) -> bool {
-    item.control.is_some() || item.client.is_some_and(|c| server.client_session(c).is_some())
+    item.control.is_some()
+        || item
+            .client
+            .is_some_and(|c| server.client_session(c).is_some())
 }

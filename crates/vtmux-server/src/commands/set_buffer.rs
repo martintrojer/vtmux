@@ -15,7 +15,9 @@ pub fn exec(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdErro
     if args.value('n').is_some() {
         let name = match (pb, bufname) {
             (Some(b), _) => b.name.clone(),
-            (None, Some(n)) => return Err(EdgeError::Message(format!("unknown buffer: {n}")).into()),
+            (None, Some(n)) => {
+                return Err(EdgeError::Message(format!("unknown buffer: {n}")).into());
+            }
             (None, None) => match server.model.paste.top() {
                 Some(b) => b.name.clone(),
                 None => return Err(EdgeError::Message("no buffer".into()).into()),
@@ -48,7 +50,11 @@ pub fn exec(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdErro
         .paste
         .set(data, bufname, limit)
         .map_err(EdgeError::Message)?;
-    if args.flag('w') && server.find_client(item.client, item.origin, args.value('t')).is_some() {
+    if args.flag('w')
+        && server
+            .find_client(item.client, item.origin, args.value('t'))
+            .is_some()
+    {
         return Err(EdgeError::NotImplemented("set-buffer -w".into()).into());
     }
     Ok(())

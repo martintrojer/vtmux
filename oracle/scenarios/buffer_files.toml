@@ -1,0 +1,29 @@
+name = "buffer_files"
+size = [80, 24]
+# save-buffer and load-buffer on file paths (cmd-save-buffer.c,
+# cmd-load-buffer.c, file.c): -a, `-` to stdout, formats in the path,
+# missing files, directories, empty files.
+steps = [
+  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["set-buffer", "-b", "b", "x\ny\\z\u0001\t"] },
+  { run = ["save-buffer", "-b", "b", "out"] },
+  { run = ["save-buffer", "-a", "-b", "b", "out"] },
+  { run = ["load-buffer", "-b", "f", "out"] },
+  { run = ["list-buffers", "-F", "#{buffer_name} #{buffer_size} #{buffer_sample}"] },
+  { run = ["save-buffer", "-b", "b", "-"] },
+  { run = ["show-buffer", "-b", "b"] },
+  { run = ["save-buffer", "-b", "b", "#{session_name}.txt"] },
+  { run = ["load-buffer", "-b", "g", "a.txt"] },
+  { run = ["save-buffer", "-b", "b", "nodir/out"] },
+  { run = ["save-buffer", "-b", "b", "."] },
+  { run = ["save-buffer", "-b", "nosuch", "out"] },
+  { run = ["save-buffer", "out"] },
+  { run = ["load-buffer", "nosuch"] },
+  { run = ["load-buffer", "."] },
+  { run = ["load-buffer", "-b", "e", "/dev/null"] },
+  { run = ["load-buffer", "-b", "", "out"] },
+  { run = ["load-buffer", "-b", "a\tb", "out"] },
+  { run = ["load-buffer", "out"] },
+  { run = ["list-buffers", "-F", "#{buffer_name} #{buffer_size}"] },
+  { run = ["load-buffer"] },
+]

@@ -8,12 +8,7 @@ use super::{Item, file_io};
 use crate::server::Server;
 use crate::target::Found;
 
-pub fn exec(
-    server: &mut Server,
-    item: &Item,
-    args: &Args,
-    found: Found,
-) -> Result<(), CmdError> {
+pub fn exec(server: &mut Server, item: &Item, args: &Args, found: Found) -> Result<(), CmdError> {
     let target = super::expand(server, found, &args.positional_text(0).unwrap_or_default());
     if target == "-" {
         return Err(EdgeError::NotImplemented("load-buffer -".into()).into());

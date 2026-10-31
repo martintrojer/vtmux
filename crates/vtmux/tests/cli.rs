@@ -2774,3 +2774,33 @@ fn alerts_silence_flag() {
         out
     });
 }
+
+/// Paste buffers on the command line: raw bytes through `save-buffer -`
+/// and `show-buffer`, `-a`, file round trip, eviction at `buffer-limit`
+/// and the `-S`-less vis encoding of `paste-buffer` into a `cat -v` pane.
+/// Reference: the same transcript on tmux 3.8.
+#[test]
+fn buffers_cli() {
+    compare("buffers_cli", |w| {
+        let mut out = vec![w.run(&["new", "-d", "-s", "a", "-x", "40", "-y", "5", "cat -v"])];
+        out.push(w.run(&["set-buffer", "-b", "b", "x\ny\\z\u{1}\t"]));
+        out.push(w.run(&["save-buffer", "-b", "b", "-"]));
+        out.push(w.run(&["show-buffer", "-b", "b"]));
+        out.push(w.run(&["save-buffer", "-b", "b", "f"]));
+        out.push(w.run(&["save-buffer", "-a", "-b", "b", "f"]));
+        out.push(w.run(&["load-buffer", "-b", "g", "f"]));
+        out.push(w.run(&["list-buffers", "-O", "size", "-r"]));
+        out.push(w.run(&["set-option", "-g", "buffer-limit", "2"]));
+        for d in ["1", "2", "3"] {
+            out.push(w.run(&["set-buffer", d]));
+        }
+        out.push(w.run(&["list-buffers", "-F", "#{buffer_name}=#{buffer_sample}"]));
+        out.push(w.run(&["set-buffer", "-b", "p", "a\u{1b}[0m\u{7f}\nb"]));
+        out.push(w.run(&["paste-buffer", "-b", "p", "-t", "a:0.0"]));
+        // The first match is the tty's echo; wait for `cat -v`'s own line,
+        // which follows the echoed `b`.
+        w.wait_for_text("a:0.0", "ba^[[0m^?");
+        out.push(w.run(&["capture-pane", "-p", "-t", "a:0.0"]));
+        out
+    });
+}
