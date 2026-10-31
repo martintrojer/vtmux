@@ -266,8 +266,9 @@ pub struct Server {
     /// Keys `send-keys -K` handed to a client, handled after the command
     /// (`server_client_handle_key_after`).
     pub(crate) injected_keys: Vec<(ClientId, vtmux_core::keys::Key)>,
-    /// The running hook command's formats (`state->formats`: `hook`,
-    /// `hook_*`), merged into its format trees (`cmdq_merge_formats`).
+    /// The running command's formats (`command`, and a hook's
+    /// `state->formats`: `hook`, `hook_*`), merged into its format trees
+    /// (`cmdq_merge_formats`).
     pub(crate) cmd_formats: Vec<(String, String)>,
     /// Event sinks that come and go (`wait-for -E`).
     pub(crate) event_waits: Vec<crate::events::EventWait>,
@@ -1279,11 +1280,16 @@ impl Server {
             self.send(id, &ServerMsg::Frame(caps.teardown()));
         }
         self.send(id, &ServerMsg::Exit { code, message });
+        let left = self.client_window(id);
         if let Some(c) = self.clients.get_mut(&id) {
             c.left_session = c.attached.or(c.left_session);
             c.attached = None;
             c.closing = true;
         }
+        // MSG_EXITING: server_client_set_session(c, NULL) looks at the
+        // focus of the window the client left (server-client.c:462-463),
+        // before server_client_lost fires client-detached.
+        self.update_focus(left);
         // server_client_set_session(c, NULL) then recalculate_sizes
         // (server-client.c:2733-2738): the clients left size the windows.
         self.recalculate_sizes();
@@ -1339,12 +1345,20 @@ impl Server {
                     }
                 }
                 crate::input::Event::Focus(focused) => {
-                    // tty_keys_next (tty-keys.c:1030-1039), then the key
-                    // callback's activity update; focus events are not
-                    // keys and reach no table (server-client.c:1523).
+                    // tty_keys_next (tty-keys.c:1030-1039): focus out is the
+                    // pane's focus-out then client-focus-out, focus in is
+                    // client-focus-in then the pane's focus-in; then the key
+                    // callback's activity update. Focus events are not keys
+                    // and reach no table (server-client.c:1523).
                     c.focused = focused;
+                    if focused {
+                        self.fire_client("client-focus-in", id);
+                        self.update_focus(self.client_window(id));
+                    } else {
+                        self.update_focus(self.client_window(id));
+                        self.fire_client("client-focus-out", id);
+                    }
                     self.touch_client(id);
-                    self.update_focus(self.client_window(id));
                     if focused {
                         self.update_latest(id);
                     }
@@ -1406,26 +1420,40 @@ impl Server {
         Some(self.model.current_of(s)?.1)
     }
 
-    /// `window_update_focus` (window.c:707-713, 716-752): the window's
-    /// active pane is focused when a focused client looks at its window;
-    /// a change is reported to a pane that asked for it (`?1004h`).
+    /// `window_update_focus` (window.c:707-713): the window's active pane.
     pub(crate) fn update_focus(&mut self, w: Option<WindowId>) {
-        let Some(window) = w.and_then(|w| self.model.windows.get(&w)) else {
+        let Some(p) = w
+            .and_then(|w| self.model.windows.get(&w))
+            .map(Window::active)
+        else {
             return;
         };
-        let p = window.active();
-        let looking = self.clients.values().any(|c| {
-            c.focused
-                && c.attached
-                    .and_then(|s| self.model.current_of(s))
-                    .is_some_and(|(_, cw, _)| Some(cw) == w)
-        });
-        let Some(pane) = self.model.panes.get_mut(&p) else {
-            return;
-        };
-        let focused = looking && !pane.exited;
-        if focused == pane.focused || pane.exited {
-            return;
+        if let Some(ev) = self.pane_focus(p) {
+            self.model.push_event(ev);
+        }
+    }
+
+    /// `window_pane_update_focus` (window.c:716-752): a pane is focused
+    /// when it is its window's active pane and a focused client looks at
+    /// the window. A change is reported to a pane that asked for it
+    /// (`?1004h`) and is the pane-focus-in/out event returned.
+    pub(crate) fn pane_focus(&mut self, p: PaneId) -> Option<crate::events::Event> {
+        let pane = self.model.panes.get(&p)?;
+        if pane.exited {
+            return None;
+        }
+        let w = pane.window;
+        let active = self.model.windows.get(&w).map(Window::active) == Some(p);
+        let focused = active
+            && self.clients.values().any(|c| {
+                c.focused
+                    && c.attached
+                        .and_then(|s| self.model.current_of(s))
+                        .is_some_and(|(_, cw, _)| cw == w)
+            });
+        let pane = self.model.panes.get_mut(&p)?;
+        if focused == pane.focused {
+            return None;
         }
         pane.focused = focused;
         if pane.term.focus_events() {
@@ -1435,14 +1463,16 @@ impl Server {
             self.pane_output_queued(p);
         }
         // window.c:741-747.
-        self.model.fire_pane(
-            if focused {
-                "pane-focus-in"
-            } else {
-                "pane-focus-out"
-            },
-            p,
-        );
+        let name = if focused {
+            "pane-focus-in"
+        } else {
+            "pane-focus-out"
+        };
+        let ev = crate::events::Event::new(name)
+            .target(crate::target::Found::from_pane(&self.model, p))
+            .pane("pane", p)
+            .window(&self.model, "window", w);
+        Some(ev)
     }
 
     /// The pane a client's keys go to (`cmd_find_from_client`).
@@ -2733,11 +2763,31 @@ pub fn run_server(listener: StdListener, socket: PathBuf, config: ServerConfig) 
     }
 }
 
-/// `sig2name` (compat): the signal's name without `SIG`.
+/// `sig2name` (tmux.c:327-338): `sys_signame[signo]` where libc has it
+/// (`HAVE_SYS_SIGNAME`: the BSDs and macOS, lower-case names), else the
+/// number (glibc and musl have no `sys_signame`).
 fn sig_name(sig: i32) -> String {
-    use rustix::process::Signal;
-    let name = Signal::from_named_raw(sig).map_or_else(|| sig.to_string(), |s| format!("{s:?}"));
-    name.trim_start_matches("Signal::")
-        .trim_start_matches("SIG")
-        .to_owned()
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    {
+        // The BSD signal numbering, which these systems share for 1-31.
+        const NAMES: [&str; 32] = [
+            "Signal 0", "hup", "int", "quit", "ill", "trap", "abrt", "emt", "fpe", "kill", "bus",
+            "segv", "sys", "pipe", "alrm", "term", "urg", "stop", "tstp", "cont", "chld", "ttin",
+            "ttou", "io", "xcpu", "xfsz", "vtalrm", "prof", "winch", "info", "usr1", "usr2",
+        ];
+        if let Some(name) = usize::try_from(sig)
+            .ok()
+            .filter(|&i| i > 0)
+            .and_then(|i| NAMES.get(i))
+        {
+            return (*name).to_owned();
+        }
+    }
+    sig.to_string()
 }

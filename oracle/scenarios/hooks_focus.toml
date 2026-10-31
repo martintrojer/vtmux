@@ -1,0 +1,53 @@
+name = "hooks_focus"
+# Focus events with an attached client and focus-events on. A focus report
+# from the terminal (tty-keys.c:1030-1039): out is the pane's focus-out then
+# client-focus-out, in is client-focus-in then the pane's focus-in.
+# window_set_active_pane (window.c:776-786) checks the old pane's focus,
+# then the new one's, before window-pane-changed; session_set_current
+# (session.c:516-520) does the old window's, then the new one's, before
+# session-window-changed. A detach (MSG_EXITING, server_client_set_session
+# to NULL, server-client.c:462-463) takes the focus away before
+# client-detached.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat"] },
+  { run = ["set", "-g", "focus-events", "on"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-focus-in", "set -agF @log '|#{hook}:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "pane-focus-out", "set -agF @log '|#{hook}:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "client-focus-in", "set -agF @log '|#{hook}:#{hook_session_name}:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "client-focus-out", "set -agF @log '|#{hook}:#{hook_session_name}:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "window-pane-changed", "set -agF @log '|#{hook}:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "session-window-changed", "set -agF @log '|#{hook}:#{hook_window_index}'"] },
+  { run = ["set-hook", "-g", "client-detached", "set -agF @log '|#{hook}'"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { keys = "\u001b[O" },
+  { settle = {} },
+  { keys = "\u001b[I" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { keys = "\u0002o" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { keys = "\u0002n" },
+  { settle = {} },
+  { keys = "\u0002n" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["selectp", "-t", "a:0.0"] },
+  { run = ["selectw", "-t", "a:1"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { keys = "\u0002d" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]
