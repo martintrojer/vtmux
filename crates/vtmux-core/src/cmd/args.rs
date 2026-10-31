@@ -21,6 +21,13 @@ use crate::error::EdgeError;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArgValue {
     Str(String),
+    /// A command-line word that is not UTF-8: its lossy `text`, which
+    /// every text accessor sees, and the `raw` bytes. tmux's arguments are
+    /// C strings, so `set-buffer` stores the raw bytes as given.
+    Bytes {
+        text: String,
+        raw: Vec<u8>,
+    },
     Commands(CommandList),
 }
 
@@ -29,7 +36,33 @@ impl ArgValue {
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Self::Str(s) => Some(s),
+            Self::Str(s) | Self::Bytes { text: s, .. } => Some(s),
+            Self::Commands(_) => None,
+        }
+    }
+
+    /// A command-line word: [`Self::Str`] when it is UTF-8, else
+    /// [`Self::Bytes`].
+    #[must_use]
+    pub fn from_bytes(word: Vec<u8>) -> Self {
+        match String::from_utf8(word) {
+            Ok(s) => Self::Str(s),
+            Err(e) => {
+                let raw = e.into_bytes();
+                Self::Bytes {
+                    text: String::from_utf8_lossy(&raw).into_owned(),
+                    raw,
+                }
+            }
+        }
+    }
+
+    /// The raw bytes of a string argument; `None` for a block.
+    #[must_use]
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Str(s) => Some(s.as_bytes()),
+            Self::Bytes { raw, .. } => Some(raw),
             Self::Commands(_) => None,
         }
     }
@@ -39,7 +72,7 @@ impl ArgValue {
     #[must_use]
     pub fn text(&self) -> Cow<'_, str> {
         match self {
-            Self::Str(s) => Cow::Borrowed(s),
+            Self::Str(s) | Self::Bytes { text: s, .. } => Cow::Borrowed(s),
             Self::Commands(list) => Cow::Owned(list.print(super::PrintFlags::default())),
         }
     }
@@ -222,6 +255,17 @@ impl Args {
         self.positionals.get(idx).map(ArgValue::text)
     }
 
+    /// Positional `idx` as the bytes given (a block as its printed
+    /// commands).
+    #[must_use]
+    pub fn positional_bytes(&self, idx: usize) -> Option<Cow<'_, [u8]>> {
+        let value = self.positionals.get(idx)?;
+        Some(match value.as_bytes() {
+            Some(b) => Cow::Borrowed(b),
+            None => Cow::Owned(value.text().into_owned().into_bytes()),
+        })
+    }
+
     /// `args_strtonum` without the format expansion: the flag's last value as
     /// a number in `min..=max`. Callers that expand formats first (`capture-pane
     /// -S`, `new -x`) expand `value(flag)` and call [`strtonum`] themselves.
@@ -294,8 +338,9 @@ fn parse_flags(
     i: &mut usize,
     args: &mut Args,
 ) -> Result<bool, CmdError> {
-    // A block is never a flag (arguments.c:218).
-    let ArgValue::Str(word_str) = &words[*i] else {
+    // A block is never a flag (arguments.c:218). A word that is not
+    // UTF-8 is parsed as its lossy text: flag letters are ASCII.
+    let Some(word_str) = words[*i].as_str() else {
         return Ok(false);
     };
     let word = word_str.as_bytes();
@@ -371,7 +416,7 @@ fn flag_argument(
             flag,
         });
     };
-    let ArgValue::Str(next) = next else {
+    let Some(next) = next.as_str() else {
         return Err(CmdError::FlagArgumentNotString {
             command: entry.name.to_owned(),
             flag,
@@ -388,5 +433,5 @@ fn flag_argument(
         }
     }
     *i += 1;
-    Ok(Some(next.clone()))
+    Ok(Some(next.to_owned()))
 }

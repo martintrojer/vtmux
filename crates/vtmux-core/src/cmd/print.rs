@@ -155,7 +155,7 @@ fn add_value(buf: &mut String, value: &ArgValue) {
         ArgValue::Commands(list) => {
             let _ = write!(buf, "{{ {} }}", list.print(PrintFlags::default()));
         }
-        ArgValue::Str(s) => buf.push_str(&args_escape(s)),
+        ArgValue::Str(s) | ArgValue::Bytes { text: s, .. } => buf.push_str(&args_escape(s)),
     }
 }
 

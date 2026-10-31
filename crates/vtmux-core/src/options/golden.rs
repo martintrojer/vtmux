@@ -196,9 +196,8 @@ impl Sim {
                 let list = match call.args.positionals.get(branch) {
                     None => return Ok(()),
                     Some(ArgValue::Commands(list)) => list.clone(),
-                    Some(ArgValue::Str(text)) => {
-                        parse_string(text, &mut self.host.env).map_err(|e| e.to_string())?
-                    }
+                    Some(value) => parse_string(&value.text(), &mut self.host.env)
+                        .map_err(|e| e.to_string())?,
                 };
                 let CommandList { calls } = list;
                 if self.run(&calls) {
