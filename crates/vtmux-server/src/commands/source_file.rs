@@ -7,6 +7,7 @@
 //! later `%if` is decided. Any parse error rejects the file before a
 //! command runs. Each command's errors carry `file:line: `.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use vtmux_core::cmd::{self, Args, CmdError, CommandCall, CommandList, ParseOpts, PrintFlags};
@@ -63,21 +64,95 @@ pub fn exec(
         verbose: args.flag('v'),
         parse_client: None,
     };
-    server.source_depth += 1;
-    for path in paths {
-        load(server, item, &path, opts);
+    Cont {
+        opts,
+        depth: server.source_depth + 1,
+        paths: paths.into(),
+        file: None,
+        causes: Vec::new(),
     }
-    server.source_depth -= 1;
-    // cmd_source_file_complete_cb -> cfg_print_causes: parse errors are
-    // printed (stdout) once every file ran; any makes the client fail.
-    let causes = std::mem::take(&mut server.causes);
-    if !causes.is_empty() {
-        item.status = 1;
-    }
-    for cause in causes {
-        item.print(&cause);
-    }
+    .drive(server, item);
     Ok(())
+}
+
+/// A `source-file` command in progress: the files still to load and the
+/// one being run. A command that blocks the client (file I/O) parks the
+/// batch with this behind it (`cmdq_insert_after` in tmux: the file's
+/// commands queue after `source-file`, ahead of the rest of the batch).
+#[derive(Debug)]
+pub struct Cont {
+    opts: LoadOpts,
+    /// `source_depth` while this runs.
+    depth: usize,
+    paths: VecDeque<PathBuf>,
+    file: Option<FileRun>,
+    /// `server.causes` while blocked, so other clients' files don't take
+    /// them.
+    causes: Vec<String>,
+}
+
+/// A parsed file: the groups (one per line) still to run.
+#[derive(Debug)]
+struct FileRun {
+    name: String,
+    groups: VecDeque<(u32, Vec<CommandCall>)>,
+}
+
+impl Cont {
+    /// Run until done or blocked. A blocked run goes on the item's stack
+    /// (after the continuations of source-files nested in it, which run
+    /// first) and blocks the item; a finished one reports the causes
+    /// (`cmd_source_file_complete_cb` -> `cfg_print_causes`: parse errors
+    /// are printed (stdout) once every file ran; any makes the client
+    /// fail).
+    pub(crate) fn drive(mut self, server: &mut Server, item: &mut Item) {
+        let outer = std::mem::replace(&mut server.source_depth, self.depth);
+        server.causes.splice(0..0, std::mem::take(&mut self.causes));
+        let blocked = self.advance(server, item);
+        server.source_depth = outer;
+        if blocked {
+            self.causes = std::mem::take(&mut server.causes);
+            item.conts.push(self);
+            item.blocked = true;
+            return;
+        }
+        let causes = std::mem::take(&mut server.causes);
+        if !causes.is_empty() {
+            item.status = 1;
+        }
+        for cause in causes {
+            item.print(&cause);
+        }
+    }
+
+    /// Whether a command blocked (only for an item that can park).
+    fn advance(&mut self, server: &mut Server, item: &mut Item) -> bool {
+        let can_park = item.can_wait && item.client.is_some();
+        loop {
+            let Some(file) = self.file.as_mut() else {
+                let Some(path) = self.paths.pop_front() else {
+                    return false;
+                };
+                self.file = parse(server, item, &path, self.opts);
+                continue;
+            };
+            let Some((line, calls)) = file.groups.pop_front() else {
+                self.file = None;
+                continue;
+            };
+            let before = server.causes.len();
+            let blocked = super::run(server, item, &calls);
+            for cause in &mut server.causes[before..] {
+                *cause = format!("{}:{line}: {cause}", file.name);
+            }
+            if let Some(at) = blocked
+                && can_park
+            {
+                file.groups.push_front((line, calls[at..].to_vec()));
+                return true;
+            }
+        }
+    }
 }
 
 /// How [`load`] treats a file.
@@ -139,6 +214,23 @@ fn glob(pattern: &Path) -> Vec<PathBuf> {
 /// are queued as causes (`cfg_add_cause`); runtime errors go to the client
 /// as any command's do, or become `file:line:` causes without a client.
 pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
+    let cont = Cont {
+        opts,
+        depth: server.source_depth,
+        paths: VecDeque::new(),
+        file: parse(server, item, path, opts),
+        causes: Vec::new(),
+    };
+    // Nothing here can park (no client, or a key binding).
+    let outer = std::mem::replace(&mut server.source_depth, cont.depth);
+    let mut cont = cont;
+    cont.advance(server, item);
+    server.source_depth = outer;
+}
+
+/// Read and parse one file (printing it for `-v`); `None` if it failed
+/// (a cause is queued) or only parses.
+fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) -> Option<FileRun> {
     let file = path.to_string_lossy().into_owned();
     let text = match std::fs::read(path) {
         Ok(t) => String::from_utf8_lossy(&t).into_owned(),
@@ -146,7 +238,7 @@ pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
             if !(opts.quiet && e.kind() == std::io::ErrorKind::NotFound) {
                 server.causes.push(format!("{file}: {}", strerror(&e)));
             }
-            return;
+            return None;
         }
     };
     let parse = ParseOpts {
@@ -201,18 +293,13 @@ pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
             e.line,
             String::from_utf8_lossy(&msg)
         ));
-        return;
+        return None;
     }
     if opts.parse_only {
-        return;
+        return None;
     }
-    for (line, calls) in groups {
-        let before = server.causes.len();
-        // wait-for refuses to block inside a file (wait_for.rs).
-        let resume = super::run(server, item, &calls);
-        debug_assert!(resume.is_none());
-        for cause in &mut server.causes[before..] {
-            *cause = format!("{file}:{line}: {cause}");
-        }
-    }
+    Some(FileRun {
+        name: file,
+        groups: groups.into(),
+    })
 }

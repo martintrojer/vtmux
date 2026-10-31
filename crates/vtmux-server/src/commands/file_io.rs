@@ -13,8 +13,9 @@
 //! (`c == NULL || CLIENT_ATTACHED`, file.c:321, 395), opened with
 //! `O_NONBLOCK` so a FIFO with no reader is an error and never stalls the
 //! server; the result is still reported after the guard. Batches that
-//! cannot park (key bindings, config files, `source-file`) finish it at
-//! once.
+//! cannot park (key bindings, config files) finish it at once. Inside
+//! `source-file` the batch parks with the rest of the file behind it
+//! ([`source_file::Cont`]).
 //!
 //! [`ServerMsg::WriteOpen`]: vtmux_core::protocol::ServerMsg::WriteOpen
 //! [`ServerMsg::ReadOpen`]: vtmux_core::protocol::ServerMsg::ReadOpen
@@ -89,13 +90,11 @@ pub(super) fn is_attached(server: &Server, item: &Item) -> bool {
 /// The command client that does the I/O, or `None` for the server.
 fn client_side(server: &Server, item: &Item) -> Option<ClientId> {
     item.client
-        .filter(|_| can_park(server, item) && !is_attached(server, item))
+        .filter(|_| can_park(item) && !is_attached(server, item))
 }
 
-fn can_park(server: &Server, item: &Item) -> bool {
-    // A blocked command inside source-file would need the rest of the
-    // file queued behind it; vtmux runs files in one go (wait_for.rs).
-    item.can_wait && item.client.is_some() && server.source_depth == 0
+fn can_park(item: &Item) -> bool {
+    item.can_wait && item.client.is_some()
 }
 
 /// `file_write`: `data` to `path` (created, truncated or appended).
@@ -134,6 +133,10 @@ pub(super) fn read(
     then: Then,
 ) -> Result<(), EdgeError> {
     let shown = path.map_or_else(|| "-".to_owned(), |p| p.display().to_string());
+    // The client's stdin can be used once (file.c:641).
+    if path.is_none() && std::mem::replace(&mut item.stdin_used, true) {
+        return complete(server, item, shown, then, Vec::new(), libc::EBADF);
+    }
     if let Some(c) = client_side(server, item) {
         server.send(
             c,
@@ -181,7 +184,7 @@ fn complete(
     data: Vec<u8>,
     error: i32,
 ) -> Result<(), EdgeError> {
-    if let Some(c) = item.client.filter(|_| can_park(server, item)) {
+    if let Some(c) = item.client.filter(|_| can_park(item)) {
         park(server, item, c, path, then, Some(error));
         if let Some(op) = server.files.get_mut(&c) {
             op.data = data;

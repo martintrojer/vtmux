@@ -10,7 +10,7 @@ publish.workspace = true
 vtmux-core.workspace = true
 vtmux-server.workspace = true
 vtmux-client.workspace = true
-rustix = { version = "1", default-features = false, features = ["std", "termios", "fs"] }
+rustix = { version = "1", default-features = false, features = ["std", "termios", "fs", "event"] }
 
 [[bin]]
 name = "vtmux"

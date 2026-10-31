@@ -3020,3 +3020,154 @@ fn save_buffer_to_a_slow_fifo_does_not_stall_the_server() {
 fn libc_o_nonblock() -> i32 {
     rustix::fs::OFlags::NONBLOCK.bits().cast_signed()
 }
+
+/// `load-buffer` of a FIFO opens it `O_NONBLOCK` and waits for it to poll
+/// readable (file.c:808-812), so a writer that connects late is read to
+/// EOF; a blocking `read(2)` would see EOF at once, set no buffer and
+/// leave the writer without a reader. Reference: the writer succeeds, the
+/// buffer is `late:10`.
+#[test]
+fn load_buffer_of_a_fifo_waits_for_the_writer() {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt;
+    compare("load_buffer_of_a_fifo_waits_for_the_writer", |w| {
+        let fifo = w.dir().join("ff");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let mut out = vec![w.run(&["new", "-d", "-s", "a", "cat"])];
+        let loader = w.spawn(&["load-buffer", "-b", "late", fifo.to_str().unwrap()]);
+        std::thread::sleep(Duration::from_millis(500));
+        // A non-blocking open fails with ENXIO while nobody reads.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let writer = loop {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc_o_nonblock())
+                .open(&fifo)
+            {
+                Err(e) if Instant::now() < deadline && e.raw_os_error() == Some(6) => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                other => break other,
+            }
+        };
+        let wrote = match writer {
+            Ok(mut f) => f.write_all(b"late-data\n").map(|()| drop(f)).is_ok(),
+            Err(_) => false,
+        };
+        out.push(Run {
+            stdout: format!("writer ok: {wrote}"),
+            stderr: String::new(),
+            code: 0,
+        });
+        let done = loader.wait_with_output().unwrap();
+        out.push(Run {
+            stdout: String::from_utf8_lossy(&done.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&done.stderr).into_owned(),
+            code: done.status.code().unwrap_or(-1),
+        });
+        out.push(w.run(&["list-buffers", "-F", "#{buffer_name}:#{buffer_size}"]));
+        out
+    });
+}
+
+/// A command client's stdin and stdout can each be used once (file.c
+/// `file_read_open` / `file_write_open` close the original descriptor,
+/// client.c:691-701): a second `load-buffer -`, `show-buffer` or
+/// `save-buffer -` fails with `Bad file descriptor: -`, and after a
+/// `save-buffer -` a print goes nowhere.
+#[test]
+fn stdin_and_stdout_are_usable_once_per_client() {
+    compare("stdin_and_stdout_are_usable_once_per_client", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run_stdin(
+                &[
+                    "load-buffer",
+                    "-b",
+                    "x",
+                    "-",
+                    ";",
+                    "load-buffer",
+                    "-b",
+                    "y",
+                    "-",
+                ],
+                b"12",
+            ),
+            w.run(&["set-buffer", "-b", "a", "zz"]),
+            w.run(&["show-buffer", "-b", "a", ";", "show-buffer", "-b", "a"]),
+            w.run(&["save-buffer", "-b", "a", "-", ";", "display", "-p", "b"]),
+            w.run(&[
+                "save-buffer",
+                "-b",
+                "a",
+                "-",
+                ";",
+                "save-buffer",
+                "-b",
+                "a",
+                "-",
+            ]),
+            w.run(&["display", "-p", "-", ";", "show-buffer", "-b", "a"]),
+            w.run(&["list-buffers", "-F", "#{buffer_name}:#{buffer_size}"]),
+        ]
+    });
+}
+
+/// File I/O for a command inside `source-file` still goes to the command
+/// client (file.c:321, 395 only look at the client's flags): `load-buffer
+/// -` reads its stdin and `save-buffer` writes, and the file's later lines
+/// run after the I/O. A second `-` in the file fails as it does outside.
+#[test]
+fn buffer_file_io_inside_source_file_uses_the_client() {
+    compare("buffer_file_io_inside_source_file_uses_the_client", |w| {
+        let out = w.dir().join("srcout");
+        let conf = w.dir().join("src.conf");
+        let text = format!(
+            "loadb -b src -\nsaveb -b src {}\nshowb -b src\nloadb -b again -\n",
+            out.display()
+        );
+        std::fs::write(&conf, text).unwrap();
+        let again = w.dir().join("again.conf");
+        std::fs::write(&again, "display -p second\n").unwrap();
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run_stdin(&["source-file", conf.to_str().unwrap()], b"via-source"),
+            w.run(&["list-buffers", "-F", "#{buffer_name}:#{buffer_size}"]),
+        ];
+        runs.push(Run {
+            stdout: std::fs::read_to_string(&out).unwrap_or_default(),
+            stderr: String::new(),
+            code: 0,
+        });
+        // The rest of the batch runs after a parked source-file.
+        let once = w.dir().join("once.conf");
+        std::fs::write(&once, "loadb -b q -\ndisplay -p inside\n").unwrap();
+        runs.push(w.run_stdin(
+            &[
+                "source-file",
+                once.to_str().unwrap(),
+                ";",
+                "display",
+                "-p",
+                "outside",
+            ],
+            b"q",
+        ));
+        runs.push(w.run(&[
+            "source-file",
+            again.to_str().unwrap(),
+            ";",
+            "display",
+            "-p",
+            "after",
+        ]));
+        runs
+    });
+}
