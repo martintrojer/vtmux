@@ -1,0 +1,30 @@
+name = "status_msg_freeze_redraw"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["splitw", "-h", "-d", "-t", "a", "sh", "-c", "read x; printf 'pre\\033[?1049hALT'; exec cat"] },
+  { run = ["splitw", "-d", "-t", "a.0", "cat"] },
+  { attach = { session = "a" } },
+  { run = ["send-keys", "-t", "a.1", "one", "Enter"] },
+  { screen = {} },
+  # With the status off the message takes the last row and still freezes.
+  { run = ["display-message", "-d", "1500", "-t", "a", "m"] },
+  { run = ["send-keys", "-t", "a.0", "hello", "Enter"] },
+  { screen = {} },
+  { settle = { quiet_ms = 1700 } },
+  { screen = {} },
+  # PANE_REDRAW draws one pane through the freeze: a screen switch
+  # (screen-write.c:3154) and respawn-pane (cmd-respawn-pane.c:92).
+  { run = ["set", "-g", "status", "on"] },
+  { run = ["display-message", "-d", "2000", "-t", "a", "m"] },
+  { run = ["send-keys", "-t", "a.0", "again", "Enter"] },
+  { run = ["send-keys", "-t", "a.2", "Enter"] },
+  { screen = {} },
+  { run = ["respawn-pane", "-k", "-t", "a.1", "sh", "-c", "echo fresh; exec cat"] },
+  { screen = {} },
+  { settle = { quiet_ms = 2200 } },
+  { screen = {} },
+]

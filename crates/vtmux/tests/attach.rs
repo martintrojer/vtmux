@@ -1364,3 +1364,57 @@ fn alerts_bell_forwarding_and_status() {
         }
     }
 }
+
+/// cmd-display-message.c `tc = cmdq_get_target_client` (`CMD_CLIENT_CFLAG`,
+/// cmd-find.c `cmd_find_client`): `-c` names the client that shows the
+/// message, by name or tty with or without `/dev/`; the other client keeps
+/// its status. An unknown name shows nothing and is not an error
+/// (`CMD_CLIENT_CANFAIL`). Formats expand for the target session, with `tc`
+/// only when it is on it (cmd-display-message.c:117-126).
+#[test]
+fn display_message_c_shows_on_the_named_client() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["new", "-d", "-s", "b", "-n", "bw", "cat"]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["set", "-g", "display-time", "0"]);
+        let a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let b = w.attach(&["attach", "-t", "b"]);
+        b.wait(|b| status_row(b).contains("[b]"));
+        let name = |s: &str| {
+            let out = w.cli(&["lsc", "-t", s, "-F", "#{client_name}"]);
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        let (na, nb) = (name("a"), name("b"));
+        let mut seen = Vec::new();
+        let out = w.cli(&["display", "-c", &na, "to a #{session_name}"]);
+        seen.push(format!("exit {:?}", out.status.code()));
+        a.wait(|a| status_row(a).starts_with("to a"));
+        thread::sleep(Duration::from_millis(200));
+        seen.push(format!("{} / {}", status_row(&a), status_row(&b)));
+        // A trailing colon and no /dev/ prefix still match.
+        let short = format!("{}:", nb.trim_start_matches("/dev/"));
+        w.cli(&["display", "-c", &short, "to b"]);
+        b.wait(|b| status_row(b).starts_with("to b"));
+        seen.push(format!("{} / {}", status_row(&a), status_row(&b)));
+        let out = w.cli(&["display", "-c", "nope", "lost"]);
+        seen.push(format!(
+            "exit {:?} {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+        thread::sleep(Duration::from_millis(200));
+        seen.push(format!("{} / {}", status_row(&a), status_row(&b)));
+        results.push(seen);
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+    // The formats use the -t target (the best session, b), not -c's.
+    assert!(
+        results[0][1].starts_with("to a b / [b]"),
+        "{:?}",
+        results[0]
+    );
+}
