@@ -387,13 +387,13 @@ impl Server {
     }
 
     /// Attach a control client: no terminal, no `MSG_READY`
-    /// (cmd-new-session.c:337-339, cmd-attach-session.c:164-165), just
-    /// `%session-changed` (control-notify.c:205-230).
+    /// (cmd-new-session.c:337-339, cmd-attach-session.c:164-165); its
+    /// client-session-changed is `%session-changed` to it
+    /// (control-notify.c:205-230).
     pub(crate) fn control_attach(&mut self, id: ClientId, s: SessionId) {
-        let Some(name) = self.model.sessions.get(&s).map(|x| x.name.clone()) else {
+        if !self.model.sessions.contains_key(&s) {
             return;
-        };
-        let _ = name;
+        }
         let Some(c) = self.clients.get_mut(&id) else {
             return;
         };
