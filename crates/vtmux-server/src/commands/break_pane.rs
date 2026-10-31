@@ -67,7 +67,6 @@ pub fn exec(
     }
     server.model.unzoom(w);
     let detached = args.flag('d');
-    let links = server.control_links();
 
     let (index, w) = if server.model.windows[&w].panes.panes.len() == 1 {
         // server_link_window then server_unlink_window: the window itself
@@ -104,7 +103,6 @@ pub fn exec(
         }
         (index, new_w)
     };
-    server.control_links_changed(&links);
 
     if args.flag('P') {
         let at = Found {
@@ -127,10 +125,7 @@ fn set_name(server: &mut Server, w: vtmux_core::ids::WindowId, name: &str) {
         .model
         .options
         .set_table_value(TreeId::Window(w), "automatic-rename", Value::Flag(false));
-    if let Some(window) = server.model.windows.get_mut(&w) {
-        window.name.clone_from(&name);
-    }
-    server.control_window_renamed(w, &name);
+    server.model.set_window_name(w, &name);
 }
 
 /// Take `wp` out of window `w` (`window_lost_pane`, `layout_close_pane`)

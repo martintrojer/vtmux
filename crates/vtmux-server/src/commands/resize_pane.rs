@@ -73,6 +73,8 @@ pub fn exec(
     let window = server.model.windows.get_mut(&w).expect("target window");
     let result = window.layout.resize_pane_cmd(wp, &req);
     server.model.fix_panes(w);
+    // cmd-resize-pane.c:187 (also after a failed adjustment).
+    server.model.layout_changed(w);
     result.map_err(EdgeError::Message)?;
     if let Some(cause) = bad {
         return Err(EdgeError::Message(format!("adjustment {cause}")).into());

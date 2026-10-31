@@ -293,6 +293,7 @@ impl Server {
     /// (switch-client): the old session becomes `last_session`, the new
     /// one's activity is bumped, the client is redrawn and sized.
     pub(crate) fn switch_session(&mut self, id: ClientId, s: SessionId) {
+        self.drain_events();
         let Some(c) = self.clients.get(&id) else {
             return;
         };
@@ -327,9 +328,13 @@ impl Server {
         }
         self.update_focus(self.client_window(id));
         self.session_attached_alerts(s);
-        // server_client_set_session: status_timer_start, then
-        // server_redraw_client.
+        // server_client_set_session: status_timer_start,
+        // client-session-changed (fired by control_attach for a control
+        // client), then server_redraw_client.
         self.status_timer_start(id);
+        if !self.is_control(id) {
+            self.fire_session_changed(id, old);
+        }
         self.redraw_client(id);
     }
 

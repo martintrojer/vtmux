@@ -23,14 +23,11 @@ pub fn exec(
         return Err(EdgeError::InvalidWindowName(name).into());
     }
     let name = clean_name(&name);
-    if let Some(window) = server.model.windows.get_mut(&w) {
-        window.name.clone_from(&name);
-    }
+    // window_set_name fires window-renamed whether or not it changed.
+    server.model.set_window_name(w, &name);
     server
         .model
         .options
         .set_table_value(TreeId::Window(w), "automatic-rename", Value::Flag(false));
-    // window_set_name fires window-renamed whether or not it changed.
-    server.control_window_renamed(w, &name);
     Ok(())
 }

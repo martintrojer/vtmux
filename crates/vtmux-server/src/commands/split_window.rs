@@ -201,9 +201,6 @@ pub fn exec(
     server.model.options.add_pane(new, w);
     server.model.panes.insert(new, pane);
     server.model.fix_panes_except(w, zoom.then_some(new));
-    if !args.flag('d') {
-        server.model.set_active(w, new);
-    }
     let new_found = Found {
         session: Some(s),
         index: Some(index),
@@ -217,6 +214,13 @@ pub fn exec(
             p.term.set_title(&title);
         }
     }
+    // spawn_pane (spawn.c:590-612): pane-created, the new pane active
+    // (window-pane-changed, above), then window-layout-changed.
+    server.fire_pane_created(s, index, new, false, false);
+    if !args.flag('d') {
+        server.model.set_active(w, new);
+    }
+    server.model.layout_changed(w);
     // window_pop_zoom: -Z zooms the (possibly new) active pane.
     server.model.pop_zoom(w, zoom);
     // cmd-split-window.c:314-315.

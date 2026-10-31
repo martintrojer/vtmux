@@ -142,7 +142,7 @@ impl<'a> Ctx<'a> {
         if target.pane.is_none()
             && let Some(w) = target.window.and_then(|w| model.windows.get(&w))
         {
-            target.pane = Some(w.active());
+            target.pane = w.panes.active;
         }
         Self {
             model,
@@ -405,6 +405,14 @@ impl<'a> Ctx<'a> {
                 s.link_alerts.get(&i).copied().unwrap_or(0) & alerts::SILENCE != 0
             })),
             // format_cb_window_layout: the saved layout while zoomed.
+            // format.c:859-896: a control client without new-layouts (which
+            // vtmux has not got) sees the v1 form.
+            "window_layout" if self.client.as_ref().is_some_and(|c| c.control) => {
+                w.full_layout().dump_v1()
+            }
+            "window_visible_layout" if self.client.as_ref().is_some_and(|c| c.control) => {
+                w.layout.dump_v1()
+            }
             "window_layout" => w.full_layout().dump_v2(&self.layout_panes(w))?,
             "window_visible_layout" => w.layout.dump_v2(&self.layout_panes(w))?,
             _ => return None,

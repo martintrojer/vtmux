@@ -52,6 +52,29 @@ pub struct Session {
     /// `#{window_linked_sessions_list}` walks that list. Absent is the
     /// oldest (a window's first link).
     pub link_seq: BTreeMap<u32, u64>,
+    /// The shape of tmux's winlinks RB tree for this session, kept through
+    /// the same inserts and removes: `session_destroy` unlinks windows
+    /// root first (session.c:221-224), which the hooks and control mode
+    /// show.
+    pub link_tree: rb::Tree,
+}
+
+impl Session {
+    /// Bring [`Self::link_tree`] up to date after one winlink came or went
+    /// (removes, then inserts, in index order).
+    pub fn sync_link_tree(&mut self) {
+        let tree_keys = self.link_tree.keys();
+        for k in &tree_keys {
+            if !self.windows.contains_key(k) {
+                self.link_tree.remove(*k);
+            }
+        }
+        for k in self.windows.keys() {
+            if !tree_keys.contains(k) {
+                self.link_tree.insert(*k);
+            }
+        }
+    }
 }
 
 /// A zoomed window: the full layout is kept aside while the zoomed pane
@@ -153,6 +176,8 @@ pub struct Pane {
     pub cwd: PathBuf,
     /// The process has been reaped.
     pub exited: bool,
+    /// Its wait status once reaped (`wp->status`, `PANE_STATUSREADY`).
+    pub status: Option<crate::jobs::JobStatus>,
     /// Output arrived since the last automatic-rename check (tmux's
     /// `PANE_CHANGED`).
     pub changed: bool,
@@ -291,7 +316,7 @@ impl Model {
     pub fn current_of(&self, s: SessionId) -> Option<(u32, WindowId, PaneId)> {
         let session = self.sessions.get(&s)?;
         let w = *session.windows.get(&session.current)?;
-        Some((session.current, w, self.windows.get(&w)?.active()))
+        Some((session.current, w, self.windows.get(&w)?.panes.active?))
     }
 
     /// Sessions that link window `w`.
@@ -411,6 +436,7 @@ impl Model {
         if window.panes.active == Some(p) {
             return false;
         }
+        let old = window.panes.active;
         // window.c:767-768: selecting a hidden pane unzooms.
         if !window.is_visible(p) {
             self.unzoom(w);
@@ -427,7 +453,43 @@ impl Model {
         }
         // window.c:782.
         self.redraw(Redraw::Window(w));
+        self.fire_pane_changed(w, p, old);
         true
+    }
+
+    /// `window_fire_pane_changed` (window.c:119-134).
+    pub fn fire_pane_changed(&mut self, w: WindowId, p: PaneId, old: Option<PaneId>) {
+        let mut ev = crate::events::Event::new("window-pane-changed")
+            .target(crate::target::Found::from_pane(self, p))
+            .window(self, "window", w)
+            .pane("pane", p)
+            .pane("new_pane", p);
+        if let Some(o) = old {
+            ev = ev.pane("old_pane", o);
+        }
+        self.push_event(ev);
+    }
+
+    /// `window_fire_pane_moved` (window.c:136-156).
+    pub fn fire_pane_moved(
+        &mut self,
+        p: PaneId,
+        old: (WindowId, Option<u32>),
+        new: (WindowId, Option<u32>),
+    ) {
+        let mut ev = crate::events::Event::new("pane-moved")
+            .target(crate::target::Found::from_pane(self, p))
+            .pane("pane", p)
+            .window(self, "window", new.0)
+            .window(self, "old_window", old.0)
+            .window(self, "new_window", new.0);
+        if let Some(i) = old.1 {
+            ev = ev.int("old_window_index", i);
+        }
+        if let Some(i) = new.1 {
+            ev = ev.int("window_index", i).int("new_window_index", i);
+        }
+        self.push_event(ev);
     }
 
     /// Stamp `p` as just made active (`w->active->active_point =
@@ -492,9 +554,24 @@ impl Model {
     /// Remove a session and every window no other session links; returns
     /// the panes that went with them (their PTYs close when dropped).
     pub fn remove_session(&mut self, id: SessionId) -> Vec<Pane> {
-        let Some(session) = self.sessions.remove(&id) else {
+        if !self.sessions.contains_key(&id) {
             return Vec::new();
-        };
+        }
+        // session_destroy (session.c:195-229): session-closed, then
+        // window-unlinked for each winlink in the order the RB tree's root
+        // is removed.
+        self.fire_session("session-closed", id, false);
+        let order = self.sessions[&id].link_tree.root_order();
+        for index in order {
+            let w = self.sessions[&id].windows[&index];
+            let ev = crate::events::Event::new("window-unlinked")
+                .session(self, "session", id)
+                .window(self, "window", w)
+                .int("window_index", index)
+                .linked_now(self, w);
+            self.push_event(ev);
+        }
+        let session = self.sessions.remove(&id).expect("checked above");
         self.options.remove_session(id);
         self.by_name.remove(&session.name);
         let mut gone = Vec::new();
@@ -506,11 +583,14 @@ impl Model {
         gone
     }
 
-    /// Drop window `w` and its panes (not its links).
+    /// Drop window `w` and its panes (not its links): `window-closed`
+    /// as its last reference goes (window.c:525-530).
     fn remove_window(&mut self, w: WindowId) -> Vec<Pane> {
-        let Some(window) = self.windows.remove(&w) else {
+        if !self.windows.contains_key(&w) {
             return Vec::new();
-        };
+        }
+        self.fire_window("window-closed", w);
+        let window = self.windows.remove(&w).expect("checked above");
         self.options.remove_window(w);
         let mut gone = Vec::new();
         for p in window.panes.panes {
@@ -569,12 +649,16 @@ impl Model {
         let Some(session) = self.sessions.get_mut(&s) else {
             return Vec::new();
         };
+        let Some(&w) = session.windows.get(&index) else {
+            return Vec::new();
+        };
+        self.fire_winlink("window-unlinked", s, index, w);
+        let session = self.sessions.get_mut(&s).expect("checked above");
         session.last.retain(|i| *i != index);
         session.link_alerts.remove(&index);
         session.link_seq.remove(&index);
-        let Some(w) = session.windows.remove(&index) else {
-            return Vec::new();
-        };
+        session.windows.remove(&index);
+        session.sync_link_tree();
         if self.sessions_with(w).next().is_none() {
             self.remove_window(w)
         } else {
@@ -599,11 +683,15 @@ impl Model {
         {
             self.next_window(s, false);
         }
+        if let Some(&w) = self.sessions.get(&s).and_then(|x| x.windows.get(&index)) {
+            self.fire_winlink("window-unlinked", s, index, w);
+        }
         if let Some(session) = self.sessions.get_mut(&s) {
             session.last.retain(|i| *i != index);
             session.link_alerts.remove(&index);
             session.link_seq.remove(&index);
             session.windows.remove(&index);
+            session.sync_link_tree();
         }
         false
     }
@@ -632,6 +720,7 @@ impl Model {
         let stamp = self.touch();
         let session = self.sessions.get_mut(&s).expect("checked above");
         let old = session.current;
+        let old_w = session.windows.get(&old).copied();
         session.last.retain(|i| *i != index && *i != old);
         if session.windows.contains_key(&old) {
             session.last.insert(0, old);
@@ -644,7 +733,28 @@ impl Model {
         // window_update_activity.
         self.alerts_clear_window(w);
         self.alerts_queue(w, crate::alerts::ACTIVITY);
+        self.fire_window_changed(s, index, old_w.map(|ow| (ow, old)));
         Some(true)
+    }
+
+    /// `session_fire_window_changed` (session.c:479-498).
+    pub fn fire_window_changed(&mut self, s: SessionId, index: u32, old: Option<(WindowId, u32)>) {
+        let Some(&w) = self.sessions.get(&s).and_then(|x| x.windows.get(&index)) else {
+            return;
+        };
+        let mut ev = crate::events::Event::new("session-window-changed")
+            .target(crate::target::Found::from_winlink(self, s, index))
+            .session(self, "session", s)
+            .window(self, "window", w)
+            .window(self, "new_window", w)
+            .int("window_index", index)
+            .int("new_window_index", index);
+        if let Some((ow, oi)) = old {
+            ev = ev
+                .window(self, "old_window", ow)
+                .int("old_window_index", oi);
+        }
+        self.push_event(ev);
     }
 
     /// `session_last` (session.c:500-512), same results as
@@ -721,6 +831,9 @@ impl Model {
             .into_iter()
             .map(|(old, w)| (moved[&old], w))
             .collect();
+        // RB_INIT, then each winlink added in order.
+        session.link_tree = rb::Tree::default();
+        session.sync_link_tree();
         session.current = moved.get(&session.current).copied().unwrap_or(base);
         for i in &mut session.last {
             if let Some(new) = moved.get(i) {
@@ -762,6 +875,12 @@ impl Model {
             .into_iter()
             .map(|(i, w)| (shift(i), w))
             .collect();
+        // window.c:2502-2507: from the top down, each RB_REMOVE then
+        // RB_INSERT one up.
+        for i in (idx..last).rev() {
+            session.link_tree.remove(i);
+            session.link_tree.insert(i + 1);
+        }
         session.current = shift(session.current);
         for i in &mut session.last {
             *i = shift(*i);
@@ -811,6 +930,8 @@ impl Model {
         let session = self.sessions.get_mut(&s).expect("checked above");
         session.windows.insert(index, w);
         session.link_seq.insert(index, stamp);
+        session.sync_link_tree();
+        self.fire_winlink("window-linked", s, index, w);
         Ok(index)
     }
 
@@ -850,11 +971,20 @@ impl Model {
         // vtmux does not have, so the window stays unzoomed.
         self.unzoom(wid);
         let window = self.windows.get_mut(&wid).expect("checked above");
+        // layout_close_pane (layout.c:1548), then window_remove_pane ->
+        // window_lost_pane, which fires window-pane-changed for a new
+        // active pane (window.c:1215-1219).
         window.layout.close_pane(id);
+        let was_active = window.panes.active == Some(id);
         window.panes.remove(id);
+        let next = window.panes.active;
+        self.fix_panes(wid);
+        self.layout_changed(wid);
+        if was_active && let Some(n) = next {
+            self.fire_pane_changed(wid, n, Some(id));
+        }
         self.options.remove_pane(id);
         let pane = self.panes.remove(&id);
-        self.fix_panes(wid);
         // server-fn.c:435 / 567: server_redraw_window.
         self.redraw(Redraw::Window(wid));
         pane.into_iter().collect()
@@ -878,6 +1008,9 @@ impl Model {
         let saved = std::mem::replace(&mut window.layout, single);
         window.zoom = Some(Zoom { pane: p, saved });
         self.fix_panes(w);
+        // window.c:1014-1015.
+        self.fire_window("window-zoomed", w);
+        self.layout_changed(w);
         true
     }
 
@@ -894,6 +1027,7 @@ impl Model {
             return;
         };
         window.pending_size = None;
+        let old = (window.sx(), window.sy());
         window.layout.resize_window(sx, sy);
         self.fix_panes(w);
         // resize.c:80.
@@ -901,6 +1035,20 @@ impl Model {
         if let Some(p) = zoomed {
             self.zoom(w, p);
         }
+        // resize.c:80-82, resize_fire_window_resized (resize.c:27-40).
+        self.layout_changed(w);
+        let Some(window) = self.windows.get(&w) else {
+            return;
+        };
+        let (nx, ny) = (window.sx(), window.sy());
+        let ev = crate::events::Event::new("window-resized")
+            .target(crate::target::Found::from_window(self, w))
+            .window(self, "window", w)
+            .int("width", nx)
+            .int("height", ny)
+            .int("old_width", old.0)
+            .int("old_height", old.1);
+        self.push_event(ev);
     }
 
     /// `window_push_zoom` (window.c:1108-1124): unzoom, and say whether
@@ -1003,6 +1151,9 @@ impl Model {
         };
         window.layout = z.saved;
         self.fix_panes(w);
+        // window_unzoom(w, 1) (window.c:1072-1075).
+        self.fire_window("window-unzoomed", w);
+        self.layout_changed(w);
         true
     }
 }
@@ -1299,4 +1450,361 @@ pub(crate) fn now_epoch() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
+}
+
+/// Just enough of OpenBSD's `RB_*` (sys/tree.h) to know which key is the
+/// root as nodes come and go.
+pub mod rb {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Colour {
+        Red,
+        Black,
+    }
+
+    #[derive(Clone, Debug)]
+    struct Node {
+        key: u32,
+        colour: Colour,
+        left: Option<usize>,
+        right: Option<usize>,
+        parent: Option<usize>,
+    }
+
+    /// Nodes live in an arena; a removed one stays there unlinked.
+    #[derive(Clone, Debug, Default)]
+    pub struct Tree {
+        nodes: Vec<Node>,
+        root: Option<usize>,
+    }
+
+    impl Tree {
+        fn root_key(&self) -> Option<u32> {
+            self.root.map(|r| self.nodes[r].key)
+        }
+
+        /// The keys, in order.
+        #[must_use]
+        pub fn keys(&self) -> Vec<u32> {
+            let mut out = Vec::new();
+            let mut stack = Vec::new();
+            let mut at = self.root;
+            while at.is_some() || !stack.is_empty() {
+                while let Some(a) = at {
+                    stack.push(a);
+                    at = self.nodes[a].left;
+                }
+                let a = stack.pop().expect("not empty");
+                out.push(self.nodes[a].key);
+                at = self.nodes[a].right;
+            }
+            out
+        }
+
+        /// The keys in the order removing the root until empty takes them
+        /// (`while (!RB_EMPTY) remove(RB_ROOT)`).
+        #[must_use]
+        pub fn root_order(&self) -> Vec<u32> {
+            let mut t = self.clone();
+            let mut out = Vec::new();
+            while let Some(k) = t.root_key() {
+                out.push(k);
+                t.remove(k);
+            }
+            out
+        }
+
+        fn colour(&self, n: Option<usize>) -> Colour {
+            n.map_or(Colour::Black, |n| self.nodes[n].colour)
+        }
+
+        fn rotate_left(&mut self, x: usize) {
+            let y = self.nodes[x].right.expect("right child");
+            let yl = self.nodes[y].left;
+            self.nodes[x].right = yl;
+            if let Some(l) = yl {
+                self.nodes[l].parent = Some(x);
+            }
+            let p = self.nodes[x].parent;
+            self.nodes[y].parent = p;
+            match p {
+                None => self.root = Some(y),
+                Some(p) if self.nodes[p].left == Some(x) => self.nodes[p].left = Some(y),
+                Some(p) => self.nodes[p].right = Some(y),
+            }
+            self.nodes[y].left = Some(x);
+            self.nodes[x].parent = Some(y);
+        }
+
+        fn rotate_right(&mut self, x: usize) {
+            let y = self.nodes[x].left.expect("left child");
+            let yr = self.nodes[y].right;
+            self.nodes[x].left = yr;
+            if let Some(r) = yr {
+                self.nodes[r].parent = Some(x);
+            }
+            let p = self.nodes[x].parent;
+            self.nodes[y].parent = p;
+            match p {
+                None => self.root = Some(y),
+                Some(p) if self.nodes[p].right == Some(x) => self.nodes[p].right = Some(y),
+                Some(p) => self.nodes[p].left = Some(y),
+            }
+            self.nodes[y].right = Some(x);
+            self.nodes[x].parent = Some(y);
+        }
+
+        /// `RB_INSERT` + `RB_INSERT_COLOR`.
+        pub fn insert(&mut self, key: u32) {
+            let n = self.nodes.len();
+            let mut parent = None;
+            let mut at = self.root;
+            while let Some(a) = at {
+                parent = Some(a);
+                at = if key < self.nodes[a].key {
+                    self.nodes[a].left
+                } else {
+                    self.nodes[a].right
+                };
+            }
+            self.nodes.push(Node {
+                key,
+                colour: Colour::Red,
+                left: None,
+                right: None,
+                parent,
+            });
+            match parent {
+                None => self.root = Some(n),
+                Some(p) if key < self.nodes[p].key => self.nodes[p].left = Some(n),
+                Some(p) => self.nodes[p].right = Some(n),
+            }
+            let mut elm = n;
+            while let Some(p) = self.nodes[elm]
+                .parent
+                .filter(|&p| self.nodes[p].colour == Colour::Red)
+            {
+                let gp = self.nodes[p].parent.expect("red parent has a parent");
+                if self.nodes[gp].left == Some(p) {
+                    let uncle = self.nodes[gp].right;
+                    if self.colour(uncle) == Colour::Red {
+                        let u = uncle.expect("red");
+                        self.nodes[u].colour = Colour::Black;
+                        self.nodes[p].colour = Colour::Black;
+                        self.nodes[gp].colour = Colour::Red;
+                        elm = gp;
+                        continue;
+                    }
+                    let mut p = p;
+                    if self.nodes[p].right == Some(elm) {
+                        self.rotate_left(p);
+                        std::mem::swap(&mut p, &mut elm);
+                    }
+                    self.nodes[p].colour = Colour::Black;
+                    self.nodes[gp].colour = Colour::Red;
+                    self.rotate_right(gp);
+                } else {
+                    let uncle = self.nodes[gp].left;
+                    if self.colour(uncle) == Colour::Red {
+                        let u = uncle.expect("red");
+                        self.nodes[u].colour = Colour::Black;
+                        self.nodes[p].colour = Colour::Black;
+                        self.nodes[gp].colour = Colour::Red;
+                        elm = gp;
+                        continue;
+                    }
+                    let mut p = p;
+                    if self.nodes[p].left == Some(elm) {
+                        self.rotate_right(p);
+                        std::mem::swap(&mut p, &mut elm);
+                    }
+                    self.nodes[p].colour = Colour::Black;
+                    self.nodes[gp].colour = Colour::Red;
+                    self.rotate_left(gp);
+                }
+            }
+            let r = self.root.expect("not empty");
+            self.nodes[r].colour = Colour::Black;
+        }
+
+        fn find(&self, key: u32) -> Option<usize> {
+            let mut at = self.root;
+            while let Some(a) = at {
+                if key == self.nodes[a].key {
+                    return Some(a);
+                }
+                at = if key < self.nodes[a].key {
+                    self.nodes[a].left
+                } else {
+                    self.nodes[a].right
+                };
+            }
+            None
+        }
+
+        fn set_child(&mut self, parent: Option<usize>, old: usize, new: Option<usize>) {
+            match parent {
+                None => self.root = new,
+                Some(p) if self.nodes[p].left == Some(old) => self.nodes[p].left = new,
+                Some(p) => self.nodes[p].right = new,
+            }
+        }
+
+        /// `RB_REMOVE` + `RB_REMOVE_COLOR` (the sys/tree.h algorithm: a
+        /// node with two children is replaced by its in-order successor).
+        pub fn remove(&mut self, key: u32) {
+            let Some(elm) = self.find(key) else { return };
+            let (child, parent, colour);
+            if self.nodes[elm].left.is_none() || self.nodes[elm].right.is_none() {
+                child = self.nodes[elm].left.or(self.nodes[elm].right);
+                parent = self.nodes[elm].parent;
+                colour = self.nodes[elm].colour;
+                if let Some(c) = child {
+                    self.nodes[c].parent = parent;
+                }
+                self.set_child(parent, elm, child);
+            } else {
+                let mut next = self.nodes[elm].right.expect("two children");
+                while let Some(l) = self.nodes[next].left {
+                    next = l;
+                }
+                child = self.nodes[next].right;
+                let mut par = self.nodes[next].parent;
+                colour = self.nodes[next].colour;
+                if let Some(c) = child {
+                    self.nodes[c].parent = par;
+                }
+                self.set_child(par, next, child);
+                if par == Some(elm) {
+                    par = Some(next);
+                }
+                // next takes elm's place.
+                let (l, r, p, c) = {
+                    let e = &self.nodes[elm];
+                    (e.left, e.right, e.parent, e.colour)
+                };
+                self.nodes[next].left = l;
+                self.nodes[next].right = r;
+                self.nodes[next].parent = p;
+                self.nodes[next].colour = c;
+                self.set_child(p, elm, Some(next));
+                if let Some(l) = l {
+                    self.nodes[l].parent = Some(next);
+                }
+                if let Some(r) = r {
+                    self.nodes[r].parent = Some(next);
+                }
+                parent = par;
+            }
+            if colour == Colour::Black {
+                self.remove_colour(parent, child);
+            }
+        }
+
+        fn remove_colour(&mut self, mut parent: Option<usize>, mut elm: Option<usize>) {
+            while (elm.is_none() || self.colour(elm) == Colour::Black) && elm != self.root {
+                let Some(p) = parent else { break };
+                if self.nodes[p].left == elm {
+                    let mut tmp = self.nodes[p].right.expect("sibling");
+                    if self.nodes[tmp].colour == Colour::Red {
+                        self.nodes[tmp].colour = Colour::Black;
+                        self.nodes[p].colour = Colour::Red;
+                        self.rotate_left(p);
+                        tmp = self.nodes[p].right.expect("sibling");
+                    }
+                    if self.colour(self.nodes[tmp].left) == Colour::Black
+                        && self.colour(self.nodes[tmp].right) == Colour::Black
+                    {
+                        self.nodes[tmp].colour = Colour::Red;
+                        elm = Some(p);
+                        parent = self.nodes[p].parent;
+                    } else {
+                        if self.colour(self.nodes[tmp].right) == Colour::Black {
+                            if let Some(l) = self.nodes[tmp].left {
+                                self.nodes[l].colour = Colour::Black;
+                            }
+                            self.nodes[tmp].colour = Colour::Red;
+                            self.rotate_right(tmp);
+                            tmp = self.nodes[p].right.expect("sibling");
+                        }
+                        self.nodes[tmp].colour = self.nodes[p].colour;
+                        self.nodes[p].colour = Colour::Black;
+                        if let Some(r) = self.nodes[tmp].right {
+                            self.nodes[r].colour = Colour::Black;
+                        }
+                        self.rotate_left(p);
+                        elm = self.root;
+                        break;
+                    }
+                } else {
+                    let mut tmp = self.nodes[p].left.expect("sibling");
+                    if self.nodes[tmp].colour == Colour::Red {
+                        self.nodes[tmp].colour = Colour::Black;
+                        self.nodes[p].colour = Colour::Red;
+                        self.rotate_right(p);
+                        tmp = self.nodes[p].left.expect("sibling");
+                    }
+                    if self.colour(self.nodes[tmp].left) == Colour::Black
+                        && self.colour(self.nodes[tmp].right) == Colour::Black
+                    {
+                        self.nodes[tmp].colour = Colour::Red;
+                        elm = Some(p);
+                        parent = self.nodes[p].parent;
+                    } else {
+                        if self.colour(self.nodes[tmp].left) == Colour::Black {
+                            if let Some(r) = self.nodes[tmp].right {
+                                self.nodes[r].colour = Colour::Black;
+                            }
+                            self.nodes[tmp].colour = Colour::Red;
+                            self.rotate_left(tmp);
+                            tmp = self.nodes[p].left.expect("sibling");
+                        }
+                        self.nodes[tmp].colour = self.nodes[p].colour;
+                        self.nodes[p].colour = Colour::Black;
+                        if let Some(l) = self.nodes[tmp].left {
+                            self.nodes[l].colour = Colour::Black;
+                        }
+                        self.rotate_right(p);
+                        elm = self.root;
+                        break;
+                    }
+                }
+            }
+            if let Some(e) = elm {
+                self.nodes[e].colour = Colour::Black;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        /// Reference (tmux 3.8, kill-session with a window-unlinked hook
+        /// appending `#{hook_window_index}` to an option).
+        #[test]
+        fn root_order_matches_reference() {
+            let order = |n: u32| {
+                let mut t = super::Tree::default();
+                for k in 0..n {
+                    t.insert(k);
+                }
+                t.root_order()
+            };
+            assert_eq!(order(2), [0, 1]);
+            assert_eq!(order(3), [1, 2, 0]);
+            assert_eq!(order(5), [1, 2, 3, 4, 0]);
+            assert_eq!(order(8), [3, 4, 5, 6, 1, 2, 7, 0]);
+            assert_eq!(order(10), [3, 4, 5, 6, 7, 8, 1, 2, 9, 0]);
+            assert_eq!(
+                order(16),
+                [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 1, 2, 15, 0]
+            );
+            // Three windows, the last moved away: 1 then 0.
+            let mut t = super::Tree::default();
+            for k in 0..3 {
+                t.insert(k);
+            }
+            t.remove(2);
+            assert_eq!(t.root_order(), [1, 0]);
+            assert_eq!(t.keys(), [0, 1]);
+        }
+    }
 }

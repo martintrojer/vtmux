@@ -100,11 +100,14 @@ pub fn exec(
         m.fix_panes(src_w);
     }
 
-    let links = server.control_links();
     if !args.flag('d') {
         server.model.set_active(dst_w, src_wp);
         server.model.set_current(dst_s, dst_idx);
     }
+    // cmd-join-pane.c:531-536.
+    server
+        .model
+        .fire_pane_moved(src_wp, (src_w, source.index), (dst_w, Some(dst_idx)));
     let emptied = server
         .model
         .windows
@@ -114,8 +117,10 @@ pub fn exec(
         // server_kill_window(src_w, 1). The window has no panes left, so
         // nothing closes.
         server.kill_window(src_w, true);
+    } else {
+        server.model.layout_changed(src_w);
     }
-    server.control_links_changed(&links);
+    server.model.layout_changed(dst_w);
     Ok(())
 }
 

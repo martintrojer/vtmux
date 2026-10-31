@@ -7,8 +7,7 @@
 # manual, reviewed edit; --update only rewrites xfail -> pass.
 
 [tests."alerts.sh"]
-status = "xfail"
-reason = "alert flags and bell forwarding work (oracle alerts_*); the test sets alert-* hooks and vtmux has no set-hook or hook firing yet (Handle in handle_alerts, server.rs)"
+status = "pass"
 
 [tests."alternate-screen-resize.sh"]
 status = "pass"
@@ -110,8 +109,7 @@ status = "pass"
 status = "pass"
 
 [tests."control-client-sanity.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."control-client-size.sh"]
 status = "xfail"
@@ -122,12 +120,11 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."control-notify-events.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."control-notify-guard.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs refresh-client, which vtmux has not got"
 
 [tests."control-subscriptions.sh"]
 status = "xfail"
@@ -261,20 +258,18 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."hooks-after.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."hooks-lifecycle.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "hooks and their order pass up to the pane-died case: vtmux has no remain-on-exit (dead panes), so the pane goes and pane-exited fires instead"
 
 [tests."hooks-notify.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "events up to session-window-changed pass; the test then needs session groups (new-session -t), then resize-window, copy-mode events beyond those, marked panes and title stacks"
 
 [tests."hooks.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."if-shell-TERM.sh"]
 status = "pass"
@@ -452,8 +447,7 @@ status = "pass"
 status = "pass"
 
 [tests."options-array.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."options-scope.sh"]
 status = "pass"
@@ -566,15 +560,13 @@ reason = "not implemented (M0 baseline)"
 
 [tests."set-hook-B.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "set-hook -B (monitor hooks, monitor.c) is not implemented"
 
 [tests."set-hook-E.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."set-hook-R.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."show-options-output.sh"]
 status = "xfail"

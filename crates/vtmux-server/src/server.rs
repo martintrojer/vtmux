@@ -68,6 +68,10 @@ pub struct ServerConfig {
     pub default_socket: bool,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent client flags (CLIENT_*)"
+)]
 pub(crate) struct Client {
     stream: UnixStream,
     inbuf: Vec<u8>,
@@ -94,6 +98,13 @@ pub(crate) struct Client {
     pub(crate) keys: crate::key_dispatch::ClientKeys,
     /// `c->last_session`.
     pub(crate) last_session: Option<SessionId>,
+    /// `CLIENT_ATTACHED`: client-detached fires when it goes.
+    pub(crate) was_attached: bool,
+    /// The session it was last in, for the client-detached payload
+    /// (`cmd_find_from_client` on a client whose session went NULL finds
+    /// the best session; tmux keeps `c->session` until the client is
+    /// lost, server-client.c:2733).
+    pub(crate) left_session: Option<SessionId>,
     /// The status lines as drawn, the message shown over them, and their
     /// redraw flag and timers (`c->status`, `c->message_string`).
     pub(crate) status: crate::render::status::StatusLine,
@@ -487,9 +498,15 @@ impl Server {
                 let _ = self.on_client_input(id, &[]);
             }
             self.jobs_timers(Instant::now());
+            // Events from outside commands (a pane exiting, a client
+            // leaving, a rename, alerts) reach their sinks before the
+            // queues run the hooks they add.
+            self.drain_events();
             self.cmdq_process();
             self.check_window_names();
             self.check_window_resizes();
+            self.drain_events();
+            self.cmdq_process();
             self.apply_redraws();
             self.render_clients();
             self.model.redraw_panes.clear();
@@ -673,6 +690,8 @@ impl Server {
                             focused: true,
                             keys: crate::key_dispatch::ClientKeys::default(),
                             last_session: None,
+                            was_attached: false,
+                            left_session: None,
                             status: crate::render::status::StatusLine::default(),
                             written: 0,
                             pasting: false,
@@ -735,6 +754,22 @@ impl Server {
     /// (`cmd_wait_for_client_lost`, then `cmdq_next` drops the dead
     /// client's queue).
     fn drop_client(&mut self, id: ClientId) {
+        // server_client_lost (server-client.c:508-514): client-detached for
+        // an attached client, client-closed for a control or terminal one,
+        // while the client is still there to name.
+        if let Some(c) = self.clients.get(&id) {
+            let terminal = c.hello.as_ref().is_some_and(|h| h.tty.is_some());
+            let control = c.control.is_some();
+            if c.was_attached {
+                let ev = self.lost_client_event("client-detached", id);
+                self.model.push_event(ev);
+            }
+            if control || terminal {
+                let ev = self.lost_client_event("client-closed", id);
+                self.model.push_event(ev);
+            }
+            self.drain_events();
+        }
         if let Some(mut c) = self.clients.remove(&id) {
             let _ = self.poll.registry().deregister(&mut c.stream);
         }
@@ -948,8 +983,14 @@ impl Server {
         item.origin = origin;
         let argv = hello.argv.clone();
         let control = hello.flags.control != vtmux_core::protocol::ControlMode::None;
+        let terminal = hello.tty.is_some();
         if let Some(c) = self.clients.get_mut(&id) {
             c.hello = Some(hello);
+        }
+        // server-client.c:3042-3043.
+        if control || terminal {
+            self.fire_client("client-created", id);
+            self.drain_events();
         }
         // The first client loads the configuration before its own command
         // runs (server-client.c:3052-3060, cfg.c start_cfg).
@@ -1054,9 +1095,10 @@ impl Server {
         }
         self.update_focus(self.model.current_of(s).map(|(_, w, _)| w));
         self.session_attached_alerts(s);
-        // server_client_set_session: status_timer_start, then
-        // server_redraw_client.
+        // server_client_set_session: status_timer_start,
+        // client-session-changed, then server_redraw_client.
         self.status_timer_start(id);
+        self.fire_session_changed(id, None);
         self.redraw_client(id);
         Ok(())
     }
@@ -1090,9 +1132,9 @@ impl Server {
     /// `alert-*` hooks and `alerts_set_message`.
     fn handle_alerts(&mut self, alerts: &[alerts::Alert]) {
         for a in alerts {
-            // TODO(hooks): events_fire_winlink(a.kind.hook(), wl) once
-            // hooks run; alert-activity, alert-bell and alert-silence are
-            // in the options table and can be set, but nothing runs them.
+            // alerts.c:208,244,280.
+            self.model
+                .fire_winlink(a.kind.hook(), a.session, a.index, a.window);
             if a.message {
                 self.alerts_set_message(a);
             }
@@ -1147,10 +1189,29 @@ impl Server {
         let Some(client) = self.clients.get_mut(&id) else {
             return;
         };
+        let mut old = None;
         if let Some(tty) = client.hello.as_mut().and_then(|h| h.tty.as_mut()) {
+            old = Some((tty.cols, tty.rows));
             tty.cols = cols.max(1);
             tty.rows = rows.max(1);
         }
+        // server-client.c:2730-2731: client-resized once it has a session.
+        if let Some((ox, oy)) = old
+            && client.attached.is_some()
+            && client.was_attached
+        {
+            let (nx, ny) = (cols.max(1), rows.max(1));
+            let ev = self
+                .client_event("client-resized", id)
+                .int("width", nx)
+                .int("height", ny)
+                .int("old_width", ox)
+                .int("old_height", oy);
+            self.model.push_event(ev);
+        }
+        let Some(client) = self.clients.get_mut(&id) else {
+            return;
+        };
         client.compositor.invalidate();
         // server-client.c:2729: server_redraw_client.
         client.status.request_full_redraw();
@@ -1219,6 +1280,7 @@ impl Server {
         }
         self.send(id, &ServerMsg::Exit { code, message });
         if let Some(c) = self.clients.get_mut(&id) {
+            c.left_session = c.attached.or(c.left_session);
             c.attached = None;
             c.closing = true;
         }
@@ -1372,6 +1434,15 @@ impl Server {
             }
             self.pane_output_queued(p);
         }
+        // window.c:741-747.
+        self.model.fire_pane(
+            if focused {
+                "pane-focus-in"
+            } else {
+                "pane-focus-out"
+            },
+            p,
+        );
     }
 
     /// The pane a client's keys go to (`cmd_find_from_client`).
@@ -1979,7 +2050,6 @@ impl Server {
         )
         .unwrap_or(0);
         let activity = self.model.touch();
-        let before = self.control_links();
         self.model.insert_session(Session {
             id,
             name,
@@ -1993,6 +2063,11 @@ impl Server {
             env,
             link_alerts: BTreeMap::new(),
             link_seq: BTreeMap::new(),
+            link_tree: {
+                let mut t = crate::model::rb::Tree::default();
+                t.insert(index);
+                t
+            },
         });
         if let Some((x, y)) = spec.default_size {
             // cmd-new-session.c:274-280: -x/-y become the session's
@@ -2003,8 +2078,59 @@ impl Server {
                 Value::String(format!("{x}x{y}")),
             );
         }
-        self.control_links_changed(&before);
+        // spawn_window (spawn.c:233-235), then cmd-new-session.c:328.
+        self.fire_spawned(id, index, window_id, false);
+        self.model.fire_session("session-created", id, true);
         Ok(id)
+    }
+
+    /// The events of `spawn_window` / `spawn_pane` once the new window is
+    /// linked (spawn.c:79-110, 233-235): pane-created, window-created,
+    /// window-linked.
+    pub(crate) fn fire_spawned(&mut self, s: SessionId, index: u32, w: WindowId, respawn: bool) {
+        let Some(p) = self.model.windows.get(&w).map(Window::active) else {
+            return;
+        };
+        self.fire_pane_created(s, index, p, false, respawn);
+        if !respawn {
+            self.model.fire_window("window-created", w);
+            self.model.fire_winlink("window-linked", s, index, w);
+        }
+    }
+
+    /// `spawn_fire_pane_created` (spawn.c:73-111).
+    pub(crate) fn fire_pane_created(
+        &mut self,
+        s: SessionId,
+        index: u32,
+        p: PaneId,
+        empty: bool,
+        respawn: bool,
+    ) {
+        let m = &self.model;
+        let Some(pane) = m.panes.get(&p) else { return };
+        let w = pane.window;
+        let cmd = crate::names::stringify_argv(&pane.argv);
+        let command = if cmd.is_empty() {
+            pane.shell.to_string_lossy().into_owned()
+        } else {
+            cmd
+        };
+        let cwd = pane.cwd.to_string_lossy().into_owned();
+        let ev = crate::events::Event::new("pane-created")
+            .target(crate::target::Found {
+                pane: Some(p),
+                ..crate::target::Found::from_winlink(m, s, index)
+            })
+            .session(m, "session", s)
+            .window(m, "window", w)
+            .int("window_index", index)
+            .pane("pane", p)
+            .text("pane_command", command)
+            .text("pane_current_path", cwd)
+            .int("created_empty", i64::from(empty))
+            .int("created_respawn", i64::from(respawn));
+        self.model.push_event(ev);
     }
 
     /// The window half of `spawn_window` (spawn.c:183-241) once its first
@@ -2079,7 +2205,6 @@ impl Server {
     pub fn new_window(&mut self, nw: &NewWindow<'_>) -> Result<u32, String> {
         let s = nw.session;
         let mut detached = nw.detached;
-        let before = self.control_links();
         if let Some(index) = nw.index
             && self.model.sessions[&s].windows.contains_key(&index)
         {
@@ -2125,22 +2250,27 @@ impl Server {
         self.insert_window(window_id, pane, nw.name.clone(), cols, rows, nw.client);
         let session = self.model.sessions.get_mut(&s).expect("target session");
         session.windows.insert(index, window_id);
+        session.sync_link_tree();
         if !session.windows.contains_key(&session.current) {
             session.current = index;
         }
+        // spawn_pane fires pane-created; spawn_window selects, then fires
+        // window-created and window-linked.
+        let p = self.model.windows[&window_id].active();
+        self.fire_pane_created(s, index, p, false, false);
         if !detached {
             self.model.set_current(s, index);
         }
-        self.control_links_changed(&before);
+        self.model.fire_window("window-created", window_id);
+        self.model
+            .fire_winlink("window-linked", s, index, window_id);
         Ok(index)
     }
 
     /// `server_kill_window` (server-fn.c:239-262) with the PTYs closed and
     /// control clients told.
     pub fn kill_window(&mut self, w: WindowId, renumber: bool) {
-        let before = self.control_links();
         let panes = self.model.kill_window(w, renumber);
-        self.control_links_changed(&before);
         for pane in panes {
             self.close_pane_io(pane);
         }
@@ -2234,6 +2364,7 @@ impl Server {
             shell,
             cwd: ps.cwd.clone(),
             exited: false,
+            status: None,
             changed: false,
             last_rename: None,
             rect: ps.rect,
@@ -2251,9 +2382,7 @@ impl Server {
     /// `server_destroy_session` + `session_destroy`: its panes' processes
     /// get SIGHUP when their PTYs close.
     pub fn destroy_session(&mut self, s: SessionId) {
-        let before = self.control_links();
         let panes = self.model.remove_session(s);
-        self.control_links_changed(&before);
         for pane in panes {
             self.close_pane_io(pane);
         }
@@ -2264,12 +2393,37 @@ impl Server {
     /// with the last pane.
     pub fn destroy_pane(&mut self, p: PaneId) {
         self.hangup_pane(p);
-        let before = self.control_links();
         let panes = self.model.remove_pane(p);
-        self.control_links_changed(&before);
         for pane in panes {
             self.close_pane_io(pane);
         }
+    }
+
+    /// `server_destroy_pane(wp, 1)` for a pane whose program went:
+    /// pane-exited (with its status, once reaped), then the pane goes.
+    fn pane_exited(&mut self, p: PaneId) {
+        self.fire_pane_exit("pane-exited", p);
+        self.destroy_pane(p);
+    }
+
+    /// `server_fire_pane_exit` (server-fn.c:35-56) once the status is in
+    /// (`PANE_STATUSREADY`): kill-pane and friends fire nothing.
+    fn fire_pane_exit(&mut self, name: &str, p: PaneId) {
+        let Some(pane) = self.model.panes.get(&p) else {
+            return;
+        };
+        let Some(status) = pane.status else { return };
+        let w = pane.window;
+        let mut ev = crate::events::Event::new(name)
+            .target(crate::target::Found::from_pane(&self.model, p))
+            .pane("pane", p)
+            .window(&self.model, "window", w);
+        ev = match status {
+            crate::jobs::JobStatus::Exited(code) => ev.int("exit_status", code),
+            crate::jobs::JobStatus::Signaled(sig) => ev.text("exit_signal", sig_name(sig)),
+        };
+        ev = ev.int("exit_success", i64::from(status.success()));
+        self.model.push_event(ev);
     }
 
     /// `respawn-pane` (spawn.c:312-345 with `SPAWN_RESPAWN|SPAWN_KILL`):
@@ -2410,9 +2564,15 @@ impl Server {
         }
         self.pane_output_queued(p);
         if closed {
-            // window_pane_error_callback: the PTY is gone; destroy the pane
-            // (server_destroy_pane, remain-on-exit off).
-            self.destroy_pane(p);
+            // window_pane_error_callback: the PTY is gone. The pane goes
+            // once the exit status is in (server_destroy_pane returns
+            // early without PANE_STATUSREADY, server-fn.c:382), so its
+            // pane-exited carries the status; until then the PTY is closed.
+            if self.model.panes.get(&p).is_some_and(|x| x.status.is_some()) {
+                self.pane_exited(p);
+            } else if let Some(io) = self.model.panes.get_mut(&p).and_then(|x| x.io.take()) {
+                io.deregister(self.poll.registry());
+            }
         }
     }
 
@@ -2475,6 +2635,7 @@ impl Server {
                         .find(|p| p.pid == raw)
                         .map(|p| {
                             p.exited = true;
+                            p.status = Some(job_status);
                             p.id
                         });
                     if let Some(p) = found {
@@ -2488,7 +2649,7 @@ impl Server {
                             .and_then(|x| x.io.as_ref())
                             .is_none_or(|io| io.readable_bytes() == 0);
                         if drained && self.model.panes.contains_key(&p) {
-                            self.destroy_pane(p);
+                            self.pane_exited(p);
                         }
                     }
                 }
@@ -2543,11 +2704,8 @@ impl Server {
             }
             // window_set_name only on a change (names.c:94-99), which
             // fires window-renamed.
-            if let Some(window) = self.model.windows.get_mut(&w)
-                && window.name != name
-            {
-                window.name.clone_from(&name);
-                self.control_window_renamed(w, &name);
+            if self.model.windows.get(&w).is_some_and(|x| x.name != name) {
+                self.model.set_window_name(w, &name);
                 // names.c:100.
                 self.model.redraw(crate::model::Redraw::WindowStatus(w));
             }
@@ -2573,4 +2731,13 @@ pub fn run_server(listener: StdListener, socket: PathBuf, config: ServerConfig) 
         },
         Err(_) => 1,
     }
+}
+
+/// `sig2name` (compat): the signal's name without `SIG`.
+fn sig_name(sig: i32) -> String {
+    use rustix::process::Signal;
+    let name = Signal::from_named_raw(sig).map_or_else(|| sig.to_string(), |s| format!("{s:?}"));
+    name.trim_start_matches("Signal::")
+        .trim_start_matches("SIG")
+        .to_owned()
 }

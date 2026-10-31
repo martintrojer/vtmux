@@ -10,7 +10,7 @@
 //! never appear inside an open guard: they are deferred until the outermost
 //! guard closes (control.c `control_notify_write`, `control_write_guard`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vtmux_core::cmd::{self, ParseOpts};
@@ -120,18 +120,6 @@ fn now_epoch() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0))
 }
-
-/// One change to the session/window links.
-#[derive(Clone, Copy)]
-enum Link {
-    SessionsChanged,
-    Close(WindowId),
-    Add(WindowId),
-}
-
-/// Which windows each session links: the before/after picture that
-/// [`Server::control_links_changed`] turns into notifications.
-pub type Links = BTreeMap<SessionId, BTreeSet<WindowId>>;
 
 impl Server {
     /// The control clients, in client order.
@@ -379,6 +367,7 @@ impl Server {
             cs.finished = true;
             cs.deferred.clear();
             if let Some(c) = self.clients.get_mut(&id) {
+                c.left_session = c.attached.or(c.left_session);
                 c.attached = None;
             }
             self.control_flush(id);
@@ -389,6 +378,7 @@ impl Server {
     /// `detach-client` on a control client.
     pub(crate) fn control_detach(&mut self, id: ClientId) {
         if let Some(c) = self.clients.get_mut(&id) {
+            c.left_session = c.attached.or(c.left_session);
             c.attached = None;
             if let Some(cs) = c.control.as_mut() {
                 cs.exit.get_or_insert(Exit::Detach);
@@ -403,20 +393,20 @@ impl Server {
         let Some(name) = self.model.sessions.get(&s).map(|x| x.name.clone()) else {
             return;
         };
+        let _ = name;
         let Some(c) = self.clients.get_mut(&id) else {
             return;
         };
+        let old = c.attached;
         c.attached = Some(s);
-        if let Some(cs) = c.control.as_mut()
-            && cs.wants_notifications()
-        {
-            cs.notify(format!("%session-changed {s} {name}").into_bytes());
-        }
         // server_client_set_session: the latest client (server-client.c:465),
-        // then session_update_activity (468).
+        // then session_update_activity (468), the alerts, then
+        // client-session-changed, which control mode writes as
+        // %session-changed to the client itself.
         self.set_latest(s, id);
         self.model.touch_session(s);
         self.session_attached_alerts(s);
+        self.fire_session_changed(id, old);
         self.control_flush(id);
     }
 
@@ -452,95 +442,190 @@ impl Server {
         self.control_notify(&|s| s.filter(|s| linking.contains(s)).map(|_| line.clone()));
     }
 
-    /// The session-to-window links now.
-    pub(crate) fn control_links(&self) -> Links {
-        self.model
-            .sessions
-            .values()
-            .map(|s| (s.id, s.windows.values().copied().collect()))
-            .collect()
-    }
-
-    /// Notifications for what changed since `before`, in tmux's order:
-    /// a closed session's clients exit first (`server_destroy_session`),
-    /// then `%sessions-changed` and its windows' closes (`session_destroy`
-    /// fires session-closed before window-unlinked); a new session's
-    /// windows are linked before `%sessions-changed` (session-created).
-    pub(crate) fn control_links_changed(&mut self, before: &Links) {
-        let after = self.control_links();
-        for id in self.control_ids() {
-            if let Some(c) = self.clients.get_mut(&id)
-                && let Some(s) = c.attached
-                && !after.contains_key(&s)
-                && let Some(cs) = c.control.as_mut()
-            {
-                cs.exit.get_or_insert(Exit::Return);
-                c.attached = None;
-            }
-        }
-        let mut events = Vec::new();
-        for (s, windows) in before {
-            match after.get(s) {
-                None => {
-                    events.push(Link::SessionsChanged);
-                    events.extend(windows.iter().map(|&w| Link::Close(w)));
-                }
-                Some(now) => {
-                    events.extend(windows.difference(now).map(|&w| Link::Close(w)));
-                    events.extend(now.difference(windows).map(|&w| Link::Add(w)));
-                }
-            }
-        }
-        for (s, windows) in &after {
-            if !before.contains_key(s) {
-                events.extend(windows.iter().map(|&w| Link::Add(w)));
-                events.push(Link::SessionsChanged);
-            }
-        }
-        let linked = |links: &Links, s: SessionId, w: WindowId| {
-            links.get(&s).is_some_and(|ws| ws.contains(&w))
-        };
-        for event in events {
-            self.control_notify(&|s| {
-                let line = match event {
-                    Link::SessionsChanged => "%sessions-changed".to_owned(),
-                    // control-notify.c:128-176: `window-` when the client's
-                    // session links the window, else `unlinked-window-`.
-                    Link::Close(w) if linked(before, s?, w) || linked(&after, s?, w) => {
-                        format!("%window-close {w}")
-                    }
-                    Link::Close(w) => format!("%unlinked-window-close {w}"),
-                    Link::Add(w) if linked(&after, s?, w) => format!("%window-add {w}"),
-                    Link::Add(w) => format!("%unlinked-window-add {w}"),
-                };
-                Some(line.into_bytes())
-            });
-        }
-    }
-
     /// The control-mode sink of the event layer (control-notify.c
-    /// `control_build_events`). Notifications are still raised by hand
-    /// below until they move here.
-    #[allow(clippy::unused_self)] // until the notifications move here
-    pub(crate) fn control_event(&mut self, _ev: &crate::events::Event) {}
-
-    /// `%session-renamed` (control-notify.c:250-267).
-    pub(crate) fn control_session_renamed(&mut self, s: SessionId, name: &str) {
-        let line = format!("%session-renamed {s} {name}").into_bytes();
-        self.control_notify(&|_| Some(line.clone()));
+    /// `control_build_events`): one notification per event, to every
+    /// control client that should hear it.
+    #[allow(clippy::too_many_lines)] // one arm per notification
+    pub(crate) fn control_event(&mut self, ev: &crate::events::Event) {
+        let window_line = |kind: &str, w: WindowId, rest: &str, linked: bool| {
+            let prefix = if linked { "" } else { "unlinked-" };
+            format!("%{prefix}window-{kind} {w}{rest}").into_bytes()
+        };
+        match ev.name.as_str() {
+            // control-notify.c:62-104.
+            "window-layout-changed" => {
+                let Some(w) = ev.get_window("window") else {
+                    return;
+                };
+                self.control_layout_changed(w);
+            }
+            // control-notify.c:107-123.
+            "window-pane-changed" => {
+                let Some(w) = ev.get_window("window") else {
+                    return;
+                };
+                let Some(p) = self.model.windows.get(&w).and_then(|x| x.panes.active) else {
+                    return;
+                };
+                let line = format!("%window-pane-changed {w} {p}").into_bytes();
+                self.control_notify(&|_| Some(line.clone()));
+            }
+            // control-notify.c:126-203: `window-` to clients whose session
+            // links the window, `unlinked-window-` to the rest.
+            kind @ ("window-unlinked" | "window-linked" | "window-renamed") => {
+                let Some(w) = ev.get_window("window") else {
+                    return;
+                };
+                let (word, rest) = match kind {
+                    "window-unlinked" => ("close", String::new()),
+                    "window-linked" => ("add", String::new()),
+                    _ => (
+                        "renamed",
+                        format!(
+                            " {}",
+                            self.model.windows.get(&w).map_or("", |x| x.name.as_str())
+                        ),
+                    ),
+                };
+                // The links when it fired, plus the window's sessions now
+                // for one that already went (window-unlinked fires before
+                // the winlink is removed).
+                let mut linked = ev.linked.clone();
+                if kind != "window-unlinked" {
+                    linked.extend(self.model.sessions_with(w).map(|s| s.id));
+                }
+                self.control_notify(&|s| Some(window_line(word, w, &rest, linked.contains(&s?))));
+            }
+            // control-notify.c:205-230.
+            "client-session-changed" => {
+                let Some((cc, cname)) = ev.get_client("client") else {
+                    return;
+                };
+                let Some(s) = self.clients.get(&cc).and_then(|c| c.attached) else {
+                    return;
+                };
+                let Some(name) = self.model.sessions.get(&s).map(|x| x.name.clone()) else {
+                    return;
+                };
+                let cname = cname.to_owned();
+                for id in self.control_ids() {
+                    let line = if id == cc {
+                        format!("%session-changed {s} {name}")
+                    } else {
+                        format!("%client-session-changed {cname} {s} {name}")
+                    };
+                    self.control_notify_one(id, true, line.into_bytes());
+                }
+            }
+            // control-notify.c:233-247.
+            "client-detached" => {
+                let Some((_, cname)) = ev.get_client("client") else {
+                    return;
+                };
+                let line = format!("%client-detached {cname}").into_bytes();
+                self.control_notify_all(&line);
+            }
+            // control-notify.c:250-267.
+            "session-renamed" => {
+                let Some((s, name)) = ev.get_session("session") else {
+                    return;
+                };
+                let line = format!("%session-renamed {s} {name}").into_bytes();
+                self.control_notify_all(&line);
+            }
+            // control-notify.c:270-296.
+            "session-created" => self.control_notify_all(b"%sessions-changed"),
+            "session-closed" => {
+                // server_destroy_session ran first: a control client of the
+                // session with nowhere to go exits (CLIENT_EXIT), and so
+                // hears nothing more (server-fn.c:513-525).
+                if let Some((s, _)) = ev.get_session("session") {
+                    for id in self.control_ids() {
+                        if let Some(c) = self.clients.get_mut(&id)
+                            && c.attached == Some(s)
+                        {
+                            c.attached = None;
+                            if let Some(cs) = c.control.as_mut() {
+                                cs.exit.get_or_insert(Exit::Return);
+                            }
+                        }
+                    }
+                }
+                self.control_notify_all(b"%sessions-changed");
+            }
+            // control-notify.c:299-318.
+            "session-window-changed" => {
+                let Some((s, _)) = ev.get_session("session") else {
+                    return;
+                };
+                let Some((_, w, _)) = self.model.current_of(s) else {
+                    return;
+                };
+                let line = format!("%session-window-changed {s} {w}").into_bytes();
+                self.control_notify_all(&line);
+            }
+            // control-notify.c:321-345.
+            "paste-buffer-changed" | "paste-buffer-deleted" => {
+                let Some(name) = ev.get_text("paste_buffer") else {
+                    return;
+                };
+                let line = format!("%{} {name}", ev.name).into_bytes();
+                self.control_notify_all(&line);
+            }
+            // control-notify.c:34-59.
+            "pane-mode-changed" => {
+                let Some(p) = ev.get_pane("pane") else { return };
+                let line = format!("%pane-mode-changed {p}").into_bytes();
+                self.control_notify_all(&line);
+            }
+            _ => {}
+        }
     }
 
-    /// `%window-renamed` / `%unlinked-window-renamed` (control-notify.c:178-203).
-    pub(crate) fn control_window_renamed(&mut self, w: WindowId, name: &str) {
-        let linking: BTreeSet<SessionId> = self.model.sessions_with(w).map(|s| s.id).collect();
-        self.control_notify(&|s| {
-            let s = s?;
-            Some(if linking.contains(&s) {
-                format!("%window-renamed {w} {name}").into_bytes()
-            } else {
-                format!("%unlinked-window-renamed {w} {name}").into_bytes()
-            })
-        });
+    /// `%layout-change` (control-notify.c:62-104): to each client whose
+    /// session has the window, unless the window has gone or has no layout.
+    fn control_layout_changed(&mut self, w: WindowId) {
+        const TEMPLATE: &str = "%layout-change #{window_id} #{window_layout} \
+                                #{window_visible_layout} #{window_raw_flags}";
+        if !self.model.windows.contains_key(&w) || self.model.sessions_with(w).next().is_none() {
+            return;
+        }
+        for id in self.control_ids() {
+            let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+                continue;
+            };
+            let Some(index) = self.model.index_of(s, w) else {
+                continue;
+            };
+            let found = crate::target::Found::from_winlink(&self.model, s, index);
+            let ctx = self.format_ctx(found, Some(id));
+            let line = vtmux_core::format::expand_str(TEMPLATE, &ctx).into_bytes();
+            self.control_notify_one(id, true, line);
+        }
+    }
+
+    /// One notification to every control client that should hear it,
+    /// attached or not.
+    fn control_notify_all(&mut self, line: &[u8]) {
+        for id in self.control_ids() {
+            self.control_notify_one(id, false, line.to_vec());
+        }
+    }
+
+    /// `control_notify_write` to client `id` if it should hear
+    /// notifications (and, with `attached`, has a session).
+    fn control_notify_one(&mut self, id: ClientId, attached: bool, line: Vec<u8>) {
+        let Some(c) = self.clients.get_mut(&id) else {
+            return;
+        };
+        if attached && c.attached.is_none() {
+            return;
+        }
+        let Some(cs) = c.control.as_mut() else { return };
+        if cs.wants_notifications() {
+            cs.notify(line);
+            self.control_flush(id);
+        }
     }
 }
 

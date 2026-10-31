@@ -30,6 +30,8 @@ pub fn exec(
     };
     if select(server, item, args, found, cycle)? {
         server.recalculate_size(w, false);
+        // cmd-select-layout.c:143-147.
+        server.model.layout_changed(w);
     }
     Ok(())
 }

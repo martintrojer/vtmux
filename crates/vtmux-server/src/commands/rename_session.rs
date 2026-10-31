@@ -30,6 +30,12 @@ pub fn exec(
     if server.model.session_named(&name).is_some() {
         return Err(EdgeError::DuplicateSession(name).into());
     }
+    // cmd-rename-session.c:75-87: the payload is made before the rename.
+    let ev = crate::events::Event::new("session-renamed")
+        .target(Found::from_session(&server.model, s))
+        .session(&server.model, "session", s)
+        .text("old_name", old.clone())
+        .text("new_name", name.clone());
     // The sessions are listed in name order: re-key.
     server.model.by_name.remove(&old);
     server.model.by_name.insert(name.clone(), s);
@@ -41,6 +47,9 @@ pub fn exec(
         .name
         .clone_from(&name);
     server.model.redraw(Redraw::SessionStatus(s));
-    server.control_session_renamed(s, &name);
+    // The payload holds the session itself, which by now has its new name.
+    server
+        .model
+        .push_event(ev.session(&server.model, "session", s));
     Ok(())
 }

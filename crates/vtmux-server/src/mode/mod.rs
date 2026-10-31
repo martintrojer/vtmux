@@ -133,9 +133,46 @@ impl Model {
         if let Some(m) = entry.as_copy_mut() {
             m.kill = kill;
         }
-        self.panes.get_mut(&p).expect("pane").modes.insert(0, entry);
+        let pane = self.panes.get_mut(&p).expect("pane");
+        let previous = pane.modes.first().map(Mode::name);
+        let name = entry.name();
+        pane.modes.insert(0, entry);
         self.mode_changed(p);
+        self.fire_mode_changed(p, previous, Some(name), true);
         true
+    }
+
+    /// `window_fire_pane_mode_changed` (window.c:158-178) for
+    /// pane-mode-entered/exited, then pane-mode-changed.
+    fn fire_mode_changed(
+        &mut self,
+        p: PaneId,
+        previous: Option<&str>,
+        current: Option<&str>,
+        entered: bool,
+    ) {
+        let Some(w) = self.panes.get(&p).map(|x| x.window) else {
+            return;
+        };
+        let first = if entered {
+            "pane-mode-entered"
+        } else {
+            "pane-mode-exited"
+        };
+        for name in [first, "pane-mode-changed"] {
+            let mut ev = crate::events::Event::new(name)
+                .target(crate::target::Found::from_pane(self, p))
+                .pane("pane", p)
+                .window(self, "window", w)
+                .int("mode_entered", i64::from(entered));
+            if let Some(c) = current {
+                ev = ev.text("current_mode", c);
+            }
+            if let Some(pr) = previous {
+                ev = ev.text("previous_mode", pr);
+            }
+            self.push_event(ev);
+        }
     }
 }
 
@@ -153,7 +190,10 @@ impl Server {
         if let Some(Mode::Copy(next)) = pane.modes.first_mut() {
             next.resize(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         }
+        let current = pane.modes.first().map(Mode::name);
         self.model.mode_changed(p);
+        self.model
+            .fire_mode_changed(p, Some(old.name()), current, false);
         if old.as_copy().is_some_and(|m| m.kill) {
             self.destroy_pane(p);
         }
