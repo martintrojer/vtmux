@@ -1,0 +1,25 @@
+name = "status_msg_lazy"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
+  { run = ["select-pane", "-t", "a:0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["resize-pane", "-Z", "-t", "a:1"] },
+  { screen = {} },
+  { run = ["set", "-g", "@x", "1"] },
+  { screen = {} },
+  { run = ["resize-pane", "-Z", "-t", "a:1"] },
+  { run = ["rename-window", "-t", "a:1", "y"] },
+  { screen = {} },
+  { run = ["set", "-g", "status-interval", "1"] },
+  { run = ["resize-pane", "-Z", "-t", "a:1"] },
+  { screen = {} },
+  { settle = { quiet_ms = 1500 } },
+  { screen = {} },
+  { run = ["select-window", "-t", "a:1"] },
+  { screen = {} },
+]
