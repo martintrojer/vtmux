@@ -1485,8 +1485,13 @@ fn ring_settles(a: &Attached, want: &[&str]) {
 
 /// A 20x8 client with the status line off, `cat` panes and `cmds` run.
 fn ring_world(cmds: &[&[&str]]) -> (World, Attached) {
+    ring_world_sized(cmds, 20, 8)
+}
+
+/// [`ring_world`] on a `cols` x `rows` client.
+fn ring_world_sized(cmds: &[&[&str]], cols: u16, rows: u16) -> (World, Attached) {
     let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
-    let a = w.attach_sized(&["new", "-s", "a", "-n", "w", "cat"], 20, 8);
+    let a = w.attach_sized(&["new", "-s", "a", "-n", "w", "cat"], cols, rows);
     a.wait(|a| a.text().contains("\x1b[?1049h"));
     for cmd in [
         &["set", "-g", "status", "off"][..],
@@ -1760,6 +1765,377 @@ fn focus_ring_pane_border_status() {
             "b.........A........A",
             "b.........A........A",
             "bbb.bbbbbbAAA.AAAAAA",
+        ],
+    );
+}
+
+/// Select each pane in turn and wait for its ring screen.
+fn ring_follows(w: &World, a: &Attached, screens: &[(&str, &[&str])]) {
+    for (pane, want) in screens {
+        assert!(w.cli(&["selectp", "-t", pane]).status.success());
+        ring_settles(a, want);
+    }
+}
+
+/// D23, 2x2 tiled: the active pane in each quadrant of the 4-way cross
+/// gets its own heavy corner there (`╃ ╄ ╅ ╆`), in the active colour. The
+/// ring decides weights from the active pane's rectangle, not from which
+/// pane owns the cell's sides: at a cross the panes up-right and down-left
+/// own the down-right pane's slots (reviewer-37).
+#[test]
+fn focus_ring_two_by_two_cross() {
+    let (w, a) = ring_world(&[
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["select-layout", "-t", "a", "tiled"],
+    ]);
+    ring_follows(
+        &w,
+        &a,
+        &[
+            (
+                "%0",
+                &[
+                    "┏━━━━━━━━┱─────────┐",
+                    "┃        ┃         │",
+                    "┃        ┃         │",
+                    "┡━━━━━━━━╃─────────┤",
+                    "│        │         │",
+                    "│        │         │",
+                    "│        │         │",
+                    "└────────┴─────────┘",
+                    "AAAAAAAAAAbbbbbbbbbb",
+                    "A........A.........b",
+                    "A........A.........b",
+                    "AAAAAAAAAAbbbbbbbbbb",
+                    "b........b.........b",
+                    "b........b.........b",
+                    "b........b.........b",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                ],
+            ),
+            (
+                "%1",
+                &[
+                    "┌────────┲━━━━━━━━━┓",
+                    "│        ┃         ┃",
+                    "│        ┃         ┃",
+                    "├────────╄━━━━━━━━━┩",
+                    "│        │         │",
+                    "│        │         │",
+                    "│        │         │",
+                    "└────────┴─────────┘",
+                    "bbbbbbbbbAAAAAAAAAAA",
+                    "b........A.........A",
+                    "b........A.........A",
+                    "bbbbbbbbbAAAAAAAAAAA",
+                    "b........b.........b",
+                    "b........b.........b",
+                    "b........b.........b",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                ],
+            ),
+            (
+                "%2",
+                &[
+                    "┌────────┬─────────┐",
+                    "│        │         │",
+                    "│        │         │",
+                    "┢━━━━━━━━╅─────────┤",
+                    "┃        ┃         │",
+                    "┃        ┃         │",
+                    "┃        ┃         │",
+                    "┗━━━━━━━━┹─────────┘",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                    "b........b.........b",
+                    "b........b.........b",
+                    "AAAAAAAAAAbbbbbbbbbb",
+                    "A........A.........b",
+                    "A........A.........b",
+                    "A........A.........b",
+                    "AAAAAAAAAAbbbbbbbbbb",
+                ],
+            ),
+            (
+                "%3",
+                &[
+                    "┌────────┬─────────┐",
+                    "│        │         │",
+                    "│        │         │",
+                    "├────────╆━━━━━━━━━┪",
+                    "│        ┃         ┃",
+                    "│        ┃         ┃",
+                    "│        ┃         ┃",
+                    "└────────┺━━━━━━━━━┛",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                    "b........b.........b",
+                    "b........b.........b",
+                    "bbbbbbbbbAAAAAAAAAAA",
+                    "b........A.........A",
+                    "b........A.........A",
+                    "b........A.........A",
+                    "bbbbbbbbbAAAAAAAAAAA",
+                ],
+            ),
+        ],
+    );
+}
+
+/// D23, 3x3 tiled: the middle pane sits in all four quadrants of a cross
+/// at once (`╆ ╅ ╄ ╃`); the bottom-right pane closes on a `╆`.
+#[test]
+fn focus_ring_three_by_three_cross() {
+    let mut cmds: Vec<&[&str]> = Vec::new();
+    for _ in 0..8 {
+        cmds.push(&["splitw", "-t", "a", "cat"]);
+        cmds.push(&["select-layout", "-t", "a", "tiled"]);
+    }
+    let (w, a) = ring_world_sized(&cmds, 20, 11);
+    ring_follows(
+        &w,
+        &a,
+        &[
+            (
+                "%4",
+                &[
+                    "┌─────┬─────┬──────┐",
+                    "│     │     │      │",
+                    "│     │     │      │",
+                    "├─────╆━━━━━╅──────┤",
+                    "│     ┃     ┃      │",
+                    "│     ┃     ┃      │",
+                    "├─────╄━━━━━╃──────┤",
+                    "│     │     │      │",
+                    "│     │     │      │",
+                    "│     │     │      │",
+                    "└─────┴─────┴──────┘",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                    "b.....b.....b......b",
+                    "b.....b.....b......b",
+                    "bbbbbbAAAAAAAbbbbbbb",
+                    "b.....A.....A......b",
+                    "b.....A.....A......b",
+                    "bbbbbbAAAAAAAbbbbbbb",
+                    "b.....b.....b......b",
+                    "b.....b.....b......b",
+                    "b.....b.....b......b",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                ],
+            ),
+            (
+                "%8",
+                &[
+                    "┌─────┬─────┬──────┐",
+                    "│     │     │      │",
+                    "│     │     │      │",
+                    "├─────┼─────┼──────┤",
+                    "│     │     │      │",
+                    "│     │     │      │",
+                    "├─────┼─────╆━━━━━━┪",
+                    "│     │     ┃      ┃",
+                    "│     │     ┃      ┃",
+                    "│     │     ┃      ┃",
+                    "└─────┴─────┺━━━━━━┛",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                    "b.....b.....b......b",
+                    "b.....b.....b......b",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                    "b.....b.....b......b",
+                    "b.....b.....b......b",
+                    "bbbbbbbbbbbbAAAAAAAA",
+                    "b.....b.....A......A",
+                    "b.....b.....A......A",
+                    "b.....b.....A......A",
+                    "bbbbbbbbbbbbAAAAAAAA",
+                ],
+            ),
+        ],
+    );
+}
+
+/// D23, nested splits: a left-right split with each side split top-bottom
+/// meets in a cross the layout tree never names; the active pane in each
+/// quadrant gets its heavy corner there.
+#[test]
+fn focus_ring_nested_cross() {
+    let (w, a) = ring_world(&[
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["splitw", "-v", "-t", "%0", "cat"],
+        &["splitw", "-v", "-t", "%1", "cat"],
+    ]);
+    ring_follows(
+        &w,
+        &a,
+        &[
+            (
+                "%0",
+                &[
+                    "┏━━━━━━━━━┱────────┐",
+                    "┃         ┃        │",
+                    "┃         ┃        │",
+                    "┃         ┃        │",
+                    "┡━━━━━━━━━╃────────┤",
+                    "│         │        │",
+                    "│         │        │",
+                    "└─────────┴────────┘",
+                    "AAAAAAAAAAAbbbbbbbbb",
+                    "A.........A........b",
+                    "A.........A........b",
+                    "A.........A........b",
+                    "AAAAAAAAAAAbbbbbbbbb",
+                    "b.........b........b",
+                    "b.........b........b",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                ],
+            ),
+            (
+                "%1",
+                &[
+                    "┌─────────┲━━━━━━━━┓",
+                    "│         ┃        ┃",
+                    "│         ┃        ┃",
+                    "│         ┃        ┃",
+                    "├─────────╄━━━━━━━━┩",
+                    "│         │        │",
+                    "│         │        │",
+                    "└─────────┴────────┘",
+                    "bbbbbbbbbbAAAAAAAAAA",
+                    "b.........A........A",
+                    "b.........A........A",
+                    "b.........A........A",
+                    "bbbbbbbbbbAAAAAAAAAA",
+                    "b.........b........b",
+                    "b.........b........b",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                ],
+            ),
+            (
+                "%2",
+                &[
+                    "┌─────────┬────────┐",
+                    "│         │        │",
+                    "│         │        │",
+                    "│         │        │",
+                    "┢━━━━━━━━━╅────────┤",
+                    "┃         ┃        │",
+                    "┃         ┃        │",
+                    "┗━━━━━━━━━┹────────┘",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                    "b.........b........b",
+                    "b.........b........b",
+                    "b.........b........b",
+                    "AAAAAAAAAAAbbbbbbbbb",
+                    "A.........A........b",
+                    "A.........A........b",
+                    "AAAAAAAAAAAbbbbbbbbb",
+                ],
+            ),
+            (
+                "%3",
+                &[
+                    "┌─────────┬────────┐",
+                    "│         │        │",
+                    "│         │        │",
+                    "│         │        │",
+                    "├─────────╆━━━━━━━━┪",
+                    "│         ┃        ┃",
+                    "│         ┃        ┃",
+                    "└─────────┺━━━━━━━━┛",
+                    "bbbbbbbbbbbbbbbbbbbb",
+                    "b.........b........b",
+                    "b.........b........b",
+                    "b.........b........b",
+                    "bbbbbbbbbbAAAAAAAAAA",
+                    "b.........A........A",
+                    "b.........A........A",
+                    "bbbbbbbbbbAAAAAAAAAA",
+                ],
+            ),
+        ],
+    );
+}
+
+/// D23, nested splits: a right side split top-bottom, its bottom split
+/// again left-right, mixes weights at T junctions (`┢ ┱ ┲ ┡ ┯ ┩`).
+#[test]
+fn focus_ring_nested_tees() {
+    let (w, a) = ring_world_sized(
+        &[
+            &["splitw", "-h", "-t", "a", "cat"],
+            &["splitw", "-v", "-t", "%1", "cat"],
+            &["splitw", "-h", "-t", "%2", "cat"],
+        ],
+        24,
+        8,
+    );
+    ring_follows(
+        &w,
+        &a,
+        &[
+            (
+                "%2",
+                &[
+                    "┌───────────┬──────────┐",
+                    "│           │          │",
+                    "│           │          │",
+                    "│           │          │",
+                    "│           ┢━━━━━┱────┤",
+                    "│           ┃     ┃    │",
+                    "│           ┃     ┃    │",
+                    "└───────────┺━━━━━┹────┘",
+                    "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "b...........b..........b",
+                    "b...........b..........b",
+                    "b...........b..........b",
+                    "b...........AAAAAAAbbbbb",
+                    "b...........A.....A....b",
+                    "b...........A.....A....b",
+                    "bbbbbbbbbbbbAAAAAAAbbbbb",
+                ],
+            ),
+            (
+                "%3",
+                &[
+                    "┌───────────┬──────────┐",
+                    "│           │          │",
+                    "│           │          │",
+                    "│           │          │",
+                    "│           ├─────┲━━━━┪",
+                    "│           │     ┃    ┃",
+                    "│           │     ┃    ┃",
+                    "└───────────┴─────┺━━━━┛",
+                    "bbbbbbbbbbbbbbbbbbbbbbbb",
+                    "b...........b..........b",
+                    "b...........b..........b",
+                    "b...........b..........b",
+                    "b...........bbbbbbAAAAAA",
+                    "b...........b.....A....A",
+                    "b...........b.....A....A",
+                    "bbbbbbbbbbbbbbbbbbAAAAAA",
+                ],
+            ),
+            (
+                "%1",
+                &[
+                    "┌───────────┲━━━━━━━━━━┓",
+                    "│           ┃          ┃",
+                    "│           ┃          ┃",
+                    "│           ┃          ┃",
+                    "│           ┡━━━━━┯━━━━┩",
+                    "│           │     │    │",
+                    "│           │     │    │",
+                    "└───────────┴─────┴────┘",
+                    "bbbbbbbbbbbbAAAAAAAAAAAA",
+                    "b...........A..........A",
+                    "b...........A..........A",
+                    "b...........A..........A",
+                    "b...........AAAAAAAAAAAA",
+                    "b...........b.....b....b",
+                    "b...........b.....b....b",
+                    "bbbbbbbbbbbbbbbbbbbbbbbb",
+                ],
+            ),
         ],
     );
 }
