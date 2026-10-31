@@ -2027,6 +2027,12 @@ impl Server {
             parse_window_name(&from)
         };
         pane.changed = true;
+        // tmux's first check_window_name runs the turn it forked, when
+        // #{pane_current_command} is still the forked server ("tmux") or
+        // the shell before it execs: a race that goes differently every
+        // run. The name clock starts at creation instead, so the first
+        // check comes one NAME_INTERVAL later and sees the command (D-012).
+        pane.last_rename = Some(Instant::now());
         self.model.panes.insert(pane_id, pane);
         let activity = self.model.touch();
         self.model.windows.insert(
