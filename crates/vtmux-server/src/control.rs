@@ -11,6 +11,7 @@
 //! guard closes (control.c `control_notify_write`, `control_write_guard`).
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vtmux_core::cmd::{self, ParseOpts};
@@ -22,7 +23,7 @@ use crate::server::{ClientId, GlobalEnv, Server};
 use crate::target::Origin;
 
 /// Why a control client leaves; decides its exit status.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Exit {
     /// EOF, an empty line, its session gone, or an unattached argv command
     /// (`CLIENT_EXIT_RETURN`): the status is `c->retval`.
@@ -32,6 +33,9 @@ pub enum Exit {
     Detach,
     /// The server is going away (`MSG_SHUTDOWN`): status 0, no reason.
     Shutdown,
+    /// `detach-client -E` (`MSG_EXEC`): the client runs the command in
+    /// place of itself.
+    Exec { command: String, shell: PathBuf },
 }
 
 /// The timestamp, number and flags a guard pair shares.
@@ -359,10 +363,12 @@ impl Server {
             if shutdown {
                 cs.exit.get_or_insert(Exit::Shutdown);
             }
-            let Some(exit) = cs.exit else { continue };
+            let Some(exit) = cs.exit.clone() else {
+                continue;
+            };
             let code = match exit {
                 Exit::Return => cs.retval,
-                Exit::Detach | Exit::Shutdown => 0,
+                Exit::Detach | Exit::Shutdown | Exit::Exec { .. } => 0,
             };
             cs.finished = true;
             cs.deferred.clear();
@@ -371,7 +377,26 @@ impl Server {
                 c.attached = None;
             }
             self.control_flush(id);
-            self.finish_client(id, code);
+            if let Exit::Exec { command, shell } = exit {
+                self.send(id, &ServerMsg::Exec { command, shell });
+                if let Some(c) = self.clients.get_mut(&id) {
+                    c.closing = true;
+                }
+                self.flush_client(id);
+            } else {
+                self.finish_client(id, code);
+            }
+        }
+    }
+
+    /// `detach-client -E` on a control client.
+    pub(crate) fn control_exec(&mut self, id: ClientId, command: String, shell: PathBuf) {
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.left_session = c.attached.or(c.left_session);
+            c.attached = None;
+            if let Some(cs) = c.control.as_mut() {
+                cs.exit.get_or_insert(Exit::Exec { command, shell });
+            }
         }
     }
 

@@ -21,7 +21,7 @@ use crate::error::EdgeError;
 use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
@@ -130,6 +130,16 @@ pub enum ServerMsg {
     Exit {
         code: i32,
         message: Option<String>,
+        /// `MSG_DETACHKILL`: after printing `message`, the client sends
+        /// SIGHUP to its parent process (client.c:414-416).
+        hup: bool,
+    },
+    /// `MSG_EXEC` (`server_client_exec`): the client replaces itself with
+    /// `shell -c command` once its terminal is restored (client.c
+    /// `client_exec`).
+    Exec {
+        command: String,
+        shell: PathBuf,
     },
     Ready,
     /// Read a file, or stdin when `path` is `None`, and send it back as
@@ -589,7 +599,8 @@ impl Message for ServerMsg {
     fn payload_len(&self) -> usize {
         1 + match self {
             Self::Stdout(b) | Self::Stderr(b) | Self::Frame(b) | Self::WriteData(b) => 4 + b.len(),
-            Self::Exit { message, .. } => 4 + option_len(message.as_ref(), |m| 4 + m.len()),
+            Self::Exit { message, .. } => 4 + option_len(message.as_ref(), |m| 4 + m.len()) + 1,
+            Self::Exec { command, shell } => 4 + command.len() + 4 + shell.as_os_str().len(),
             Self::Ready | Self::WriteClose => 0,
             Self::ReadOpen { path } => option_len(path.as_ref(), |p| 4 + p.as_os_str().len()),
             Self::WriteOpen { path, .. } => 4 + path.as_os_str().len() + 1,
@@ -610,10 +621,16 @@ impl Message for ServerMsg {
                 out.push(2);
                 put_bytes(out, b);
             }
-            Self::Exit { code, message } => {
+            Self::Exit { code, message, hup } => {
                 out.push(3);
                 out.extend_from_slice(&code.to_le_bytes());
                 put_option(out, message.as_ref(), |o, m| put_bytes(o, m.as_bytes()));
+                out.push(u8::from(*hup));
+            }
+            Self::Exec { command, shell } => {
+                out.push(9);
+                put_bytes(out, command.as_bytes());
+                put_bytes(out, shell.as_os_str().as_bytes());
             }
             Self::Ready => out.push(4),
             Self::ReadOpen { path } => {
@@ -643,6 +660,7 @@ impl Message for ServerMsg {
             3 => Self::Exit {
                 code: r.i32()?,
                 message: r.option(Reader::string)?,
+                hup: r.flag()?,
             },
             4 => Self::Ready,
             5 => Self::ReadOpen {
@@ -654,6 +672,10 @@ impl Message for ServerMsg {
             },
             7 => Self::WriteData(r.bytes()?),
             8 => Self::WriteClose,
+            9 => Self::Exec {
+                command: r.string()?,
+                shell: r.path()?,
+            },
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -728,10 +750,21 @@ mod tests {
             ServerMsg::Exit {
                 code: 0,
                 message: None,
+                hup: false,
             },
             ServerMsg::Exit {
                 code: -1,
                 message: Some("exited".into()),
+                hup: false,
+            },
+            ServerMsg::Exit {
+                code: 0,
+                message: Some("detached and SIGHUP (from session a)".into()),
+                hup: true,
+            },
+            ServerMsg::Exec {
+                command: "echo hi".into(),
+                shell: PathBuf::from("/bin/sh"),
             },
             ServerMsg::Ready,
             ServerMsg::ReadOpen { path: None },
@@ -931,7 +964,7 @@ mod tests {
         // client.c:659-668 shape, vtmux numbers.
         assert_eq!(
             err.to_string(),
-            "protocol version mismatch (client 0, server 4)"
+            "protocol version mismatch (client 0, server 5)"
         );
     }
 }

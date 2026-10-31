@@ -67,6 +67,20 @@ impl World {
     }
     /// `attach_sized` with extra variables in the client's environment.
     fn attach_env(&self, args: &[&str], cols: u16, rows: u16, extra: &[(&str, &str)]) -> Attached {
+        let mut cmd = CommandBuilder::new(&self.bin);
+        cmd.args(self.args());
+        cmd.args(args);
+        self.spawn_attached(cmd, cols, rows, extra)
+    }
+    /// `attach_env` with the whole command given (`cmd` already has the
+    /// binary and its arguments, or a shell that runs them).
+    fn spawn_attached(
+        &self,
+        mut cmd: CommandBuilder,
+        cols: u16,
+        rows: u16,
+        extra: &[(&str, &str)],
+    ) -> Attached {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -75,9 +89,6 @@ impl World {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut cmd = CommandBuilder::new(&self.bin);
-        cmd.args(self.args());
-        cmd.args(args);
         cmd.env_clear();
         for (k, v) in self.env() {
             cmd.env(k, v);
@@ -189,6 +200,10 @@ impl Attached {
         )
         .unwrap();
         rustix::process::kill_process(pid, signal).unwrap();
+    }
+    /// The client's exit code once it has exited.
+    fn status(&mut self) -> Option<u32> {
+        self.child.try_wait().unwrap().map(|s| s.exit_code())
     }
     fn alive(&mut self) -> bool {
         self.child.try_wait().unwrap().is_none()
@@ -2754,4 +2769,234 @@ fn owner_prompt_jumps() {
         a.keys(b"\x02d");
         a.exited(0);
     }
+}
+
+/// Two clients on session `a`, one on `b`, and what each does after
+/// `act` ran: `alive` or `exit N`, so both servers can be compared.
+struct Pair {
+    w: World,
+    clients: Vec<Attached>,
+    names: Vec<String>,
+}
+
+impl Pair {
+    /// `extra` clients are attached to `a`, then one to `b`; every client
+    /// is named by its tty.
+    fn new(bin: PathBuf, third: bool) -> Self {
+        let w = World::new(bin);
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["new", "-d", "-s", "b", "-n", "bw", "cat"]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        let mut clients = Vec::new();
+        for target in ["a", "a", "b"].into_iter().take(if third { 3 } else { 2 }) {
+            clients.push(w.attach(&["attach", "-t", target]));
+            let want = clients.len();
+            clients[want - 1].wait(|_| {
+                w.cli(&["lsc", "-F", "x"])
+                    .stdout
+                    .split(|&b| b == b'\n')
+                    .count()
+                    > want
+            });
+        }
+        let out = w.cli(&["lsc", "-F", "#{client_name}"]);
+        let names = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        Self { w, clients, names }
+    }
+
+    /// Wait for the clients to settle, then report each.
+    fn report(&mut self) -> Vec<String> {
+        thread::sleep(Duration::from_millis(600));
+        self.clients
+            .iter_mut()
+            .map(|c| match c.status() {
+                None => "alive".to_owned(),
+                Some(code) => {
+                    let text = c.text();
+                    let tail = text.rsplit("\x1b[?1049l").next().unwrap_or("");
+                    format!("exit {code} {:?}", strip_escapes(tail).trim())
+                }
+            })
+            .collect()
+    }
+}
+
+/// `text` without CSI sequences (the teardown's mode resets).
+fn strip_escapes(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn pair_results(third: bool, act: impl Fn(&mut Pair) -> Vec<String>) -> Vec<Vec<String>> {
+    let results: Vec<_> = bins()
+        .into_iter()
+        .map(|bin| {
+            let mut p = Pair::new(bin, third);
+            let mut seen = act(&mut p);
+            seen.extend(p.report());
+            seen
+        })
+        .collect();
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+    results
+}
+
+fn run_line(p: &Pair, args: &[&str]) -> String {
+    let out = p.w.cli(args);
+    format!(
+        "rc={:?} {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr).trim()
+    )
+}
+
+/// cmd-detach-client.c: `-a` detaches every client but the caller, here
+/// the one that pressed the key bound to it.
+#[test]
+fn detach_client_a_keeps_the_caller() {
+    let r = pair_results(true, |p| {
+        p.w.cli(&["bind", "-n", "F5", "detach-client", "-a"]);
+        p.clients[0].keys(b"\x1b[15~");
+        Vec::new()
+    });
+    assert!(r[0][0].starts_with("alive"), "{:?}", r[0]);
+    assert!(r[0][1].starts_with("exit 0"), "{:?}", r[0]);
+    assert!(r[0][2].starts_with("exit 0"), "{:?}", r[0]);
+}
+
+/// `-a -t`: every client but the named one, whatever its session.
+#[test]
+fn detach_client_a_with_target() {
+    let r = pair_results(true, |p| {
+        let name = p.names[1].clone();
+        vec![run_line(p, &["detach-client", "-a", "-t", &name])]
+    });
+    assert!(r[0][1].starts_with("exit 0"), "{:?}", r[0]);
+    assert_eq!(r[0][2], "alive");
+    assert!(r[0][3].starts_with("exit 0"), "{:?}", r[0]);
+}
+
+#[test]
+fn detach_client_t_names_one_client() {
+    let r = pair_results(true, |p| {
+        let name = p.names[1].clone();
+        let short = format!("{}:", name.trim_start_matches("/dev/"));
+        vec![
+            run_line(p, &["detach-client", "-t", "nope"]),
+            run_line(p, &["detach-client", "-t", &short]),
+        ]
+    });
+    assert_eq!(r[0][0], "rc=Some(1) can't find client: nope");
+    assert_eq!(
+        &r[0][2..],
+        ["alive", "exit 0 \"[detached (from session a)]\"", "alive"]
+    );
+}
+
+/// `-s`: every client on the session, the others stay.
+#[test]
+fn detach_client_s_detaches_a_session() {
+    let r = pair_results(true, |p| {
+        vec![
+            run_line(p, &["detach-client", "-s", "nosuch"]),
+            run_line(p, &["detach-client", "-s", "a"]),
+        ]
+    });
+    assert!(r[0][2].starts_with("exit 0"), "{:?}", r[0]);
+    assert!(r[0][3].starts_with("exit 0"), "{:?}", r[0]);
+    assert_eq!(r[0][4], "alive");
+}
+
+/// `-P`: the client says so and sends SIGHUP to its parent. The client
+/// runs under a shell that records the hangup.
+#[test]
+fn detach_client_p_hangs_up_the_parent() {
+    let r: Vec<_> = bins()
+        .into_iter()
+        .map(|bin| {
+            let w = World::new(bin.clone());
+            w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+            let mark = w.home.path().join("hup");
+            let script = format!(
+                "trap 'echo HUP > {}' HUP; {} -L {} -f /dev/null attach -t a; echo back",
+                mark.display(),
+                bin.display(),
+                w.label
+            );
+            let mut cmd = CommandBuilder::new("/bin/sh");
+            cmd.args(["-c", &script]);
+            let mut a = w.spawn_attached(cmd, 40, 10, &[]);
+            a.wait(|_| w.cli(&["lsc"]).stdout.len() > 1);
+            let before = run_line_w(&w, &["detach-client", "-t", "nope"]);
+            let out = run_line_w(&w, &["detach-client", "-P"]);
+            a.exited(0);
+            a.wait(|a| a.text().contains("[detached and SIGHUP (from session a)]"));
+            thread::sleep(Duration::from_millis(200));
+            (before, out, std::fs::read_to_string(&mark).ok())
+        })
+        .collect();
+    assert_eq!(r[0], r[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(r[0].2.as_deref(), Some("HUP\n"));
+}
+
+fn run_line_w(w: &World, args: &[&str]) -> String {
+    let out = w.cli(args);
+    format!(
+        "rc={:?} {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr).trim()
+    )
+}
+
+/// `-E`: the client is replaced by `$SHELL -c command` instead of
+/// detaching: no message, the command's own exit status, `SHELL` set.
+#[test]
+fn detach_client_e_runs_a_command_in_place_of_the_client() {
+    let r = pair_results(true, |p| {
+        let name = p.names[1].clone();
+        vec![run_line(
+            p,
+            &[
+                "detach-client",
+                "-E",
+                "echo ran:$SHELL; exit 7",
+                "-t",
+                &name,
+            ],
+        )]
+    });
+    assert_eq!(r[0][1], "alive");
+    assert_eq!(r[0][2], "exit 7 \"ran:/bin/sh\"");
+    assert_eq!(r[0][3], "alive");
+    // `-a` and `-s` take `-E` too.
+    let r = pair_results(true, |p| {
+        let name = p.names[0].clone();
+        vec![run_line(
+            p,
+            &["detach-client", "-a", "-E", "echo ran; exit 3", "-t", &name],
+        )]
+    });
+    assert_eq!(&r[0][1..], ["alive", "exit 3 \"ran\"", "exit 3 \"ran\""]);
+    let r = pair_results(true, |p| {
+        vec![run_line(
+            p,
+            &["detach-client", "-s", "a", "-E", "echo ran; exit 4"],
+        )]
+    });
+    assert_eq!(&r[0][1..], ["exit 4 \"ran\"", "exit 4 \"ran\"", "alive"]);
 }
