@@ -7,7 +7,7 @@
 //! Also the one-shot timers `run-shell -d` waits on.
 
 use std::collections::BTreeMap;
-use std::io::{self, Read};
+use std::io;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -105,7 +105,6 @@ pub struct JobSpec {
     pub nowait: bool,
 }
 
-#[expect(dead_code, reason = "run-shell and if-shell start jobs (next commit)")]
 impl Server {
     /// `job_run` (job.c:70-232): `/bin/sh -c command` (run-shell and
     /// if-shell do not ask for `JOB_DEFAULTSHELL`) in `cwd`, with the
@@ -176,14 +175,13 @@ impl Server {
         let Some(fd) = job.fd.as_ref() else {
             return;
         };
-        let mut file = std::fs::File::from(fd.try_clone().expect("dup job fd"));
         let mut buf = [0u8; 16 * 1024];
         let closed = loop {
-            match file.read(&mut buf) {
+            match rustix::io::read(fd, &mut buf) {
                 Ok(0) => break true,
                 Ok(n) => job.output.extend_from_slice(&buf[..n]),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break false,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(rustix::io::Errno::AGAIN) => break false,
+                Err(rustix::io::Errno::INTR) => {}
                 Err(_) => break true,
             }
         };

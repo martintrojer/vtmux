@@ -473,6 +473,8 @@ impl<'a> Ctx<'a> {
             "pane_input_off" => flag(p.input_off),
             "pane_dead" => flag(p.exited && io.is_none()),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),
+            // format_cb_start_path (format.c:943-955).
+            "pane_start_path" => p.cwd.to_string_lossy().into_owned(),
             "pane_tty" => io
                 .and_then(|io| sys::pty::tty_name(&io.owned().try_clone_to_owned().ok()?))
                 .unwrap_or_default(),

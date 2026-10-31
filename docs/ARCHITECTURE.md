@@ -96,7 +96,9 @@ The acknowledgements are the backpressure. When a client's terminal is slow or s
 
 Those replies match tmux 3.8 byte for byte, including error messages and exit codes. This is the compliance edge that scripts and plugins depend on.
 
-As in tmux, a command client does its own file I/O: `load-buffer` and `save-buffer` on a path, and `load-buffer -` from its stdin, become `ReadOpen` / `WriteOpen` requests; the command waits (parked like `wait-for`) until the client answers `FileDone`, so a slow file such as a FIFO holds up only that client. Attached and control clients get the I/O done in the server, non-blocking.
+Commands run on a command queue (`cmdq.rs`, after tmux's `cmd-queue.c`). Each client has its own queue, and a global queue runs work that has no client: the startup config, and `run-shell -b` commands. A command can wait, as tmux's `CMD_RETURN_WAIT` does. `wait-for`, file I/O, and plain `run-shell` and `if-shell` waiting on their job all hold their queue until they are continued. Other queues keep running meanwhile. Commands a running command adds (a sourced file, the branch `if-shell` picks) go in right after it. Jobs (`jobs.rs`) are `/bin/sh -c` children whose output comes back through the same `mio` loop.
+
+As in tmux, a command client does its own file I/O: `load-buffer` and `save-buffer` on a path, and `load-buffer -` from its stdin, become `ReadOpen` / `WriteOpen` requests. The command waits on its queue until the client answers `FileDone`, so a slow file such as a FIFO holds up only that client. Attached and control clients get the I/O done in the server, non-blocking.
 
 Control-mode clients (`vtmux -C`) use the same socket. They send command lines on stdin and get tmux's `%begin`/`%end`/`%error` guards, `%output`, and the other notifications instead of frames.
 

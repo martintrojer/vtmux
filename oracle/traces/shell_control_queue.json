@@ -1,0 +1,205 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "shell_control_queue",
+  "inputs": {
+    "name": "shell_control_queue",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "cat"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "run 'echo x; exit 2' ; display -p next"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "next"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "if true 'display -p y' ; display -p after-if"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "after-if"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "run -C 'display -p c1 ; display -p c2'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "c2"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "if -F 1 'display -p f'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "f"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "run -d 0.1 'echo late'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "late"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "if 'exit 1' 'display -p no' 'nosuch'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "unknown command"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "if -b true 'display -p bgif'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "bgif"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "run -b -C 'display -p bgc'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "bgc"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "x",
+          "'echo x; exit 2' returned 2",
+          "%begin <TIME> #3 1",
+          "next",
+          "%end <TIME> #3 1",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%begin <TIME> #5 1",
+          "y",
+          "%end <TIME> #5 1",
+          "%begin <TIME> #6 1",
+          "after-if",
+          "%end <TIME> #6 1",
+          "%begin <TIME> #7 1",
+          "%end <TIME> #7 1",
+          "%begin <TIME> #8 1",
+          "c1",
+          "%end <TIME> #8 1",
+          "%begin <TIME> #9 1",
+          "c2",
+          "%end <TIME> #9 1",
+          "%begin <TIME> #10 1",
+          "%end <TIME> #10 1",
+          "%begin <TIME> #11 1",
+          "f",
+          "%end <TIME> #11 1",
+          "%begin <TIME> #12 1",
+          "%end <TIME> #12 1",
+          "late",
+          "%begin <TIME> #13 1",
+          "%end <TIME> #13 1",
+          "unknown command: nosuch",
+          "%begin <TIME> #14 1",
+          "%end <TIME> #14 1",
+          "%begin <TIME> #15 0",
+          "bgif",
+          "%end <TIME> #15 0",
+          "%begin <TIME> #16 1",
+          "%end <TIME> #16 1",
+          "%begin <TIME> #17 0",
+          "bgc",
+          "%end <TIME> #17 0",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 1
+      }
+    }
+  ]
+}

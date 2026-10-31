@@ -74,6 +74,17 @@ pub fn exec(
         verbose: args.flag('v') && item.control.is_none(),
         parse_client: None,
     };
+    // cmd-source-file.c:264-272: with nothing to read, a miss is the
+    // command's error (the rest of its group is dropped); otherwise the
+    // command waits for its files and the miss only fails the client.
+    if paths.is_empty() {
+        if server.cfg_finished
+            && let Some(step) = item.step
+        {
+            server.cmdq_insert_work(step, Work::SourceDone { failed });
+        }
+        return if failed { Err(CmdError::Quiet) } else { Ok(()) };
+    }
     let mut groups = Vec::new();
     for path in paths {
         let before = server.causes.len();
