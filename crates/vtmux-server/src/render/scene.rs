@@ -134,6 +134,72 @@ impl Junction {
     }
 }
 
+/// How a border cell is drawn: tmux's shape for its lines, or, under the
+/// focus ring (D23), a weight per arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shape {
+    pub junction: Junction,
+    ring: Option<Arms>,
+}
+
+impl From<Junction> for Shape {
+    fn from(junction: Junction) -> Self {
+        Self {
+            junction,
+            ring: None,
+        }
+    }
+}
+
+impl Shape {
+    /// Whether the focus ring draws any arm of this cell heavy: it is on
+    /// the active pane's rectangle.
+    #[must_use]
+    pub fn heavy(self) -> bool {
+        self.ring
+            .is_some_and(|a| a.left == 2 || a.right == 2 || a.up == 2 || a.down == 2)
+    }
+
+    /// The cell's text: [`glyph`], or the ring's mixed-weight glyph.
+    #[must_use]
+    pub fn glyph(self, lines: Lines, index: Option<u32>) -> String {
+        self.ring
+            .map_or_else(|| glyph(lines, self.junction, index), |a| a.glyph().into())
+    }
+}
+
+/// The focus ring's weight of each arm of a border cell: none, light or
+/// heavy (D23). Heavy arms are the active pane's rectangle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Arms {
+    left: u8,
+    right: u8,
+    up: u8,
+    down: u8,
+}
+
+impl Arms {
+    fn new(lines: Sides, heavy: Sides) -> Self {
+        let w = |line: bool, heavy: bool| if heavy { 2 } else { u8::from(line) };
+        Self {
+            left: w(lines.left, heavy.left),
+            right: w(lines.right, heavy.right),
+            up: w(lines.up, heavy.up),
+            down: w(lines.down, heavy.down),
+        }
+    }
+
+    /// Every light/heavy combination of U+2500–U+257F, indexed by the arm
+    /// weights in base 3 (left, right, up, down).
+    fn glyph(self) -> &'static str {
+        const TABLE: &str =
+            "·╷╻╵│╽╹╿┃╶┌┎└├┟┖┞┠╺┍┏┕┝┢┗┡┣╴┐┒┘┤┧┚┦┨─┬┰┴┼╁┸╀╂╼┮┲┶┾╆┺╄╊╸┑┓┙┥┪┛┩┫╾┭┱┵┽╅┹╃╉━┯┳┷┿╈┻╇╋";
+        let i = usize::from(self.left * 27 + self.right * 9 + self.up * 3 + self.down);
+        let (at, c) = TABLE.char_indices().nth(i).expect("81 glyphs");
+        &TABLE[at..at + c.len_utf8()]
+    }
+}
+
 /// The glyph for a border cell (window-border.c `window_get_border_cell`;
 /// UTF-8 forms from tty-acs.c). `index` is the pane's `pane_index` for
 /// `number` lines, `None` when there is no pane.
@@ -180,6 +246,10 @@ pub struct WindowView {
     /// `redraw_check_two_pane_colours`: exactly two tiled panes, split this
     /// way.
     pub two_pane: Option<Dir>,
+    /// The focus ring (D23) around this active pane: the panes sit 1 cell
+    /// in (the caller offsets them and adds 2 to `sx`, `sy`), every tiled
+    /// pane is closed on all sides, and border arms carry weights.
+    pub ring: Option<PaneId>,
 }
 
 /// A border cell. `up`, `down`, `left`, `right` are the panes on each side
@@ -193,6 +263,9 @@ pub struct Border {
     /// The pane whose style colours this cell, when fixed at build time.
     pub style: Option<PaneId>,
     sides: Sides,
+    /// Under the focus ring, a tiled border's heavy arms (`None` for tmux
+    /// lines, and for floating panes' borders, which the ring leaves alone).
+    heavy: Option<Sides>,
     /// An indicator arrow is drawn here if it points at the active pane.
     pub arrow: bool,
 }
@@ -201,6 +274,14 @@ impl Border {
     #[must_use]
     pub fn junction(&self) -> Junction {
         Junction::from_sides(self.sides)
+    }
+
+    #[must_use]
+    pub fn shape(&self) -> Shape {
+        Shape {
+            junction: self.junction(),
+            ring: self.heavy.map(|h| Arms::new(self.sides, h)),
+        }
     }
 
     fn has(&self, p: PaneId) -> bool {
@@ -257,7 +338,7 @@ pub enum SceneCell {
     Status {
         pane: PaneId,
         offset: u32,
-        under: Junction,
+        under: Shape,
     },
 }
 
@@ -268,6 +349,7 @@ pub struct Scene {
     pub cells: Vec<SceneCell>,
     wsx: i32,
     wsy: i32,
+    ring: bool,
 }
 
 fn int(n: u32) -> i32 {
@@ -295,9 +377,20 @@ impl Scene {
             cells,
             wsx: int(win.sx),
             wsy: int(win.sy),
+            ring: win.ring.is_some(),
         };
         for p in &win.panes {
             scene.mark_pane(p, win.indicators);
+        }
+        if let Some(active) = win.ring {
+            if let Some(p) = win.panes.iter().find(|p| p.id == active && !p.floating) {
+                scene.mark_ring(p);
+            }
+            // Status lines take the ring's weights, so they go on last.
+            for p in win.panes.iter().filter(|p| !p.floating) {
+                let g = &p.rect;
+                scene.mark_status(p, g.xoff + int(g.sx), g.yoff - 1, g.yoff + int(g.sy));
+            }
         }
         if win.indicators.colour()
             && let Some(dir) = win.two_pane
@@ -374,9 +467,12 @@ impl Scene {
         } else {
             mark_right = right <= self.wsx;
             mark_bottom = bottom <= self.wsy;
-            if p.status == PaneStatus::Top && bottom < self.wsy {
+            // The ring closes every pane; its status line sits on an edge
+            // the layout did not reserve.
+            let open = if self.ring { PaneStatus::Off } else { p.status };
+            if open == PaneStatus::Top && bottom < self.wsy {
                 mark_bottom = false;
-            } else if p.status == PaneStatus::Bottom {
+            } else if open == PaneStatus::Bottom {
                 mark_top = false;
             }
         }
@@ -410,7 +506,9 @@ impl Scene {
                 self.mark_cell(right, wy, p, (false, false), down(wy));
             }
         }
-        self.mark_status(p, right, top, bottom);
+        if !self.ring || p.floating {
+            self.mark_status(p, right, top, bottom);
+        }
         if indicators.arrows() {
             self.mark_arrows(p, (left, right, top, bottom));
         }
@@ -437,6 +535,9 @@ impl Scene {
         let SceneCell::Border(b) = &mut self.cells[i] else {
             unreachable!("just made a border");
         };
+        if self.ring && !p.floating {
+            b.heavy.get_or_insert_default();
+        }
         if owner.0 {
             b.up = Some(p.id);
         }
@@ -469,9 +570,44 @@ impl Scene {
                 self.cells[i] = SceneCell::Status {
                     pane: p.id,
                     offset,
-                    under: b.junction(),
+                    under: b.shape(),
                 };
             }
+        }
+    }
+
+    /// The focus ring (D23): the arms of `p`'s rectangle that run along it
+    /// are heavy.
+    fn mark_ring(&mut self, p: &ScenePane) {
+        let g = &p.rect;
+        let (left, right) = (g.xoff - 1, g.xoff + int(g.sx));
+        let (top, bottom) = (g.yoff - 1, g.yoff + int(g.sy));
+        let mut heavy = |wx: i32, wy: i32, sides: Sides| {
+            if let Some(i) = self.index(wx, wy)
+                && let SceneCell::Border(b) = &mut self.cells[i]
+                && b.has(p.id)
+                && let Some(h) = &mut b.heavy
+            {
+                *h = h.merge(sides);
+            }
+        };
+        for wx in left..=right {
+            let sides = Sides {
+                left: wx > left,
+                right: wx < right,
+                ..Sides::default()
+            };
+            heavy(wx, top, sides);
+            heavy(wx, bottom, sides);
+        }
+        for wy in top..=bottom {
+            let sides = Sides {
+                up: wy > top,
+                down: wy < bottom,
+                ..Sides::default()
+            };
+            heavy(left, wy, sides);
+            heavy(right, wy, sides);
         }
     }
 
@@ -522,8 +658,8 @@ impl Scene {
     /// the width of `pane`'s status line and the border shape under each
     /// column (`None` where no status cell is visible: drawn as a line).
     #[must_use]
-    pub fn status_line(&self, pane: PaneId) -> Vec<Option<Junction>> {
-        let mut out: Vec<Option<Junction>> = Vec::new();
+    pub fn status_line(&self, pane: PaneId) -> Vec<Option<Shape>> {
+        let mut out: Vec<Option<Shape>> = Vec::new();
         for cell in &self.cells {
             if let SceneCell::Status {
                 pane: p,
@@ -569,7 +705,7 @@ mod tests {
                         SceneCell::Pane { pane, .. } => pane.0.to_string(),
                         SceneCell::Border(b) => b
                             .arrow_glyph(active)
-                            .map_or_else(|| glyph(Lines::Single, b.junction(), None), Into::into),
+                            .map_or_else(|| b.shape().glyph(Lines::Single, None), Into::into),
                         SceneCell::Status { .. } => "s".into(),
                         SceneCell::Empty => ".".into(),
                         SceneCell::Outside => "#".into(),
@@ -594,6 +730,7 @@ mod tests {
             ],
             indicators: Indicators::Both,
             two_pane: None,
+            ring: None,
         };
         let scene = Scene::build(&win, 9, 5);
         assert_eq!(
@@ -626,6 +763,7 @@ mod tests {
             panes: vec![pane(0, 2, 4, 0, 0), pane(1, 2, 4, 3, 0)],
             indicators: Indicators::Colour,
             two_pane: Some(Dir::LeftRight),
+            ring: None,
         };
         let scene = Scene::build(&win, 5, 4);
         let owner = |y| match scene.get(2, y) {
@@ -657,14 +795,56 @@ mod tests {
             panes: vec![a, b],
             indicators: Indicators::Off,
             two_pane: Some(Dir::LeftRight),
+            ring: None,
         };
         let scene = Scene::build(&win, 9, 4);
         assert_eq!(text(&scene, None)[0], "──ss┬──ss");
         assert_eq!(text(&scene, None)[1], "0000│1111");
         assert_eq!(
             scene.status_line(PaneId(0)),
-            [Some(Junction::Horizontal), Some(Junction::Horizontal)]
+            [Some(Junction::Horizontal.into()); 2]
         );
+    }
+
+    /// D23: under the ring every tiled pane is closed and the active
+    /// pane's arms are heavy; junctions mix weights per arm.
+    #[test]
+    fn focus_ring_marks_the_active_rectangle_heavy() {
+        let win = WindowView {
+            sx: 9,
+            sy: 5,
+            panes: vec![pane(0, 3, 3, 1, 1), pane(1, 3, 3, 5, 1)],
+            indicators: Indicators::Off,
+            two_pane: Some(Dir::LeftRight),
+            ring: Some(PaneId(1)),
+        };
+        let scene = Scene::build(&win, 9, 5);
+        assert_eq!(
+            text(&scene, None),
+            [
+                "┌───┲━━━┓",
+                "│000┃111┃",
+                "│000┃111┃",
+                "│000┃111┃",
+                "└───┺━━━┛"
+            ]
+        );
+    }
+
+    #[test]
+    fn ring_glyphs_cover_every_weight() {
+        let arms = |left, right, up, down| Arms {
+            left,
+            right,
+            up,
+            down,
+        };
+        assert_eq!(arms(0, 0, 0, 0).glyph(), "·");
+        assert_eq!(arms(1, 1, 1, 1).glyph(), "┼");
+        assert_eq!(arms(2, 2, 2, 2).glyph(), "╋");
+        assert_eq!(arms(0, 2, 1, 2).glyph(), "┢");
+        assert_eq!(arms(1, 2, 2, 0).glyph(), "┺");
+        assert_eq!(arms(2, 1, 2, 2).glyph(), "╉");
     }
 
     #[test]

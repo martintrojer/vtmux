@@ -2804,3 +2804,56 @@ fn buffers_cli() {
         out
     });
 }
+
+/// D23 off-state: `vtmux-focus-ring` is invisible until set. Listings on a
+/// fresh server are byte-identical to tmux's (`show -g`, `-gw`, `-s`,
+/// `-A`, `-wA`, `-pA`), the window keeps its size, and prefixes of the name
+/// keep tmux's errors. A config guarding it with `%if "#{vtmux_version}"`
+/// loads cleanly in both. Then, vtmux only: a named lookup prints the
+/// default, the guarded `set` took effect, and once set it is listed at
+/// that scope.
+#[test]
+fn vtmux_options_invisible_while_unset() {
+    compare("vtmux_options_invisible_while_unset", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]),
+            w.run(&["show", "-g"]),
+            w.run(&["show", "-gw"]),
+            w.run(&["show", "-s"]),
+            w.run(&["show", "-A"]),
+            w.run(&["show", "-wA"]),
+            w.run(&["show", "-pA"]),
+            w.run(&["display", "-p", "#{window_width}x#{window_height}"]),
+            w.run(&["set", "-g", "vt", "on"]),
+            w.run(&["show", "-g", "vtm"]),
+            w.run(&["set", "-gw", "vtmux", "on"]),
+            w.run(&["source", &guarded_config(w)]),
+        ]
+    });
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a", "cat"]);
+    let out = |args: &[&str]| w.run(args).stdout;
+    w.run(&["source", &guarded_config(&w)]);
+    assert_eq!(out(&["show", "-gv", "vtmux-focus-ring"]), "on\n");
+    w.run(&["set", "-gwu", "vtmux-focus-ring"]);
+    assert_eq!(out(&["show", "-gv", "vtmux-focus-ring"]), "off\n");
+    assert_eq!(out(&["show", "-w", "vtmux-focus-ring"]), "");
+    assert_eq!(out(&["display", "-p", "[#{vtmux-focus-ring}]"]), "[]\n");
+    let r = w.run(&["set", "-gw", "vtmux-focus-ring", "on"]);
+    assert_eq!((r.code, r.stderr.as_str()), (0, ""));
+    assert!(out(&["show", "-gw"]).ends_with("vtmux-focus-ring on\n"));
+    assert_eq!(out(&["show", "-wv", "vtmux-focus-ring"]), "");
+    assert_eq!(out(&["show", "-wAv", "vtmux-focus-ring"]), "on\n");
+    assert_eq!(out(&["display", "-p", "[#{vtmux-focus-ring}]"]), "[1]\n");
+}
+
+/// The D23 config guard: real tmux skips the vtmux option.
+fn guarded_config(w: &World) -> String {
+    let path = w.dir().join("guard.conf");
+    std::fs::write(
+        &path,
+        "set -g pane-border-lines heavy\n%if \"#{vtmux_version}\"\nset -g vtmux-focus-ring on\n%endif\n",
+    )
+    .expect("write");
+    path.to_str().expect("utf-8").to_owned()
+}

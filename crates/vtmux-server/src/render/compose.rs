@@ -13,7 +13,7 @@ use vtmux_core::style::{Attrs, CellStyle};
 use vtmux_core::styled;
 use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
 
-use super::scene::{Junction, Lines, Scene, SceneCell, glyph};
+use super::scene::{Lines, Scene, SceneCell, Shape};
 
 /// A client's ten `theme*` colours (`c->theme_colours`,
 /// server-client.c `server_client_update_theme_colours`).
@@ -141,6 +141,9 @@ pub struct PaneDraw {
 pub struct Draw {
     pub panes: BTreeMap<PaneId, PaneDraw>,
     pub active: Option<PaneId>,
+    /// Where the window's origin is in the drawn area: 1 cell in under the
+    /// focus ring (D23), else 0.
+    pub offset: u16,
     /// The window's `pane-border-style` and `pane-border-lines`
     /// (`redraw_get_default_border_style`).
     pub border: CellStyle,
@@ -197,7 +200,7 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
                     });
                     let text = b
                         .arrow_glyph(d.active)
-                        .map_or_else(|| glyph(lines, b.junction(), index), Into::into);
+                        .map_or_else(|| b.shape().glyph(lines, index), Into::into);
                     Cell {
                         text,
                         width: 1,
@@ -370,11 +373,14 @@ pub(crate) fn draw_line_by<T: PartialEq + Clone>(
 
 /// `window_make_pane_status`: the border line under the status line, then
 /// `expanded` (`pane-border-format`) drawn over it in the border style.
-/// `under` is [`Scene::status_line`].
+/// `under` is [`Scene::status_line`]. Under the focus ring (D23) the line
+/// cells on the active pane's rectangle take `ring` (the active border
+/// style), so the rectangle stays one colour behind another pane's label.
 #[must_use]
 pub fn pane_status(
-    under: &[Option<Junction>],
+    under: &[Option<Shape>],
     border: &CellStyle,
+    ring: &CellStyle,
     lines: Lines,
     index: Option<u32>,
     expanded: &str,
@@ -384,10 +390,13 @@ pub fn pane_status(
     }
     let row = under
         .iter()
-        .map(|j| styled::Cell {
-            text: glyph(lines, j.unwrap_or(Junction::Horizontal), index),
-            width: 1,
-            style: border.clone(),
+        .map(|j| {
+            let shape = j.unwrap_or_else(|| super::scene::Junction::Horizontal.into());
+            styled::Cell {
+                text: shape.glyph(lines, index),
+                width: 1,
+                style: if shape.heavy() { ring } else { border }.clone(),
+            }
         })
         .collect();
     let base = CellStyle {
@@ -400,6 +409,7 @@ pub fn pane_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::scene::Junction;
 
     /// A status line shorter than its format is cut; past its text the
     /// border shows through, in the border style.
@@ -409,9 +419,10 @@ mod tests {
             fg: Colour::Ansi(2),
             ..CellStyle::default()
         };
-        let under = [Some(Junction::Horizontal); 6];
+        let under = [Some(Junction::Horizontal.into()); 6];
         let cells = pane_status(
             &under,
+            &green,
             &green,
             Lines::Single,
             None,

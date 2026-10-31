@@ -360,9 +360,21 @@ impl Model {
     }
 
     /// `window_get_pane_status` (window.c:2918): the `*-floating` values
-    /// count as off for tiled geometry.
+    /// count as off for tiled geometry, and so does everything under the
+    /// focus ring (D23), whose edges carry the status lines instead of a
+    /// reserved row.
     #[must_use]
     pub fn pane_status(&self, w: WindowId) -> PaneStatus {
+        if self.number_option(TreeId::Window(w), "vtmux-focus-ring") != 0 {
+            return PaneStatus::Off;
+        }
+        self.border_status(w)
+    }
+
+    /// `pane-border-status` for tiled panes as drawn: [`Self::pane_status`]
+    /// without the focus ring.
+    #[must_use]
+    pub fn border_status(&self, w: WindowId) -> PaneStatus {
         match self.number_option(TreeId::Window(w), "pane-border-status") {
             1 => PaneStatus::Top,
             2 => PaneStatus::Bottom,

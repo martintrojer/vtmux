@@ -102,6 +102,10 @@ impl Source<'_> {
         let window = self.model.windows.get(&w)?;
         let active = window.active();
         let wtree = TreeId::Window(w);
+        // D23: under the focus ring the window sits 1 cell in from the
+        // drawn area's corner, inside a frame the scene draws.
+        let ring = self.model.number_option(wtree, "vtmux-focus-ring") != 0;
+        let offset = u16::from(ring);
         let mut panes = Vec::new();
         let mut draws = BTreeMap::new();
         for &p in window.panes.z_order.iter().rev() {
@@ -113,9 +117,12 @@ impl Source<'_> {
             }
             let floating = window.is_floating(p);
             let lines = self.lines(w, p, floating);
+            let mut rect = pane.rect;
+            rect.xoff += i32::from(offset);
+            rect.yoff += i32::from(offset);
             panes.push(ScenePane {
                 id: p,
-                rect: pane.rect,
+                rect,
                 floating,
                 lines,
                 status: self.pane_status(w, p, floating, lines),
@@ -143,16 +150,25 @@ impl Source<'_> {
                 },
             );
         }
+        let frame = 2 * u32::from(offset);
         let view = WindowView {
-            sx: window.sx(),
-            sy: window.sy(),
+            sx: window.sx() + frame,
+            sy: window.sy() + frame,
             panes,
-            indicators: Indicators::from_choice(
-                self.model.number_option(wtree, "pane-border-indicators"),
-            ),
+            // D23: pane-border-indicators is ignored under the ring.
+            indicators: if ring {
+                Indicators::Off
+            } else {
+                Indicators::from_choice(self.model.number_option(wtree, "pane-border-indicators"))
+            },
             two_pane: two_pane(self.model, w),
+            ring: ring.then_some(active),
         };
         let scene = Scene::build(&view, cols, rows);
+        let ring_style = draws
+            .get(&active)
+            .map(|d| d.border.clone())
+            .unwrap_or_default();
         for p in &view.panes {
             let under = scene.status_line(p.id);
             if under.is_empty() {
@@ -168,12 +184,13 @@ impl Source<'_> {
             let format = self.string(TreeId::Pane(p.id), "pane-border-format");
             let expanded = vtmux_core::format::expand_time(&format, &ctx);
             let d = draws.get_mut(&p.id).expect("drawn pane");
-            d.status = pane_status(&under, &d.border, d.lines, d.index, &expanded);
+            d.status = pane_status(&under, &d.border, &ring_style, d.lines, d.index, &expanded);
         }
         let ctx = self.ctx(found, caps);
         let draw = Draw {
             panes: draws,
             active: Some(active),
+            offset,
             border: self.style(wtree, "pane-border-style", &ctx),
             lines: Lines::from_choice(self.model.number_option(wtree, "pane-border-lines")),
             outside: self.fill(w, false, caps),
@@ -194,10 +211,12 @@ impl Source<'_> {
         Lines::from_choice(self.model.number_option(tree, "pane-border-lines"))
     }
 
-    /// `window_pane_get_pane_status` (window.c:2930).
+    /// `window_pane_get_pane_status` (window.c:2930). Read from the option,
+    /// not the layout's, which is off under the focus ring (the ring's edge
+    /// carries the line).
     fn pane_status(&self, w: WindowId, p: PaneId, floating: bool, lines: Lines) -> PaneStatus {
         if !floating {
-            return self.model.pane_status(w);
+            return self.model.border_status(w);
         }
         if lines == Lines::None {
             return PaneStatus::Off;
@@ -286,8 +305,8 @@ pub fn cursor(screen: &mut Snapshot, draw: &Draw, model: &Model, rows: u16) {
     let Some((cx, cy)) = d.content.cursor else {
         return;
     };
-    let x = pane.rect.xoff + i32::from(cx);
-    let y = pane.rect.yoff + i32::from(cy);
+    let x = pane.rect.xoff + i32::from(cx) + i32::from(draw.offset);
+    let y = pane.rect.yoff + i32::from(cy) + i32::from(draw.offset);
     let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
         return;
     };

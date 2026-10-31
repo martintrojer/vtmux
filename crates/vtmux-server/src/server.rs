@@ -1133,7 +1133,8 @@ impl Server {
     /// it, less its status lines; no such client leaves it alone. The size
     /// is only recorded (`WINDOW_RESIZE`) when it differs from the one
     /// already pending, else from the window's own;
-    /// [`Self::check_window_resizes`] applies it.
+    /// [`Self::check_window_resizes`] applies it. Under the focus ring
+    /// (D23) the window is 2 cells smaller each way, for the frame.
     pub fn recalculate_window(&mut self, w: WindowId) {
         let size = self
             .clients
@@ -1153,6 +1154,15 @@ impl Server {
         let Some(size) = size else {
             return;
         };
+        let frame = 2 * u32::from(
+            self.model
+                .number_option(TreeId::Window(w), "vtmux-focus-ring")
+                != 0,
+        );
+        let size = (
+            size.0.saturating_sub(frame).max(1),
+            size.1.saturating_sub(frame).max(1),
+        );
         let Some(window) = self.model.windows.get_mut(&w) else {
             return;
         };
@@ -2067,7 +2077,17 @@ impl Server {
             .filter(|c| c.control.is_none() && c.attached == Some(s))
             .find_map(|c| Some((c.hello.as_ref()?.tty.as_ref()?, self.status_line_size(c))));
         let (sx, sy) = if let Some((tty, lines)) = client {
-            (tty.cols, tty.rows.saturating_sub(lines))
+            // D23: a new window starts inside the focus ring, as
+            // recalculate_window would fit it.
+            let frame = 2 * u32::from(
+                self.model
+                    .number_option(TreeId::GlobalWindow, "vtmux-focus-ring")
+                    != 0,
+            );
+            (
+                tty.cols.saturating_sub(frame),
+                tty.rows.saturating_sub(lines).saturating_sub(frame),
+            )
         } else {
             let size = self
                 .model
