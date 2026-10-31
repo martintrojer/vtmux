@@ -161,16 +161,23 @@ impl Item {
 
     /// `cmdq_print`: a line on stdout.
     pub fn print(&mut self, text: &str) {
+        self.print_line(text.as_bytes());
+    }
+
+    /// `cmdq_print` of bytes that need not be UTF-8: a UTF-8 client gets
+    /// them as they are (`server_client_print`, server-client.c:3243-3256),
+    /// any other a sanitised line.
+    pub fn print_line(&mut self, text: &[u8]) {
         if !self.can_print() {
             return;
         }
         let mut line = if self.utf8 {
-            text.to_owned()
+            text.to_vec()
         } else {
-            utf8_sanitize(text)
+            utf8_sanitize(&String::from_utf8_lossy(text)).into_bytes()
         };
-        line.push('\n');
-        self.output.push(Output::Stdout(line.into_bytes()));
+        line.push(b'\n');
+        self.output.push(Output::Stdout(line));
     }
 
     /// Raw bytes on stdout (`file_print_buffer`).

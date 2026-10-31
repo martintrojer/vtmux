@@ -495,6 +495,9 @@ impl Server {
                 }
                 self.cmdq_process();
             }
+            if self.shutdown {
+                self.send_exit();
+            }
             if self.should_exit() {
                 self.exit_clients();
                 return Ok(());
@@ -589,6 +592,31 @@ impl Server {
                 .all(|c| c.closing && c.outbuf.is_empty())
     }
 
+    /// `server_send_exit` (server.c:314-333), at once when `kill-server`
+    /// runs: every session goes (its panes are hung up) and every client
+    /// that is not on its way out gets `MSG_SHUTDOWN`, a waiting one
+    /// included. Only the process exit waits for a running job
+    /// (`job_still_running`, server.c:306).
+    fn send_exit(&mut self) {
+        self.hangup_panes();
+        let ids: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| !c.closing && c.control.is_none() && c.attached.is_none())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in ids {
+            self.finish_client(id, 0);
+        }
+    }
+
+    fn hangup_panes(&mut self) {
+        let panes: Vec<_> = self.model.panes.keys().copied().collect();
+        for p in panes {
+            self.hangup_pane(p);
+        }
+    }
+
     fn exit_clients(&mut self) {
         // server_exit -> job_kill_all (server.c:260).
         self.jobs_kill_all();
@@ -596,10 +624,7 @@ impl Server {
         for id in ids {
             self.flush_client(id);
         }
-        let panes: Vec<_> = self.model.panes.keys().copied().collect();
-        for p in panes {
-            self.hangup_pane(p);
-        }
+        self.hangup_panes();
         // tmux leaves the socket file: a later client gets ECONNREFUSED and
         // prints `no server running on` (client.c:291-295).
     }
@@ -609,6 +634,9 @@ impl Server {
     fn accept(&mut self) {
         loop {
             match self.listener.accept() {
+                // server_accept (server.c): once exiting, a new client is
+                // closed on (`server_exit`).
+                Ok(_) if self.shutdown => {}
                 Ok((mut stream, _)) => {
                     let id = ClientId(self.next_client);
                     self.next_client += 1;

@@ -278,24 +278,19 @@ fn job_done(
     status: JobStatus,
     to_pane: bool,
 ) {
-    let mut lines: Vec<String> = Vec::new();
-    let text = String::from_utf8_lossy(output);
-    let mut rest = &*text;
-    while let Some(nl) = rest.find('\n') {
-        lines.push(rest[..nl].to_owned());
-        rest = &rest[nl + 1..];
-    }
-    if !rest.is_empty() {
-        lines.push(rest.to_owned());
+    let mut lines: Vec<Vec<u8>> = output.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect();
+    // A final newline ends the last line; it does not start another.
+    if lines.last().is_some_and(Vec::is_empty) {
+        lines.pop();
     }
     let retcode = match status {
         JobStatus::Exited(0) => 0,
         JobStatus::Exited(code) => {
-            lines.push(format!("'{command}' returned {code}"));
+            lines.push(format!("'{command}' returned {code}").into_bytes());
             code
         }
         JobStatus::Signaled(sig) => {
-            lines.push(format!("'{command}' terminated by signal {sig}"));
+            lines.push(format!("'{command}' terminated by signal {sig}").into_bytes());
             sig + 128
         }
     };
@@ -305,7 +300,7 @@ fn job_done(
     if let Some(step) = done.step.filter(|_| !to_pane) {
         server.cmdq_with_item(step, |_, item| {
             for line in &lines {
-                item.print(line);
+                item.print_line(line);
             }
         });
     }

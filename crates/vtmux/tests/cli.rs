@@ -1422,6 +1422,109 @@ fn run_shell_cli() {
     });
 }
 
+/// `run-shell` output reaches a UTF-8 client as the bytes the job wrote,
+/// not re-encoded (`server_client_print` -> `file_print`,
+/// server-client.c:3243-3256), in the output lines and in the
+/// `'cmd' returned N` line; a client that is not UTF-8 gets `_`.
+#[test]
+fn run_shell_non_utf8_output() {
+    compare("run_shell_non_utf8_output", |w| {
+        let hex = |r: Run, bytes: &[u8]| {
+            let mut seen = Run::seen(bytes.iter().map(|b| format!("{b:02x}")).collect());
+            seen.stderr = r.stderr;
+            seen.code = r.code;
+            seen
+        };
+        let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+        for (locale, cmd) in [
+            ("C.UTF-8", r"printf '\377x\303\251y\n'"),
+            ("C.UTF-8", r"printf '\351'; exit 1"),
+            ("C", r"printf '\377x\303\251y\n'"),
+        ] {
+            let out = Command::new(&w.bin)
+                .args(["-L", &w.label, "-f", "/dev/null", "run", cmd])
+                .current_dir(w.dir())
+                .env_remove("TMUX")
+                .env_remove("TMUX_PANE")
+                .env_remove("LC_CTYPE")
+                .env_remove("LANG")
+                .env("LC_ALL", locale)
+                .env("TMUX_TMPDIR", w.dir())
+                .env("SHELL", "/bin/sh")
+                .output()
+                .expect("run binary");
+            let run = Run {
+                stdout: String::new(),
+                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                code: out.status.code().unwrap_or(-1),
+            };
+            runs.push(hex(run, &out.stdout));
+        }
+        runs
+    });
+}
+
+/// `kill-server` while a waiting `run-shell` job runs: the panes die, the
+/// waiting client is released at once with status 0, new clients find no
+/// server, and the server process exits only once the job is done
+/// (server.c `server_send_exit`, `server_loop`'s `job_still_running`).
+#[test]
+fn kill_server_with_running_job() {
+    compare("kill_server_with_running_job", |w| {
+        let started = w.dir().join("started");
+        let pidfile = w.dir().join("pane-pid");
+        let (st, pf) = (
+            started.to_str().expect("utf-8"),
+            pidfile.to_str().expect("utf-8"),
+        );
+        let mut runs = vec![w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "k",
+            &format!("echo $$ >{pf}; exec sleep 77"),
+        ])];
+        let client = w.spawn(&["run", &format!("touch {st}; sleep 2")]);
+        let begin = Instant::now();
+        while !(started.exists() && pidfile.exists()) && begin.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        runs.push(w.run(&["kill-server"]));
+        // The waiting client returns long before its job's 2 s are up.
+        let released = Instant::now();
+        let out = client.wait_with_output().expect("wait");
+        runs.push(Run {
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            code: out.status.code().unwrap_or(-1),
+        });
+        runs.push(Run::seen(format!(
+            "released early: {}",
+            released.elapsed() < Duration::from_millis(1500)
+        )));
+        runs.push(w.run(&["new", "-d", "-s", "again"]));
+        runs.push(w.run(&["ls", "-F", "#S"]));
+        // The pane's process is gone (a zombie counts as gone).
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .expect("pane pid")
+            .trim()
+            .parse()
+            .expect("pid");
+        let gone = || {
+            std::fs::read_to_string(format!("/proc/{pid}/stat")).map_or(true, |stat| {
+                stat.rsplit(") ").next().is_some_and(|r| r.starts_with('Z'))
+            })
+        };
+        let begin = Instant::now();
+        while !gone() && begin.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        runs.push(Run::seen(format!("pane gone: {}", gone())));
+        w.wait_gone();
+        runs
+    });
+}
+
 /// `run-shell -b` returns at once and its output goes to a pane's view
 /// mode (D-009), not the client; `-b -C` commands run later on the global
 /// queue. `-t` sends output to the pane too.
