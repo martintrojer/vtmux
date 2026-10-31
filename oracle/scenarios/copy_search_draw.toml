@@ -1,0 +1,50 @@
+# Search marks and their styles (window_copy_update_style): every match in
+# copy-mode-match-style, the one at the cursor in
+# copy-mode-current-match-style (emacs keys: the one just before the
+# cursor after a forward search), the mark's line in copy-mode-mark-style
+# with the mark's cell swapped, and the count in the position indicator.
+name = "copy_search_draw"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "i=1; while [ $i -le 8 ]; do echo \"line$i foo bar foo\"; i=$((i+1)); done; echo 'wide 世界 foo'; echo 'end'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "copy-mode-position-format", "#[align=right][#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"] },
+  { attach = { session = "a" } },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "foo"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "search-again"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward", "b.r"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-left"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward-text", "世界"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "page-up"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "set-mark"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "3", "cursor-down"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "jump-to-mark"] },
+  { run = ["display", "-p", "-t", "a", "[#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
+  { screen = {} },
+  { run = ["set", "-g", "copy-mode-match-style", "bg=red,underscore"] },
+  { run = ["set", "-g", "copy-mode-current-match-style", "fg=green,bold"] },
+  { run = ["setw", "-g", "mode-keys", "vi"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward", "foo"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-again"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "begin-selection"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "5", "cursor-right"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "cancel"] },
+  { run = ["display", "-p", "-t", "a", "[#{pane_search_string}]"] },
+  { screen = {} },
+]

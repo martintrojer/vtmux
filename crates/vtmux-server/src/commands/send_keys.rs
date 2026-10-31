@@ -23,7 +23,7 @@ pub fn exec(
     if args.flag('K') {
         return inject(server, item, args);
     }
-    for flag in ['M', 'R', 'F', 'c'] {
+    for flag in ['M', 'R', 'c'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("send-keys -{flag}")).into());
         }
@@ -90,11 +90,27 @@ pub fn exec(
 
 /// `send-keys -X`: a command for the pane's mode (`window_copy_command`).
 fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Result<(), CmdError> {
-    let words: Vec<String> = args
+    let mut words: Vec<String> = args
         .positionals
         .iter()
         .map(|a| a.text().into_owned())
         .collect();
+    // window_copy_expand_search_string: `-F` makes a search's string a
+    // format (expanded for the pane); an empty result searches nothing.
+    if args.flag('F')
+        && words.first().is_some_and(|w| {
+            matches!(
+                w.as_str(),
+                "search-forward"
+                    | "search-backward"
+                    | "search-forward-text"
+                    | "search-backward-text"
+            )
+        })
+        && let Some(arg) = words.get_mut(1)
+    {
+        *arg = super::expand(server, found, arg);
+    }
     let Some((name, rest)) = words.split_first() else {
         // window_copy_command: no command, nothing to do.
         return if server

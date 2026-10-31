@@ -2,14 +2,16 @@
 //! screen with its own cursor and selection, over a copy of the pane's grid
 //! taken on entry ([`Grid`]).
 //!
-//! Search, jumps, marks, piping, refresh and drawing line numbers are not
-//! here yet.
+//! Piping, refresh and drawing line numbers are not here yet.
+
+mod search;
 
 use vtmux_core::cmd::{Args, CmdEntry};
 use vtmux_vt::{Cell, PaneTerm, Row, Snapshot};
 
 use super::grid::Grid;
 use super::reader::{Reader, WHITESPACE, cell_text};
+use search::{Search, SearchKind};
 
 /// What a copy mode command asks for afterwards
 /// (`enum window_copy_cmd_action`); only leaving is visible to vtmux, which
@@ -76,6 +78,95 @@ pub struct Env {
     pub line_numbers: i64,
     /// The session's `word-separators` (`cs->s->options`).
     pub separators: String,
+    /// `wrap-search`.
+    pub wrap_search: bool,
+}
+
+/// How a cell in view is painted (`window_copy_update_style`,
+/// `screen_select_cell`), for the renderer to give it the option's style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Paint {
+    /// `copy-mode-mark-style`, its colours swapped on the mark's cell.
+    Mark { inverse: bool },
+    /// `copy-mode-match-style`.
+    Match { inverse: bool },
+    /// `copy-mode-current-match-style`.
+    CurrentMatch { inverse: bool },
+    /// `copy-mode-selection-style`.
+    Selection,
+}
+
+/// What the last jump looked for (`jumptype`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Jump {
+    Off,
+    Forward,
+    Backward,
+    ToForward,
+    ToBackward,
+}
+
+/// Whether a command clears the search marks (`enum
+/// window_copy_cmd_clear`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Clear {
+    Always,
+    Never,
+    EmacsOnly,
+}
+
+/// The table's `.clear` for `name` (window-copy.c:3298-3891).
+fn clear_kind(name: &str) -> Clear {
+    match name {
+        "copy-pipe-no-clear"
+        | "copy-selection-no-clear"
+        | "line-numbers-on"
+        | "line-numbers-off"
+        | "line-numbers-toggle"
+        | "pipe-no-clear"
+        | "refresh-on"
+        | "refresh-off"
+        | "refresh-now"
+        | "refresh-toggle"
+        | "toggle-position" => Clear::Never,
+        "bottom-line"
+        | "cursor-down"
+        | "cursor-left"
+        | "cursor-right"
+        | "cursor-up"
+        | "cursor-centre-vertical"
+        | "cursor-centre-horizontal"
+        | "end-of-line"
+        | "goto-line"
+        | "halfpage-down"
+        | "halfpage-up"
+        | "history-bottom"
+        | "history-top"
+        | "jump-again"
+        | "jump-backward"
+        | "jump-forward"
+        | "jump-reverse"
+        | "jump-to-backward"
+        | "jump-to-forward"
+        | "middle-line"
+        | "next-paragraph"
+        | "next-space"
+        | "next-space-end"
+        | "next-word"
+        | "next-word-end"
+        | "other-end"
+        | "page-down"
+        | "page-up"
+        | "previous-paragraph"
+        | "previous-space"
+        | "previous-word"
+        | "scroll-down"
+        | "scroll-to-mouse"
+        | "scroll-up"
+        | "start-of-line"
+        | "top-line" => Clear::EmacsOnly,
+        _ => Clear::Always,
+    }
 }
 
 /// A grid position: column and backing line.
@@ -177,6 +268,15 @@ pub struct CopyMode {
     endselr: Pos,
     /// `data->separators`, set by word selection.
     separators: String,
+    search: Search,
+    /// The pane's last search (`wp->searchstr`, `wp->searchregex`), kept
+    /// by the pane between copy modes.
+    pub pane_search: Option<(String, bool)>,
+    jump: Jump,
+    jumpchar: String,
+    /// The mark (`mx`, `my`) and whether it is drawn (`showmark`).
+    mark: Pos,
+    show_mark: bool,
 }
 
 /// The copy mode commands tmux has (`window_copy_cmd_table`), so one vtmux
@@ -403,6 +503,7 @@ impl CopyMode {
         trim: bool,
         (scroll_exit, hide_position): (bool, bool),
         vi: bool,
+        pane_search: Option<(String, bool)>,
     ) -> Self {
         let (backing, cx, cursor_row) = Grid::clone_of(source, sx, sy, trim);
         let hsize = backing.hsize();
@@ -439,6 +540,24 @@ impl CopyMode {
             selr: (0, 0),
             endselr: (0, 0),
             separators: String::new(),
+            // window_copy_common_init: the pane's last search is searched
+            // up again by search-again.
+            search: Search {
+                kind: if pane_search.is_some() {
+                    SearchKind::Up
+                } else {
+                    SearchKind::Off
+                },
+                regex: pane_search.as_ref().is_some_and(|(_, r)| *r),
+                string: pane_search.as_ref().map(|(s, _)| s.clone()),
+                all: true,
+                ..Search::default()
+            },
+            pane_search,
+            jump: Jump::Off,
+            jumpchar: String::new(),
+            mark: (cx, hsize + cy - oy),
+            show_mark: false,
         }
     }
 
@@ -466,8 +585,17 @@ impl CopyMode {
             vi: self.modekeys_vi,
             line_numbers: 0,
             separators: String::new(),
+            wrap_search: false,
         };
         self.clear_selection(&env);
+        // window_copy_size_changed: the marks are made again for the new
+        // size, counting all of history.
+        let had = self.search.marks.is_some();
+        self.clear_marks();
+        if had && !self.search.timeout {
+            self.search_marks(None, self.search.regex, false);
+        }
+        self.search.origin = Some((self.cx, self.cy, self.oy));
     }
 
     // --- grid access ------------------------------------------------------
@@ -549,6 +677,18 @@ impl CopyMode {
             active: self.drag != Drag::None,
             present: self.selpos != self.endpos,
         })
+    }
+
+    /// `search_present`, `search_timed_out`, and `search_count` with
+    /// `search_count_partial` unless the count is unknown.
+    #[must_use]
+    pub fn search_info(&self) -> (bool, bool, Option<(i64, bool)>) {
+        let s = &self.search;
+        (
+            s.marks.is_some(),
+            s.timeout,
+            (s.count != -1).then_some((s.count, s.more)),
+        )
     }
 
     /// `window_copy_line_number_mode`.
@@ -660,24 +800,44 @@ impl CopyMode {
         self.sel.is_some_and(|s| s.contains(x, y))
     }
 
-    /// Which screen cells are selected, row-major; empty without a
-    /// selection on screen.
+    /// Which screen cells are selected or painted for the mark or a
+    /// search, row-major; empty without any. tmux's terminal shows those
+    /// cells written, never erased with the blanks around them (reference
+    /// tmux 3.8: the blank end of the mark's line is written as spaces in
+    /// `copy-mode-mark-style`).
     #[must_use]
-    pub fn selection_mask(&self) -> Vec<bool> {
-        if self.sel.is_none_or(|s| s.hidden) {
+    pub fn selection_mask(&self, vi: bool) -> Vec<bool> {
+        let selection = self.sel.is_some_and(|s| !s.hidden);
+        if !selection && !self.show_mark && self.search.marks.is_none() {
             return Vec::new();
         }
         (0..self.sy)
             .flat_map(|y| (0..self.sx).map(move |x| (x, y)))
-            .map(|(x, y)| self.selected(x, y))
+            .map(|(x, y)| self.selected(x, y) || self.paint_of(x, y, vi).is_some())
             .collect()
     }
 
+    /// How cell `(x, py)` of the view is painted before the selection
+    /// (`window_copy_update_style`): the mark's line in the mark style, a
+    /// search match in the match or current match style, the mark's own
+    /// cell with the colours swapped. `vi` is `mode-keys` now.
+    fn paint_of(&self, x: usize, py: usize, vi: bool) -> Option<Paint> {
+        let fy = self.abs(py);
+        let inverse = self.show_mark && fy == self.mark.1 && x == self.mark.0;
+        let mark = (self.show_mark && fy == self.mark.1).then_some(Paint::Mark { inverse });
+        match self.match_paint(x, fy, vi) {
+            Some(true) => Some(Paint::CurrentMatch { inverse }),
+            Some(false) => Some(Paint::Match { inverse }),
+            None => mark,
+        }
+    }
+
     /// The mode's screen (`window_copy_write_line` for every row, without
-    /// the indicator): the backing rows in view, `select` applied to the
-    /// selected cells (`screen_select_cell`), and the cursor.
+    /// the indicator): the backing rows in view, `paint` applied to the
+    /// marked, matched and selected cells (`window_copy_update_style`,
+    /// `screen_select_cell`), and the cursor. `vi` is `mode-keys` now.
     #[must_use]
-    pub fn screen(&self, select: &dyn Fn(&mut Cell)) -> Snapshot {
+    pub fn screen(&self, vi: bool, paint: &dyn Fn(&mut Cell, Paint)) -> Snapshot {
         let (sx, sy) = (self.sx, self.sy);
         let mut cells = Vec::with_capacity(sx * sy);
         for py in 0..sy {
@@ -693,8 +853,11 @@ impl CopyMode {
                 if c.width == 2 && x + 1 >= sx {
                     c = blank();
                 }
+                if let Some(p) = self.paint_of(x, py, vi) {
+                    paint(&mut c, p);
+                }
                 if self.selected(x, py) {
-                    select(&mut c);
+                    paint(&mut c, Paint::Selection);
                 }
                 cells.push(c);
             }
@@ -716,7 +879,7 @@ impl CopyMode {
     /// character (`screen_write_overwrite`, screen-write.c:3007-3025), so
     /// the screen says what the terminal shows and the character is drawn
     /// again once the `$` goes.
-    pub fn mark_overflow(&self, screen: &mut Snapshot, select: &dyn Fn(&mut Cell)) {
+    pub fn mark_overflow(&self, screen: &mut Snapshot, paint: &dyn Fn(&mut Cell, Paint)) {
         if self.cx < self.sx || self.cy >= self.sy {
             return;
         }
@@ -739,7 +902,7 @@ impl CopyMode {
                 ..Cell::default()
             };
             if selected {
-                select(c);
+                paint(c, Paint::Selection);
             }
         }
     }
@@ -765,6 +928,18 @@ impl CopyMode {
         let outcome = self.run(env, name, &args, np);
         if outcome.is_none() && TMUX_COMMANDS.contains(&name) {
             return Err(CommandError::NotImplemented(name.to_owned()));
+        }
+        // window_copy_command: any command but a search clears the marks
+        // as its table entry says (window-copy.c:3953-3963).
+        if !name.starts_with("search-") && self.search.marks.is_some() {
+            let clear = match clear_kind(name) {
+                Clear::EmacsOnly if env.vi => Clear::Never,
+                c => c,
+            };
+            if clear != Clear::Never {
+                self.clear_marks();
+                self.search.origin = None;
+            }
         }
         Ok(outcome.unwrap_or_else(|| Action::Stay.into()))
     }
@@ -826,6 +1001,7 @@ impl CopyMode {
                     self.other_end(env);
                 }
                 (self.cx, self.cy, self.oy) = (0, 0, self.hsize());
+                self.refresh_marks();
                 self.update_selection(env, false);
             }
             "history-bottom" => {
@@ -835,6 +1011,7 @@ impl CopyMode {
                 self.cy = self.sy - 1;
                 self.cx = self.cursor_limit(env, self.hsize() + self.cy, false);
                 self.oy = 0;
+                self.refresh_marks();
                 self.update_selection(env, false);
             }
             "scroll-up" => {
@@ -975,6 +1152,97 @@ impl CopyMode {
             | "copy-end-of-line"
             | "copy-end-of-line-and-cancel" => {
                 return Some(self.copy_lines(env, args, np, name));
+            }
+
+            // Search.
+            "search-forward"
+            | "search-backward"
+            | "search-forward-text"
+            | "search-backward-text" => {
+                if let Some(string) = args.positional(0).filter(|s| !s.is_empty()) {
+                    self.search.string = Some(string.to_owned());
+                    let down = name.starts_with("search-forward");
+                    let regex = !name.ends_with("-text");
+                    self.search.kind = if down {
+                        SearchKind::Down
+                    } else {
+                        SearchKind::Up
+                    };
+                    self.search.regex = regex;
+                    self.search.timeout = false;
+                    for _ in 0..np {
+                        self.search(env, down, regex);
+                    }
+                }
+            }
+            "search-again" | "search-reverse" => {
+                let reverse = name == "search-reverse";
+                let down = match self.search.kind {
+                    SearchKind::Off => return Some(Action::Stay.into()),
+                    SearchKind::Down => !reverse,
+                    SearchKind::Up => reverse,
+                };
+                for _ in 0..np {
+                    self.search(env, down, self.search.regex);
+                }
+            }
+            "search-forward-incremental" | "search-backward-incremental" => {
+                let arg = args.positional(0).unwrap_or_default();
+                self.search_incremental(env, arg, name.contains("forward"));
+            }
+
+            // Jumps.
+            "jump-forward" | "jump-backward" | "jump-to-forward" | "jump-to-backward" => {
+                let arg = args.positional(0).unwrap_or_default();
+                if !arg.is_empty() {
+                    self.jump = match name {
+                        "jump-forward" => Jump::Forward,
+                        "jump-backward" => Jump::Backward,
+                        "jump-to-forward" => Jump::ToForward,
+                        _ => Jump::ToBackward,
+                    };
+                    // utf8_fromcstr: the jump looks for the first character.
+                    arg.clone_into(&mut self.jumpchar);
+                    let kind = self.jump;
+                    repeat(self, &mut |m| m.cursor_jump(env, kind));
+                }
+            }
+            "jump-again" | "jump-reverse" => {
+                let kind = match (self.jump, name == "jump-reverse") {
+                    (Jump::Off, _) => return Some(Action::Stay.into()),
+                    (k, false) => k,
+                    (Jump::Forward, true) => Jump::Backward,
+                    (Jump::Backward, true) => Jump::Forward,
+                    (Jump::ToForward, true) => Jump::ToBackward,
+                    (Jump::ToBackward, true) => Jump::ToForward,
+                };
+                repeat(self, &mut |m| m.cursor_jump(env, kind));
+            }
+            "set-mark" => {
+                self.mark = (self.cx, self.abs(self.cy));
+                self.show_mark = true;
+            }
+            "jump-to-mark" => self.jump_to_mark(env),
+
+            // Brackets, paragraphs and prompts.
+            "previous-matching-bracket" => {
+                for _ in 0..np {
+                    if !self.previous_matching_bracket(env) {
+                        break;
+                    }
+                }
+            }
+            "next-matching-bracket" => {
+                for _ in 0..np {
+                    if !self.next_matching_bracket(env) {
+                        break;
+                    }
+                }
+            }
+            "previous-paragraph" => repeat(self, &mut |m| m.previous_paragraph(env)),
+            "next-paragraph" => repeat(self, &mut |m| m.next_paragraph(env)),
+            "previous-prompt" | "next-prompt" => {
+                self.cursor_prompt(env, name == "next-prompt", args.flag('o'));
             }
             _ => return None,
         }
@@ -1177,7 +1445,7 @@ impl CopyMode {
     /// `window_copy_scroll_to` (window-copy.c:3981-4015): put the cursor at
     /// grid position `(px, py)`, scrolling it into view a quarter of the
     /// screen from the edge.
-    fn scroll_to_pos(&mut self, env: &Env, px: usize, py: usize) {
+    fn scroll_to_pos(&mut self, env: &Env, px: usize, py: usize, no_redraw: bool) {
         let (hsize, sy) = (self.hsize(), self.sy);
         self.cx = px;
         let top = hsize - self.oy;
@@ -1194,6 +1462,9 @@ impl CopyMode {
             };
             self.cy = py - offset;
             self.oy = hsize - offset;
+        }
+        if !no_redraw {
+            self.refresh_marks();
         }
         self.update_selection(env, false);
     }
@@ -1239,13 +1510,13 @@ impl CopyMode {
             if self.drag != Drag::None && before {
                 self.lineflag = LineSel::RightLeft;
                 self.drag = Drag::Start;
-                self.scroll_to_pos(env, first.0, first.1);
+                self.scroll_to_pos(env, first.0, first.1, true);
             } else {
                 self.lineflag = LineSel::LeftRight;
                 if self.drag != Drag::None {
                     self.drag = Drag::End;
                     let limit = self.cursor_limit(env, last.1, false);
-                    self.scroll_to_pos(env, limit, last.1);
+                    self.scroll_to_pos(env, limit, last.1, true);
                 }
             }
             if self.drag == Drag::None {
@@ -1446,6 +1717,7 @@ impl CopyMode {
             return;
         }
         self.oy -= ny;
+        self.refresh_marks();
         self.update_selection_view(env);
     }
 
@@ -1460,6 +1732,7 @@ impl CopyMode {
             return;
         }
         self.oy += ny;
+        self.refresh_marks();
         self.update_selection_view(env);
     }
 
@@ -1715,6 +1988,7 @@ impl CopyMode {
             self.oy += n;
         }
         self.page_end(env);
+        self.refresh_marks();
         self.update_selection(env, false);
     }
 
@@ -1733,6 +2007,7 @@ impl CopyMode {
         if scroll_exit && self.oy == 0 && self.sel.is_none() {
             return true;
         }
+        self.refresh_marks();
         self.update_selection(env, false);
         false
     }
@@ -1748,6 +2023,7 @@ impl CopyMode {
         if scroll_exit && self.oy == 0 && self.sel.is_none() {
             return true;
         }
+        self.refresh_marks();
         self.update_selection_view(env);
         false
     }
@@ -1780,6 +2056,340 @@ impl CopyMode {
                 .ok()
                 .filter(|&n| n <= hsize)
                 .unwrap_or(hsize);
+        }
+        self.update_selection(env, false);
+    }
+
+    // --- search, jumps, marks, brackets, paragraphs, prompts --------------
+
+    /// `window_copy_cmd_search_*_incremental` (window-copy.c:2936-3053):
+    /// `arg` is a prefix (`=`, `+` or `-`, the direction) and the string so
+    /// far; a changed string searches again from where the search began.
+    fn search_incremental(&mut self, env: &Env, arg: &str, forward: bool) {
+        self.search.timeout = false;
+        let mut chars = arg.chars();
+        let prefix = chars.next();
+        let rest = chars.as_str();
+        match self.search.origin {
+            None => self.search.origin = Some((self.cx, self.cy, self.oy)),
+            Some((x, y, o)) if self.search.string.as_deref().is_some_and(|s| s != rest) => {
+                (self.cx, self.cy, self.oy) = (x, y, o);
+                self.cx = self.cursor_limit(env, self.abs(self.cy), false);
+            }
+            Some(_) => {}
+        }
+        if rest.is_empty() {
+            self.clear_marks();
+            return;
+        }
+        let down = match prefix {
+            Some('=') => forward,
+            Some('+') => true,
+            Some('-') => false,
+            _ => return,
+        };
+        self.search.kind = if down {
+            SearchKind::Down
+        } else {
+            SearchKind::Up
+        };
+        self.search.regex = false;
+        self.search.string = Some(rest.to_owned());
+        if !self.search(env, down, false) {
+            self.clear_marks();
+        }
+    }
+
+    /// `grid_reader_cell_equals_data`: the cell holds the jump character.
+    fn cell_is_jumpchar(&self, x: usize, y: usize) -> bool {
+        let Some(want) = self.jumpchar.chars().next() else {
+            return false;
+        };
+        let c = self.backing.cell(x, y);
+        let mut text = cell_text(&c).chars();
+        c.width != 0 && text.next() == Some(want) && text.next().is_none()
+    }
+
+    /// `grid_reader_cursor_jump`: the next jump character from `(px, py)`
+    /// on, following wrapped lines.
+    fn find_jump(&self, mut px: usize, py: usize) -> Option<Pos> {
+        let last = self.last_row();
+        for y in py..=last {
+            let len = self.find_length(y);
+            while px < len {
+                if self.cell_is_jumpchar(px, y) {
+                    return Some((px, y));
+                }
+                px += 1;
+            }
+            if y == last || !self.wrapped(y) {
+                return None;
+            }
+            px = 0;
+        }
+        None
+    }
+
+    /// `grid_reader_cursor_jump_back`: the previous one at or before
+    /// `(px, py)`.
+    fn find_jump_back(&self, px: usize, py: usize) -> Option<Pos> {
+        let mut xx = px + 1;
+        let mut y = py + 1;
+        while y > 0 {
+            for x in (0..xx).rev() {
+                if self.cell_is_jumpchar(x, y - 1) {
+                    return Some((x, y - 1));
+                }
+            }
+            if y == 1 || !self.wrapped(y - 2) {
+                return None;
+            }
+            xx = self.find_length(y - 2);
+            y -= 1;
+        }
+        None
+    }
+
+    /// `window_copy_cursor_jump`, `_jump_back`, `_jump_to`,
+    /// `_jump_to_back`.
+    fn cursor_jump(&mut self, env: &Env, kind: Jump) {
+        let py = self.abs(self.cy);
+        match kind {
+            Jump::Off => {}
+            Jump::Forward | Jump::ToForward => {
+                let skip = if kind == Jump::Forward { 1 } else { 2 };
+                if let Some((x, y)) = self.find_jump(self.cx + skip, py) {
+                    let mut r = Reader::new(&self.backing, x, y);
+                    if kind == Jump::ToForward {
+                        r.cursor_left(true);
+                    }
+                    let (x, y) = r.get();
+                    self.acquire_cursor_down(env, x, y, false);
+                }
+            }
+            Jump::Backward | Jump::ToBackward => {
+                let mut r = self.reader();
+                r.cursor_left(false);
+                if kind == Jump::ToBackward {
+                    r.cursor_left(false);
+                }
+                let (x, y) = r.get();
+                if let Some((x, y)) = self.find_jump_back(x, y) {
+                    let mut r = Reader::new(&self.backing, x, y);
+                    if kind == Jump::ToBackward {
+                        r.cursor_right(true, false, !env.vi);
+                    }
+                    let (x, y) = r.get();
+                    self.acquire_cursor_up(env, x, y);
+                }
+            }
+        }
+    }
+
+    /// `window_copy_jump_to_mark`: the cursor and the mark change places.
+    fn jump_to_mark(&mut self, env: &Env) {
+        let here = (self.cx, self.abs(self.cy));
+        let (mx, my) = self.mark;
+        let hsize = self.hsize();
+        self.cx = mx;
+        if my < hsize {
+            self.cy = 0;
+            self.oy = hsize - my;
+        } else {
+            self.cy = my - hsize;
+            self.oy = 0;
+        }
+        self.mark = here;
+        self.show_mark = true;
+        self.update_selection(env, false);
+    }
+
+    /// The cell's one-byte character, `None` for padding or a longer one
+    /// (`gc.data.size != 1`).
+    fn byte_at(&self, x: usize, y: usize) -> Option<u8> {
+        let c = self.backing.cell(x, y);
+        let t = cell_text(&c);
+        (c.width != 0 && t.len() == 1).then(|| t.as_bytes()[0])
+    }
+
+    /// `window_copy_cmd_previous_matching_bracket`, one repeat; false to
+    /// stop repeating (an empty line).
+    fn previous_matching_bracket(&mut self, env: &Env) -> bool {
+        const OPEN: &[u8] = b"{[(";
+        const CLOSE: &[u8] = b"}])";
+        let (mut px, mut py) = (self.cx, self.abs(self.cy));
+        if self.find_length(py) == 0 {
+            return false;
+        }
+        let mut tried = false;
+        let found = loop {
+            if let Some(b) = self.byte_at(px, py).filter(|b| CLOSE.contains(b)) {
+                break b;
+            }
+            if !self.modekeys_vi {
+                if !tried && px > 0 {
+                    px -= 1;
+                    tried = true;
+                    continue;
+                }
+                self.cursor_previous_word(env, "}])", true);
+            }
+            return true;
+        };
+        let start = OPEN[CLOSE.iter().position(|&c| c == found).expect("close")];
+        let mut n = 1;
+        while n != 0 {
+            if px == 0 {
+                if py == 0 {
+                    return true;
+                }
+                let mut xx;
+                loop {
+                    py -= 1;
+                    xx = self.find_length(py);
+                    if xx != 0 || py == 0 {
+                        break;
+                    }
+                }
+                if xx == 0 && py == 0 {
+                    return true;
+                }
+                px = xx - 1;
+            } else {
+                px -= 1;
+            }
+            match self.byte_at(px, py) {
+                Some(b) if b == found => n += 1,
+                Some(b) if b == start => n -= 1,
+                _ => {}
+            }
+        }
+        self.scroll_to_pos(env, px, py, false);
+        true
+    }
+
+    /// `window_copy_cmd_next_matching_bracket`, one repeat; false to stop.
+    fn next_matching_bracket(&mut self, env: &Env) -> bool {
+        const OPEN: &[u8] = b"{[(";
+        const CLOSE: &[u8] = b"}])";
+        let (mut px, mut py) = (self.cx, self.abs(self.cy));
+        let mut xx = self.find_length(py);
+        let yy = self.last_row();
+        if xx == 0 {
+            return false;
+        }
+        let mut tried = false;
+        let found = loop {
+            let b = self.byte_at(px, py);
+            // vi: a closing bracket first goes back to its opening one,
+            // or stays put if there is none.
+            if self.modekeys_vi && b.is_some_and(|b| CLOSE.contains(&b)) {
+                let saved = (self.cx, self.abs(self.cy));
+                self.scroll_to_pos(env, px, py, false);
+                self.previous_matching_bracket(env);
+                let (cx, cy) = (self.cx, self.abs(self.cy));
+                if self.byte_at(cx, cy).is_some_and(|b| CLOSE.contains(&b)) {
+                    self.scroll_to_pos(env, saved.0, saved.1, false);
+                }
+                return false;
+            }
+            if let Some(b) = b.filter(|b| OPEN.contains(b)) {
+                break b;
+            }
+            if !self.modekeys_vi {
+                if !tried && px <= xx {
+                    px += 1;
+                    tried = true;
+                    continue;
+                }
+                self.cursor_next_word_end(env, "{[(", false);
+                return true;
+            }
+            // vi: on along the line, onto the lines it wraps onto.
+            if px > xx {
+                if py == yy || !self.wrapped(py) || self.row(py).cells.len() > self.backing.sx() {
+                    return true;
+                }
+                px = 0;
+                py += 1;
+                xx = self.find_length(py);
+            } else {
+                px += 1;
+            }
+        };
+        let end = CLOSE[OPEN.iter().position(|&c| c == found).expect("open")];
+        let mut n = 1;
+        while n != 0 {
+            if px > xx {
+                if py == yy {
+                    return true;
+                }
+                px = 0;
+                py += 1;
+                xx = self.find_length(py);
+            } else {
+                px += 1;
+            }
+            match self.byte_at(px, py) {
+                Some(b) if b == found => n += 1,
+                Some(b) if b == end => n -= 1,
+                _ => {}
+            }
+        }
+        self.scroll_to_pos(env, px, py, false);
+        true
+    }
+
+    /// `window_copy_previous_paragraph`.
+    fn previous_paragraph(&mut self, env: &Env) {
+        let mut oy = self.abs(self.cy);
+        while oy > 0 && self.find_length(oy) == 0 {
+            oy -= 1;
+        }
+        while oy > 0 && self.find_length(oy) > 0 {
+            oy -= 1;
+        }
+        self.scroll_to_pos(env, 0, oy, false);
+    }
+
+    /// `window_copy_next_paragraph`.
+    fn next_paragraph(&mut self, env: &Env) {
+        let mut oy = self.abs(self.cy);
+        let maxy = self.hsize() + self.sy - 1;
+        while oy < maxy && self.find_length(oy) == 0 {
+            oy += 1;
+        }
+        while oy < maxy && self.find_length(oy) > 0 {
+            oy += 1;
+        }
+        let ox = self.find_length(oy);
+        self.scroll_to_pos(env, ox, oy, false);
+    }
+
+    /// `window_copy_cursor_prompt`: to the start of the next or previous
+    /// line where a prompt (or with `-o` command output) starts.
+    fn cursor_prompt(&mut self, env: &Env, down: bool, output: bool) {
+        let mut line = self.abs(self.cy);
+        let end = if down { self.last_row() } else { 0 };
+        loop {
+            if line == end {
+                return;
+            }
+            line = if down { line + 1 } else { line - 1 };
+            if self.backing.starts(line, output) {
+                break;
+            }
+        }
+        let hsize = self.hsize();
+        self.cx = 0;
+        // As tmux: `line > hsize`, so the first screen line is shown from
+        // the top of history's end.
+        if line > hsize {
+            self.cy = line - hsize;
+            self.oy = 0;
+        } else {
+            self.cy = 0;
+            self.oy = hsize - line;
         }
         self.update_selection(env, false);
     }
@@ -1845,12 +2455,13 @@ mod tests {
             vi: false,
             line_numbers: 0,
             separators: String::new(),
+            wrap_search: true,
         }
     }
 
     fn enter(t: &PaneTerm, scroll_exit: bool) -> CopyMode {
         let size = (usize::from(t.cols()), usize::from(t.rows()));
-        CopyMode::new(t, size, false, (scroll_exit, false), false)
+        CopyMode::new(t, size, false, (scroll_exit, false), false, None)
     }
 
     fn cmd(m: &mut CopyMode, name: &str) -> Action {
@@ -1893,8 +2504,8 @@ mod tests {
         assert_eq!(cmd(&mut m, "cancel"), Action::Cancel);
         assert_eq!(cmd(&mut m, "nosuch"), Action::Stay);
         assert_eq!(
-            m.command(&env(), "search-forward", &[]),
-            Err(CommandError::NotImplemented("search-forward".into()))
+            m.command(&env(), "pipe", &[]),
+            Err(CommandError::NotImplemented("pipe".into()))
         );
     }
 
@@ -1906,7 +2517,7 @@ mod tests {
         cmd(&mut m, "history-top");
         t.feed(b"more\r\nand more\r\n");
         assert_eq!(m.cursor_line(), "line1");
-        let s = m.screen(&|_| {});
+        let s = m.screen(false, &|_, _| {});
         assert_eq!(s.cell(0, 5).unwrap().text, "l");
         assert_eq!(s.cell(4, 5).unwrap().text, "6");
         cmd(&mut m, "history-bottom");
@@ -1964,13 +2575,14 @@ mod selection_tests {
             vi,
             line_numbers: 0,
             separators: "-".into(),
+            wrap_search: true,
         }
     }
 
     fn mode(text: &str, vi: bool) -> CopyMode {
         let mut t = PaneTerm::new(20, 4, 100);
         t.feed(text.as_bytes());
-        CopyMode::new(&t, (20, 4), false, (false, false), vi)
+        CopyMode::new(&t, (20, 4), false, (false, false), vi, None)
     }
 
     fn run(m: &mut CopyMode, e: &Env, cmds: &[&str]) -> Option<Copied> {

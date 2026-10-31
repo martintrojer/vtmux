@@ -176,6 +176,10 @@ pub struct Pane {
     pub resize_timer: Option<Instant>,
     /// `wp->modes`: the pane's modes, the one shown first.
     pub modes: Vec<crate::mode::Mode>,
+    /// The last copy mode search and whether it was a regular expression
+    /// (`wp->searchstr`, `wp->searchregex`): `#{pane_search_string}`, and
+    /// what the next copy mode's search-again looks for.
+    pub search: Option<(String, bool)>,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its
