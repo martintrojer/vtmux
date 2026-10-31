@@ -19,6 +19,8 @@ pub mod model;
 pub mod names;
 pub mod pane_io;
 pub mod paste;
+pub mod prompt;
+pub mod prompt_history;
 pub mod render;
 pub mod resize;
 pub mod server;
