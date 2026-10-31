@@ -1064,7 +1064,10 @@ impl Parser<'_, '_> {
         else {
             return Err(CmdError::Syntax);
         };
-        let text = bytes_to_string(text)?;
+        // tmux expands every condition as a C string, live or dead
+        // (cmd-parse.y `expanded`), so a non-UTF-8 condition never fails the
+        // file. Only its truth matters: invalid bytes keep it non-empty.
+        let text = String::from_utf8_lossy(&text);
         Ok(crate::format::is_true(&self.lexer.env.expand(&text)))
     }
 

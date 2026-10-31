@@ -314,6 +314,37 @@ display b
 F:4: display-message b
 exit=0
 %%
+### dead-elif-non-utf8
+%if 1
+set -g @a 1
+%elif "\377"
+set -g @a 2
+%endif
+set -g @b 1
+---
+F:2: set-option -g @a 1
+F:6: set-option -g @b 1
+exit=0
+%%
+### dead-nested-if-non-utf8
+%if 0
+%if "\377"
+set -g @a 1
+%endif
+%endif
+set -g @h 1
+---
+F:6: set-option -g @h 1
+exit=0
+%%
+### live-if-non-utf8
+%if "\377"
+set -g @a 1
+%endif
+---
+F:2: set-option -g @a 1
+exit=0
+%%
 ### true-unknown-command
 %if 1
 nosuchcommand
