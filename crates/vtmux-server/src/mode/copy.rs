@@ -660,6 +660,19 @@ impl CopyMode {
         self.sel.is_some_and(|s| s.contains(x, y))
     }
 
+    /// Which screen cells are selected, row-major; empty without a
+    /// selection on screen.
+    #[must_use]
+    pub fn selection_mask(&self) -> Vec<bool> {
+        if self.sel.is_none_or(|s| s.hidden) {
+            return Vec::new();
+        }
+        (0..self.sy)
+            .flat_map(|y| (0..self.sx).map(move |x| (x, y)))
+            .map(|(x, y)| self.selected(x, y))
+            .collect()
+    }
+
     /// The mode's screen (`window_copy_write_line` for every row, without
     /// the indicator): the backing rows in view, `select` applied to the
     /// selected cells (`screen_select_cell`), and the cursor.

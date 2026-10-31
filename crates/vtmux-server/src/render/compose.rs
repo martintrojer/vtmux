@@ -134,6 +134,10 @@ pub struct PaneDraw {
     pub border: CellStyle,
     /// The drawn status line, empty when there is none.
     pub status: Vec<styled::Cell>,
+    /// Per content cell, row-major: in copy mode's selection
+    /// (`GRID_FLAG_SELECTED`), so never erased as part of an empty run.
+    /// Empty without a selection.
+    pub selected: Vec<bool>,
 }
 
 /// Everything [`compose`] needs besides the scene.
@@ -250,15 +254,29 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
                         .unwrap_or(false),
                     _ => false,
                 };
-            let written = draw_line(
-                &mut screen.cells[row + usize::from(x)..row + usize::from(end)],
-                d.bce,
-                wrapped,
-            );
+            let cells = &mut screen.cells[row + usize::from(x)..row + usize::from(end)];
+            let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
+            let keep = selected_span(d, scene, x, end, y);
+            let written = draw_line_keeping(cells, &bgs, Color::Default, d.bce, wrapped, &keep);
             ended_written = full && written;
             x = end;
         }
     }
+}
+
+/// Which cells of the span `x..end` of row `y` are [`PaneDraw::selected`].
+fn selected_span(d: &Draw, scene: &Scene, x: u16, end: u16, y: u16) -> Vec<bool> {
+    (x..end)
+        .map(|x| match scene.get(x, y) {
+            SceneCell::Pane { pane, px, py } => d.panes.get(pane).is_some_and(|p| {
+                let cols = usize::from(p.content.cols);
+                let at =
+                    usize::try_from(*py).unwrap_or(0) * cols + usize::try_from(*px).unwrap_or(0);
+                p.selected.get(at).copied().unwrap_or(false)
+            }),
+            _ => false,
+        })
+        .collect()
 }
 
 /// What makes cells one `tty_draw_line` span: the same pane's content or
@@ -305,6 +323,7 @@ fn is_empty<T: PartialEq>(c: &Cell, bg: &T, last: &T) -> bool {
 ///
 /// Returns whether the last cell was written, not erased: the terminal
 /// cursor is then past the end of the span.
+#[cfg(test)]
 pub(crate) fn draw_line(cells: &mut [Cell], bce: bool, wrapped: bool) -> bool {
     let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
     draw_line_by(cells, &bgs, Color::Default, bce, wrapped)
@@ -320,8 +339,25 @@ pub(crate) fn draw_line_by<T: PartialEq + Clone>(
     bgs: &[T],
     default: T,
     bce: bool,
-    mut wrapped: bool,
+    wrapped: bool,
 ) -> bool {
+    draw_line_keeping(cells, bgs, default, bce, wrapped, &[])
+}
+
+/// [`draw_line_by`] where the cells `keep` marks are never empty: a
+/// selected cell is always written (`tty_draw_line_get_empty`,
+/// tty-draw.c:105-106).
+fn draw_line_keeping<T: PartialEq + Clone>(
+    cells: &mut [Cell],
+    bgs: &[T],
+    default: T,
+    bce: bool,
+    mut wrapped: bool,
+    keep: &[bool],
+) -> bool {
+    let empty = |cells: &[Cell], i: usize, last: &T| {
+        !keep.get(i).copied().unwrap_or(false) && is_empty(&cells[i], &bgs[i], last)
+    };
     let mut last_bg = default;
     let mut written = false;
     let mut i = 0;
@@ -330,7 +366,7 @@ pub(crate) fn draw_line_by<T: PartialEq + Clone>(
             i += 1;
             continue;
         }
-        if !is_empty(&cells[i], &bgs[i], &last_bg) {
+        if !empty(cells, i, &last_bg) {
             if cells[i].text.is_empty() {
                 cells[i].text = " ".into();
             }
@@ -341,7 +377,7 @@ pub(crate) fn draw_line_by<T: PartialEq + Clone>(
             continue;
         }
         let start = i;
-        while i < cells.len() && is_empty(&cells[i], &bgs[i], &last_bg) {
+        while i < cells.len() && empty(cells, i, &last_bg) {
             i += 1;
         }
         let last = cells[i - 1].style;
