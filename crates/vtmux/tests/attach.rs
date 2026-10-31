@@ -3119,3 +3119,62 @@ fn detach_client_e_runs_a_command_in_place_of_the_client() {
     });
     assert_eq!(&r[0][1..], ["exit 4 \"ran\"", "exit 4 \"ran\"", "alive"]);
 }
+
+/// A command client running `confirm-before` waits for the answer on the
+/// attached client and exits 0 when it confirmed, 1 when not
+/// (cmd-confirm-before.c:143-149). `command-prompt` waits too, and the
+/// commands it makes run in the command client's batch, so their output
+/// goes to its stdout (cmd-command-prompt.c:259-262).
+#[test]
+fn waiting_prompts_answer_the_command_client() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let spawn = |args: &[&str]| {
+            Command::new(&bin)
+                .args(w.args())
+                .args(args)
+                .env_clear()
+                .envs(w.env())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        };
+        let mut answers = Vec::new();
+        for key in [&b"y"[..], b"n", b"\x1b"] {
+            let child = spawn(&["confirm-before", "-p", "ok?", "display -p yes"]);
+            a.wait(|a| status_row(a).contains("ok?"));
+            a.keys(key);
+            let out = child.wait_with_output().unwrap();
+            answers.push((
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout).into_owned(),
+            ));
+            a.wait(|a| !status_row(a).contains("ok?"));
+        }
+        assert_eq!(
+            answers,
+            [
+                (Some(0), "yes\n".to_owned()),
+                (Some(1), String::new()),
+                (Some(1), String::new())
+            ],
+            "{}",
+            bin.display()
+        );
+        let child = spawn(&["command-prompt", "-p", "say", "display -p 'got %%'"]);
+        a.wait(|a| status_row(a).contains("say"));
+        a.keys(b"hi\r");
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(
+            (
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout).into_owned()
+            ),
+            (Some(0), "got hi\n".to_owned()),
+            "{}",
+            bin.display()
+        );
+    }
+}

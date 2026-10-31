@@ -85,10 +85,21 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
     if bytes.len() == 1 {
         return expired.then(|| (Event::Key(key(Base::Char('\x1b'))), 1));
     }
-    if bytes[1] == b']' || bytes[1] == b'P' {
-        // OSC colour/clipboard and DCS version replies (tty-keys.c
-        // tty_keys_colours/extended_device_attributes). Never forward.
-        for i in 2..bytes.len() {
+    // OSC colour/clipboard and DCS version replies (tty-keys.c
+    // tty_keys_clipboard, tty_keys_colours, tty_keys_palette,
+    // tty_keys_extended_device_attributes) start with these; anything else
+    // after Escape is a key with Meta (`ESC P` is M-P).
+    let reply = [
+        &b"\x1bP>|"[..],
+        b"\x1b]52;",
+        b"\x1b]10;",
+        b"\x1b]11;",
+        b"\x1b]4;",
+    ]
+    .into_iter()
+    .find(|p| p.starts_with(&bytes[..bytes.len().min(p.len())]));
+    if let Some(prefix) = reply.filter(|p| bytes.len() >= p.len()) {
+        for i in prefix.len()..bytes.len() {
             if bytes[i] == 7 {
                 return Some((Event::Ignore, i + 1));
             }
@@ -99,6 +110,9 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
         if bytes.len() > 4096 || expired {
             return Some((Event::Ignore, bytes.len()));
         }
+        return None;
+    }
+    if reply.is_some() && !expired {
         return None;
     }
     if matches!(bytes[1], b'[' | b'O') {

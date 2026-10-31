@@ -1,0 +1,22 @@
+# send-keys takes `0xNN` key names (key-string.c:268-290): 0x01 is C-a,
+# 0x41 is A. On an attached client `ESC P` and `ESC ]` are M-P and M-]
+# (tty-keys.c only takes `ESC P >|` and `ESC ] 52;/10;/11;/4;` as
+# replies), shown through command-prompt -k.
+name = "keys_hex_meta"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "stty raw -echo; exec cat -v"] },
+  { run = ["send-keys", "-t", "a", "0x01", "0x41", "0x7F", "0x263A"] },
+  { run = ["bind", "-n", "M-k", "command-prompt", "-k", "-p", "key", "set -ga @k '%% '"] },
+  { attach = { session = "a" } },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+  { keys = "\u001bk" },
+  { settle = {} },
+  { keys = "\u001bP" },
+  { settle = {} },
+  { keys = "\u001bk" },
+  { settle = {} },
+  { keys = "\u001b]" },
+  { settle = {} },
+  { run = ["show", "-gv", "@k"] },
+]

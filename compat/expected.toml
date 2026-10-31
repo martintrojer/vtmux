@@ -66,8 +66,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."cmd-template-replace.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."codepoint-widths.sh"]
 status = "xfail"
@@ -89,7 +88,7 @@ status = "pass"
 
 [tests."confirm-before-lock.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs lock-client, lock-session and lock-server (confirm-before is in)"
 
 [tests."control-client-exit-stalled.sh"]
 status = "xfail"
@@ -469,11 +468,11 @@ reason = "not implemented (M0 baseline)"
 
 [tests."prompt-keys.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs choose-tree (tree-mode prompts)"
 
 [tests."prompt-mechanics.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs choose-tree, pane prompts (-P) and the pane-prompt-opened/closed hooks"
 
 [tests."prompt-words-history.sh"]
 status = "skip"
@@ -633,7 +632,7 @@ reason = "not implemented (M0 baseline)"
 
 [tests."tty-keys.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "command-prompt -k is in; the input decoder lacks tty-keys.c's keypad, rxvt and xterm F-key variants and CSI u extended keys"
 
 [tests."utf8-test.sh"]
 status = "xfail"
