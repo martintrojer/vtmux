@@ -214,11 +214,11 @@ fn relay(
                     let mut bytes = [0; 4096];
                     loop {
                         match io::stdin().read(&mut bytes) {
-                            Ok(0) => {
-                                let _ = send(stream, &ClientMsg::Detach);
-                                socket.signal_exit = Some("lost tty".into());
-                                break;
-                            }
+                            // The tty is gone: tmux's server drops the client
+                            // itself (tty_read_callback -> server_client_lost,
+                            // tty.c:181-189), with no MSG_EXITING and so no
+                            // focus-out. Close the connection, as it would.
+                            Ok(0) => return Ok((1, Some("lost tty".into()))),
                             Ok(n) => send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?,
                             Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
@@ -233,6 +233,12 @@ fn relay(
                             SIGWINCH => {
                                 out.high_water = high_water();
                                 send_size(stream)?;
+                            }
+                            // Closing the terminal raises SIGHUP as well as
+                            // EOF on stdin; with the tty already hung up
+                            // it is the same loss as EOF.
+                            SIGHUP if tty_hung_up() => {
+                                return Ok((1, Some("lost tty".into())));
                             }
                             SIGTERM | SIGHUP => {
                                 let _ = send(stream, &ClientMsg::Detach);
@@ -327,6 +333,15 @@ impl Socket {
         }
         Ok(None)
     }
+}
+
+/// The terminal went away (the master closed): stdin polls `POLLHUP`.
+fn tty_hung_up() -> bool {
+    use rustix::event::{PollFd, PollFlags};
+    let stdin = io::stdin();
+    let mut fds = [PollFd::new(&stdin, PollFlags::empty())];
+    rustix::event::poll(&mut fds, Some(&rustix::event::Timespec::default()))
+        .is_ok_and(|n| n > 0 && fds[0].revents().contains(PollFlags::HUP))
 }
 
 fn send_size(stream: &mut UnixStream) -> io::Result<()> {

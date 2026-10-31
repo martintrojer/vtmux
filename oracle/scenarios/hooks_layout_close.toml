@@ -1,0 +1,29 @@
+name = "hooks_layout_close"
+# layout_close_pane always fires window-layout-changed (layout.c:1532-1548).
+# break-pane calls it on the source window (cmd-break-pane.c:157): once when
+# the window keeps other panes. join-pane calls it through layout_close_pane
+# on the source and then fires the source (unless it was emptied and killed)
+# and the target again (cmd-join-pane.c:535-536). A one-pane window breaking
+# out is relinked, not closed, and fires nothing.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
+  { run = ["splitw", "-t", "a:0", "cat"] },
+  { run = ["splitw", "-t", "a:0", "cat"] },
+  { run = ["set-hook", "-g", "window-layout-changed", "set -agF @n '|#{hook_window}'"] },
+  { run = ["set", "-g", "@n", ""] },
+  { run = ["breakp", "-d", "-s", "a:0.2"] },
+  { run = ["show", "-gv", "@n"] },
+  { run = ["set", "-g", "@n", ""] },
+  { run = ["joinp", "-s", "a:1", "-t", "a:0"] },
+  { run = ["show", "-gv", "@n"] },
+  { run = ["set", "-g", "@n", ""] },
+  { run = ["breakp", "-d", "-s", "a:0.1"] },
+  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
+  { run = ["set", "-g", "@n", ""] },
+  { run = ["joinp", "-d", "-s", "a:1.1", "-t", "a:0"] },
+  { run = ["show", "-gv", "@n"] },
+  { run = ["set", "-g", "@n", ""] },
+  { run = ["breakp", "-d", "-s", "a:1"] },
+  { run = ["show", "-gv", "@n"] },
+  { run = ["kill-server"] },
+]

@@ -74,8 +74,14 @@ pub fn exec(
     dst.layout
         .split(dst_wp, hole, &req)
         .map_err(|e| cause(e.to_string()))?;
+    m.windows
+        .get_mut(&src_w)
+        .expect("source window")
+        .layout
+        .close_pane(src_wp);
+    // layout_close_pane fires window-layout-changed (layout.c:1548).
+    m.layout_changed(src_w);
     let src = m.windows.get_mut(&src_w).expect("source window");
-    src.layout.close_pane(src_wp);
     if src_w == dst_w {
         src.panes.panes.retain(|p| *p != src_wp);
         src.panes.z_order.retain(|p| *p != src_wp);
