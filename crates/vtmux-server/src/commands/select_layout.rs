@@ -29,7 +29,7 @@ pub fn exec(
         return Err(EdgeError::NoCurrentTarget.into());
     };
     if select(server, item, args, found, cycle)? {
-        server.recalculate_window(w);
+        server.recalculate_size(w, false);
     }
     Ok(())
 }

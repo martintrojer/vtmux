@@ -75,7 +75,7 @@ pub(crate) struct Client {
     /// Frames sent but not yet written to the client's terminal.
     unacked: Unacked,
     /// Exit has been queued; close once the output is flushed.
-    closing: bool,
+    pub(crate) closing: bool,
     pub(crate) hello: Option<Hello>,
     pub(crate) attached: Option<SessionId>,
     /// Control mode (`-C`) state; `None` for terminal and command clients.
@@ -208,6 +208,9 @@ pub struct NewWindow<'a> {
     pub cwd: PathBuf,
     pub extra_env: &'a [String],
     pub client_path: Option<&'a str>,
+    /// The target client (`sc->tc`): it sizes the window and becomes its
+    /// latest client (spawn.c:192-202).
+    pub client: Option<ClientId>,
 }
 
 pub struct Server {
@@ -470,6 +473,7 @@ impl Server {
             self.apply_redraws();
             self.render_clients();
             self.model.redraw_panes.clear();
+            self.send_pane_resizes();
             self.control_tick();
             if self.wants_flush() {
                 // server_loop / server_send_exit: release every waiter.
@@ -484,17 +488,22 @@ impl Server {
     }
 
     /// The poll timeout: the sooner of the loop's own needs and the next
-    /// silence timer (`alerts_reset`'s `event_add`).
+    /// silence timer (`alerts_reset`'s `event_add`), and the next queued
+    /// pane size.
     fn next_timeout(&self) -> Option<Duration> {
         let own = self.own_timeout();
-        let silence = self
-            .model
-            .alerts_deadline()
-            .map(|d| d.saturating_duration_since(Instant::now()));
-        match (own, silence) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        let now = Instant::now();
+        [
+            own,
+            self.model
+                .alerts_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.pane_resize_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
     }
 
     fn own_timeout(&self) -> Option<Duration> {
@@ -671,6 +680,9 @@ impl Server {
         }
         self.waits.client_lost(id);
         self.parked.remove(&id);
+        self.attached_lost(id);
+        // server-client.c:564.
+        self.recalculate_sizes();
     }
 
     /// The client's name (server-client.c:3016-3019): its tty, else
@@ -968,10 +980,12 @@ impl Server {
         client.term = Some(term);
         client.compositor.invalidate();
         client.attached = Some(s);
-        // server_client_set_session: session_update_activity (server-client.c:468).
-        self.model.touch_session(s);
         // Caps::startup ends with a DECRQM query (tty.c tty_send_requests).
         client.decoder.query_sent(Instant::now());
+        // server_client_set_session: the current window's latest client
+        // (server-client.c:465), then session_update_activity (468).
+        self.set_latest(s, id);
+        self.model.touch_session(s);
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
         // set of modes, not their ordering.
@@ -1073,10 +1087,15 @@ impl Server {
         }
     }
 
-    /// `MSG_RESIZE` (server-client.c:2712-2730): the client's terminal
-    /// takes its new size and every window is fitted again
-    /// (`recalculate_sizes`); the loop's check pass applies it.
+    /// `MSG_RESIZE` (server-client.c:2712-2730): the client becomes the
+    /// latest of the window it looks at, its terminal takes its new size
+    /// and every window is fitted again (`recalculate_sizes`); the loop's
+    /// check pass applies it.
     pub(crate) fn resize_client(&mut self, id: ClientId, cols: u32, rows: u32) {
+        if self.is_control(id) {
+            return;
+        }
+        self.update_latest(id);
         let Some(client) = self.clients.get_mut(&id) else {
             return;
         };
@@ -1115,78 +1134,6 @@ impl Server {
             if c.attached.is_some() {
                 c.compositor.invalidate();
                 c.status.request_full_redraw();
-            }
-        }
-    }
-
-    /// `recalculate_sizes` (resize.c:426-466): [`Self::recalculate_window`]
-    /// for every window.
-    pub fn recalculate_sizes(&mut self) {
-        let windows: Vec<_> = self.model.windows.keys().copied().collect();
-        for w in windows {
-            self.recalculate_window(w);
-        }
-    }
-
-    /// `recalculate_size(w, 0)` (resize.c:359-424) with `latest` semantics:
-    /// the last terminal client attached to a session that links `w` sizes
-    /// it, less its status lines; no such client leaves it alone. The size
-    /// is only recorded (`WINDOW_RESIZE`) when it differs from the one
-    /// already pending, else from the window's own;
-    /// [`Self::check_window_resizes`] applies it. Under the focus ring
-    /// (D23) the window is 2 cells smaller each way, for the frame.
-    pub fn recalculate_window(&mut self, w: WindowId) {
-        let size = self
-            .clients
-            .values()
-            .rev()
-            .filter(|c| c.control.is_none())
-            .filter(|c| {
-                c.attached
-                    .and_then(|s| self.model.sessions.get(&s))
-                    .is_some_and(|s| s.windows.values().any(|x| *x == w))
-            })
-            .find_map(|c| {
-                let tty = c.hello.as_ref()?.tty.as_ref()?;
-                let lines = self.status_line_size(c);
-                Some((tty.cols.max(1), tty.rows.saturating_sub(lines).max(1)))
-            });
-        let Some(size) = size else {
-            return;
-        };
-        let frame = 2 * u32::from(
-            self.model
-                .number_option(TreeId::Window(w), "vtmux-focus-ring")
-                != 0,
-        );
-        let size = (
-            size.0.saturating_sub(frame).max(1),
-            size.1.saturating_sub(frame).max(1),
-        );
-        let Some(window) = self.model.windows.get_mut(&w) else {
-            return;
-        };
-        if window.pending_size.unwrap_or((window.sx(), window.sy())) != size {
-            window.pending_size = Some(size);
-        }
-    }
-
-    /// `server_client_check_window_resize` (server-client.c:1953-1970),
-    /// run every loop before drawing: a window with a pending size takes
-    /// it once it is the current window of a session with a client
-    /// attached. A background window keeps its size (and its panes get no
-    /// SIGWINCH) until then.
-    fn check_window_resizes(&mut self) {
-        let current: Vec<WindowId> = self
-            .clients
-            .values()
-            .filter_map(|c| c.attached)
-            .filter_map(|s| self.model.current_of(s))
-            .map(|(_, w, _)| w)
-            .collect();
-        for w in current {
-            if let Some((sx, sy)) = self.model.windows.get(&w).and_then(|x| x.pending_size) {
-                self.model.resize_window(w, sx, sy);
             }
         }
     }
@@ -1287,6 +1234,9 @@ impl Server {
                     c.focused = focused;
                     self.touch_client(id);
                     self.update_focus(self.client_window(id));
+                    if focused {
+                        self.update_latest(id);
+                    }
                 }
                 crate::input::Event::Key(key) => {
                     // server_client_handle_key0: a message goes with the
@@ -1296,6 +1246,10 @@ impl Server {
                     }
                     let pasting = c.pasting;
                     self.touch_client(id);
+                    // server_client_update_latest (server-client.c:1708-1709)
+                    // runs before the bound commands, which tmux queues
+                    // after the key callback.
+                    self.update_latest(id);
                     if (pasting || !self.handle_key(id, key.to_core()))
                         && let Some(p) = self.client_pane(id)
                     {
@@ -1908,7 +1862,7 @@ impl Server {
             rect: Geometry::new(cols, rows, 0, 0),
             shell: None,
         })?;
-        self.insert_window(window_id, pane, spec.window_name, cols, rows);
+        self.insert_window(window_id, pane, spec.window_name, cols, rows, None);
         // spawn_window with idx -1: the first free index from base-index
         // (spawn.c:183-185); the session is new, so that is base-index.
         let index = u32::try_from(
@@ -1957,6 +1911,7 @@ impl Server {
         name: Option<String>,
         cols: u32,
         rows: u32,
+        latest: Option<ClientId>,
     ) {
         let pane_id = pane.id;
         self.model.options.add_window(window_id);
@@ -1993,6 +1948,8 @@ impl Server {
                 last_layout: None,
                 old_layout: None,
                 pending_size: None,
+                manual_size: (cols, rows),
+                latest,
                 alerts: crate::alerts::WindowAlerts::default(),
             },
         );
@@ -2033,7 +1990,7 @@ impl Server {
                 .next_free_index(s, base)
                 .ok_or_else(|| format!("couldn't add window -{}", i64::from(base) + 1))?
         };
-        let (cols, rows) = self.default_window_size(s);
+        let (cols, rows) = self.default_window_size(nw.client, s, None, None);
         let window_id = self.model.window_ids.allocate();
         let pane_id = self.model.pane_ids.allocate();
         let session_env = self.model.sessions[&s].env.clone();
@@ -2051,7 +2008,7 @@ impl Server {
                 shell: None,
             })
             .map_err(|e| format!("fork failed: {e}"))?;
-        self.insert_window(window_id, pane, nw.name.clone(), cols, rows);
+        self.insert_window(window_id, pane, nw.name.clone(), cols, rows, nw.client);
         let session = self.model.sessions.get_mut(&s).expect("target session");
         session.windows.insert(index, window_id);
         if !session.windows.contains_key(&session.current) {
@@ -2062,44 +2019,6 @@ impl Server {
         }
         self.control_links_changed(&before);
         Ok(index)
-    }
-
-    /// `default_window_size` (resize.c:291-343) with `window-size latest`:
-    /// a terminal client attached to the session, less its status lines,
-    /// else the session's `default-size`, else 80x24; clamped to
-    /// `WINDOW_MINIMUM..=WINDOW_MAXIMUM`.
-    fn default_window_size(&self, s: SessionId) -> (u32, u32) {
-        const WINDOW_MAXIMUM: u32 = 10_000;
-        let client = self
-            .clients
-            .values()
-            .rev()
-            .filter(|c| c.control.is_none() && c.attached == Some(s))
-            .find_map(|c| Some((c.hello.as_ref()?.tty.as_ref()?, self.status_line_size(c))));
-        let (sx, sy) = if let Some((tty, lines)) = client {
-            // D23: a new window starts inside the focus ring, as
-            // recalculate_window would fit it.
-            let frame = 2 * u32::from(
-                self.model
-                    .number_option(TreeId::GlobalWindow, "vtmux-focus-ring")
-                    != 0,
-            );
-            (
-                tty.cols.saturating_sub(frame),
-                tty.rows.saturating_sub(lines).saturating_sub(frame),
-            )
-        } else {
-            let size = self
-                .model
-                .options
-                .get(TreeId::Session(s), "default-size")
-                .map(|e| e.value.to_text(e.def, None, false))
-                .unwrap_or_default();
-            size.split_once('x')
-                .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
-                .unwrap_or((80, 24))
-        };
-        (sx.clamp(1, WINDOW_MAXIMUM), sy.clamp(1, WINDOW_MAXIMUM))
     }
 
     /// `server_kill_window` (server-fn.c:239-262) with the PTYs closed and
@@ -2216,6 +2135,8 @@ impl Server {
             input_off: false,
             focused: false,
             active_point: 0,
+            resizes: Vec::new(),
+            resize_timer: None,
         })
     }
 
@@ -2329,7 +2250,9 @@ impl Server {
             match io.read() {
                 ReadResult::Data(bytes) => {
                     let before = (pane.term.title(), pane.term.pwd());
+                    let alternate = pane.term.alternate_on();
                     pane.term.feed(&bytes);
+                    let left_alternate = alternate && !pane.term.alternate_on();
                     // input.c:2725-2740: a new title (OSC 0/2) or path
                     // (OSC 7) redraws the status of the window's sessions.
                     let retitled = (pane.term.title(), pane.term.pwd()) != before;
@@ -2339,6 +2262,9 @@ impl Server {
                     let replies = pane.term.take_replies();
                     if !replies.is_empty() {
                         io.write(&replies);
+                    }
+                    if left_alternate {
+                        pane.flush_resizes();
                     }
                     // input_parse_buffer -> window_update_activity on every
                     // non-empty read (input.c:1053): W/t sorts and lsw -O

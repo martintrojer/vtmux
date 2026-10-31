@@ -396,7 +396,9 @@ impl Server {
         {
             cs.notify(format!("%session-changed {s} {name}").into_bytes());
         }
-        // server_client_set_session: session_update_activity (server-client.c:468).
+        // server_client_set_session: the latest client (server-client.c:465),
+        // then session_update_activity (468).
+        self.set_latest(s, id);
         self.model.touch_session(s);
         self.session_attached_alerts(s);
         self.control_flush(id);

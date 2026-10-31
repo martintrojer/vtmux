@@ -301,6 +301,8 @@ impl Server {
             let c = self.clients.get_mut(&id).expect("client");
             c.attached = Some(s);
             c.compositor.invalidate();
+            // server-client.c:465.
+            self.set_latest(s, id);
             self.model.touch_session(s);
             if let Some(tty) = self
                 .clients

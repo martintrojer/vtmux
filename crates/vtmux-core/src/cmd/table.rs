@@ -176,7 +176,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("rename-session", Some("rename"), "t:", 1, Some(1), "[-t target-session] new-name", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("rename-window", Some("renamew"), "t:", 1, Some(1), "[-t target-window] new-name", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("resize-pane", Some("resizep"), "D::L::MR::Tt:U::x:y:Z", 0, Some(1), "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
-    cmd("resize-window", Some("resizew"), "aADLRt:Ux:y:", 0, Some(1), "[-aADLRU] [-x width] [-y height] [-t target-window] [adjustment]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
+    cmd("resize-window", Some("resizew"), "aADLRt:Ux:y:", 0, Some(1), "[-aADLRU] [-x width] [-y height] [-t target-window] [adjustment]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("respawn-pane", Some("respawnp"), "c:e:Ekt:", 0, None, "[-Ek] [-c start-directory] [-e environment] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("respawn-window", Some("respawnw"), "c:e:Ekt:", 0, None, "[-Ek] [-c start-directory] [-e environment] [-t target-window] [shell-command [argument ...]]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("rotate-window", Some("rotatew"), "Dt:UZ", 0, Some(0), "[-DUZ] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
@@ -346,7 +346,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 61);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 62);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

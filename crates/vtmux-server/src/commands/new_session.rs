@@ -112,18 +112,17 @@ pub fn exec(
     let client_size = item.tty.as_ref().map(|t| (t.cols, t.rows));
     let x = size(args.value('x'), "width", client_size.map(|c| c.0), 80)?;
     let y = size(args.value('y'), "height", client_size.map(|c| c.1), 24)?;
-    // Detached: -x/-y or 80x24 (default-size); attached: the client's
-    // terminal less one row when the global `status` is on, whatever its
-    // line count (cmd-new-session.c:250-254); attaching fits it after.
+    // Attached: the client's terminal less one row when the global
+    // `status` is on, whatever its line count (cmd-new-session.c:250-254);
+    // attaching fits it after. Detached: the global default-size with
+    // -x/-y over it, 80x24 when it does not parse (255-266).
     let status = u32::from(server.model.status_lines(TreeId::GlobalSession) > 0);
-    let (cols, rows) = match (detached || control, client_size) {
-        (false, Some((c, r))) => (
-            u16::try_from(c).unwrap_or(u16::MAX).max(1),
-            u16::try_from(r.saturating_sub(status))
-                .unwrap_or(u16::MAX)
-                .max(1),
-        ),
-        _ => (x.unwrap_or(80), y.unwrap_or(24)),
+    let clamp = |n: u32| u16::try_from(n).unwrap_or(u16::MAX).max(1);
+    let (cols, rows) = if let (false, Some((c, r))) = (detached || control, client_size) {
+        (clamp(c), clamp(r.saturating_sub(status)))
+    } else {
+        let (dx, dy) = server.default_size(TreeId::GlobalSession);
+        (x.unwrap_or(clamp(dx)), y.unwrap_or(clamp(dy)))
     };
     let spec = NewSession {
         name: session_name,
