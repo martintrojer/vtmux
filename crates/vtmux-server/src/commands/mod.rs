@@ -30,6 +30,8 @@ mod new_window;
 mod rename_window;
 mod resize_pane;
 mod respawn_pane;
+mod respawn_window;
+mod rotate_window;
 mod select_layout;
 mod select_pane;
 mod select_window;
@@ -319,6 +321,8 @@ fn dispatch(
             join_pane::exec(server, args, source, found, call.entry.name == "move-pane")
         }
         "respawn-pane" => respawn_pane::exec(server, item, args, found),
+        "respawn-window" => respawn_window::exec(server, item, args, found),
+        "rotate-window" => rotate_window::exec(server, args, found),
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),

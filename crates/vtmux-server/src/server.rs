@@ -2251,7 +2251,7 @@ impl Server {
         Ok(())
     }
 
-    fn close_pane_io(&self, mut pane: Pane) {
+    pub(crate) fn close_pane_io(&self, mut pane: Pane) {
         if let Some(io) = pane.io.take() {
             io.deregister(self.poll.registry());
             // window_pane_destroy closes the master; the kernel sends the

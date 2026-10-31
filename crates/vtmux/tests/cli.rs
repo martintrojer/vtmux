@@ -2130,6 +2130,154 @@ fn panes_respawn() {
     });
 }
 
+/// rotate-window (cmd-rotate-window.c:44-114): panes shift along their
+/// cells (list order, ids, geometry), -D and -U, the active and last
+/// panes, a zoomed window unzoomed unless -Z, and the target errors.
+#[test]
+fn windows_rotate() {
+    compare("windows_rotate", |w| {
+        let lsp = &[
+            "lsp",
+            "-F",
+            "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}",
+        ][..];
+        let zoom = &["display", "-p", "#{window_zoomed_flag} #{pane_id}"][..];
+        steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+                ],
+                &["rotatew"],
+                &["splitw", "-d", "cat"],
+                &["splitw", "-d", "-h", "cat"],
+                &["splitw", "-d", "-t", "a:0.0", "-l", "3", "cat"],
+                lsp,
+                &["rotatew"],
+                lsp,
+                &["rotatew", "-D"],
+                &["rotatew", "-D"],
+                lsp,
+                &["rotatew", "-D", "-U"],
+                lsp,
+                &["selectp", "-t", "a:0.2"],
+                &["rotatew", "-U"],
+                lsp,
+                &["selectl", "main-vertical"],
+                &["rotatew", "-D"],
+                lsp,
+                &["resizep", "-Z", "-t", "a:0.1"],
+                &["rotatew"],
+                zoom,
+                &["resizep", "-Z", "-t", "a:0.1"],
+                &["rotatew", "-Z"],
+                zoom,
+                lsp,
+                &["rotatew", "-t", "nosuch"],
+                &["rotatew", "-t", "a:9"],
+                &["rotatew", "extra"],
+                &["kill-server"],
+            ],
+        )
+    });
+}
+
+/// respawn-window (cmd-respawn-window.c:46-110, spawn.c:106-128): a live
+/// window without -k is an error (vtmux has no remain-on-exit); -k keeps
+/// the window ID and index, leaves the first pane alone in a full-size
+/// layout, takes a command, -c and -e, and selects the window.
+#[test]
+fn windows_respawn() {
+    compare("windows_respawn", |w| {
+        let mut runs = steps(
+            w,
+            &[
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+                ],
+                &["new", "-d", "-s", "keep", "cat"],
+                &["neww", "-d", "-t", "a", "-n", "two", "cat"],
+                &["splitw", "-d", "-t", "a:1", "cat"],
+                &["splitw", "-d", "-t", "a:1", "-h", "cat"],
+                &["selectp", "-t", "a:1.1"],
+                &["respawnw", "-t", "a:1"],
+                &["respawnw", "-k", "-t", "a:9"],
+                &["respawnw", "-k", "-t", "a:1", "printf X; exec cat"],
+            ],
+        );
+        w.wait_for_text("a:1", "X");
+        runs.extend(steps(
+            w,
+            &[
+                &[
+                    "lsw",
+                    "-t",
+                    "a",
+                    "-F",
+                    "#{window_index} #{window_id} #{window_active}#{window_last_flag} #{window_panes} #{window_layout}",
+                ],
+                &[
+                    "lsp",
+                    "-t",
+                    "a:1",
+                    "-F",
+                    "#{pane_index} #{pane_id} #{pane_width}x#{pane_height} #{pane_start_command}",
+                ],
+                &["splitw", "-d", "-t", "a:1", "cat"],
+                &["lsp", "-t", "a:1", "-F", "#{pane_id}"],
+            ],
+        ));
+        runs.push(w.run(&[
+            "respawnw",
+            "-k",
+            "-c",
+            "/tmp",
+            "-e",
+            "FOO=bar",
+            "-t",
+            "a:1",
+            "printf '%s:' \"$FOO\"; pwd; exec cat",
+        ]));
+        w.wait_for_text("a:1", "bar:/tmp");
+        runs.extend(steps(
+            w,
+            &[&["lsp", "-t", "a:1", "-F", "#{pane_id}"], &["kill-server"]],
+        ));
+        runs
+    });
+}
+
+/// respawn-window -k on a zoomed window (D-008): tmux leaves the zoom flag
+/// on freed cells and dies on the next layout read; vtmux unzooms.
+#[test]
+fn windows_respawn_zoomed() {
+    let (_keep, as_tmux) = vtmux_as_tmux();
+    let w = World::new(&as_tmux);
+    let out = |args: &[&str]| w.run(args).stdout;
+    assert_eq!(
+        w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"])
+            .code,
+        0
+    );
+    w.run(&["splitw", "-d", "cat"]);
+    w.run(&["resizep", "-Z", "-t", "a:0.1"]);
+    assert_eq!(out(&["display", "-p", "#{window_zoomed_flag}"]), "1\n");
+    assert_eq!(w.run(&["respawnw", "-k"]).code, 0);
+    assert_eq!(
+        out(&[
+            "display",
+            "-p",
+            "#{window_zoomed_flag} #{window_panes} #{pane_id}"
+        ]),
+        "0 1 %0\n"
+    );
+    assert_eq!(
+        out(&["display", "-p", "#{window_layout}"]),
+        "{\"V\":2,\"L\":{\"t\":\"p\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"a\":true,\"i\":0,\"I\":\"%0\"}}\n"
+    );
+    w.run(&["kill-server"]);
+}
+
 /// set-environment / show-environment (cmd-set-environment.c,
 /// cmd-show-environment.c): both scopes, `-h`, `-r`, `-u`, `-F`, `-s` and
 /// its escaping, listing, every argument and target error. `cat` keeps the

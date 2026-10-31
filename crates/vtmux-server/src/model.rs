@@ -827,6 +827,74 @@ impl Model {
         self.zoom(w, active)
     }
 
+    /// The pane order and cells of `rotate-window` (cmd-rotate-window.c:
+    /// 52-110) for a window already unzoomed: the last pane (`down`) or
+    /// the first moves to the other end of the list and every pane takes
+    /// the layout cell its new list position had before, so the cells keep
+    /// their places. The pane that lands in the active pane's cell becomes
+    /// active.
+    pub fn rotate_panes(&mut self, w: WindowId, down: bool) {
+        let Some(window) = self.windows.get_mut(&w) else {
+            return;
+        };
+        let old = window.panes.panes.clone();
+        let mut new = old.clone();
+        if down {
+            new.rotate_right(1);
+        } else {
+            new.rotate_left(1);
+        }
+        // Cell k keeps its place and goes to the pane now at position k.
+        let paths: Vec<_> = old
+            .iter()
+            .map(|p| window.layout.root.find_pane(*p))
+            .collect();
+        for (path, pane) in paths.into_iter().zip(&new) {
+            if let Some(path) = path
+                && let Cell::Pane(leaf) | Cell::Floating(leaf) = window.layout.root.get_mut(&path)
+            {
+                leaf.pane = *pane;
+            }
+        }
+        let active = window.active();
+        window.panes.panes.clone_from(&new);
+        let at = new.iter().position(|p| *p == active).unwrap_or(0);
+        let pick = if down {
+            new[..at].last().or(new.last())
+        } else {
+            new.get(at + 1).or(new.first())
+        };
+        let pick = pick.copied().unwrap_or(active);
+        self.fix_panes(w);
+        self.set_active(w, pick);
+    }
+
+    /// The window half of `spawn_window` with `SPAWN_RESPAWN`
+    /// (spawn.c:106-128): every pane but the first goes (returned, for
+    /// their PTYs to close), the first fills the window as the only,
+    /// active pane in a fresh layout. An existing zoom is dropped first;
+    /// tmux frees the layout under it and crashes on the next read (D-008).
+    pub fn reset_window_panes(&mut self, w: WindowId) -> Option<(PaneId, Vec<Pane>)> {
+        self.unzoom(w);
+        let window = self.windows.get_mut(&w)?;
+        let first = *window.panes.panes.first()?;
+        let gone: Vec<PaneId> = window.panes.panes.drain(1..).collect();
+        window.panes.last.clear();
+        window.panes.z_order = vec![first];
+        window.panes.active = Some(first);
+        let mut layout = Layout::new(window.layout.sx, window.layout.sy, first);
+        layout.opts = window.layout.opts;
+        window.layout = layout;
+        let mut removed = Vec::new();
+        for p in gone {
+            self.options.remove_pane(p);
+            removed.extend(self.panes.remove(&p));
+        }
+        self.stamp_active(first);
+        self.fix_panes(w);
+        Some((first, removed))
+    }
+
     /// `window_unzoom` (window.c:1022-1080): false when not zoomed.
     pub fn unzoom(&mut self, w: WindowId) -> bool {
         let Some(window) = self.windows.get_mut(&w) else {
