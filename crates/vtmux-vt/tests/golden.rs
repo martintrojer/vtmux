@@ -229,4 +229,6 @@ golden! {
     reply_xtwinops_18,
     reply_decrqm_wrap,
     reply_decrqm_alt,
+    reply_decrqm_irm,
+    reply_decrqm_ansi_unknown,
 }
