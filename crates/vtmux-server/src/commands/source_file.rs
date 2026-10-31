@@ -61,7 +61,8 @@ pub fn exec(
         if matches.is_empty() && !quiet {
             item.error(
                 server,
-                format!("No such file or directory: {path}").into_bytes(),
+                vtmux_core::rawstr::to_bytes(&format!("No such file or directory: {path}"))
+                    .into_owned(),
             );
             failed = true;
         }
@@ -186,7 +187,7 @@ fn glob(pattern: &Path) -> Vec<PathBuf> {
 pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) -> Groups {
     let file = path.to_string_lossy().into_owned();
     let text = match std::fs::read(path) {
-        Ok(t) => String::from_utf8_lossy(&t).into_owned(),
+        Ok(t) => vtmux_core::rawstr::from_vec(t),
         Err(e) => {
             if !(opts.quiet && e.kind() == std::io::ErrorKind::NotFound) {
                 server.causes.push(format!("{file}: {}", strerror(&e)));
@@ -241,7 +242,7 @@ pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) 
         server.causes.push(format!(
             "{file}:{}: {}",
             e.line,
-            String::from_utf8_lossy(&msg)
+            vtmux_core::rawstr::from_bytes(&msg)
         ));
         return Vec::new();
     }

@@ -33,7 +33,7 @@ pub fn exec(
     let target = if show {
         if attached {
             // cmdq_print_data: one line to a control client.
-            item.print(&String::from_utf8_lossy(&data));
+            item.print_line(&data);
             return Ok(());
         }
         "-".to_owned()

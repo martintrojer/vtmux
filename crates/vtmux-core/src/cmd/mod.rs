@@ -145,7 +145,7 @@ impl CmdError {
                 out.push(*flag);
                 out
             }
-            _ => self.to_string().into_bytes(),
+            _ => crate::rawstr::to_bytes(&self.to_string()).into_owned(),
         }
     }
 }

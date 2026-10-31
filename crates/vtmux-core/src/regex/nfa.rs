@@ -358,8 +358,12 @@ impl Nfa {
     fn accepts(&self, node: usize, c: char) -> bool {
         match self.nodes[node].kind {
             Kind::Literal(l) => equal(l, c, self.ignore_case),
-            Kind::Any => true,
-            Kind::Bracket(b) => self.brackets[b].matches(c, self.ignore_case),
+            // glibc's `.` and brackets never match a byte that is not UTF-8
+            // (a reserved character, `rawstr`).
+            Kind::Any => !crate::rawstr::is_raw(c),
+            Kind::Bracket(b) => {
+                !crate::rawstr::is_raw(c) && self.brackets[b].matches(c, self.ignore_case)
+            }
             _ => false,
         }
     }

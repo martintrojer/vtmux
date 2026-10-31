@@ -164,7 +164,7 @@ fn add_value(buf: &mut String, value: &ArgValue) {
         ArgValue::Commands(list) => {
             let _ = write!(buf, "{{ {} }}", list.print(PrintFlags::default()));
         }
-        ArgValue::Str(s) | ArgValue::Bytes { text: s, .. } => buf.push_str(&args_escape(s)),
+        ArgValue::Str(s) => buf.push_str(&args_escape(s)),
     }
 }
 
@@ -216,6 +216,25 @@ fn vis(s: &str, double_quoted: bool) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
+        if crate::rawstr::is_raw(c) {
+            let rest: String = chars.clone().take(3).collect();
+            let joined = format!("{c}{rest}");
+            let bytes = crate::rawstr::to_bytes(&joined);
+            // `utf8_open` takes F4 and glibc decodes it past U+10FFFF, so
+            // `utf8_strvis` copies such a character; Rust calls it invalid.
+            if matches!(
+                bytes.as_ref(),
+                [0xf4, 0x90..=0xbf, 0x80..=0xbf, 0x80..=0xbf, ..]
+            ) && rest.chars().take(3).all(crate::rawstr::is_raw)
+            {
+                out.push(c);
+                out.extend(chars.by_ref().take(3));
+                continue;
+            }
+            // Any other byte that is not UTF-8 is octal.
+            let _ = write!(out, "\\{:03o}", bytes[0]);
+            continue;
+        }
         if !c.is_ascii() {
             out.push(c);
             continue;

@@ -66,7 +66,7 @@ pub fn exec(
     }
     if item.client.is_none() {
         // cmdq_error with no client: a config cause.
-        item.error(server, msg.into_bytes());
+        item.error(server, vtmux_core::rawstr::to_bytes(&msg).into_owned());
         item.status = 0;
         return Ok(());
     }
@@ -91,7 +91,12 @@ pub fn exec(
             ignore_keys: args.flag('N'),
             no_freeze: args.flag('C'),
         };
-        server.status_message(tc, msg, delay, flags);
+        server.status_message(
+            tc,
+            vtmux_core::rawstr::to_lossy(&msg).into_owned(),
+            delay,
+            flags,
+        );
     }
     Ok(())
 }

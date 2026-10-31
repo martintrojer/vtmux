@@ -34,7 +34,7 @@ impl PasteBuffer {
             out.truncate(WIDTH);
             out.extend_from_slice(b"...");
         }
-        String::from_utf8_lossy(&out).into_owned()
+        vtmux_core::rawstr::from_bytes(&out)
     }
 
     /// `format_cb_buffer_full`: `xstrndup` stops at a NUL.
@@ -45,7 +45,7 @@ impl PasteBuffer {
             .iter()
             .position(|&b| b == 0)
             .unwrap_or(self.data.len());
-        String::from_utf8_lossy(&self.data[..end]).into_owned()
+        vtmux_core::rawstr::from_bytes(&self.data[..end])
     }
 }
 

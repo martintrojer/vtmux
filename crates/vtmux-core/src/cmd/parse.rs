@@ -148,18 +148,12 @@ enum RawArg {
     Block(Vec<RawCommand>),
     /// An already parsed list (`cmd_parse_from_arguments` with a block).
     Built(CommandList),
-    /// A command-line word that is not UTF-8 (`parse_argv_values`): an
-    /// [`ArgValue::Bytes`].
-    Bytes(ArgValue),
-    /// A word that is not UTF-8. Lexed like any other, but an `Args`
-    /// string cannot hold it, so only building it fails: a word in a
-    /// dropped `%if` branch never does.
-    Invalid,
 }
 
 impl RawArg {
+    /// A word as the lexer read it: bytes, not necessarily UTF-8.
     fn word(bytes: Vec<u8>) -> Self {
-        String::from_utf8(bytes).map_or(RawArg::Invalid, RawArg::Str)
+        RawArg::Str(crate::rawstr::from_vec(bytes))
     }
 }
 
@@ -199,25 +193,6 @@ pub fn parse_argv_values(values: &[ArgValue]) -> Result<Vec<CommandCall>, CmdErr
                 }
                 if !end || !word.is_empty() {
                     current.push(RawArg::Str(word));
-                }
-            }
-            ArgValue::Bytes { raw, .. } => {
-                // The same `;` and `\;` handling, on bytes.
-                let mut word = raw.clone();
-                if word.last() == Some(&b';') {
-                    word.pop();
-                    if word.last() == Some(&b'\\') {
-                        word.pop();
-                        word.push(b';');
-                    } else {
-                        end = true;
-                    }
-                }
-                if !end || !word.is_empty() {
-                    current.push(match ArgValue::from_bytes(word) {
-                        ArgValue::Str(s) => RawArg::Str(s),
-                        bytes => RawArg::Bytes(bytes),
-                    });
                 }
             }
             ArgValue::Commands(list) => current.push(RawArg::Built(list.clone())),
@@ -368,8 +343,6 @@ fn build_command(
         // block as first word, is an empty list.
         let first = match cmd.args.first() {
             Some(RawArg::Str(first)) => first.as_str(),
-            Some(RawArg::Invalid) => return Err(NOT_UTF8),
-            Some(RawArg::Bytes(v)) => v.as_str().unwrap_or_default(),
             _ => return Ok(Vec::new()),
         };
         if let Some((_, text)) = DEFAULT_COMMAND_ALIASES.iter().find(|(a, _)| *a == first) {
@@ -399,8 +372,6 @@ fn build_command(
                 ArgValue::Commands(CommandList { calls: calls? })
             }
             RawArg::Built(list) => ArgValue::Commands(list.clone()),
-            RawArg::Bytes(b) => b.clone(),
-            RawArg::Invalid => return Err(NOT_UTF8),
         });
     }
     // cmd_parse (cmd.c:508-540).
@@ -428,8 +399,6 @@ fn clone_raw(arg: &RawArg) -> RawArg {
                 .collect(),
         ),
         RawArg::Built(l) => RawArg::Built(l.clone()),
-        RawArg::Bytes(b) => RawArg::Bytes(b.clone()),
-        RawArg::Invalid => RawArg::Invalid,
     }
 }
 
@@ -816,19 +785,20 @@ impl Lexer<'_> {
             };
             value = value << 4 | digit;
         }
-        // wctomb: surrogates fail (the reference prints the message). Above
-        // U+10FFFF glibc emits bytes that are not UTF-8, which an `Args`
-        // string cannot hold.
+        // wctomb: surrogates and values past 0x7fffffff fail (the
+        // reference prints the message). Above U+10FFFF glibc emits the
+        // old five and six byte forms, which are not UTF-8.
         match char::from_u32(value) {
             Some(c) => {
                 let mut tmp = [0; 4];
                 buf.extend_from_slice(c.encode_utf8(&mut tmp).as_bytes());
                 Ok(())
             }
-            None if (0xd800..0xe000).contains(&value) => Err(CmdError::Lex(message)),
-            // Not UTF-8: a byte that never is, so building the word fails.
+            None if value > 0x7fff_ffff || (0xd800..0xe000).contains(&value) => {
+                Err(CmdError::Lex(message))
+            }
             None => {
-                buf.push(0xff);
+                push_long_utf8(buf, value);
                 Ok(())
             }
         }
@@ -871,7 +841,7 @@ impl Lexer<'_> {
         }
         let name = String::from_utf8_lossy(&name);
         if let Some(value) = self.env.var(&name) {
-            buf.extend_from_slice(value.as_bytes());
+            buf.extend_from_slice(&crate::rawstr::to_bytes(&value));
         }
         Ok(())
     }
@@ -898,15 +868,23 @@ impl Lexer<'_> {
         let user = String::from_utf8_lossy(&name);
         let home = self.env.home((!name.is_empty()).then_some(&*user));
         let home = home.ok_or(CmdError::Syntax)?;
-        buf.extend_from_slice(home.as_bytes());
+        buf.extend_from_slice(&crate::rawstr::to_bytes(&home));
         Ok(())
     }
 }
 
-const NOT_UTF8: CmdError = CmdError::Unsupported("non-UTF-8 argument");
-
-fn bytes_to_string(bytes: Vec<u8>) -> Result<String, CmdError> {
-    String::from_utf8(bytes).map_err(|_| NOT_UTF8)
+/// glibc's `wctomb` past U+10FFFF: UTF-8's original four to six byte
+/// forms (`value` is at most `0x7fffffff`).
+fn push_long_utf8(buf: &mut Vec<u8>, value: u32) {
+    let (lead, count): (u8, u32) = match value {
+        0..0x20_0000 => (0xf0, 3),
+        0x20_0000..0x400_0000 => (0xf8, 4),
+        _ => (0xfc, 5),
+    };
+    buf.push(lead | u8::try_from(value >> (6 * count)).unwrap_or(0));
+    for i in (0..count).rev() {
+        buf.push(0x80 | u8::try_from((value >> (6 * i)) & 0x3f).unwrap_or(0));
+    }
 }
 
 /// Longest `NAME=value` tmux accepts (`CMD_PARSE_MAX_ENVIRON_LEN`,
@@ -955,8 +933,9 @@ fn lex_commands(
     opts: ParseOpts,
     line: u32,
 ) -> Result<Vec<RawCommand>, (u32, CmdError)> {
+    let bytes = crate::rawstr::to_bytes(text);
     let mut lexer = Lexer {
-        input: text.as_bytes(),
+        input: &bytes,
         off: 0,
         escapes: 0,
         eof: false,
@@ -1015,8 +994,8 @@ impl Parser<'_, '_> {
             .scope
             .is_none_or(|f| f && self.stack.iter().all(|s| *s));
         if applies && !self.lexer.opts.parse_only {
-            let name = bytes_to_string(text[..eq].to_vec())?;
-            let value = bytes_to_string(text[eq + 1..].to_vec())?;
+            let name = crate::rawstr::from_bytes(&text[..eq]);
+            let value = crate::rawstr::from_bytes(&text[eq + 1..]);
             self.lexer.env.set(&name, &value, hidden);
         }
         Ok(())
@@ -1099,7 +1078,7 @@ impl Parser<'_, '_> {
         // tmux expands every condition as a C string, live or dead
         // (cmd-parse.y `expanded`), so a non-UTF-8 condition never fails the
         // file. Only its truth matters: invalid bytes keep it non-empty.
-        let text = String::from_utf8_lossy(&text);
+        let text = crate::rawstr::from_vec(text);
         Ok(crate::format::is_true(&self.lexer.env.expand(&text)))
     }
 
@@ -1307,7 +1286,7 @@ mod tests {
 
     /// argv words that are not UTF-8 keep their bytes (tmux's argv is C
     /// strings); flags, `;` and `\;` work on them as on text, and the text
-    /// accessors see a lossy copy.
+    /// accessors see them as reserved characters (`rawstr`).
     #[test]
     fn argv_bytes_keep_non_utf8_words() {
         let words: Vec<Vec<u8>> = [
@@ -1324,14 +1303,17 @@ mod tests {
         let calls = parse_argv_bytes(&words).unwrap();
         assert_eq!(calls.len(), 2);
         let a = &calls[0].args;
-        assert_eq!(a.value('b'), Some("n\u{fffd}"));
+        assert_eq!(a.value('b'), Some(&*crate::rawstr::from_bytes(b"n\xff")));
         // Only a trailing `;` ends the command; `\;` before it is literal.
         assert_eq!(a.positional_bytes(0).unwrap().as_ref(), b"a\xff\x80\\;\xfe");
         assert_eq!(
             a.positional_text(0).unwrap(),
-            "a\u{fffd}\u{fffd}\\;\u{fffd}"
+            crate::rawstr::from_bytes(b"a\xff\x80\\;\xfe")
         );
-        assert_eq!(calls[1].args.positional(0), Some("\u{fffd}"));
+        assert_eq!(
+            calls[1].args.positional(0),
+            Some(&*crate::rawstr::from_bytes(b"\xfe"))
+        );
         assert!(parse_argv_bytes(&[b"\xffcmd".to_vec()]).is_err());
     }
 
@@ -1979,13 +1961,23 @@ mod tests {
         );
     }
 
-    /// Typed "unsupported" errors, the allowed escape hatch in the brief:
-    /// conditionals and non-UTF-8 words. Reference accepts all of them.
+    /// Words that are not UTF-8 are bytes, as tmux's C strings are.
+    /// Reference: `source-file` of `display -p X` for each X, bytes printed.
     #[test]
-    fn config_m0_unsupported_is_typed() {
-        for text in ["display -p \\377", "display -p \\U00110000"] {
+    fn config_non_utf8_words_are_bytes() {
+        let word = |text: &str| -> Vec<u8> {
+            let calls = parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+            crate::rawstr::to_bytes(calls[0].args.positional(0).unwrap()).into_owned()
+        };
+        assert_eq!(word("display -p \\377"), b"\xff");
+        assert_eq!(word("display -p a\\351b"), b"a\xe9b");
+        // wctomb past U+10FFFF: the old four to six byte forms.
+        assert_eq!(word("display -p \\U00110000"), b"\xf4\x90\x80\x80");
+        assert_eq!(word("display -p \\U7fffffff"), b"\xfd\xbf\xbf\xbf\xbf\xbf");
+        // Past 0x7fffffff, and surrogates, wctomb fails.
+        for text in ["display -p \\U80000000", "display -p \\ud800"] {
             let e = parse(text).expect_err(text);
-            assert!(matches!(e, CmdError::Unsupported(_)), "{text}: {e}");
+            assert!(matches!(e, CmdError::Lex(_)), "{text}: {e}");
         }
         // `=` after the command name is just an argument, and `=x` first is
         // not a valid name.
@@ -2206,7 +2198,7 @@ mod tests {
     fn block(calls: &[CommandCall], idx: usize) -> &CommandList {
         match &calls[0].args.positionals[idx] {
             ArgValue::Commands(list) => list,
-            other => panic!("{other:?} is not a block"),
+            other @ ArgValue::Str(_) => panic!("{other:?} is not a block"),
         }
     }
 

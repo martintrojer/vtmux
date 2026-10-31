@@ -180,7 +180,7 @@ impl Item {
 
     /// `cmdq_print`: a line on stdout.
     pub fn print(&mut self, text: &str) {
-        self.print_line(text.as_bytes());
+        self.print_line(&vtmux_core::rawstr::to_bytes(text));
     }
 
     /// `cmdq_print` of bytes that need not be UTF-8: a UTF-8 client gets
@@ -193,7 +193,7 @@ impl Item {
         let mut line = if self.utf8 {
             text.to_vec()
         } else {
-            utf8_sanitize(&String::from_utf8_lossy(text)).into_bytes()
+            utf8_sanitize(&vtmux_core::rawstr::from_bytes(text)).into_bytes()
         };
         line.push(b'\n');
         self.output.push(Output::Stdout(line));
@@ -235,10 +235,10 @@ impl Item {
             // cmdq_error with no client: a cause while the config loads,
             // else the server message log, which vtmux has not got.
             if !server.cfg_finished {
-                let msg = String::from_utf8_lossy(&line);
+                let msg = vtmux_core::rawstr::from_bytes(&line);
                 let cause = match &self.source {
                     Some(src) => format!("{}:{}: {msg}", src.file, src.line),
-                    None => msg.into_owned(),
+                    None => msg,
                 };
                 server.causes.push(cause);
             }
@@ -247,7 +247,7 @@ impl Item {
         let mut line = if self.utf8 {
             line
         } else {
-            utf8_sanitize(&String::from_utf8_lossy(&line)).into_bytes()
+            utf8_sanitize(&vtmux_core::rawstr::from_bytes(&line)).into_bytes()
         };
         line.push(b'\n');
         self.output.push(Output::Stderr(line));

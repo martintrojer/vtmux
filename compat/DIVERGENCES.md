@@ -124,3 +124,11 @@ product reasons" category.
 - vtmux behaviour: the window's name clock starts at creation, so the first check comes one `NAME_INTERVAL` (500 ms) later, when the command has exec'd. The window keeps the name from `default_window_name` (`cat`) or settles on the command's `argv[0]` (`sleep` for `sh -c 'exec sleep 5'`), and no spurious `window-renamed` or `%window-renamed` fires at start.
 - Evidence: 30 runs of `new -d -s a cat; neww -d cat; neww -d; neww -d sleep 4; neww -d 'exec sleep 5'` with SHELL=/bin/sh give `cat/cat/sh/sleep/sleep` every time; before the change `sh/cat/...` mixes. Reference runs of the same script vary as above.
 - Category: Do not copy tmux bug (the name depends on a scheduler race).
+
+### D-013: bytes that glibc reads as a character past U+10FFFF
+
+- Test / assertion: none (the rows are left out of cli.rs `non_utf8_bytes_through_options_and_formats`).
+- tmux behaviour: option values, formats and arguments are C strings. For `.`, `?` and `[...]` (`regexec`, `fnmatch`) and for `#{w:}`, `#{=N:}`, tmux 3.8 on glibc 2.43 sees `\364\220\200\200` (`\U00110000`), the five byte `\370\210\200\200\200` and the six byte `\375\277\277\277\277\277` (`\U7fffffff`) as one character each: `#{s/./x/:@o}` gives `x`, `#{m:?,#{@o}}` and `#{m/r:^.$,#{@o}}` give 1, `#{w:@o}` of the four byte form gives 1.
+- vtmux behaviour: the core keeps text as `String` with each byte that is not UTF-8 as one reserved character (`rawstr`), so these sequences are separate bytes: `.`, `?` and `[...]` do not match them, `w` is 0 and `=` skips them. `n`, `p`, `q`, `b`, `d`, `==`, `show`, `display -p` and `source-file -v` match tmux for them, as they do for every byte string.
+- Evidence: `set -g @o "$(printf '\370\210\200\200\200')"; display -p '#{s/./x/:@o}'`: tmux `x`, vtmux `\370\210\200\200\200`; `/tmp/bytes_args/p7.sh` (bytes_args worker) lists every differing row.
+- Category: Deferred (only text that is not Unicode; every UTF-8 and every lone invalid byte matches).

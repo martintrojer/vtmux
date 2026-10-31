@@ -205,7 +205,7 @@ impl EdgeError {
                 path_line("error creating ", path, &format!(" ({})", strerror(io)))
             }
             Self::Socket(e) => e.to_bytes(),
-            _ => self.to_string().into_bytes(),
+            _ => crate::rawstr::to_bytes(&self.to_string()).into_owned(),
         }
     }
 }

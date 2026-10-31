@@ -160,7 +160,7 @@ impl Server {
     /// it runs: a line in its stream (`control_write`).
     pub(crate) fn control_print(&mut self, id: ClientId, line: &str) {
         if let Some(cs) = self.control_mut(id) {
-            cs.write_line(line.as_bytes());
+            cs.write_line(&vtmux_core::rawstr::to_bytes(line));
             self.control_flush(id);
         }
     }
@@ -169,7 +169,7 @@ impl Server {
     /// 253): deferred while a guard is open, whatever the client's state.
     pub(crate) fn control_config_error(&mut self, id: ClientId, cause: &str) {
         if let Some(cs) = self.control_mut(id) {
-            cs.notify(format!("%config-error {cause}").into_bytes());
+            cs.notify(vtmux_core::rawstr::to_bytes(&format!("%config-error {cause}")).into_owned());
             self.control_flush(id);
         }
     }
@@ -291,7 +291,7 @@ impl Server {
                 cs.inbuf.clear();
                 break;
             }
-            self.control_line(id, &String::from_utf8_lossy(&line));
+            self.control_line(id, &vtmux_core::rawstr::from_vec(line));
         }
         if let Some(cs) = self.control_mut(id)
             && cs.eof
@@ -624,7 +624,9 @@ impl Server {
             };
             let found = crate::target::Found::from_winlink(&self.model, s, index);
             let ctx = self.format_ctx(found, Some(id));
-            let line = vtmux_core::format::expand_str(TEMPLATE, &ctx).into_bytes();
+            let line =
+                vtmux_core::rawstr::to_bytes(&vtmux_core::format::expand_str(TEMPLATE, &ctx))
+                    .into_owned();
             self.control_notify_one(id, true, line);
         }
     }
