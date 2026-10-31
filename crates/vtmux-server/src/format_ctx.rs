@@ -21,6 +21,11 @@ pub struct ServerInfo {
     pub socket_path: String,
     pub pid: u32,
     pub host: String,
+    /// `#{current_file}`: the file the running command was parsed from
+    /// (cfg.c `load_cfg`: `cmdq_add_format(state, "current_file", ...)`,
+    /// merged into every format tree of the item by `cmdq_merge_formats`).
+    /// Set by the queue while such a command fires.
+    pub current_file: Option<String>,
 }
 
 impl ServerInfo {
@@ -34,6 +39,7 @@ impl ServerInfo {
             socket_path,
             pid: std::process::id(),
             host,
+            current_file: None,
         }
     }
 }
@@ -578,6 +584,7 @@ impl Ctx<'_> {
             "user" => sys::user::current_user().map(|p| p.name),
             "version" => Some("3.8".to_owned()),
             "vtmux_version" => Some(env!("CARGO_PKG_VERSION").to_owned()),
+            "current_file" => self.info.current_file.clone(),
             "host" => Some(self.info.host.clone()),
             "host_short" => Some(
                 self.info
