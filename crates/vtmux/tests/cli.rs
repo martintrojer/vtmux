@@ -652,6 +652,57 @@ fn source_file_config_env() {
     });
 }
 
+/// `#{current_file}` and `#{d:current_file}` in commands parsed from a
+/// file (cfg.c `load_cfg`: `cmdq_add_format(state, "current_file", ...)`,
+/// merged by `cmdq_merge_formats`): empty outside a file, the inner file
+/// inside a nested `source-file` (also with `-F`, whose path expands
+/// `#{d:current_file}`) and the outer file again afterwards; commands
+/// queued by `if-shell -F` and `run-shell -C` keep the file. Paths differ
+/// between the two worlds, so the expectations are compared in the file
+/// against the world's directory.
+#[test]
+fn source_file_current_file() {
+    compare("source_file_current_file", |w| {
+        let dir = w.dir().to_str().expect("utf-8").to_owned();
+        let write = |name: &str, text: String| {
+            std::fs::write(w.dir().join(name), text).expect("write");
+        };
+        write(
+            "inner.conf",
+            format!(
+                "set -gF @in '#{{==:#{{current_file}},{dir}/inner.conf}}'\n\
+                 set -gF @in_d '#{{==:#{{d:current_file}},{dir}}}'\n\
+                 set -gF @in_b '#{{b:current_file}}'\n"
+            ),
+        );
+        write(
+            "outer.conf",
+            format!(
+                "set -gF @before '#{{==:#{{current_file}},{dir}/outer.conf}}'\n\
+                 set -gF @d '#{{==:#{{d:current_file}},{dir}}}'\n\
+                 source-file {dir}/inner.conf\n\
+                 source-file -F '#{{d:current_file}}/inner.conf'\n\
+                 set -gF @after '#{{==:#{{current_file}},{dir}/outer.conf}}'\n\
+                 if-shell -F 1 \"set -gF @ifs '#{{==:#{{current_file}},{dir}/outer.conf}}'\"\n\
+                 run-shell -C \"set -gF @rsc '#{{==:#{{current_file}},{dir}/outer.conf}}'\"\n\
+                 %if '#{{==:#{{current_file}},}}'\n\
+                 set -g @cond top\n\
+                 %endif\n"
+            ),
+        );
+        let outer = format!("{dir}/outer.conf");
+        vec![
+            w.run(&["new", "-d", "-s", "a"]),
+            w.run(&["source", &outer]),
+            w.run(&[
+                "display",
+                "-p",
+                "#{@before} #{@d} #{@in} #{@in_d} #{@in_b} #{@after} #{@ifs} #{@rsc} #{@cond} [#{current_file}]",
+            ]),
+        ]
+    });
+}
+
 /// `%if` in config files (cmd-parse.y `condition`, `condition1`,
 /// `expanded`): the whole file is parsed before anything runs, so a `set`
 /// is not seen by a later `%if`; conditions are formats over the parsing
@@ -988,7 +1039,10 @@ fn options_owner_config() {
             .lines()
             .filter(|line| {
                 let command = line.split_whitespace().next().unwrap_or("");
+                // The `%if "#{vtmux_version}"` block (D23) sets an option
+                // tmux has not got: vtmux-only, so it is not compared.
                 !(matches!(command, "run" | "run-shell" | "if-shell")
+                    || line.contains("vtmux-focus-ring")
                     || command == "source-file" && line.contains("mu-crew.conf"))
             })
             .collect::<Vec<_>>()

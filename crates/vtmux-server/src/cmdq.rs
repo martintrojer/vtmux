@@ -440,8 +440,15 @@ impl Server {
                     return false;
                 };
                 item.step = Some(id);
+                // load_cfg: the file's commands (and what they queue)
+                // carry `current_file` in their state.
+                let outer = std::mem::replace(
+                    &mut self.info.current_file,
+                    source.as_ref().map(|s| s.file.clone()),
+                );
                 item.source = source;
                 let ok = commands::fire(self, &mut item, &call);
+                self.info.current_file = outer;
                 self.flush_item(&mut item);
                 let wait = std::mem::take(&mut item.blocked);
                 if self.cmdq.queues.contains_key(&q) {
