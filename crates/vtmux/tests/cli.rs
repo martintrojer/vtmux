@@ -1081,8 +1081,9 @@ fn options_spawn_and_exit_empty() {
     });
 }
 
-/// Owner acceptance: strip only top-level run/run-shell/if-shell and the
-/// mu-crew source-file, preserving bindings and environment lines. Their
+/// Owner acceptance: strip only top-level run/run-shell/if-shell, the
+/// mu-crew source-file and vtmux-only options, preserving bindings and
+/// environment lines. Their
 /// effects are later work; source still runs subsequent set lines.
 #[test]
 fn options_owner_config() {
