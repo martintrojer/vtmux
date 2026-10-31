@@ -251,8 +251,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."format-strings.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."format-time-range.sh"]
 status = "xfail"

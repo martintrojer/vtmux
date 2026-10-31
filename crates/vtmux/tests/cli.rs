@@ -408,6 +408,61 @@ fn send_keys_and_capture() {
     });
 }
 
+/// Copy mode's format variables (window-copy.c `window_copy_formats`,
+/// format.c `format_cb_pane_in_mode`/`pane_mode`), `send-keys -X` with a
+/// repeat count, mode keys through `send-keys`, and the errors outside a
+/// mode (cmd-send-keys.c:191-204), emacs and vi keys.
+#[test]
+fn copy_mode_formats() {
+    const F: &str = "[#{pane_in_mode}] [#{pane_mode}] [#{scroll_position}] \
+        [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}] [#{copy_cursor_word}] \
+        [#{copy_position}/#{copy_position_limit}] [#{copy_line_numbers}] \
+        [#{selection_present}] [#{selection_active}] [#{selection_mode}] \
+        [#{rectangle_toggle}] [#{search_present}] [#{search_count}] [#{refresh_active}] \
+        #{cursor_x},#{cursor_y} #{history_size}";
+    compare("copy_mode_formats", |w| {
+        let mut runs = vec![w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "30",
+            "-y",
+            "6",
+            "sh",
+            "-c",
+            "for i in 1 2 3 4 5 6 7 8 9; do echo line$i; done; echo 'foo bar-baz'; exec cat",
+        ])];
+        w.wait_for_text("a", "bar-baz");
+        let mut step = |args: &[&str]| {
+            runs.push(w.run(args));
+            runs.push(w.run(&["display", "-p", "-t", "a", F]));
+        };
+        step(&["send-keys", "-t", "a", "-X", "cancel"]);
+        step(&["send-keys", "-t", "a", "-X", "-N", "2", "cancel"]);
+        step(&["copy-mode", "-t", "a"]);
+        step(&["send-keys", "-t", "a", "-X", "cursor-up"]);
+        step(&["send-keys", "-t", "a", "-X", "-N", "5", "cursor-right"]);
+        step(&["send-keys", "-t", "a", "-X", "-N", "3", "cursor-right"]);
+        step(&["send-keys", "-t", "a", "-X", "page-up"]);
+        step(&["send-keys", "-t", "a", "-X", "-N", "0", "cursor-up"]);
+        step(&["send-keys", "-t", "a", "-N", "2", "Up"]);
+        step(&["send-keys", "-t", "a", "-X", "history-top"]);
+        step(&["send-keys", "-t", "a", "-X", "goto-line", "2"]);
+        step(&["send-keys", "-t", "a", "-X", "nosuch"]);
+        step(&["send-keys", "-t", "a", "-X"]);
+        step(&["send-keys", "-t", "a", "q"]);
+        step(&["set", "-g", "mode-keys", "vi"]);
+        step(&["copy-mode", "-u", "-t", "a"]);
+        step(&["send-keys", "-t", "a", "k", "$"]);
+        step(&["send-keys", "-t", "a", "-X", "line-numbers-off"]);
+        step(&["copy-mode", "-t", "a"]);
+        step(&["copy-mode", "-q", "-t", "a"]);
+        runs
+    });
+}
+
 /// (9) Command lookup, flag and arity errors (the `task_0` shared facts).
 #[test]
 fn command_errors() {
