@@ -7,13 +7,16 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use unicode_width::UnicodeWidthChar;
+use vtmux_core::rawstr::Unit;
 
 /// `check_name` -> `utf8_isvalid` (utf8.c:827-847): ASCII must be printable
 /// (0x20-0x7e); any other valid UTF-8 character is fine.
 #[must_use]
 pub fn check_name(name: &str) -> bool {
-    name.chars()
-        .all(|c| !vtmux_core::rawstr::is_raw(c) && (!c.is_ascii() || (' '..='~').contains(&c)))
+    vtmux_core::rawstr::units(name).all(|u| match u {
+        Unit::Char(c) => !c.is_ascii() || (' '..='~').contains(&c),
+        Unit::Byte(_) => false,
+    })
 }
 
 /// `vis(3)` with `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL` over a string that
@@ -22,7 +25,14 @@ pub fn check_name(name: &str) -> bool {
 #[must_use]
 pub fn vis(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
+    for u in vtmux_core::rawstr::units(s) {
+        let c = match u {
+            Unit::Byte(b) => {
+                let _ = write!(out, "\\{b:03o}");
+                continue;
+            }
+            Unit::Char(c) => c,
+        };
         match c {
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
@@ -33,13 +43,6 @@ pub fn vis(s: &str) -> String {
             '\u{b}' => out.push_str("\\v"),
             '\u{c}' => out.push_str("\\f"),
             '\0' => out.push_str("\\000"),
-            c if vtmux_core::rawstr::is_raw(c) => {
-                let _ = write!(
-                    out,
-                    "\\{:03o}",
-                    vtmux_core::rawstr::to_bytes(&c.to_string())[0]
-                );
-            }
             c if c.is_ascii_control() => {
                 let _ = write!(out, "\\{:03o}", u32::from(c));
             }
@@ -168,10 +171,12 @@ pub fn stringify_argv(argv: &[String]) -> String {
 #[must_use]
 pub fn utf8_sanitize(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if vtmux_core::rawstr::is_raw(c) {
+    for u in vtmux_core::rawstr::units(s) {
+        let Unit::Char(c) = u else {
             out.push('_');
-        } else if c.is_ascii() {
+            continue;
+        };
+        if c.is_ascii() {
             out.push(if (' '..='~').contains(&c) { c } else { '_' });
         } else {
             for _ in 0..c.width().unwrap_or(0) {

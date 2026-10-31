@@ -17,6 +17,7 @@ mod parse;
 #[cfg(test)]
 mod tests;
 
+use crate::rawstr::{Unit, unit_at, unit_before};
 pub(crate) use ctype::{Class, equal, lower, upper};
 use std::ops::Range;
 
@@ -33,7 +34,7 @@ pub enum Error {
 #[derive(Debug, Clone)]
 enum Expr {
     Empty,
-    Literal(char),
+    Literal(Unit),
     Any,
     Bracket(Bracket),
     Anchor(Anchor),
@@ -68,6 +69,8 @@ pub(crate) enum Item {
     Char(char),
     Range(char, char),
     Class(Class),
+    /// A byte that is not UTF-8: it matches nothing.
+    Never,
 }
 impl Bracket {
     fn matches(&self, c: char, ignore_case: bool) -> bool {
@@ -83,6 +86,7 @@ impl Bracket {
                         && matches!(class, Class::Upper | Class::Lower)
                         && (Class::Upper.contains(c) || Class::Lower.contains(c)))
             }
+            Item::Never => false,
         });
         yes != self.negated
     }
@@ -110,8 +114,7 @@ struct State {
 
 impl Regex {
     pub fn new(pattern: &str, ignore_case: bool) -> Result<Self, Error> {
-        let (expr, groups) =
-            parse::parse(pattern.split('\0').next().unwrap_or_default(), ignore_case)?;
+        let (expr, groups) = parse::parse(crate::rawstr::c_str(pattern), ignore_case)?;
         let nfa = if has_backref(&expr) {
             None
         } else {
@@ -127,7 +130,7 @@ impl Regex {
 
     /// `regexec` with `REG_NOSUB`: whether any match exists.
     pub fn is_match(&self, text: &str) -> Result<bool, Error> {
-        let text = text.split('\0').next().unwrap_or_default();
+        let text = crate::rawstr::c_str(text);
         match &self.nfa {
             Some(nfa) => Ok(nfa.span(text, false).is_some()),
             None => self.find(text).map(|m| m.is_some()),
@@ -141,18 +144,16 @@ impl Regex {
     /// `regexec` with `REG_NOTBOL` when `not_bol`: the text does not start a
     /// line, so `^` does not match at its start.
     pub fn find_with(&self, text: &str, not_bol: bool) -> Result<Option<Match>, Error> {
-        let text = text.split('\0').next().unwrap_or_default();
+        let text = crate::rawstr::c_str(text);
         // Flat literal patterns need no state exploration, even for multi-megabyte text.
         if !self.ignore_case
             && let Expr::Seq(parts) = &self.expr
         {
-            let literal: Option<String> = parts
-                .iter()
-                .map(|p| match p {
-                    Expr::Literal(c) => Some(*c),
-                    _ => None,
-                })
-                .collect();
+            let literal: Option<String> = parts.iter().try_fold(String::new(), |mut s, p| {
+                let Expr::Literal(u) = p else { return None };
+                crate::rawstr::push_unit(&mut s, *u);
+                Some(s)
+            });
             if let Some(literal) = literal {
                 return Ok(text.find(&literal).map(|start| Match {
                     captures: vec![Some(start..start + literal.len())],
@@ -169,8 +170,7 @@ impl Regex {
         // gets its own budget. There is no cross-start ceiling: a shared
         // budget makes an ordinary backreference fail on long plain text
         // (review_fmt_regex_2), and each start is already bounded.
-        for start in text
-            .char_indices()
+        for start in crate::rawstr::unit_indices(text)
             .map(|(i, _)| i)
             .chain(std::iter::once(text.len()))
         {
@@ -226,33 +226,32 @@ impl Regex {
         not_bol: bool,
     ) -> Result<Vec<State>, Error> {
         *budget = budget.checked_sub(self.groups + 1).ok_or(Error::Limit)?;
-        let next = text[s.pos..].chars().next();
+        let next = unit_at(text, s.pos);
         match expr {
             Expr::Empty => Ok(vec![s]),
-            Expr::Literal(c) => Ok(if next.is_some_and(|n| equal(*c, n, self.ignore_case)) {
-                s.pos += next.unwrap().len_utf8();
-                vec![s]
-            } else {
-                vec![]
+            Expr::Literal(c) => Ok(match next {
+                Some((n, len)) if unit_equal(*c, n, self.ignore_case) => {
+                    s.pos += len;
+                    vec![s]
+                }
+                _ => vec![],
             }),
             Expr::Any | Expr::Bracket(_) => {
                 // glibc's `.` and brackets never match a byte that is not
-                // UTF-8 (a reserved character, `rawstr`).
-                if let Some(c) = next
-                    && !crate::rawstr::is_raw(c)
+                // UTF-8.
+                if let Some((Unit::Char(c), len)) = next
                     && (matches!(expr, Expr::Any)
                         || matches!(expr, Expr::Bracket(b) if b.matches(c, self.ignore_case)))
                 {
-                    s.pos += c.len_utf8();
+                    s.pos += len;
                     Ok(vec![s])
                 } else {
                     Ok(vec![])
                 }
             }
             Expr::Anchor(a) => {
-                let word = |c: char| c == '_' || Class::Alnum.contains(c);
-                let before = text[..s.pos].chars().next_back().is_some_and(word);
-                let after = next.is_some_and(word);
+                let before = unit_before(text, s.pos).is_some_and(is_word);
+                let after = next.is_some_and(|(u, _)| is_word(u));
                 let yes = match a {
                     Anchor::Start => s.pos == 0 && !not_bol,
                     Anchor::End => s.pos == text.len(),
@@ -270,14 +269,14 @@ impl Regex {
                 // The comparison is work too: charge its length.
                 *budget = budget.checked_sub(r.len()).ok_or(Error::Limit)?;
                 let mut at = s.pos;
-                for c in text[r.clone()].chars() {
-                    let Some(n) = text[at..].chars().next() else {
+                for c in crate::rawstr::units(&text[r.clone()]) {
+                    let Some((n, len)) = unit_at(text, at) else {
                         return Ok(vec![]);
                     };
-                    if !equal(c, n, self.ignore_case) {
+                    if !unit_equal(c, n, self.ignore_case) {
                         return Ok(vec![]);
                     }
-                    at += n.len_utf8();
+                    at += len;
                 }
                 s.pos = at;
                 Ok(vec![s])
@@ -348,6 +347,19 @@ impl Regex {
             }
         }
     }
+}
+
+/// `equal` over units: a byte that is not UTF-8 equals only itself.
+fn unit_equal(a: Unit, b: Unit, ignore_case: bool) -> bool {
+    match (a, b) {
+        (Unit::Char(a), Unit::Char(b)) => equal(a, b, ignore_case),
+        (a, b) => a == b,
+    }
+}
+
+/// A word character for `\b`, `\<` and the like.
+fn is_word(u: Unit) -> bool {
+    matches!(u, Unit::Char(c) if c == '_' || Class::Alnum.contains(c))
 }
 
 fn unique(states: Vec<State>) -> Vec<State> {

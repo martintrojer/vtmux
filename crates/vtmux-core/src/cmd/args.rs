@@ -20,8 +20,8 @@ use crate::error::EdgeError;
 /// arguments.c): text, or a parsed `{ ... }` block (`ARGS_COMMANDS`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArgValue {
-    /// Text. A byte that is not UTF-8 is one reserved character
-    /// ([`crate::rawstr`]): tmux's arguments are C strings.
+    /// Text. A byte that is not UTF-8 is carried as [`crate::rawstr`]
+    /// describes: tmux's arguments are C strings.
     Str(String),
     Commands(CommandList),
 }
@@ -332,12 +332,10 @@ fn parse_flags(
     let mut pos = 1;
     while pos < word.len() {
         let mut flag = word[pos];
-        // A byte that was not UTF-8 is the reserved character that stands
-        // for it: report the byte, as tmux does.
-        if let Some(c) = word_str[pos..].chars().next()
-            && crate::rawstr::is_raw(c)
-        {
-            flag = crate::rawstr::to_bytes(&c.to_string())[0];
+        // A byte that is not UTF-8 is reported as the byte, as tmux does
+        // (it is no flag letter, so the error below returns at once).
+        if let Some((crate::rawstr::Unit::Byte(b), _)) = crate::rawstr::unit_at(word_str, pos) {
+            flag = b;
         }
         pos += 1;
         if flag == b'?' {

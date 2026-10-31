@@ -89,10 +89,11 @@ impl Eval<'_> {
     }
 }
 
-/// Byte-oriented empty-match progression is intentional (regsub.c:regsub).
-/// The public format API uses UTF-8 strings: tmux can split a character here,
-/// so retain all original bytes and convert only at the final boundary.
+/// `regsub` (regsub.c) over the bytes `text` stands for: an empty match
+/// moves on one byte, which can be inside a character, and the search from
+/// there sees the rest of that character as bytes that are not UTF-8.
 fn regsub(pattern: &str, with: &str, text: &str, icase: bool) -> String {
+    use crate::rawstr::{byte_len, from_bytes, from_vec, to_bytes};
     if text.is_empty() || pattern.is_empty() {
         return text.to_owned();
     }
@@ -100,34 +101,35 @@ fn regsub(pattern: &str, with: &str, text: &str, icase: bool) -> String {
     let Ok(regex) = Regex::new(pattern, icase) else {
         return text.to_owned();
     };
+    let bytes = to_bytes(text);
+    let end = bytes.len();
     let mut out = Vec::new();
     let (mut start, mut last, mut empty) = (0usize, 0usize, false);
-    while start <= text.len() {
-        // regexec can search after an invalid UTF-8 continuation byte. For empty
-        // matches this offset itself is meaningful; other patterns skip to the
-        // next boundary. Preserve the byte progress from regsub.
-        let mut boundary = start;
-        while boundary < text.len() && !text.is_char_boundary(boundary) {
-            boundary += 1;
-        }
+    while start <= end {
+        // regexec(text + start): offsets in `rest` are mapped back to bytes.
+        let rest = from_bytes(&bytes[start..]);
+        let at = |i: usize| start + byte_len(&rest[..i]);
         // regsub.c: any regexec failure (no match, or a resource limit) copies
         // the rest of the text and stops; earlier replacements stand.
-        let result = regex.find(&text[boundary..]);
-        let Ok(Some(m)) = result else {
-            out.extend_from_slice(&text.as_bytes()[start..]);
+        let Ok(Some(m)) = regex.find(&rest) else {
+            out.extend_from_slice(&bytes[start..]);
             break;
         };
-        let range = m.captures[0].clone().unwrap();
-        let so = boundary + range.start;
-        let eo = boundary + range.end;
-        out.extend_from_slice(&text.as_bytes()[last..so]);
+        let captures: Vec<Option<std::ops::Range<usize>>> = m
+            .captures
+            .iter()
+            .map(|c| c.as_ref().map(|r| at(r.start)..at(r.end)))
+            .collect();
+        let whole = captures[0].clone().unwrap();
+        let (so, eo) = (whole.start, whole.end);
+        out.extend_from_slice(&bytes[last..so]);
         if pattern.starts_with('^') {
-            replacement(&mut out, with, &text[boundary..], &m.captures);
-            out.extend_from_slice(&text.as_bytes()[eo..]);
+            replacement(&mut out, with, &bytes, &captures);
+            out.extend_from_slice(&bytes[eo..]);
             break;
         }
         if empty || so != last || so != eo {
-            replacement(&mut out, with, &text[boundary..], &m.captures);
+            replacement(&mut out, with, &bytes, &captures);
             last = eo;
             start = eo;
             empty = false;
@@ -137,30 +139,35 @@ fn regsub(pattern: &str, with: &str, text: &str, icase: bool) -> String {
             empty = true;
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    from_vec(out)
 }
 
+/// `regsub_expand`: `with`, `\\N` replaced by capture N's bytes.
 fn replacement(
     out: &mut Vec<u8>,
     with: &str,
-    text: &str,
+    bytes: &[u8],
     captures: &[Option<std::ops::Range<usize>>],
 ) {
-    let mut chars = with.chars();
-    while let Some(mut c) = chars.next() {
-        if c == '\\'
-            && let Some(next) = chars.next()
+    use crate::rawstr::Unit;
+    let mut units = crate::rawstr::units(with);
+    while let Some(mut u) = units.next() {
+        if u == Unit::Char('\\')
+            && let Some(next) = units.next()
         {
-            c = next;
-            if let Some(n) = c.to_digit(10)
+            u = next;
+            if let Some(n) = u.char().and_then(|c| c.to_digit(10))
                 && let Some(Some(range)) = captures.get(usize::try_from(n).unwrap())
                 && !range.is_empty()
             {
-                out.extend_from_slice(&text.as_bytes()[range.clone()]);
+                out.extend_from_slice(&bytes[range.clone()]);
                 continue;
             }
         }
-        out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+        match u {
+            Unit::Char(c) => out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+            Unit::Byte(b) => out.push(b),
+        }
     }
 }
 

@@ -84,7 +84,7 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
         return Format::default();
     }
     // C strings: a NUL ends the template.
-    let s = s.split('\0').next().unwrap_or_default();
+    let s = crate::rawstr::c_str(s);
     let b = s.as_bytes();
     let mut out = Builder::default();
     let mut i = 0;

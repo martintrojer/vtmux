@@ -29,6 +29,7 @@
 //! combining, as the status line's screen applies it).
 
 use crate::colour::Colour;
+use crate::rawstr::Unit;
 use crate::style::{Align, CellStyle, List, RangeKind, Style, StyleSyntax};
 use crate::width::{Cluster, Combine, char_width, combine_at_start, text_width};
 
@@ -613,8 +614,10 @@ pub fn draw_onto(
 
         // Not a style: draw one character.
         if bytes[cp] != b'#' || next != Some(b'[') || sy.ignore {
-            let c = expanded[cp..].chars().next().unwrap_or(' ');
-            cp += c.len_utf8();
+            let (u, len) = crate::rawstr::unit_at(expanded, cp).unwrap_or((Unit::Char(' '), 1));
+            cp += len;
+            // A byte that is not UTF-8 is nonprintable (format-draw.c:800-805).
+            let Unit::Char(c) = u else { continue };
             if c.is_ascii() && !(' '..='~').contains(&c) {
                 continue; // nonprintable
             }
@@ -839,9 +842,11 @@ pub fn format_width(expanded: &str) -> usize {
                 }
             }
         } else {
-            let c = expanded[cp..].chars().next().unwrap_or(' ');
-            cp += c.len_utf8();
-            width += text_width(c.encode_utf8(&mut [0; 4]));
+            let (u, len) = crate::rawstr::unit_at(expanded, cp).unwrap_or((Unit::Char(' '), 1));
+            cp += len;
+            if let Unit::Char(c) = u {
+                width += text_width(c.encode_utf8(&mut [0; 4]));
+            }
         }
     }
     width

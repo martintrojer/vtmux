@@ -414,7 +414,7 @@ struct CondArm {
 pub fn parse(template: &str) -> Parsed {
     let mut deferred = Vec::new();
     // tmux works on C strings: a NUL ends the template.
-    let template = template.split('\0').next().unwrap_or_default();
+    let template = crate::rawstr::c_str(template);
     let ast = parse::template(template, 0, &mut deferred);
     Parsed { ast, deferred }
 }
