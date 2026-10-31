@@ -524,15 +524,15 @@ impl<'a> Ctx<'a> {
             "copy_line_numbers" => u8::from(m.line_numbers_active(line_numbers)).to_string(),
             "copy_cursor_x" => cx.to_string(),
             "copy_cursor_y" => cy.to_string(),
-            "top_line_time" => m.top_line_time(&p.term).to_string(),
-            "copy_cursor_line" => m.cursor_line(&p.term),
+            "top_line_time" => m.top_line_time().to_string(),
+            "copy_cursor_line" => m.cursor_line(),
             "copy_cursor_word" => {
                 let separators = self
                     .options
                     .get(TreeId::GlobalSession, "word-separators")
                     .map(|e| e.value.to_text(e.def, None, false))
                     .unwrap_or_default();
-                m.cursor_word(&p.term, &separators)
+                m.cursor_word(&separators)
             }
             "selection_mode" => "char".to_owned(),
             "refresh_active"

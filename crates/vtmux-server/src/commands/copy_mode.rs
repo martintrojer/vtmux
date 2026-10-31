@@ -32,19 +32,12 @@ pub fn exec(
     };
     let (scroll_exit, hide) = (args.flag('e'), args.flag('H'));
     server.model.set_copy_mode(p, args.flag('k'), |model| {
-        let term = &model.panes[&p].term;
-        if swp == p {
-            CopyMode::new(term, scroll_exit, hide)
-        } else {
-            let source = &model.panes[&swp].term;
-            CopyMode::from_source(
-                source,
-                usize::from(term.cols()),
-                usize::from(term.rows()),
-                scroll_exit,
-                hide,
-            )
-        }
+        let size = (
+            usize::from(model.panes[&p].term.cols()),
+            usize::from(model.panes[&p].term.rows()),
+        );
+        let source = &model.panes[&swp].term;
+        CopyMode::new(source, size, swp != p, scroll_exit, hide)
     });
     // window_copy_set_line_numbers(wp, 1): keys and commands, not the mouse.
     with_copy(server, p, |m, env| m.set_line_numbers(env, true, false));
@@ -71,7 +64,7 @@ pub fn exec(
 pub(crate) fn with_copy<R>(
     server: &mut Server,
     p: PaneId,
-    f: impl FnOnce(&mut CopyMode, crate::mode::copy::Env<'_>) -> R,
+    f: impl FnOnce(&mut CopyMode, crate::mode::copy::Env) -> R,
 ) -> Option<R> {
     let pane = server.model.panes.get_mut(&p)?;
     if !matches!(pane.modes.first(), Some(Mode::Copy(_))) {

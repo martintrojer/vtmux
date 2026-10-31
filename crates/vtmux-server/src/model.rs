@@ -1217,7 +1217,7 @@ impl Pane {
             .first_mut()
             .and_then(crate::mode::Mode::as_copy_mut)
         {
-            m.resize(&self.term);
+            m.resize(usize::from(self.term.cols()), usize::from(self.term.rows()));
         }
     }
 

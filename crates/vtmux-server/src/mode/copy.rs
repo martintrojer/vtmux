@@ -1,34 +1,13 @@
 //! Copy mode (window-copy.c): a scrollable view of a pane's history and
-//! screen with its own cursor.
-//!
-//! tmux clones the pane's whole grid on entry (`window_copy_clone_screen`).
-//! vtmux copies only the visible rows and reads history through
-//! [`PaneTerm::history_row`], whose ids stay with their rows while more
-//! scroll in, so the view stays where it was as the pane keeps writing.
-//! A history row Ghostty has since dropped reads as empty.
+//! screen with its own cursor, over a copy of the pane's grid taken on
+//! entry ([`Grid`]).
 //!
 //! Selections, search, jumps, marks, copying, refresh and drawing line
 //! numbers are not here yet.
 
-use std::borrow::Cow;
-
 use vtmux_vt::{Cell, PaneTerm, Row, Snapshot};
 
-/// Where copy mode's rows come from (`data->backing`).
-#[derive(Clone, Debug)]
-enum Backing {
-    /// The pane's own grid: history by id from the live terminal, the
-    /// visible rows as they were on entry.
-    Live {
-        /// History id of backing row 0.
-        first: u64,
-        generation: u64,
-        hsize: usize,
-        visible: Vec<Row>,
-    },
-    /// A copy of another pane (`copy-mode -s`).
-    Owned { hsize: usize, rows: Vec<Row> },
-}
+use super::grid::Grid;
 
 /// What a copy mode command asks for afterwards
 /// (`enum window_copy_cmd_action`); only leaving is visible to vtmux, which
@@ -49,8 +28,7 @@ enum Recentre {
 
 /// The options copy mode reads as it goes.
 #[derive(Clone, Copy, Debug)]
-pub struct Env<'a> {
-    pub term: &'a PaneTerm,
+pub struct Env {
     /// `mode-keys` is `vi`.
     pub vi: bool,
     /// `copy-mode-line-numbers`: off, default, absolute, relative, hybrid.
@@ -60,7 +38,7 @@ pub struct Env<'a> {
 /// One copy mode (`struct window_copy_mode_data`).
 #[derive(Clone, Debug)]
 pub struct CopyMode {
-    backing: Backing,
+    backing: Grid,
     sx: usize,
     sy: usize,
     /// Lines scrolled up into history.
@@ -194,50 +172,20 @@ pub enum CommandError {
 }
 
 impl CopyMode {
-    /// `window_copy_init` for pane `term`, `-e` and `-H` given.
+    /// `window_copy_init`: a copy of `source`'s grid (`copy-mode -s`, or
+    /// the pane itself) in a `sx` x `sy` view, `-e` and `-H` given. A
+    /// source other than the pane loses its trailing empty lines
+    /// (`window_copy_clone_screen`'s `trim`).
     #[must_use]
-    pub fn new(term: &PaneTerm, scroll_exit: bool, hide_position: bool) -> Self {
-        let (backing, cx, cursor_row) = live_backing(term);
-        let sy = usize::from(term.rows());
-        Self::with_backing(backing, usize::from(term.cols()), sy, cx, cursor_row)
-            .flags(scroll_exit, hide_position)
-    }
-
-    /// `window_copy_init` with `copy-mode -s`: a copy of `source`'s grid in
-    /// a `sx` x `sy` view. tmux trims trailing empty lines and reflows the
-    /// copy to the view's size; vtmux trims, and fits the rows without
-    /// reflowing (history pulled down or padded, `screen_resize_y`).
-    #[must_use]
-    pub fn from_source(
+    pub fn new(
         source: &PaneTerm,
-        sx: usize,
-        sy: usize,
+        (sx, sy): (usize, usize),
+        trim: bool,
         scroll_exit: bool,
         hide_position: bool,
     ) -> Self {
-        let src_hsize = source.history_size();
-        let mut n = src_hsize + usize::from(source.rows());
-        while n > src_hsize + 1 && source.row(n - 1).length() == 0 {
-            n -= 1;
-        }
-        let mut rows: Vec<Row> = (0..n).map(|y| source.row(y)).collect();
-        let (scx, scy) = source.cursor();
-        let (mut cx, mut cursor_row) = (usize::from(scx), src_hsize + usize::from(scy));
-        if cursor_row >= n {
-            (cx, cursor_row) = (0, n - 1);
-        }
-        if rows.len() < sy {
-            rows.resize(sy, Row::default());
-        }
-        let hsize = rows.len() - sy;
-        let backing = Backing::Owned { hsize, rows };
-        Self::with_backing(backing, sx, sy, cx, cursor_row).flags(scroll_exit, hide_position)
-    }
-
-    fn with_backing(backing: Backing, sx: usize, sy: usize, cx: usize, cursor_row: usize) -> Self {
-        let hsize = match &backing {
-            Backing::Live { hsize, .. } | Backing::Owned { hsize, .. } => *hsize,
-        };
+        let (backing, cx, cursor_row) = Grid::clone_of(source, sx, sy, trim);
+        let hsize = backing.hsize();
         let (cy, oy) = if cursor_row < hsize {
             (0, hsize - cursor_row)
         } else {
@@ -249,11 +197,11 @@ impl CopyMode {
             sy,
             oy,
             cx,
-            cy: cy.min(sy.saturating_sub(1)),
+            cy,
             lastcx: 0,
             lastsx: 0,
-            scroll_exit: false,
-            hide_position: false,
+            scroll_exit,
+            hide_position,
             line_numbers: 1,
             recentre: Recentre::Middle,
             recentre_line: 0,
@@ -262,37 +210,30 @@ impl CopyMode {
         }
     }
 
-    fn flags(mut self, scroll_exit: bool, hide_position: bool) -> Self {
-        self.scroll_exit = scroll_exit;
-        self.hide_position = hide_position;
-        self
-    }
-
-    /// `window_copy_resize`, simplified: the view is taken again from the
-    /// pane at its new size, keeping the distance from the top of history.
-    /// tmux reflows its copy and keeps the cursor on the same text.
-    pub fn resize(&mut self, term: &PaneTerm) {
-        if !matches!(self.backing, Backing::Live { .. }) {
-            self.sx = usize::from(term.cols());
-            self.sy = usize::from(term.rows());
-            return;
-        }
-        let from_top = self.hsize() - self.oy;
-        let (backing, _, _) = live_backing(term);
-        self.backing = backing;
-        self.sx = usize::from(term.cols());
-        self.sy = usize::from(term.rows());
-        self.oy = self.hsize().saturating_sub(from_top);
-        self.cy = self.cy.min(self.sy - 1);
-        self.cx = self.cx.min(self.sx);
+    /// `window_copy_resize` (window-copy.c:1212-1243): the copy is resized
+    /// (reflowed if the width changed) keeping the cursor on its text; a
+    /// cursor line now in history is shown at the top, else the view goes
+    /// to the bottom.
+    pub fn resize(&mut self, sx: usize, sy: usize) {
+        let (sx, sy) = (sx.max(1), sy.max(1));
+        let hsize = self.hsize();
+        self.oy = self.oy.min(hsize + self.cy);
+        let cy = hsize + self.cy - self.oy;
+        let (cx, cy) = self.backing.resize_keeping(sx, sy, self.cx, cy);
+        (self.sx, self.sy) = (sx, sy);
+        let hsize = self.hsize();
+        self.cx = cx;
+        (self.cy, self.oy) = if cy < hsize {
+            (0, hsize - cy)
+        } else {
+            (cy - hsize, 0)
+        };
     }
 
     // --- grid access ------------------------------------------------------
 
     fn hsize(&self) -> usize {
-        match &self.backing {
-            Backing::Live { hsize, .. } | Backing::Owned { hsize, .. } => *hsize,
-        }
+        self.backing.hsize()
     }
 
     /// Last row of the backing grid (`hsize + sy - 1`).
@@ -301,46 +242,26 @@ impl CopyMode {
     }
 
     /// Backing row `y`, history first.
-    fn row<'a>(&'a self, term: &PaneTerm, y: usize) -> Cow<'a, Row> {
-        match &self.backing {
-            Backing::Live {
-                first,
-                generation,
-                hsize,
-                visible,
-            } => {
-                if y >= *hsize {
-                    return visible
-                        .get(y - hsize)
-                        .map_or_else(|| Cow::Owned(Row::default()), Cow::Borrowed);
-                }
-                let live = (term.history_generation() == *generation)
-                    .then(|| term.history_row(first + y as u64))
-                    .flatten();
-                Cow::Owned(live.unwrap_or_default())
-            }
-            Backing::Owned { rows, .. } => rows
-                .get(y)
-                .map_or_else(|| Cow::Owned(Row::default()), Cow::Borrowed),
-        }
+    fn row(&self, y: usize) -> &Row {
+        self.backing.row(y)
     }
 
-    fn padding(&self, term: &PaneTerm, x: usize, y: usize) -> bool {
-        self.row(term, y).cells.get(x).is_some_and(|c| c.width == 0)
+    fn padding(&self, x: usize, y: usize) -> bool {
+        self.row(y).cells.get(x).is_some_and(|c| c.width == 0)
     }
 
-    fn wrapped(&self, term: &PaneTerm, y: usize) -> bool {
-        self.row(term, y).wrapped
+    fn wrapped(&self, y: usize) -> bool {
+        self.row(y).wrapped
     }
 
     /// `window_copy_find_length`: `grid_line_length`.
-    fn find_length(&self, term: &PaneTerm, py: usize) -> usize {
-        self.row(term, py).length()
+    fn find_length(&self, py: usize) -> usize {
+        self.row(py).length()
     }
 
     /// `window_copy_cursor_limit`: vi keys stop on the last character.
-    fn cursor_limit(&self, env: Env<'_>, py: usize, allow_onemore: bool) -> usize {
-        let row = self.row(env.term, py);
+    fn cursor_limit(&self, env: Env, py: usize, allow_onemore: bool) -> usize {
+        let row = self.row(py);
         if allow_onemore || !env.vi {
             row.length()
         } else {
@@ -397,36 +318,25 @@ impl CopyMode {
     /// `top_line_time`: when the top line of the view scrolled into
     /// history, 0 for a line of the screen.
     #[must_use]
-    pub fn top_line_time(&self, term: &PaneTerm) -> i64 {
-        let y = self.hsize() - self.oy;
-        match &self.backing {
-            Backing::Live {
-                first,
-                generation,
-                hsize,
-                ..
-            } if y < *hsize && term.history_generation() == *generation => {
-                term.history_time(first + y as u64)
-            }
-            _ => 0,
-        }
+    pub fn top_line_time(&self) -> i64 {
+        self.backing.time(self.hsize() - self.oy)
     }
 
     /// `copy_cursor_line` (`window_copy_get_line`, `format_grid_line`).
     #[must_use]
-    pub fn cursor_line(&self, term: &PaneTerm) -> String {
-        self.row(term, self.abs(self.cy)).text()
+    pub fn cursor_line(&self) -> String {
+        self.row(self.abs(self.cy)).text()
     }
 
     /// `copy_cursor_word` (`window_copy_get_word`, `format_grid_word`,
     /// format.c:7102-7168): the word around the cursor, following wrapped
     /// lines, ended by `separators`, a space or an empty cell.
     #[must_use]
-    pub fn cursor_word(&self, term: &PaneTerm, separators: &str) -> String {
+    pub fn cursor_word(&self, separators: &str) -> String {
         let is_sep = |c: &Cell| c.text.is_empty() || c.text == " " || separators.contains(&*c.text);
         // Past the grid's cells, grid_get_cell gives the default cell: a space.
         let cell = |x: usize, y: usize| {
-            self.row(term, y).cells.get(x).cloned().unwrap_or(Cell {
+            self.row(y).cells.get(x).cloned().unwrap_or(Cell {
                 width: 1,
                 ..Cell::default()
             })
@@ -440,11 +350,11 @@ impl CopyMode {
                 break;
             }
             if x == 0 {
-                if y == 0 || !self.wrapped(term, y - 1) {
+                if y == 0 || !self.wrapped(y - 1) {
                     break;
                 }
                 y -= 1;
-                x = self.find_length(term, y);
+                x = self.find_length(y);
                 if x == 0 {
                     break;
                 }
@@ -454,9 +364,9 @@ impl CopyMode {
         let mut word = String::new();
         loop {
             if found {
-                let end = self.find_length(term, y);
+                let end = self.find_length(y);
                 if end == 0 || x == end - 1 {
-                    if y == self.last_row() || !self.wrapped(term, y) {
+                    if y == self.last_row() || !self.wrapped(y) {
                         break;
                     }
                     y += 1;
@@ -489,17 +399,21 @@ impl CopyMode {
     /// The mode's screen (`window_copy_write_line` for every row, without
     /// the indicator): the backing rows in view, and the cursor.
     #[must_use]
-    pub fn screen(&self, term: &PaneTerm) -> Snapshot {
+    pub fn screen(&self) -> Snapshot {
         let (sx, sy) = (self.sx, self.sy);
         let mut cells = Vec::with_capacity(sx * sy);
         for py in 0..sy {
-            let row = self.row(term, self.abs(py));
+            let row = self.row(self.abs(py));
             for x in 0..sx {
-                let mut c = row.cells.get(x).cloned().unwrap_or_default();
+                let blank = || Cell {
+                    width: 1,
+                    ..Cell::default()
+                };
+                let mut c = row.cells.get(x).cloned().unwrap_or_else(blank);
                 // window_copy_write_one: a wide character cut by the edge is
                 // a space.
                 if c.width == 2 && x + 1 >= sx {
-                    c = Cell::default();
+                    c = blank();
                 }
                 cells.push(c);
             }
@@ -516,11 +430,26 @@ impl CopyMode {
     }
 
     /// A cursor past the last column shows as `$` there, drawn last
-    /// (window-copy.c:5483-5487).
+    /// (window-copy.c:5483-5487). Written over the second half of a wide
+    /// character, it clears the character (`screen_write_overwrite`,
+    /// screen-write.c:3007-3025), so the screen says what the terminal
+    /// shows and the character is drawn again once the `$` goes.
     pub fn mark_overflow(&self, screen: &mut Snapshot) {
-        if self.cx >= self.sx
-            && let Some(c) = screen.cells.get_mut(self.cy * self.sx + self.sx - 1)
-        {
+        if self.cx < self.sx {
+            return;
+        }
+        let row = self.cy * self.sx;
+        let mut x = self.sx - 1;
+        while x > 0 && screen.cells.get(row + x).is_some_and(|c| c.width == 0) {
+            x -= 1;
+            if let Some(c) = screen.cells.get_mut(row + x) {
+                *c = Cell {
+                    width: 1,
+                    ..Cell::default()
+                };
+            }
+        }
+        if let Some(c) = screen.cells.get_mut(row + self.sx - 1) {
             *c = Cell {
                 text: "$".into(),
                 width: 1,
@@ -538,7 +467,7 @@ impl CopyMode {
     /// A copy mode command tmux has that vtmux does not yet.
     pub fn command(
         &mut self,
-        env: Env<'_>,
+        env: Env,
         name: &str,
         args: &[String],
     ) -> Result<Action, CommandError> {
@@ -551,7 +480,7 @@ impl CopyMode {
     }
 
     #[allow(clippy::too_many_lines)] // one arm per command
-    fn run(&mut self, env: Env<'_>, name: &str, args: &[String], np: u32) -> Option<Action> {
+    fn run(&mut self, env: Env, name: &str, args: &[String], np: u32) -> Option<Action> {
         let repeat = |m: &mut Self, f: &mut dyn FnMut(&mut Self)| {
             for _ in 0..np {
                 f(m);
@@ -641,7 +570,7 @@ impl CopyMode {
     }
 
     /// `window_copy_set_line_numbers1`.
-    pub fn set_line_numbers(&mut self, env: Env<'_>, enabled: bool, force: bool) {
+    pub fn set_line_numbers(&mut self, env: Env, enabled: bool, force: bool) {
         self.line_numbers = if !enabled {
             0
         } else if force && env.line_numbers == 0 {
@@ -652,7 +581,7 @@ impl CopyMode {
     }
 
     /// `window_copy_update_cursor`, the cursor part: clamped to the line.
-    fn update_cursor(&mut self, env: Env<'_>, cx: usize, cy: usize) {
+    fn update_cursor(&mut self, env: Env, cx: usize, cy: usize) {
         let mut cx = cx;
         if cy < self.sy {
             cx = cx.min(self.cursor_limit(env, self.abs(cy), false));
@@ -678,24 +607,24 @@ impl CopyMode {
 
     /// Remember where the cursor was on its line before a vertical move,
     /// then put it back at the end of the new line if it was at the end.
-    fn remember_column(&mut self, term: &PaneTerm) {
-        let ox = self.find_length(term, self.abs(self.cy));
+    fn remember_column(&mut self) {
+        let ox = self.find_length(self.abs(self.cy));
         if self.cx != ox {
             self.lastcx = self.cx;
             self.lastsx = ox;
         }
     }
 
-    fn keep_end_of_line(&mut self, env: Env<'_>) {
-        let px = self.find_length(env.term, self.abs(self.cy));
+    fn keep_end_of_line(&mut self, env: Env) {
+        let px = self.find_length(self.abs(self.cy));
         if (self.cx >= self.lastsx && self.cx != px) || self.cx > px {
             self.update_cursor(env, px, self.cy);
         }
     }
 
     /// `window_copy_cursor_up` (window-copy.c:6489-6567), no selection.
-    fn cursor_up(&mut self, env: Env<'_>, scroll_only: bool) {
-        self.remember_column(env.term);
+    fn cursor_up(&mut self, env: Env, scroll_only: bool) {
+        self.remember_column();
         if scroll_only && env.vi && self.cy < self.sy - 1 {
             self.update_cursor(env, self.cx, self.cy + 1);
         }
@@ -709,8 +638,8 @@ impl CopyMode {
     }
 
     /// `window_copy_cursor_down` (window-copy.c:6569-6639), no selection.
-    fn cursor_down(&mut self, env: Env<'_>, scroll_only: bool) {
-        self.remember_column(env.term);
+    fn cursor_down(&mut self, env: Env, scroll_only: bool) {
+        self.remember_column();
         if scroll_only && env.vi && self.cy > 0 {
             self.update_cursor(env, self.cx, self.cy - 1);
         }
@@ -725,7 +654,7 @@ impl CopyMode {
 
     /// `window_copy_acquire_cursor_up`: scroll up if the reader's position
     /// `(px, py)` is above the view, then put the cursor there.
-    fn acquire_cursor_up(&mut self, env: Env<'_>, px: usize, py: usize) {
+    fn acquire_cursor_up(&mut self, env: Env, px: usize, py: usize) {
         let top = self.hsize() - self.oy;
         let (ny, cy) = if py < top {
             (top - py, 0)
@@ -739,7 +668,7 @@ impl CopyMode {
     }
 
     /// `window_copy_acquire_cursor_down`.
-    fn acquire_cursor_down(&mut self, env: Env<'_>, px: usize, py: usize) {
+    fn acquire_cursor_down(&mut self, env: Env, px: usize, py: usize) {
         let cy = py + self.oy - self.hsize();
         let yy = self.sy - 1;
         for _ in 0..cy.saturating_sub(yy) {
@@ -750,15 +679,15 @@ impl CopyMode {
 
     /// `grid_reader_cursor_left` with wrap, then
     /// `window_copy_acquire_cursor_up`.
-    fn cursor_left(&mut self, env: Env<'_>) {
+    fn cursor_left(&mut self, env: Env) {
         let (mut x, mut y) = (self.cx, self.abs(self.cy));
-        while x > 0 && self.padding(env.term, x, y) {
+        while x > 0 && self.padding(x, y) {
             x -= 1;
         }
         if x == 0 && y > 0 {
             // grid_reader_cursor_up, then end of line without wrap.
             y -= 1;
-            x = self.find_length(env.term, y);
+            x = self.find_length(y);
         } else {
             x = x.saturating_sub(1);
         }
@@ -767,7 +696,7 @@ impl CopyMode {
 
     /// `window_copy_cursor_right`: `grid_reader_cursor_right` with wrap,
     /// one past the end for emacs keys.
-    fn cursor_right(&mut self, env: Env<'_>) {
+    fn cursor_right(&mut self, env: Env) {
         let (mut x, mut y) = (self.cx, self.abs(self.cy));
         let px = self.cursor_limit(env, y, false);
         if x >= px && y < self.last_row() {
@@ -775,7 +704,7 @@ impl CopyMode {
             y += 1;
         } else if x < px {
             x += 1;
-            while x < px && self.padding(env.term, x, y) {
+            while x < px && self.padding(x, y) {
                 x += 1;
             }
         }
@@ -783,25 +712,25 @@ impl CopyMode {
     }
 
     /// `grid_reader_cursor_start_of_line` with wrap.
-    fn start_of_wrapped_line(&self, term: &PaneTerm, mut y: usize) -> usize {
-        while y > 0 && self.wrapped(term, y - 1) {
+    fn start_of_wrapped_line(&self, mut y: usize) -> usize {
+        while y > 0 && self.wrapped(y - 1) {
             y -= 1;
         }
         y
     }
 
-    fn cursor_start_of_line(&mut self, env: Env<'_>) {
-        let y = self.start_of_wrapped_line(env.term, self.abs(self.cy));
+    fn cursor_start_of_line(&mut self, env: Env) {
+        let y = self.start_of_wrapped_line(self.abs(self.cy));
         self.acquire_cursor_up(env, 0, y);
     }
 
     /// `grid_reader_cursor_back_to_indentation` (grid-reader.c:411-438):
     /// the first non-space of the (wrapped) line, else stay.
-    fn cursor_back_to_indentation(&mut self, env: Env<'_>) {
+    fn cursor_back_to_indentation(&mut self, env: Env) {
         let (mut px, mut py) = (self.cx, self.abs(self.cy));
-        let mut y = self.start_of_wrapped_line(env.term, py);
+        let mut y = self.start_of_wrapped_line(py);
         'lines: while y <= self.last_row() {
-            let row = self.row(env.term, y);
+            let row = self.row(y);
             for (x, c) in row.cells[..row.length()].iter().enumerate() {
                 if c.width != 0 && !(c.text.is_empty() || c.text == " ") {
                     (px, py) = (x, y);
@@ -817,9 +746,9 @@ impl CopyMode {
     }
 
     /// `window_copy_cursor_end_of_line`: the end of the wrapped line.
-    fn cursor_end_of_line(&mut self, env: Env<'_>) {
+    fn cursor_end_of_line(&mut self, env: Env) {
         let mut y = self.abs(self.cy);
-        while y < self.last_row() && self.wrapped(env.term, y) {
+        while y < self.last_row() && self.wrapped(y) {
             y += 1;
         }
         let px = self.cursor_limit(env, y, false);
@@ -837,21 +766,21 @@ impl CopyMode {
 
     /// The shared start of the page moves: remember the column and go back
     /// to it.
-    fn page_start(&mut self, term: &PaneTerm) {
-        self.remember_column(term);
+    fn page_start(&mut self) {
+        self.remember_column();
         self.cx = self.lastcx;
     }
 
-    fn page_end(&mut self, env: Env<'_>) {
-        let px = self.find_length(env.term, self.abs(self.cy));
+    fn page_end(&mut self, env: Env) {
+        let px = self.find_length(self.abs(self.cy));
         if (self.cx >= self.lastsx && self.cx != px) || self.cx > px {
             self.cursor_end_of_line(env);
         }
     }
 
     /// `window_copy_pageup1`.
-    pub fn pageup(&mut self, env: Env<'_>, half: bool) {
-        self.page_start(env.term);
+    pub fn pageup(&mut self, env: Env, half: bool) {
+        self.page_start();
         let n = self.page(half);
         if self.oy + n > self.hsize() {
             self.oy = self.hsize();
@@ -863,8 +792,8 @@ impl CopyMode {
     }
 
     /// `window_copy_pagedown1`: whether the mode should exit.
-    pub fn pagedown(&mut self, env: Env<'_>, half: bool, scroll_exit: bool) -> bool {
-        self.page_start(env.term);
+    pub fn pagedown(&mut self, env: Env, half: bool, scroll_exit: bool) -> bool {
+        self.page_start();
         let n = self.page(half);
         if self.oy < n {
             self.oy = 0;
@@ -880,8 +809,8 @@ impl CopyMode {
     /// `copy-mode -S` without a mouse event (`window_copy_scroll1` with the
     /// slider at the top): the view goes to the top of history, the cursor
     /// keeps its row. Whether the mode should exit.
-    pub fn scroll_to_top(&mut self, env: Env<'_>, scroll_exit: bool) -> bool {
-        self.page_start(env.term);
+    pub fn scroll_to_top(&mut self, env: Env, scroll_exit: bool) -> bool {
+        self.page_start();
         self.oy = self.hsize();
         self.page_end(env);
         scroll_exit && self.oy == 0
@@ -901,7 +830,7 @@ impl CopyMode {
     }
 
     /// `window_copy_goto_line`.
-    fn goto_line(&mut self, env: Env<'_>, line: &str) {
+    fn goto_line(&mut self, env: Env, line: &str) {
         let Ok(lineno) = vtmux_core::cmd::strtonum(line, -1, i64::from(i32::MAX)) else {
             return;
         };
@@ -957,22 +886,6 @@ impl CopyMode {
     }
 }
 
-/// The pane's own grid as copy mode's backing, with the cursor's column
-/// and backing row.
-fn live_backing(term: &PaneTerm) -> (Backing, usize, usize) {
-    let hsize = term.history_size();
-    let sy = usize::from(term.rows());
-    let visible = (hsize..hsize + sy).map(|y| term.row(y)).collect();
-    let (cx, cy) = term.cursor();
-    let backing = Backing::Live {
-        first: term.history_id(0),
-        generation: term.history_generation(),
-        hsize,
-        visible,
-    };
-    (backing, usize::from(cx), hsize + usize::from(cy))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -988,16 +901,18 @@ mod tests {
         t
     }
 
-    fn env(term: &PaneTerm) -> Env<'_> {
-        Env {
-            term,
-            vi: false,
-            line_numbers: 0,
-        }
+    const ENV: Env = Env {
+        vi: false,
+        line_numbers: 0,
+    };
+
+    fn enter(t: &PaneTerm, scroll_exit: bool) -> CopyMode {
+        let size = (usize::from(t.cols()), usize::from(t.rows()));
+        CopyMode::new(t, size, false, scroll_exit, false)
     }
 
-    fn cmd(m: &mut CopyMode, term: &PaneTerm, name: &str) -> Action {
-        m.command(env(term), name, &[]).unwrap()
+    fn cmd(m: &mut CopyMode, name: &str) -> Action {
+        m.command(ENV, name, &[]).unwrap()
     }
 
     /// Reference (tmux 3.8, 30x6, emacs keys): entering puts the cursor at
@@ -1006,67 +921,94 @@ mod tests {
     #[test]
     fn entering_and_paging() {
         let t = pane();
-        let mut m = CopyMode::new(&t, false, false);
+        let mut m = enter(&t, false);
         assert_eq!((m.scroll_position(), m.cursor()), (0, (0, 5)));
         assert_eq!(m.position(0), (0, 5));
-        cmd(&mut m, &t, "page-up");
+        cmd(&mut m, "page-up");
         assert_eq!((m.scroll_position(), m.cursor()), (4, (5, 5)));
-        assert_eq!(m.cursor_line(&t), "line7");
-        cmd(&mut m, &t, "history-top");
+        assert_eq!(m.cursor_line(), "line7");
+        cmd(&mut m, "history-top");
         assert_eq!((m.scroll_position(), m.cursor()), (5, (0, 0)));
-        assert_eq!(m.cursor_line(&t), "line1");
-        cmd(&mut m, &t, "history-bottom");
+        assert_eq!(m.cursor_line(), "line1");
+        cmd(&mut m, "history-bottom");
         assert_eq!((m.scroll_position(), m.cursor()), (0, (0, 5)));
-        cmd(&mut m, &t, "cursor-up");
+        cmd(&mut m, "cursor-up");
         assert_eq!(m.cursor(), (6, 4));
-        assert_eq!(m.cursor_line(&t), "line10");
-        cmd(&mut m, &t, "cursor-up");
+        assert_eq!(m.cursor_line(), "line10");
+        cmd(&mut m, "cursor-up");
         assert_eq!(m.cursor(), (5, 3));
     }
 
     #[test]
     fn scroll_exit_and_cancel() {
         let t = pane();
-        let mut m = CopyMode::new(&t, true, false);
-        cmd(&mut m, &t, "page-up");
-        assert_eq!(cmd(&mut m, &t, "page-down"), Action::Cancel);
-        let mut m = CopyMode::new(&t, false, false);
-        assert_eq!(cmd(&mut m, &t, "scroll-down"), Action::Stay);
-        assert_eq!(cmd(&mut m, &t, "cursor-down-and-cancel"), Action::Cancel);
-        assert_eq!(cmd(&mut m, &t, "cancel"), Action::Cancel);
-        assert_eq!(cmd(&mut m, &t, "nosuch"), Action::Stay);
+        let mut m = enter(&t, true);
+        cmd(&mut m, "page-up");
+        assert_eq!(cmd(&mut m, "page-down"), Action::Cancel);
+        let mut m = enter(&t, false);
+        assert_eq!(cmd(&mut m, "scroll-down"), Action::Stay);
+        assert_eq!(cmd(&mut m, "cursor-down-and-cancel"), Action::Cancel);
+        assert_eq!(cmd(&mut m, "cancel"), Action::Cancel);
+        assert_eq!(cmd(&mut m, "nosuch"), Action::Stay);
         assert_eq!(
-            m.command(env(&t), "begin-selection", &[]),
+            m.command(ENV, "begin-selection", &[]),
             Err(CommandError::NotImplemented("begin-selection".into()))
         );
     }
 
-    /// The view stays put while the pane keeps writing.
+    /// The view is the copy taken on entry: later output does not show.
     #[test]
     fn view_survives_new_output() {
         let mut t = pane();
-        let mut m = CopyMode::new(&t, false, false);
-        cmd(&mut m, &t, "history-top");
+        let mut m = enter(&t, false);
+        cmd(&mut m, "history-top");
         t.feed(b"more\r\nand more\r\n");
-        assert_eq!(m.cursor_line(&t), "line1");
-        let s = m.screen(&t);
+        assert_eq!(m.cursor_line(), "line1");
+        let s = m.screen();
         assert_eq!(s.cell(0, 5).unwrap().text, "l");
         assert_eq!(s.cell(4, 5).unwrap().text, "6");
+        cmd(&mut m, "history-bottom");
+        assert_eq!(m.cursor_line(), "");
+        assert_eq!(m.position(0), (0, 5));
+    }
+
+    /// `window_copy_resize`: a shorter view keeps the cursor on its line,
+    /// shown at the top when that line is now in history; growing again
+    /// pulls the lines back. Reference (tmux 3.8, 40x9 pane of line1..30,
+    /// page-up then cursor-up, split -v): `[5] [6,0] line23`.
+    #[test]
+    fn resize_keeps_the_cursor_line() {
+        let mut t = PaneTerm::new(40, 9, 2000);
+        for i in 1..=30 {
+            t.feed(format!("line{i}\r\n").as_bytes());
+        }
+        let mut m = enter(&t, false);
+        cmd(&mut m, "page-up");
+        cmd(&mut m, "cursor-up");
+        assert_eq!((m.scroll_position(), m.cursor()), (7, (6, 7)));
+        assert_eq!(m.cursor_line(), "line23");
+        t.resize(40, 4);
+        m.resize(40, 4);
+        assert_eq!((m.scroll_position(), m.cursor()), (5, (6, 0)));
+        assert_eq!(m.cursor_line(), "line23");
+        m.resize(40, 9);
+        assert_eq!((m.scroll_position(), m.cursor()), (0, (6, 0)));
+        assert_eq!(m.cursor_line(), "line23");
     }
 
     #[test]
     fn cursor_word_follows_separators() {
         let mut t = PaneTerm::new(30, 3, 100);
         t.feed(b"foo bar-baz qux");
-        let mut m = CopyMode::new(&t, false, false);
+        let mut m = enter(&t, false);
         m.cx = 5;
         m.cy = 0;
-        assert_eq!(m.cursor_word(&t, "-"), "bar");
+        assert_eq!(m.cursor_word("-"), "bar");
         m.cx = 8;
-        assert_eq!(m.cursor_word(&t, "-"), "baz");
-        assert_eq!(m.cursor_word(&t, ""), "bar-baz");
+        assert_eq!(m.cursor_word("-"), "baz");
+        assert_eq!(m.cursor_word(""), "bar-baz");
         // Past the end of the line: a blank, so no word.
         m.cx = 30;
-        assert_eq!(m.cursor_word(&t, ""), "");
+        assert_eq!(m.cursor_word(""), "");
     }
 }
