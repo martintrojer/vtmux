@@ -6,7 +6,10 @@
 //! A border cell can belong to up to four panes, one per side; which pane
 //! colours it is decided when drawing ([`Border::style_pane`]), except for
 //! the two-pane half-colouring, which is fixed here
-//! (`redraw_mark_two_pane_colours`).
+//! (`redraw_mark_two_pane_colours`). Under the focus ring (D23) ownership
+//! plays no part: an arm is heavy, and its cell takes the active colour,
+//! when it lies on the active pane's rectangle. A 4-way junction has one
+//! owner slot per side for four panes, so the slots cannot say that.
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::layout::{Dir, Geometry, PaneStatus};
@@ -290,10 +293,16 @@ impl Border {
 
     /// `redraw_get_pane_for_border_style`: the fixed owner, else the active
     /// pane if it is adjacent, else the first of up, down, left, right.
+    /// Under the ring the active pane colours exactly the cells on its
+    /// rectangle (D23).
     #[must_use]
     pub fn style_pane(&self, active: Option<PaneId>) -> Option<PaneId> {
+        let on_active = match self.heavy {
+            Some(h) => h != Sides::default(),
+            None => active.is_some_and(|a| self.has(a)),
+        };
         self.style
-            .or(active.filter(|a| self.has(*a)))
+            .or(active.filter(|_| on_active))
             .or(self.up)
             .or(self.down)
             .or(self.left)
@@ -577,7 +586,8 @@ impl Scene {
     }
 
     /// The focus ring (D23): the arms of `p`'s rectangle that run along it
-    /// are heavy.
+    /// are heavy, by geometry alone. Floating panes' borders have no
+    /// weights, so they stay as tmux draws them.
     fn mark_ring(&mut self, p: &ScenePane) {
         let g = &p.rect;
         let (left, right) = (g.xoff - 1, g.xoff + int(g.sx));
@@ -585,7 +595,6 @@ impl Scene {
         let mut heavy = |wx: i32, wy: i32, sides: Sides| {
             if let Some(i) = self.index(wx, wy)
                 && let SceneCell::Border(b) = &mut self.cells[i]
-                && b.has(p.id)
                 && let Some(h) = &mut b.heavy
             {
                 *h = h.merge(sides);
