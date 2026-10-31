@@ -1418,3 +1418,26 @@ fn display_message_c_shows_on_the_named_client() {
         results[0]
     );
 }
+
+/// The startup config is parsed for the attaching client (cfg.c:81-90,
+/// `pi.c`): `%if` sees its tty, terminal name and name, on both servers.
+#[test]
+fn startup_config_conditions_see_the_attaching_client() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let conf = w.home.path().join("c.conf");
+        std::fs::write(
+            &conf,
+            "%if \"#{client_tty}\"\nset -g @tty has\n%else\nset -g @tty none\n%endif\n\
+             %if \"#{==:#{client_termname},xterm-256color}\"\nset -g @term yes\n%else\nset -g @term no\n%endif\n\
+             %if \"#{client_name}\"\nset -g @cn has\n%else\nset -g @cn none\n%endif\n",
+        )
+        .unwrap();
+        let mut a = w.attach(&["-f", conf.to_str().unwrap(), "new", "-s", "a"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        let got = display(&w, "#{@tty} #{@term} #{@cn}");
+        assert_eq!(got, "has yes has", "{}", w.bin.display());
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
