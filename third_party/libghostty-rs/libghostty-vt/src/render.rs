@@ -507,8 +507,13 @@ impl Snapshot<'_, '_> {
     /// Get the current color information from a render state.
     pub fn colors(&self) -> Result<Colors> {
         let mut colors = ffi::sized!(ffi::RenderStateColors);
-        let result =
-            unsafe { ffi::ghostty_render_state_colors_get(self.0.0.as_raw(), &raw mut colors) };
+        let result = unsafe {
+            ffi::ghostty_render_state_get(
+                self.0.0.as_raw(),
+                ffi::RenderStateData::COLORS,
+                (&raw mut colors).cast(),
+            )
+        };
         from_result(result)?;
 
         Ok(Colors {
