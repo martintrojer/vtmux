@@ -61,6 +61,7 @@ pub fn exec(
         quiet: false,
         parse_only: args.flag('n'),
         verbose: args.flag('v'),
+        parse_client: None,
     };
     server.source_depth += 1;
     for path in paths {
@@ -89,6 +90,9 @@ pub struct LoadOpts {
     pub parse_only: bool,
     /// Print each line's commands before running (`-v`).
     pub verbose: bool,
+    /// The client (and its origin) the file is parsed for when the item
+    /// has none: `pi.c` of the startup config (cfg.c:81-90).
+    pub parse_client: Option<(crate::server::ClientId, crate::target::Origin)>,
 }
 
 /// `glob(3)` for the patterns tmux passes (no `{}` or `~`): `*`, `?`,
@@ -156,14 +160,17 @@ pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
     // top-level ones that run.
     let mut printed: Vec<(u32, String)> = Vec::new();
     let mut groups: Vec<(u32, Vec<CommandCall>)> = Vec::new();
-    let tc = item.client.filter(|id| server.clients.contains_key(id));
+    let (tc, origin) = match item.client {
+        Some(id) => (Some(id), item.origin),
+        None => opts
+            .parse_client
+            .map_or((None, item.origin), |(id, o)| (Some(id), o)),
+    };
+    let tc = tc.filter(|id| server.clients.contains_key(id));
     let ctx = server.format_ctx(Found::default(), tc);
     let (client, clients) = (ctx.client, ctx.clients);
-    let mut env = GlobalEnv::new(&mut server.global_env, &server.model, &server.info).for_client(
-        item.origin,
-        client,
-        clients,
-    );
+    let mut env = GlobalEnv::new(&mut server.global_env, &server.model, &server.info)
+        .for_client(origin, client, clients);
     let mut collect = |group: cmd::Group<'_>| {
         let calls = group.calls.to_vec();
         if opts.verbose {

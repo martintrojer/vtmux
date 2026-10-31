@@ -148,6 +148,16 @@ enum RawArg {
     Block(Vec<RawCommand>),
     /// An already parsed list (`cmd_parse_from_arguments` with a block).
     Built(CommandList),
+    /// A word that is not UTF-8. Lexed like any other, but an `Args`
+    /// string cannot hold it, so only building it fails: a word in a
+    /// dropped `%if` branch never does.
+    Invalid,
+}
+
+impl RawArg {
+    fn word(bytes: Vec<u8>) -> Self {
+        String::from_utf8(bytes).map_or(RawArg::Invalid, RawArg::Str)
+    }
 }
 
 /// Parse an argument vector as `tmux a b ; c d` receives it.
@@ -327,8 +337,10 @@ fn build_command(
     if expand_alias {
         // cmd_parse_expand_alias (cmd-parse.y:767-822): no first word, or a
         // block as first word, is an empty list.
-        let Some(RawArg::Str(first)) = cmd.args.first() else {
-            return Ok(Vec::new());
+        let first = match cmd.args.first() {
+            Some(RawArg::Str(first)) => first,
+            Some(RawArg::Invalid) => return Err(NOT_UTF8),
+            _ => return Ok(Vec::new()),
         };
         if let Some((_, text)) = DEFAULT_COMMAND_ALIASES.iter().find(|(a, _)| a == first) {
             // Parse the alias text, append the remaining words to its last
@@ -357,6 +369,7 @@ fn build_command(
                 ArgValue::Commands(CommandList { calls: calls? })
             }
             RawArg::Built(list) => ArgValue::Commands(list.clone()),
+            RawArg::Invalid => return Err(NOT_UTF8),
         });
     }
     // cmd_parse (cmd.c:508-540).
@@ -384,6 +397,7 @@ fn clone_raw(arg: &RawArg) -> RawArg {
                 .collect(),
         ),
         RawArg::Built(l) => RawArg::Built(l.clone()),
+        RawArg::Invalid => RawArg::Invalid,
     }
 }
 
@@ -400,7 +414,7 @@ enum Token {
     RBrace,
     /// A word (`TOKEN`) or `name=value` (`EQUALS`).
     Word {
-        text: String,
+        text: Vec<u8>,
         equals: bool,
     },
     /// `%hidden`: valid only at the start of a statement, before `NAME=value`.
@@ -411,7 +425,7 @@ enum Token {
     Endif,
     /// `#{...}` straight after a `%` directive (`FORMAT`, cmd-parse.y:1325-1333):
     /// an unquoted condition that would otherwise be a comment.
-    Format(String),
+    Format(Vec<u8>),
     End,
 }
 
@@ -528,7 +542,7 @@ impl Lexer<'_> {
                     let mut next = self.getc();
                     if condition && next == Some(b'{') {
                         let format = self.format().ok_or(CmdError::Syntax)?;
-                        return Ok(Token::Format(bytes_to_string(format)?));
+                        return Ok(Token::Format(format));
                     }
                     while next.is_some() && next != Some(b'\n') {
                         next = self.getc();
@@ -546,7 +560,7 @@ impl Lexer<'_> {
                     let word = self.get_word(b'%');
                     if word.iter().all(|c| *c == b'%' || c.is_ascii_digit()) {
                         return Ok(Token::Word {
-                            text: bytes_to_string(word)?,
+                            text: word,
                             equals: false,
                         });
                     }
@@ -568,7 +582,7 @@ impl Lexer<'_> {
                         name_end.is_some_and(|i| token[1 + i] == b'=')
                     };
                     return Ok(Token::Word {
-                        text: bytes_to_string(token)?,
+                        text: token,
                         equals,
                     });
                 }
@@ -780,7 +794,11 @@ impl Lexer<'_> {
                 Ok(())
             }
             None if (0xd800..0xe000).contains(&value) => Err(CmdError::Lex(message)),
-            None => Err(CmdError::Unsupported("non-UTF-8 argument")),
+            // Not UTF-8: a byte that never is, so building the word fails.
+            None => {
+                buf.push(0xff);
+                Ok(())
+            }
         }
     }
 
@@ -853,8 +871,10 @@ impl Lexer<'_> {
     }
 }
 
+const NOT_UTF8: CmdError = CmdError::Unsupported("non-UTF-8 argument");
+
 fn bytes_to_string(bytes: Vec<u8>) -> Result<String, CmdError> {
-    String::from_utf8(bytes).map_err(|_| CmdError::Unsupported("non-UTF-8 argument"))
+    String::from_utf8(bytes).map_err(|_| NOT_UTF8)
 }
 
 /// Longest `NAME=value` tmux accepts (`CMD_PARSE_MAX_ENVIRON_LEN`,
@@ -951,16 +971,21 @@ impl Parser<'_, '_> {
     /// first `=`. Bison reduces the rule without reading a lookahead, so the
     /// assignment is applied before the next token is lexed. It applies
     /// only when every enclosing condition's flag is set.
-    fn assign(&mut self, text: &str, hidden: bool) -> Result<(), CmdError> {
+    fn assign(&mut self, text: &[u8], hidden: bool) -> Result<(), CmdError> {
         if text.len() > MAX_ENVIRON_LEN {
             return Err(CmdError::Lex("environment variable is too long"));
         }
-        let (name, value) = text.split_once('=').ok_or(CmdError::Syntax)?;
+        let eq = text
+            .iter()
+            .position(|c| *c == b'=')
+            .ok_or(CmdError::Syntax)?;
         let applies = self
             .scope
             .is_none_or(|f| f && self.stack.iter().all(|s| *s));
         if applies && !self.lexer.opts.parse_only {
-            self.lexer.env.set(name, value, hidden);
+            let name = bytes_to_string(text[..eq].to_vec())?;
+            let value = bytes_to_string(text[eq + 1..].to_vec())?;
+            self.lexer.env.set(&name, &value, hidden);
         }
         Ok(())
     }
@@ -1039,6 +1064,7 @@ impl Parser<'_, '_> {
         else {
             return Err(CmdError::Syntax);
         };
+        let text = bytes_to_string(text)?;
         Ok(crate::format::is_true(&self.lexer.env.expand(&text)))
     }
 
@@ -1201,7 +1227,7 @@ impl Parser<'_, '_> {
             };
         }
         match token {
-            Token::Word { text, .. } => args.push(RawArg::Str(text)),
+            Token::Word { text, .. } => args.push(RawArg::word(text)),
             // Only an argument may be a block, never the command name.
             _ => return Err(CmdError::Syntax),
         }
@@ -1211,7 +1237,7 @@ impl Parser<'_, '_> {
                     let Token::Word { text, .. } = self.next()? else {
                         unreachable!("peeked a word")
                     };
-                    args.push(RawArg::Str(text));
+                    args.push(RawArg::word(text));
                 }
                 Token::LBrace => {
                     self.next()?;

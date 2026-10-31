@@ -79,6 +79,11 @@ case_ set-then-if $'set -g @q 1\n%if "#{@q}"\ndisplay set\n%else\ndisplay unset\
 case_ false-unknown-command $'%if 0\nnosuchcommand -x\ndisplay -p a b c\n%else\ndisplay b\n%endif'
 case_ false-bad-quote $'%if 0\ndisplay "abc\n%endif'
 case_ false-bad-tilde $'%if 0\ndisplay ~nosuchuser\n%endif'
+# A word that is not UTF-8 is only a problem where it is built.
+case_ false-non-utf8 $'%if 0\nset -g @a "\\377"\n%endif\nset -g @b 1'
+case_ false-non-utf8-big $'%if 0\ndisplay \\U00110000\n%else\ndisplay b\n%endif'
+case_ false-non-utf8-command $'%if 0\n\\377 x\n%endif\ndisplay b'
+case_ false-non-utf8-assign $'%if 0\nA=\\377\n%endif\ndisplay b'
 case_ true-unknown-command $'%if 1\nnosuchcommand\n%endif'
 # ---- one-line form ------------------------------------------------------
 case_ inline $'display x ; %if 1 display inl %endif'

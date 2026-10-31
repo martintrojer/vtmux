@@ -596,6 +596,57 @@ fn startup_config() {
     });
 }
 
+/// The startup config is parsed for the client that started the server
+/// (cfg.c:81-90, `pi.c`), attached or not, so `%if` sees `client_name` and
+/// `client_pid`; its commands still run with no client. A non-UTF-8 word in
+/// a dropped branch does not reject the file (cmd-parse.y builds only the
+/// branch taken).
+#[test]
+fn startup_config_conditions() {
+    compare("startup_config_conditions", |w| {
+        let conf = w.dir().join("cond.conf");
+        std::fs::write(
+            &conf,
+            "%if \"#{client_name}\"\nset -g @cn has\n%else\nset -g @cn none\n%endif\n\
+             %if \"#{client_pid}\"\nset -g @cp has\n%else\nset -g @cp none\n%endif\n\
+             %if \"#{session_name}\"\nset -g @sn has\n%else\nset -g @sn none\n%endif\n\
+             %if 0\nset -g @a \"\\377\"\n%endif\nset -g @b 1\n",
+        )
+        .expect("write");
+        let c = conf.to_str().expect("utf-8");
+        vec![
+            w.raw(&["-L", &w.label, "-f", c, "new", "-d", "-s", "s"]),
+            w.run(&["show", "-g", "@cn"]),
+            w.run(&["show", "-g", "@cp"]),
+            w.run(&["show", "-g", "@sn"]),
+            w.run(&["show", "-g", "@b"]),
+            w.run(&["show", "-g", "@a"]),
+        ]
+    });
+}
+
+/// `source-file` with a non-UTF-8 word: dropped in a false branch, an
+/// error only where it is built.
+#[test]
+fn source_file_non_utf8_in_false_branch() {
+    compare("source_file_non_utf8_in_false_branch", |w| {
+        let write = |name: &str, text: &str| {
+            let path = w.dir().join(name);
+            std::fs::write(&path, text).expect("write");
+            path.to_str().expect("utf-8").to_owned()
+        };
+        let dropped = write(
+            "d.conf",
+            "%if 0\nset -g @a \"\\377\"\n%endif\nset -g @b 1\n",
+        );
+        vec![
+            w.run(&["new", "-d", "-s", "a"]),
+            w.run(&["source", "-v", &dropped]),
+            w.run(&["show", "-g", "@b"]),
+        ]
+    });
+}
+
 /// A multi-word command is run as `execvp` does (spawn.c:552), so an
 /// executable without a shebang runs through `/bin/sh` (ENOEXEC fallback),
 /// given by path and found through the pane's `PATH`.

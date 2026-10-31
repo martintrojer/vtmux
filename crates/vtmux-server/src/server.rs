@@ -879,16 +879,7 @@ impl Server {
             self.fail_client(id, &e);
             return;
         }
-        // The first client loads the configuration before its own command
-        // runs (server-client.c:3052-3060, cfg.c start_cfg).
-        if !self.config_loaded {
-            self.load_config(&hello.cwd);
-        }
-        let mut item = Item::new(Some(id), hello.cwd.clone());
-        item.env.clone_from(&hello.env);
-        item.tty.clone_from(&hello.tty);
-        item.utf8 = hello.flags.utf8;
-        item.origin = Origin {
+        let origin = Origin {
             attached: None,
             inside_pane: hello
                 .env
@@ -896,10 +887,21 @@ impl Server {
                 .find(|(k, _)| k == "TMUX_PANE")
                 .and_then(|(_, v)| v.parse().ok()),
         };
+        let mut item = Item::new(Some(id), hello.cwd.clone());
+        item.env.clone_from(&hello.env);
+        item.tty.clone_from(&hello.tty);
+        item.utf8 = hello.flags.utf8;
+        item.origin = origin;
         let argv = hello.argv.clone();
         let control = hello.flags.control != vtmux_core::protocol::ControlMode::None;
+        let cwd = hello.cwd.clone();
         if let Some(c) = self.clients.get_mut(&id) {
             c.hello = Some(hello);
+        }
+        // The first client loads the configuration before its own command
+        // runs (server-client.c:3052-3060, cfg.c start_cfg).
+        if !self.config_loaded {
+            self.load_config(id, origin, &cwd);
         }
         if control {
             // The argv command runs with guard flags 0 (cmd-queue.c:594).
@@ -1829,15 +1831,18 @@ impl Server {
 
     // ------------------------------------------------------------- config
 
-    /// cfg.c `start_cfg` / `load_cfg`: each file runs with no client;
-    /// errors become causes `file:line: message`.
-    fn load_config(&mut self, cwd: &Path) {
+    /// cfg.c `start_cfg` / `load_cfg`: each file runs with no client but
+    /// is parsed for `first`, the client that started the server (`pi.c`,
+    /// attached or not), so `%if` conditions see it; errors become causes
+    /// `file:line: message`.
+    fn load_config(&mut self, first: ClientId, origin: Origin, cwd: &Path) {
         self.config_loaded = true;
         let files = self.config.config_files.clone();
         let quiet = self.config.config_quiet;
         let mut item = Item::new(None, cwd.to_owned());
         let opts = commands::source_file::LoadOpts {
             quiet,
+            parse_client: Some((first, origin)),
             ..Default::default()
         };
         for file in files {
