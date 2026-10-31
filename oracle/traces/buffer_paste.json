@@ -1,0 +1,689 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "buffer_paste",
+  "inputs": {
+    "name": "buffer_paste",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "40",
+          "-y",
+          "10",
+          "sh",
+          "-c",
+          "stty -echo; tmux wait-for -S ready; while read -r l; do printf 'got:%s\\n' \"$(printf %s \"$l\" | tr '\\033' '@')\"; [ \"$l\" = mode ] && printf '\\033[?2004h' && tmux wait-for -S fed; [ \"$l\" = end ] && tmux wait-for -S fed; done; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "p",
+          "one\ntwo\n"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "end\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-r",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "end\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-s",
+          "|",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "\rend\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-s",
+          "XX",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "\rend\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "p",
+          "a\u001b[31mb\\cé\n"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "end\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-S",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "end\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-p",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "end\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "mode\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-p",
+          "-d",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "\rend\r"
+        ]
+      },
+      {
+        "wait_for": "fed"
+      },
+      {
+        "run": [
+          "show-buffer",
+          "-b",
+          "p"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-b",
+          "p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-t",
+          "%9"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "x\n"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-d",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "paste-buffer",
+          "-d",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "list-buffers"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "got:one\ngot:two\ngot:end\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "got:end\ngot:one|two|\ngot:end\ngot:oneXXtwoXX\ngot:end\ngot:a^[[31m^?b\\cé\ngot:end\ngot:a@[31b\\cé\ngot:end\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no buffer p\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "got:end\ngot:a@[31b\\cé\ngot:end\ngot:a^[[31m^?b\\cé\ngot:end\ngot:mode\ngot:@[200~a^[[31m^?b\\cé\ngot:@[201~\ngot:end\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no buffer p\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find pane: %9\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,378 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "buffer_files",
+  "inputs": {
+    "name": "buffer_files",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b",
+          "x\ny\\z\u0001\t"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-a",
+          "-b",
+          "b",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "-b",
+          "f",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name} #{buffer_size} #{buffer_sample}"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer",
+          "-b",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b",
+          "#{session_name}.txt"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "-b",
+          "g",
+          "a.txt"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b",
+          "nodir/out"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b",
+          "."
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "nosuch",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "nosuch"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "."
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "-b",
+          "e",
+          "/dev/null"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "-b",
+          "",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "-b",
+          "a\tb",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer",
+          "out"
+        ]
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name} #{buffer_size}"
+        ]
+      },
+      {
+        "run": [
+          "load-buffer"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "f 14 x\\ny\\\\z\\001\\tx\\ny\\\\z\\001\\t\nb 7 x\\ny\\\\z\\001\\t\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\ny\\z\u0001\t",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\ny\\z\u0001\t",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "No such file or directory: <TMP>/home/nodir/out\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "Is a directory: <TMP>/home/.\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no buffer nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no buffers\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "No such file or directory: <TMP>/home/nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "Input/output error: <TMP>/home/.\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "empty buffer name\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid buffer name: a\tb\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "buffer0 14\ng 7\nf 14\nb 7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "command load-buffer: too few arguments (need at least 1)\n",
+        "exit": 1
+      }
+    }
+  ]
+}

@@ -29,7 +29,7 @@ impl PasteBuffer {
     pub fn sample(&self) -> String {
         const WIDTH: usize = 200;
         let len = self.data.len().min(WIDTH);
-        let mut out = strvis(&self.data[..len], SAMPLE);
+        let mut out = strvis(&self.data[..len], Vis::Sample);
         if self.data.len() > WIDTH || out.len() > WIDTH {
             out.truncate(WIDTH);
             out.extend_from_slice(b"...");
@@ -202,53 +202,29 @@ impl PasteStore {
     }
 }
 
-/// The `vis(3)` flags the edge uses, as booleans.
-#[derive(Clone, Copy)]
-struct Vis {
-    octal: bool,
-    cstyle: bool,
-    tab: bool,
-    nl: bool,
-    safe: bool,
-    noslash: bool,
+/// The two `vis(3)` flag sets the edge uses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Vis {
+    /// `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL` (`paste_make_sample`).
+    Sample,
+    /// `VIS_SAFE|VIS_NOSLASH` (`cmd_paste_buffer_paste`).
+    Paste,
 }
-
-/// `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL` (paste_make_sample).
-const SAMPLE: Vis = Vis {
-    octal: true,
-    cstyle: true,
-    tab: true,
-    nl: true,
-    safe: false,
-    noslash: false,
-};
-
-/// `VIS_SAFE|VIS_NOSLASH` (cmd_paste_buffer_paste).
-const PASTE: Vis = Vis {
-    octal: false,
-    cstyle: false,
-    tab: false,
-    nl: false,
-    safe: true,
-    noslash: true,
-};
 
 /// `vis` (compat/vis.c:56-135) for one byte; `next` is the byte after it.
 fn vis_byte(out: &mut Vec<u8>, c: u8, next: u8, f: Vis) {
-    let graph = (0x21..=0x7e).contains(&c);
-    let visible = graph
+    let sample = f == Vis::Sample;
+    let visible = (0x21..=0x7e).contains(&c)
         || c == b' '
-        || (!f.tab && c == b'\t')
-        || (!f.nl && c == b'\n')
-        || (f.safe && matches!(c, 0x08 | 0x07 | b'\r'));
+        || (!sample && matches!(c, b'\t' | b'\n' | 0x08 | 0x07 | b'\r'));
     if visible {
-        if c == b'\\' && !f.noslash {
+        if c == b'\\' && sample {
             out.push(b'\\');
         }
         out.push(c);
         return;
     }
-    if f.cstyle {
+    if sample {
         let esc = match c {
             b'\n' => Some(b'n'),
             b'\r' => Some(b'r'),
@@ -268,7 +244,7 @@ fn vis_byte(out: &mut Vec<u8>, c: u8, next: u8, f: Vis) {
             return;
         }
     }
-    if c & 0x7f == b' ' || f.octal {
+    if c & 0x7f == b' ' || sample {
         out.extend_from_slice(&[
             b'\\',
             (c >> 6 & 7) + b'0',
@@ -277,7 +253,7 @@ fn vis_byte(out: &mut Vec<u8>, c: u8, next: u8, f: Vis) {
         ]);
         return;
     }
-    if !f.noslash {
+    if sample {
         out.push(b'\\');
     }
     let mut c = c;
@@ -323,7 +299,7 @@ fn strvis(data: &[u8], f: Vis) -> Vec<u8> {
 /// `cmd_paste_buffer_paste`: one line of a buffer as the pane's input.
 #[must_use]
 pub fn vis_paste(data: &[u8]) -> Vec<u8> {
-    strvis(data, PASTE)
+    strvis(data, Vis::Paste)
 }
 
 #[cfg(test)]
@@ -369,11 +345,17 @@ mod tests {
     fn sample_escapes() {
         assert_eq!(buf(b"a\tb\n\\\x01\xff").sample(), "a\\tb\\n\\\\\\001\\377");
         assert_eq!(buf("é".as_bytes()).sample(), "é");
-        assert_eq!(buf(&[b'x'; 201]).sample(), format!("{}...", "x".repeat(200)));
+        assert_eq!(
+            buf(&[b'x'; 201]).sample(),
+            format!("{}...", "x".repeat(200))
+        );
     }
 
     #[test]
     fn paste_encoding() {
-        assert_eq!(vis_paste(b"a\x1b[0m\x7f\xa1\xa0\xc3\xa9\t\\"), b"a^[[0m^?M-!\\240\xc3\xa9\t\\");
+        assert_eq!(
+            vis_paste(b"a\x1b[0m\x7f\xa1\xa0\xc3\xa9\t\\"),
+            b"a^[[0m^?M-!\\240\xc3\xa9\t\\"
+        );
     }
 }
