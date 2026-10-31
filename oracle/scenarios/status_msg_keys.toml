@@ -1,0 +1,25 @@
+name = "status_msg_keys"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["bind", "-n", "F2", "select-window", "-t", ":9"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { keys = "\u001bOQ" },
+  { screen = {} },
+  { settle = { quiet_ms = 1000 } },
+  { screen = {} },
+  { run = ["set", "-g", "display-time", "0"] },
+  { run = ["display-message", "-t", "a", "sticky"] },
+  { settle = { quiet_ms = 1000 } },
+  { screen = {} },
+  { keys = "x" },
+  { screen = {} },
+  { run = ["display-message", "-N", "-d", "1500", "-t", "a", "nokeys"] },
+  { keys = "y" },
+  { screen = {} },
+  { settle = { quiet_ms = 1800 } },
+  { screen = {} },
+]
