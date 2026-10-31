@@ -1,0 +1,24 @@
+name = "size_split_attach_winch"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh", "-c", "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["splitw", "-h", "-t", "a", "sh", "-c", "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["resize-pane", "-Z", "-t", "a"] },
+  { screen = {} },
+  { run = ["set", "-g", "status", "2"] },
+  { screen = {} },
+  { run = ["lsp", "-t", "a", "-F", "#{pane_id} #{pane_top} #{pane_width}x#{pane_height} #{window_zoomed_flag}"] },
+  { run = ["set", "-g", "status-position", "top"] },
+  { screen = {} },
+  { run = ["set", "-g", "status", "off"] },
+  { screen = {} },
+  { run = ["lsp", "-t", "a", "-F", "#{pane_id} #{pane_top} #{pane_width}x#{pane_height} #{window_zoomed_flag}"] },
+  { run = ["resize-pane", "-Z", "-t", "a"] },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { run = ["capture-pane", "-p", "-t", "%1"] },
+]

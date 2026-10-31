@@ -1,0 +1,404 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "size_split_attach_winch",
+  "inputs": {
+    "name": "size_split_attach_winch",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "sh",
+          "-c",
+          "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "a",
+          "sh",
+          "-c",
+          "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "resize-pane",
+          "-Z",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "2"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a",
+          "-F",
+          "#{pane_id} #{pane_top} #{pane_width}x#{pane_height} #{window_zoomed_flag}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-position",
+          "top"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a",
+          "-F",
+          "#{pane_id} #{pane_top} #{pane_width}x#{pane_height} #{window_zoomed_flag}"
+        ]
+      },
+      {
+        "run": [
+          "resize-pane",
+          "-Z",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%1"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.               \\e[37m│\\e[39mP",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          23,
+          0
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*Z\\e[0m\\e[42m            \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          5,
+          0
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.W2.",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*Z\\e[0m\\e[42m            \\e[30m\"t\" <CLOCK>",
+          " P: 0:[t]- \\e[4m1:[t]*Z\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          8,
+          0
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 0 20x8 1\n%1 0 40x8 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[42m[a] \\e[4m0:w*Z\\e[0m\\e[42m            \\e[30m\"t\" <CLOCK>",
+          " P: 0:[t]- \\e[4m1:[t]*Z\\e[0m\\e[42m",
+          "\\e[49mP W1.W2.",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          8,
+          2
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.W2.W3.",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          11,
+          0
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 0 20x10 1\n%1 0 40x10 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.W2.W3.W4.      \\e[37m│\\e[39mP W1.W2.W3.W4.",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m"
+        ],
+        "cursor": [
+          35,
+          0
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "P W1.W2.W3.W4.\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "P W1.W2.W3.W4.\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

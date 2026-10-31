@@ -1,0 +1,28 @@
+name = "size_window_size_option"
+size = [50, 15]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["set", "-g", "status-format[0]", ""] },
+  { run = ["new-window", "-d", "-t", "a:1", "-n", "x", "sh", "-c", "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"] },
+  { run = ["set", "-g", "window-size", "largest"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { resize = [40, 10] },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"] },
+  { run = ["set", "-g", "window-size", "smallest"] },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"] },
+  { run = ["set", "-g", "default-size", "100x30"] },
+  { run = ["new", "-d", "-s", "b"] },
+  { run = ["new-window", "-d", "-t", "a:2", "-n", "y", "sh", "-c", "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"] },
+  { run = ["list-windows", "-a", "-F", "#{session_name}:#{window_index} #{window_width}x#{window_height}"] },
+  { run = ["select-window", "-t", "a:1"] },
+  { run = ["select-pane", "-t", "a:1", "-T", "t"] },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"] },
+  { run = ["capture-pane", "-p", "-t", "a:1"] },
+]

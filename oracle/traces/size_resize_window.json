@@ -1,0 +1,627 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "size_resize_window",
+  "inputs": {
+    "name": "size_resize_window",
+    "size": [
+      50,
+      15
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "sh",
+          "-c",
+          "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-format[0]",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "new-window",
+          "-d",
+          "-t",
+          "a:1",
+          "-n",
+          "x",
+          "sh",
+          "-c",
+          "n=0; trap 'n=$((n+1)); printf W$n.' WINCH; printf \"P \"; sleep 100000 & while :; do wait; done"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-x",
+          "30",
+          "-y",
+          "10"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-L",
+          "5"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-R"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-U",
+          "3"
+        ]
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-D",
+          "20"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-A"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:1",
+          "-a"
+        ]
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"
+        ]
+      },
+      {
+        "resize": [
+          60,
+          20
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"
+        ]
+      },
+      {
+        "run": [
+          "set-window-option",
+          "-t",
+          "a:0",
+          "window-size",
+          "latest"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-t",
+          "a",
+          "-F",
+          "#{window_index} #{window_width}x#{window_height} m=#{window_manual_width},#{window_manual_height} #{window-size}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-x",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-y",
+          "10001"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:0",
+          "-L",
+          "x"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m \\e[39m"
+        ],
+        "cursor": [
+          5,
+          0
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 50x14 m=, latest\n1 80x24 m=, latest\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.W2.                      \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[39m                              \\e[32m│\\e[37m···················",
+          "\\e[32m──────────────────────────────┘\\e[37m···················",
+          "··················································",
+          "··················································",
+          "··················································",
+          "\\e[30m\\e[42m \\e[39m"
+        ],
+        "cursor": [
+          8,
+          0
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 30x10 m=30,10 manual\n1 80x24 m=, latest\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 26x7 m=26,7 manual\n1 80x24 m=, latest\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.W2.W3.               \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[39m                          \\e[32m│\\e[37m·······················",
+          "\\e[30m\\e[42m \\e[39m"
+        ],
+        "cursor": [
+          11,
+          0
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 26x27 m=26,27 manual\n1 80x24 m=, latest\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 50x14 m=50,14 manual\n1 50x14 m=50,14 manual\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.W2.W3.W4.                                    \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[39m                                                  \\e[32m│\\e[37m·········",
+          "\\e[32m──────────────────────────────────────────────────┘\\e[37m·········",
+          "····························································",
+          "····························································",
+          "····························································",
+          "····························································",
+          "\\e[30m\\e[42m \\e[39m"
+        ],
+        "cursor": [
+          14,
+          0
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 50x14 m=50,14 manual\n1 50x14 m=50,14 manual\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "P W1.W2.W3.W4.W5.",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m \\e[39m"
+        ],
+        "cursor": [
+          17,
+          0
+        ]
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 60x19 m=, latest\n1 50x14 m=50,14 manual\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "P W1.W2.W3.W4.W5.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "width too small\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "height too large\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "adjustment too small\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "adjustment invalid\n",
+        "exit": 1
+      }
+    }
+  ]
+}
