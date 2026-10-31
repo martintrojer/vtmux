@@ -69,10 +69,11 @@ pub fn apply_show(
     };
     let (entry, parent) = match store.tree(tree).get_only(&name) {
         Some(e) => (Some(e), false),
-        None if args.flag('A') => (store.get(tree, &name), true),
         // A global tree holds every tmux option; a vtmux one it does not
-        // hold reads as its default when named.
+        // hold reads as its default when named. Nothing is above a global
+        // tree, so `-A` marks nothing inherited there, as for a tmux option.
         None if tree.is_global() => (super::vtmux::default_entry(&name), false),
+        None if args.flag('A') => (store.get(tree, &name), true),
         None => (None, false),
     };
     match entry {
