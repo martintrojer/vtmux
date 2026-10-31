@@ -1,0 +1,35 @@
+name = "hooks_events"
+# Event hooks (hooks.c hooks_event_cb, events.c events_fire_*) appended to an
+# option in the order tmux fires them, with their hook_* payloads: a new
+# session (window-created, window-linked, session-created), a window
+# renamed, moved current, linked and unlinked, a pane exiting with its
+# status, then the session going (session-closed before window-unlinked,
+# root first). after-* and command-error from the CLI.
+steps = [
+  { run = ["new", "-d", "-s", "main", "-n", "m", "-x", "80", "-y", "24", "cat"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "session-created", "set -gF @log '#{@log}|#{hook}:#{hook_session_name}'"] },
+  { run = ["set-hook", "-g", "session-closed", "set -gF @log '#{@log}|#{hook}:#{hook_session_name}'"] },
+  { run = ["set-hook", "-g", "session-renamed", "set -gF @log '#{@log}|#{hook}:#{hook_session_name}:#{hook_old_name}'"] },
+  { run = ["set-hook", "-g", "window-created", "set -gF @log '#{@log}|#{hook}:#{hook_window_name}'"] },
+  { run = ["set-hook", "-g", "window-linked", "set -gF @log '#{@log}|#{hook}:#{hook_session_name}:#{hook_window_index}'"] },
+  { run = ["set-hook", "-g", "window-unlinked", "set -gF @log '#{@log}|#{hook}:#{hook_session_name}:#{hook_window_index}'"] },
+  { run = ["set-hook", "-g", "window-renamed", "set -gF @log '#{@log}|#{hook}:#{hook_old_name}>#{hook_new_name}'"] },
+  { run = ["set-hook", "-g", "session-window-changed", "set -gF @log '#{@log}|#{hook}:#{hook_old_window_index}>#{hook_new_window_index}'"] },
+  { run = ["set-hook", "-g", "pane-exited", "set -gF @log '#{@log}|#{hook}:#{hook_exit_status}:#{hook_exit_success}'"] },
+  { run = ["set-hook", "-g", "command-error", "set -gF @log '#{@log}|#{hook}:#{command}'"] },
+  { run = ["new", "-d", "-s", "t", "-n", "t0", "cat"] },
+  { run = ["neww", "-d", "-t", "t:1", "-n", "t1", "cat"] },
+  { run = ["set-hook", "-ga", "pane-exited", "wait-for -S exited"] },
+  { run = ["neww", "-d", "-t", "t:2", "-n", "t2", "sh -c 'exit 3'"] },
+  { wait_for = "exited" },
+  { run = ["rename-window", "-t", "t:0", "tz"] },
+  { run = ["rename-session", "-t", "t", "tt"] },
+  { run = ["selectw", "-t", "tt:1"] },
+  { run = ["linkw", "-d", "-s", "tt:1", "-t", "main:5"] },
+  { run = ["unlinkw", "-t", "main:5"] },
+  { run = ["kill-window", "-t", "nosuch:9"] },
+  { run = ["kill-session", "-t", "tt"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]

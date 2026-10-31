@@ -1,0 +1,41 @@
+name = "control_notify_session_window"
+# control-notify.c: every current-window change of a session is
+# %session-window-changed (session.c session_set_current), and the window
+# and layout events are raised from the same event layer as hooks:
+# select-window, new-window and link-window without -d, move-window,
+# split-window (%window-pane-changed then %layout-change, v1 layout for a
+# control client without new-layouts), select-pane, kill-pane, resize-pane,
+# rename-session, and a killed session's %sessions-changed and window
+# closes (session_destroy unlinks root first).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat"] },
+  { run = ["neww", "-d", "-t", "a:2", "-n", "w2", "cat"] },
+  { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat"] },
+  { run = ["neww", "-d", "-t", "b:1", "-n", "b1", "cat"] },
+  { control = { argv = ["attach", "-t", "b"], id = "c1" } },
+  { control_send = { id = "c1", line = "selectw -t b:0" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "neww -t b: -n nw cat" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "neww -d -t b: -n nd cat" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "linkw -s a:1 -t b:7" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "movew -s a:2 -t b:8" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "splitw -t b:0 cat" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "selectp -t b:0.0" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "killp -t b:0.1" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "resizep -t b:0.0 -x 10" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "rename-session -t a alpha" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "kill-session -t alpha" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["kill-server"] },
+]
