@@ -15,7 +15,8 @@ use vtmux_core::ids::SessionId;
 use vtmux_core::keys::Key;
 use vtmux_core::options::{OptionValue, TreeId, Value};
 
-use crate::commands::{self, Output};
+use crate::cmdq::{End, NewBatch};
+use crate::commands;
 use crate::server::{ClientId, Server};
 use crate::target::Origin;
 
@@ -239,13 +240,12 @@ impl Server {
         }
     }
 
-    /// `key_bindings_dispatch`: the binding's commands run for the client,
-    /// as a new queue item (`CMDQ_STATE_REPEAT` for a repeating binding).
-    /// A control client sees them in guards with flags 0; an attached
-    /// terminal client gets a failure as its status-line message
-    /// (`cmdq_error` -> `status_message_set`, cmd-queue.c:882), and output
-    /// would go to view mode, which vtmux has not got yet, so it is dropped.
-    /// A binding whose command blocks (`wait-for`) drops what follows it.
+    /// `key_bindings_dispatch` (key-bindings.c:756-786): the binding's
+    /// commands are a new batch for the client (`CMDQ_STATE_REPEAT` for a
+    /// repeating binding), at the end of its queue or, for a key a command
+    /// handed over (`send-keys -K`), right after that command. A control
+    /// client sees them in guards with flags 0; an attached terminal client
+    /// gets a failure as its status-line message (`cmdq::End::Quiet`).
     fn run_binding(&mut self, id: ClientId, commands: &CommandList, repeat: bool, _key: Key) {
         let Some(c) = self.clients.get(&id) else {
             return;
@@ -267,23 +267,12 @@ impl Server {
         }
         // The key callback is a queue item of its own and takes a number.
         self.cmd_number = self.cmd_number.wrapping_add(1);
-        let _ = commands::run(self, &mut item, &commands.calls);
-        if control {
-            self.control_take_output(id, &mut item);
-            self.control_flush(id);
-            return;
-        }
-        for out in std::mem::take(&mut item.output) {
-            if let Output::Stderr(line) = out {
-                let text = String::from_utf8_lossy(&line);
-                let mut msg = text.trim_end_matches('\n').to_owned();
-                // cmdq_error: `*msg = toupper(*msg)`.
-                if let Some(first) = msg.get(..1) {
-                    let upper = first.to_ascii_uppercase();
-                    msg.replace_range(..1, &upper);
-                }
-                self.status_message_set(id, msg);
-            }
+        let batch = NewBatch::new(item, commands.calls.clone(), End::Quiet);
+        if let Some(after) = self.key_after {
+            self.key_after = self.cmdq_insert_batch(after, batch);
+        } else {
+            self.cmdq_append(Some(id), batch);
+            self.cmdq_process();
         }
     }
 
@@ -333,7 +322,8 @@ impl Server {
 
     /// Keys `send-keys -K` gave a client: handled as typed, after the
     /// command (`server_client_handle_key_after`), with `KEYC_SENT`.
-    pub(crate) fn handle_injected_keys(&mut self) {
+    pub(crate) fn handle_injected_keys(&mut self, after: Option<crate::cmdq::StepId>) {
+        self.key_after = after;
         for (id, key) in std::mem::take(&mut self.injected_keys) {
             let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached.is_some()) else {
                 continue;
@@ -349,5 +339,6 @@ impl Server {
                 self.forward_key(p, &k);
             }
         }
+        self.key_after = None;
     }
 }

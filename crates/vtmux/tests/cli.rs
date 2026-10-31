@@ -1333,6 +1333,35 @@ fn wait_for_channels_and_locks() {
     });
 }
 
+/// A command that waits inside `source-file` holds the rest of the file
+/// and the commands after `source-file` (cmd-source-file.c:131-138 queues
+/// the file's commands after it with `cmdq_insert_after`): `wait-for`
+/// parks the client's queue until signalled, then the file's later lines,
+/// its causes, and the rest of the argv list run in order.
+#[test]
+fn source_file_waits_inside() {
+    compare("source_file_waits_inside", |w| {
+        let conf = w.dir().join("wait.conf");
+        std::fs::write(
+            &conf,
+            "display -p one\nwait-for ch\ndisplay -p two\nselectw -t nosuch\ndisplay -p three\n",
+        )
+        .expect("write");
+        let c = conf.to_str().expect("utf-8");
+        let mut runs = vec![w.run(&["new", "-d", "-s", "a", "cat"])];
+        let waiter = w.spawn(&["source-file", c, ";", "display", "-p", "after"]);
+        runs.push(w.waiters(&["ch"], &[waiter.id()], "client-0\n"));
+        runs.push(w.run(&["wait-for", "-S", "ch"]));
+        let out = waiter.wait_with_output().expect("wait");
+        runs.push(Run {
+            stdout: w.normalise(&String::from_utf8_lossy(&out.stdout)),
+            stderr: w.normalise(&String::from_utf8_lossy(&out.stderr)),
+            code: out.status.code().unwrap_or(-1),
+        });
+        runs
+    });
+}
+
 impl Run {
     /// A value a helper observed, as a run for the transcript.
     fn seen(stdout: String) -> Self {

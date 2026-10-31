@@ -1,16 +1,15 @@
 //! Command execution: one file per command, dispatched by table entry.
 //!
-//! A batch of commands (one client's argv, or one config file) runs in
-//! order and stops at the first error, as tmux's queue drops the rest of a
-//! failed command list (cmd-queue.c `cmdq_remove_group`). Output goes to the
-//! client in order; errors and prints follow `cmdq_error` / `cmdq_print`
+//! Commands run as steps of the command queue ([`crate::cmdq`]): [`fire`]
+//! runs one, with its control guard. Output goes to the client in order;
+//! errors and prints follow `cmdq_error` / `cmdq_print`
 //! (cmd-queue.c:820-886): a command client gets `text\n` on stderr /
 //! stdout (sanitised when it has no UTF-8), a config run (no client)
 //! records errors as causes and drops prints.
 //!
-//! A command can block its client's queue (`CMD_RETURN_WAIT`, only
-//! `wait-for` so far): [`run`] stops after it and reports where to resume;
-//! the server parks the rest of the batch until the client is woken.
+//! A command can wait (`CMD_RETURN_WAIT`: `wait-for`, file I/O,
+//! `run-shell`, `if-shell`) by setting [`Item::blocked`]; its queue holds
+//! until the step is continued.
 
 mod break_pane;
 mod capture_pane;
@@ -107,17 +106,15 @@ pub struct Item {
     /// A control client's command: the `%begin` guard flags (0 for the
     /// argv command, 1 for lines read from stdin, cmd-queue.c:594).
     pub control: Option<u8>,
-    /// The command that just ran blocked the client (`CMD_RETURN_WAIT`).
+    /// The command that just ran returned `CMD_RETURN_WAIT`.
     pub blocked: bool,
     /// Run from a repeating key binding (`CMDQ_STATE_REPEAT`):
     /// `switch-client` then keeps the client's key table.
     pub repeat: bool,
-    /// The batch can park (`Server::run_batch`): a command may return
-    /// `CMD_RETURN_WAIT` and finish later. Key bindings and config files
-    /// cannot yet, so their file I/O completes at once.
-    pub can_wait: bool,
-    /// `source-file` runs the blocked command is inside, innermost first.
-    pub conts: Vec<source_file::Cont>,
+    /// The queue step running now (`item` in tmux's callbacks).
+    pub step: Option<crate::cmdq::StepId>,
+    /// The running command's file and line (`cmd_get_source`).
+    pub source: Option<std::rc::Rc<crate::cmdq::Source>>,
     /// What the command client's stdout has been used for.
     pub stdout: Stdout,
     /// `load-buffer -` has used the client's stdin.
@@ -154,8 +151,8 @@ impl Item {
             control: None,
             blocked: false,
             repeat: false,
-            can_wait: false,
-            conts: Vec::new(),
+            step: None,
+            source: None,
             stdout: Stdout::Free,
             stdin_used: false,
         }
@@ -208,9 +205,16 @@ impl Item {
     pub fn error(&mut self, server: &mut Server, line: Vec<u8>) {
         self.status = 1;
         if self.client.is_none() {
-            server
-                .causes
-                .push(String::from_utf8_lossy(&line).into_owned());
+            // cmdq_error with no client: a cause while the config loads,
+            // else the server message log, which vtmux has not got.
+            if !server.cfg_finished {
+                let msg = String::from_utf8_lossy(&line);
+                let cause = match &self.source {
+                    Some(src) => format!("{}:{}: {msg}", src.file, src.line),
+                    None => msg.into_owned(),
+                };
+                server.causes.push(cause);
+            }
             return;
         }
         let mut line = if self.utf8 {
@@ -223,40 +227,27 @@ impl Item {
     }
 }
 
-/// Run a parsed batch for `item`, stopping at the first error. For a
-/// control client each command is wrapped in its own guard
-/// (`cmdq_fire_command`, cmd-queue.c:594-655). A command that blocks the
-/// client ends the run early: the result is the index of the command to
-/// resume at. A blocked command still closes its guard with `%end`, as
-/// `CMD_RETURN_WAIT` is not an error.
-pub fn run(server: &mut Server, item: &mut Item, calls: &[CommandCall]) -> Option<usize> {
-    for (i, call) in calls.iter().enumerate() {
-        let guard = server.control_begin(item);
-        let result = run_one(server, item, call);
-        // A quiet failure (unbind-key -q) ends the group but never reached
-        // cmdq_error: no message, no exit status.
-        if let Err(e) = result.as_ref()
-            && !matches!(e, CmdError::Quiet)
-        {
-            let line = match e {
-                CmdError::Edge(edge) => edge.to_bytes(),
-                other => other.to_bytes(),
-            };
-            item.error(server, line);
-        }
-        server.control_end(item, guard, result.is_ok());
-        server.update_focus_all();
-        // send-keys -K: the keys are handled as queue items after this
-        // command (server_client_handle_key_after), so after its guard.
-        server.handle_injected_keys();
-        if result.is_err() {
-            return None;
-        }
-        if std::mem::take(&mut item.blocked) {
-            return Some(i + 1);
-        }
+/// `cmdq_fire_command` (cmd-queue.c:569-655): run one command for
+/// `item` inside its control guard (flags 1 for a control client's stdin
+/// line, cmd-queue.c:594). Whether it succeeded; a failure drops the rest
+/// of its group. A waiting command (`CMD_RETURN_WAIT`) still closes its
+/// guard with `%end`.
+pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
+    let guard = server.control_begin(item);
+    let result = run_one(server, item, call);
+    // A quiet failure (unbind-key -q) ends the group but never reached
+    // cmdq_error: no message, no exit status.
+    if let Err(e) = result.as_ref()
+        && !matches!(e, CmdError::Quiet)
+    {
+        item.error(server, crate::cmdq::error_bytes(e));
     }
-    None
+    server.control_end(item, guard, result.is_ok());
+    server.update_focus_all();
+    // send-keys -K: the keys are handled as queue items after this
+    // command (server_client_handle_key_after), so after its guard.
+    server.handle_injected_keys(item.step);
+    result.is_ok()
 }
 
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {

@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use vtmux_core::cmd::{self, CmdError, ParseOpts};
+use vtmux_core::cmd::{self, ParseOpts};
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::protocol::ServerMsg;
 
@@ -173,6 +173,15 @@ impl Server {
         }
     }
 
+    /// `control_notify_write(c, "%%config-error %s", cause)` (cfg.c:231,
+    /// 253): deferred while a guard is open, whatever the client's state.
+    pub(crate) fn control_config_error(&mut self, id: ClientId, cause: &str) {
+        if let Some(cs) = self.control_mut(id) {
+            cs.notify(format!("%config-error {cause}").into_bytes());
+            self.control_flush(id);
+        }
+    }
+
     /// Is `id` a control client?
     pub(crate) fn is_control(&self, id: ClientId) -> bool {
         self.clients.get(&id).is_some_and(|c| c.control.is_some())
@@ -326,15 +335,14 @@ impl Server {
             ParseOpts::default(),
         ) {
             Ok(calls) => {
-                self.run_batch(id, item, calls);
+                let batch = crate::cmdq::NewBatch::new(item, calls, crate::cmdq::End::ControlLine);
+                self.cmdq_append(Some(id), batch);
+                self.cmdq_process();
                 return;
             }
             Err(e) => {
                 let guard = self.control_begin(&item);
-                let msg = match &e {
-                    CmdError::Edge(edge) => edge.to_bytes(),
-                    other => other.to_bytes(),
-                };
+                let msg = crate::cmdq::error_bytes(&e);
                 if let Some(cs) = self.control_mut(id) {
                     cs.out.extend_from_slice(b"parse error: ");
                     cs.write_line(&msg);

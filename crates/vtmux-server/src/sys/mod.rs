@@ -4,6 +4,7 @@
 //! `SAFETY` comment. Everything exported is a safe function.
 
 pub mod daemon;
+pub mod job;
 pub mod pty;
 pub mod signal;
 pub mod user;

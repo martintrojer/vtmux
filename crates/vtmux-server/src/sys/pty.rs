@@ -225,7 +225,7 @@ fn exec_candidates(
 }
 
 /// One past the highest descriptor the child needs to close.
-fn fd_limit() -> libc::c_int {
+pub(super) fn fd_limit() -> libc::c_int {
     let limit = rustix::process::getrlimit(rustix::process::Resource::Nofile)
         .current
         .unwrap_or(1 << 16);
@@ -275,28 +275,7 @@ unsafe fn child(c: &mut Child<'_>) -> ! {
         if libc::tcsetattr(0, libc::TCSANOW, &raw const tio) != 0 {
             libc::_exit(1);
         }
-        // Signals back to defaults, mask cleared (proc_clear_signals): Rust
-        // ignores SIGPIPE and exec keeps ignored signals ignored.
-        for sig in [
-            libc::SIGPIPE,
-            libc::SIGTSTP,
-            libc::SIGTTIN,
-            libc::SIGTTOU,
-            libc::SIGQUIT,
-            libc::SIGINT,
-            libc::SIGHUP,
-            libc::SIGCHLD,
-            libc::SIGTERM,
-            libc::SIGUSR1,
-            libc::SIGUSR2,
-            libc::SIGWINCH,
-            libc::SIGCONT,
-        ] {
-            libc::signal(sig, libc::SIG_DFL);
-        }
-        let mut set: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&raw mut set);
-        libc::sigprocmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
+        clear_signals();
         close_from(3, c.fd_limit);
         for path in c.candidates {
             libc::execve(path.as_ptr(), c.argv.as_ptr(), c.envp.as_ptr());
@@ -326,6 +305,37 @@ unsafe fn child(c: &mut Child<'_>) -> ! {
     }
 }
 
+/// Signals back to defaults, mask cleared (`proc_clear_signals`): Rust
+/// ignores SIGPIPE and exec keeps ignored signals ignored.
+///
+/// # Safety
+/// Only call in a forked child before exec.
+pub(super) unsafe fn clear_signals() {
+    // SAFETY: signal(2) to SIG_DFL and sigprocmask on a local set.
+    unsafe {
+        for sig in [
+            libc::SIGPIPE,
+            libc::SIGTSTP,
+            libc::SIGTTIN,
+            libc::SIGTTOU,
+            libc::SIGQUIT,
+            libc::SIGINT,
+            libc::SIGHUP,
+            libc::SIGCHLD,
+            libc::SIGTERM,
+            libc::SIGUSR1,
+            libc::SIGUSR2,
+            libc::SIGWINCH,
+            libc::SIGCONT,
+        ] {
+            libc::signal(sig, libc::SIG_DFL);
+        }
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&raw mut set);
+        libc::sigprocmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
+    }
+}
+
 fn last_errno() -> libc::c_int {
     io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
@@ -335,7 +345,7 @@ fn last_errno() -> libc::c_int {
 ///
 /// # Safety
 /// Closes descriptors; only call in a forked child that owns none it needs.
-unsafe fn close_from(first: libc::c_int, limit: libc::c_int) {
+pub(super) unsafe fn close_from(first: libc::c_int, limit: libc::c_int) {
     #[cfg(target_os = "linux")]
     // SAFETY: close_range on a range of descriptors the child does not use.
     unsafe {

@@ -93,8 +93,9 @@ fn client_side(server: &Server, item: &Item) -> Option<ClientId> {
         .filter(|_| can_park(item) && !is_attached(server, item))
 }
 
+/// A client's queue can wait for the I/O (`CMD_RETURN_WAIT`).
 fn can_park(item: &Item) -> bool {
-    item.can_wait && item.client.is_some()
+    item.client.is_some() && item.step.is_some()
 }
 
 /// `file_write`: `data` to `path` (created, truncated or appended).
