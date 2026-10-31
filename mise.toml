@@ -1,4 +1,4 @@
 [tools]
-# libghostty-vt 0.2.2 pins a ghostty commit whose build.zig requires Zig 0.15.2
-# exactly; 0.17 fails even though the crate README says 0.17.x.
-zig = "0.15.2"
+# ghostty's build.zig requires the Zig of its build.zig.zon minimum_zig_version
+# (same major.minor); the pin in third_party/libghostty-rs needs 0.17.
+zig = "0.17.0"

@@ -898,8 +898,8 @@ impl AltModeScanner {
     }
 }
 
-/// Byte budget for Ghostty's `max_scrollback` (bytes, despite the docs saying
-/// lines: Screen.zig:282-296) that keeps at least `lines` lines of history.
+/// Byte budget for Ghostty's scrollback limit (`OPT_SCROLLBACK_MAX_BYTES`)
+/// that keeps at least `lines` lines of history.
 ///
 /// Ghostty cannot trim by lines, so this over-retains and `history_size`
 /// hides the excess. The budget assumes a design width of twice the current
@@ -1012,9 +1012,7 @@ fn decrqm_reply(term: &Terminal<'_, '_>, params: &[u8]) -> Option<Vec<u8>> {
             _ => 0,
         }
     } else if mode == 4 {
-        // tmux answers `CSI 4 $ p` (input.c:1638-1650) but libghostty-vt 0.2.2
-        // only parses the `?` form (stream.zig DECRQM, `intermediates.len == 2`),
-        // so this arm is unreachable today; kept so an upgrade needs no change.
+        // IRM, the only ANSI mode tmux reports (input.c:1638-1650).
         on(Mode::INSERT)
     } else {
         0

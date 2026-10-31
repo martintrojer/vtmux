@@ -19,6 +19,25 @@ the pin is bumped here.
 Recorded per commit in git history; the list is kept current:
 
 - `libghostty-vt/Cargo.toml`: `path` on the `libghostty-vt-sys` dependency.
+- `libghostty-vt-sys/build.rs`: `GHOSTTY_COMMIT` = `3bd54e025cc3` (ghostty
+  main, 2026-10-31), which contains `e257bb45`.
+- `libghostty-vt-sys/src/bindings.rs`: regenerated from that commit's
+  headers with `gen-bindings`, then `cargo fmt`.
+- `libghostty-vt/src`: API drift from `a887df42c`, ported in the shape
+  libghostty-rs master uses:
+  - `ghostty_terminal_new(alloc, &t, cols, rows)`: `GhosttyTerminalOptions`
+    is gone. `TerminalOptions` stays; `max_scrollback` (always bytes) is
+    applied through the new `Terminal::set_scrollback_max_bytes`.
+  - `ghostty_terminal_mode_get/set` are gone: `Terminal::mode`/`set_mode`
+    go through `TERMINAL_DATA_MODE`/`TERMINAL_OPT_MODE`.
+  - `ghostty_render_state_colors_get` is gone: `RENDER_STATE_DATA_COLORS`.
+  - The clipboard-write callback returns `void` and answers through the
+    request's `reply` function; the wrapper's trampoline calls it.
+  - New `Terminal::scrollback_max_bytes`/`set_scrollback_max_bytes`.
+
+  Checked by diffing the old and new bindings: no constant was renumbered
+  or removed, and struct layouts only grew at the end (`ClipboardWrite`,
+  `TerminalScrollViewportValue`).
 
 ## Bumping ghostty
 
@@ -26,9 +45,14 @@ Recorded per commit in git history; the list is kept current:
    `libghostty-vt-sys/build.rs`.
 2. Match Zig to the commit's `build.zig.zon` `minimum_zig_version` in
    `mise.toml` and `.github/workflows/ci.yml`.
-3. Diff `include/ghostty/vt/` between the old and new commit and fix
-   `libghostty-vt-sys/src/bindings.rs` and the wrapper; or regenerate with
-   `cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings`
-   (needs libclang; see `tools/gen_bindings.rs`).
+3. Regenerate the bindings from the new headers, in
+   `third_party/libghostty-rs/libghostty-vt-sys`:
+   `GHOSTTY_INCLUDE_DIR=<ghostty-install>/include cargo run --features
+   bindgen-tool --bin gen-bindings`, then `cargo fmt` there. It needs
+   libclang (`LIBCLANG_PATH`; the `libclang` PyPI wheel works without root)
+   and, on Fedora, `BINDGEN_EXTRA_CLANG_ARGS=-I/usr/lib/gcc/x86_64-redhat-linux/<N>/include`
+   for `stddef.h`. Diff the old and new bindings for removed or changed
+   functions, callback types and struct fields (a changed callback type
+   still compiles), and fix the wrapper.
 4. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES` and
    friends) and run the slow gate.

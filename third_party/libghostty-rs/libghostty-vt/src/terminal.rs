@@ -241,18 +241,10 @@ pub struct Options {
     pub cols: u16,
     /// Terminal height in cells. Must be greater than zero.
     pub rows: u16,
-    /// Maximum number of lines to keep in scrollback history.
+    /// Maximum scrollback allocation in bytes (despite the 0.2.2 docs, which
+    /// said lines). Applied with [`Terminal::set_scrollback_max_bytes`]; zero
+    /// disables scrollback.
     pub max_scrollback: usize,
-}
-
-impl From<Options> for ffi::TerminalOptions {
-    fn from(value: Options) -> Self {
-        Self {
-            cols: value.cols,
-            rows: value.rows,
-            max_scrollback: value.max_scrollback,
-        }
-    }
 }
 
 /// Default visual style used when the cursor style is reset.
@@ -291,12 +283,15 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     unsafe fn new_inner(alloc: *const ffi::Allocator, opts: Options) -> Result<Self> {
         let mut raw: ffi::Terminal = std::ptr::null_mut();
-        let result = unsafe { ffi::ghostty_terminal_new(alloc, &raw mut raw, opts.into()) };
+        let result =
+            unsafe { ffi::ghostty_terminal_new(alloc, &raw mut raw, opts.cols, opts.rows) };
         from_result(result)?;
-        Ok(Self {
+        let mut term = Self {
             inner: Object::new(raw)?,
             vtable: Box::new(VTable::default()),
-        })
+        };
+        term.set_scrollback_max_bytes(Some(opts.max_scrollback))?;
+        Ok(term)
     }
 
     /// Write VT-encoded data to the terminal for processing.
@@ -445,18 +440,34 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     /// Get the current value of a terminal mode.
     pub fn mode(&self, mode: Mode) -> Result<bool> {
-        let mut value = false;
+        let mut mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value: false,
+        };
         let result = unsafe {
-            ffi::ghostty_terminal_mode_get(self.inner.as_raw(), mode.into(), &raw mut value)
+            ffi::ghostty_terminal_get(
+                self.inner.as_raw(),
+                Data::MODE,
+                (&raw mut mode).cast::<std::ffi::c_void>(),
+            )
         };
         from_result(result)?;
-        Ok(value)
+        Ok(mode.value)
     }
 
     /// Set the value of a terminal mode.
     pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
-        let result =
-            unsafe { ffi::ghostty_terminal_mode_set(self.inner.as_raw(), mode.into(), value) };
+        let mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value,
+        };
+        let result = unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.as_raw(),
+                Opt::MODE,
+                (&raw const mode).cast::<std::ffi::c_void>(),
+            )
+        };
         from_result(result)?;
         Ok(self)
     }
@@ -641,6 +652,23 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///  The number of scrollback rows (total rows minus viewport rows).
     pub fn scrollback_rows(&self) -> Result<usize> {
         self.get(Data::SCROLLBACK_ROWS)
+    }
+
+    /// The configured maximum scrollback allocation in bytes; `None` when
+    /// unlimited.
+    pub fn scrollback_max_bytes(&self) -> Result<Option<usize>> {
+        self.get_optional(Data::SCROLLBACK_MAX_BYTES)
+    }
+
+    /// Set the maximum scrollback allocation in bytes.
+    ///
+    /// Ghostty prunes whole pages (about 400 KB), so the limit holds to
+    /// within a page. Lowering it immediately removes eligible complete
+    /// history pages. Zero disables scrollback and erases retained history;
+    /// `None` removes the limit.
+    pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())?;
+        Ok(self)
     }
 
     /// The effective foreground color (override or default).
@@ -1706,12 +1734,30 @@ handlers! {
         tag = CLIPBOARD_WRITE,
         from = GhosttyTerminalClipboardWriteFn(
             write: *const ffi::ClipboardWrite
-        ) -> ffi::ClipboardWriteResult::Type,
+        ),
         to = <'t>ClipboardWriteFn(ClipboardWrite<'t>) -> std::result::Result<(), ClipboardWriteError>,
     ) |term, func| {
-        match func(&term, unsafe { ClipboardWrite::from_raw(write) }) {
+        // Ghostty now takes the answer through the request's `reply`
+        // function instead of a return value; returning without a reply
+        // denies the write.
+        let result = match func(&term, unsafe { ClipboardWrite::from_raw(write) }) {
             Ok(_) => ffi::ClipboardWriteResult::SUCCESS,
-            Err(e) => e.into()
+            Err(e) => e.into(),
+        };
+        let reply = ffi::ClipboardWriteReply {
+            size: std::mem::size_of::<ffi::ClipboardWriteReply>(),
+            result,
+            remember: false,
+        };
+        // SAFETY: `write` is valid for the callback; `reply` (a member the
+        // size check proves present) is Ghostty's own answer function.
+        unsafe {
+            let size = (*write).size;
+            let end = std::mem::offset_of!(ffi::ClipboardWrite, reply)
+                + std::mem::size_of::<ffi::ClipboardWriteReplyFn>();
+            if size >= end && let Some(answer) = (*write).reply {
+                answer(write, &raw const reply);
+            }
         }
     }
 }
@@ -1860,6 +1906,47 @@ mod tests {
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/other\x1b\\");
         assert_eq!(callback_count.get(), 2);
         assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/other");
+    }
+
+    /// The clipboard-write result reaches Ghostty through the request's
+    /// `reply` function (vendored change); Ghostty reports it back to the
+    /// program as an OSC 5522 status.
+    #[test]
+    fn clipboard_write_result_is_replied() {
+        for (result, status) in [
+            (Ok(()), "DONE"),
+            (Err(ClipboardWriteError::Denied), "EPERM"),
+            (Err(ClipboardWriteError::Busy), "EBUSY"),
+        ] {
+            let written: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+            let data: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+            let mut terminal = Terminal::new(Options {
+                cols: 80,
+                rows: 24,
+                max_scrollback: 0,
+            })
+            .expect("terminal should initialize");
+            terminal
+                .on_pty_write(|_, bytes| written.borrow_mut().extend_from_slice(bytes))
+                .expect("callback should register")
+                .on_clipboard_write(|_, write| {
+                    for c in write.contents() {
+                        data.borrow_mut().extend_from_slice(c.data.as_bytes());
+                    }
+                    result
+                })
+                .expect("callback should register");
+            terminal.vt_write(
+                b"\x1b]5522;type=write\x1b\\\
+                  \x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;R2hvc3Q=\x1b\\\
+                  \x1b]5522;type=wdata\x1b\\",
+            );
+            assert_eq!(*data.borrow(), b"Ghost");
+            assert_eq!(
+                *written.borrow(),
+                format!("\x1b]5522;type=write:status={status}\x1b\\").as_bytes()
+            );
+        }
     }
 
     #[test]
@@ -2098,6 +2185,7 @@ mod miri_soundness {
             location: ffi::ClipboardLocation::STANDARD,
             contents: std::ptr::null(),
             contents_len: 0,
+            ..Default::default()
         };
         // SAFETY: `raw` outlives the borrow, matching the callback contract.
         let write = unsafe { ClipboardWrite::from_raw(&raw) };

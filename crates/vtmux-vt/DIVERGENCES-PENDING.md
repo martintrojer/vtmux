@@ -49,7 +49,7 @@ and the probes from `review_vt_wrap`.
 ## P5. Ghostty retains history by bytes, not lines
 
 - No golden (memory only, plus the widening case below).
-- libghostty-vt 0.2.2 has no trim-by-lines API and `max_scrollback` is bytes.
+- Ghostty caps history in bytes or in page-granular lines, never exactly in lines.
   `PaneTerm` sets a byte budget from a design width of `max(2*cols, 256)` and
   models tmux's `hsize` itself (`PaneTerm::feed`), hiding the excess. Narrow panes
   keep more rows in RAM than `history-limit`. A pane widened beyond twice its
