@@ -5,8 +5,10 @@
 //! size) follows tmux 3.8, read from `input.c`, `format.c` and `screen.c`.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use libghostty_vt::screen::{Screen, TrackedGridRef};
 use libghostty_vt::terminal::{
@@ -16,6 +18,14 @@ use libghostty_vt::terminal::{
 use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
+
+/// Where a history row is read from.
+pub(crate) enum HistoryRow<'a> {
+    /// Row of Ghostty's active screen (history included).
+    Screen(usize),
+    /// The primary history copied when the alternate screen came up.
+    Frozen(&'a FrozenRow),
+}
 
 /// Pixel size of one cell in XTWINOPS replies: tmux's `DEFAULT_XPIXEL` and
 /// `DEFAULT_YPIXEL` (tmux.h:122-123), used when no client reports a size.
@@ -47,6 +57,17 @@ pub struct PaneTerm {
     history_lines: usize,
     /// tmux's `hsize` for the primary grid, modelled (see [`PaneTerm::feed`]).
     hsize: usize,
+    /// Rows ever scrolled into the primary history: the newest history row
+    /// has id `scrolled - 1` (tmux's `hscrolled`, never reduced by
+    /// collection), so a history row keeps its id while more scroll in.
+    scrolled: u64,
+    /// Changes whenever history ids stop naming the same rows: a clear,
+    /// a reset or a resize (tmux's `scroll_generation`, which a clear bumps).
+    generation: u64,
+    /// When each retained history row scrolled in (`grid_line_time`), the
+    /// first entry for history id `times_base`.
+    times: VecDeque<i64>,
+    times_base: u64,
     /// Tracked pin on the first active row, re-armed before every piece fed,
     /// to count the rows a piece scrolled into history.
     pin: Option<TrackedGridRef>,
@@ -144,6 +165,10 @@ impl PaneTerm {
             title_override,
             history_lines,
             hsize: 0,
+            scrolled: 0,
+            generation: 0,
+            times: VecDeque::new(),
+            times_base: 0,
             pin: None,
             scan: AltModeScanner::default(),
             frozen: None,
@@ -198,6 +223,9 @@ impl PaneTerm {
                         self.clear_primary_history = true;
                     }
                     _ => {}
+                }
+                if matches!(e, ScanEvent::ClearHistory | ScanEvent::Reset) {
+                    self.generation += 1;
                 }
                 self.feed_piece(&bytes[i..=i]);
                 i += 1;
@@ -278,6 +306,60 @@ impl PaneTerm {
         // count unknown; assume everything retained is new.
         let scrolled = retained.saturating_sub(above_pin.unwrap_or(0));
         self.hsize = tmux_hsize(self.hsize, self.history_lines, scrolled).min(retained);
+        self.scrolled += scrolled as u64;
+        if scrolled > 0 {
+            // grid_line_set_time: the server loop's `current_time`.
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+            self.times.extend(std::iter::repeat_n(now, scrolled));
+            while self.times.len() > retained {
+                self.times.pop_front();
+                self.times_base += 1;
+            }
+            self.times_base = self.times_base.max(self.scrolled - self.times.len() as u64);
+        }
+    }
+
+    /// The id of history row `y` (`0..history_size()`, oldest first), stable
+    /// while more rows scroll in, until [`PaneTerm::history_generation`]
+    /// changes.
+    #[must_use]
+    pub fn history_id(&self, y: usize) -> u64 {
+        (self.scrolled + y as u64).saturating_sub(self.history_size() as u64)
+    }
+
+    /// See [`PaneTerm::history_id`].
+    #[must_use]
+    pub fn history_generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// When history row `id` scrolled in, seconds since the epoch, 0 when
+    /// unknown (`grid_line_time`).
+    #[must_use]
+    pub fn history_time(&self, id: u64) -> i64 {
+        id.checked_sub(self.times_base)
+            .and_then(|i| self.times.get(usize::try_from(i).ok()?))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// History row `id` while it is still retained: the primary screen's,
+    /// or the copy taken when the alternate screen came up.
+    pub(crate) fn history_screen_row(&self, id: u64) -> Option<HistoryRow<'_>> {
+        let back = usize::try_from(self.scrolled.checked_sub(id)?).ok()?;
+        if back == 0 {
+            return None;
+        }
+        if self.alternate_on() {
+            let frozen = self.frozen.as_ref()?;
+            return frozen
+                .get(frozen.len().checked_sub(back)?)
+                .map(HistoryRow::Frozen);
+        }
+        let retained = self.term.scrollback_rows().unwrap_or(0);
+        retained.checked_sub(back).map(HistoryRow::Screen)
     }
 
     /// Copy the newest `hsize` primary history rows.
@@ -311,7 +393,11 @@ impl PaneTerm {
             // the frozen copy is not reflowed.)
             let after = self.term.scrollback_rows().unwrap_or(0);
             self.hsize = (self.hsize + after).saturating_sub(before).min(after);
+            self.scrolled = (self.scrolled + after as u64).saturating_sub(before as u64);
+            self.times.clear();
+            self.times_base = self.scrolled;
         }
+        self.generation += 1;
     }
 
     /// Width in cells.

@@ -9,7 +9,7 @@ use libghostty_vt::screen::{CellContentTag, CellWide, GridRef};
 use libghostty_vt::terminal::{Point, PointCoordinate};
 
 use crate::snapshot::{Cell, Color, Style, Underline};
-use crate::term::PaneTerm;
+use crate::term::{HistoryRow, PaneTerm};
 
 /// One end of the captured range, as `-S` / `-E` give it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,6 +191,21 @@ impl Row {
 }
 
 impl PaneTerm {
+    /// History row `id` (see [`PaneTerm::history_id`]) while it is still
+    /// retained.
+    #[must_use]
+    pub fn history_row(&self, id: u64) -> Option<Row> {
+        let cols = usize::from(self.cols());
+        let (cells, wrapped) = match self.history_screen_row(id)? {
+            HistoryRow::Screen(y) => read_screen_row(&self.term, y, cols),
+            HistoryRow::Frozen(f) => f.thaw(),
+        };
+        Some(Row {
+            cells: cells.iter().map(RowCell::to_cell).collect(),
+            wrapped,
+        })
+    }
+
     /// Row `y` of tmux's grid: `0..history_size()` is history, oldest
     /// first, then the visible rows. While the alternate screen is up the
     /// history is the primary screen's, copied on entry. Out of range is an
@@ -627,9 +642,22 @@ mod tests {
         assert!(!t.row(4).wrapped);
         assert_eq!(t.row(4).text(), "gh");
         assert_eq!(t.row(5), Row::default());
+        // History ids stay with their rows as more scroll in.
+        let id = t.history_id(1);
+        assert_eq!(t.history_row(id).unwrap().text(), "l1");
+        assert!(t.history_time(id) > 0);
+        t.feed(b"\r\nx\r\ny");
+        assert_eq!(t.history_size(), 4);
+        assert_eq!(t.history_row(id).unwrap().text(), "l1");
+        assert_eq!(t.history_id(1), id);
+        assert!(t.history_row(t.history_id(4)).is_none());
         // The primary history stays readable under the alternate screen.
         t.feed(b"\x1b[?1049h");
         assert_eq!(t.row(1).text(), "l1");
+        assert_eq!(t.history_row(id).unwrap().text(), "l1");
+        let generation = t.history_generation();
+        t.feed(b"\x1b[3J");
+        assert_ne!(t.history_generation(), generation);
     }
 
     #[test]
