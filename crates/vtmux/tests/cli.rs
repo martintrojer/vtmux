@@ -1430,7 +1430,7 @@ fn run_shell_cli() {
 fn run_shell_non_utf8_output() {
     compare("run_shell_non_utf8_output", |w| {
         let hex = |r: Run, bytes: &[u8]| {
-            let mut seen = Run::seen(bytes.iter().map(|b| format!("{b:02x}")).collect());
+            let mut seen = Run::seen(format!("{bytes:02x?}"));
             seen.stderr = r.stderr;
             seen.code = r.code;
             seen
