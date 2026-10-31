@@ -278,7 +278,7 @@ impl KeyBindings {
         }
         let commands = match (&args.positionals[1], count) {
             (ArgValue::Commands(list), 2) => list.clone(),
-            (ArgValue::Str(text) | ArgValue::Bytes { text, .. }, 2) => parse_string(text, env)?,
+            (ArgValue::Str(text), 2) => parse_string(text, env)?,
             _ => CommandList {
                 calls: parse_argv_values(&args.positionals[1..])?,
             },

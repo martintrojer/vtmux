@@ -47,7 +47,11 @@ fn shell_argv(shell: &Path, argv: &[String]) -> Vec<Vec<u8>> {
         .as_bytes()
         .to_vec();
     if let [command] = argv {
-        vec![base, b"-c".to_vec(), command.as_bytes().to_vec()]
+        vec![
+            base,
+            b"-c".to_vec(),
+            vtmux_core::rawstr::to_bytes(command).into_owned(),
+        ]
     } else {
         let mut login = b"-".to_vec();
         login.extend_from_slice(&base);
@@ -60,7 +64,10 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     // Everything the child needs is built before fork.
     let direct = spec.argv.len() > 1;
     let words: Vec<Vec<u8>> = if direct {
-        spec.argv.iter().map(|a| a.as_bytes().to_vec()).collect()
+        spec.argv
+            .iter()
+            .map(|a| vtmux_core::rawstr::to_bytes(a).into_owned())
+            .collect()
     } else {
         shell_argv(&spec.shell, &spec.argv)
     };
@@ -92,7 +99,7 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
         .env
         .iter()
         .filter(|(k, _)| !k.is_empty() && !k.contains('=') && k != "PWD")
-        .map(|(k, v)| cstring(format!("{k}={v}").as_bytes()))
+        .map(|(k, v)| cstring(&vtmux_core::rawstr::to_bytes(&format!("{k}={v}"))))
         .collect::<io::Result<_>>()?;
     let pwds: Vec<CString> = dirs
         .iter()
@@ -382,7 +389,7 @@ pub fn foreground_name(master: &OwnedFd) -> Option<String> {
     let pgrp = rustix::termios::tcgetpgrp(master).ok()?;
     let cmdline = std::fs::read(format!("/proc/{}/cmdline", pgrp.as_raw_nonzero())).ok()?;
     let first = cmdline.split(|b| *b == 0).next()?;
-    Some(String::from_utf8_lossy(first).into_owned())
+    Some(vtmux_core::rawstr::from_bytes(first))
 }
 
 /// `osdep_get_cwd` (osdep-linux.c:64-89): the foreground process group's

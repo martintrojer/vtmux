@@ -97,7 +97,7 @@ impl Eval<'_> {
             };
         }
         if post.length {
-            v = v.len().to_string();
+            v = crate::rawstr::byte_len(&v).to_string();
         }
         if post.width {
             v = text::width(&v).to_string();

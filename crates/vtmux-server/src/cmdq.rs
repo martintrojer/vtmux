@@ -619,8 +619,9 @@ impl Server {
         let Some(id) = item.client else { return };
         for out in std::mem::take(&mut item.output) {
             if let Output::Stderr(line) = out {
-                let text = String::from_utf8_lossy(&line);
-                let mut msg = text.trim_end_matches('\n').to_owned();
+                let text = vtmux_core::rawstr::from_bytes(&line);
+                let mut msg =
+                    vtmux_core::rawstr::to_lossy(text.trim_end_matches('\n')).into_owned();
                 // cmdq_error: `*msg = toupper(*msg)`.
                 if let Some(first) = msg.get(..1) {
                     let upper = first.to_ascii_uppercase();

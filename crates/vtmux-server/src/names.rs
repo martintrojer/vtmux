@@ -13,7 +13,7 @@ use unicode_width::UnicodeWidthChar;
 #[must_use]
 pub fn check_name(name: &str) -> bool {
     name.chars()
-        .all(|c| !c.is_ascii() || (' '..='~').contains(&c))
+        .all(|c| !vtmux_core::rawstr::is_raw(c) && (!c.is_ascii() || (' '..='~').contains(&c)))
 }
 
 /// `vis(3)` with `VIS_OCTAL|VIS_CSTYLE|VIS_TAB|VIS_NL` over a string that
@@ -33,6 +33,13 @@ pub fn vis(s: &str) -> String {
             '\u{b}' => out.push_str("\\v"),
             '\u{c}' => out.push_str("\\f"),
             '\0' => out.push_str("\\000"),
+            c if vtmux_core::rawstr::is_raw(c) => {
+                let _ = write!(
+                    out,
+                    "\\{:03o}",
+                    vtmux_core::rawstr::to_bytes(&c.to_string())[0]
+                );
+            }
             c if c.is_ascii_control() => {
                 let _ = write!(out, "\\{:03o}", u32::from(c));
             }
@@ -162,7 +169,9 @@ pub fn stringify_argv(argv: &[String]) -> String {
 pub fn utf8_sanitize(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if c.is_ascii() {
+        if vtmux_core::rawstr::is_raw(c) {
+            out.push('_');
+        } else if c.is_ascii() {
             out.push(if (' '..='~').contains(&c) { c } else { '_' });
         } else {
             for _ in 0..c.width().unwrap_or(0) {

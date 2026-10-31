@@ -4,6 +4,7 @@
 
 use super::parse::skip;
 use super::wcwidth::char_width;
+use crate::rawstr::is_raw;
 use std::fmt::Write as _;
 
 /// `format_leading_hashes` (format-draw.c:648): the run of `#`s at `i`, its drawn
@@ -30,7 +31,10 @@ fn char_at(s: &str, i: usize) -> char {
 /// What one non-`#` character adds to a width: `Some(w)` for a drawn character, `None`
 /// for an ASCII control byte that format-draw.c skips.
 fn drawn_width(c: char) -> Option<usize> {
-    if c.is_ascii() {
+    if is_raw(c) {
+        // A byte that is not UTF-8 is skipped (not copied, no width).
+        None
+    } else if c.is_ascii() {
         (' '..='~').contains(&c).then_some(1)
     } else {
         Some(char_width(c))
@@ -57,11 +61,40 @@ pub fn width(s: &str) -> usize {
             }
         } else {
             let c = char_at(s, i);
-            total += drawn_width(c).unwrap_or(0);
-            i += c.len_utf8();
+            if is_raw(c) {
+                // `format_width` has no re-scan: a lead byte takes the whole
+                // sequence it announces (utf8_open size), valid or not.
+                i += skip_sequence(s, i);
+            } else {
+                total += drawn_width(c).unwrap_or(0);
+                i += c.len_utf8();
+            }
         }
     }
     total
+}
+
+/// How many bytes of `s` from `i` (on a raw character) `format_width`
+/// consumes: `utf8_open`'s size for a lead byte, else the one byte.
+fn skip_sequence(s: &str, i: usize) -> usize {
+    let lead = crate::rawstr::to_bytes(&char_at(s, i).to_string())[0];
+    let size = match lead {
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => 1,
+    };
+    // `size` bytes of the text: whole characters, a split one ends with it.
+    let mut bytes = 0;
+    let mut end = i;
+    for c in s[i..].chars() {
+        if bytes >= size {
+            break;
+        }
+        bytes += if is_raw(c) { 1 } else { c.len_utf8() };
+        end += c.len_utf8();
+    }
+    end - i
 }
 
 /// `format_trim_left` (format-draw.c:1139): the first `limit` columns of `s`.
@@ -148,7 +181,11 @@ pub fn trim_right(s: &str, limit: usize) -> String {
 fn cstr_width(s: &str) -> usize {
     s.chars()
         .map(|c| {
-            if c.is_ascii() {
+            if is_raw(c) {
+                // `utf8_cstrwidth` tests `*s > 0x1f` on a signed char: a
+                // byte that is not UTF-8 is negative, so it has no width.
+                0
+            } else if c.is_ascii() {
                 usize::from(c > '\x1f' && c != '\x7f')
             } else {
                 char_width(c)
@@ -292,6 +329,9 @@ fn vis(s: &str, dq: bool) -> String {
             '\x0c' => out.push_str("\\f"),
             c if c.is_ascii() && !(' '..='~').contains(&c) => {
                 let _ = write!(out, "\\{:03o}", u32::from(c));
+            }
+            c if is_raw(c) => {
+                let _ = write!(out, "\\{:03o}", crate::rawstr::to_bytes(&c.to_string())[0]);
             }
             c => out.push(c),
         }

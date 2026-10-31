@@ -47,7 +47,7 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
         .as_bytes();
     let argv0 = cstring(base)?;
     let dash_c = cstring(b"-c")?;
-    let command = cstring(spec.command.as_bytes())?;
+    let command = cstring(&vtmux_core::rawstr::to_bytes(&spec.command))?;
     let argv = [
         argv0.as_ptr(),
         dash_c.as_ptr(),
@@ -75,7 +75,7 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
         .env
         .iter()
         .filter(|(k, _)| !k.is_empty() && !k.contains('=') && (spec.cwd.is_none() || k != "PWD"))
-        .map(|(k, v)| cstring(format!("{k}={v}").as_bytes()))
+        .map(|(k, v)| cstring(&vtmux_core::rawstr::to_bytes(&format!("{k}={v}"))))
         .collect::<io::Result<_>>()?;
     let mut envp: Vec<*const libc::c_char> = env.iter().map(|e| e.as_ptr()).collect();
     let pwd_slot = envp.len();

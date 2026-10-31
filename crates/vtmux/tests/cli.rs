@@ -3548,25 +3548,60 @@ impl World {
 
     /// `run` with raw (possibly non-UTF-8) command words.
     fn run_bytes(&self, args: &[&[u8]]) -> Run {
+        self.run_io(args, None)
+    }
+
+    /// `run_bytes` with `input` on stdin. Stdout and stderr are compared as
+    /// escaped bytes, so a lossy decode cannot hide a difference; the time
+    /// and command number of a control guard line (server-wide counters)
+    /// are blanked.
+    fn run_io(&self, args: &[&[u8]], input: Option<&[u8]>) -> Run {
+        use std::io::Write as _;
         use std::os::unix::ffi::OsStrExt;
         let mut full: Vec<&std::ffi::OsStr> = ["-L", &self.label, "-f", "/dev/null"]
             .into_iter()
             .map(std::ffi::OsStr::new)
             .collect();
         full.extend(args.iter().map(|a| std::ffi::OsStr::from_bytes(a)));
-        let out = Command::new(&self.bin)
+        let mut child = Command::new(&self.bin)
             .args(full)
             .current_dir(self.dir())
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
             .env("TMUX_TMPDIR", self.dir())
             .env("SHELL", "/bin/sh")
-            .output()
-            .expect("run binary");
+            .stdin(if input.is_some() {
+                std::process::Stdio::piped()
+            } else {
+                std::process::Stdio::null()
+            })
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn binary");
+        if let Some(input) = input {
+            child.stdin.take().unwrap().write_all(input).unwrap();
+        }
+        let out = child.wait_with_output().expect("wait");
+        let guards = |s: String| -> String {
+            s.split_inclusive("\\n")
+                .map(|l| {
+                    let mut f = l.split(' ');
+                    match (f.next(), f.next(), f.next(), f.next()) {
+                        (
+                            Some(k @ ("%begin" | "%end" | "%error")),
+                            Some(_),
+                            Some(_),
+                            Some(rest),
+                        ) => format!("{k} T N {rest}"),
+                        _ => l.to_owned(),
+                    }
+                })
+                .collect()
+        };
         Run {
-            // Bytes, escaped, so a lossy decode cannot hide a difference.
-            stdout: out.stdout.escape_ascii().to_string(),
-            stderr: self.normalise(&String::from_utf8_lossy(&out.stderr)),
+            stdout: self.normalise(&guards(out.stdout.escape_ascii().to_string())),
+            stderr: self.normalise(&out.stderr.escape_ascii().to_string()),
             code: out.status.code().unwrap_or(-1),
         }
     }
@@ -3990,5 +4025,138 @@ fn hooks_exit_signal() {
         run(&["show", "-gv", "@log"]);
         run(&["kill-server"]);
         out
+    });
+}
+
+/// Words that are not UTF-8 are bytes end to end, as tmux's C strings are
+/// (reviewer-44, `low_non_utf_8_bytes_in_a_command_string`): argv, `run -C`,
+/// `source-file`, a control client's stdin, `if-shell`, and the `\377` /
+/// `\U` escapes of the config grammar all print the raw bytes.
+#[test]
+fn non_utf8_bytes_in_command_strings() {
+    compare("non_utf8_bytes_in_command_strings", |w| {
+        // reference: T display -p "c$(printf '\351')" | od -c  -> c 351
+        let file = w.dir().join("f");
+        std::fs::write(
+            &file,
+            b"display -p \"c\\351\"\ndisplay -p \\U00110000\ndisplay -p \\U7fffffff\n\
+              display -p \\U80000000\nA=x\\377y\ndisplay -p \"$A\"\n\
+              %if \"\\377\"\ndisplay -p yes\n%endif\nrun -C \"display -p \\\"z\\351\\\"\"\n",
+        )
+        .unwrap();
+        let f = file.to_str().unwrap().as_bytes().to_vec();
+        vec![
+            w.run(&["new", "-d", "-s", "s", "cat"]),
+            w.run_bytes(&[b"display", b"-p", b"c\xe9"]),
+            w.run_bytes(&[b"run", b"-C", b"display -p \"c\\351\""]),
+            w.run_bytes(&[b"run", b"-C", b"display -p \"c\xe9\""]),
+            w.run_bytes(&[b"source", &f]),
+            w.run_bytes(&[b"source", b"-nv", &f]),
+            w.run_bytes(&[b"if", b"-F", b"1", b"display -p x\xe9"]),
+            w.run_bytes(&[b"if", b"-F", b"x\xe9", b"display -p yes"]),
+            w.run_bytes(&[b"display", b"-p", b"\\U00110000"]),
+            // A bad flag byte is reported as the byte.
+            w.run_bytes(&[b"display", b"-\xe9"]),
+            // Printed back as the command was written: octal for each byte.
+            w.run_bytes(&[b"bind", b"-T", b"foo", b"x", b"display", b"a\xff"]),
+            w.run_bytes(&[b"list-keys", b"-T", b"foo"]),
+            w.run_io(
+                &[b"-C", b"attach", b"-t", b"s"],
+                Some(b"display -p ok\ndisplay -p c\xe9\nnosuchcmd\n"),
+            ),
+        ]
+    });
+}
+
+/// Option values, user options, environment and buffers hold raw bytes, and
+/// formats see them as C strings: `n` counts bytes, `w` and `=` skip bytes
+/// that are not UTF-8, `p` pads by `utf8_cstrwidth`, `.` and `m/r` never
+/// match one (reviewer-40, `low_non_utf_8_window_buffer_names_are`).
+#[test]
+fn non_utf8_bytes_through_options_and_formats() {
+    compare("non_utf8_bytes_through_options_and_formats", |w| {
+        let o: &[u8] = b"a\xffb\xc3\xa9c";
+        let mut steps = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+        steps.push(w.run_bytes(&[b"display", b"-p", o]));
+        steps.push(w.run_bytes(&[b"set", b"-g", b"@o", o]));
+        steps.push(w.run_bytes(&[b"show", b"-g", b"@o"]));
+        steps.push(w.run_bytes(&[b"show", b"-gv", b"@o"]));
+        steps.push(w.run_bytes(&[b"set-environment", b"-g", b"FOO", o]));
+        steps.push(w.run_bytes(&[b"show-environment", b"-g", b"FOO"]));
+        steps.push(w.run_bytes(&[b"display", b"-p", b"#{FOO}"]));
+        steps.push(w.run_bytes(&[b"set-buffer", o]));
+        steps.push(w.run_bytes(&[b"list-buffers", b"-F", b"#{buffer_sample}|#{buffer_full}"]));
+        // reference: set -gF @f '<fmt>'; show -gv @f
+        for f in [
+            "#{=3:@o}",
+            "#{=-3:@o}",
+            "#{=/3/..:@o}",
+            "#{p8:@o}|",
+            "#{p-8:@o}|",
+            "#{w:@o}",
+            "#{n:@o}",
+            "#{b:@o}",
+            "#{q/e:@o}",
+            "#{s/b/Z/:@o}",
+            "#{s/./Z/:@o}",
+            "#{m/r:a.b,#{@o}}",
+            "#{m:a?b*,#{@o}}",
+            "#{R:#{@o},2}",
+            "#{==:#{@o},#{@o}}",
+            "#{?#{@o},Y,N}",
+        ] {
+            steps.push(w.run(&["set", "-gF", "@f", f]));
+            steps.push(w.run_bytes(&[b"show", b"-gv", b"@f"]));
+        }
+        // Truncated, padded and counted characters around lone lead bytes.
+        for v in [
+            &b"\xe4"[..],
+            b"\xe4\xb8",
+            b"\xe4\xb8x",
+            b"a\xe4\xb8x",
+            b"\xe4\xb8\xad",
+            b"\xf0\x9f\x98",
+            b"\x80",
+            b"\xc0\x80",
+        ] {
+            steps.push(w.run_bytes(&[b"set", b"-g", b"@o", v]));
+            for f in [
+                &b"#{n:@o}"[..],
+                b"#{w:@o}",
+                b"#{=2:@o}",
+                b"#{=-2:@o}",
+                b"#{p4:@o}|",
+                b"#{s/./x/:@o}",
+                b"#{m:?,#{@o}}",
+                b"#{m/r:^.$,#{@o}}",
+            ] {
+                steps.push(w.run_bytes(&[b"display", b"-p", f]));
+            }
+        }
+        steps
+    });
+}
+
+/// Names must be valid UTF-8 (tmux.c `check_name`): `new-window -n`,
+/// `rename-window`, `rename-session`, `new-session -s`, `set-buffer -b` and
+/// `-n` fail with `invalid ... name` and the raw bytes; nothing is created.
+#[test]
+fn non_utf8_names_are_rejected() {
+    compare("non_utf8_names_are_rejected", |w| {
+        let bad: &[u8] = b"n\xff";
+        vec![
+            w.run(&["new", "-d", "-s", "s", "-n", "w", "cat"]),
+            w.run_bytes(&[b"new-window", b"-d", b"-n", bad]),
+            w.run_bytes(&[b"new-window", b"-d", b"-n", b"a\xff\xc3\xa9"]),
+            w.run_bytes(&[b"rename-window", bad]),
+            w.run_bytes(&[b"rename-session", bad]),
+            w.run_bytes(&[b"new-session", b"-d", b"-s", bad]),
+            w.run_bytes(&[b"set-buffer", b"-b", bad, b"v"]),
+            w.run_bytes(&[b"set-buffer", b"-b", b"ok", b"v"]),
+            w.run_bytes(&[b"set-buffer", b"-b", b"ok", b"-n", bad]),
+            w.run(&["list-windows", "-F", "#{window_name}"]),
+            w.run(&["list-sessions", "-F", "#{session_name}"]),
+            w.run(&["list-buffers", "-F", "#{buffer_name}"]),
+        ]
     });
 }

@@ -20,14 +20,9 @@ use crate::error::EdgeError;
 /// arguments.c): text, or a parsed `{ ... }` block (`ARGS_COMMANDS`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArgValue {
+    /// Text. A byte that is not UTF-8 is one reserved character
+    /// ([`crate::rawstr`]): tmux's arguments are C strings.
     Str(String),
-    /// A command-line word that is not UTF-8: its lossy `text`, which
-    /// every text accessor sees, and the `raw` bytes. tmux's arguments are
-    /// C strings, so `set-buffer` stores the raw bytes as given.
-    Bytes {
-        text: String,
-        raw: Vec<u8>,
-    },
     Commands(CommandList),
 }
 
@@ -36,35 +31,15 @@ impl ArgValue {
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Self::Str(s) | Self::Bytes { text: s, .. } => Some(s),
+            Self::Str(s) => Some(s),
             Self::Commands(_) => None,
         }
     }
 
-    /// A command-line word: [`Self::Str`] when it is UTF-8, else
-    /// [`Self::Bytes`].
+    /// A command-line word, bytes as the client received them.
     #[must_use]
     pub fn from_bytes(word: Vec<u8>) -> Self {
-        match String::from_utf8(word) {
-            Ok(s) => Self::Str(s),
-            Err(e) => {
-                let raw = e.into_bytes();
-                Self::Bytes {
-                    text: String::from_utf8_lossy(&raw).into_owned(),
-                    raw,
-                }
-            }
-        }
-    }
-
-    /// The raw bytes of a string argument; `None` for a block.
-    #[must_use]
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Self::Str(s) => Some(s.as_bytes()),
-            Self::Bytes { raw, .. } => Some(raw),
-            Self::Commands(_) => None,
-        }
+        Self::Str(crate::rawstr::from_vec(word))
     }
 
     /// `args_value_as_string` (arguments.c:100-115): a block is its printed
@@ -72,7 +47,7 @@ impl ArgValue {
     #[must_use]
     pub fn text(&self) -> Cow<'_, str> {
         match self {
-            Self::Str(s) | Self::Bytes { text: s, .. } => Cow::Borrowed(s),
+            Self::Str(s) => Cow::Borrowed(s),
             Self::Commands(list) => Cow::Owned(list.print(super::PrintFlags::default())),
         }
     }
@@ -259,10 +234,11 @@ impl Args {
     /// commands).
     #[must_use]
     pub fn positional_bytes(&self, idx: usize) -> Option<Cow<'_, [u8]>> {
-        let value = self.positionals.get(idx)?;
-        Some(match value.as_bytes() {
-            Some(b) => Cow::Borrowed(b),
-            None => Cow::Owned(value.text().into_owned().into_bytes()),
+        Some(match self.positionals.get(idx)? {
+            ArgValue::Str(s) => crate::rawstr::to_bytes(s),
+            block @ ArgValue::Commands(_) => {
+                Cow::Owned(crate::rawstr::to_bytes(&block.text()).into_owned())
+            }
         })
     }
 
@@ -355,7 +331,14 @@ fn parse_flags(
     let name = entry.name.to_owned();
     let mut pos = 1;
     while pos < word.len() {
-        let flag = word[pos];
+        let mut flag = word[pos];
+        // A byte that was not UTF-8 is the reserved character that stands
+        // for it: report the byte, as tmux does.
+        if let Some(c) = word_str[pos..].chars().next()
+            && crate::rawstr::is_raw(c)
+        {
+            flag = crate::rawstr::to_bytes(&c.to_string())[0];
+        }
         pos += 1;
         if flag == b'?' {
             // No message: cmd_parse prints `usage: name usage` (cmd.c:520).

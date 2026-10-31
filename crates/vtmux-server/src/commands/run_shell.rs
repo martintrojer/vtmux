@@ -49,7 +49,7 @@ impl Done {
     /// (cmd-run-shell.c:211-213, cmd-if-shell.c:157-160).
     fn error(&self, server: &mut Server, msg: &str) {
         if let Some(step) = self.step {
-            let line = msg.as_bytes().to_vec();
+            let line = vtmux_core::rawstr::to_bytes(msg).into_owned();
             server.cmdq_with_item(step, |server, item| item.error(server, line));
         } else if let Some(c) = self.client {
             let mut msg = msg.to_owned();
@@ -130,7 +130,7 @@ fn make_commands(
     match vtmux_core::cmd::parse_string(&text, &mut env) {
         Ok(list) => Ok(list.calls),
         Err(e) => {
-            let msg = String::from_utf8_lossy(&crate::cmdq::error_bytes(&e)).into_owned();
+            let msg = vtmux_core::rawstr::from_bytes(&crate::cmdq::error_bytes(&e));
             Err(match source {
                 Some(src) => format!("{}:{}: {msg}", src.file, src.line),
                 None => msg,

@@ -236,7 +236,10 @@ impl Regex {
                 vec![]
             }),
             Expr::Any | Expr::Bracket(_) => {
+                // glibc's `.` and brackets never match a byte that is not
+                // UTF-8 (a reserved character, `rawstr`).
                 if let Some(c) = next
+                    && !crate::rawstr::is_raw(c)
                     && (matches!(expr, Expr::Any)
                         || matches!(expr, Expr::Bracket(b) if b.matches(c, self.ignore_case)))
                 {

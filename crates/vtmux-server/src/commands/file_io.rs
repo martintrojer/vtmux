@@ -279,7 +279,7 @@ impl Server {
         }
         let op = self.files.remove(&id).expect("checked above");
         if let Err(msg) = finish(self, op) {
-            item.error(self, msg.into_bytes());
+            item.error(self, vtmux_core::rawstr::to_bytes(&msg).into_owned());
         }
         // Control output goes into the stream before the next guard.
         self.control_take_output(id, item);
