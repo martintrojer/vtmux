@@ -116,3 +116,11 @@ product reasons" category.
 - vtmux behaviour: Ghostty stores a tab as the blank cells it moved over (`d_tab_capture`, vt P4), so copy mode copies spaces; word movement still treats them as whitespace, so cursor positions agree. Ghostty prints U+0085 as a cell of its own (`#{cursor_x}` 6 vs tmux 5 after `xa\302\205b c`), so next-word over it stops one column later.
 - Evidence: `printf 'aa\tbb'` then `capture-pane -p`: tmux `aa^Ibb`, vtmux `aa      bb`; `printf 'xa\302\205b c'` then `display -p '#{cursor_x}'`: tmux 5, vtmux 6.
 - Category: Deferred (grid-level, D4 arbiter not run; the tab case follows `d_tab_capture`)
+
+### D-012: a new window's first automatic-rename check waits one name interval
+
+- Test / assertion: cli.rs `initial_window_name_is_the_command` (vtmux only; the reference's outcome is not repeatable, so it cannot be compared).
+- tmux behaviour: `spawn_window` sets the name from `default_window_name` (the command's first word), and `check_window_name` (names.c) runs at the end of the same loop turn, with no `name_time` yet. `#{pane_current_command}` then reads the foreground process of the new PTY, which is usually still the forked server (`tmux`) and sometimes the shell before it execs or the command itself. So `new -d -s a cat; neww -d cat; neww -d cat` gives `tmux`, `cat` and `sh` in different runs (20 runs: 10 `tmux/tmux/tmux`, 6 `tmux/tmux/cat`, 2 `cat/cat/tmux`, 2 `tmux/cat/cat`), and `window-renamed` fires for the ones that lose. A window that prints nothing keeps the wrong name.
+- vtmux behaviour: the window's name clock starts at creation, so the first check comes one `NAME_INTERVAL` (500 ms) later, when the command has exec'd. The window keeps the name from `default_window_name` (`cat`) or settles on the command's `argv[0]` (`sleep` for `sh -c 'exec sleep 5'`), and no spurious `window-renamed` or `%window-renamed` fires at start.
+- Evidence: 30 runs of `new -d -s a cat; neww -d cat; neww -d; neww -d sleep 4; neww -d 'exec sleep 5'` with SHELL=/bin/sh give `cat/cat/sh/sleep/sleep` every time; before the change `sh/cat/...` mixes. Reference runs of the same script vary as above.
+- Category: Do not copy tmux bug (the name depends on a scheduler race).

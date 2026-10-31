@@ -2207,6 +2207,36 @@ fn windows_spawn_and_names() {
     });
 }
 
+/// A window's first automatic-rename check must see the command, not the
+/// shell that is about to exec it: `new -d -s a cat; neww -d cat` named the
+/// windows `sh` (tmux's check races the exec the same way, but names them
+/// `tmux`, `cat` or `sh` run to run, so D-012 pins the settled outcome
+/// instead of comparing). Reference probe, SHELL=/bin/sh, isolated:
+/// `new -d -s a cat; neww -d cat; neww -d cat; sleep 2; lsw -F
+/// '#{window_name} #{pane_current_command}'` is `tmux cat` for the windows
+/// that lost the race and `cat cat` for the ones that won; none is `sh`.
+#[test]
+fn initial_window_name_is_the_command() {
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a", "cat"]);
+    for _ in 0..5 {
+        w.run(&["neww", "-d", "cat"]);
+    }
+    w.run(&["neww", "-d"]);
+    w.run(&["neww", "-d", "sh", "-c", "exec sleep 101"]);
+    // Past two name intervals: every check that is going to run has run.
+    std::thread::sleep(Duration::from_millis(1500));
+    let names = w.run(&[
+        "lsw",
+        "-F",
+        "#{window_name} #{pane_current_command} #{automatic-rename}",
+    ]);
+    assert_eq!(
+        names.stdout,
+        "cat cat 1\n".repeat(6) + "sh sh 1\nsleep sleep 1\n"
+    );
+}
+
 /// Runs each argv in order (all through `World::run`).
 fn steps(w: &World, steps: &[&[&str]]) -> Vec<Run> {
     steps.iter().map(|a| w.run(a)).collect()
