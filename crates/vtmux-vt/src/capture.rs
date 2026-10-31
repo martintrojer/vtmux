@@ -8,7 +8,7 @@ use libghostty_vt::error::Error;
 use libghostty_vt::screen::{CellContentTag, CellWide, GridRef};
 use libghostty_vt::terminal::{Point, PointCoordinate};
 
-use crate::snapshot::{Color, Style, Underline};
+use crate::snapshot::{Cell, Color, Style, Underline};
 use crate::term::PaneTerm;
 
 /// One end of the captured range, as `-S` / `-E` give it.
@@ -65,7 +65,9 @@ pub fn capture(term: &PaneTerm, opts: CaptureOpts) -> Vec<u8> {
     // tmux threads one `lastgc` through every line of a capture (cmd-capture-pane.c:333).
     let mut last_style = Style::default();
     for y in top..=bottom {
-        let (cells, wrapped) = read_row(term, y, hsize, cols);
+        let (mut cells, wrapped) = read_row(term, y, hsize, cols);
+        // Spacer cells are tmux's PADDING cells: skipped (grid.c:1219).
+        cells.retain(|c| !c.spacer());
         emit_row(&mut out, &cells, opts, &mut last_style);
         if !opts.join || !wrapped {
             out.push(b'\n');
@@ -96,17 +98,114 @@ fn resolve(r: LineRef, hsize: usize, last: usize, is_start: bool) -> usize {
     pos.min(last)
 }
 
-#[derive(Clone, Debug)]
+/// How a cell sits in a wide character.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Width {
+    #[default]
+    Narrow,
+    Double,
+    /// The second column of a wide character (tmux's PADDING cell).
+    SpacerTail,
+    /// The last column left empty when a wide character wrapped.
+    SpacerHead,
+}
+
+#[derive(Clone, Debug, Default)]
 pub(crate) struct RowCell {
     text: String,
     style: Style,
     /// Blank cell with no text (tmux stores a space).
     empty: bool,
+    wide: Width,
+    acs: bool,
+    link: bool,
 }
 
 impl RowCell {
     fn is_default_blank(&self) -> bool {
-        self.empty && self.style == Style::default()
+        self.empty && self.style == Style::default() && self.wide == Width::Narrow && !self.link
+    }
+
+    fn spacer(&self) -> bool {
+        matches!(self.wide, Width::SpacerTail | Width::SpacerHead)
+    }
+
+    /// The cell as the renderer sees it (as [`crate::snapshot`] reads it).
+    fn to_cell(&self) -> Cell {
+        Cell {
+            text: self.text.clone(),
+            width: match self.wide {
+                Width::Double => 2,
+                Width::SpacerTail => 0,
+                Width::Narrow | Width::SpacerHead => 1,
+            },
+            style: self.style,
+            acs: self.acs,
+            link: self.link,
+        }
+    }
+}
+
+/// One row of tmux's grid as copy mode reads it (`grid_get_line`): every
+/// column, the second column of a wide character with width 0 (tmux's
+/// PADDING cell), and whether the line wrapped onto the next
+/// (`GRID_LINE_WRAPPED`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Row {
+    pub cells: Vec<Cell>,
+    pub wrapped: bool,
+}
+
+impl Row {
+    /// `grid_line_length` (grid.c:1669-1686): one past the last cell that
+    /// is not a blank, a padding cell counting as content.
+    #[must_use]
+    pub fn length(&self) -> usize {
+        self.cells
+            .iter()
+            .rposition(|c| c.width == 0 || !(c.text.is_empty() || c.text == " "))
+            .map_or(0, |i| i + 1)
+    }
+
+    /// `grid_line_limit` (grid.c:1690-1706): the last column of the line's
+    /// content that is not padding, 0 for an empty line.
+    #[must_use]
+    pub fn limit(&self) -> usize {
+        let mut x = self.length().saturating_sub(1);
+        while x > 0 && self.cells.get(x).is_some_and(|c| c.width == 0) {
+            x -= 1;
+        }
+        x
+    }
+
+    /// The line's text up to [`Row::length`], padding skipped
+    /// (`format_grid_line`, format.c:7171-7196).
+    #[must_use]
+    pub fn text(&self) -> String {
+        self.cells[..self.length()]
+            .iter()
+            .filter(|c| c.width != 0)
+            .map(|c| if c.text.is_empty() { " " } else { &c.text })
+            .collect()
+    }
+}
+
+impl PaneTerm {
+    /// Row `y` of tmux's grid: `0..history_size()` is history, oldest
+    /// first, then the visible rows. While the alternate screen is up the
+    /// history is the primary screen's, copied on entry. Out of range is an
+    /// empty row.
+    #[must_use]
+    pub fn row(&self, y: usize) -> Row {
+        let hsize = self.history_size();
+        if y >= hsize + usize::from(self.rows()) {
+            return Row::default();
+        }
+        let (cells, wrapped) = read_row(self, y, hsize, usize::from(self.cols()));
+        Row {
+            cells: cells.iter().map(RowCell::to_cell).collect(),
+            wrapped,
+        }
     }
 }
 
@@ -139,9 +238,8 @@ impl FrozenRow {
         cells.resize(
             self.len,
             RowCell {
-                text: String::new(),
-                style: Style::default(),
                 empty: true,
+                ..RowCell::default()
             },
         );
         (cells, self.wrapped)
@@ -162,7 +260,7 @@ fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCel
     read_screen_row(&term.term, y + retained - hsize, cols)
 }
 
-/// Read one row of the active screen as tmux sees it: padding cells removed.
+/// Read one row of the active screen, spacer cells included.
 fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
     let mut cells = Vec::with_capacity(cols);
     let mut wrapped = false;
@@ -181,11 +279,18 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
                 .unwrap_or(false);
         }
         let Ok(cell) = gr.cell() else { continue };
-        // Spacer cells are tmux's PADDING cells: skipped (grid.c:1219).
-        if matches!(cell.wide(), Ok(CellWide::SpacerTail | CellWide::SpacerHead)) {
-            continue;
-        }
-        let mut style = gr.style().map(Style::from).unwrap_or_default();
+        let wide = match cell.wide() {
+            Ok(CellWide::Wide) => Width::Double,
+            Ok(CellWide::SpacerTail) => Width::SpacerTail,
+            Ok(CellWide::SpacerHead) => Width::SpacerHead,
+            _ => Width::Narrow,
+        };
+        // Most cells are unstyled: skip the style lookup for them.
+        let mut style = if cell.has_styling().unwrap_or(true) {
+            gr.style().map(Style::from).unwrap_or_default()
+        } else {
+            Style::default()
+        };
         match cell.content_tag() {
             Ok(CellContentTag::BgColorPalette) => {
                 if let Ok(i) = cell.bg_color_palette() {
@@ -199,11 +304,18 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
             }
             _ => {}
         }
-        let text = cell_text(&gr);
+        let text = if cell.has_text().unwrap_or(true) {
+            cell_text(&gr)
+        } else {
+            String::new()
+        };
         cells.push(RowCell {
             empty: text.is_empty(),
             text,
             style,
+            wide,
+            acs: cell.is_protected().unwrap_or(false),
+            link: cell.has_hyperlink().unwrap_or(false),
         });
     }
     (cells, wrapped)
@@ -495,6 +607,29 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(String::from_utf8(capture(&t, clamp)).unwrap(), "l0\nl1\n");
+    }
+
+    /// History and visible rows through one index, wide characters with a
+    /// padding cell, the wrap flag, and tmux's line length and limit.
+    #[test]
+    fn rows_cover_history_and_screen() {
+        let mut t = PaneTerm::new(6, 3, 100);
+        t.feed("l0\r\nl1\r\nab\u{4e16}  \r\nabcdefgh".as_bytes());
+        // l0 l1 history; visible "ab世", "abcdef" (wrapped), "gh".
+        assert_eq!(t.history_size(), 2);
+        assert_eq!(t.row(0).text(), "l0");
+        let wide = t.row(2);
+        assert_eq!(wide.cells.len(), 6);
+        assert_eq!((wide.cells[2].width, wide.cells[3].width), (2, 0));
+        assert_eq!((wide.length(), wide.limit()), (4, 2));
+        assert_eq!(wide.text(), "ab\u{4e16}");
+        assert!(t.row(3).wrapped);
+        assert!(!t.row(4).wrapped);
+        assert_eq!(t.row(4).text(), "gh");
+        assert_eq!(t.row(5), Row::default());
+        // The primary history stays readable under the alternate screen.
+        t.feed(b"\x1b[?1049h");
+        assert_eq!(t.row(1).text(), "l1");
     }
 
     #[test]
