@@ -17,7 +17,7 @@ use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
 use signal_hook::consts::{SIGCHLD, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
-use vtmux_core::cmd::{self, CmdError, CommandCall, ConfigEnv};
+use vtmux_core::cmd::{self, CmdError, ConfigEnv};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::layout::{Geometry, Layout as CoreLayout, WindowPanes};
@@ -139,13 +139,6 @@ impl Unacked {
     }
 }
 
-/// A batch whose client is blocked (`CMDQ_WAITING`): the item so far and
-/// the commands after the blocking one.
-struct Parked {
-    item: Item,
-    rest: Vec<CommandCall>,
-}
-
 /// What a new pane needs ([`Server::spawn_pane`]).
 #[derive(Debug)]
 pub struct PaneSpawn<'a> {
@@ -219,8 +212,9 @@ pub struct Server {
     pub global_env: Environ,
     /// `kill-server` ran: exit once replies are out.
     pub shutdown: bool,
-    /// Nesting of `source-file` (cmd-source-file.c depth limit).
-    pub source_depth: usize,
+    /// Nesting of `source-file`: with no client (cmd-source-file.c
+    /// `cmd_source_file_depth`) and per client (`c->source_file_depth`).
+    pub source_depths: BTreeMap<Option<ClientId>, usize>,
     /// Errors from config files, shown to the first client
     /// (cfg.c `cfg_add_cause`).
     pub causes: Vec<String>,
@@ -235,19 +229,25 @@ pub struct Server {
     pub(crate) cmd_number: u32,
     config: ServerConfig,
     config_loaded: bool,
+    /// `cfg_finished`: the startup config has run.
+    pub(crate) cfg_finished: bool,
+    /// `cfg_client` (the client that started the server, whose directory
+    /// jobs use while the config loads) and `cfg_item` (its waiting step).
+    pub(crate) cfg_client: Option<ClientId>,
+    pub(crate) cfg_wait: Option<crate::cmdq::StepId>,
+    /// Every command queue (cmd-queue.c).
+    pub(crate) cmdq: crate::cmdq::Cmdq,
+    /// Keys a command handed to a client go in after this step
+    /// (`server_client_handle_key_after`).
+    pub(crate) key_after: Option<crate::cmdq::StepId>,
     /// Panes that still had output when their read budget ran out. mio is
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
     backlog: std::collections::BTreeSet<PaneId>,
     /// `wait-for` channels.
     pub waits: WaitChannels,
-    /// Blocked batches, one per client at most.
-    parked: BTreeMap<ClientId, Parked>,
     /// The file operation a parked batch waits for (file.c `client_file`).
     pub(crate) files: BTreeMap<ClientId, commands::file_io::FileOp>,
-    /// Clients woken this turn (`cmdq_continue`); their batches resume at
-    /// the end of the turn, as tmux resumes them in its next `cmdq_next`.
-    woken: Vec<ClientId>,
     /// Every key table (`key_tables`), the 3.8 defaults loaded at start.
     pub key_bindings: vtmux_core::keys::KeyBindings,
     /// Keys `send-keys -K` handed to a client, handled after the command
@@ -404,7 +404,7 @@ impl Server {
             info: ServerInfo::new(socket.to_string_lossy().into_owned()),
             global_env,
             shutdown: false,
-            source_depth: 0,
+            source_depths: BTreeMap::new(),
             causes: Vec::new(),
             socket,
             poll,
@@ -415,11 +415,14 @@ impl Server {
             cmd_number: 0,
             config,
             config_loaded: false,
+            cfg_finished: false,
+            cfg_client: None,
+            cfg_wait: None,
+            cmdq: crate::cmdq::Cmdq::default(),
+            key_after: None,
             backlog: std::collections::BTreeSet::new(),
             waits: WaitChannels::default(),
-            parked: BTreeMap::new(),
             files: BTreeMap::new(),
-            woken: Vec::new(),
             key_bindings: vtmux_core::keys::KeyBindings::with_defaults(),
             injected_keys: Vec::new(),
         })
@@ -470,7 +473,7 @@ impl Server {
             for id in ids {
                 let _ = self.on_client_input(id, &[]);
             }
-            self.resume_woken();
+            self.cmdq_process();
             self.check_window_names();
             self.check_window_resizes();
             self.apply_redraws();
@@ -480,8 +483,10 @@ impl Server {
             self.control_tick();
             if self.wants_flush() {
                 // server_loop / server_send_exit: release every waiter.
-                self.woken.extend(self.waits.flush());
-                self.resume_woken();
+                for c in self.waits.flush() {
+                    self.wake(c);
+                }
+                self.cmdq_process();
             }
             if self.should_exit() {
                 self.exit_clients();
@@ -510,9 +515,10 @@ impl Server {
     }
 
     fn own_timeout(&self) -> Option<Duration> {
-        if !self.backlog.is_empty() || !self.woken.is_empty() {
+        if !self.backlog.is_empty() || self.cmdq.runnable() {
             return Some(Duration::ZERO);
         }
+
         if let Some(deadline) = self
             .clients
             .values()
@@ -682,7 +688,7 @@ impl Server {
             let _ = self.poll.registry().deregister(&mut c.stream);
         }
         self.waits.client_lost(id);
-        self.parked.remove(&id);
+        self.cmdq_client_lost(id);
         self.attached_lost(id);
         // server-client.c:564.
         self.recalculate_sizes();
@@ -734,57 +740,6 @@ impl Server {
         }
     }
 
-    /// `cmdq_continue`: the client's blocked batch resumes at the end of
-    /// this turn.
-    pub fn wake(&mut self, id: ClientId) {
-        self.woken.push(id);
-    }
-
-    fn resume_woken(&mut self) {
-        while !self.woken.is_empty() {
-            for id in std::mem::take(&mut self.woken) {
-                let Some(mut p) = self.parked.remove(&id) else {
-                    continue;
-                };
-                if !self.file_resume(id, &mut p.item) {
-                    // Still reading or writing: woken again by FileDone.
-                    self.parked.insert(id, p);
-                    continue;
-                }
-                if self.resume_conts(&mut p.item) {
-                    // Blocked again inside a source-file.
-                    if p.item.control.is_none() {
-                        self.send_output(id, &mut p.item);
-                    }
-                    self.parked.insert(id, p);
-                    continue;
-                }
-                let control_line = p.item.control == Some(1);
-                self.run_batch(id, p.item, p.rest);
-                if control_line && !self.parked.contains_key(&id) {
-                    self.control_read(id);
-                }
-            }
-        }
-    }
-
-    /// The `source-file` runs a woken batch was blocked inside continue,
-    /// innermost first, before the rest of the batch. Whether one blocked
-    /// again.
-    fn resume_conts(&mut self, item: &mut Item) -> bool {
-        item.can_wait = true;
-        let mut pending = std::mem::take(&mut item.conts).into_iter();
-        while let Some(cont) = pending.next() {
-            cont.drive(self, item);
-            // `drive` blocks the item and queues itself if it blocked.
-            if std::mem::take(&mut item.blocked) {
-                item.conts.extend(pending);
-                return true;
-            }
-        }
-        false
-    }
-
     /// `tty_set_selection` (tty.c:2149-2166): OSC 52 through the client
     /// terminal's `Ms`, whatever `set-clipboard` says, once its tty has
     /// started.
@@ -801,37 +756,10 @@ impl Server {
         self.send(id, &ServerMsg::Frame(bytes));
     }
 
-    /// Whether `id` has a blocked batch.
+    /// Whether client `id`'s queue has work besides the step firing now
+    /// (a control client's next stdin line waits for it).
     pub(crate) fn is_parked(&self, id: ClientId) -> bool {
-        self.parked.contains_key(&id)
-    }
-
-    /// Run a client's batch; park it if a command blocks, else hand its
-    /// results back.
-    pub(crate) fn run_batch(&mut self, id: ClientId, mut item: Item, mut calls: Vec<CommandCall>) {
-        item.can_wait = true;
-        match commands::run(self, &mut item, &calls) {
-            Some(at) => {
-                let rest = calls.split_off(at);
-                if item.control.is_none() {
-                    // What ran so far reaches the client now, as tmux
-                    // writes each command's output as it runs.
-                    self.send_output(id, &mut item);
-                }
-                self.parked.insert(id, Parked { item, rest });
-            }
-            None => match item.control {
-                Some(0) => self.control_command_done(id, item),
-                Some(_) => {
-                    // An error after the guard (file I/O, cmdq_error from
-                    // a done callback) still sets c->retval.
-                    self.control_retval(id, item.status);
-                    self.control_take_output(id, &mut item);
-                    self.control_flush(id);
-                }
-                None => self.deliver(id, item),
-            },
-        }
+        self.cmdq.busy(Some(id))
     }
 
     /// Queue a message; write what the socket takes now.
@@ -962,14 +890,13 @@ impl Server {
         item.origin = origin;
         let argv = hello.argv.clone();
         let control = hello.flags.control != vtmux_core::protocol::ControlMode::None;
-        let cwd = hello.cwd.clone();
         if let Some(c) = self.clients.get_mut(&id) {
             c.hello = Some(hello);
         }
         // The first client loads the configuration before its own command
         // runs (server-client.c:3052-3060, cfg.c start_cfg).
         if !self.config_loaded {
-            self.load_config(id, origin, &cwd);
+            self.start_cfg(id, origin);
         }
         if control {
             // The argv command runs with guard flags 0 (cmd-queue.c:594).
@@ -984,16 +911,23 @@ impl Server {
         } else {
             argv
         };
-        match cmd::parse_argv_bytes(&argv) {
-            Ok(calls) => self.run_batch(id, item, calls),
+        let end = if control {
+            crate::cmdq::End::ControlArgv
+        } else {
+            crate::cmdq::End::Client
+        };
+        let calls = match cmd::parse_argv_bytes(&argv) {
+            Ok(calls) => calls,
             Err(e) => {
                 item.error(self, cmd_error_bytes(&e));
-                self.run_batch(id, item, Vec::new());
+                Vec::new()
             }
-        }
+        };
+        self.cmdq_append(Some(id), crate::cmdq::NewBatch::new(item, calls, end));
+        self.cmdq_process();
     }
 
-    fn send_output(&mut self, id: ClientId, item: &mut Item) {
+    pub(crate) fn send_output(&mut self, id: ClientId, item: &mut Item) {
         for out in std::mem::take(&mut item.output) {
             let msg = match out {
                 Output::Stdout(b) => ServerMsg::Stdout(b),
@@ -1003,7 +937,7 @@ impl Server {
         }
     }
 
-    fn deliver(&mut self, id: ClientId, mut item: Item) {
+    pub(crate) fn deliver(&mut self, id: ClientId, mut item: Item) {
         self.send_output(id, &mut item);
         if item.after == After::Exit || self.shutdown {
             self.finish_client(id, item.status);
@@ -1851,22 +1785,59 @@ impl Server {
 
     // ------------------------------------------------------------- config
 
-    /// cfg.c `start_cfg` / `load_cfg`: each file runs with no client but
-    /// is parsed for `first`, the client that started the server (`pi.c`,
-    /// attached or not), so `%if` conditions see it; errors become causes
-    /// `file:line: message`.
-    fn load_config(&mut self, first: ClientId, origin: Origin, cwd: &Path) {
+    /// cfg.c `start_cfg` (cfg.c:64-91): the files' commands go on the
+    /// global queue with no client, parsed for `first`, the client that
+    /// started the server (`pi.c`, attached or not), so `%if` conditions
+    /// see it; errors become causes `file:line: message`. `first` waits
+    /// for them (`cfg_client_done`) before its own command.
+    fn start_cfg(&mut self, first: ClientId, origin: Origin) {
+        use crate::cmdq::{End, NewBatch, Work};
         self.config_loaded = true;
-        let files = self.config.config_files.clone();
-        let quiet = self.config.config_quiet;
-        let mut item = Item::new(None, cwd.to_owned());
+        self.cfg_client = Some(first);
+        let cwd = self
+            .clients
+            .get(&first)
+            .and_then(|c| c.hello.as_ref())
+            .map(|h| h.cwd.clone())
+            .unwrap_or_default();
+        let mut wait = NewBatch::new(Item::new(Some(first), cwd.clone()), Vec::new(), End::Quiet);
+        wait.before.push(Work::CfgClientWait);
+        self.cmdq_append(Some(first), wait);
         let opts = commands::source_file::LoadOpts {
-            quiet,
+            quiet: self.config.config_quiet,
             parse_client: Some((first, origin)),
             ..Default::default()
         };
-        for file in files {
-            commands::source_file::load(self, &mut item, &file, opts);
+        let mut item = Item::new(None, cwd);
+        let mut groups = Vec::new();
+        for file in self.config.config_files.clone() {
+            groups.extend(commands::source_file::parse(self, &mut item, &file, opts));
+        }
+        let mut batch = NewBatch::new(item, Vec::new(), End::Config);
+        batch.groups = groups;
+        self.cmdq_append(None, batch);
+    }
+
+    /// `cfg_done` (cfg.c:47-62): the config has run; the first client's
+    /// command may go.
+    pub(crate) fn cfg_done(&mut self) {
+        if self.cfg_finished {
+            return;
+        }
+        self.cfg_finished = true;
+        // cfg_show_causes(NULL) (cfg.c:239-280): the first client, if it
+        // is a control client, gets them as `%config-error`. Otherwise they
+        // wait for an attached session's view mode, which vtmux has not
+        // got: they stay queued, and the next source-file prints them.
+        if let Some(&first) = self.clients.keys().next()
+            && self.is_control(first)
+        {
+            for cause in std::mem::take(&mut self.causes) {
+                self.control_config_error(first, &cause);
+            }
+        }
+        if let Some(step) = self.cfg_wait.take() {
+            self.cmdq_continue(step);
         }
     }
 

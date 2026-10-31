@@ -7,30 +7,38 @@
 //! later `%if` is decided. Any parse error rejects the file before a
 //! command runs. Each command's errors carry `file:line: `.
 
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use vtmux_core::cmd::{self, Args, CmdError, CommandCall, CommandList, ParseOpts, PrintFlags};
 use vtmux_core::error::{EdgeError, strerror};
 
 use super::Item;
+use crate::cmdq::{Groups, Source, Work};
 use crate::server::{GlobalEnv, Server};
 use crate::target::Found;
 
 /// `CMD_SOURCE_FILE_DEPTH_LIMIT` (cmd-source-file.c:34).
 const DEPTH_LIMIT: usize = 50;
 
+/// `cmd_source_file_exec` (cmd-source-file.c:174-273): each file's
+/// commands go into the queue right after this one, then a step that
+/// reports the causes (`cmd_source_file_complete_cb`).
 pub fn exec(
     server: &mut Server,
     item: &mut Item,
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    if server.source_depth >= DEPTH_LIMIT {
+    // Without a client the depth is global, else the client's.
+    let depth = server.source_depths.entry(item.client).or_default();
+    if *depth >= DEPTH_LIMIT {
         return Err(EdgeError::TooManyNestedFiles.into());
     }
+    *depth += 1;
     let quiet = args.flag('q');
     let mut paths = Vec::new();
+    let mut failed = false;
     for raw in &args.positionals {
         let raw = &*raw.text();
         let path = if args.flag('F') {
@@ -55,102 +63,54 @@ pub fn exec(
                 server,
                 format!("No such file or directory: {path}").into_bytes(),
             );
+            failed = true;
         }
         paths.extend(matches);
     }
     let opts = LoadOpts {
         quiet: false,
         parse_only: args.flag('n'),
-        verbose: args.flag('v'),
+        // cmd-source-file.c:211-215: not for a control client.
+        verbose: args.flag('v') && item.control.is_none(),
         parse_client: None,
     };
-    Cont {
-        opts,
-        depth: server.source_depth + 1,
-        paths: paths.into(),
-        file: None,
-        causes: Vec::new(),
+    let mut groups = Vec::new();
+    for path in paths {
+        let before = server.causes.len();
+        groups.extend(parse(server, item, &path, opts));
+        failed |= server.causes.len() > before;
     }
-    .drive(server, item);
+    let Some(step) = item.step else {
+        return Ok(());
+    };
+    let last = server.cmdq_insert_commands(step, groups).unwrap_or(step);
+    // cmd_source_file_complete: while the config loads its causes wait
+    // for cfg_show_causes, and the depth is never given back.
+    if server.cfg_finished {
+        server.cmdq_insert_work(last, Work::SourceDone { failed });
+    }
     Ok(())
 }
 
-/// A `source-file` command in progress: the files still to load and the
-/// one being run. A command that blocks the client (file I/O) parks the
-/// batch with this behind it (`cmdq_insert_after` in tmux: the file's
-/// commands queue after `source-file`, ahead of the rest of the batch).
-#[derive(Debug)]
-pub struct Cont {
-    opts: LoadOpts,
-    /// `source_depth` while this runs.
-    depth: usize,
-    paths: VecDeque<PathBuf>,
-    file: Option<FileRun>,
-    /// `server.causes` while blocked, so other clients' files don't take
-    /// them.
-    causes: Vec<String>,
-}
-
-/// A parsed file: the groups (one per line) still to run.
-#[derive(Debug)]
-struct FileRun {
-    name: String,
-    groups: VecDeque<(u32, Vec<CommandCall>)>,
-}
-
-impl Cont {
-    /// Run until done or blocked. A blocked run goes on the item's stack
-    /// (after the continuations of source-files nested in it, which run
-    /// first) and blocks the item; a finished one reports the causes
-    /// (`cmd_source_file_complete_cb` -> `cfg_print_causes`: parse errors
-    /// are printed (stdout) once every file ran; any makes the client
-    /// fail).
-    pub(crate) fn drive(mut self, server: &mut Server, item: &mut Item) {
-        let outer = std::mem::replace(&mut server.source_depth, self.depth);
-        server.causes.splice(0..0, std::mem::take(&mut self.causes));
-        let blocked = self.advance(server, item);
-        server.source_depth = outer;
-        if blocked {
-            self.causes = std::mem::take(&mut server.causes);
-            item.conts.push(self);
-            item.blocked = true;
-            return;
-        }
-        let causes = std::mem::take(&mut server.causes);
-        if !causes.is_empty() {
-            item.status = 1;
-        }
-        for cause in causes {
-            item.print(&cause);
-        }
+/// `cmd_source_file_complete_cb` (cmd-source-file.c:77-94): one level
+/// less deep, and the causes printed (`cfg_print_causes`): a control
+/// client gets `%config-error` lines, any other client stdout. A file
+/// that did not load makes an unattached client fail
+/// (cmd-source-file.c:105-108).
+pub fn done(server: &mut Server, item: &mut Item, failed: bool) {
+    if let Some(depth) = server.source_depths.get_mut(&item.client) {
+        *depth = depth.saturating_sub(1);
     }
-
-    /// Whether a command blocked (only for an item that can park).
-    fn advance(&mut self, server: &mut Server, item: &mut Item) -> bool {
-        let can_park = item.can_wait && item.client.is_some();
-        loop {
-            let Some(file) = self.file.as_mut() else {
-                let Some(path) = self.paths.pop_front() else {
-                    return false;
-                };
-                self.file = parse(server, item, &path, self.opts);
-                continue;
-            };
-            let Some((line, calls)) = file.groups.pop_front() else {
-                self.file = None;
-                continue;
-            };
-            let before = server.causes.len();
-            let blocked = super::run(server, item, &calls);
-            for cause in &mut server.causes[before..] {
-                *cause = format!("{}:{line}: {cause}", file.name);
-            }
-            if let Some(at) = blocked
-                && can_park
-            {
-                file.groups.push_front((line, calls[at..].to_vec()));
-                return true;
-            }
+    if failed
+        && let Some(c) = item.client
+        && server.client_session(c).is_none()
+    {
+        item.status = 1;
+    }
+    for cause in std::mem::take(&mut server.causes) {
+        match item.client.filter(|&c| server.is_control(c)) {
+            Some(c) => server.control_config_error(c, &cause),
+            None => item.print(&cause),
         }
     }
 }
@@ -209,28 +169,10 @@ fn glob(pattern: &Path) -> Vec<PathBuf> {
     current
 }
 
-/// Read, parse and (unless `parse_only`) run one file for `item`'s
-/// client (`None` while loading the startup config). Read and parse errors
-/// are queued as causes (`cfg_add_cause`); runtime errors go to the client
-/// as any command's do, or become `file:line:` causes without a client.
-pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
-    let cont = Cont {
-        opts,
-        depth: server.source_depth,
-        paths: VecDeque::new(),
-        file: parse(server, item, path, opts),
-        causes: Vec::new(),
-    };
-    // Nothing here can park (no client, or a key binding).
-    let outer = std::mem::replace(&mut server.source_depth, cont.depth);
-    let mut cont = cont;
-    cont.advance(server, item);
-    server.source_depth = outer;
-}
-
-/// Read and parse one file (printing it for `-v`); `None` if it failed
-/// (a cause is queued) or only parses.
-fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) -> Option<FileRun> {
+/// `load_cfg`: read and parse one file (printing it for `-v`), its
+/// groups (one per line) to queue; none if it failed (a cause is queued)
+/// or only parses.
+pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) -> Groups {
     let file = path.to_string_lossy().into_owned();
     let text = match std::fs::read(path) {
         Ok(t) => String::from_utf8_lossy(&t).into_owned(),
@@ -238,7 +180,7 @@ fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) -> O
             if !(opts.quiet && e.kind() == std::io::ErrorKind::NotFound) {
                 server.causes.push(format!("{file}: {}", strerror(&e)));
             }
-            return None;
+            return Vec::new();
         }
     };
     let parse = ParseOpts {
@@ -284,22 +226,25 @@ fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) -> O
         }
     }
     if let Err(e) = parsed {
-        let msg = match &e.error {
-            CmdError::Edge(edge) => edge.to_bytes(),
-            other => other.to_bytes(),
-        };
+        let msg = crate::cmdq::error_bytes(&e.error);
         server.causes.push(format!(
             "{file}:{}: {}",
             e.line,
             String::from_utf8_lossy(&msg)
         ));
-        return None;
+        return Vec::new();
     }
     if opts.parse_only {
-        return None;
+        return Vec::new();
     }
-    Some(FileRun {
-        name: file,
-        groups: groups.into(),
-    })
+    groups
+        .into_iter()
+        .map(|(line, calls)| {
+            let source = Rc::new(Source {
+                file: file.clone(),
+                line,
+            });
+            (Some(source), calls)
+        })
+        .collect()
 }

@@ -287,8 +287,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."if-shell-error.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."if-shell-nested.sh"]
 status = "xfail"

@@ -63,12 +63,6 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
         server.waits.wait(&name, client)
     };
     if outcome == Outcome::Block {
-        if server.source_depth > 0 {
-            // A blocked command inside source-file would need the rest of
-            // the file queued behind it; vtmux runs files in one go.
-            server.waits.wake(&name, client);
-            return Err(EdgeError::NotImplemented("wait-for inside source-file".into()).into());
-        }
         item.blocked = true;
     }
     Ok(())
