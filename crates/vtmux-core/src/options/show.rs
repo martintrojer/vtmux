@@ -82,6 +82,7 @@ pub fn apply_show(
             let parent = parent && !(key.is_none() && entry.is_array() && empty_array);
             print(
                 store,
+                tree,
                 &name,
                 entry,
                 key.as_ref(),
@@ -126,7 +127,7 @@ fn show_all(
         };
         if shown {
             print(
-                store, name, entry, None, false, hooks_cmd, printer, host, out,
+                store, tree, name, entry, None, false, hooks_cmd, printer, host, out,
             );
         }
     }
@@ -147,7 +148,7 @@ fn show_all(
             None => continue,
         };
         print(
-            store, def.name, entry, None, parent, hooks_cmd, printer, host, out,
+            store, tree, def.name, entry, None, parent, hooks_cmd, printer, host, out,
         );
     }
 }
@@ -157,6 +158,7 @@ fn show_all(
 #[allow(clippy::too_many_arguments)]
 fn print(
     store: &OptionsStore,
+    tree: TreeId,
     name: &str,
     entry: &Entry,
     key: Option<&ArrayKey>,
@@ -173,6 +175,7 @@ fn print(
                 for k in items.keys() {
                     print(
                         store,
+                        tree,
                         name,
                         entry,
                         Some(k),
@@ -237,9 +240,12 @@ fn print(
         ("option_has_array_key", flag(key.is_some())),
     ];
     if hooks_cmd {
-        // Fire counts are server state; a server that tracks them adds its
-        // own through `expand`.
-        vars.push(("hook_fire_count", "0".to_owned()));
+        // cmd-show-options.c:238-246.
+        let (count, time) = store.hook_fire_stats(tree, name);
+        vars.push(("hook_fire_count", count.to_string()));
+        if time != 0 {
+            vars.push(("hook_fire_time", time.to_string()));
+        }
     }
     out.push(host.expand(store, template, &vars));
 }

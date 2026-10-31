@@ -415,6 +415,12 @@ fn dispatch(
         "wait-for" => wait_for::exec(server, item, args),
         "run-shell" => run_shell::exec(server, item, args, found),
         "if-shell" => run_shell::if_shell(server, item, args, found),
+        "set-hook" => match set_option::exec(server, item, call, found)? {
+            // set-hook -R / -E run hooks and events: not wired yet.
+            SetOutcome::RunHook(_) => Err(EdgeError::NotImplemented("set-hook -R".into()).into()),
+            SetOutcome::FireEvent(_) => Err(EdgeError::NotImplemented("set-hook -E".into()).into()),
+            SetOutcome::Changed(_) | SetOutcome::Unchanged => Ok(()),
+        },
         "set-option" | "set-window-option" => {
             let result = set_option::exec(server, item, call, found);
             // options_push_changes (options.c:1437-1446): pane-border-status
@@ -445,7 +451,7 @@ fn dispatch(
         }
         "set-environment" => set_environment::exec(server, item, args, found),
         "show-environment" => show_environment::exec(server, item, args, found),
-        "show-options" | "show-window-options" => {
+        "show-options" | "show-window-options" | "show-hooks" => {
             show_options::exec(server, item, call, found).map_err(Into::into)
         }
         "attach-session" => {

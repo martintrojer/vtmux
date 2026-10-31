@@ -190,12 +190,12 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("server-access", None, "adglrw", 0, Some(1), "[-adglrw] [-t target-pane] [user|group]", None, None, false, false),
     cmd("set-buffer", Some("setb"), "ab:t:n:w", 0, Some(1), "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]", None, None, false, true),
     cmd("set-environment", Some("setenv"), "Fhgrt:u", 1, Some(2), "[-Fhgru] [-t target-session] variable [value]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, true),
-    cmd("set-hook", None, "agpERTt:uB:w", 0, Some(2), "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
+    cmd("set-hook", None, "agpERTt:uB:w", 0, Some(2), "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("set-option", Some("set"), "aFgopqst:uUw", 1, Some(2), "[-aFgopqsuUw] [-t target-pane] option [value]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("set-window-option", Some("setw"), "aFgoqt:u", 1, Some(2), "[-aFgoqu] [-t target-window] option [value]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, true),
     cmd("show-buffer", Some("showb"), "b:", 0, Some(0), "[-b buffer-name]", None, None, false, true),
     cmd("show-environment", Some("showenv"), "hgst:", 0, Some(1), "[-hgs] [-t target-session] [variable]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, true),
-    cmd("show-hooks", None, "BF:gpt:w", 0, Some(1), "[-Bgpw] [-F format] [-t target-pane] [hook]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, false),
+    cmd("show-hooks", None, "BF:gpt:w", 0, Some(1), "[-Bgpw] [-F format] [-t target-pane] [hook]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("show-messages", Some("showmsgs"), "JTt:", 0, Some(0), "[-JT] [-t target-client]", None, None, false, false),
     cmd("show-options", Some("show"), "AgF:Hpqst:vw", 0, Some(1), "[-AgHpqsvw] [-F format] [-t target-pane] [option]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("show-prompt-history", Some("showphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, false),
@@ -265,7 +265,70 @@ pub const DEFAULT_COMMAND_ALIASES: [(&str, &str); 6] = [
     ("choose-session", "choose-tree -s"),
 ];
 
+/// The commands with `CMD_AFTERHOOK`: the queue fires `after-<name>` once
+/// they succeed (cmd-queue.c:625-639). new-session, new-window,
+/// select-pane, select-window and split-window fire it themselves, with
+/// their own target.
+const AFTER_HOOK: &[&str] = &[
+    "bind-key",
+    "capture-pane",
+    "clear-history",
+    "display-panes",
+    "copy-mode",
+    "clock-mode",
+    "display-menu",
+    "display-popup",
+    "display-message",
+    "kill-pane",
+    "list-buffers",
+    "list-clients",
+    "list-commands",
+    "list-keys",
+    "list-panes",
+    "list-sessions",
+    "list-windows",
+    "load-buffer",
+    "lock-server",
+    "lock-session",
+    "lock-client",
+    "paste-buffer",
+    "pipe-pane",
+    "refresh-client",
+    "rename-session",
+    "rename-window",
+    "resize-pane",
+    "resize-window",
+    "save-buffer",
+    "show-buffer",
+    "select-layout",
+    "next-layout",
+    "previous-layout",
+    "send-keys",
+    "send-prefix",
+    "set-buffer",
+    "delete-buffer",
+    "set-environment",
+    "set-option",
+    "set-window-option",
+    "set-hook",
+    "show-environment",
+    "show-messages",
+    "show-options",
+    "show-window-options",
+    "show-hooks",
+    "show-prompt-history",
+    "clear-prompt-history",
+    "swap-window",
+    "unbind-key",
+];
+
 impl CmdEntry {
+    /// Whether the queue fires `after-<name>` for this command.
+    #[must_use]
+    pub fn after_hook(&self) -> bool {
+        AFTER_HOOK.contains(&self.name)
+    }
+
     /// The error for running a command vtmux has not implemented.
     pub fn ensure_implemented(&self) -> Result<(), CmdError> {
         if self.implemented {
@@ -346,7 +409,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 65);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 67);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

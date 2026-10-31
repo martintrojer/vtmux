@@ -993,7 +993,7 @@ fn options_user_scopes() {
 
 /// Re-run the core's reference probes at the server boundary. Generating
 /// invocations: crates/vtmux-core/tests/options_cases.sh (isolated new -d
-/// -s s, then each 0x1f-delimited argv). Hook commands belong to later work.
+/// -s s, then each 0x1f-delimited argv), set-hook and show-hooks included.
 #[test]
 fn options_core_probes_over_cli() {
     let mut checked = 0;
@@ -1007,10 +1007,13 @@ fn options_core_probes_over_cli() {
             .filter_map(|line| line.strip_prefix("$ "))
             .map(|line| line.split('\x1f').collect())
             .collect();
-        if commands
-            .iter()
-            .any(|argv| matches!(argv[0], "set-hook" | "show-hooks"))
-        {
+        // TODO(hooks): set-hook -R / -E need the event layer.
+        if commands.iter().any(|argv| {
+            argv[0] == "set-hook"
+                && argv
+                    .iter()
+                    .any(|a| a.starts_with('-') && a.contains(['R', 'E']))
+        }) {
             continue;
         }
         compare(name, |w| {
@@ -1026,7 +1029,7 @@ fn options_core_probes_over_cli() {
         });
         checked += 1;
     }
-    assert_eq!(checked, 48);
+    assert_eq!(checked, 51);
 }
 
 /// For a name `options_parse` rejects, `options_match` returns without

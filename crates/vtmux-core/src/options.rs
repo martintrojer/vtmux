@@ -200,6 +200,9 @@ pub struct OptionsStore {
     /// User options set with `set-hook` (`hooks_add_event`), which
     /// `show-options` hides without `-H`.
     hook_events: BTreeSet<String>,
+    /// `o->fire_count` and `o->fire_time` of the hooks that have run, by
+    /// the tree that holds them (`options_hook_fired`).
+    hook_fires: HashMap<(TreeId, String), (u32, i64)>,
     /// `TMUX_TERM`, the default `-u` restores to `default-terminal`.
     term: String,
 }
@@ -221,6 +224,7 @@ impl OptionsStore {
             panes: HashMap::new(),
             pane_window: HashMap::new(),
             hook_events: BTreeSet::new(),
+            hook_fires: HashMap::new(),
             term: defaults.term.clone(),
         };
         for def in table::table() {
@@ -365,6 +369,36 @@ impl OptionsStore {
             .collect();
         panes.sort_unstable();
         panes
+    }
+
+    /// The tree `name` is read from when looked up in `id` (`options_get`).
+    #[must_use]
+    pub fn holder(&self, id: TreeId, name: &str) -> Option<TreeId> {
+        let mut at = Some(id);
+        while let Some(t) = at {
+            if self.tree(t).get_only(name).is_some() {
+                return Some(t);
+            }
+            at = self.parent(t);
+        }
+        None
+    }
+
+    /// `options_hook_fired`: hook `name` in tree `tree` ran at `now`.
+    pub fn hook_fired(&mut self, tree: TreeId, name: &str, now: i64) {
+        let e = self.hook_fires.entry((tree, name.to_owned())).or_default();
+        e.0 += 1;
+        e.1 = now;
+    }
+
+    /// `options_get_fire_count` and `options_get_fire_time` of the hook
+    /// `name` as seen from `tree`.
+    #[must_use]
+    pub fn hook_fire_stats(&self, tree: TreeId, name: &str) -> (u32, i64) {
+        self.holder(tree, name)
+            .and_then(|t| self.hook_fires.get(&(t, name.to_owned())))
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Whether `set-hook` has made `name` a hook event.

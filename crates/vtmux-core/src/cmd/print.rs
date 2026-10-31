@@ -78,6 +78,15 @@ impl CommandCall {
     }
 }
 
+impl CommandCall {
+    /// `args_print` alone: the flags and arguments, as `#{hook_arguments}`
+    /// shows them (cmd-queue.c `cmdq_insert_hook`).
+    #[must_use]
+    pub fn print_args(&self) -> String {
+        args_print(self)
+    }
+}
+
 /// `args_print`. The flags are a tree keyed by flag byte, so both passes
 /// walk them in byte order.
 fn args_print(call: &CommandCall) -> String {
