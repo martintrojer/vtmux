@@ -383,6 +383,7 @@ impl PaneTerm {
     /// Only if libghostty fails to allocate.
     pub fn resize(&mut self, cols: u16, rows: u16) {
         let before = self.term.scrollback_rows().unwrap_or(0);
+        let same_width = cols.max(1) == self.cols();
         let on_primary = !self.alternate_on();
         self.term
             .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
@@ -393,9 +394,31 @@ impl PaneTerm {
             // the frozen copy is not reflowed.)
             let after = self.term.scrollback_rows().unwrap_or(0);
             self.hsize = (self.hsize + after).saturating_sub(before).min(after);
-            self.scrolled = (self.scrolled + after as u64).saturating_sub(before as u64);
-            self.times.clear();
-            self.times_base = self.scrolled;
+            let scrolled = (self.scrolled + after as u64).saturating_sub(before as u64);
+            if same_width {
+                // No reflow: history rows keep their ids and times; rows a
+                // shorter screen pushed into history have none
+                // (screen_resize_y, screen.c:449-455), rows a taller one
+                // pulled back lose theirs.
+                if scrolled >= self.scrolled {
+                    let pushed = usize::try_from(scrolled - self.scrolled).unwrap_or(0);
+                    self.times.extend(std::iter::repeat_n(0, pushed));
+                } else {
+                    let pulled = usize::try_from(self.scrolled - scrolled).unwrap_or(0);
+                    self.times.truncate(self.times.len().saturating_sub(pulled));
+                }
+                while self.times.len() > after {
+                    self.times.pop_front();
+                    self.times_base += 1;
+                }
+                self.scrolled = scrolled;
+                self.times_base = self.times_base.max(self.scrolled - self.times.len() as u64);
+            } else {
+                // Ghostty's reflow does not say which row went where.
+                self.scrolled = scrolled;
+                self.times.clear();
+                self.times_base = self.scrolled;
+            }
         }
         self.generation += 1;
     }
