@@ -240,7 +240,7 @@ impl Sim {
                 Err(e) => return self.errs.push(format!("adjustment {e}")),
             }
         }
-        if let Err(e) = self.layout.resize_pane_cmd(target, &req) {
+        if let Err(e) = self.layout.resize_pane_cmd(target, &req, &mut 0) {
             self.errs.push(e);
         }
     }

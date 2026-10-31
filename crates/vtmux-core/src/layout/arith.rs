@@ -780,25 +780,27 @@ impl Layout {
     }
 
     /// `layout_resize_pane_to`: set the size of the pane's cell (or its
-    /// nearest ancestor that splits along `dir`) to `new_size`.
-    pub fn resize_pane_to(&mut self, pane: PaneId, dir: Dir, new_size: u32) {
+    /// nearest ancestor that splits along `dir`) to `new_size`. Whether it
+    /// got as far as `layout_resize_layout`, which tmux ends with a
+    /// window-layout-changed event (layout.c:1002).
+    pub fn resize_pane_to(&mut self, pane: PaneId, dir: Dir, new_size: u32) -> bool {
         let Some(path) = self.root.find_pane(pane) else {
-            return;
+            return false;
         };
         let Some(k) = self.splitting_ancestor(&path, dir) else {
-            return;
+            return false;
         };
         let lc_path = &path[..=k];
         let size = to_i32(self.root.get(lc_path).g().size(dir));
         let Cell::Node(parent) = self.root.get(&path[..k]) else {
-            return;
+            return false;
         };
         let change = if last_tiled(&parent.children) == Some(path[k]) {
             size.wrapping_sub(to_i32(new_size))
         } else {
             to_i32(new_size).wrapping_sub(size)
         };
-        self.resize_pane(pane, dir, change, true);
+        self.resize_pane(pane, dir, change, true)
     }
 
     /// The depth `k` such that the node at `path[..k]` splits along `dir`
@@ -809,25 +811,27 @@ impl Layout {
             .find(|&k| matches!(self.root.get(&path[..k]), Cell::Node(n) if n.dir == dir))
     }
 
-    /// `layout_resize_pane`: grow (positive) or shrink the pane.
-    pub fn resize_pane(&mut self, pane: PaneId, dir: Dir, change: i32, opposite: bool) {
+    /// `layout_resize_pane`: grow (positive) or shrink the pane. Whether it
+    /// reached `layout_resize_layout`, as [`Self::resize_pane_to`].
+    pub fn resize_pane(&mut self, pane: PaneId, dir: Dir, change: i32, opposite: bool) -> bool {
         let Some(path) = self.root.find_pane(pane) else {
-            return;
+            return false;
         };
         let Some(k) = self.splitting_ancestor(&path, dir) else {
-            return;
+            return false;
         };
         let Cell::Node(parent) = self.root.get(&path[..k]) else {
-            return;
+            return false;
         };
         let mut idx = path[k];
         if last_tiled(&parent.children) == Some(idx) {
             match neighbour_dir(&parent.children, idx, false) {
                 Some(i) => idx = i,
-                None => return,
+                None => return false,
             }
         }
         self.resize_layout(&path[..k], idx, dir, change, opposite);
+        true
     }
 
     /// `layout_resize_layout` for child `idx` of the node at `parent_path`.
@@ -1148,8 +1152,15 @@ impl Layout {
     }
 
     /// `resize-pane -x/-y/-U/-D/-L/-R` for `pane` (cmd-resize-pane.c:110-188).
-    /// `Err` is the message `cmdq_error` prints.
-    pub fn resize_pane_cmd(&mut self, pane: PaneId, req: &ResizeRequest) -> Result<(), String> {
+    /// `Err` is the message `cmdq_error` prints. `resized` counts the
+    /// `layout_resize_layout` runs, each a window-layout-changed event in
+    /// tmux (layout.c:1002), including those before an error.
+    pub fn resize_pane_cmd(
+        &mut self,
+        pane: PaneId,
+        req: &ResizeRequest,
+        resized: &mut u32,
+    ) -> Result<(), String> {
         let path = self.root.find_pane(pane).ok_or("pane not in the layout")?;
         let floating = self.root.get(&path).is_floating();
         let (wsx, wsy) = (i64::from(self.sx), i64::from(self.sy));
@@ -1160,7 +1171,7 @@ impl Layout {
                 self.resize_floating_to(pane, Dir::LeftRight, x as u32)
                     .map_err(|e| format!("size {e}"))?;
             } else {
-                self.resize_pane_to(pane, Dir::LeftRight, x as u32);
+                *resized += u32::from(self.resize_pane_to(pane, Dir::LeftRight, x as u32));
             }
         }
         if let Some(v) = &req.y {
@@ -1182,7 +1193,7 @@ impl Layout {
                 self.resize_floating_to(pane, Dir::TopBottom, y as u32)
                     .map_err(|e| format!("size {e}"))?;
             } else {
-                self.resize_pane_to(pane, Dir::TopBottom, y as u32);
+                *resized += u32::from(self.resize_pane_to(pane, Dir::TopBottom, y as u32));
             }
         }
         // tmux never resets `opposite` between flags.
@@ -1205,7 +1216,7 @@ impl Layout {
                 } else {
                     adjust
                 };
-                self.resize_pane(pane, dir, adjust, true);
+                *resized += u32::from(self.resize_pane(pane, dir, adjust, true));
             }
         }
         if !path.is_empty() {

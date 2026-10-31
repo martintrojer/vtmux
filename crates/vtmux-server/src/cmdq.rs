@@ -523,6 +523,13 @@ impl Server {
                     }
                     self.cmd_formats.clone_from(&st.formats);
                 }
+                // cmdq_merge_formats (cmd-queue.c:294-303): `command` is the
+                // running command's name, under the state's own formats (an
+                // after-* hook's `command` is the hooked command's).
+                if !self.cmd_formats.iter().any(|(k, _)| k == "command") {
+                    self.cmd_formats
+                        .push(("command".to_owned(), call.entry.name.to_owned()));
+                }
                 let ok = commands::fire(self, &mut item, &call);
                 self.info.current_file = outer;
                 self.cmd_formats.clear();
