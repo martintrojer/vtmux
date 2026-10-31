@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/vtmux-core","crates/vtmux-vt","crates/vtmux-server","crates/vtmux-client","crates/vtmux","xtask"]
+# Vendored libghostty-rs (see third_party/libghostty-rs/VENDOR.md): path
+# dependencies, kept out of the workspace so its lints and fmt do not apply.
+exclude = ["third_party"]
 
 [workspace.package]
 version = "0.0.0"
