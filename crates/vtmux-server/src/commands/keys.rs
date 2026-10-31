@@ -41,7 +41,10 @@ fn keep_client_tables(server: &mut Server) {
 pub fn bind_or_unbind(server: &mut Server, call: &CommandCall) -> Result<(), CmdError> {
     let mut bindings = std::mem::take(&mut server.key_bindings);
     let result = bindings
-        .execute(call, &mut GlobalEnv(&mut server.global_env))
+        .execute(
+            call,
+            &mut GlobalEnv::new(&mut server.global_env, &server.model, &server.info),
+        )
         .expect("a key command");
     server.key_bindings = bindings;
     keep_client_tables(server);

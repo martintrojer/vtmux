@@ -22,7 +22,7 @@ pub fn exec(
         &mut Host {
             model: &server.model,
             info: &server.info,
-            env: GlobalEnv(&mut server.global_env),
+            env: GlobalEnv::new(&mut server.global_env, &server.model, &server.info),
             found,
             clients,
             client,

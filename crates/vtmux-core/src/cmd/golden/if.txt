@@ -1,0 +1,604 @@
+### true
+%if 1
+display a
+%endif
+---
+F:2: display-message a
+exit=0
+%%
+### false
+%if 0
+display a
+%endif
+display b
+---
+F:4: display-message b
+exit=0
+%%
+### else
+%if 0
+display a
+%else
+display b
+%endif
+---
+F:4: display-message b
+exit=0
+%%
+### elif-chain
+%if 0
+display a
+%elif 0
+display b
+%elif 1
+display c
+%elif 1
+display d
+%else
+display e
+%endif
+---
+F:6: display-message c
+exit=0
+%%
+### elif-none
+%if 0
+display a
+%elif 0
+display b
+%endif
+display z
+---
+F:6: display-message z
+exit=0
+%%
+### elif-first-wins
+%if 1
+display a
+%elif 1
+display b
+%else
+display c
+%endif
+---
+F:2: display-message a
+exit=0
+%%
+### nested
+%if 1
+%if 0
+display a
+%elif 1
+display b
+%else
+display c
+%endif
+display d
+%endif
+---
+F:5: display-message b
+F:9: display-message d
+exit=0
+%%
+### nested-in-false
+%if 0
+%if 1
+display a
+%endif
+%else
+display b
+%endif
+---
+F:6: display-message b
+exit=0
+%%
+### two-blocks
+%if 1
+display a
+%endif
+%if 1
+display b
+%endif
+display c
+---
+F:2: display-message a
+F:5: display-message b
+F:7: display-message c
+exit=0
+%%
+### empty-line-branch
+%if 1
+
+%endif
+---
+exit=0
+%%
+### comments
+%if 1 # c
+display a
+%endif # c
+---
+F:2: display-message a
+exit=0
+%%
+### quoted-newline
+%if 1
+display "a
+b"
+%endif
+---
+F:3: display-message a\nb
+exit=0
+%%
+### format-unquoted
+%if #{==:a,a}
+display yes
+%endif
+---
+F:2: display-message yes
+exit=0
+%%
+### format-unquoted-space
+%if #{==:a, b}
+display yes
+%else
+display no
+%endif
+---
+F:4: display-message no
+exit=0
+%%
+### format-quoted
+%if "#{!=:a,b}"
+display yes
+%endif
+---
+F:2: display-message yes
+exit=0
+%%
+### format-arith
+%if #{e|+:1,1}
+display yes
+%endif
+---
+F:2: display-message yes
+exit=0
+%%
+### format-zero
+%if "#{e|-:1,1}"
+display yes
+%else
+display no
+%endif
+---
+F:4: display-message no
+exit=0
+%%
+### quoted-words
+%if "a b"
+display yes
+%endif
+---
+F:2: display-message yes
+exit=0
+%%
+### vtmux-guard
+%if "#{vtmux_version}"
+display vtmux
+%else
+display tmux
+%endif
+---
+F:4: display-message tmux
+exit=0
+%%
+### vtmux-guard-unquoted
+%if #{vtmux_version}
+display vtmux
+%endif
+---
+exit=0
+%%
+### no-jobs
+%if "#(echo 1)"
+display job
+%else
+display nojob
+%endif
+---
+F:4: display-message nojob
+exit=0
+%%
+### env-var-in-condition
+T_X=1
+%if "$T_X"
+T_A=1
+%endif
+---
+T_A=1
+T_X=1
+exit=0
+%%
+### assignment-seen-by-format
+X1=1
+%if "#{X1}"
+display seen
+%endif
+---
+exit=0
+%%
+### hidden-seen-by-format
+%hidden H1=1
+%if "#{H1}"
+display seen
+%else
+display unseen
+%endif
+---
+F:5: display-message unseen
+exit=0
+%%
+### set-then-if
+set -g @q 1
+%if "#{@q}"
+display set
+%else
+display unset
+%endif
+---
+F:1: set-option -g @q 1
+F:5: display-message unset
+exit=0
+%%
+### false-unknown-command
+%if 0
+nosuchcommand -x
+display -p a b c
+%else
+display b
+%endif
+---
+F:5: display-message b
+exit=0
+%%
+### false-bad-quote
+%if 0
+display "abc
+%endif
+---
+F:4: syntax error
+exit=1
+%%
+### false-bad-tilde
+%if 0
+display ~nosuchuser
+%endif
+---
+F:2: syntax error
+exit=1
+%%
+### true-unknown-command
+%if 1
+nosuchcommand
+%endif
+---
+F:2: unknown command: nosuchcommand
+exit=1
+%%
+### inline
+display x ; %if 1 display inl %endif
+---
+F:1: display-message x ; display-message inl
+exit=0
+%%
+### inline-first
+%if 1 display a ; display b %else display c %endif ; display d
+---
+F:1: display-message a ; display-message b ; display-message d
+exit=0
+%%
+### inline-elif
+%if 0 display a %elif 1 display e %endif
+---
+F:1: display-message e
+exit=0
+%%
+### inline-two
+%if 1 display a %endif ; %if 0 display b %else display c %endif
+---
+F:1: display-message a ; display-message c
+exit=0
+%%
+### inline-nested
+%if 1 %if 0 nosuch %else display nested %endif %endif
+---
+F:1: display-message nested
+exit=0
+%%
+### inline-trailing-semi
+%if 1 display a ; %endif
+---
+F:1: display-message a
+exit=0
+%%
+### inline-middle
+display a ; %if 1 display b %endif ; display c
+---
+F:1: display-message a ; display-message b ; display-message c
+exit=0
+%%
+### inline-false-unknown
+display a ; %if 0 nosuch %endif
+---
+F:1: display-message a
+exit=0
+%%
+### block
+bind x { %if 1
+display a
+%else
+display b
+%endif
+}
+---
+F:2: display-message a
+F:2: bind-key x { display-message a }
+exit=0
+%%
+### block-close-after-endif
+bind x { %if 0
+display a
+%endif }
+---
+F:3: bind-key x {  }
+exit=0
+%%
+### block-inline
+bind x { display a ; %if 0 display b %else display c %endif }
+---
+F:1: display-message a ; display-message c
+F:1: bind-key x { display-message a ; display-message c }
+exit=0
+%%
+### block-in-branch
+%if 1
+bind x { display a
+display b }
+%endif
+display c
+---
+F:2: display-message a
+F:3: display-message b
+F:3: bind-key x { display-message a ;; display-message b }
+F:5: display-message c
+exit=0
+%%
+### env-scope
+%if 1
+T_A1=1
+%elif 1
+T_A2=1
+%else
+T_A3=1
+%endif
+%if 1
+T_B1=1
+%elif 0
+T_B2=1
+%else
+T_B3=1
+%endif
+%if 0
+T_C1=1
+%else
+T_C2=1
+%endif
+---
+T_A1=1
+T_A2=1
+T_B1=1
+T_B3=1
+T_C2=1
+exit=0
+%%
+### env-nested
+%if 0
+%if 1
+T_N1=1
+%endif
+%endif
+%if 1
+%if 1
+T_N2=1
+%endif
+T_N3=1
+%endif
+---
+T_N2=1
+T_N3=1
+exit=0
+%%
+### env-inline
+%if 1 display a ; T_I1=1 %endif
+%if 0 T_I2=1 %else T_I3=1 %endif
+---
+T_I1=1
+T_I3=1
+exit=0
+%%
+### err-empty-branch
+%if 1
+%endif
+---
+F:2: syntax error
+exit=1
+%%
+### err-empty-else
+%if 0
+display a
+%else
+%endif
+---
+F:4: syntax error
+exit=1
+%%
+### err-unterminated
+%if 1
+display a
+---
+F:3: syntax error
+exit=1
+%%
+### err-stray-else
+%else
+---
+F:1: syntax error
+exit=1
+%%
+### err-stray-endif
+display a
+%endif
+---
+F:2: syntax error
+exit=1
+%%
+### err-no-condition
+%if
+display a
+%endif
+---
+F:1: syntax error
+exit=1
+%%
+### err-assignment-condition
+%if A=1
+display a
+%endif
+---
+F:1: syntax error
+exit=1
+%%
+### err-two-words
+%if #{x} y
+display a
+%endif
+---
+F:1: syntax error
+exit=1
+%%
+### err-elif-two-words
+%if 1
+display a
+%elif 1 2
+%endif
+---
+F:3: syntax error
+exit=1
+%%
+### err-unclosed-format
+%if #{x
+display a
+%endif
+---
+F:1: syntax error
+exit=1
+%%
+### err-else-same-line
+%if 1
+display a
+%else display b
+%endif
+---
+F:3: syntax error
+exit=1
+%%
+### err-after-endif
+%if 1
+display a
+%endif display b
+---
+F:3: syntax error
+exit=1
+%%
+### err-inline-trailing
+%if 1 display a %endif display b
+---
+F:1: syntax error
+exit=1
+%%
+### err-inline-semi-first
+%if 1 ; display a %endif
+---
+F:1: syntax error
+exit=1
+%%
+### err-inline-empty-else
+%if 1 display a %else %endif
+---
+F:1: syntax error
+exit=1
+%%
+### err-inline-unclosed
+%if 1 display a
+display b
+---
+F:1: syntax error
+exit=1
+%%
+### err-chain-then-block
+display x ; %if 1
+display y
+%endif
+---
+F:1: syntax error
+exit=1
+%%
+### err-endif-brace
+%if 1
+display a
+%endif }
+---
+F:3: syntax error
+exit=1
+%%
+### err-later-unknown
+%if 1
+display a
+%endif
+nosuch
+---
+F:2: display-message a
+F:4: unknown command: nosuch
+exit=1
+%%
+### lines-plain
+display a # c
+display b \
+ c
+display "x
+y" ; nosuch
+---
+F:2: display-message a
+F:3: command display-message: too many arguments (need at most 1)
+exit=1
+%%
+### lines-block-group
+bind x { display a
+display b
+}
+display c
+---
+F:1: display-message a
+F:2: display-message b
+F:2: bind-key x { display-message a ;; display-message b }
+F:4: display-message c
+exit=0
+%%
+### alias
+info ; splitp -h
+---
+F:1: show-messages -JT
+F:1: split-window -h
+F:1: show-messages -JT ; split-window -h
+exit=0
+%%

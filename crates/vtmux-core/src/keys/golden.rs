@@ -46,6 +46,9 @@ impl ConfigEnv for Env {
     fn set(&mut self, name: &str, value: &str, _hidden: bool) {
         self.0.insert(name.to_owned(), value.to_owned());
     }
+    fn expand(&self, template: &str) -> String {
+        crate::format::expand_str(template, &NoVars)
+    }
 }
 
 struct NoVars;

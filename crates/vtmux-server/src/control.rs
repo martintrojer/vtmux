@@ -313,7 +313,9 @@ impl Server {
         };
         match cmd::parse_config_with(
             line,
-            &mut GlobalEnv(&mut self.global_env),
+            // cmd_parse_and_append(line, NULL, ...): no parse input, so
+            // a `%if` sees no client (control.c:719).
+            &mut GlobalEnv::new(&mut self.global_env, &self.model, &self.info),
             ParseOpts::default(),
         ) {
             Ok(calls) => {

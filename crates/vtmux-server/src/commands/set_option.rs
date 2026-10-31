@@ -107,7 +107,7 @@ impl FormatContext for Vars<'_, '_> {
 
 impl OptionHost for Host<'_> {
     fn expand(&mut self, store: &OptionsStore, template: &str, extra: &[(&str, String)]) -> String {
-        let mut ctx = Ctx::new(self.model, self.info, self.env.0, self.found);
+        let mut ctx = Ctx::new(self.model, self.info, self.env.env, self.found);
         ctx.options = store;
         ctx.clients = Rc::clone(&self.clients);
         ctx.client.clone_from(&self.client);
@@ -143,7 +143,7 @@ pub fn exec(
         &mut Host {
             model: &server.model,
             info: &server.info,
-            env: GlobalEnv(&mut server.global_env),
+            env: GlobalEnv::new(&mut server.global_env, &server.model, &server.info),
             found,
             clients,
             client,

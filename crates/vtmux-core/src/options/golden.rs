@@ -46,6 +46,18 @@ impl ConfigEnv for Env {
     fn set(&mut self, name: &str, value: &str, _hidden: bool) {
         self.0.insert(name.to_owned(), value.to_owned());
     }
+    /// The cases' `%if` conditions read no option: the reference expands
+    /// them before any `set` in the file has run.
+    fn expand(&self, template: &str) -> String {
+        format::expand_str(
+            template,
+            &Vars {
+                store: &OptionsStore::new(&Defaults::default()),
+                target: Target::default(),
+                extra: &[],
+            },
+        )
+    }
 }
 
 /// Format variables: the extras `show -F` adds, then options

@@ -1,19 +1,18 @@
 //! `source-file` (cmd-source-file.c) and config loading (cfg.c
 //! `load_cfg`): parse a whole file, then run it.
 //!
-//! The file is parsed statement by statement so a `NAME=value` applies to
-//! the global environment before later statements are lexed, as tmux's
-//! grammar applies assignments while parsing (cmd-parse.y:224-270). Any
-//! parse error rejects the file before a command runs. Each command's
-//! errors carry `file:line: `.
+//! The whole file is one parse (`cmd_parse_from_file`), so `%if` blocks
+//! span lines, assignments apply while the file is read
+//! (cmd-parse.y:224-270), and a command in the file never runs before a
+//! later `%if` is decided. Any parse error rejects the file before a
+//! command runs. Each command's errors carry `file:line: `.
 
 use std::path::{Path, PathBuf};
 
-use vtmux_core::cmd::{self, Args, CmdError, CommandCall, ParseOpts};
+use vtmux_core::cmd::{self, Args, CmdError, CommandCall, CommandList, ParseOpts, PrintFlags};
 use vtmux_core::error::{EdgeError, strerror};
 
 use super::Item;
-use crate::names::args_escape;
 use crate::server::{GlobalEnv, Server};
 use crate::target::Found;
 
@@ -131,32 +130,6 @@ fn glob(pattern: &Path) -> Vec<PathBuf> {
     current
 }
 
-/// `cmd_print`: the command's canonical text for `-v`.
-fn print_command(call: &CommandCall) -> String {
-    let args = &call.args;
-    let mut parts: Vec<String> = Vec::new();
-    let bare: String = args
-        .flags
-        .iter()
-        .filter(|(_, v)| v.iter().all(Option::is_none))
-        .flat_map(|(f, v)| std::iter::repeat_n(*f, v.len()))
-        .collect();
-    if !bare.is_empty() {
-        parts.push(format!("-{bare}"));
-    }
-    for (f, values) in &args.flags {
-        for v in values.iter().flatten() {
-            parts.push(format!("-{f} {}", args_escape(v)));
-        }
-    }
-    parts.extend(args.positionals.iter().map(|p| args_escape(&p.text())));
-    if parts.is_empty() {
-        call.entry.name.to_owned()
-    } else {
-        format!("{} {}", call.entry.name, parts.join(" "))
-    }
-}
-
 /// Read, parse and (unless `parse_only`) run one file for `item`'s
 /// client (`None` while loading the startup config). Read and parse errors
 /// are queued as causes (`cfg_add_cause`); runtime errors go to the client
@@ -177,33 +150,51 @@ pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
         one_group: false,
     };
     // Each line is its own group (cmd-parse.y cmd_parse_build_commands):
-    // an error stops the rest of that line only.
-    let mut groups: Vec<(usize, Vec<CommandCall>)> = Vec::new();
-    let mut line_no = 1;
-    for stmt in split_statements(&text) {
-        match cmd::parse_config_with(&stmt.text, &mut GlobalEnv(&mut server.global_env), parse) {
-            Ok(calls) if calls.is_empty() => {}
-            Ok(calls) => groups.push((line_no, calls)),
-            Err(e) => {
-                let msg = match &e {
-                    CmdError::Edge(edge) => edge.to_bytes(),
-                    other => other.to_bytes(),
-                };
-                server.causes.push(format!(
-                    "{file}:{line_no}: {}",
-                    String::from_utf8_lossy(&msg)
-                ));
-                return;
-            }
+    // an error stops the rest of that line only. `pi->c` is the item's
+    // client, its state from `cmd_find_from_client` (cfg.c:116-121).
+    // `printed` is every group as tmux prints it for -v, `groups` the
+    // top-level ones that run.
+    let mut printed: Vec<(u32, String)> = Vec::new();
+    let mut groups: Vec<(u32, Vec<CommandCall>)> = Vec::new();
+    let tc = item.client.filter(|id| server.clients.contains_key(id));
+    let ctx = server.format_ctx(Found::default(), tc);
+    let (client, clients) = (ctx.client, ctx.clients);
+    let mut env = GlobalEnv::new(&mut server.global_env, &server.model, &server.info).for_client(
+        item.origin,
+        client,
+        clients,
+    );
+    let mut collect = |group: cmd::Group<'_>| {
+        let calls = group.calls.to_vec();
+        if opts.verbose {
+            let list = CommandList {
+                calls: calls.clone(),
+            };
+            printed.push((group.line, list.print(PrintFlags::default())));
         }
-        line_no += stmt.lines;
-    }
+        if !group.nested {
+            groups.push((group.line, calls));
+        }
+    };
+    let parsed = cmd::parse_file(&text, &mut env, parse, Some(&mut collect));
     if opts.verbose {
-        // cmd_parse_print_commands (cmd-parse.y:612-624).
-        for (line, calls) in &groups {
-            let text: Vec<String> = calls.iter().map(print_command).collect();
-            item.print(&format!("{file}:{line}: {}", text.join(" ; ")));
+        // cmd_parse_print_commands (cmd-parse.y:612-624): groups built
+        // before an error are printed too.
+        for (line, text) in &printed {
+            item.print(&format!("{file}:{line}: {text}"));
         }
+    }
+    if let Err(e) = parsed {
+        let msg = match &e.error {
+            CmdError::Edge(edge) => edge.to_bytes(),
+            other => other.to_bytes(),
+        };
+        server.causes.push(format!(
+            "{file}:{}: {}",
+            e.line,
+            String::from_utf8_lossy(&msg)
+        ));
+        return;
     }
     if opts.parse_only {
         return;
@@ -216,89 +207,5 @@ pub fn load(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) {
         for cause in &mut server.causes[before..] {
             *cause = format!("{file}:{line}: {cause}");
         }
-    }
-}
-
-/// A statement of config text and how many physical lines it spans.
-struct Statement {
-    text: String,
-    lines: usize,
-}
-
-/// Split config text into newline-terminated statements, keeping quoted
-/// newlines and backslash continuations inside one statement, so each can
-/// be parsed (and its assignments applied) before the next.
-fn split_statements(text: &str) -> Vec<Statement> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut lines = 0;
-    let mut quote: Option<char> = None;
-    let mut chars = text.chars().peekable();
-    let mut comment = false;
-    while let Some(c) = chars.next() {
-        cur.push(c);
-        if comment {
-            if c == '\n' {
-                comment = false;
-            } else {
-                continue;
-            }
-        }
-        match (quote, c) {
-            (_, '\\') => {
-                if let Some(n) = chars.next() {
-                    cur.push(n);
-                    if n == '\n' {
-                        lines += 1;
-                    }
-                }
-            }
-            (None, '#')
-                if cur.len() == 1 || cur[..cur.len() - 1].ends_with([' ', '\t', '\n', ';']) =>
-            {
-                comment = true;
-            }
-            (None, '\'' | '"') => quote = Some(c),
-            (Some(q), c) if c == q => quote = None,
-            (_, '\n') => {
-                lines += 1;
-                if quote.is_none() {
-                    out.push(Statement {
-                        text: std::mem::take(&mut cur),
-                        lines,
-                    });
-                    lines = 0;
-                }
-            }
-            _ => {}
-        }
-    }
-    if !cur.is_empty() {
-        out.push(Statement {
-            text: cur,
-            lines: lines + 1,
-        });
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn statements_split_on_unquoted_newlines() {
-        let s = split_statements("a\nb 'x\ny'\nc \\\nd\n# x 'q\ne\n");
-        let texts: Vec<_> = s.iter().map(|s| (s.text.as_str(), s.lines)).collect();
-        assert_eq!(
-            texts,
-            vec![
-                ("a\n", 1),
-                ("b 'x\ny'\n", 2),
-                ("c \\\nd\n", 2),
-                ("# x 'q\n", 1),
-                ("e\n", 1)
-            ]
-        );
     }
 }

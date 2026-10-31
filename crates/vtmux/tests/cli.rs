@@ -522,6 +522,61 @@ fn source_file_config_env() {
     });
 }
 
+/// `%if` in config files (cmd-parse.y `condition`, `condition1`,
+/// `expanded`): the whole file is parsed before anything runs, so a `set`
+/// is not seen by a later `%if`; conditions are formats over the parsing
+/// client's current state (here the best session, `cmd_find_from_client`);
+/// false branches are lexed but not built; a `%if` inside `{ }` is decided
+/// when the file is parsed; a guard on a format that is empty takes the
+/// else branch (`#{@unset}` here; `#{vtmux_version}` is that on tmux and
+/// set on vtmux, D21, checked below).
+#[test]
+fn source_file_conditions() {
+    compare("source_file_conditions", |w| {
+        let write = |name: &str, text: &str| {
+            let path = w.dir().join(name);
+            std::fs::write(&path, text).expect("write");
+            path.to_str().expect("utf-8").to_owned()
+        };
+        let good = write(
+            "if.conf",
+            "set -g @q 1\n\
+             %if \"#{@q}\"\nset -g @r set\n%else\nset -g @r unset\n%endif\n\
+             %if #{==:#{session_name},a}\n\
+             %if 0\nnosuchcommand\n%elif 1\nset -g @n elif\n%else\nset -g @n else\n%endif\n\
+             %endif\n\
+             set -g @i x ; %if 1 set -g @i inl %endif\n\
+             %if \"#{@unset}\"\nset -g @v set\n%else\nset -g @v empty\n%endif\n\
+             %if \"#(echo 1)\"\nset -g @j job\n%endif\n\
+             bind -T t x { %if 1\ndisplay -p a\n%else\ndisplay -p b\n%endif\n}\n",
+        );
+        let bad_quote = write("q.conf", "set -g @b 1\n%if 0\ndisplay \"abc\n%endif\n");
+        let unterminated = write("u.conf", "%if 1\nset -g @u 1\n");
+        vec![
+            w.run(&["new", "-d", "-s", "a"]),
+            w.run(&["source", "-v", &good]),
+            w.run(&["display", "-p", "#{@q} #{@r} #{@n} #{@i} #{@v} [#{@j}]"]),
+            w.run(&["list-keys", "-T", "t"]),
+            w.run(&["source", "-nv", &good]),
+            w.run(&["source", &bad_quote]),
+            w.run(&["source", &unterminated]),
+            w.run(&["display", "-p", "[#{@b}] [#{@u}]"]),
+        ]
+    });
+    // The D23 guard: the same file takes the vtmux branch only on vtmux.
+    let w = World::new(&vtmux_bin());
+    let conf = w.dir().join("guard.conf");
+    std::fs::write(
+        &conf,
+        "%if \"#{vtmux_version}\"\nset -g @v vtmux\n%else\nset -g @v tmux\n%endif\n",
+    )
+    .expect("write");
+    w.run(&["new", "-d", "-s", "a"]);
+    let r = w.run(&["source", conf.to_str().expect("utf-8")]);
+    assert_eq!((r.code, r.stderr.as_str()), (0, ""));
+    assert_eq!(w.run(&["display", "-p", "#{@v}"]).stdout, "vtmux\n");
+}
+
 /// A startup config runs before the first command, without a client:
 /// `new` in it is detached, errors are kept for an attached session and
 /// never reach a command client (cfg.c `start_cfg`, `cfg_show_causes`).

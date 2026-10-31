@@ -34,10 +34,17 @@
 //! the lexer read the token that ended it, as bison's lookahead makes it:
 //! a trailing `# comment` has already moved to the next line by then.
 //!
-//! Not handled yet and reported as [`CmdError::Unsupported`]: `%if` and
-//! friends, and arguments that are not valid UTF-8 (`\377`, `\U00110000`).
-//! Parse errors carry no `file:line:` prefix; the caller that knows the file
-//! adds it.
+//! `%if`, `%elif`, `%else` and `%endif` are decided while parsing: the
+//! condition is a format expanded through [`ConfigEnv::expand`], and the
+//! commands of the branches not taken are lexed and grammar-checked but
+//! never built, so an unknown command there is no error (see [`Parser`]).
+//! [`parse_file`] parses a whole file as one text, so a `set` in the file
+//! is not seen by a later `%if`.
+//!
+//! Not handled yet and reported as [`CmdError::Unsupported`]: arguments
+//! that are not valid UTF-8 (`\377`, `\U00110000`). Parse errors from
+//! [`parse_config_with`] carry no `file:line:` prefix; [`parse_file`]
+//! returns the line and the caller adds the prefix.
 
 use super::table::{DEFAULT_COMMAND_ALIASES, find};
 use super::{ArgValue, Args, CmdError, CommandCall, CommandList};
@@ -57,6 +64,11 @@ pub trait ConfigEnv {
     /// `environ_put(global_environ, "NAME=value", hidden)`, called from the
     /// assignment rule unless the parse is parse-only (cmd-parse.y:224-270).
     fn set(&mut self, name: &str, value: &str, hidden: bool);
+    /// A `%if` or `%elif` condition, expanded as a format at parse time
+    /// (`expanded`, cmd-parse.y:197-217): the parsing client and its
+    /// current state (`cmd_find_from_client`), `FORMAT_NOJOBS`, so `#()`
+    /// is empty.
+    fn expand(&self, template: &str) -> String;
 }
 
 /// Options for [`parse_config_with`] (the `CMD_PARSE_*` flags that matter).
@@ -84,7 +96,43 @@ impl ConfigEnv for NoEnv {
     }
 
     fn set(&mut self, _: &str, _: &str, _: bool) {}
+
+    fn expand(&self, template: &str) -> String {
+        crate::format::expand_str(template, &NoVars)
+    }
 }
+
+/// A format context with nothing in it.
+struct NoVars;
+
+impl crate::format::FormatContext for NoVars {
+    fn get(&self, _: &str) -> Option<String> {
+        None
+    }
+}
+
+/// A parse error and the line it is reported at (`pi->line` when tmux's
+/// `yyerror` or `cmd_parse_build_command` failed).
+#[derive(Debug)]
+pub struct ParseError {
+    pub line: u32,
+    pub error: CmdError,
+}
+
+/// One group of commands as it is built (`cmd_parse_print_commands`,
+/// cmd-parse.y:612-624): what `source-file -v` prints.
+pub struct Group<'g> {
+    /// `pi->line` when the group was finished: what `-v` prints, and the
+    /// `file:line:` of the group's runtime errors.
+    pub line: u32,
+    pub calls: &'g [CommandCall],
+    /// A group inside a `{ }` argument. tmux prints these too (before the
+    /// command holding them), but they are part of that command, not run.
+    pub nested: bool,
+}
+
+/// Called with each [`Group`] in the order tmux builds (and prints) them.
+pub type PrintGroup<'p> = &'p mut dyn FnMut(Group<'_>);
 
 /// One command as the grammar reads it, before it is looked up (`struct
 /// cmd_parse_command`).
@@ -142,7 +190,7 @@ pub fn parse_argv_values(values: &[ArgValue]) -> Result<Vec<CommandCall>, CmdErr
     if !current.is_empty() {
         commands.push(new(current));
     }
-    build_commands(&commands, false, true)
+    build_commands(&commands, true, &mut Build::new(false, 0, None))
 }
 
 /// Parse config text: one line, or several (a newline ends a statement
@@ -157,8 +205,40 @@ pub fn parse_config_with(
     env: &mut dyn ConfigEnv,
     opts: ParseOpts,
 ) -> Result<Vec<CommandCall>, CmdError> {
-    let raw = lex_commands(text, env, opts)?;
-    build_commands(&raw, opts.one_group, true)
+    parse_lines(text, env, opts, 0, None).map_err(|e| e.error)
+}
+
+/// `cmd_parse_from_file`: config text from a file, whose first line is
+/// line 1. The whole text is parsed before anything is built, so a `NAME=value`
+/// anywhere is applied before any command is checked, and a `set` never
+/// affects a later `%if`. `print`, if given, sees each group as it is built
+/// (`source-file -v`); groups built before an error have been printed.
+///
+/// # Errors
+/// The first syntax, lexer or command error, at tmux's line.
+pub fn parse_file(
+    text: &str,
+    env: &mut dyn ConfigEnv,
+    opts: ParseOpts,
+    print: Option<PrintGroup<'_>>,
+) -> Result<Vec<CommandCall>, ParseError> {
+    parse_lines(text, env, opts, 1, print)
+}
+
+fn parse_lines(
+    text: &str,
+    env: &mut dyn ConfigEnv,
+    opts: ParseOpts,
+    first_line: u32,
+    print: Option<PrintGroup<'_>>,
+) -> Result<Vec<CommandCall>, ParseError> {
+    let raw = lex_commands(text, env, opts, first_line)
+        .map_err(|(line, error)| ParseError { line, error })?;
+    let mut build = Build::new(opts.one_group, first_line, print);
+    build_commands(&raw, true, &mut build).map_err(|error| ParseError {
+        line: build.line,
+        error,
+    })
 }
 
 /// `cmd_parse_from_string` (cmd-parse.y:1010-1027): text as a command
@@ -173,36 +253,79 @@ pub fn parse_string(text: &str, env: &mut dyn ConfigEnv) -> Result<CommandList, 
     })
 }
 
+/// What `cmd_parse_build_commands` carries in `pi`.
+struct Build<'p> {
+    /// `CMD_PARSE_ONEGROUP`.
+    one_group: bool,
+    /// `pi->line`: the line of the command being built. A block's commands
+    /// move it, so a group printed or failing after a block reports the
+    /// block's last command's line, as tmux does.
+    line: u32,
+    print: Option<PrintGroup<'p>>,
+    /// How many `{ }` arguments deep the build is.
+    depth: usize,
+}
+
+impl<'p> Build<'p> {
+    fn new(one_group: bool, line: u32, print: Option<PrintGroup<'p>>) -> Self {
+        Self {
+            one_group,
+            line,
+            print,
+            depth: 0,
+        }
+    }
+
+    fn print(&mut self, calls: &[CommandCall]) {
+        if let Some(print) = self.print.as_mut() {
+            print(Group {
+                line: self.line,
+                calls,
+                nested: self.depth > 0,
+            });
+        }
+    }
+}
+
 /// `cmd_parse_build_commands` (cmd-parse.y:937-1005): build each command,
 /// giving a new group to each run of commands from one line.
 fn build_commands(
     cmds: &[RawCommand],
-    one_group: bool,
     expand_alias: bool,
+    b: &mut Build<'_>,
 ) -> Result<Vec<CommandCall>, CmdError> {
     let mut out = Vec::new();
     let mut group = 0;
+    let mut start = 0;
     let mut line = None;
     for cmd in cmds {
-        if line.is_none() || (!one_group && line != Some(cmd.line)) {
+        if line.is_none() || (!b.one_group && line != Some(cmd.line)) {
+            if line.is_some() {
+                b.print(&out[start..]);
+            }
+            start = out.len();
             group += 1;
         }
         line = Some(cmd.line);
-        for mut call in build_command(cmd, one_group, expand_alias)? {
+        b.line = cmd.line;
+        for mut call in build_command(cmd, expand_alias, b)? {
             call.group = group;
             out.push(call);
         }
+    }
+    if line.is_some() {
+        b.print(&out[start..]);
     }
     Ok(out)
 }
 
 fn build_command(
     cmd: &RawCommand,
-    one_group: bool,
     expand_alias: bool,
+    b: &mut Build<'_>,
 ) -> Result<Vec<CommandCall>, CmdError> {
     if expand_alias {
-        // cmd_parse_expand_alias (cmd-parse.y:820-880): no first word, or a
+        // cmd_parse_expand_alias (cmd-parse.y:767-822): no first word, or a
         // block as first word, is an empty list.
         let Some(RawArg::Str(first)) = cmd.args.first() else {
             return Ok(Vec::new());
@@ -212,24 +335,27 @@ fn build_command(
             // command, and build without expanding again.
             let opts = ParseOpts {
                 parse_only: true,
-                one_group,
+                one_group: b.one_group,
             };
-            let mut expanded = lex_commands(text, &mut NoEnv, opts)?;
+            let mut expanded = lex_commands(text, &mut NoEnv, opts, b.line).map_err(|e| e.1)?;
             let Some(last) = expanded.last_mut() else {
                 return Ok(Vec::new());
             };
             last.args.extend(cmd.args[1..].iter().map(clone_raw));
-            return build_commands(&expanded, one_group, false);
+            return build_commands(&expanded, false, b);
         }
     }
-    // cmd_parse_build_command (cmd-parse.y:886-935).
+    // cmd_parse_build_command (cmd-parse.y:824-878).
     let mut values = Vec::with_capacity(cmd.args.len());
     for arg in &cmd.args {
         values.push(match arg {
             RawArg::Str(s) => ArgValue::Str(s.clone()),
-            RawArg::Block(block) => ArgValue::Commands(CommandList {
-                calls: build_commands(block, one_group, expand_alias)?,
-            }),
+            RawArg::Block(block) => {
+                b.depth += 1;
+                let calls = build_commands(block, expand_alias, b);
+                b.depth -= 1;
+                ArgValue::Commands(CommandList { calls: calls? })
+            }
             RawArg::Built(list) => ArgValue::Commands(list.clone()),
         });
     }
@@ -279,9 +405,13 @@ enum Token {
     },
     /// `%hidden`: valid only at the start of a statement, before `NAME=value`.
     Hidden,
-    /// `%if`, `%elif`, `%else`, `%endif`: a statement-level directive.
-    /// Anywhere else tmux's grammar rejects it.
-    Directive,
+    If,
+    Elif,
+    Else,
+    Endif,
+    /// `#{...}` straight after a `%` directive (`FORMAT`, cmd-parse.y:1325-1333):
+    /// an unquoted condition that would otherwise be a comment.
+    Format(String),
     End,
 }
 
@@ -299,6 +429,9 @@ struct Lexer<'a> {
     /// A real newline was returned; the line moves on at the next token
     /// (`ps->eol`).
     eol: bool,
+    /// The last token was a `%` directive, so `#{` opens a format
+    /// (`ps->condition`).
+    condition: bool,
 }
 
 const MAX_NAME: usize = 1024 - 2;
@@ -359,6 +492,7 @@ impl Lexer<'_> {
             self.line += 1;
             self.eol = false;
         }
+        let condition = std::mem::take(&mut self.condition);
         loop {
             let Some(mut ch) = self.getc() else {
                 // Every input ends with a newline (cmd-parse.y:1292-1300).
@@ -392,6 +526,10 @@ impl Lexer<'_> {
                     // A comment to the end of the line (continuations
                     // included: it reads through getc).
                     let mut next = self.getc();
+                    if condition && next == Some(b'{') {
+                        let format = self.format().ok_or(CmdError::Syntax)?;
+                        return Ok(Token::Format(bytes_to_string(format)?));
+                    }
                     while next.is_some() && next != Some(b'\n') {
                         next = self.getc();
                     }
@@ -412,9 +550,13 @@ impl Lexer<'_> {
                             equals: false,
                         });
                     }
+                    self.condition = true;
                     return match word.as_slice() {
                         b"%hidden" => Ok(Token::Hidden),
-                        b"%if" | b"%else" | b"%elif" | b"%endif" => Ok(Token::Directive),
+                        b"%if" => Ok(Token::If),
+                        b"%elif" => Ok(Token::Elif),
+                        b"%else" => Ok(Token::Else),
+                        b"%endif" => Ok(Token::Endif),
                         _ => Err(CmdError::Syntax),
                     };
                 }
@@ -431,6 +573,30 @@ impl Lexer<'_> {
                     });
                 }
             }
+        }
+    }
+
+    /// `yylex_format` (cmd-parse.y:1403-1440): `#{` has been read; up to
+    /// its matching `}`. A newline or the end of input first is `None`.
+    fn format(&mut self) -> Option<Vec<u8>> {
+        let mut buf = b"#{".to_vec();
+        let mut brackets = 1;
+        loop {
+            let mut ch = self.getc().filter(|c| *c != b'\n')?;
+            if ch == b'#' {
+                ch = self.getc().filter(|c| *c != b'\n')?;
+                if ch == b'{' {
+                    brackets += 1;
+                }
+                buf.push(b'#');
+            } else if ch == b'}' {
+                brackets -= 1;
+                if brackets == 0 {
+                    buf.push(ch);
+                    return Some(buf);
+                }
+            }
+            buf.push(ch);
         }
     }
 
@@ -695,54 +861,48 @@ fn bytes_to_string(bytes: Vec<u8>) -> Result<String, CmdError> {
 /// cmd-parse.y:40).
 const MAX_ENVIRON_LEN: usize = 16384;
 
-impl Lexer<'_> {
-    /// `assignment` / `hidden_assignment` (cmd-parse.y:224-270). The lexer
-    /// only returns an `EQUALS` token when it holds a valid name before the
-    /// first `=`. Bison reduces the rule without reading a lookahead, so the
-    /// assignment is applied before the next token is lexed.
-    fn assign(&mut self, text: &str, hidden: bool) -> Result<(), CmdError> {
-        if text.len() > MAX_ENVIRON_LEN {
-            return Err(CmdError::Lex("environment variable is too long"));
-        }
-        let (name, value) = text.split_once('=').ok_or(CmdError::Syntax)?;
-        if !self.opts.parse_only {
-            self.env.set(name, value, hidden);
-        }
-        Ok(())
-    }
+/// The grammar (cmd-parse.y `%%` rules) over the lexer: statements of
+/// commands, assignments and conditions, with `{ ... }` blocks as
+/// arguments.
+///
+/// `%if` keeps two things apart the way tmux does. Which branch's commands
+/// survive is decided by the `condition` rules: the first true one. Whether
+/// a command or assignment is kept *while it is read* uses the scope stack
+/// (`ps->scope`, `ps->stack`): `%elif` replaces the current flag with its
+/// own condition and `%else` negates the current flag, whatever came
+/// before. That is visible only for assignments, which are applied as they
+/// are read: after `%if 1`, an assignment under a true `%elif` is applied
+/// too, even though that branch's commands are dropped.
+struct Parser<'a, 'b> {
+    lexer: &'b mut Lexer<'a>,
+    peeked: Option<Token>,
+    /// `ps->scope`: the innermost condition's flag.
+    scope: Option<bool>,
+    /// `ps->stack`: the enclosing conditions' flags.
+    stack: Vec<bool>,
 }
 
-/// A `;`, newline, `}` or end of text ends a command. tmux quirk
-/// (cmd-parse.y:405-415, `commands ';' command`): when that command is a bare
-/// `NAME=value` it has no arguments, so the rule builds a fresh empty list
-/// and frees every command earlier in the same `;` chain, unbuilt and so
-/// unchecked (`x -- ; A=1` is not an `unknown command` error). The
-/// assignments already took effect when they were parsed.
-fn end_command(
-    items: &mut Vec<RawCommand>,
-    current: &mut Vec<RawArg>,
-    line: u32,
-    drop: bool,
-    chain_start: usize,
-) {
-    if !current.is_empty() {
-        items.push(RawCommand {
-            line,
-            args: std::mem::take(current),
-        });
-    } else if drop {
-        items.truncate(chain_start);
-    }
+/// Where a run of statements is: what may end it.
+#[derive(Clone, Copy, PartialEq)]
+enum Context {
+    /// The whole text (`lines`): ends at the end of input.
+    Top,
+    /// A `{ ... }` argument (`argument_statements`): ends at `}`.
+    Block,
+    /// A `%if` branch (`'\n' statements`): ends at `%elif`, `%else` or
+    /// `%endif`, after at least one statement.
+    Branch,
 }
 
-/// The grammar: statements of commands and assignments separated by `;` and
-/// newlines (cmd-parse.y `statements`, `commands`, `command`,
-/// `hidden_assignment`), with `{ ... }` blocks as arguments.
+/// A branch of a condition and the flag that selects it.
+type Branch = (bool, Vec<RawCommand>);
+
 fn lex_commands(
     text: &str,
     env: &mut dyn ConfigEnv,
     opts: ParseOpts,
-) -> Result<Vec<RawCommand>, CmdError> {
+    line: u32,
+) -> Result<Vec<RawCommand>, (u32, CmdError)> {
     let mut lexer = Lexer {
         input: text.as_bytes(),
         off: 0,
@@ -750,127 +910,331 @@ fn lex_commands(
         eof: false,
         env,
         opts,
-        line: 0,
+        line,
         eol: false,
+        condition: false,
     };
-    statements(&mut lexer, false)
+    let mut parser = Parser {
+        lexer: &mut lexer,
+        peeked: None,
+        scope: None,
+        stack: Vec::new(),
+    };
+    match parser.statements(Context::Top) {
+        Ok((commands, _)) => Ok(commands),
+        Err(e) => Err((parser.lexer.line, e)),
+    }
 }
 
-/// The statements of the whole text, or of one block (`nested`, ended by
-/// its `}`).
-fn statements(lexer: &mut Lexer<'_>, nested: bool) -> Result<Vec<RawCommand>, CmdError> {
-    let mut items = Vec::new();
-    let mut current: Vec<RawArg> = Vec::new();
-    // A command has started in this statement: a `;` is only valid after
-    // one (`; display` is a syntax error, `display ;; display` is not).
-    let mut started = false;
-    // The command so far is just `NAME=value` (`optional_assignment` is
-    // followed by a TOKEN, so another `NAME=value` is a syntax error).
-    let mut assigned = false;
-    // Where the current `;`-chain starts in `items`, and whether the
-    // assignment now being read follows an earlier command in the chain.
-    let mut chain_start = 0;
-    let mut drop_chain = false;
-    loop {
-        match lexer.next_token()? {
-            Token::Word { equals, text } => {
-                if current.is_empty() {
-                    if assigned {
-                        if equals {
-                            return Err(CmdError::Syntax);
-                        }
-                        assigned = false;
-                    } else if equals {
-                        drop_chain = started;
-                        lexer.assign(&text, false)?;
-                        started = true;
-                        assigned = true;
-                        continue;
+impl Parser<'_, '_> {
+    fn next(&mut self) -> Result<Token, CmdError> {
+        match self.peeked.take() {
+            Some(token) => Ok(token),
+            None => self.lexer.next_token(),
+        }
+    }
+
+    fn peek(&mut self) -> Result<&Token, CmdError> {
+        if self.peeked.is_none() {
+            self.peeked = Some(self.lexer.next_token()?);
+        }
+        Ok(self.peeked.as_ref().expect("just filled"))
+    }
+
+    /// `ps->scope == NULL || ps->scope->flag`: commands are kept.
+    fn keeping(&self) -> bool {
+        self.scope.is_none_or(|f| f)
+    }
+
+    /// `assignment` / `hidden_assignment` (cmd-parse.y:224-270). The lexer
+    /// only returns an `EQUALS` token when it holds a valid name before the
+    /// first `=`. Bison reduces the rule without reading a lookahead, so the
+    /// assignment is applied before the next token is lexed. It applies
+    /// only when every enclosing condition's flag is set.
+    fn assign(&mut self, text: &str, hidden: bool) -> Result<(), CmdError> {
+        if text.len() > MAX_ENVIRON_LEN {
+            return Err(CmdError::Lex("environment variable is too long"));
+        }
+        let (name, value) = text.split_once('=').ok_or(CmdError::Syntax)?;
+        let applies = self
+            .scope
+            .is_none_or(|f| f && self.stack.iter().all(|s| *s));
+        if applies && !self.lexer.opts.parse_only {
+            self.lexer.env.set(name, value, hidden);
+        }
+        Ok(())
+    }
+
+    /// `statements` in `context`. Returns the commands kept and the token
+    /// that ended the run (`End`, `}`, or a branch's directive).
+    fn statements(&mut self, context: Context) -> Result<(Vec<RawCommand>, Token), CmdError> {
+        let mut items = Vec::new();
+        let mut done = 0;
+        loop {
+            let commands = match self.next()? {
+                Token::Eol => {
+                    done += 1;
+                    continue;
+                }
+                Token::End if context == Context::Top => return Ok((items, Token::End)),
+                Token::RBrace if context == Context::Block => {
+                    return Ok((items, Token::RBrace));
+                }
+                t @ (Token::Elif | Token::Else | Token::Endif)
+                    if context == Context::Branch && done > 0 =>
+                {
+                    return Ok((items, t));
+                }
+                Token::Hidden => {
+                    match self.next()? {
+                        Token::Word { equals: true, text } => self.assign(&text, true)?,
+                        _ => return Err(CmdError::Syntax),
                     }
-                    started = true;
+                    Vec::new()
                 }
-                current.push(RawArg::Str(text));
+                Token::If => {
+                    let flag = self.if_open()?;
+                    if matches!(self.peek()?, Token::Eol) {
+                        // `statement: condition`, then the statement's end.
+                        self.next()?;
+                        self.condition(flag)?
+                    } else {
+                        // `commands: condition1 ...`.
+                        let first = self.condition1(flag)?;
+                        self.commands_after(first)?
+                    }
+                }
+                token @ (Token::Word { .. } | Token::LBrace) => {
+                    let first = self.command(token)?;
+                    let commands = self.chain_start(first);
+                    self.commands_after(commands)?
+                }
+                _ => return Err(CmdError::Syntax),
+            };
+            // `statement: condition | commands` keeps them only in a true
+            // scope.
+            let commands = if self.keeping() { commands } else { Vec::new() };
+            // `statement '\n'`, or the block's `statement '}'`.
+            match self.next()? {
+                Token::Eol => {}
+                Token::RBrace if context == Context::Block => {
+                    items.extend(commands);
+                    return Ok((items, Token::RBrace));
+                }
+                _ => return Err(CmdError::Syntax),
             }
-            Token::LBrace => {
-                // Only an argument may be a block, never the command name.
-                if current.is_empty() {
-                    return Err(CmdError::Syntax);
-                }
-                let block = statements(lexer, true)?;
-                current.push(RawArg::Block(block));
+            done += 1;
+            items.extend(commands);
+        }
+    }
+
+    /// `if_open: IF expanded` (and `if_elif`'s condition): the condition
+    /// word, expanded as a format. Returns `format_true` of it.
+    fn expanded(&mut self) -> Result<bool, CmdError> {
+        let (Token::Word {
+            equals: false,
+            text,
+        }
+        | Token::Format(text)) = self.next()?
+        else {
+            return Err(CmdError::Syntax);
+        };
+        Ok(crate::format::is_true(&self.lexer.env.expand(&text)))
+    }
+
+    fn if_open(&mut self) -> Result<bool, CmdError> {
+        let flag = self.expanded()?;
+        if let Some(outer) = self.scope.replace(flag) {
+            self.stack.push(outer);
+        }
+        Ok(flag)
+    }
+
+    fn if_close(&mut self) {
+        self.scope = self.stack.pop();
+    }
+
+    /// `if_else`: the flag becomes the negation of the current one.
+    fn if_else(&mut self) {
+        self.scope = self.scope.map(|f| !f);
+    }
+
+    /// `if_elif`: the flag becomes this condition's.
+    fn if_elif(&mut self) -> Result<bool, CmdError> {
+        let flag = self.expanded()?;
+        self.scope = Some(flag);
+        Ok(flag)
+    }
+
+    /// `condition`: the `%if` line has been read; branches of whole
+    /// statements up to `%endif`.
+    fn condition(&mut self, flag: bool) -> Result<Vec<RawCommand>, CmdError> {
+        let (first, mut end) = self.statements(Context::Branch)?;
+        let mut branches: Vec<Branch> = vec![(flag, first)];
+        while matches!(end, Token::Elif) {
+            let flag = self.if_elif()?;
+            if !matches!(self.next()?, Token::Eol) {
+                return Err(CmdError::Syntax);
             }
-            Token::RBrace => {
-                if !nested {
-                    return Err(CmdError::Syntax);
-                }
-                end_command(
-                    &mut items,
-                    &mut current,
-                    lexer.line,
-                    assigned && drop_chain,
-                    chain_start,
-                );
-                return Ok(items);
+            let (commands, next) = self.statements(Context::Branch)?;
+            branches.push((flag, commands));
+            end = next;
+        }
+        if matches!(end, Token::Else) {
+            self.if_else();
+            if !matches!(self.next()?, Token::Eol) {
+                return Err(CmdError::Syntax);
             }
-            Token::Hidden => {
-                // `statement: hidden_assignment`, then the newline (or the
-                // block's `}`): not part of a `;` list, so only a whole
-                // statement of its own.
-                if started || !current.is_empty() {
-                    return Err(CmdError::Syntax);
-                }
-                match lexer.next_token()? {
-                    Token::Word { equals: true, text } => lexer.assign(&text, true)?,
-                    _ => return Err(CmdError::Syntax),
-                }
-                match lexer.next_token()? {
-                    Token::Eol => {}
-                    Token::RBrace if nested => return Ok(items),
-                    _ => return Err(CmdError::Syntax),
-                }
+            let (commands, next) = self.statements(Context::Branch)?;
+            if !matches!(next, Token::Endif) {
+                return Err(CmdError::Syntax);
             }
-            Token::Directive => {
-                // Valid only where a statement or command may start.
-                if !current.is_empty() || assigned {
-                    return Err(CmdError::Syntax);
+            branches.push((true, commands));
+        }
+        self.if_close();
+        Ok(select(branches))
+    }
+
+    /// `condition1`: the one-line form, `%if X cmds [%elif Y cmds]...
+    /// [%else cmds] %endif`, each branch a `commands` list.
+    fn condition1(&mut self, flag: bool) -> Result<Vec<RawCommand>, CmdError> {
+        let (first, mut end) = self.branch_commands()?;
+        let mut branches: Vec<Branch> = vec![(flag, first)];
+        while matches!(end, Token::Elif) {
+            let flag = self.if_elif()?;
+            let (commands, next) = self.branch_commands()?;
+            branches.push((flag, commands));
+            end = next;
+        }
+        if matches!(end, Token::Else) {
+            self.if_else();
+            let (commands, next) = self.branch_commands()?;
+            if !matches!(next, Token::Endif) {
+                return Err(CmdError::Syntax);
+            }
+            branches.push((true, commands));
+        }
+        self.if_close();
+        Ok(select(branches))
+    }
+
+    /// One branch of `condition1`: a `commands` list ended by a directive.
+    fn branch_commands(&mut self) -> Result<(Vec<RawCommand>, Token), CmdError> {
+        let commands = match self.next()? {
+            Token::If => {
+                let flag = self.if_open()?;
+                self.condition1(flag)?
+            }
+            token @ (Token::Word { .. } | Token::LBrace) => {
+                let first = self.command(token)?;
+                self.chain_start(first)
+            }
+            _ => return Err(CmdError::Syntax),
+        };
+        let commands = self.commands_after(commands)?;
+        match self.next()? {
+            t @ (Token::Elif | Token::Else | Token::Endif) => Ok((commands, t)),
+            _ => Err(CmdError::Syntax),
+        }
+    }
+
+    /// `commands: command`.
+    fn chain_start(&self, first: RawCommand) -> Vec<RawCommand> {
+        if !first.args.is_empty() && self.keeping() {
+            vec![first]
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The rest of a `commands` list: `';'`, `';' command` and
+    /// `';' condition1`. Leaves the token after the list unread.
+    ///
+    /// tmux quirk (cmd-parse.y:417-430, `commands ';' command`): when that
+    /// command is a bare `NAME=value` it has no arguments, so the rule
+    /// builds a fresh empty list and frees every command earlier in the
+    /// list, unbuilt and so unchecked (`x -- ; A=1` is not an `unknown
+    /// command` error). The assignments already took effect when they were
+    /// parsed.
+    fn commands_after(&mut self, mut list: Vec<RawCommand>) -> Result<Vec<RawCommand>, CmdError> {
+        while matches!(self.peek()?, Token::Semi) {
+            self.next()?;
+            match self.peek()? {
+                Token::Word { .. } | Token::LBrace => {
+                    let token = self.next()?;
+                    let command = self.command(token)?;
+                    if !command.args.is_empty() && self.keeping() {
+                        list.push(command);
+                    } else {
+                        list.clear();
+                    }
                 }
-                return Err(CmdError::Unsupported("%if conditionals"));
-            }
-            Token::Semi => {
-                if !started {
-                    return Err(CmdError::Syntax);
+                Token::If => {
+                    self.next()?;
+                    let flag = self.if_open()?;
+                    list.extend(self.condition1(flag)?);
                 }
-                end_command(
-                    &mut items,
-                    &mut current,
-                    lexer.line,
-                    assigned && drop_chain,
-                    chain_start,
-                );
-                assigned = false;
+                _ => {}
             }
-            Token::Eol => {
-                end_command(
-                    &mut items,
-                    &mut current,
-                    lexer.line,
-                    assigned && drop_chain,
-                    chain_start,
-                );
-                started = false;
-                assigned = false;
-                chain_start = items.len();
-            }
-            Token::End => {
-                // A block still open at the end of the text.
-                return if nested {
-                    Err(CmdError::Syntax)
-                } else {
-                    Ok(items)
-                };
+        }
+        Ok(list)
+    }
+
+    /// `command`: an optional `NAME=value`, then the command's words and
+    /// blocks. A bare assignment is a command with no arguments. The line
+    /// is the lexer's once the token after the command has been read.
+    fn command(&mut self, first: Token) -> Result<RawCommand, CmdError> {
+        let mut args = Vec::new();
+        let mut token = first;
+        if let Token::Word { equals: true, text } = &token {
+            self.assign(text, false)?;
+            token = match self.peek()? {
+                Token::Word { equals: false, .. } => self.next()?,
+                // `NAME=value NAME=value` or `NAME=value {`.
+                Token::Word { .. } | Token::LBrace => return Err(CmdError::Syntax),
+                _ => {
+                    return Ok(RawCommand {
+                        line: self.lexer.line,
+                        args,
+                    });
+                }
+            };
+        }
+        match token {
+            Token::Word { text, .. } => args.push(RawArg::Str(text)),
+            // Only an argument may be a block, never the command name.
+            _ => return Err(CmdError::Syntax),
+        }
+        loop {
+            match self.peek()? {
+                Token::Word { .. } => {
+                    let Token::Word { text, .. } = self.next()? else {
+                        unreachable!("peeked a word")
+                    };
+                    args.push(RawArg::Str(text));
+                }
+                Token::LBrace => {
+                    self.next()?;
+                    let (block, _) = self.statements(Context::Block)?;
+                    args.push(RawArg::Block(block));
+                }
+                _ => {
+                    return Ok(RawCommand {
+                        line: self.lexer.line,
+                        args,
+                    });
+                }
             }
         }
     }
+}
+
+/// The first branch whose flag is set (the `condition` rules' actions).
+fn select(branches: Vec<Branch>) -> Vec<RawCommand> {
+    branches
+        .into_iter()
+        .find_map(|(flag, commands)| flag.then_some(commands))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -895,6 +1259,9 @@ mod tests {
             self.vars.insert(name.to_owned(), value.to_owned());
             self.sets.push((name.to_owned(), value.to_owned(), hidden));
         }
+        fn expand(&self, template: &str) -> String {
+            crate::format::expand_str(template, &Vars(&self.vars))
+        }
         fn home(&self, user: Option<&str>) -> Option<String> {
             match user {
                 None => Some("/home/me".to_owned()),
@@ -902,6 +1269,16 @@ mod tests {
                 Some("bin") => Some("/bin".to_owned()),
                 Some(_) => None,
             }
+        }
+    }
+
+    /// `#{NAME}` reads the fake environment, as tmux's `format_find`
+    /// falls back to the global environment.
+    struct Vars<'a>(&'a HashMap<String, String>);
+
+    impl crate::format::FormatContext for Vars<'_> {
+        fn get(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
         }
     }
 
@@ -1515,11 +1892,7 @@ mod tests {
     /// conditionals and non-UTF-8 words. Reference accepts all of them.
     #[test]
     fn config_m0_unsupported_is_typed() {
-        for text in [
-            "%if 1\ndisplay -p x\n%endif",
-            "display -p \\377",
-            "display -p \\U00110000",
-        ] {
+        for text in ["display -p \\377", "display -p \\U00110000"] {
             let e = parse(text).expect_err(text);
             assert!(matches!(e, CmdError::Unsupported(_)), "{text}: {e}");
         }
