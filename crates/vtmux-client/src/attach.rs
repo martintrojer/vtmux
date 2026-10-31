@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
@@ -21,12 +22,20 @@ const STDOUT: Token = Token(3);
 #[must_use]
 pub fn attach(stream: &mut UnixStream) -> i32 {
     match run(stream) {
-        Ok((code, message)) => {
+        Ok(Leave::Exit { code, message, hup }) => {
             if let Some(message) = message {
                 println!("[{message}]");
             }
+            // client.c:414-416: MSG_DETACHKILL hangs up the parent (the
+            // login shell, normally) once the reason is printed.
+            if hup && let Some(ppid) = rustix::process::getppid().filter(|p| !p.is_init()) {
+                let _ = rustix::process::kill_process(ppid, rustix::process::Signal::HUP);
+            }
             code
         }
+        // The terminal is restored (run dropped its guard): the process
+        // becomes the command.
+        Ok(Leave::Exec { command, shell }) => exec(&shell, &command),
         Err(e) => {
             eprintln!("{e}");
             1
@@ -34,7 +43,46 @@ pub fn attach(stream: &mut UnixStream) -> i32 {
     }
 }
 
-fn run(stream: &mut UnixStream) -> io::Result<(i32, Option<String>)> {
+/// How the attached client ends.
+enum Leave {
+    Exit {
+        code: i32,
+        message: Option<String>,
+        hup: bool,
+    },
+    /// `MSG_EXEC`.
+    Exec { command: String, shell: PathBuf },
+}
+
+impl Leave {
+    fn exit(code: i32, message: &str) -> Self {
+        Self::Exit {
+            code,
+            message: Some(message.to_owned()),
+            hup: false,
+        }
+    }
+}
+
+/// `client_exec` (client.c:492-509): `shell -c command` in place of this
+/// process, with `SHELL` set to `shell` and a login-shell `argv[0]` when
+/// the client is a login shell (`shell_argv0`, which vtmux does not
+/// track: `argv[0]` is the shell's basename). Only returns, with the exit
+/// status, if the exec fails.
+#[must_use]
+pub fn exec(shell: &Path, command: &str) -> i32 {
+    use std::os::unix::process::CommandExt;
+    let name = shell.file_name().unwrap_or(shell.as_os_str());
+    let err = std::process::Command::new(shell)
+        .arg0(name)
+        .args(["-c", command])
+        .env("SHELL", shell)
+        .exec();
+    eprintln!("{}: {err}", shell.display());
+    1
+}
+
+fn run(stream: &mut UnixStream) -> io::Result<Leave> {
     // Install signal handlers before entering raw mode: all returns drop the
     // tty guard, including SIGTERM/SIGHUP (client.c client_signal). SIGINT
     // goes to proc_signal_cb and client_signal ignores it while attached;
@@ -198,7 +246,7 @@ fn relay(
     poll: &mut Poll,
     signals: &mut Signals,
     out: &mut Output,
-) -> io::Result<(i32, Option<String>)> {
+) -> io::Result<Leave> {
     let mut events = Events::with_capacity(16);
     let mut socket = Socket::default();
     out.high_water = high_water();
@@ -218,7 +266,7 @@ fn relay(
                             // itself (tty_read_callback -> server_client_lost,
                             // tty.c:181-189), with no MSG_EXITING and so no
                             // focus-out. Close the connection, as it would.
-                            Ok(0) => return Ok((1, Some("lost tty".into()))),
+                            Ok(0) => return Ok(Leave::exit(1, "lost tty")),
                             Ok(n) => send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?,
                             Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
@@ -238,7 +286,7 @@ fn relay(
                             // EOF on stdin; with the tty already hung up
                             // it is the same loss as EOF.
                             SIGHUP if tty_hung_up() => {
-                                return Ok((1, Some("lost tty".into())));
+                                return Ok(Leave::exit(1, "lost tty"));
                             }
                             SIGTERM | SIGHUP => {
                                 let _ = send(stream, &ClientMsg::Detach);
@@ -279,15 +327,11 @@ struct Socket {
 
 impl Socket {
     /// Read and dispatch until `WouldBlock`, the high-water mark or Exit.
-    fn pump(
-        &mut self,
-        stream: &mut UnixStream,
-        out: &mut Output,
-    ) -> io::Result<Option<(i32, Option<String>)>> {
+    fn pump(&mut self, stream: &mut UnixStream, out: &mut Output) -> io::Result<Option<Leave>> {
         let mut bytes = [0; 16384];
         while !out.full() {
             match stream.read(&mut bytes) {
-                Ok(0) => return Ok(Some((1, Some("server exited unexpectedly".into())))),
+                Ok(0) => return Ok(Some(Leave::exit(1, "server exited unexpectedly"))),
                 Ok(n) => self.input.extend_from_slice(&bytes[..n]),
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                     self.readable = false;
@@ -309,12 +353,15 @@ impl Socket {
                                 out.finish()?;
                                 write_all_waiting(io::stderr().as_fd(), &b)?;
                             }
-                            ServerMsg::Exit { code, message } => {
+                            ServerMsg::Exit { code, message, hup } => {
                                 return Ok(Some(if let Some(reason) = self.signal_exit.take() {
-                                    (1, Some(reason))
+                                    Leave::exit(1, &reason)
                                 } else {
-                                    (code, message)
+                                    Leave::Exit { code, message, hup }
                                 }));
+                            }
+                            ServerMsg::Exec { command, shell } => {
+                                return Ok(Some(Leave::Exec { command, shell }));
                             }
                             // File requests go to command clients only: an
                             // attached client's I/O is the server's.

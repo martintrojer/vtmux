@@ -897,7 +897,7 @@ impl Server {
         self.flush_client(id);
     }
 
-    fn flush_client(&mut self, id: ClientId) {
+    pub(crate) fn flush_client(&mut self, id: ClientId) {
         let Some(c) = self.clients.get_mut(&id) else {
             return;
         };
@@ -941,7 +941,7 @@ impl Server {
             ClientMsg::Resize { cols, rows } => self.resize_client(id, cols, rows),
             ClientMsg::Stdin(bytes) => self.control_stdin(id, &bytes),
             ClientMsg::StdinEof => self.control_stdin_eof(id),
-            ClientMsg::Detach => self.detach_client(id),
+            ClientMsg::Detach => self.detach_client(id, false),
             ClientMsg::ReadData(bytes) => self.file_read_data(id, &bytes),
             ClientMsg::FileDone { error } => self.file_done(id, error),
             ClientMsg::FrameAck { seq } => {
@@ -965,6 +965,7 @@ impl Server {
             &ServerMsg::Exit {
                 code,
                 message: None,
+                hup: false,
             },
         );
         if let Some(c) = self.clients.get_mut(&id) {
@@ -1258,18 +1259,25 @@ impl Server {
         }
     }
 
-    pub fn detach_session_clients(&mut self, session: SessionId) {
-        let ids: Vec<_> = self
-            .clients
+    /// Every attached client (a session set), in connection order.
+    pub fn attached_clients(&self) -> Vec<ClientId> {
+        self.clients
             .iter()
-            .filter_map(|(&id, c)| (c.attached == Some(session)).then_some(id))
-            .collect();
-        for id in ids {
-            self.detach_client(id);
-        }
+            .filter_map(|(&id, c)| c.attached.map(|_| id))
+            .collect()
     }
 
-    pub fn detach_client(&mut self, id: ClientId) {
+    /// Clients attached to a session, in connection order.
+    pub fn session_clients(&self, session: SessionId) -> Vec<ClientId> {
+        self.clients
+            .iter()
+            .filter_map(|(&id, c)| (c.attached == Some(session)).then_some(id))
+            .collect()
+    }
+
+    /// `server_client_detach` (server-client.c:2733-2745): `hup` is
+    /// `MSG_DETACHKILL`, which has the client hang up its parent.
+    pub fn detach_client(&mut self, id: ClientId, hup: bool) {
         if self.is_control(id) {
             self.control_detach(id);
             return;
@@ -1277,19 +1285,70 @@ impl Server {
         let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
             return;
         };
+        let how = if hup {
+            "detached and SIGHUP"
+        } else {
+            "detached"
+        };
         let message = self
             .model
             .sessions
             .get(&s)
-            .map(|s| format!("detached (from session {})", s.name));
-        self.exit_attached(id, 0, message);
+            .map(|s| format!("{how} (from session {})", s.name));
+        self.exit_attached(id, 0, message, hup);
     }
 
-    fn exit_attached(&mut self, id: ClientId, code: i32, message: Option<String>) {
+    /// `server_client_exec` (server-client.c:630-655): the client runs
+    /// `shell -c command` in place of itself, `shell` being the session's
+    /// `default-shell` (the server's, with no session) unless it fails
+    /// `checkshell`. An empty command does nothing.
+    pub fn exec_client(&mut self, id: ClientId, command: &str) {
+        if command.is_empty() {
+            return;
+        }
+        let tree = self
+            .clients
+            .get(&id)
+            .and_then(|c| c.attached)
+            .map_or(TreeId::GlobalSession, TreeId::Session);
+        let shell = self.default_shell(tree);
+        if self.is_control(id) {
+            self.control_exec(id, command.to_owned(), shell);
+            return;
+        }
+        // MSG_EXEC takes the client out like MSG_DETACH: the terminal is
+        // restored first, then the process is replaced.
+        self.exit_attached_with(
+            id,
+            &ServerMsg::Exec {
+                command: command.to_owned(),
+                shell,
+            },
+        );
+    }
+
+    /// `default-shell` of `tree`, or /bin/sh when `checkshell` fails.
+    pub(crate) fn default_shell(&self, tree: TreeId) -> PathBuf {
+        let configured = self.model.options.get(tree, "default-shell").map_or_else(
+            || "/bin/sh".to_owned(),
+            |e| e.value.to_text(e.def, None, false),
+        );
+        if check_shell(Path::new(&configured)) {
+            PathBuf::from(configured)
+        } else {
+            PathBuf::from("/bin/sh")
+        }
+    }
+
+    fn exit_attached(&mut self, id: ClientId, code: i32, message: Option<String>, hup: bool) {
+        self.exit_attached_with(id, &ServerMsg::Exit { code, message, hup });
+    }
+
+    fn exit_attached_with(&mut self, id: ClientId, last: &ServerMsg) {
         if let Some(caps) = self.clients.get(&id).and_then(|c| c.caps) {
             self.send(id, &ServerMsg::Frame(caps.teardown()));
         }
-        self.send(id, &ServerMsg::Exit { code, message });
+        self.send(id, last);
         let left = self.client_window(id);
         if let Some(c) = self.clients.get_mut(&id) {
             c.left_session = c.attached.or(c.left_session);
@@ -1534,11 +1593,11 @@ impl Server {
             .collect();
         for (id, s) in attached {
             if self.shutdown {
-                self.exit_attached(id, 1, Some("server exited".into()));
+                self.exit_attached(id, 1, Some("server exited".into()), false);
                 continue;
             }
             if self.model.current_of(s).is_none() {
-                self.exit_attached(id, 0, Some("exited".into()));
+                self.exit_attached(id, 0, Some("exited".into()), false);
                 continue;
             }
             let client = &self.clients[&id];
@@ -2364,20 +2423,10 @@ impl Server {
         // The shell and history budget come from the session's options,
         // not the starting client's shell.
         let session_tree = TreeId::Session(ps.session);
-        let configured_shell = self
-            .model
-            .options
-            .get(session_tree, "default-shell")
-            .map_or_else(
-                || "/bin/sh".to_owned(),
-                |e| e.value.to_text(e.def, None, false),
-            );
         let shell = if let Some(kept) = &ps.shell {
             kept.clone()
-        } else if check_shell(Path::new(&configured_shell)) {
-            PathBuf::from(configured_shell)
         } else {
-            PathBuf::from("/bin/sh")
+            self.default_shell(session_tree)
         };
         child.set("SHELL", &shell.to_string_lossy(), false);
 

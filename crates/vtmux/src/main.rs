@@ -364,7 +364,13 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
             Ok(Some(ServerMsg::Stderr(b))) => {
                 let _ = io::stderr().lock().write_all(&b);
             }
-            Ok(Some(ServerMsg::Exit { code, message })) => break (code, message),
+            Ok(Some(ServerMsg::Exit { code, message, .. })) => break (code, message),
+            // client.c:403-407: detach-client -E replaces the client.
+            Ok(Some(ServerMsg::Exec { command, shell })) => {
+                return ExitCode::from(
+                    u8::try_from(vtmux_client::attach::exec(&shell, &command)).unwrap_or(1),
+                );
+            }
             // A control client's file I/O is the server's (file.c:321).
             Ok(Some(
                 ServerMsg::Ready
@@ -399,11 +405,16 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
             Ok(Some(ServerMsg::Stderr(b))) => {
                 let _ = io::stderr().lock().write_all(&b);
             }
-            Ok(Some(ServerMsg::Exit { code, message })) => {
+            Ok(Some(ServerMsg::Exit { code, message, .. })) => {
                 if let Some(m) = message {
                     write_err(m.as_bytes());
                 }
                 return ExitCode::from(u8::try_from(code).unwrap_or(1));
+            }
+            Ok(Some(ServerMsg::Exec { command, shell })) => {
+                return ExitCode::from(
+                    u8::try_from(vtmux_client::attach::exec(&shell, &command)).unwrap_or(1),
+                );
             }
             Ok(Some(ServerMsg::Ready)) => {
                 return ExitCode::from(

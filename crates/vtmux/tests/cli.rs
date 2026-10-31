@@ -620,6 +620,25 @@ fn command_errors() {
     });
 }
 
+/// `detach-client` with no attached client: `CMD_CLIENT_TFLAG` fails first,
+/// whatever `-a`, `-s`, `-P` or `-E` say (cmd-queue.c:604-609).
+#[test]
+fn detach_client_without_clients() {
+    compare("detach_client_without_clients", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a"]),
+            w.run(&["detach-client"]),
+            w.run(&["detach-client", "-a"]),
+            w.run(&["detach-client", "-s", "a"]),
+            w.run(&["detach-client", "-s", "nosuch"]),
+            w.run(&["detach-client", "-P", "-E", "true"]),
+            w.run(&["detach-client", "-t", "foo"]),
+            w.run(&["detach-client", "-t", "foo:", "-a"]),
+            w.run(&["ls"]),
+        ]
+    });
+}
+
 /// (10) kill-session leaves the others; killing the last ends the server.
 #[test]
 fn kill_session() {

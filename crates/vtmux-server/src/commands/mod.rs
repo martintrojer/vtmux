@@ -15,6 +15,7 @@ mod break_pane;
 mod capture_pane;
 pub(crate) mod copy_mode;
 mod delete_buffer;
+mod detach_client;
 mod display_message;
 pub(crate) mod file_io;
 mod join_pane;
@@ -538,32 +539,7 @@ fn dispatch(
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
             attach(server, item, session, !args.flag('E'), true)
         }
-        "detach-client" => {
-            if args.flag('s') {
-                let spec = args.target('s');
-                let source = target::resolve(
-                    &server.model,
-                    item.origin,
-                    spec.as_ref(),
-                    vtmux_core::cmd::TargetKind::Session,
-                    vtmux_core::cmd::FindFlags::CANFAIL,
-                )?;
-                if let Some(s) = source.session {
-                    server.detach_session_clients(s);
-                }
-                Ok(())
-            } else {
-                // cmd_find_current_client: the calling client when it is
-                // attached (cmd-find.c).
-                let client = item
-                    .client
-                    .filter(|&c| server.client_session(c).is_some())
-                    .or_else(|| server.current_client())
-                    .ok_or(EdgeError::NoCurrentClient)?;
-                server.detach_client(client);
-                Ok(())
-            }
-        }
+        "detach-client" => detach_client::exec(server, item, args),
         other => Err(CmdError::NotImplemented(other.to_owned())),
     }
 }
