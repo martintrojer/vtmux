@@ -278,7 +278,7 @@ fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCel
 /// Read one row of the active screen, spacer cells included.
 fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
     let mut cells = Vec::with_capacity(cols);
-    let mut wrapped = false;
+    let (mut wrapped, mut styled, mut linked) = (false, true, true);
     let y = u32::try_from(y).unwrap_or(u32::MAX);
     for x in 0..cols {
         let Ok(gr) = term.grid_ref(Point::Screen(PointCoordinate {
@@ -287,11 +287,13 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
         })) else {
             break;
         };
-        if x == 0 {
-            wrapped = gr
-                .row()
-                .and_then(libghostty_vt::screen::Row::is_wrapped)
-                .unwrap_or(false);
+        if x == 0
+            && let Ok(row) = gr.row()
+        {
+            wrapped = row.is_wrapped().unwrap_or(false);
+            // Per-row flags let most cells skip the style and link lookups.
+            styled = row.is_styled().unwrap_or(true);
+            linked = row.has_hyperlink().unwrap_or(true);
         }
         let Ok(cell) = gr.cell() else { continue };
         let wide = match cell.wide() {
@@ -301,28 +303,34 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
             _ => Width::Narrow,
         };
         // Most cells are unstyled: skip the style lookup for them.
-        let mut style = if cell.has_styling().unwrap_or(true) {
+        let mut style = if styled && cell.has_styling().unwrap_or(true) {
             gr.style().map(Style::from).unwrap_or_default()
         } else {
             Style::default()
         };
-        match cell.content_tag() {
+        let text = match cell.content_tag() {
+            // One codepoint: no grapheme buffer needed.
+            Ok(CellContentTag::Codepoint) => cell
+                .codepoint()
+                .ok()
+                .and_then(char::from_u32)
+                .filter(|&c| c != '\0')
+                .map(String::from)
+                .unwrap_or_default(),
+            Ok(CellContentTag::CodepointGrapheme) => cell_text(&gr),
             Ok(CellContentTag::BgColorPalette) => {
                 if let Ok(i) = cell.bg_color_palette() {
                     style.bg = Color::Palette(i.0);
                 }
+                String::new()
             }
             Ok(CellContentTag::BgColorRgb) => {
                 if let Ok(c) = cell.bg_color_rgb() {
                     style.bg = Color::Rgb(c.r, c.g, c.b);
                 }
+                String::new()
             }
-            _ => {}
-        }
-        let text = if cell.has_text().unwrap_or(true) {
-            cell_text(&gr)
-        } else {
-            String::new()
+            Err(_) => String::new(),
         };
         cells.push(RowCell {
             empty: text.is_empty(),
@@ -330,7 +338,7 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
             style,
             wide,
             acs: cell.is_protected().unwrap_or(false),
-            link: cell.has_hyperlink().unwrap_or(false),
+            link: linked && cell.has_hyperlink().unwrap_or(false),
         });
     }
     (cells, wrapped)
