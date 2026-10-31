@@ -149,7 +149,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("kill-window", Some("killw"), "af:t:", 0, Some(0), "[-a] [-f filter] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("last-pane", Some("lastp"), "det:Z", 0, Some(0), "[-deZ] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("last-window", Some("last"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
-    cmd("link-window", Some("linkw"), "abdks:t:", 0, Some(0), "[-abdk] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, false),
+    cmd("link-window", Some("linkw"), "abdks:t:", 0, Some(0), "[-abdk] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, true),
     cmd("list-buffers", Some("lsb"), "F:f:O:r", 0, Some(0), "[-F format] [-f filter] [-O order]", None, None, false, false),
     cmd("list-clients", Some("lsc"), "F:f:O:rt:", 0, Some(0), "[-F format] [-f filter] [-O order][-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("list-commands", Some("lscm"), "F:", 0, Some(1), "[-F format] [command]", None, None, true, false),
@@ -162,7 +162,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("lock-server", Some("lock"), "", 0, Some(0), "", None, None, false, false),
     cmd("lock-session", Some("locks"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, false),
     cmd("move-pane", Some("movep"), "bdD::fhMvl:L::P:R::s:t:U::X:Y:z:", 0, Some(0), "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
-    cmd("move-window", Some("movew"), "abdkrs:t:", 0, Some(0), "[-abdkr] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, false),
+    cmd("move-window", Some("movew"), "abdkrs:t:", 0, Some(0), "[-abdkr] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, true),
     cmd("new-pane", Some("newp"), "AbB:Cc:Dde:EfF:hIkl:KLMm:Op:PR:s:S:t:T:vWx:X:y:Y:Z", 0, None, "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("new-session", Some("new"), "Ac:dDe:EF:f:n:Ps:t:x:Xy:", 0, None, "[-AdDEPX] [-c start-directory] [-e environment] [-F format] [-f flags] [-n window-name] [-s session-name] [-t target-session] [-x width] [-y height] [shell-command [argument ...]]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, true, true),
     cmd("new-window", Some("neww"), "abc:de:EF:kn:PSt:", 0, None, "[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]", Some(slot('t', TargetKind::Window, FindFlags::WINDOW_INDEX)), None, false, true),
@@ -173,7 +173,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("previous-layout", Some("prevl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("previous-window", Some("prev"), "at:", 0, Some(0), "[-a] [-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("refresh-client", Some("refresh"), "A:B:cC:Df:r:F:lLRSt:U", 0, Some(1), "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]", None, None, false, false),
-    cmd("rename-session", Some("rename"), "t:", 1, Some(1), "[-t target-session] new-name", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, false),
+    cmd("rename-session", Some("rename"), "t:", 1, Some(1), "[-t target-session] new-name", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("rename-window", Some("renamew"), "t:", 1, Some(1), "[-t target-window] new-name", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("resize-pane", Some("resizep"), "D::L::MR::Tt:U::x:y:Z", 0, Some(1), "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("resize-window", Some("resizew"), "aADLRt:Ux:y:", 0, Some(1), "[-aADLRU] [-x width] [-y height] [-t target-window] [adjustment]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
@@ -205,11 +205,11 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("start-server", Some("start"), "", 0, Some(0), "", None, None, true, true),
     cmd("suspend-client", Some("suspendc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, false),
     cmd("swap-pane", Some("swapp"), "dDs:t:UZ", 0, Some(0), "[-dDUZ] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
-    cmd("swap-window", Some("swapw"), "ds:t:", 0, Some(0), "[-d] [-s src-window] [-t dst-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::DEFAULT_MARKED)), false, false),
+    cmd("swap-window", Some("swapw"), "ds:t:", 0, Some(0), "[-d] [-s src-window] [-t dst-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("switch-client", Some("switchc"), "c:EFlnO:pt:rT:Z", 0, Some(0), "[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]", None, None, false, true),
     cmd("switch-mode", None, "F:kst:wZ", 0, Some(1), "[-kswZ] [-F format] [-t target-pane] [command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("unbind-key", Some("unbind"), "anqT:", 0, Some(1), "[-anq] [-T key-table] key", None, None, false, true),
-    cmd("unlink-window", Some("unlinkw"), "kt:", 0, Some(0), "[-k] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, false),
+    cmd("unlink-window", Some("unlinkw"), "kt:", 0, Some(0), "[-k] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("wait-for", Some("wait"), "EF:LSUlvw:", 1, Some(1), "[-ELSUlv] [-F format] [-w waiter] name", None, None, false, true),
 ];
 
@@ -346,7 +346,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 49);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 54);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
@@ -466,10 +466,10 @@ mod tests {
 
     #[test]
     fn non_m0_commands_are_not_implemented() {
-        let e = find("swap-window").unwrap();
+        let e = find("copy-mode").unwrap();
         assert_eq!(
             e.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: swap-window"
+            "not implemented in vtmux yet: copy-mode"
         );
         assert!(find("new-session").unwrap().ensure_implemented().is_ok());
     }

@@ -46,6 +46,12 @@ pub struct Session {
     /// Alert flags of the winlinks (`wl->flags & WINLINK_ALERTFLAGS`),
     /// by window index: [`crate::alerts::BELL`] and friends. Absent is 0.
     pub link_alerts: BTreeMap<u32, u8>,
+    /// When each winlink was attached to its window, by window index
+    /// ([`Model::next_link_stamp`]): tmux appends a link to its window's
+    /// `winlinks` list (`winlink_set_window`), and
+    /// `#{window_linked_sessions_list}` walks that list. Absent is the
+    /// oldest (a window's first link).
+    pub link_seq: BTreeMap<u32, u64>,
 }
 
 /// A zoomed window: the full layout is kept aside while the zoomed pane
@@ -191,6 +197,8 @@ pub struct Model {
     activity: u64,
     /// `next_active_point` (window.c:63).
     active_points: u64,
+    /// Source of [`Session::link_seq`].
+    link_stamp: u64,
     /// Windows queued for the next alert check (`alerts_list`).
     pub(crate) alerts_list: Vec<WindowId>,
     /// Status redraws asked for since the last frame.
@@ -214,6 +222,7 @@ impl Default for Model {
             pane_ids: IdAllocator::new(),
             activity: 0,
             active_points: 0,
+            link_stamp: 0,
             alerts_list: Vec::new(),
             redraws: Vec::new(),
             redraw_panes: std::collections::BTreeSet::new(),
@@ -267,6 +276,30 @@ impl Model {
         self.sessions
             .values()
             .filter(move |s| s.windows.values().any(|x| *x == w))
+    }
+
+    /// The next [`Session::link_seq`] stamp.
+    pub fn next_link_stamp(&mut self) -> u64 {
+        self.link_stamp += 1;
+        self.link_stamp
+    }
+
+    /// Every winlink of window `w` in the order of tmux's `w->winlinks`
+    /// list (oldest attachment first).
+    #[must_use]
+    pub fn window_links(&self, w: WindowId) -> Vec<(&Session, u32)> {
+        let mut links: Vec<_> = self
+            .sessions
+            .values()
+            .flat_map(|s| {
+                s.windows
+                    .iter()
+                    .filter(move |(_, x)| **x == w)
+                    .map(move |(i, _)| (s, *i, s.link_seq.get(i).copied().unwrap_or(0)))
+            })
+            .collect();
+        links.sort_by_key(|(_, _, stamp)| *stamp);
+        links.into_iter().map(|(s, i, _)| (s, i)).collect()
     }
 
     /// A number-valued option as seen from `tree`.
@@ -503,6 +536,7 @@ impl Model {
         };
         session.last.retain(|i| *i != index);
         session.link_alerts.remove(&index);
+        session.link_seq.remove(&index);
         let Some(w) = session.windows.remove(&index) else {
             return Vec::new();
         };
@@ -533,9 +567,20 @@ impl Model {
         if let Some(session) = self.sessions.get_mut(&s) {
             session.last.retain(|i| *i != index);
             session.link_alerts.remove(&index);
+            session.link_seq.remove(&index);
             session.windows.remove(&index);
         }
         false
+    }
+
+    /// Destroy window `w` if no session links it any more (the last
+    /// `winlink_remove` dropping its reference).
+    pub fn drop_if_unlinked(&mut self, w: WindowId) -> Vec<Pane> {
+        if self.sessions_with(w).next().is_none() {
+            self.remove_window(w)
+        } else {
+            Vec::new()
+        }
     }
 
     /// `session_set_current` (session.c:520-545): `None` when there is no
@@ -651,6 +696,18 @@ impl Model {
             .into_iter()
             .filter_map(|(old, f)| moved.get(&old).map(|new| (*new, f)))
             .collect();
+        // Every winlink is made anew and appended to its window's list.
+        let keys: Vec<u32> = session.windows.keys().copied().collect();
+        session.link_seq.clear();
+        for i in keys {
+            self.link_stamp += 1;
+            let stamp = self.link_stamp;
+            self.sessions
+                .get_mut(&s)
+                .expect("session")
+                .link_seq
+                .insert(i, stamp);
+        }
     }
 
     /// `winlink_shuffle_up` (window.c:2481-2510): make room for a window
@@ -675,6 +732,10 @@ impl Model {
             *i = shift(*i);
         }
         session.link_alerts = std::mem::take(&mut session.link_alerts)
+            .into_iter()
+            .map(|(i, f)| (shift(i), f))
+            .collect();
+        session.link_seq = std::mem::take(&mut session.link_seq)
             .into_iter()
             .map(|(i, f)| (shift(i), f))
             .collect();
@@ -711,8 +772,10 @@ impl Model {
             self.next_free_index(s, base)
                 .ok_or_else(|| format!("index in use: {}", -1 - i64::from(base)))?
         };
+        let stamp = self.next_link_stamp();
         let session = self.sessions.get_mut(&s).expect("checked above");
         session.windows.insert(index, w);
+        session.link_seq.insert(index, stamp);
         Ok(index)
     }
 

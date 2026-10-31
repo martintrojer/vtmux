@@ -241,6 +241,8 @@ impl<'a> Ctx<'a> {
             // s->attached: the clients attached to it (format.c
             // format_cb_session_attached, recalculate_sizes).
             "session_attached" => self.attached_to(s.id).count().to_string(),
+            // format_cb_session_many_attached.
+            "session_many_attached" => flag(self.attached_to(s.id).count() > 1),
             // format_cb_session_attached_list: their names, in client order.
             "session_attached_list" => self
                 .attached_to(s.id)
@@ -347,6 +349,29 @@ impl<'a> Ctx<'a> {
                     f.push('Z');
                 }
                 f
+            }
+            // format_cb_window_linked: the window has more than one winlink
+            // (a window linked twice in one session counts).
+            "window_linked" => {
+                wl?;
+                flag(self.model.window_links(w.id).len() > 1)
+            }
+            // format_cb_window_linked_sessions: sessions linking it (no
+            // session groups yet, so each session counts once).
+            "window_linked_sessions" => {
+                wl?;
+                self.model.sessions_with(w.id).count().to_string()
+            }
+            // format_cb_window_linked_sessions_list: one name per winlink,
+            // in the order they were attached to the window.
+            "window_linked_sessions_list" => {
+                wl?;
+                self.model
+                    .window_links(w.id)
+                    .iter()
+                    .map(|(s, _)| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
             }
             "window_activity_flag" => flag(wl.is_some_and(|(s, i)| {
                 s.link_alerts.get(&i).copied().unwrap_or(0) & alerts::ACTIVITY != 0

@@ -25,8 +25,10 @@ mod list_clients;
 mod list_panes;
 mod list_sessions;
 mod list_windows;
+mod move_window;
 mod new_session;
 mod new_window;
+mod rename_session;
 mod rename_window;
 mod resize_pane;
 mod respawn_pane;
@@ -43,6 +45,8 @@ mod show_options;
 pub mod source_file;
 mod split_window;
 mod swap_pane;
+mod swap_window;
+mod unlink_window;
 mod wait_for;
 
 use std::path::PathBuf;
@@ -305,6 +309,12 @@ fn dispatch(
         "list-panes" => list_panes::exec(server, item, args, found),
         "new-window" => new_window::exec(server, item, args, found),
         "kill-window" => kill_window::exec(server, item, args, found),
+        "link-window" | "move-window" => {
+            move_window::exec(server, item, args, source, call.entry.name == "move-window")
+        }
+        "unlink-window" => unlink_window::exec(server, item, args, found),
+        "swap-window" => swap_window::exec(server, args, source, found),
+        "rename-session" => rename_session::exec(server, item, args, found),
         "rename-window" => rename_window::exec(server, item, args, found),
         "list-windows" => list_windows::exec(server, item, args, found),
         "select-window" => select_window::exec(server, item, args, found, Which::Select),
