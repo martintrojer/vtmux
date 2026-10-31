@@ -2252,7 +2252,7 @@ impl Server {
                     let before = (pane.term.title(), pane.term.pwd());
                     let alternate = pane.term.alternate_on();
                     pane.term.feed(&bytes);
-                    let left_alternate = alternate && !pane.term.alternate_on();
+                    let entered_alternate = !alternate && pane.term.alternate_on();
                     // input.c:2725-2740: a new title (OSC 0/2) or path
                     // (OSC 7) redraws the status of the window's sessions.
                     let retitled = (pane.term.title(), pane.term.pwd()) != before;
@@ -2263,7 +2263,7 @@ impl Server {
                     if !replies.is_empty() {
                         io.write(&replies);
                     }
-                    if left_alternate {
+                    if entered_alternate {
                         pane.flush_resizes();
                     }
                     // input_parse_buffer -> window_update_activity on every

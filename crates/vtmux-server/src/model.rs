@@ -1244,7 +1244,7 @@ impl Pane {
         self.resize_timer = Some(now + delay);
     }
 
-    /// `screen_alternate_off` (screen-write.c:3157-3166): leaving the
+    /// `screen_write_alternateon` (screen-write.c:3157-3166): entering the
     /// alternate screen sends the pane's size at once if any was queued.
     pub fn flush_resizes(&mut self) {
         if self.resizes.is_empty() {
