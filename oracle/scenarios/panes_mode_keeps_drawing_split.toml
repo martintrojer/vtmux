@@ -1,0 +1,19 @@
+name = "panes_mode_keeps_drawing_split"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { attach = { session = "a" } },
+  { run = ["display-panes", "-d", "0", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} [#{pane_mode}] #{pane_width}x#{pane_height} z=#{window_zoomed_flag}"] },
+  { run = ["splitw", "-d", "-t", "%1", "cat"] },
+  { settle = { react = true } },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} [#{pane_mode}] #{pane_width}x#{pane_height} z=#{window_zoomed_flag}"] },
+  { screen = {} },
+  { keys = "q" },
+  { settle = { react = true } },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} [#{pane_mode}] #{pane_width}x#{pane_height} z=#{window_zoomed_flag}"] },
+  { screen = {} },
+]
