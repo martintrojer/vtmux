@@ -3830,3 +3830,106 @@ fn switch_client_prefers_an_unattached_session() {
     }
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// The screen's rows with trailing blanks trimmed.
+fn rows_of(a: &Attached) -> Vec<String> {
+    let snap = vtmux_vt::snapshot(&a.screen());
+    (0..snap.rows)
+        .map(|y| {
+            (0..snap.cols)
+                .map(|x| {
+                    let t = &snap.cell(x, y).unwrap().text;
+                    if t.is_empty() { " " } else { t }
+                })
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// Clock mode with the clock pinned (`VTMUX_FAKE_TIME`, debug builds only;
+/// the reference ignores it, so this runs against vtmux alone): the exact
+/// glyph rows window-clock.c draws for 2026-11-01 13:07:45 UTC in each
+/// style, in `clock-mode-colour`, the compact text on a small pane, and
+/// any key leaving the mode. The rows were laid out by an independent
+/// script from `window_clock_table` and `window_clock_draw_screen`'s
+/// arithmetic (`x = sx/2 - 3*len`, `y = sy/2 - 3`, 6 columns a glyph).
+#[test]
+fn clock_mode_glyphs_at_a_fixed_time() {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let mut a = w.attach_env(
+        &["new", "-s", "a", "-n", "w", "cat"],
+        80,
+        24,
+        &[("VTMUX_FAKE_TIME", "1793538465"), ("TZ", "UTC")],
+    );
+    a.wait(|a| a.text().contains("\x1b[?1049h"));
+    for cmd in [
+        &["set", "-g", "status", "off"][..],
+        &["set", "-w", "clock-mode-colour", "red"],
+        &["set", "-w", "clock-mode-style", "24-with-seconds"],
+        &["clock-mode", "-t", "a"],
+    ] {
+        assert!(w.cli(cmd).status.success(), "{cmd:?}");
+    }
+    let glyphs = |top: [&str; 5]| -> Vec<String> {
+        let mut rows = vec![String::new(); 24];
+        for (i, r) in top.iter().enumerate() {
+            rows[9 + i] = (*r).to_owned();
+        }
+        rows
+    };
+    let want = glyphs([
+        "                    # #####       ##### #####       #   # #####",
+        "                    #     #   #   #   #     #   #   #   # #",
+        "                    # #####       #   #     #       ##### #####",
+        "                    #     #   #   #   #     #   #       #     #",
+        "                    # #####       #####     #           # #####",
+    ]);
+    a.wait_for(Duration::from_secs(5), |a| rows_of(a) == want);
+    // Every `#` is the colour on the colour (red is palette 1).
+    let snap = vtmux_vt::snapshot(&a.screen());
+    let hashes: Vec<_> = snap.cells.iter().filter(|c| c.text == "#").collect();
+    assert_eq!(hashes.len(), 79);
+    assert!(
+        hashes
+            .iter()
+            .all(|c| c.style.fg == vtmux_vt::Color::Palette(1)
+                && c.style.bg == vtmux_vt::Color::Palette(1))
+    );
+    // 12-hour style: " 1:07 PM".
+    assert!(
+        w.cli(&["set", "-w", "clock-mode-style", "12"])
+            .status
+            .success()
+    );
+    let want = glyphs([
+        "                          #       ##### #####       ##### #   #",
+        "                          #   #   #   #     #       #   # ## ##",
+        "                          #       #   #     #       ##### # # #",
+        "                          #   #   #   #     #       #     #   #",
+        "                          #       #####     #       #     #   #",
+    ]);
+    a.wait_for(Duration::from_secs(5), |a| rows_of(a) == want);
+    // A pane too small for glyphs shows the text, in the colour.
+    a.resize(20, 5);
+    assert!(
+        w.cli(&["set", "-w", "clock-mode-style", "24"])
+            .status
+            .success()
+    );
+    a.wait_for(Duration::from_secs(5), |a| {
+        rows_of(a).get(2).map(String::as_str) == Some("        13:07")
+    });
+    let snap = vtmux_vt::snapshot(&a.screen());
+    assert_eq!(
+        snap.cell(8, 2).unwrap().style.fg,
+        vtmux_vt::Color::Palette(1)
+    );
+    // Any key leaves the mode.
+    a.keys(b"x");
+    a.wait_for(Duration::from_secs(5), |_| {
+        display(&w, "[#{pane_mode}]") == "[]"
+    });
+}

@@ -666,7 +666,7 @@ impl<'a> Runner<'a> {
             },
         );
         let text = String::from_utf8_lossy(&bytes).replace('\u{1b}', "\\e");
-        let mut rows: Vec<String> = text.split('\n').map(|r| self.norm.text(r)).collect();
+        let mut rows: Vec<String> = text.split('\n').map(|r| self.norm.row(r)).collect();
         if rows.last().is_some_and(String::is_empty) {
             rows.pop();
         }

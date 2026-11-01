@@ -61,8 +61,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."clock-mode.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."cmd-template-replace.sh"]
 status = "pass"

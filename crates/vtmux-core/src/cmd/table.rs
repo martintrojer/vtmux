@@ -128,7 +128,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("choose-tree", None, "F:f:GhK:kNO:rst:wyZ", 0, Some(1), "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("clear-history", Some("clearhist"), "Ht:", 0, Some(0), "[-H] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("clear-prompt-history", Some("clearphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, true),
-    cmd("clock-mode", None, "t:", 0, Some(0), "[-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("clock-mode", None, "t:", 0, Some(0), "[-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("command-prompt", None, "1CbeFiklI:NPp:t:T:", 0, Some(1), "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]", None, None, false, true),
     cmd("confirm-before", Some("confirm"), "bc:p:t:y", 1, Some(1), "[-by] [-c confirm-key] [-p prompt] [-t target-client] command", None, None, false, true),
     cmd("copy-mode", None, "dekHMqSs:t:u", 0, Some(0), "[-dekHMqSu] [-s src-pane] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, true),
@@ -426,7 +426,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 73);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 74);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
@@ -546,10 +546,10 @@ mod tests {
 
     #[test]
     fn non_m0_commands_are_not_implemented() {
-        let e = find("clock-mode").unwrap();
+        let e = find("lock-server").unwrap();
         assert_eq!(
             e.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: clock-mode"
+            "not implemented in vtmux yet: lock-server"
         );
         assert!(find("new-session").unwrap().ensure_implemented().is_ok());
     }

@@ -1,0 +1,887 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "clock_small",
+  "inputs": {
+    "name": "clock_small",
+    "size": [
+      20,
+      5
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-colour",
+          "red"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-style",
+          "12"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "x"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-style",
+          "24"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "x"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-style",
+          "12-with-seconds"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "x"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-style",
+          "24-with-seconds"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "x"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-style",
+          "24"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-colour",
+          "default"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "x"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "clock-mode-colour",
+          "colour196"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "x"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "q"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{pane_in_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-N",
+          "2",
+          "x"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "\\e[31m      <CLOCK>\\e[39m",
+          "",
+          ""
+        ],
+        "cursor": [
+          14,
+          2
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[] [0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "        \\e[31m<CLOCK>\\e[39m",
+          "",
+          ""
+        ],
+        "cursor": [
+          13,
+          2
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[] [0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "\\e[31m     <CLOCK>\\e[39m",
+          "",
+          ""
+        ],
+        "cursor": [
+          16,
+          2
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[] [0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "      \\e[31m<CLOCK>\\e[39m",
+          "",
+          ""
+        ],
+        "cursor": [
+          14,
+          2
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[] [0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "        <CLOCK>",
+          "",
+          ""
+        ],
+        "cursor": [
+          13,
+          2
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [2]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "        \\e[38;5;196m<CLOCK>\\e[39m",
+          "",
+          ""
+        ],
+        "cursor": [
+          13,
+          2
+        ]
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "not in a mode\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[copy-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[] [0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[clock-mode] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "not in a mode\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -13,6 +13,7 @@
 
 mod break_pane;
 mod capture_pane;
+pub(crate) mod clock_mode;
 pub(crate) mod command_prompt;
 pub(crate) mod confirm_before;
 pub(crate) mod copy_mode;
@@ -450,6 +451,7 @@ fn dispatch(
         "display-message" => display_message::exec(server, item, args, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
+        "clock-mode" => clock_mode::exec(server, found),
         "copy-mode" => copy_mode::exec(server, item, args, source, found),
         "set-buffer" => set_buffer::exec(server, item, args),
         "delete-buffer" => delete_buffer::exec(server, args),

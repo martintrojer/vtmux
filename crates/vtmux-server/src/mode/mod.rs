@@ -8,6 +8,7 @@
 //! asks the user a question keeps a [`prompt::ModePrompt`] on its pane
 //! (`mode_tree_set_prompt`).
 
+pub mod clock;
 pub mod copy;
 pub mod grid;
 pub mod prompt;
@@ -19,6 +20,7 @@ use vtmux_core::options::TreeId;
 use crate::model::{Model, Redraw};
 use crate::server::Server;
 
+pub use clock::ClockMode;
 pub use copy::CopyMode;
 
 /// What the server asks of a mode (`struct window_mode`). A mode without
@@ -82,6 +84,7 @@ impl PaneMode for CopyMode {
 #[derive(Clone, Debug)]
 pub enum Mode {
     Copy(Box<CopyMode>),
+    Clock(ClockMode),
     /// A mode with no key table and no command callback, like tmux's tree
     /// and clock modes: only tests need one before those exist.
     #[cfg(test)]
@@ -92,6 +95,7 @@ impl PaneMode for Mode {
     fn name(&self) -> &'static str {
         match self {
             Self::Copy(m) => m.name(),
+            Self::Clock(m) => m.name(),
             #[cfg(test)]
             Self::Probe => "probe-mode",
         }
@@ -100,6 +104,7 @@ impl PaneMode for Mode {
     fn key_table(&self, vi: bool) -> Option<&'static str> {
         match self {
             Self::Copy(m) => m.key_table(vi),
+            Self::Clock(m) => m.key_table(vi),
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -108,6 +113,7 @@ impl PaneMode for Mode {
     fn takes_commands(&self) -> bool {
         match self {
             Self::Copy(m) => m.takes_commands(),
+            Self::Clock(m) => m.takes_commands(),
             #[cfg(test)]
             Self::Probe => false,
         }
@@ -116,6 +122,7 @@ impl PaneMode for Mode {
     fn set_prefix(&mut self, n: u32) {
         match self {
             Self::Copy(m) => m.set_prefix(n),
+            Self::Clock(m) => m.set_prefix(n),
             #[cfg(test)]
             Self::Probe => {}
         }
@@ -130,6 +137,7 @@ impl PaneMode for Mode {
     ) -> Result<copy::Outcome, copy::CommandError> {
         match self {
             Self::Copy(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
+            Self::Clock(m) => m.command(env, name, args, read_only_client),
             #[cfg(test)]
             Self::Probe => Err(copy::CommandError::NotImplemented(name.to_owned())),
         }
@@ -141,6 +149,7 @@ impl Mode {
     pub fn as_copy(&self) -> Option<&CopyMode> {
         match self {
             Self::Copy(m) => Some(m),
+            Self::Clock(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -149,6 +158,7 @@ impl Mode {
     pub fn as_copy_mut(&mut self) -> Option<&mut CopyMode> {
         match self {
             Self::Copy(m) => Some(m),
+            Self::Clock(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -291,8 +301,11 @@ impl Server {
         if pane.modes.is_empty() {
             pane.unseen_changes = false;
         }
-        if let Some(Mode::Copy(next)) = pane.modes.first_mut() {
-            next.resize(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
+        let size = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
+        match pane.modes.first_mut() {
+            Some(Mode::Copy(next)) => next.resize(size.0, size.1),
+            Some(Mode::Clock(next)) => next.resize(size.0, size.1),
+            _ => {}
         }
         let current = pane.modes.first().map(Mode::name);
         // A prompt of the mode that went goes with it.
@@ -330,7 +343,20 @@ impl Server {
         c: Option<crate::server::ClientId>,
         key: vtmux_core::keys::Key,
     ) -> bool {
-        self.mode_prompt_key(p, c, key)
+        if self.mode_prompt_key(p, c, key) {
+            return true;
+        }
+        // window_pane_key: a mode's `key` callback runs only with a client;
+        // clock mode's leaves the mode on any key (no mouse yet).
+        let clock = self
+            .model
+            .panes
+            .get(&p)
+            .is_some_and(|x| matches!(x.modes.first(), Some(Mode::Clock(_))));
+        if clock && c.is_some() {
+            self.clock_key(p);
+        }
+        false
     }
 
     /// Run `f` on pane `p`'s shown mode, out of the pane while it runs so
