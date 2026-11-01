@@ -19,6 +19,7 @@ pub(crate) mod copy_mode;
 mod delete_buffer;
 mod detach_client;
 mod display_message;
+pub(crate) mod display_popup;
 pub(crate) mod file_io;
 mod join_pane;
 mod keys;
@@ -545,6 +546,7 @@ fn dispatch(
         "detach-client" => detach_client::exec(server, item, args),
         "command-prompt" => command_prompt::exec(server, item, args),
         "confirm-before" => confirm_before::exec(server, item, args),
+        "display-popup" => display_popup::exec(server, item, args, found),
         "show-prompt-history" => prompt_history::show(server, item, args),
         "clear-prompt-history" => prompt_history::clear(server, args),
         other => Err(CmdError::NotImplemented(other.to_owned())),

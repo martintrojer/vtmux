@@ -155,7 +155,7 @@ impl Server {
     /// global environment and the session's; once the config has run,
     /// `TERM` and friends as a pane gets them (a config's if-shell sees
     /// the outside `TERM`); `TMUX` with the session's ID or -1.
-    fn job_environ(&self, session: Option<SessionId>) -> Vec<(String, String)> {
+    pub(crate) fn job_environ(&self, session: Option<SessionId>) -> Vec<(String, String)> {
         let mut env = self.global_env.clone();
         if let Some(s) = session.and_then(|s| self.model.sessions.get(&s)) {
             s.env.copy_into(&mut env);

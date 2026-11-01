@@ -120,6 +120,9 @@ pub(crate) struct Client {
     /// The command a status-line prompt answers to (`c->prompt`'s
     /// callbacks); the prompt itself is in `status`.
     pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
+    /// The popup over the client's screen (`c->overlay_data` with
+    /// `popup_draw_cb`).
+    pub(crate) popup: Option<crate::popup::Popup>,
 }
 
 /// Frame bytes the client has not yet written to its terminal: in
@@ -281,6 +284,8 @@ pub struct Server {
     pub(crate) event_waits: Vec<crate::events::EventWait>,
     /// Every prompt type's history (prompt-history.c).
     pub(crate) prompt_history: crate::prompt_history::History,
+    /// Closed popups' processes not yet reaped.
+    pub(crate) orphans: Vec<i32>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -458,6 +463,7 @@ impl Server {
             cmd_formats: Vec::new(),
             event_waits: Vec::new(),
             prompt_history: crate::prompt_history::History::default(),
+            orphans: Vec::new(),
         })
     }
 
@@ -475,6 +481,15 @@ impl Server {
                 match event.token() {
                     LISTENER => self.accept(),
                     SIGNALS => self.on_signals(),
+                    Token(t) if (crate::popup::POPUP_BASE..CLIENT_BASE).contains(&t) => {
+                        let id = ClientId(t - crate::popup::POPUP_BASE);
+                        if event.is_writable() {
+                            self.popup_writable(id);
+                        }
+                        if event.is_readable() || event.is_read_closed() {
+                            self.popup_readable(id);
+                        }
+                    }
                     Token(t) if (crate::jobs::JOB_BASE..CLIENT_BASE).contains(&t) => {
                         let id = crate::jobs::JobId(t - crate::jobs::JOB_BASE);
                         self.job_writable(id);
@@ -711,6 +726,7 @@ impl Server {
                             left_session: None,
                             status: crate::render::status::StatusLine::default(),
                             prompt_owner: None,
+                            popup: None,
                             written: 0,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
@@ -793,8 +809,10 @@ impl Server {
             }
             self.drain_events();
         }
-        // server-client.c:494: status_prompt_clear, whose free callback
-        // continues a command waiting on the prompt.
+        // server-client.c:493-494: server_client_clear_overlay, then
+        // status_prompt_clear, whose free callback continues a command
+        // waiting on the prompt.
+        self.popup_close(id);
         self.status_prompt_clear(id);
         if let Some(mut c) = self.clients.remove(&id) {
             let _ = self.poll.registry().deregister(&mut c.stream);
@@ -1444,6 +1462,7 @@ impl Server {
                         vtmux_core::keys::Key::FOCUS_OUT
                     };
                     let taken = self.clients.get_mut(&id).is_none_or(|c| c.status.key())
+                        || self.popup_key(id, key)
                         || self.prompts_key(id, key);
                     if !taken {
                         self.touch_client(id);
@@ -1534,6 +1553,7 @@ impl Server {
         let focused = active
             && self.clients.values().any(|c| {
                 c.focused
+                    && c.popup.is_none()
                     && c.attached
                         .and_then(|s| self.model.current_of(s))
                         .is_some_and(|(_, cw, _)| cw == w)
@@ -1616,7 +1636,10 @@ impl Server {
             let Some(tty) = client.hello.as_ref().and_then(|h| h.tty.as_ref()) else {
                 continue;
             };
-            let Some(caps) = client.caps else { continue };
+            let Some(mut caps) = client.caps else {
+                continue;
+            };
+            caps.overlay = client.popup.is_some();
             let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
             let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
             let queued = client.unacked.bytes;
@@ -1657,6 +1680,8 @@ impl Server {
                 .map(<[vtmux_vt::Cell]>::to_vec);
             self.draw_window(s, caps, &mut screen, scene_y, area, held.as_deref());
             self.draw_status(id, s, caps, &mut screen, lines, top);
+            // screen-redraw.c:1813: the overlay over everything else.
+            self.draw_popup(id, caps, &mut screen);
             let frame = self
                 .clients
                 .get_mut(&id)
@@ -1713,6 +1738,45 @@ impl Server {
         screen.cells[at..at + window.cells.len()].clone_from_slice(&window.cells);
         screen.cursor = window.cursor.map(|(x, cy)| (x, cy + y));
         screen.cursor_visible = window.cursor_visible;
+    }
+
+    /// Client `id`'s popup over `screen` (`popup_draw_cb`), and the cursor
+    /// in it (`popup_mode_cb`, server-client.c:2198-2200).
+    fn draw_popup(&self, id: ClientId, caps: crate::render::Caps, screen: &mut vtmux_vt::Snapshot) {
+        let Some(p) = self.clients.get(&id).and_then(|c| c.popup.as_ref()) else {
+            return;
+        };
+        let source = crate::render::window::Source {
+            model: &self.model,
+            info: &self.info,
+            env: &self.global_env,
+        };
+        let Some((defaults, border)) = self.popup_styles(id, &source) else {
+            return;
+        };
+        let content = vtmux_vt::snapshot(&p.term);
+        let draw = crate::render::popup::PopupDraw {
+            px: p.px,
+            py: p.py,
+            sx: p.sx,
+            sy: p.sy,
+            lines: p.lines,
+            border: &border,
+            defaults: &defaults,
+            title: &p.title,
+            content: &content,
+        };
+        // popup_draw_cb clears overlay_check while it draws (popup.c:229-231):
+        // its own empty runs are erased as without an overlay.
+        let clear = crate::render::Caps {
+            overlay: false,
+            ..caps
+        }
+        .clear();
+        crate::render::popup::draw(&draw, &source.theme(caps), clear, screen);
+        let (cx, cy) = p.cursor();
+        screen.cursor = Some((cx.min(screen.cols), cy.min(screen.rows.saturating_sub(1))));
+        screen.cursor_visible = content.cursor_visible;
     }
 
     /// `redraw_draw_pane_prompt` for every visible pane of session `s`'s
@@ -2836,7 +2900,7 @@ impl Server {
                         (_, Some(sig)) => crate::jobs::JobStatus::Signaled(sig),
                         (code, None) => crate::jobs::JobStatus::Exited(code.unwrap_or(0)),
                     };
-                    if self.job_died(raw, job_status) {
+                    if self.job_died(raw, job_status) || self.popup_died(raw, job_status) {
                         continue;
                     }
                     let found = self
