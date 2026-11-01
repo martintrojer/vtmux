@@ -1,0 +1,162 @@
+{
+  "meta": {
+    "date": "2026-11-01 22:13 UTC",
+    "commit": "eea1a69",
+    "host": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "AMD Ryzen 7 5700X3D 8-Core Processor",
+    "cpus": 16,
+    "kernel": "7.2.11-200.fc44.x86_64",
+    "load_at_start": 3.7265625,
+    "runs": 3,
+    "versions": {
+      "tmux": "tmux 3.8",
+      "vtmux": "vtmux 0.0.0 (tmux 3.8)"
+    }
+  },
+  "scenarios": {
+    "idle": {
+      "title": "idle (1 session, 60 s, -f /dev/null)",
+      "results": {
+        "tmux": {
+          "rss_mb": 4.296875,
+          "cpu_ms": 0.0,
+          "wakeups_per_s": 0.0
+        },
+        "vtmux": {
+          "rss_mb": 7.28125,
+          "cpu_ms": 0.0,
+          "wakeups_per_s": 0.0
+        }
+      }
+    },
+    "scale": {
+      "title": "scale (10 sessions x 10 windows x 4 panes of idle cat)",
+      "results": {
+        "tmux": {
+          "panes": 400,
+          "rss_mb": 6.44921875,
+          "rss_kb_per_pane": 5.353383458646617,
+          "create_cpu_ms": 270.0,
+          "create_wall_s": 0.2918232079828158,
+          "peak_rss_mb": 6.4453125
+        },
+        "vtmux": {
+          "panes": 400,
+          "rss_mb": 20.06640625,
+          "rss_kb_per_pane": 33.18295739348371,
+          "create_cpu_ms": 430.0,
+          "create_wall_s": 0.4512034610379487,
+          "peak_rss_mb": 20.0546875
+        }
+      }
+    },
+    "history": {
+      "title": "history (bench-history-memory.sh, fastest of RUNS)",
+      "raw": "scenario binary      size   limit     rss_mb hist_size retained output_s\nspec    tmux      120x40  100000       66.2     99962        -     0.45\nspec    vtmux     120x40  100000      105.3     99962   100039     0.30\nnarrow  tmux       80x24   10000       25.4      9978        -     0.72\nnarrow  vtmux      80x24   10000       27.7      9978    10244     0.34\nwide    tmux      500x24   10000       29.1      9978        -     0.18\nwide    vtmux     500x24   10000       47.0      9978    10025     0.13\n",
+      "history": {
+        "spec": {
+          "tmux": {
+            "size": "120x40",
+            "limit": 100000,
+            "rss_mb": 66.2,
+            "hist_size": 99962,
+            "retained": "-",
+            "output_s": 0.45
+          },
+          "vtmux": {
+            "size": "120x40",
+            "limit": 100000,
+            "rss_mb": 105.3,
+            "hist_size": 99962,
+            "retained": "100039",
+            "output_s": 0.3
+          }
+        },
+        "narrow": {
+          "tmux": {
+            "size": "80x24",
+            "limit": 10000,
+            "rss_mb": 25.4,
+            "hist_size": 9978,
+            "retained": "-",
+            "output_s": 0.72
+          },
+          "vtmux": {
+            "size": "80x24",
+            "limit": 10000,
+            "rss_mb": 27.7,
+            "hist_size": 9978,
+            "retained": "10244",
+            "output_s": 0.34
+          }
+        },
+        "wide": {
+          "tmux": {
+            "size": "500x24",
+            "limit": 10000,
+            "rss_mb": 29.1,
+            "hist_size": 9978,
+            "retained": "-",
+            "output_s": 0.18
+          },
+          "vtmux": {
+            "size": "500x24",
+            "limit": 10000,
+            "rss_mb": 47.0,
+            "hist_size": 9978,
+            "retained": "10025",
+            "output_s": 0.13
+          }
+        }
+      }
+    },
+    "startup": {
+      "title": "startup (new -d + kill-server, 100x, -f /dev/null)",
+      "results": {
+        "tmux": {
+          "new_ms": 9.549435984808952,
+          "kill_ms": 21.92200650461018,
+          "rss_mb": 4.30078125
+        },
+        "vtmux": {
+          "new_ms": 7.363613985944539,
+          "kill_ms": 21.377899014623836,
+          "rss_mb": 7.287109375
+        }
+      }
+    },
+    "throughput": {
+      "title": "throughput without a client (100 MB log text, 120x40 pane, default history; sgr bytes = 19%)",
+      "throughput": {
+        "plain": {
+          "tmux": {
+            "wall_s": 2.637871782993898,
+            "cpu_s": 2.53,
+            "mb_per_s": 39.75295565009749,
+            "peak_rss_mb": 5.421875
+          },
+          "vtmux": {
+            "wall_s": 1.2207563130068593,
+            "cpu_s": 1.17,
+            "mb_per_s": 85.90019062994662,
+            "peak_rss_mb": 10.3046875
+          }
+        },
+        "sgr": {
+          "tmux": {
+            "wall_s": 3.2477230330114253,
+            "cpu_s": 3.18,
+            "mb_per_s": 32.28932976552594,
+            "peak_rss_mb": 5.39453125
+          },
+          "vtmux": {
+            "wall_s": 2.642608995025512,
+            "cpu_s": 2.49,
+            "mb_per_s": 39.68305572160047,
+            "peak_rss_mb": 10.171875
+          }
+        }
+      }
+    }
+  }
+}
