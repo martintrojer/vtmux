@@ -1,11 +1,10 @@
 # The status-line prompt (status.c status_prompt_set/redraw, prompt.c
 # prompt_draw): prefix-: draws `:` in message-style with the cursor after
 # the input; emacs editing (C-a, C-e, C-b, C-f, C-w, C-y, C-k, C-u, C-t,
-# Delete, BSpace); Enter runs the command;
-# Keys that open a prompt and keys for it are sent apart: tmux queues the
-# binding, so keys in the same read as `C-b :` reach the key tables (and
-# the pane) before the prompt opens; vtmux runs the binding at once. history recall with Up/Down
-# (prompt-history.c); show-prompt-history; Escape and C-c cancel.
+# Delete, BSpace); Enter runs the command; history recall with Up/Down
+# (prompt-history.c); show-prompt-history; Escape and C-c cancel. Keys
+# after the one that opens the prompt are in their own write: in the same
+# read they would wait behind the prompt (prompt_key_order).
 name = "prompt_command"
 size = [40, 6]
 steps = [

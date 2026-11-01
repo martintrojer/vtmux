@@ -17,10 +17,28 @@ use vtmux_core::ids::SessionId;
 use vtmux_core::keys::Key;
 use vtmux_core::options::{OptionValue, TreeId, Value};
 
-use crate::cmdq::{End, NewBatch};
+use std::path::PathBuf;
+
+use crate::cmdq::{End, NewBatch, StepId, Work};
 use crate::commands;
 use crate::server::{ClientId, Server};
 use crate::target::Origin;
+
+/// A key waiting on a queue for `server_client_key_callback` (`struct
+/// key_event` and its client).
+#[derive(Debug)]
+pub struct KeyEvent {
+    pub client: ClientId,
+    pub kind: KeyKind,
+}
+
+#[derive(Debug)]
+pub enum KeyKind {
+    Key(crate::keys::Key),
+    /// `KEYC_PASTE_START` / `KEYC_PASTE_END`
+    /// (`server_client_is_bracket_paste`).
+    Paste(bool),
+}
 
 /// A client's key state: `c->keytable`, `CLIENT_REPEAT`, `c->last_key`,
 /// `c->repeat_timer`, and the two times `prefix-timeout` compares.
@@ -278,8 +296,6 @@ impl Server {
         if control {
             item.control = Some(0);
         }
-        // The key callback is a queue item of its own and takes a number.
-        self.cmd_number = self.cmd_number.wrapping_add(1);
         let batch = NewBatch::new(item, commands.calls.clone(), End::Quiet);
         if let Some(after) = self.key_after {
             self.key_after = self.cmdq_insert_batch(after, batch);
@@ -338,25 +354,95 @@ impl Server {
         self.redraw_client(id);
     }
 
-    /// Keys `send-keys -K` gave a client: handled as typed, after the
-    /// command (`server_client_handle_key_after`), with `KEYC_SENT`.
-    pub(crate) fn handle_injected_keys(&mut self, after: Option<crate::cmdq::StepId>) {
-        self.key_after = after;
-        for (id, key) in std::mem::take(&mut self.injected_keys) {
-            let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached.is_some()) else {
-                continue;
-            };
-            // server_client_handle_key0, as for typed keys.
-            if c.status.key() || self.status_prompt_key(id, key) {
-                continue;
+    /// `server_client_handle_key0` for a key or paste marker from client
+    /// `id`: a message and the prompt see it at once (the queue may be
+    /// waiting on the prompt); otherwise it is queued for
+    /// [`Self::fire_key`], at the end of the client's queue or, for
+    /// `send-keys -K`, after `after`. Returns the step the next key goes
+    /// after when queued after `after`.
+    pub(crate) fn handle_key0(
+        &mut self,
+        id: ClientId,
+        kind: KeyKind,
+        after: Option<StepId>,
+    ) -> Option<StepId> {
+        let c = self.clients.get_mut(&id).filter(|c| c.attached.is_some())?;
+        if c.status.key() {
+            return None;
+        }
+        let core = match &kind {
+            KeyKind::Key(k) => k.to_core(),
+            KeyKind::Paste(true) => Key::PASTE_START,
+            KeyKind::Paste(false) => Key::PASTE_END,
+        };
+        if self.status_prompt_key(id, core) {
+            return None;
+        }
+        let mut batch = NewBatch::new(
+            commands::Item::new(None, PathBuf::new()),
+            Vec::new(),
+            End::Quiet,
+        );
+        batch.before.push(Work::Key(KeyEvent { client: id, kind }));
+        match after {
+            // cmdq_insert_after: the key's End step follows it, so the
+            // next key goes after that and a binding (inserted after the
+            // key step) runs before the next key.
+            Some(after) => self.cmdq_insert_batch(after, batch),
+            None => self.cmdq_append(Some(id), batch),
+        }
+    }
+
+    /// `server_client_key_callback` for the queued key at step `step`.
+    pub(crate) fn fire_key(&mut self, step: StepId, event: &KeyEvent) {
+        // The callback is a queue item of its own and takes a number
+        // (cmd-queue.c:745-746).
+        self.cmd_number = self.cmd_number.wrapping_add(1);
+        let id = event.client;
+        let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached.is_some()) else {
+            return;
+        };
+        match event.kind {
+            KeyKind::Paste(start) => {
+                c.pasting = start;
+                // server_client_is_bracket_paste: the markers reach a pane
+                // that asked for bracketed paste.
+                if let Some(p) = self.client_pane(id)
+                    && self.model.panes[&p].term.bracketed_paste()
+                    && self.model.panes[&p].modes.is_empty()
+                {
+                    self.write_pane(p, if start { b"\x1b[200~" } else { b"\x1b[201~" });
+                }
             }
-            self.touch_client(id);
-            if !self.handle_key(id, key)
-                && let (Some(p), Some(k)) = (self.client_pane(id), crate::keys::Key::from_core(key))
-            {
-                self.forward_key(p, &k);
+            KeyKind::Key(key) => {
+                let pasting = c.pasting;
+                self.touch_client(id);
+                // server_client_update_latest (server-client.c:1708-1709)
+                // runs before the bound commands, which are queued after
+                // this step.
+                self.update_latest(id);
+                let outer = self.key_after.replace(step);
+                let taken = !pasting && self.handle_key(id, key.to_core());
+                self.key_after = outer;
+                if !taken && let Some(p) = self.client_pane(id) {
+                    self.forward_key(p, &key);
+                }
             }
         }
-        self.key_after = None;
+    }
+
+    /// Keys `send-keys -K` gave a client: handled as typed, each queued
+    /// after the command and the key before it
+    /// (`server_client_handle_key_after`), with `KEYC_SENT`.
+    pub(crate) fn handle_injected_keys(&mut self, command: Option<StepId>) {
+        let mut after = command;
+        for (id, key) in std::mem::take(&mut self.injected_keys) {
+            let Some(k) = crate::keys::Key::from_core(key) else {
+                continue;
+            };
+            // cmd_send_keys_inject_key: a key the prompt or a message took
+            // makes the next one go right after the command again.
+            after = self.handle_key0(id, KeyKind::Key(k), after).or(command);
+        }
     }
 }

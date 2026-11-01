@@ -110,7 +110,7 @@ pub(crate) struct Client {
     pub(crate) status: crate::render::status::StatusLine,
     /// Frame bytes sent to the client (`c->written`).
     pub(crate) written: usize,
-    pasting: bool,
+    pub(crate) pasting: bool,
     decoder: crate::input::Decoder,
     caps: Option<crate::render::Caps>,
     /// The client's terminal once attached (`tty_open`): its features and
@@ -1413,15 +1413,7 @@ impl Server {
                     }
                 }
                 crate::input::Event::Paste(start) => {
-                    c.pasting = start;
-                    // server_client_is_bracket_paste: the markers reach a
-                    // pane that asked for bracketed paste.
-                    if let Some(p) = self.client_pane(id)
-                        && self.model.panes[&p].term.bracketed_paste()
-                        && self.model.panes[&p].modes.is_empty()
-                    {
-                        self.write_pane(p, if start { b"\x1b[200~" } else { b"\x1b[201~" });
-                    }
+                    self.handle_key0(id, crate::key_dispatch::KeyKind::Paste(start), None);
                 }
                 crate::input::Event::Focus(focused) => {
                     // tty_keys_next (tty-keys.c:1030-1039): focus out is the
@@ -1437,36 +1429,34 @@ impl Server {
                         self.update_focus(self.client_window(id));
                         self.fire_client("client-focus-out", id);
                     }
-                    self.touch_client(id);
-                    if focused {
-                        self.update_latest(id);
+                    // server_client_handle_key0 with the focus key: a
+                    // message or a prompt (`-k` names it) may take it, and
+                    // then there is no key callback.
+                    let key = if focused {
+                        vtmux_core::keys::Key::FOCUS_IN
+                    } else {
+                        vtmux_core::keys::Key::FOCUS_OUT
+                    };
+                    let taken = self.clients.get_mut(&id).is_none_or(|c| c.status.key())
+                        || self.status_prompt_key(id, key);
+                    if !taken {
+                        self.touch_client(id);
+                        if focused {
+                            self.update_latest(id);
+                        }
                     }
                 }
                 crate::input::Event::Key(key) => {
-                    // server_client_handle_key0: a message goes with the
-                    // key, or swallows it with -N.
-                    if c.status.key() {
-                        continue;
-                    }
-                    let pasting = c.pasting;
-                    // server-client.c:1826-1835: the prompt first, at once;
-                    // a key it takes skips the key callback.
-                    if self.status_prompt_key(id, key.to_core()) {
-                        continue;
-                    }
-                    self.touch_client(id);
-                    // server_client_update_latest (server-client.c:1708-1709)
-                    // runs before the bound commands, which tmux queues
-                    // after the key callback.
-                    self.update_latest(id);
-                    if (pasting || !self.handle_key(id, key.to_core()))
-                        && let Some(p) = self.client_pane(id)
-                    {
-                        self.forward_key(p, &key);
-                    }
+                    // server_client_handle_key0 (server-client.c:1781-1880):
+                    // a message and the prompt see the key at once; the
+                    // key tables get it from the client's queue, after the
+                    // commands earlier keys queued, and not while a
+                    // command waits on a prompt.
+                    self.handle_key0(id, crate::key_dispatch::KeyKind::Key(key), None);
                 }
             }
         }
+        self.cmdq_process();
         Ok(())
     }
 

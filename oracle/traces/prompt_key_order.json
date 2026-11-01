@@ -1,0 +1,313 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "prompt_key_order",
+  "inputs": {
+    "name": "prompt_key_order",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-b",
+          "command-prompt",
+          "-b",
+          "-p",
+          "b",
+          "set -g @b '%%'"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-y",
+          "confirm-before",
+          "-p",
+          "ok?",
+          "set -g @y yes"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0002:abc"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0003"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001bbxy"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "z\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@b"
+        ]
+      },
+      {
+        "keys": "\u001byqy"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@y"
+        ]
+      },
+      {
+        "keys": "\u0002:display -d 0 hi\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0003"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:\\e[39m"
+        ],
+        "cursor": [
+          1,
+          5
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abc",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abc",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mb\\e[39m"
+        ],
+        "cursor": [
+          2,
+          5
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abcxy",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          5,
+          0
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "z\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abcxy",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mok?\\e[39m"
+        ],
+        "cursor": [
+          4,
+          5
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abcxyqy",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          7,
+          0
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "yes\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abcxyqy",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:\\e[39m"
+        ],
+        "cursor": [
+          1,
+          5
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "abcxyqydisplay -d 0 hi",
+          "abcxyqydisplay -d 0 hi",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    }
+  ]
+}
