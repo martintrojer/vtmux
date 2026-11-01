@@ -25,8 +25,8 @@ use crate::server::Server;
 
 pub use clock::ClockMode;
 pub use copy::CopyMode;
-pub use window_tree::WindowTree;
 pub use panes::PanesMode;
+pub use window_tree::WindowTree;
 
 /// What the server asks of a mode (`struct window_mode`). A mode without
 /// a key table gets its keys from its own handler; one without a command
