@@ -1310,6 +1310,51 @@ fn options_spawn_and_exit_empty() {
     });
 }
 
+/// History parity with Ghostty's line limit (history-memory spec,
+/// criterion 2): Ghostty keeps at most a page more than `history-limit`,
+/// whatever the styling, and `#{history_size}` and `capture-pane -S -`
+/// stay tmux's (`grid_collect_history`, grid.c:449-474). A styled 80
+/// column pane (40 truecolour runs per line, where a byte budget kept
+/// 9664 rows to tmux's 9979), a 500 column pane, and reflow of the wide
+/// pane's history when it narrows and widens again (grid.c `grid_reflow`
+/// keeps every line, so `history_size` passes the limit). One limit for
+/// all: tmux applies a new `history-limit` to running panes, which vtmux
+/// doesn't yet (task `hist_limit_live`).
+#[test]
+fn history_limit_retention() {
+    compare("history_limit_retention", |w| {
+        let styled = "awk 'BEGIN { for (i = 0; i < 12000; i++) { s = sprintf(\"%05d\", i); \
+            for (j = 0; j < 40; j++) s = s sprintf(\"\\033[38;2;%d;%d;%dm%c\", i % 256, j, (i * 7) % 256, 65 + j % 26); \
+            print s \"\\033[m\" } }'; echo DONE; exec cat";
+        let wide = "awk 'BEGIN { for (i = 0; i < 12000; i++) { s = sprintf(\"%05d\", i); \
+            while (length(s) < 450) s = s \" \" i; print s } }'; echo DONE; exec cat";
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&["set", "-g", "history-limit", "10000"]),
+            w.run(&["new", "-d", "-s", "s", "-x", "80", "-y", "24", styled]),
+            w.run(&["new", "-d", "-s", "w", "-x", "500", "-y", "24", wide]),
+        ];
+        w.wait_for_text("s", "DONE");
+        w.wait_for_text("w", "DONE");
+        let state = ["display", "-p", "-t", "", "#{history_size} #{pane_width}"];
+        for (target, size) in [
+            ("s", None),
+            ("w", None),
+            ("w", Some("100")),
+            ("w", Some("500")),
+        ] {
+            if let Some(cols) = size {
+                runs.push(w.run(&["resize-window", "-t", target, "-x", cols]));
+            }
+            let mut display = state;
+            display[3] = target;
+            runs.push(w.run(&display));
+            runs.push(w.run(&["capture-pane", "-p", "-S", "-", "-t", target]));
+        }
+        runs
+    });
+}
+
 /// spawn.c `spawn_pane` (379-390): a new pane with no command runs the
 /// session's `default-command` as one `$SHELL -c` word; respawn-pane and
 /// respawn-window without a command keep the pane's own. Scopes: session

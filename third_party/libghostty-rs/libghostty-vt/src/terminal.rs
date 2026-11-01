@@ -671,6 +671,27 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
+    /// The configured maximum number of physical scrollback lines; `None`
+    /// when unlimited.
+    pub fn scrollback_max_lines(&self) -> Result<Option<usize>> {
+        self.get_optional(Data::SCROLLBACK_MAX_LINES)
+    }
+
+    /// Set the maximum number of physical lines retained in scrollback
+    /// (primary screen only).
+    ///
+    /// Ghostty prunes whole pages, and never splits the page holding the
+    /// top of the active area, so the history kept after pruning is between
+    /// `v + 1 - page_rows` and `v` rows (`page_rows` is a page's row count
+    /// at the current width). The effective limit is never below one page.
+    /// Lowering it immediately removes eligible complete history pages, and
+    /// it is enforced again on every new row and on resize. `None` removes
+    /// the limit.
+    pub fn set_scrollback_max_lines(&mut self, v: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::SCROLLBACK_MAX_LINES, v.as_ref())?;
+        Ok(self)
+    }
+
     /// The effective foreground color (override or default).
     pub fn fg_color(&self) -> Result<Option<RgbColor>> {
         self.get_optional::<ffi::ColorRgb>(Data::COLOR_FOREGROUND)

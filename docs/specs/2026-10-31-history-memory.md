@@ -84,6 +84,10 @@ All measured by a pinned benchmark script in the repo (`scripts/bench-history-me
 | Re-arm the compression deadline after vtmux's own history reads | Otherwise read history stays decompressed forever |
 | Criterion 3 measures `copy-mode` entry on compressed 100k-line history; the bar is "no worse than 2× entry on uncompressed history" rather than 50 ms | Entry copies all history today; an absolute 50 ms would require a lazy copy-mode grid, which is a separate piece of work |
 
+## Retention as built (hist_retain, 2026-11-01)
+
+The byte-budget resolution above was refuted (scratch `delegate_refute-hist-retain`): a byte budget holds far fewer rows of styled output, so `#{history_size}` fell below tmux's (5620 rows for tmux's 9978 at 80 columns, 70 truecolour cells per line). Ghostty 3bd54e025 has a line limit (`OPT_SCROLLBACK_MAX_LINES`), now exposed by the vendored wrapper. `PaneTerm` sets it to `max(history-limit, hsize)` plus one page of rows at the current width, re-sets it after every resize, and turns the byte limit off. Ghostty prunes whole pages, so it keeps every row tmux has and at most one page more, whatever the styling. `history-limit 0` keeps the byte limit at 0, since the line limit can't go below a page. Applying `history-limit` changes to existing panes moved to task `hist_limit_live`. Numbers: `docs/test-health/2026-11-01-history-memory.md`.
+
 ## Implementation checklist
 
 0. Upgrade libghostty-vt (setter + security fix); everything green on the new pin.
