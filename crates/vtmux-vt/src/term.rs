@@ -121,6 +121,13 @@ pub struct PaneTerm {
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
     frozen: Option<Vec<FrozenRow>>,
+    /// The oldest row of tmux's primary history (the active top when it
+    /// has none), pinned as the alternate screen came up, and the history
+    /// rows Ghostty kept then. Ghostty reflows the primary screen at every
+    /// resize under the alternate screen; tmux leaves it alone and
+    /// reflows it once on the way back (screen.c `screen_alternate_off`).
+    /// Either way tmux's history starts at this row again.
+    alt_entry: Option<(TrackedGridRef, usize)>,
     /// ED3 arrived under the alternate screen: tmux cleared the primary
     /// history (input.c:1758), which libghostty cannot reach until the
     /// primary screen is back.
@@ -231,6 +238,7 @@ impl PaneTerm {
             pin: None,
             scan: AltModeScanner::default(),
             frozen: None,
+            alt_entry: None,
             clear_primary_history: false,
             redraw: false,
             marks: Vec::new(),
@@ -299,6 +307,7 @@ impl PaneTerm {
                     ScanEvent::AltMode(b'h') if !self.alternate_on() => {
                         self.frozen = Some(self.freeze_history());
                         self.frozen_marks = self.line_marks();
+                        self.alt_entry = self.pin_oldest().map(|pin| (pin, self.retained_rows()));
                     }
                     // tmux's ED3 clears the grid's history, which under the
                     // alternate screen is the primary one (input.c:1758).
@@ -366,6 +375,7 @@ impl PaneTerm {
         self.term.vt_write(piece);
         if !self.alternate_on() {
             self.frozen = None;
+            let entry = self.alt_entry.take();
             if std::mem::take(&mut self.clear_primary_history) {
                 // Back on the primary screen: apply the ED3 that arrived
                 // under the alternate one.
@@ -375,11 +385,51 @@ impl PaneTerm {
                 self.account_scroll();
             } else {
                 // Back from the alternate screen (or a reset): the primary
-                // history may have changed under us (a reset, or a budget
-                // lowered while the alternate screen was up).
+                // history may have changed under us (a resize reflowed it,
+                // a reset cleared it, a budget lowered while the alternate
+                // screen was up pruned it).
+                if let Some((oldest, retained)) = entry {
+                    self.history_from(&oldest, retained);
+                }
                 self.clamp_history_to_retained();
             }
+            // Resizes under the alternate screen leave the limit lifted.
+            self.retain();
         }
+    }
+
+    /// Pin the oldest row of tmux's primary history (the active top when it
+    /// has none). Primary screen only: a pin belongs to the active screen.
+    fn pin_oldest(&mut self) -> Option<TrackedGridRef> {
+        let y = self.retained_rows().saturating_sub(self.hsize);
+        let y = u32::try_from(y).ok()?;
+        self.term
+            .track_grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
+            .ok()
+    }
+
+    /// After a reflow (`retained` history rows before it): tmux's history
+    /// starts at `oldest` again. A pin Ghostty pruned leaves `hsize` as it
+    /// was. Ghostty's reflow does not say which row went where, so the
+    /// rows' times are lost.
+    fn history_from(&mut self, oldest: &TrackedGridRef, retained: usize) {
+        let Some(hidden) = oldest
+            .point(PointSpace::Screen)
+            .ok()
+            .flatten()
+            .and_then(|p| usize::try_from(p.y).ok())
+        else {
+            return;
+        };
+        let after = self.retained_rows();
+        let hsize = after.saturating_sub(hidden);
+        if hsize == self.hsize && after == retained {
+            return;
+        }
+        self.hsize = hsize;
+        self.scrolled = (self.scrolled + after as u64).saturating_sub(retained as u64);
+        self.times.clear();
+        self.times_base = self.scrolled;
     }
 
     fn arm_pin(&mut self) {
@@ -544,16 +594,12 @@ impl PaneTerm {
         let on_primary = !self.alternate_on();
         // The oldest row tmux has (the active top when it has none): rows
         // above it stay hidden however the reflow splits or joins them.
-        let oldest = on_primary
-            .then(|| {
-                let y = u32::try_from(before.saturating_sub(self.hsize)).ok()?;
-                self.term
-                    .track_grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
-                    .ok()
-            })
-            .flatten();
+        let oldest = if on_primary { self.pin_oldest() } else { None };
         // Lift the line limit so the reflow keeps every row; `retain`
-        // sets it again for the new width.
+        // sets it again for the new width. Under the alternate screen it
+        // stays lifted until the primary screen is back: `hsize` is
+        // tmux's unreflowed count there, and pruning to it would drop the
+        // rows a narrowing reflow split off (see `alt_entry`).
         if self.history_lines > 0 {
             let _ = self.term.set_scrollback_max_lines(None);
             self.line_limit = None;
@@ -598,8 +644,8 @@ impl PaneTerm {
                 self.times_base = self.scrolled;
             }
         }
-        self.retain();
         if on_primary {
+            self.retain();
             self.clamp_history_to_retained();
         }
         self.generation += 1;
@@ -1673,6 +1719,43 @@ mod tests {
             t.feed(&lines(0, 3000, false));
             assert_retention(&t, &String::from_utf8_lossy(seq));
             assert!(t.term.scrollback_rows().unwrap() >= 1000);
+        }
+    }
+
+    /// Ghostty reflows the primary screen at a resize under the alternate
+    /// screen; tmux reflows it once when the alternate screen goes
+    /// (screen.c `screen_alternate_off`). A narrowing splits every history
+    /// row in Ghostty, so the line limit must not prune to tmux's unsplit
+    /// count until then, and tmux's history starts at the same row after.
+    #[test]
+    fn resize_under_the_alternate_screen_keeps_history() {
+        for styled in [false, true] {
+            let mut t = PaneTerm::new(80, 24, 2000);
+            t.feed(&lines(0, 5000, styled));
+            let before = t.history_size();
+            let oldest = 5000 + 1 - 24 - before;
+            t.feed(b"\x1b[?1049h");
+            for (cols, rows) in [(40, 24), (20, 10), (90, 30), (80, 24)] {
+                t.resize(cols, rows);
+                assert_eq!(t.history_size(), before, "{cols}x{rows} styled={styled}");
+            }
+            t.feed(b"\x1b[?1049l");
+            assert_eq!(t.history_size(), before, "styled={styled}");
+            assert_retention(&t, &format!("after alt styled={styled}"));
+            let opts = crate::capture::CaptureOpts {
+                start: crate::capture::LineRef::Start,
+                end: crate::capture::LineRef::Line(-i64::try_from(before).unwrap()),
+                ..Default::default()
+            };
+            let row = crate::capture::capture(&t, opts);
+            assert_eq!(
+                String::from_utf8_lossy(&row).trim_end(),
+                format!("{oldest:070}"),
+                "styled={styled}"
+            );
+            // The limit is back: more output stays within a page of it.
+            t.feed(&lines(0, 3000, styled));
+            assert_retention(&t, &format!("then output styled={styled}"));
         }
     }
 

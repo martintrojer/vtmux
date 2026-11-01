@@ -38,6 +38,23 @@ Recorded per commit in git history; the list is kept current:
   `set_scrollback_max_lines` (`GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES`,
   `GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES`, already in the bindings);
   vtmux keeps history by line count with it.
+- `libghostty-vt-sys/build.rs`: applies `libghostty-vt-sys/patches/*.patch`
+  (name order, `git apply`) to the fetched ghostty; the source stamp
+  records the commit and the patch contents. Not applied to a
+  `GHOSTTY_SOURCE_DIR` tree.
+- `patches/0001-keep-one-free-page-resident.patch` (`PageList.zig`
+  `destroyNodeExt`, `keepWarm`): a freed pool page is zeroed in place
+  instead of decommitted while no other free page is resident. With a
+  line limit and no byte limit, Ghostty erases the oldest page each time
+  output fills one (`Limits.enforce`), `madvise(MADV_DONTNEED)` on Linux;
+  the next page comes from the same pool item and faults all 98 of its
+  4 KiB pages back in. vtmux's 1M-line flood went from 0.26 s to 0.91 s
+  (506k minor faults) without it, 0.27 s with it
+  (`docs/test-health/2026-11-01-history-memory.md`). Upstream candidate.
+  ghostty's `zig build test-lib-vt` with it: 6977/7053 pass, 74 skip; the
+  one failure (`kitty.graphics_image` "temporary file outside directory
+  prefix is rejected", in both test binaries) fails the same way on
+  unpatched 3bd54e025 on this host.
 
   Checked by diffing the old and new bindings: no constant was renumbered
   or removed, and struct layouts only grew at the end (`ClipboardWrite`,
@@ -58,6 +75,8 @@ Recorded per commit in git history; the list is kept current:
    for `stddef.h`. Diff the old and new bindings for removed or changed
    functions, callback types and struct fields (a changed callback type
    still compiles), and fix the wrapper.
-4. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES`,
+4. Re-apply or drop each `libghostty-vt-sys/patches/*.patch` (the build
+   fails if one no longer applies).
+5. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES`,
    `PAGE_GRID_BYTES`, `CELLS_ALIGN`; `page_rows_matches_ghostty` fails if
    the page layout changed) and run the slow gate.
