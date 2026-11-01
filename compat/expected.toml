@@ -631,8 +631,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."tty-keys.sh"]
-status = "xfail"
-reason = "command-prompt -k is in; the input decoder lacks tty-keys.c's keypad, rxvt and xterm F-key variants and CSI u extended keys"
+status = "pass"
 
 [tests."utf8-test.sh"]
 status = "xfail"

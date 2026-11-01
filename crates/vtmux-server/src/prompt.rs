@@ -8,7 +8,7 @@
 //! (`prompt_fire_callback`).
 //!
 //! Not here yet: incremental (`-i`) and pane (`-P`) prompts, Tab
-//! completion, keypad keys (vtmux decodes none), mouse.
+//! completion, mouse.
 
 use vtmux_core::keys::Key;
 use vtmux_core::width::char_width;
@@ -238,7 +238,7 @@ impl Prompt {
                 pass_on: false,
             };
         }
-        let key = key.without_flags();
+        let key = keypad_key(key.without_flags());
         if self.kind == Kind::Numeric {
             if key.as_char().is_some_and(|c| c.is_ascii_digit()) && key.modifiers() == 0 {
                 self.insert(key);
@@ -654,6 +654,16 @@ fn emacs(key: Key) -> Option<Action> {
 /// A key as `-1` and `C-v` take it (prompt.c:1252-1262): Backspace is
 /// DEL, a Ctrl key its control character, Unicode as it is; other keys
 /// are dropped.
+/// `prompt_keypad_key` (prompt.c:735-775): an unmodified keypad key is
+/// its character, `KPEnter` is Enter.
+fn keypad_key(key: Key) -> Key {
+    const CHARS: &[u8; 16] = b"/*-789+456123\r0.";
+    match key.keypad_index() {
+        Some(n) if key.modifiers() == 0 => Key::ascii(CHARS[usize::from(n)]),
+        _ => key,
+    }
+}
+
 fn literal(key: Key) -> Option<char> {
     let base = key.base();
     if base == Key::BSPACE {

@@ -265,7 +265,13 @@ impl PaneTerm {
                 if e == ScanEvent::Reset && !self.alternate_on() {
                     self.marks.clear();
                 }
+                // tmux's RIS (input.c:1407-1412, screen_write_reset) keeps
+                // the title; Ghostty's full reset clears it.
+                let title = (e == ScanEvent::Reset).then(|| self.title());
                 self.feed_piece(&bytes[i..=i]);
+                if let Some(title) = title {
+                    *self.title_override.borrow_mut() = Some(title);
+                }
                 i += 1;
                 if let ScanEvent::Osc133(mark) = e {
                     self.mark_cursor_line(mark);
@@ -578,6 +584,13 @@ impl PaneTerm {
     #[must_use]
     pub fn app_cursor(&self) -> bool {
         self.term.mode(Mode::DECCKM).unwrap_or(false)
+    }
+
+    /// DECKPAM (`ESC =`): keypad keys are sent as `ESC O x` (tmux's
+    /// `MODE_KKEYPAD`, input-keys.c:648-649).
+    #[must_use]
+    pub fn app_keypad(&self) -> bool {
+        self.term.mode(Mode::KEYPAD_KEYS).unwrap_or(false)
     }
 
     /// `?1004h`: the pane asked for focus reports (`MODE_FOCUSON`).
@@ -1125,6 +1138,15 @@ mod tests {
         assert_eq!(t.title(), "a#(b)\\tc");
         t.feed(b"x");
         assert_eq!(t.title(), "a#(b)\\tc");
+        t.feed(b"\x1b]2;next\x07");
+        assert_eq!(t.title(), "next");
+    }
+
+    #[test]
+    fn ris_keeps_the_title() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"\x1b]2;host\x07x\x1bc");
+        assert_eq!(t.title(), "host");
         t.feed(b"\x1b]2;next\x07");
         assert_eq!(t.title(), "next");
     }
