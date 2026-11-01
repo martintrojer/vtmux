@@ -4174,3 +4174,75 @@ fn choose_tree_bindings_s_w_and_owner_s() {
     }
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// input.c `input_dcs_dispatch` and screen-write.c `screen_write_rawstring`
+/// (`screen_write_set_client_cb`, 139-161): the payload of `DCS tmux; ... ST`
+/// (a doubled ESC is one) is written raw to the clients when the pane's
+/// `allow-passthrough` is `on` and the pane's window is the client's current
+/// one, or `all` and the client's session has it. `off` drops it, and the
+/// pane's grid and title show nothing of it.
+#[test]
+fn allow_passthrough_delivers_dcs_tmux_payloads_raw() {
+    const OSC52: &[u8] = b"\x1b]52;c;aGVsbG8=\x07";
+    const APC: &[u8] = b"\x1b_Gi=7,a=q,s=1,v=1,f=24;AAAA\x1b\\";
+    // (mode, the pane is in a background window, delivered)
+    let cases = [
+        ("off", false, false),
+        ("on", false, true),
+        ("all", false, true),
+        ("off", true, false),
+        ("on", true, false),
+        ("all", true, true),
+    ];
+    for bin in bins() {
+        for (mode, background, want) in cases {
+            let w = World::new(bin.clone());
+            let file = w.home.path().join("payload");
+            let mut payload = b"X\x1bPtmux;\x1b".to_vec();
+            payload
+                .extend_from_slice(b"\x1b]52;c;aGVsbG8=\x07\x1b\x1b]2;INNER\x07\x1b\x1b[31m\x1b\\");
+            payload.extend_from_slice(b"\x1bPtmux;\x1b");
+            payload.extend_from_slice(b"\x1b_Gi=7,a=q,s=1,v=1,f=24;AAAA\x1b\x1b\\\x1b\\Y");
+            std::fs::write(&file, payload).unwrap();
+            let script = format!("read x; cat {}; exec cat", file.display());
+            let a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+            a.wait(|a| status_row(a).contains("0:w"));
+            w.cli(&["set", "-g", "allow-passthrough", mode]);
+            w.cli(&["set", "-g", "status-right", ""]);
+            let target = "a:0";
+            if background {
+                w.cli(&["neww", "-d", "-n", "other", "cat"]);
+                // Move the client off the window that prints.
+                w.cli(&["select-window", "-t", "a:1"]);
+                a.wait(|a| status_row(a).contains("1:other*"));
+            }
+            let start = a.bytes.lock().unwrap().len();
+            w.cli(&["send-keys", "-t", target, "Enter"]);
+            let end = Instant::now() + Duration::from_secs(5);
+            loop {
+                let out = w.cli(&["capture-pane", "-p", "-t", target]);
+                if String::from_utf8_lossy(&out.stdout).contains('Y') {
+                    break;
+                }
+                assert!(Instant::now() < end, "{} {mode}: no marker", bin.display());
+                thread::sleep(Duration::from_millis(20));
+            }
+            thread::sleep(Duration::from_millis(300));
+            let got = a.bytes.lock().unwrap()[start..].to_vec();
+            let has = |needle: &[u8]| got.windows(needle.len()).any(|x| x == needle);
+            let what = format!("{} {mode} background={background}", bin.display());
+            assert_eq!(has(OSC52), want, "{what}: OSC 52 in {got:?}");
+            assert_eq!(has(APC), want, "{what}: APC in {got:?}");
+            // Nothing of the payload is drawn or titles the pane, delivered
+            // or not.
+            let out = w.cli(&["display", "-p", "-t", target, "#{pane_title}"]);
+            let title = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            assert!(!title.contains("INNER"), "{what}: title {title:?}");
+            let out = w.cli(&["capture-pane", "-p", "-e", "-t", target]);
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+            // (the Enter that released `read` echoed a newline first)
+            let lines: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
+            assert_eq!(lines, ["XY"], "{what}: grid {text:?}");
+        }
+    }
+}
