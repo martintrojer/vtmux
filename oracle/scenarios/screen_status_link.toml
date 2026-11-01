@@ -10,8 +10,10 @@ steps = [
   { attach = { session = "a" } },
   { screen = {} },
   { run = ["set", "-w", "-t", "a", "pane-border-format", "a#[link=http://x]            #[nolink]b"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["set", "-w", "-t", "a", "pane-border-lines", "spaces"] },
   { run = ["set", "-w", "-t", "a", "pane-border-format", "#[fg=red]a#[link=http://x]            #[nolink]            b"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

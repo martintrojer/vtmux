@@ -87,6 +87,7 @@ steps = [
   { run = ["send-keys", "-t", "a", "-X", "search-forward", "日本"] },
   { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
   { run = ["send-keys", "-t", "a", "-X", "search-forward", "long"] },
+  { settle = { react = true } },
   { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}#{?search_count_partial,+,}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}] [#{scroll_position}]"] },
   { screen = {} },
   { run = ["send-keys", "-t", "a", "-X", "cancel"] },

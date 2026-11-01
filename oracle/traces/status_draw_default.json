@@ -94,6 +94,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -102,6 +107,11 @@
           "-t",
           "a:1"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -202,7 +212,7 @@
       }
     },
     {
-      "step": 10,
+      "step": 11,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -222,7 +232,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 12,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -231,7 +241,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 14,
       "observation": {
         "kind": "screen",
         "rows": [

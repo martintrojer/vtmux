@@ -64,6 +64,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -75,6 +80,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -84,6 +94,11 @@
           "status-justify",
           "absolute-centre"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -103,6 +118,11 @@
           "status-justify",
           "left"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -174,7 +194,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -192,34 +212,7 @@
       }
     },
     {
-      "step": 8,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 9,
-      "observation": {
-        "kind": "screen",
-        "rows": [
-          "",
-          "",
-          "",
-          "",
-          "",
-          "\\e[30m\\e[42mL\\e[39m                              \\e[4m\\e[30m0:w*\\e[0m\\e[30m\\e[42m 1:xy RIGHTSIDE"
-        ],
-        "cursor": [
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "step": 10,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -237,7 +230,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42mL\\e[39m                   \\e[4m\\e[30m0:w*\\e[0m\\e[30m\\e[42m 1:xy\\e[39m            \\e[30mRIGHTSIDE"
+          "\\e[30m\\e[42mL\\e[39m                              \\e[4m\\e[30m0:w*\\e[0m\\e[30m\\e[42m 1:xy RIGHTSIDE"
         ],
         "cursor": [
           0,
@@ -255,7 +248,25 @@
       }
     },
     {
-      "step": 13,
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42mL\\e[39m                   \\e[4m\\e[30m0:w*\\e[0m\\e[30m\\e[42m 1:xy\\e[39m            \\e[30mRIGHTSIDE"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 15,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -264,7 +275,16 @@
       }
     },
     {
-      "step": 14,
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [

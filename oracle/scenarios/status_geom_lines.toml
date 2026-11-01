@@ -13,6 +13,7 @@ steps = [
   { settle = {} },
   { screen = {} },
   { run = ["set", "-t", "a", "status", "5"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
   { resize = [40, 5] },
@@ -20,6 +21,7 @@ steps = [
   { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
   { resize = [40, 10] },
   { run = ["set", "-t", "a", "status", "2"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
 ]

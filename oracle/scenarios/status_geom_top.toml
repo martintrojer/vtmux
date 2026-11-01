@@ -13,8 +13,10 @@ steps = [
   { screen = {} },
   { run = ["set", "-g", "status-format[1]", ""] },
   { run = ["set", "-g", "status", "2"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["display", "-p", "-t", "a", "#{window_height} #{pane_height}"] },
   { run = ["set", "-g", "status-position", "bottom"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

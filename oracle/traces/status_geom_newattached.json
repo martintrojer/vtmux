@@ -111,6 +111,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -136,6 +141,11 @@
           "-t",
           "a:0"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -164,6 +174,11 @@
           "status",
           "on"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -293,7 +308,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 13,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -315,19 +330,10 @@
       }
     },
     {
-      "step": 13,
-      "observation": {
-        "kind": "cli",
-        "stdout": "7 7\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 14,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "7 7\n",
         "stderr": "",
         "exit": 0
       }
@@ -343,6 +349,15 @@
     },
     {
       "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -364,7 +379,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 19,
       "observation": {
         "kind": "cli",
         "stdout": "0 40x10\n1 40x10\n",
@@ -373,25 +388,25 @@
       }
     },
     {
-      "step": 18,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 19,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -413,7 +428,7 @@
       }
     },
     {
-      "step": 21,
+      "step": 24,
       "observation": {
         "kind": "cli",
         "stdout": "0 40x9\n1 40x10\n",

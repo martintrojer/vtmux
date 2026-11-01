@@ -54,11 +54,16 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
         "settle": {
-          "quiet_ms": 1000
+          "quiet_ms": 2500
         }
       },
       {
@@ -81,11 +86,16 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
         "settle": {
-          "quiet_ms": 1000
+          "quiet_ms": 2500
         }
       },
       {
@@ -105,11 +115,16 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
         "settle": {
-          "quiet_ms": 1000
+          "quiet_ms": 2500
         }
       },
       {
@@ -129,11 +144,16 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
         "settle": {
-          "quiet_ms": 1000
+          "quiet_ms": 2500
         }
       },
       {
@@ -155,11 +175,16 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
         "settle": {
-          "quiet_ms": 500
+          "quiet_ms": 1500
         }
       },
       {
@@ -223,7 +248,7 @@
       }
     },
     {
-      "step": 6,
+      "step": 7,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -241,7 +266,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 9,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -259,15 +284,6 @@
       }
     },
     {
-      "step": 9,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 10,
       "observation": {
         "kind": "cli",
@@ -278,6 +294,15 @@
     },
     {
       "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -295,25 +320,25 @@
       }
     },
     {
-      "step": 13,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 14,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -331,52 +356,16 @@
       }
     },
     {
-      "step": 17,
+      "step": 20,
       "observation": {
         "kind": "cli",
         "stdout": "",
         "stderr": "",
         "exit": 0
-      }
-    },
-    {
-      "step": 18,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 19,
-      "observation": {
-        "kind": "screen",
-        "rows": [
-          "",
-          "",
-          "",
-          "",
-          "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m  \\e[39m\\e[46m         \\e[44mmid\\e[46m        \\e[30m\\e[42m       R t"
-        ],
-        "cursor": [
-          0,
-          0
-        ]
       }
     },
     {
       "step": 21,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 22,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -394,7 +383,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m  \\e[39m\\e[44m<fmt> a\\e[30m\\e[42m \\e[39m                   \\e[30mR t"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m  \\e[39m\\e[46m         \\e[44mmid\\e[46m        \\e[30m\\e[42m       R t"
         ],
         "cursor": [
           0,
@@ -404,6 +393,42 @@
     },
     {
       "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m  \\e[39m\\e[44m<fmt> a\\e[30m\\e[42m \\e[39m                   \\e[30mR t"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 30,
       "observation": {
         "kind": "screen",
         "rows": [

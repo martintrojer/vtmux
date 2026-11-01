@@ -93,6 +93,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -111,6 +116,11 @@
           "status-position",
           "bottom"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -222,7 +232,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 13,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -242,7 +252,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 14,
       "observation": {
         "kind": "cli",
         "stdout": "6 6\n",
@@ -251,7 +261,7 @@
       }
     },
     {
-      "step": 14,
+      "step": 15,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -260,7 +270,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 17,
       "observation": {
         "kind": "screen",
         "rows": [

@@ -23,8 +23,11 @@
           "9",
           "sh",
           "-c",
-          "stty raw -echo; exec cat -v"
+          "stty raw -echo; tmux wait-for -S ready; exec cat -v"
         ]
+      },
+      {
+        "wait_for": "ready"
       },
       {
         "run": [
@@ -47,6 +50,9 @@
         "attach": {
           "session": "a"
         }
+      },
+      {
+        "settle": {}
       },
       {
         "keys": "\u0002%"
@@ -151,7 +157,16 @@
       }
     },
     {
-      "step": 6,
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "2\n",
@@ -160,7 +175,7 @@
       }
     },
     {
-      "step": 9,
+      "step": 11,
       "observation": {
         "kind": "cli",
         "stdout": "mx\n",
@@ -169,7 +184,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 14,
       "observation": {
         "kind": "cli",
         "stdout": "3\n",
@@ -178,7 +193,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "$ |\n\n\n\n",
@@ -187,7 +202,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 20,
       "observation": {
         "kind": "cli",
         "stdout": "",

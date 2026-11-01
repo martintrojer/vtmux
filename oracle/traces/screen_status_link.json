@@ -90,6 +90,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -111,6 +116,11 @@
           "pane-border-format",
           "#[fg=red]a#[link=http://x]            #[nolink]            b"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -204,7 +214,7 @@
       }
     },
     {
-      "step": 9,
+      "step": 10,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -226,15 +236,6 @@
       }
     },
     {
-      "step": 10,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 11,
       "observation": {
         "kind": "cli",
@@ -245,6 +246,15 @@
     },
     {
       "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
       "observation": {
         "kind": "screen",
         "rows": [
