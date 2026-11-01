@@ -375,7 +375,9 @@ impl Server {
             KeyKind::Paste(true) => Key::PASTE_START,
             KeyKind::Paste(false) => Key::PASTE_END,
         };
-        if self.prompts_key(id, core) {
+        // server-client.c:1792-1802: the overlay takes every key at once
+        // (the queue may be waiting on the popup's command).
+        if self.popup_key(id, core) || self.prompts_key(id, core) {
             return None;
         }
         let mut batch = NewBatch::new(

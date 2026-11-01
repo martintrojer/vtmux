@@ -366,6 +366,28 @@ fn status_rows(
         .collect()
 }
 
+/// The `range=` ranges of each status line as `status_redraw` records them
+/// (`sl->entries[i].ranges`), for `display-popup -x W`.
+#[must_use]
+pub fn status_ranges(
+    source: &Source<'_>,
+    ctx: &Ctx<'_>,
+    s: SessionId,
+    cols: usize,
+    lines: usize,
+) -> Vec<Vec<styled::StyleRange>> {
+    let tree = TreeId::Session(s);
+    let base = base_style(source, ctx, tree);
+    (0..u32::try_from(lines).unwrap_or(u32::MAX))
+        .map(|i| {
+            let expanded = format(source, tree, i)
+                .map(|f| vtmux_core::format::expand_time(&f, ctx))
+                .unwrap_or_default();
+            styled::draw(&base, cols, &expanded, true, false).ranges
+        })
+        .collect()
+}
+
 /// What the status lines show under a message or prompt
 /// (`status_push_screen`, `screen_write_fast_copy`): what of the status
 /// fits in `lines` (at least one) rows of `cols`, the rest default cells.
