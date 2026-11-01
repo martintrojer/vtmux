@@ -1,0 +1,318 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "format_jobs_status",
+  "inputs": {
+    "name": "format_jobs_status",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "echo one > \"$HOME/f\""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-interval",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "[#(cat \"$HOME/f\")]"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "run-shell",
+          "echo two > \"$HOME/f\""
+        ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 1500
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "refresh-client",
+          "-S"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "[#(echo x$(cat \"$HOME/f\"))]"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "run-shell",
+          "echo three > \"$HOME/f\""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-interval",
+          "1"
+        ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 2600,
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                           \\e[30m[one]"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                           \\e[30m[one]"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                           \\e[30m[two]"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                          \\e[30m[xtwo]"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                        \\e[30m[xthree]"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+name = "format_jobs_status"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  # The job reads a file, so what it prints changes only when the scenario
+  # writes it; status-interval 0 leaves refreshes to completion and -S.
+  { run = ["run-shell", 'echo one > "$HOME/f"'] },
+  { run = ["set", "-g", "status-interval", "0"] },
+  { run = ["set", "-g", "status-right", '[#(cat "$HOME/f")]'] },
+  { attach = { session = "a" } },
+  # format_job_complete (format.c:370-385): the job reports and the status
+  # is drawn again with its line, though nothing else asked for a redraw.
+  { settle = { react = true } },
+  { screen = {} },
+  # No redraw is asked for, so the file's new content is not looked at.
+  { run = ["run-shell", 'echo two > "$HOME/f"'] },
+  { settle = { quiet_ms = 1500 } },
+  { screen = {} },
+  # refresh-client -S: FORMAT_FORCE (status.c:241-243), the job runs again.
+  { run = ["refresh-client", "-S"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # The expanded command changing restarts the job on its own.
+  { run = ["set", "-g", "status-right", '[#(echo x$(cat "$HOME/f"))]'] },
+  { settle = { react = true } },
+  { screen = {} },
+  # status-interval: a tick draws the status again, and a job that is over
+  # in an earlier second runs again (format.c:436-437).
+  { run = ["run-shell", 'echo three > "$HOME/f"'] },
+  { run = ["set", "-g", "status-interval", "1"] },
+  { settle = { react = true, quiet_ms = 2600 } },
+  { screen = {} },
+]

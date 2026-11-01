@@ -71,6 +71,10 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
         return control_size(server, tc, size);
     }
 
+    // Both forms set CLIENT_STATUSFORCE (cmd-refresh-client.c:275-280).
+    if let Some(c) = server.clients.get_mut(&tc) {
+        c.status.force_jobs();
+    }
     if args.flag('S') {
         server.status_redraw_client(tc);
     } else {
