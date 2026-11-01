@@ -1,0 +1,1036 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "tree_prompts",
+  "inputs": {
+    "name": "tree_prompts",
+    "size": [
+      80,
+      16
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "aaa",
+          "-n",
+          "w0",
+          "-x",
+          "60",
+          "-y",
+          "15",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:1",
+          "-n",
+          "w1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "aaa:1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "bbb",
+          "-n",
+          "x0",
+          "-x",
+          "60",
+          "-y",
+          "15",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "bbb:1",
+          "-n",
+          "x1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ccc",
+          "-n",
+          "y0",
+          "-x",
+          "60",
+          "-y",
+          "15",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%1",
+          "-T",
+          "t1"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%2",
+          "-T",
+          "t2"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%3",
+          "-T",
+          "t3"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%4",
+          "-T",
+          "t4"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%5",
+          "-T",
+          "t5"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "message-style",
+          "bg=yellow,fg=black"
+        ]
+      },
+      {
+        "attach": {
+          "session": "aaa"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-t",
+          "aaa:0.0",
+          "-N"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u0013"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "x1"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "n"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "N"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "f"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "#{==:#{window_name},x1}\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "f"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0007"
+      },
+      {
+        "keys": "c"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "Gx"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "n"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "x"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-sessions",
+          "-F",
+          "#{session_name} #{session_windows}"
+        ]
+      },
+      {
+        "keys": "gjjjjtGt"
+      },
+      {
+        "keys": "X"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-windows",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_name}"
+        ]
+      },
+      {
+        "keys": "gjt"
+      },
+      {
+        "keys": ":"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "rename-window -t '%%' r%%\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "list-windows",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_name}"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-t",
+          "aaa:0.0",
+          "-N",
+          "-y"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "Gx"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-sessions",
+          "-F",
+          "#{session_name}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[30m\\e[43m(1)   ├─→ - 0: w0*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(9)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mx1\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "\\e[30m\\e[43m(search) \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          9,
+          14
+        ]
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[30m\\e[43m(1)   ├─→ - 0: w0*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(9)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mx1\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "\\e[30m\\e[43m(search) x1\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          11,
+          14
+        ]
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[30m\\e[43m(9)   └─→ - 1: x1: \"t4\"\\e[39m",
+          "\\e[37m\\e[49m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[30m\\e[43m(9)   └─→ - 1: x1: \"t4\"\\e[39m",
+          "\\e[37m\\e[49m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[30m\\e[43m(9)   └─→ - 1: x1: \"t4\"\\e[39m",
+          "\\e[37m\\e[49m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[30m\\e[43m(9)   └─→ - 1: x1: \"t4\"\\e[39m",
+          "\\e[37m\\e[49m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "\\e[30m\\e[43m(filter) \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          9,
+          14
+        ]
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows",
+          "\\e[30m\\e[43m(1) └─→ - 1: x1: \"t4\"\\e[39m",
+          "\\e[37m\\e[49m(2)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows",
+          "\\e[30m\\e[43m(1) └─→ - 1: x1: \"t4\"\\e[39m",
+          "\\e[37m\\e[49m(2)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m(filter) #{==:#{window_name},x1}\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          32,
+          14
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[30m\\e[43m(9)   └─→ - 1: x1: \"t4\"\\e[39m",
+          "\\e[37m\\e[49m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[37m(M-d)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t5\"\\e[39m",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(9)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mx1\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[30m\\e[43m(M-d)     └─→ 0: cat*: \"t5\"\\e[39m",
+          "\\e[30mKill pane 0? \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          13,
+          14
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(9)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mx1\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(M-a)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t4\"\\e[39m",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mccc\\e[37m: 1 windows\\e[39m",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39my0\\e[37m*: \"t5\"\\e[39m",
+          "\\e[30m\\e[43m(M-d)     └─→ 0: cat*: \"t5\"\\e[39m",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          13
+        ]
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(9)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mx1\\e[37m: \"t4\"\\e[39m",
+          "\\e[30m\\e[43m(M-a)     └─→ 0: cat*: \"t4\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaa 2\nbbb 2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)       ├─→ \\e[36m0*\\e[37m: \\e[36mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(6)   \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 2 windows\\e[39m",
+          "\\e[37m(7)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(8)   │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(9)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mx1\\e[37m: \"t4\"\\e[39m",
+          "\\e[36m\\e[43m(M-a)     └─→ 0*: cat*: \"t4\"\\e[39m",
+          "",
+          "",
+          "",
+          "\\e[30mKill 2 tagged? \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          15,
+          14
+        ]
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2) │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(4)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(5) \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "(6) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[30m\\e[43m(7)     └─→ 0: cat*: \"t3\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          7
+        ]
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaa:0 w0\naaa:1 w1\nbbb:0 x0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[31m-\\e[37m \\e[36m0*\\e[37m: \\e[36mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[30m\\e[43m(2) │   └─→ 0: cat*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(4)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(5) \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "(6) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(7)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m(1 tagged) \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          11,
+          14
+        ]
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[31m-\\e[37m \\e[36m0*\\e[37m: \\e[36mr%%\\e[37m*: \"t0\"\\e[39m",
+          "\\e[30m\\e[43m(2) │   └─→ 0: cat*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1\\e[37m: \"t2\"\\e[39m",
+          "\\e[37m(4)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t2\"\\e[39m",
+          "\\e[37m(5) \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "(6) └─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t3\"\\e[39m",
+          "\\e[37m(7)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t3\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:r%%*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                              \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 59,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaa:0 r%%\naaa:1 w1\nbbb:0 x0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 63,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mr%%\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(2) │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t0\"\\e[39m",
+          "\\e[37m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1\\e[37m: \"t2\"\\e[39m",
+          "\\e[30m\\e[43m(4)     └─→ 0: cat*: \"t2\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:r%%*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                              \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 64,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaa\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
