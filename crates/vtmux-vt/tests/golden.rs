@@ -231,4 +231,5 @@ golden! {
     reply_decrqm_alt,
     reply_decrqm_irm,
     reply_decrqm_ansi_unknown,
+    reply_decxcpr,
 }

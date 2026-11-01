@@ -964,10 +964,12 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// - XTVERSION `DCS > | tmux 3.8 ST` (input.c:1885-1890), size reports
 ///   14/16/18 t (input.c:2160-2183): produced by the registered effects
 ///
-/// Dropped, tmux does not answer: DA3, DSR ?996 (needs a client theme),
-/// kitty keyboard `CSI ? u`, XTWINOPS 21 t (input.c:2143-2149), every OSC
-/// colour query (tmux answers only from client state), Kitty graphics and
-/// Glyph Protocol APC.
+/// Dropped, tmux does not answer: DA3, DECXCPR `CSI ? 6 n` and DSR ?998
+/// (tmux's private DSR knows only 996, input.c:1631-1637), DSR ?996 (needs a
+/// client theme), mode 2033/2048 reports, kitty keyboard `CSI ? u`, XTWINOPS
+/// 21 t (input.c:2143-2149), every OSC query (colours, clipboard, OSC 5522,
+/// 7501; tmux answers colours only from client state), XTGETTCAP, Kitty
+/// graphics and Glyph Protocol APC.
 fn tmux_reply(term: &Terminal<'_, '_>, data: &[u8]) -> Option<Vec<u8>> {
     if let Some(body) = data.strip_prefix(b"\x1b[") {
         if let Some(params) = body.strip_suffix(b"$y") {
@@ -977,7 +979,10 @@ fn tmux_reply(term: &Terminal<'_, '_>, data: &[u8]) -> Option<Vec<u8>> {
             b'c' if body.starts_with(b"?") => Some(b"\x1b[?1;2c".to_vec()),
             b'c' if body.starts_with(b">") => Some(b"\x1b[>84;0;0c".to_vec()),
             b'n' if body == b"0n" => Some(data.to_vec()),
-            b'R' => {
+            // CPR only: tmux answers DECXCPR (`CSI ? 6 n`, Ghostty's
+            // `CSI ? row ; col ; 1 R`) with nothing, its private DSR knows
+            // only 996 (input.c:1631-1637).
+            b'R' if !body.starts_with(b"?") => {
                 let (x, y) = tmux_cursor(term);
                 Some(format!("\x1b[{};{}R", y + 1, x + 1).into_bytes())
             }
@@ -1104,6 +1109,16 @@ mod tests {
             let r = replies_to(20, 5, q);
             assert!(r.is_empty() || r == b"\x1b[?2048;0$y", "{q:?} -> {r:?}");
         }
+    }
+
+    /// tmux's private DSR answers only 996 (input.c:1631-1637); Ghostty
+    /// answers DECXCPR with `CSI ? row ; col ; 1 R`.
+    #[test]
+    fn decxcpr_is_not_answered() {
+        assert_eq!(replies_to(20, 5, b"\x1b[?6n\x1b[5n"), b"\x1b[0n");
+        assert_eq!(replies_to(20, 5, b"\x1b[?998n\x1b[5n"), b"\x1b[0n");
+        let pending = replies_to(20, 5, b"abcdefghijklmnopqrst\x1b[?6n\x1b[6n");
+        assert_eq!(pending, b"\x1b[1;21R");
     }
 
     #[test]
