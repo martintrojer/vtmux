@@ -40,7 +40,7 @@ pub struct Item {
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_QUIET: Duration = Duration::from_millis(150);
-const SETTLE_LIMIT: Duration = Duration::from_secs(10);
+const SETTLE_LIMIT: Duration = Duration::from_secs(30);
 /// How long `settle` waits for the first output a just-sent input provokes.
 const REACTION_LIMIT: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(5);

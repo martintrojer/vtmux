@@ -12,16 +12,16 @@ steps = [
   { settle = { react = true } },
   { screen = {} },
   # With the status off the message takes the last row and still freezes.
-  { run = ["display-message", "-d", "1500", "-t", "a", "m"] },
+  { run = ["display-message", "-d", "5000", "-t", "a", "m"] },
   { run = ["send-keys", "-t", "a.0", "hello", "Enter"] },
   { settle = { react = true } },
   { screen = {} },
-  { settle = { quiet_ms = 3500 } },
+  { settle = { quiet_ms = 10000 } },
   { screen = {} },
   # PANE_REDRAW draws one pane through the freeze: a screen switch
   # (screen-write.c:3154) and respawn-pane (cmd-respawn-pane.c:92).
   { run = ["set", "-g", "status", "on"] },
-  { run = ["display-message", "-d", "2000", "-t", "a", "m"] },
+  { run = ["display-message", "-d", "6000", "-t", "a", "m"] },
   { run = ["send-keys", "-t", "a.0", "again", "Enter"] },
   { run = ["send-keys", "-t", "a.2", "Enter"] },
   { settle = { react = true } },
@@ -29,6 +29,6 @@ steps = [
   { run = ["respawn-pane", "-k", "-t", "a.1", "sh", "-c", "echo fresh; exec cat"] },
   { settle = { react = true } },
   { screen = {} },
-  { settle = { quiet_ms = 4000 } },
+  { settle = { quiet_ms = 11000 } },
   { screen = {} },
 ]

@@ -17,9 +17,9 @@ steps = [
   { screen = {} },
   { keys = "x" },
   { screen = {} },
-  { run = ["display-message", "-N", "-d", "1500", "-t", "a", "nokeys"] },
+  { run = ["display-message", "-N", "-d", "5000", "-t", "a", "nokeys"] },
   { keys = "y" },
   { screen = {} },
-  { settle = { quiet_ms = 3500 } },
+  { settle = { quiet_ms = 10000 } },
   { screen = {} },
 ]

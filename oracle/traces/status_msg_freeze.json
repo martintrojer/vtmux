@@ -59,7 +59,7 @@
         "run": [
           "display-message",
           "-d",
-          "1500",
+          "5000",
           "-t",
           "a",
           "m"
@@ -123,11 +123,16 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
         "settle": {
-          "quiet_ms": 3500
+          "quiet_ms": 10000
         }
       },
       {
@@ -146,7 +151,7 @@
           "display-message",
           "-C",
           "-d",
-          "1500",
+          "5000",
           "-t",
           "a",
           "c"
@@ -171,7 +176,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 3500
+          "quiet_ms": 10000
         }
       },
       {
@@ -189,7 +194,7 @@
           "set",
           "-g",
           "display-time",
-          "1500"
+          "5000"
         ]
       },
       {
@@ -208,11 +213,16 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
         "settle": {
-          "quiet_ms": 3500
+          "quiet_ms": 10000
         }
       },
       {
@@ -375,7 +385,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -393,7 +403,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 20,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -408,15 +418,6 @@
           0,
           2
         ]
-      }
-    },
-    {
-      "step": 20,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
       }
     },
     {
@@ -438,7 +439,16 @@
       }
     },
     {
-      "step": 24,
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -456,15 +466,6 @@
       }
     },
     {
-      "step": 26,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 27,
       "observation": {
         "kind": "cli",
@@ -474,25 +475,7 @@
       }
     },
     {
-      "step": 29,
-      "observation": {
-        "kind": "screen",
-        "rows": [
-          "hello               \\e[37m│\\e[39mzoomed",
-          "hello               \\e[37m│\\e[39mzoomed",
-          "drawn               \\e[37m│\\e[39m",
-          "drawn               \\e[32m│\\e[39m",
-          "                    \\e[32m│\\e[39m",
-          "\\e[30m\\e[43mCan't find window: 9\\e[39m"
-        ],
-        "cursor": [
-          21,
-          2
-        ]
-      }
-    },
-    {
-      "step": 30,
+      "step": 28,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -501,7 +484,7 @@
       }
     },
     {
-      "step": 31,
+      "step": 30,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -519,7 +502,34 @@
       }
     },
     {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
       "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "hello               \\e[37m│\\e[39mzoomed",
+          "hello               \\e[37m│\\e[39mzoomed",
+          "drawn               \\e[37m│\\e[39m",
+          "drawn               \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[43mCan't find window: 9\\e[39m"
+        ],
+        "cursor": [
+          21,
+          2
+        ]
+      }
+    },
+    {
+      "step": 35,
       "observation": {
         "kind": "screen",
         "rows": [
