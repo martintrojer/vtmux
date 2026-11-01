@@ -17,7 +17,9 @@
           "a",
           "-n",
           "w",
-          "sh"
+          "sh",
+          "-c",
+          "printf '$ '; while read l; do eval \"$l\"; printf '$ '; done"
         ]
       },
       {
@@ -145,7 +147,7 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
@@ -155,7 +157,7 @@
           "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
         ],
         "cursor": [
-          8,
+          2,
           0
         ]
       }
@@ -183,7 +185,7 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
@@ -193,7 +195,7 @@
           ""
         ],
         "cursor": [
-          8,
+          2,
           0
         ]
       }
@@ -212,9 +214,9 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$ stty size",
+          "$ stty size",
           "8 40",
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
@@ -222,7 +224,7 @@
           ""
         ],
         "cursor": [
-          8,
+          2,
           2
         ]
       }
@@ -241,9 +243,9 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$ stty size",
+          "$ stty size",
           "8 40",
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
@@ -251,7 +253,7 @@
           "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
         ],
         "cursor": [
-          8,
+          2,
           2
         ]
       }
@@ -279,9 +281,9 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$ stty size",
+          "$ stty size",
           "8 40",
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
@@ -289,7 +291,7 @@
           "\\e[30m\\e[42m \\e[39m"
         ],
         "cursor": [
-          8,
+          2,
           2
         ]
       }
@@ -308,9 +310,9 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$ stty size",
+          "$ stty size",
           "8 40",
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
@@ -318,7 +320,7 @@
           "\\e[30m\\e[42m \\e[39m"
         ],
         "cursor": [
-          8,
+          2,
           2
         ]
       }

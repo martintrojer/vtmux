@@ -1,7 +1,7 @@
 name = "status_geom_toggle"
 size = [40, 8]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "sh"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh", "-c", "printf '$ '; while read l; do eval \"$l\"; printf '$ '; done"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },
   { attach = { session = "a" } },
   { screen = {} },

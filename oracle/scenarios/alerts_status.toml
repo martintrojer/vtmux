@@ -5,6 +5,7 @@ steps = [
   { run = ["select-pane", "-t", "a:0", "-T", "t"] },
   { run = ["neww", "-d", "-n", "x", "sh", "-c", "while read x; do printf x; done"] },
   { run = ["neww", "-d", "-n", "y", "sh", "-c", "while read x; do printf '\\007'; done"] },
+  { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "monitor-activity", "on"] },
   { run = ["set", "-g", "window-status-activity-style", "fg=red"] },
   { run = ["set", "-g", "window-status-bell-style", "fg=blue"] },
