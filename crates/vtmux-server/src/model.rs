@@ -1431,12 +1431,11 @@ impl Pane {
         self.resizes.push((from, (rect.sx, rect.sy)));
         self.term.resize(clamp16(rect.sx), clamp16(rect.sy));
         // window_pane_resize: the shown mode follows.
-        if let Some(m) = self
-            .modes
-            .first_mut()
-            .and_then(crate::mode::Mode::as_copy_mut)
-        {
-            m.resize(usize::from(self.term.cols()), usize::from(self.term.rows()));
+        let size = (usize::from(self.term.cols()), usize::from(self.term.rows()));
+        match self.modes.first_mut() {
+            Some(crate::mode::Mode::Copy(m)) => m.resize(size.0, size.1),
+            Some(crate::mode::Mode::Clock(m)) => m.resize(size.0, size.1),
+            _ => {}
         }
     }
 

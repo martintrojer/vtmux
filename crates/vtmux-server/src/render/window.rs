@@ -10,6 +10,7 @@ use vtmux_core::layout::{Cell as LayoutCell, Dir, PaneStatus};
 use vtmux_core::options::TreeId;
 use vtmux_core::style::{CellStyle, Style};
 use vtmux_core::styled;
+use vtmux_core::time::WallClock as _;
 use vtmux_vt::{Color, Snapshot};
 
 use super::Caps;
@@ -213,6 +214,10 @@ impl Source<'_> {
         ctx: &Ctx<'_>,
         caps: Caps,
     ) -> (Snapshot, Vec<bool>) {
+        if let Some(crate::mode::Mode::Clock(m)) = pane.modes.first() {
+            let screen = self.clock_screen(pane, m, ctx, caps);
+            return (screen, Vec::new());
+        }
         let (mut screen, selected) = match pane.modes.first().and_then(crate::mode::Mode::as_copy) {
             Some(m) => {
                 let vi = self
@@ -227,6 +232,32 @@ impl Source<'_> {
             self.mode_prompt(&mut screen, prompt, tree, caps);
         }
         (screen, selected)
+    }
+
+    /// Clock mode's screen (`window_clock_draw_screen`): the time now in
+    /// `clock-mode-style`, coloured by `clock-mode-colour`.
+    fn clock_screen(
+        &self,
+        pane: &crate::model::Pane,
+        m: &crate::mode::ClockMode,
+        ctx: &Ctx<'_>,
+        caps: Caps,
+    ) -> Snapshot {
+        let wtree = TreeId::Window(pane.window);
+        // style_apply on a colour option: `style_parse_colour`, so the text
+        // is one colour; one that does not parse is the default.
+        let value = self.string(wtree, "clock-mode-colour");
+        let value = if value.contains("#{") {
+            vtmux_core::format::expand_str(&value, ctx)
+        } else {
+            value
+        };
+        let colour = Colour::parse(&value).map_or(Color::Default, |c| self.theme(caps).colour(c));
+        let style = self.model.number_option(wtree, "clock-mode-style");
+        let tm = vtmux_core::time::SystemWallClock
+            .local_time(crate::mode::clock::now())
+            .unwrap_or_else(|| vtmux_core::time::Tm::utc(0));
+        m.screen(&crate::mode::clock::time_text(&tm, style), colour)
     }
 
     /// `mode_tree_draw_prompt` (mode-tree.c:1046-1070): the mode's prompt
