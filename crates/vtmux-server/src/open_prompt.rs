@@ -95,6 +95,8 @@ impl Server {
         state: Found,
         owner: Owner,
     ) {
+        // status.c:580: server_client_clear_overlay.
+        self.popup_close(c);
         self.status_prompt_clear(c);
         let start = editor.incremental_start();
         let Some(client) = self.clients.get_mut(&c) else {

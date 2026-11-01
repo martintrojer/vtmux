@@ -137,7 +137,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("detach-client", Some("detach"), "aE:s:t:P", 0, Some(0), "[-aP] [-E shell-command] [-s target-session] [-t target-client]", None, Some(slot('s', TargetKind::Session, FindFlags::CANFAIL)), false, true),
     cmd("display-menu", Some("menu"), "b:c:C:H:s:S:MOt:T:x:y:", 1, None, "[-MO] [-b border-lines] [-c target-client] [-C starting-choice] [-H selected-style] [-s style] [-S border-style] [-t target-pane] [-T title] [-x position] [-y position] name [key] [command] ...", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("display-message", Some("display"), "aCc:d:jlINpt:F:v", 0, Some(1), "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
-    cmd("display-popup", Some("popup"), "Bb:Cc:d:e:Eh:kNs:S:t:T:w:x:y:", 0, None, "[-BCEkN] [-b border-lines] [-c target-client] [-d start-directory] [-e environment] [-h height] [-s style] [-S border-style] [-t target-pane] [-T title] [-w width] [-x position] [-y position] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("display-popup", Some("popup"), "Bb:Cc:d:e:Eh:kNs:S:t:T:w:x:y:", 0, None, "[-BCEkN] [-b border-lines] [-c target-client] [-d start-directory] [-e environment] [-h height] [-s style] [-S border-style] [-t target-pane] [-T title] [-w width] [-x position] [-y position] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("display-panes", Some("displayp"), "d:kNs:t:Z", 0, Some(1), "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, false),
     cmd("find-window", Some("findw"), "CiNrt:TZ", 1, Some(1), "[-CiNrTZ] [-t target-pane] match-string", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("has-session", Some("has"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
@@ -409,7 +409,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 71);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 72);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
