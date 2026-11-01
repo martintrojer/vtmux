@@ -380,6 +380,14 @@ impl Term {
         self.base.xterm
     }
 
+    /// terminfo's `khome`/`kend` are `\E[1~`/`\E[4~` (screen, tmux)
+    /// rather than xterm's `\EOH`/`\EOF`; tty-keys.c adds them to the key
+    /// tree (`tty_default_code_keys`).
+    #[must_use]
+    pub fn tilde_home_end(&self) -> bool {
+        !self.base.xterm
+    }
+
     /// `TERM_RGBCOLOURS`.
     #[must_use]
     pub fn rgb(&self) -> bool {

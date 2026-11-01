@@ -1087,6 +1087,7 @@ impl Server {
                     "unsupported terminal (xterm*, xterm-ghostty, screen, screen-256color, tmux-256color)".into(),
                 )
             })?;
+        client.decoder.set_terminal(&term);
         client.caps = Some(caps);
         client.term = Some(term);
         client.compositor.invalidate();
@@ -1574,6 +1575,7 @@ impl Server {
         }
         let modes = crate::keys::KeyModes {
             app_cursor: pane.term.app_cursor(),
+            app_keypad: pane.term.app_keypad(),
         };
         self.write_pane(p, &crate::keys::encode(key, modes));
     }

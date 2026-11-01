@@ -188,6 +188,20 @@ impl Key {
         Self(Self::F1.0 + n as u64 - 1)
     }
 
+    /// The `n`th numeric keypad key in tmux's order (`KP/` 0 to `KP.` 15,
+    /// tmux.h:392-407), with `KEYC_KEYPAD` as tty-keys.c gives it.
+    #[must_use]
+    pub const fn keypad(n: u8) -> Self {
+        Self((Self::KP_SLASH.0 + n as u64) | KEYPAD)
+    }
+
+    /// Which keypad key this is, modifiers and flags ignored.
+    #[must_use]
+    pub fn keypad_index(self) -> Option<u8> {
+        let n = (self.0 & MASK_KEY).checked_sub(Self::KP_SLASH.0)?;
+        u8::try_from(n).ok().filter(|n| *n < 16)
+    }
+
     /// The modifier bits alone (`sort_key_binding_cmp`, `-O modifier`).
     #[must_use]
     pub const fn modifiers(self) -> u64 {

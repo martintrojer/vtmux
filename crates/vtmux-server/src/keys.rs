@@ -20,7 +20,16 @@ pub enum Named {
     Down,
     Left,
     Right,
+    /// A numeric keypad key, numbered in tmux's order (`KP/` 0 to `KP.`
+    /// 15, tmux.h:392-407).
+    Keypad(u8),
 }
+
+/// The keypad keys in [`Named::Keypad`] order: the final byte of their
+/// application-mode `ESC O x` sequence (tty-keys.c:87-102) and what
+/// they send in numeric mode (input-keys.c:200-247).
+pub const KEYPAD_SS3: &[u8; 16] = b"ojmwxyktuvqrsMpn";
+const KEYPAD_NUMERIC: &[u8; 16] = b"/*-789+456123\n0.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Base {
@@ -50,8 +59,8 @@ impl Key {
     #[must_use]
     pub fn to_core(&self) -> CoreKey {
         use Named::{
-            BackTab, Backspace, Delete, Down, End, F, Home, Insert, Left, PageDown, PageUp, Right,
-            Up,
+            BackTab, Backspace, Delete, Down, End, F, Home, Insert, Keypad, Left, PageDown, PageUp,
+            Right, Up,
         };
         let mut k = match self.base {
             Base::Char(c) => CoreKey::from_char(c),
@@ -69,6 +78,7 @@ impl Key {
                 Down => CoreKey::DOWN,
                 Left => CoreKey::LEFT,
                 Right => CoreKey::RIGHT,
+                Keypad(n) => CoreKey::keypad(n),
             },
         };
         if self.ctrl {
@@ -106,11 +116,15 @@ impl Key {
                 (CoreKey::RIGHT, Named::Right),
             ];
             let found = named.iter().find(|(k, _)| *k == base).map(|(_, n)| *n);
-            Base::Named(found.or_else(|| {
-                (1..=12)
-                    .find(|n| CoreKey::function_key(*n) == base)
-                    .map(Named::F)
-            })?)
+            Base::Named(
+                found
+                    .or_else(|| {
+                        (1..=12)
+                            .find(|n| CoreKey::function_key(*n) == base)
+                            .map(Named::F)
+                    })
+                    .or_else(|| base.keypad_index().map(Named::Keypad))?,
+            )
         };
         Some(Self {
             base,
@@ -127,6 +141,8 @@ impl Key {
 pub struct KeyModes {
     /// DECCKM (`MODE_KCURSOR`): cursor keys send `ESC O x`.
     pub app_cursor: bool,
+    /// DECKPAM (`MODE_KKEYPAD`): keypad keys send `ESC O x`.
+    pub app_keypad: bool,
 }
 
 /// `key_string_table` (key-string.c:33-110), the non-mouse, non-keypad part.
@@ -164,6 +180,12 @@ fn table(s: &str) -> Option<Base> {
     ];
     if let Some((_, n)) = NAMED.iter().find(|(k, _)| k.eq_ignore_ascii_case(s)) {
         return Some(Base::Named(*n));
+    }
+    // The keypad names (key-string.c:108-124).
+    if s.len() >= 3
+        && let Some(n) = CoreKey::from_name(s).and_then(CoreKey::keypad_index)
+    {
+        return Some(Base::Named(Named::Keypad(n)));
     }
     if let Some(n) = s
         .strip_prefix(['F', 'f'])
@@ -274,8 +296,28 @@ pub fn encode(key: &Key, modes: KeyModes) -> Vec<u8> {
 
 fn encode_named(n: Named, key: &Key, modes: KeyModes) -> Vec<u8> {
     use Named::{
-        BackTab, Backspace, Delete, Down, End, F, Home, Insert, Left, PageDown, PageUp, Right, Up,
+        BackTab, Backspace, Delete, Down, End, F, Home, Insert, Keypad, Left, PageDown, PageUp,
+        Right, Up,
     };
+    if let Keypad(i) = n {
+        // input_key: application mode's `ESC O x`, else the character;
+        // Meta is an Escape before either, other modifiers send nothing
+        // (input_key_vt10x has no mapping for them).
+        if key.ctrl || key.shift {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        if key.meta {
+            out.push(0x1b);
+        }
+        if modes.app_keypad {
+            out.extend_from_slice(b"\x1bO");
+            out.push(KEYPAD_SS3[usize::from(i)]);
+        } else {
+            out.push(KEYPAD_NUMERIC[usize::from(i)]);
+        }
+        return out;
+    }
     if n == Backspace {
         // The `backspace` option, default \177 (input-keys.c:592-614).
         let mut out = Vec::new();
@@ -317,7 +359,7 @@ fn encode_named(n: Named, key: &Key, modes: KeyModes) -> Vec<u8> {
             }),
             None,
         ),
-        Backspace | BackTab => unreachable!(),
+        Backspace | BackTab | Keypad(_) => unreachable!(),
     };
     let cursor = matches!(n, Up | Down | Left | Right);
     let function = matches!(n, F(1..=4));
@@ -414,7 +456,14 @@ mod tests {
             b"Enter"
         );
         assert_eq!(
-            send_keys_bytes("Up", false, KeyModes { app_cursor: true }),
+            send_keys_bytes(
+                "Up",
+                false,
+                KeyModes {
+                    app_cursor: true,
+                    app_keypad: false
+                }
+            ),
             b"\x1bOA"
         );
     }
@@ -466,7 +515,16 @@ mod tests {
             esc_prefix: true,
         };
         assert_eq!(encode(&up, KeyModes::default()), b"\x1b\x1b[A");
-        assert_eq!(encode(&up, KeyModes { app_cursor: true }), b"\x1b\x1bOA");
+        assert_eq!(
+            encode(
+                &up,
+                KeyModes {
+                    app_cursor: true,
+                    app_keypad: false
+                }
+            ),
+            b"\x1b\x1bOA"
+        );
         let implied = Key {
             esc_prefix: false,
             ..up

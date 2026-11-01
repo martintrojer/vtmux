@@ -63,6 +63,7 @@ pub fn exec(
     };
     let modes = KeyModes {
         app_cursor: pane.term.app_cursor(),
+        app_keypad: pane.term.app_keypad(),
     };
     let mut bytes = Vec::new();
     for _ in 0..repeat {

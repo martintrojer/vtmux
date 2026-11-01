@@ -30,6 +30,8 @@ pub struct Decoder {
     queries_until: Option<Instant>,
     /// Inside a bracketed paste (`TTY_BRACKETPASTE`).
     pasting: bool,
+    /// The terminal's `khome`/`kend` are `ESC [1~`/`ESC [4~`.
+    tilde_home_end: bool,
 }
 impl Decoder {
     /// A query went to the terminal (the startup `DECRQM 2026`); its reply
@@ -37,6 +39,10 @@ impl Decoder {
     /// answered or `QUERY_TIMEOUT` passes.
     pub fn query_sent(&mut self, now: Instant) {
         self.queries_until = Some(now + QUERY_TIMEOUT);
+    }
+    /// The client's terminal is known (`tty_keys_build` with its terminfo).
+    pub fn set_terminal(&mut self, term: &vtmux_core::term_features::Term) {
+        self.tilde_home_end = term.tilde_home_end();
     }
     pub fn feed(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);
@@ -52,7 +58,7 @@ impl Decoder {
         let mut events = Vec::new();
         while !self.bytes.is_empty() {
             let expired = self.deadline().is_some_and(|t| now >= t);
-            let Some((event, used)) = decode(&self.bytes, expired) else {
+            let Some((event, used)) = decode(&self.bytes, expired, self.tilde_home_end) else {
                 self.pending.get_or_insert(now);
                 break;
             };
@@ -78,7 +84,7 @@ fn key(base: Base) -> Key {
     }
 }
 #[allow(clippy::too_many_lines)] // terminal sequence dispatch table
-fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
+fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, usize)> {
     if bytes[0] != 0x1b {
         return character(bytes, expired).map(|(k, n)| (Event::Key(k), n));
     }
@@ -115,7 +121,31 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
     if reply.is_some() && !expired {
         return None;
     }
-    if matches!(bytes[1], b'[' | b'O') {
+    // The key tree (tty-keys.c tty_keys_find): a whole sequence is that
+    // key; the start of one waits for more until escape-time.
+    for (seq, event) in [
+        (&b"\x1b[I"[..], Event::Focus(true)),
+        (b"\x1b[O", Event::Focus(false)),
+        (b"\x1b[200~", Event::Paste(true)),
+        (b"\x1b[201~", Event::Paste(false)),
+    ] {
+        if bytes.starts_with(seq) {
+            return Some((event, seq.len()));
+        }
+    }
+    let table = key_table(tilde_home_end);
+    if let Some((seq, k)) = table.iter().find(|(seq, _)| bytes.starts_with(seq)) {
+        return Some((Event::Key(*k), seq.len()));
+    }
+    if !expired
+        && (table.iter().any(|(seq, _)| seq.starts_with(bytes))
+            || [&b"\x1b[200~"[..], b"\x1b[201~"]
+                .iter()
+                .any(|s| s.starts_with(bytes)))
+    {
+        return None;
+    }
+    if bytes[1] == b'[' {
         let final_index = bytes
             .iter()
             .enumerate()
@@ -128,7 +158,7 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
             if body.starts_with('?')
                 || body.starts_with('>')
                 || body.starts_with('<')
-                || matches!(final_byte, b'c' | b't' | b'n' | b'y' | b'u')
+                || matches!(final_byte, b'c' | b't' | b'n' | b'y')
             {
                 if final_byte == b'y' && body.starts_with("?2026;") {
                     return Some((
@@ -138,59 +168,8 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
                 }
                 return Some((Event::Ignore, end + 1));
             }
-            let mut args = body.split(';');
-            let number = args.next().unwrap_or("");
-            let modifier = args.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(1);
-            let named = match final_byte {
-                b'A' => Some(Named::Up),
-                b'B' => Some(Named::Down),
-                b'C' => Some(Named::Right),
-                b'D' => Some(Named::Left),
-                b'H' => Some(Named::Home),
-                b'F' => Some(Named::End),
-                b'Z' => Some(Named::BackTab),
-                b'P' => Some(Named::F(1)),
-                b'Q' => Some(Named::F(2)),
-                b'R' => Some(Named::F(3)),
-                b'S' => Some(Named::F(4)),
-                b'~' => match number {
-                    "200" => return Some((Event::Paste(true), end + 1)),
-                    "201" => return Some((Event::Paste(false), end + 1)),
-                    "1" | "7" => Some(Named::Home),
-                    "4" | "8" => Some(Named::End),
-                    "2" => Some(Named::Insert),
-                    "3" => Some(Named::Delete),
-                    "5" => Some(Named::PageUp),
-                    "6" => Some(Named::PageDown),
-                    "11" => Some(Named::F(1)),
-                    "12" => Some(Named::F(2)),
-                    "13" => Some(Named::F(3)),
-                    "14" => Some(Named::F(4)),
-                    "15" => Some(Named::F(5)),
-                    "17" => Some(Named::F(6)),
-                    "18" => Some(Named::F(7)),
-                    "19" => Some(Named::F(8)),
-                    "20" => Some(Named::F(9)),
-                    "21" => Some(Named::F(10)),
-                    "23" => Some(Named::F(11)),
-                    "24" => Some(Named::F(12)),
-                    _ => None,
-                },
-                _ => None,
-            };
-            if let Some(named) = named {
-                let mut k = key(Base::Named(named));
-                let m = modifier.saturating_sub(1);
-                k.shift = m & 1 != 0;
-                k.meta = m & 2 != 0;
-                k.ctrl = m & 4 != 0;
+            if let Some(k) = extended_key(body, final_byte) {
                 return Some((Event::Key(k), end + 1));
-            }
-            if matches!(final_byte, b'I' | b'O') {
-                if bytes[1] == b'[' && body.is_empty() {
-                    return Some((Event::Focus(final_byte == b'I'), end + 1));
-                }
-                return Some((Event::Ignore, end + 1));
             }
         } else if !expired {
             return None;
@@ -198,21 +177,15 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
     }
     // tty_keys_next (tty-keys.c:900-924): Escape followed by a key is that
     // key with Meta. If the key already carries an xterm Meta modifier (or
-    // is a paste marker), the Escape is a key of its own. The meta forms in
-    // the table (tty-keys.c:118-144) keep Escape+arrow as Escape+arrow,
-    // but `ESC ESC [H`/`ESC ESC O F` are M-Home/M-End.
-    let (event, n) = decode(&bytes[1..], expired)?;
+    // is a paste marker), the Escape is a key of its own.
+    let (event, n) = decode(&bytes[1..], expired, tilde_home_end)?;
     let event = match event {
         Event::Key(k) if k.meta && !k.esc_prefix => {
             return Some((Event::Key(key(Base::Char('\x1b'))), 1));
         }
         Event::Paste(_) => return Some((Event::Key(key(Base::Char('\x1b'))), 1)),
         Event::Key(mut k) => {
-            let implied = n == 3
-                && bytes[1] == 0x1b
-                && matches!(bytes[2], b'[' | b'O')
-                && matches!(bytes[3], b'H' | b'F');
-            k.esc_prefix = k.esc_prefix || !implied;
+            k.esc_prefix = true;
             k.meta = true;
             Event::Key(k)
         }
@@ -220,6 +193,200 @@ fn decode(bytes: &[u8], expired: bool) -> Option<(Event, usize)> {
     };
     Some((event, n + 1))
 }
+/// A table row: the key with its modifiers.
+fn row(base: Base, ctrl: bool, meta: bool, shift: bool) -> Key {
+    Key {
+        base,
+        ctrl,
+        meta,
+        shift,
+        esc_prefix: false,
+    }
+}
+
+/// The key tree `tty_keys_build` makes: `tty_default_xterm_keys` with each
+/// modifier digit 2-9, `tty_default_raw_keys`, then the terminfo keys
+/// (`tty_default_code_keys`) of the terminals vtmux knows, which only
+/// differ in `khome`/`kend` (and agree with the rows above elsewhere).
+type KeyTable = Vec<(Vec<u8>, Key)>;
+
+fn key_table(tilde_home_end: bool) -> &'static [(Vec<u8>, Key)] {
+    static TABLES: std::sync::OnceLock<[KeyTable; 2]> = std::sync::OnceLock::new();
+    &TABLES.get_or_init(|| [build_table(false), build_table(true)])[usize::from(tilde_home_end)]
+}
+
+#[expect(clippy::too_many_lines, reason = "tty-keys.c's key tables")]
+fn build_table(tilde_home_end: bool) -> KeyTable {
+    use Named::{
+        BackTab, Delete, Down, End, F, Home, Insert, Keypad, Left, PageDown, PageUp, Right, Up,
+    };
+    let named = |n| Base::Named(n);
+    let mut t: Vec<(Vec<u8>, Key)> = Vec::new();
+    let mut add = |seq: &str, k: Key| {
+        let seq = seq.as_bytes().to_vec();
+        match t.iter_mut().find(|(s, _)| *s == seq) {
+            Some(entry) => entry.1 = k,
+            None => t.push((seq, k)),
+        }
+    };
+    // tty_default_xterm_keys (tty-keys.c:222-253) with
+    // tty_default_xterm_modifiers: 2 S, 3 M, 4 S-M, 5 C, 6 S-C, 7 M-C,
+    // 8 S-M-C, 9 M; the Meta is KEYC_IMPLIED_META.
+    let xterm: [(&str, Named); 30] = [
+        ("\x1b[1;_P", F(1)),
+        ("\x1bO1;_P", F(1)),
+        ("\x1bO_P", F(1)),
+        ("\x1b[1;_Q", F(2)),
+        ("\x1bO1;_Q", F(2)),
+        ("\x1bO_Q", F(2)),
+        ("\x1b[1;_R", F(3)),
+        ("\x1bO1;_R", F(3)),
+        ("\x1bO_R", F(3)),
+        ("\x1b[1;_S", F(4)),
+        ("\x1bO1;_S", F(4)),
+        ("\x1bO_S", F(4)),
+        ("\x1b[15;_~", F(5)),
+        ("\x1b[17;_~", F(6)),
+        ("\x1b[18;_~", F(7)),
+        ("\x1b[19;_~", F(8)),
+        ("\x1b[20;_~", F(9)),
+        ("\x1b[21;_~", F(10)),
+        ("\x1b[23;_~", F(11)),
+        ("\x1b[24;_~", F(12)),
+        ("\x1b[1;_A", Up),
+        ("\x1b[1;_B", Down),
+        ("\x1b[1;_C", Right),
+        ("\x1b[1;_D", Left),
+        ("\x1b[1;_H", Home),
+        ("\x1b[1;_F", End),
+        ("\x1b[5;_~", PageUp),
+        ("\x1b[6;_~", PageDown),
+        ("\x1b[2;_~", Insert),
+        ("\x1b[3;_~", Delete),
+    ];
+    for (template, n) in xterm {
+        for digit in 2u8..=9 {
+            let m = if digit == 9 { 2 } else { digit - 1 };
+            let k = row(named(n), m & 4 != 0, m & 2 != 0, m & 1 != 0);
+            add(
+                &template.replace('_', &char::from(b'0' + digit).to_string()),
+                k,
+            );
+        }
+    }
+    // tty_default_raw_keys (tty-keys.c:81-219).
+    add("\x1bO[", key(Base::Char('\x1b')));
+    for (i, c) in crate::keys::KEYPAD_SS3.iter().enumerate() {
+        let n = u8::try_from(i).expect("16 keypad keys");
+        add(&format!("\x1bO{}", char::from(*c)), key(named(Keypad(n))));
+    }
+    for (c, n) in [('A', Up), ('B', Down), ('C', Right), ('D', Left)] {
+        add(&format!("\x1bO{c}"), key(named(n)));
+        add(&format!("\x1b[{c}"), key(named(n)));
+    }
+    // Escape+arrow stays Escape+arrow (no KEYC_IMPLIED_META), but
+    // Escape+Home/End are M-Home/M-End.
+    for (c, n) in [('A', Up), ('B', Down), ('C', Right), ('D', Left)] {
+        let k = Key {
+            esc_prefix: true,
+            ..row(named(n), false, true, false)
+        };
+        add(&format!("\x1b\x1bO{c}"), k);
+        add(&format!("\x1b\x1b[{c}"), k);
+    }
+    for (c, n) in [('H', Home), ('F', End)] {
+        add(&format!("\x1bO{c}"), key(named(n)));
+        add(&format!("\x1b\x1bO{c}"), row(named(n), false, true, false));
+        add(&format!("\x1b[{c}"), key(named(n)));
+        add(&format!("\x1b\x1b[{c}"), row(named(n), false, true, false));
+    }
+    // rxvt arrow keys.
+    for (c, n) in [('a', Up), ('b', Down), ('c', Right), ('d', Left)] {
+        add(&format!("\x1bO{c}"), row(named(n), true, false, false));
+        add(&format!("\x1b[{c}"), row(named(n), false, false, true));
+    }
+    // rxvt function keys.
+    let numbers = [
+        "11", "12", "13", "14", "15", "17", "18", "19", "20", "21", "23", "24",
+    ];
+    for (i, num) in numbers.iter().enumerate().take(10) {
+        add(
+            &format!("\x1b[{num}~"),
+            key(named(F(u8::try_from(i + 1).expect("F key")))),
+        );
+    }
+    let shifted = ["23", "24", "25", "26", "28", "29", "31", "32", "33", "34"];
+    for (i, num) in shifted.iter().enumerate() {
+        let f = F(u8::try_from(i + 1).expect("F key"));
+        add(&format!("\x1b[{num}~"), row(named(f), false, false, true));
+    }
+    add("\x1b[23$", row(named(F(11)), false, false, true));
+    add("\x1b[24$", row(named(F(12)), false, false, true));
+    for (i, num) in numbers.iter().enumerate() {
+        let f = F(u8::try_from(i + 1).expect("F key"));
+        add(&format!("\x1b[{num}^"), row(named(f), true, false, false));
+        add(&format!("\x1b[{num}@"), row(named(f), true, false, true));
+    }
+    add("\x1b[1;5Z", row(Base::Char('\t'), true, false, true));
+    // tty_default_code_keys from terminfo: kf1-kf12, kich1, kdch1, khome,
+    // kend, knp, kpp, kcbt (the arrows and modified keys repeat rows above).
+    for (i, seq) in [
+        "\x1bOP", "\x1bOQ", "\x1bOR", "\x1bOS", "\x1b[15~", "\x1b[17~", "\x1b[18~", "\x1b[19~",
+        "\x1b[20~", "\x1b[21~", "\x1b[23~", "\x1b[24~",
+    ]
+    .iter()
+    .enumerate()
+    {
+        add(seq, key(named(F(u8::try_from(i + 1).expect("F key")))));
+    }
+    add("\x1b[2~", key(named(Insert)));
+    add("\x1b[3~", key(named(Delete)));
+    add("\x1b[6~", key(named(PageDown)));
+    add("\x1b[5~", key(named(PageUp)));
+    add("\x1b[Z", key(named(BackTab)));
+    if tilde_home_end {
+        add("\x1b[1~", key(named(Home)));
+        add("\x1b[4~", key(named(End)));
+    }
+    t
+}
+
+/// `tty_keys_extended_key` (tty-keys.c:1089-1202): `CSI number;mods u` or
+/// `CSI 27;mods;number ~`.
+fn extended_key(body: &str, final_byte: u8) -> Option<Key> {
+    let parts: Vec<u32> = body
+        .split(';')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let (number, modifiers) = match (final_byte, parts.as_slice()) {
+        (b'u', [n, m, ..]) | (b'~', [27, m, n, ..]) => (*n, *m),
+        _ => return None,
+    };
+    let base = if number == 0x7f {
+        Base::Named(Named::Backspace)
+    } else {
+        Base::Char(char::from_u32(number)?)
+    };
+    let m = modifiers.saturating_sub(1);
+    let mut k = row(base, m & 4 != 0, m & 0b1010 != 0, m & 1 != 0);
+    // S-Tab is BTab.
+    if k.base == Base::Char('\t') && k.shift {
+        k.base = Base::Named(Named::BackTab);
+        k.shift = false;
+    }
+    // A shifted printable key loses the Shift.
+    if let Base::Char(c) = k.base
+        && (('\x21'..'\x7f').contains(&c) || !c.is_ascii())
+        && k.shift
+        && !k.ctrl
+        && !k.meta
+    {
+        k.shift = false;
+    }
+    Some(k)
+}
+
 fn character(bytes: &[u8], expired: bool) -> Option<(Key, usize)> {
     let b = bytes[0];
     if b < 128 {
@@ -370,5 +537,52 @@ mod tests {
             decode1(b"\x1b\x1b[1;3D"),
             vec![Event::Key(key(Base::Char('\x1b'))), Event::Key(m_left)]
         );
+    }
+
+    #[test]
+    fn tty_keys_rows_name_like_tmux() {
+        let now = Instant::now();
+        let name = |b: &[u8], tilde: bool| {
+            let mut d = Decoder {
+                tilde_home_end: tilde,
+                ..Decoder::default()
+            };
+            d.feed(b);
+            d.drain(now + Duration::from_millis(20))
+                .into_iter()
+                .map(|e| match e {
+                    Event::Key(k) => k.to_core().to_string(),
+                    other => format!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        for (seq, want) in [
+            (&b"\x1bOM"[..], "KPEnter"),
+            (b"\x1bOp", "KP0"),
+            (b"\x1bOj", "KP*"),
+            (b"\x1bOy", "KP9"),
+            (b"\x1b\x1bOp", "M-KP0"),
+            (b"\x1bOa", "C-Up"),
+            (b"\x1b[d", "S-Left"),
+            (b"\x1b[25~", "S-F3"),
+            (b"\x1b[24$", "S-F12"),
+            (b"\x1b[11^", "C-F1"),
+            (b"\x1b[24@", "C-S-F12"),
+            (b"\x1b[1;9A", "M-Up"),
+            (b"\x1b[123;5u", "C-{"),
+            (b"\x1b[32;2u", "S-Space"),
+            (b"\x1b[9;5u", "C-Tab"),
+            (b"\x1b[1;5Z", "C-S-Tab"),
+            (b"\x1b[97;7u", "C-M-a"),
+            (b"\x1b\x1b[H", "M-Home"),
+            (b"\x1b\x1b[A", "M-Up"),
+        ] {
+            assert_eq!(name(seq, false), want, "{seq:?}");
+        }
+        // xterm's terminfo has no ESC [1~ / ESC [4~: Meta-[ then the text.
+        assert_eq!(name(b"\x1b[1~", false), "M-[ 1 ~");
+        assert_eq!(name(b"\x1b[1~", true), "Home");
+        assert_eq!(name(b"\x1b[4~", true), "End");
     }
 }
