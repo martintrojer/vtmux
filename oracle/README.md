@@ -88,3 +88,5 @@ ignores `divergence` annotations (both sides are the reference); `replay` and `l
 against their `expect`.
 
 **Host names on screen.** A screen showing the recording machine's host name (the default `status-right`, or a pane title in `status-format[1]`) has padding that depends on the name's length, which no normalisation can undo elsewhere. `oracle record` refuses such a screen: pin `status-right` and the pane titles (`select-pane -T`).
+
+**Races under load.** CI runners are slower than a laptop. A `screen` right after a `run` that changes the screen (zoom, resize, `display-message`, option changes) should be preceded by `{ settle = { react = true } }`, which waits for output since the last settle. A pane program that changes tty modes (`stty raw`) must signal with `tmux wait-for -S` and the scenario must `wait_for` it before sending keys. Check a new scenario with `oracle replay` five times under a CPU hog (`nproc` busy loops) before committing.
