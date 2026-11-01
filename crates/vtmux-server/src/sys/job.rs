@@ -140,9 +140,8 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
         return Err(fork_error);
     }
     rustix::fs::fcntl_setfl(&ours, rustix::fs::OFlags::NONBLOCK)?;
-    // job_write_callback (job.c:331-334): nothing to write, so the job's
-    // stdin sees EOF at once.
-    let _ = rustix::net::shutdown(&ours, rustix::net::Shutdown::Write);
+    // The caller writes the job's input and shuts the write side
+    // (job_write_callback, job.c:331-334), so stdin sees EOF.
     Ok(Spawned {
         fd: ours,
         pid: Pid::from_raw(pid).expect("fork returned a positive pid"),
@@ -188,6 +187,8 @@ mod tests {
             show_stderr,
         })
         .expect("spawn");
+        // As the server does once it has no input to write.
+        rustix::net::shutdown(&spawned.fd, rustix::net::Shutdown::Write).expect("shutdown");
         let mut file = std::fs::File::from(spawned.fd);
         let mut out = Vec::new();
         let mut buf = [0u8; 256];

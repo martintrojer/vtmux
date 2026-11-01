@@ -2,9 +2,11 @@
 //! screen with its own cursor and selection, over a copy of the pane's grid
 //! taken on entry ([`Grid`]).
 //!
-//! Piping, refresh and drawing line numbers are not here yet.
+//! Drawing line numbers is not here yet.
 
 mod search;
+
+use std::time::{Duration, Instant};
 
 use vtmux_core::cmd::{Args, CmdEntry};
 use vtmux_vt::{Cell, PaneTerm, Row, Snapshot};
@@ -277,7 +279,17 @@ pub struct CopyMode {
     /// The mark (`mx`, `my`) and whether it is drawn (`showmark`).
     mark: Pos,
     show_mark: bool,
+    /// The view is of another pane (`copy-mode -s`): it is never refreshed
+    /// (`window_copy_refresh_allowed`).
+    foreign: bool,
+    /// When the automatic refresh runs next, while it is on
+    /// (`refresh_active`, `refresh_timer`).
+    refresh_due: Option<Instant>,
 }
+
+/// How often the automatic refresh looks for new output
+/// (`WINDOW_COPY_REFRESH_INTERVAL`, 50 ms).
+pub const REFRESH_INTERVAL: Duration = Duration::from_millis(50);
 
 /// The copy mode commands tmux has (`window_copy_cmd_table`), so one vtmux
 /// has not got yet is an error rather than ignored like an unknown name.
@@ -405,11 +417,24 @@ pub struct Copied {
     pub append: bool,
 }
 
+/// Text a pipe command feeds a job (`window_copy_pipe_run`), for the
+/// server to run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pipe {
+    /// The command, already expanded; empty means the `copy-command` option.
+    pub command: String,
+    /// The selection: empty when there is none (the job still runs).
+    pub data: Vec<u8>,
+}
+
 /// What a copy mode command did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outcome {
     pub action: Action,
     pub copied: Option<Copied>,
+    pub pipe: Option<Pipe>,
+    /// `refresh-now`: the server copies the pane's screen again.
+    pub refresh: bool,
 }
 
 impl From<Action> for Outcome {
@@ -417,12 +442,14 @@ impl From<Action> for Outcome {
         Self {
             action,
             copied: None,
+            pipe: None,
+            refresh: false,
         }
     }
 }
 
-/// The copy commands whose argument is a buffer name prefix, expanded as
-/// a format before the command runs (`format_single` on `arg0`).
+/// The copy commands whose arguments (a buffer name prefix, a command)
+/// are expanded as formats before the command runs (`format_single`).
 const PREFIX_COMMANDS: &[&str] = &[
     "copy-end-of-line",
     "copy-end-of-line-and-cancel",
@@ -432,6 +459,17 @@ const PREFIX_COMMANDS: &[&str] = &[
     "copy-selection",
     "copy-selection-and-cancel",
 ];
+
+/// `window_copy_copy_buffer`'s arguments for `data`, when there is some.
+fn copied(data: Option<Vec<u8>>, prefix: Option<&str>, args: &Args) -> Option<Copied> {
+    Some(Copied {
+        data: data?,
+        prefix: prefix.map(str::to_owned),
+        paste: !args.flag('P'),
+        clip: !args.flag('C'),
+        append: false,
+    })
+}
 
 /// A command's arguments (`window_copy_cmd_table` `.args`): flags and the
 /// most positionals it takes; every other command takes none.
@@ -458,6 +496,30 @@ fn arg_spec(name: &str) -> (&'static str, usize, usize) {
         "scroll-to-mouse" => ("e", 0, 0),
         _ => ("", 0, 0),
     }
+}
+
+/// `name`'s arguments with the ones tmux runs through `format_single`
+/// (the buffer prefix and the pipe command, window-copy.c:1380-1560,
+/// 2660-2720) expanded by `expand`. They are expanded before the command
+/// runs, so the formats see the cursor and selection as they were. Other
+/// commands, and arguments `name` rejects, come back as given.
+pub fn expand_args(name: &str, args: &[String], expand: &dyn Fn(&str) -> String) -> Vec<String> {
+    let formatted = PREFIX_COMMANDS.contains(&name)
+        || name.starts_with("copy-pipe")
+        || matches!(name, "pipe" | "pipe-no-clear" | "pipe-and-cancel");
+    let Some(parsed) = parse_args(name, args).filter(|_| formatted) else {
+        return args.to_vec();
+    };
+    // Only boolean flags (`-C`, `-P`), so the arguments rebuild as flags,
+    // `--`, then the expanded positionals.
+    let mut out: Vec<String> = parsed
+        .flags
+        .iter()
+        .flat_map(|(f, v)| std::iter::repeat_n(format!("-{f}"), v.len()))
+        .collect();
+    out.push("--".to_owned());
+    out.extend(parsed.positionals.iter().map(|p| expand(&p.text())));
+    out
 }
 
 /// `args_parse` with the command's spec; `None` for arguments it rejects
@@ -558,6 +620,8 @@ impl CopyMode {
             jumpchar: String::new(),
             mark: (cx, hsize + cy - oy),
             show_mark: false,
+            foreign: trim,
+            refresh_due: None,
         }
     }
 
@@ -587,15 +651,82 @@ impl CopyMode {
             separators: String::new(),
             wrap_search: false,
         };
-        self.clear_selection(&env);
-        // window_copy_size_changed: the marks are made again for the new
-        // size, counting all of history.
+        self.size_changed(&env);
+    }
+
+    /// `window_copy_size_changed`: the selection goes and the marks are
+    /// made again for the new size, counting all of history.
+    fn size_changed(&mut self, env: &Env) {
+        self.clear_selection(env);
         let had = self.search.marks.is_some();
         self.clear_marks();
         if had && !self.search.timeout {
             self.search_marks(None, self.search.regex, false);
         }
         self.search.origin = Some((self.cx, self.cy, self.oy));
+    }
+
+    /// `refresh_active`.
+    #[must_use]
+    pub fn refresh_active(&self) -> bool {
+        self.refresh_due.is_some()
+    }
+
+    /// When the automatic refresh next runs, if it is on.
+    #[must_use]
+    pub fn refresh_due(&self) -> Option<Instant> {
+        self.refresh_due
+    }
+
+    /// `window_copy_refresh_start`: not for another pane's view, nor when
+    /// already on.
+    fn refresh_start(&mut self) {
+        if !self.foreign && self.refresh_due.is_none() {
+            self.refresh_due = Some(Instant::now() + REFRESH_INTERVAL);
+        }
+    }
+
+    /// `window_copy_refresh_arm`: the next refresh, if it is on.
+    pub fn refresh_arm(&mut self, now: Instant) {
+        if self.refresh_due.is_some() {
+            self.refresh_due = Some(now + REFRESH_INTERVAL);
+        }
+    }
+
+    /// Whether the timer should refresh now (`window_copy_refresh_timer`):
+    /// not while a selection is being made, so it does not move.
+    #[must_use]
+    pub fn refresh_ready(&self) -> bool {
+        self.sel.is_none() && self.drag == Drag::None
+    }
+
+    /// Whether the cursor is at the bottom of the view, so a refresh
+    /// follows new output.
+    #[must_use]
+    pub fn follows(&self) -> bool {
+        self.oy == 0 && self.cy == self.sy - 1
+    }
+
+    /// `window_copy_do_refresh`: copy the pane's screen again, then put the
+    /// view back: at the bottom when `follow`, else on the same lines (the
+    /// distance from the top of history kept).
+    pub fn refresh(&mut self, env: &Env, source: &PaneTerm, follow: bool) {
+        self.oy = self.oy.min(self.hsize());
+        let from_top = self.hsize() - self.oy;
+        let (backing, _, _) = Grid::clone_of(source, self.sx, self.sy, false);
+        self.backing = backing;
+        let hsize = self.hsize();
+        if follow {
+            self.cy = self.sy - 1;
+            self.cx = self.cursor_limit(env, hsize + self.cy, false);
+            self.oy = 0;
+        } else if from_top <= hsize {
+            self.oy = hsize - from_top;
+        } else {
+            self.cy = 0;
+            self.oy = hsize;
+        }
+        self.size_changed(env);
     }
 
     // --- grid access ------------------------------------------------------
@@ -1067,8 +1198,24 @@ impl CopyMode {
                 }
             }
             "recentre-top-bottom" => self.recentre_top_bottom(env),
-            // Line numbers are not drawn yet: only turning them off works.
+            // Line numbers are not drawn yet; the setting is kept.
+            "line-numbers-on" => self.set_line_numbers(env, true, true),
             "line-numbers-off" => self.set_line_numbers(env, false, false),
+            "line-numbers-toggle" => {
+                let on = !self.line_numbers_active(env.line_numbers);
+                self.set_line_numbers(env, on, true);
+            }
+            "refresh-toggle" if self.refresh_active() => self.refresh_due = None,
+            "refresh-on" | "refresh-toggle" => self.refresh_start(),
+            "refresh-off" => self.refresh_due = None,
+            "refresh-now" => {
+                if !self.foreign {
+                    return Some(Outcome {
+                        refresh: true,
+                        ..Outcome::from(Action::Stay)
+                    });
+                }
+            }
 
             // Selections.
             "begin-selection" => {
@@ -1117,7 +1264,7 @@ impl CopyMode {
 
             // Copying.
             "copy-selection-no-clear" | "copy-selection" | "copy-selection-and-cancel" => {
-                let copied = self.copy_selection(env, args);
+                let copied = copied(self.get_selection(env), args.positional(0), args);
                 let action = match name {
                     "copy-selection-no-clear" => Action::Stay,
                     "copy-selection" => {
@@ -1129,7 +1276,28 @@ impl CopyMode {
                         Action::Cancel
                     }
                 };
-                return Some(Outcome { action, copied });
+                return Some(Outcome {
+                    action,
+                    copied,
+                    pipe: None,
+                    refresh: false,
+                });
+            }
+            "copy-pipe-no-clear" | "copy-pipe" | "copy-pipe-and-cancel" => {
+                let data = self.get_selection(env);
+                let pipe = Pipe {
+                    command: args.positional(0).unwrap_or_default().to_owned(),
+                    data: data.clone().unwrap_or_default(),
+                };
+                let copied = copied(data, args.positional(1), args);
+                return Some(self.after_pipe(env, name, copied, pipe));
+            }
+            "pipe-no-clear" | "pipe" | "pipe-and-cancel" => {
+                let pipe = Pipe {
+                    command: args.positional(0).unwrap_or_default().to_owned(),
+                    data: self.get_selection(env).unwrap_or_default(),
+                };
+                return Some(self.after_pipe(env, name, None, pipe));
             }
             "append-selection" | "append-selection-and-cancel" => {
                 let copied = self.get_selection(env).map(|data| Copied {
@@ -1145,12 +1313,21 @@ impl CopyMode {
                 } else {
                     Action::Stay
                 };
-                return Some(Outcome { action, copied });
+                return Some(Outcome {
+                    action,
+                    copied,
+                    pipe: None,
+                    refresh: false,
+                });
             }
             "copy-line"
             | "copy-line-and-cancel"
             | "copy-end-of-line"
-            | "copy-end-of-line-and-cancel" => {
+            | "copy-end-of-line-and-cancel"
+            | "copy-pipe-line"
+            | "copy-pipe-line-and-cancel"
+            | "copy-pipe-end-of-line"
+            | "copy-pipe-end-of-line-and-cancel" => {
                 return Some(self.copy_lines(env, args, np, name));
             }
 
@@ -1580,7 +1757,12 @@ impl CopyMode {
     #[allow(clippy::similar_names)] // tmux's names for the four edges
     fn get_selection(&self, env: &Env) -> Option<Vec<u8>> {
         if self.sel.is_none() && self.lineflag == LineSel::None {
-            return None;
+            // No selection: the search match at the cursor, if any
+            // (`window_copy_match_at_cursor`).
+            return self
+                .search_match_at()
+                .filter(|m| !m.is_empty())
+                .map(String::into_bytes);
         }
         let ((sx, sy), (mut ex, ey)) = if self.endpos.1 < self.selpos.1
             || (self.endpos.1 == self.selpos.1 && self.endpos.0 < self.selpos.0)
@@ -1656,24 +1838,32 @@ impl CopyMode {
         }
     }
 
-    /// `window_copy_copy_selection`, the copy part of
-    /// `copy-selection-no-clear` and friends.
-    fn copy_selection(&self, env: &Env, args: &Args) -> Option<Copied> {
-        Some(Copied {
-            data: self.get_selection(env)?,
-            prefix: args.positional(0).map(str::to_owned),
-            paste: !args.flag('P'),
-            clip: !args.flag('C'),
-            append: false,
-        })
+    /// What the pipe commands do after the job and the copy: the table's
+    /// `copy-pipe-no-clear` (nothing), `copy-pipe` (clear) and
+    /// `copy-pipe-and-cancel` (clear, cancel), and the `pipe` ones.
+    fn after_pipe(&mut self, env: &Env, name: &str, copied: Option<Copied>, pipe: Pipe) -> Outcome {
+        if !name.ends_with("-no-clear") {
+            self.clear_selection(env);
+        }
+        let action = if name.ends_with("-and-cancel") {
+            Action::Cancel
+        } else {
+            Action::Stay
+        };
+        Outcome {
+            action,
+            copied,
+            pipe: Some(pipe),
+            refresh: false,
+        }
     }
 
     /// `window_copy_do_copy_line` and `window_copy_do_copy_end_of_line`:
     /// select from the cursor (or its line's start) to the end of the line
-    /// `np - 1` lines down, copy, then put everything back.
+    /// `np - 1` lines down, copy (or pipe), then put everything back.
     fn copy_lines(&mut self, env: &Env, args: &Args, np: u32, name: &str) -> Outcome {
         let saved = (self.cx, self.cy, self.oy);
-        if name.starts_with("copy-line") {
+        if name.starts_with("copy-line") || name.starts_with("copy-pipe-line") {
             self.selflag = SelectionMode::Char;
             self.cursor_start_of_line(env);
         }
@@ -1682,11 +1872,23 @@ impl CopyMode {
             self.cursor_down(env, false);
         }
         self.cursor_end_of_line(env);
-        let copied = self.copy_selection(env, args);
+        let data = self.get_selection(env);
+        let (pipe, prefix) = if name.starts_with("copy-pipe") {
+            let pipe = Pipe {
+                command: args.positional(0).unwrap_or_default().to_owned(),
+                data: data.clone().unwrap_or_default(),
+            };
+            (Some(pipe), args.positional(1))
+        } else {
+            (None, args.positional(0))
+        };
+        let copied = copied(data, prefix, args);
         if name.ends_with("-and-cancel") {
             return Outcome {
                 action: Action::Cancel,
                 copied,
+                pipe,
+                refresh: false,
             };
         }
         self.clear_selection(env);
@@ -1694,6 +1896,8 @@ impl CopyMode {
         Outcome {
             action: Action::Stay,
             copied,
+            pipe,
+            refresh: false,
         }
     }
 
@@ -2503,10 +2707,6 @@ mod tests {
         assert_eq!(cmd(&mut m, "cursor-down-and-cancel"), Action::Cancel);
         assert_eq!(cmd(&mut m, "cancel"), Action::Cancel);
         assert_eq!(cmd(&mut m, "nosuch"), Action::Stay);
-        assert_eq!(
-            m.command(&env(), "pipe", &[]),
-            Err(CommandError::NotImplemented("pipe".into()))
-        );
     }
 
     /// The view is the copy taken on entry: later output does not show.
@@ -2547,6 +2747,130 @@ mod tests {
         m.resize(40, 9);
         assert_eq!((m.scroll_position(), m.cursor()), (0, (6, 0)));
         assert_eq!(m.cursor_line(), "line23");
+    }
+
+    /// The pipe commands (reference: the CLI test `copy_pipe_commands`):
+    /// the selection and the command, the buffer prefix at the second
+    /// argument, what each does to the selection and the mode.
+    #[test]
+    fn pipe_commands() {
+        let term = pane();
+        let environ = env();
+        let go = |name: &str, args: &[&str]| {
+            let mut mode = enter(&term, false);
+            let args: Vec<String> = args.iter().map(|&a| a.to_owned()).collect();
+            for c in [
+                "history-top",
+                "start-of-line",
+                "begin-selection",
+                "cursor-right",
+                "cursor-right",
+            ] {
+                mode.command(&environ, c, &[]).unwrap();
+            }
+            let out = mode.command(&environ, name, &args).unwrap();
+            (mode, out)
+        };
+        let (mode, out) = go("copy-pipe", &["cat", "pre"]);
+        assert_eq!(out.action, Action::Stay);
+        let pipe = out.pipe.unwrap();
+        assert_eq!(
+            (pipe.command.as_str(), pipe.data.as_slice()),
+            ("cat", &b"li"[..])
+        );
+        let copy = out.copied.unwrap();
+        assert_eq!(
+            (copy.prefix.as_deref(), copy.data.as_slice()),
+            (Some("pre"), &b"li"[..])
+        );
+        assert!(mode.selection().is_none_or(|s| !s.present));
+        let (mode, out) = go("copy-pipe-no-clear", &["cat"]);
+        assert!(out.pipe.is_some() && out.copied.is_some());
+        assert!(mode.selection().is_some_and(|s| s.present));
+        let (_, out) = go("copy-pipe-and-cancel", &["-P", "cat"]);
+        assert_eq!(out.action, Action::Cancel);
+        assert!(out.copied.is_some_and(|c| !c.paste));
+        // `pipe` copies nothing, and an empty command is the option's.
+        let (mode, out) = go("pipe-no-clear", &[""]);
+        assert!(out.copied.is_none());
+        assert_eq!(out.pipe.unwrap().command, "");
+        assert!(mode.selection().is_some_and(|s| s.present));
+        let (_, out) = go("pipe-and-cancel", &["cat"]);
+        assert_eq!(out.action, Action::Cancel);
+        // The line variants take the whole line, and the cursor is restored.
+        let (mode, out) = go("copy-pipe-line", &["cat"]);
+        assert_eq!(out.pipe.unwrap().data, b"line1");
+        assert_eq!(mode.cursor(), (2, 0));
+    }
+
+    /// `expand_args` expands the buffer prefix and the command and keeps
+    /// the flags; other commands' arguments are left alone.
+    #[test]
+    fn expand_args_formats_only_the_format_arguments() {
+        let up = |t: &str| t.to_uppercase();
+        let args = |a: &[&str]| a.iter().map(|&s| s.to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            expand_args("copy-pipe", &args(&["-P", "cat", "pre"]), &up),
+            args(&["-P", "--", "CAT", "PRE"])
+        );
+        assert_eq!(
+            expand_args("copy-selection", &args(&["pre"]), &up),
+            args(&["--", "PRE"])
+        );
+        assert_eq!(expand_args("pipe", &args(&["a"]), &up), args(&["--", "A"]));
+        assert_eq!(
+            expand_args("search-forward", &args(&["a"]), &up),
+            args(&["a"])
+        );
+        // Too many arguments: the command rejects them, nothing to expand.
+        assert_eq!(
+            expand_args("pipe", &args(&["a", "b"]), &up),
+            args(&["a", "b"])
+        );
+    }
+
+    /// `window_copy_do_refresh`: the copy follows new output when the
+    /// cursor is at the bottom, else keeps the lines on screen.
+    #[test]
+    fn refresh_follows_only_at_the_bottom() {
+        let mut t = pane();
+        let e = env();
+        let mut m = enter(&t, false);
+        assert!(m.follows());
+        cmd(&mut m, "history-top");
+        assert!(!m.follows());
+        let top = m.cursor_line();
+        t.feed(b"line11\r\nline12\r\n");
+        m.refresh(&e, &t, false);
+        assert_eq!(m.cursor_line(), top);
+        cmd(&mut m, "history-bottom");
+        cmd(&mut m, "bottom-line");
+        assert!(m.follows());
+        t.feed(b"line13\r\n");
+        m.refresh(&e, &t, true);
+        assert_eq!(m.cursor_line(), "");
+        assert_eq!(m.scroll_position(), 0);
+    }
+
+    /// `refresh-on`/`-off`/`-toggle` arm and stop the timer; `refresh-now`
+    /// asks for a refresh; another pane's view never refreshes.
+    #[test]
+    fn refresh_commands() {
+        let t = pane();
+        let mut m = enter(&t, false);
+        assert!(!m.refresh_active());
+        cmd(&mut m, "refresh-on");
+        assert!(m.refresh_active());
+        cmd(&mut m, "refresh-toggle");
+        assert!(!m.refresh_active());
+        cmd(&mut m, "refresh-toggle");
+        cmd(&mut m, "refresh-off");
+        assert!(!m.refresh_active());
+        assert!(m.command(&env(), "refresh-now", &[]).unwrap().refresh);
+        let mut other = CopyMode::new(&t, (30, 6), true, (false, false), false, None);
+        cmd(&mut other, "refresh-on");
+        assert!(!other.refresh_active());
+        assert!(!other.command(&env(), "refresh-now", &[]).unwrap().refresh);
     }
 
     #[test]

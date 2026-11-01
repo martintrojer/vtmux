@@ -602,6 +602,216 @@ fn copy_selection_formats() {
     });
 }
 
+/// The copy mode pipe commands (window-copy.c:2660-2720, 1380-1560): the
+/// selection to a job's stdin, `copy-command` when no command is given,
+/// the buffer prefix and `-P`, the line variants with a repeat count, the
+/// formats in the command expanded before the cursor moves, and what
+/// each leaves of the selection and the mode. Reference: tmux 3.8.
+#[test]
+#[allow(clippy::too_many_lines)] // one transcript
+fn copy_pipe_commands() {
+    compare("copy_pipe_commands", |w| {
+        let d = w.dir().to_string_lossy().into_owned();
+        // The job writes `name.t` and renames it, so a reader sees all of it.
+        let sink = |name: &str| format!("cat > {d}/{name}.t && mv {d}/{name}.t {d}/{name}");
+        let read = |name: &str| -> Run {
+            let path = w.dir().join(name);
+            let start = Instant::now();
+            while !path.exists() && start.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let text = std::fs::read(&path).map_or_else(
+                |_| "MISSING".into(),
+                |b| String::from_utf8_lossy(&b).into_owned(),
+            );
+            Run {
+                stdout: w.normalise(&text),
+                stderr: String::new(),
+                code: 0,
+            }
+        };
+        let mut runs = vec![w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "30",
+            "-y",
+            "6",
+            "sh",
+            "-c",
+            "printf 'alpha beta\\ngamma delta\\nthird line\\n'; echo last; exec cat",
+        ])];
+        w.wait_for_text("a", "last");
+        let state = |w: &World| {
+            w.run(&[
+                "display",
+                "-p",
+                "-t",
+                "a",
+                "[#{pane_in_mode}] [#{selection_present}] [#{copy_cursor_x},#{copy_cursor_y}]",
+            ])
+        };
+        let x = |w: &World, args: &[&str]| {
+            let mut full = vec!["send-keys", "-t", "a", "-X"];
+            full.extend_from_slice(args);
+            w.run(&full)
+        };
+        let select = |w: &World, runs: &mut Vec<Run>| {
+            runs.push(w.run(&["copy-mode", "-t", "a"]));
+            runs.push(x(w, &["history-top"]));
+            runs.push(x(w, &["start-of-line"]));
+            runs.push(x(w, &["begin-selection"]));
+            runs.push(x(w, &["-N", "4", "cursor-right"]));
+        };
+        // Each of the three keeping the mode, with and without a prefix.
+        select(w, &mut runs);
+        runs.push(x(w, &["copy-pipe", &sink("o1")]));
+        runs.push(read("o1"));
+        runs.push(state(w));
+        runs.push(x(w, &["begin-selection"]));
+        runs.push(x(w, &["cursor-right"]));
+        runs.push(x(w, &["copy-pipe-no-clear", &sink("o2"), "pre#{pane_id}-"]));
+        runs.push(read("o2"));
+        runs.push(state(w));
+        runs.push(x(w, &["pipe-no-clear", &sink("o3")]));
+        runs.push(read("o3"));
+        runs.push(state(w));
+        runs.push(x(w, &["pipe", &sink("o4")]));
+        runs.push(read("o4"));
+        runs.push(state(w));
+        runs.push(x(w, &["cancel"]));
+        // -P: no buffer; -C: no clipboard; -and-cancel leaves the mode.
+        select(w, &mut runs);
+        runs.push(x(w, &["copy-pipe-and-cancel", "-P", &sink("o5")]));
+        runs.push(read("o5"));
+        runs.push(state(w));
+        select(w, &mut runs);
+        runs.push(x(w, &["pipe-and-cancel", &sink("o6")]));
+        runs.push(read("o6"));
+        runs.push(state(w));
+        runs.push(w.run(&["list-buffers", "-F", "#{buffer_name}=#{buffer_sample}"]));
+        // The line variants, one and two lines, from the middle of a line.
+        runs.push(w.run(&["copy-mode", "-t", "a"]));
+        runs.push(x(w, &["history-top"]));
+        runs.push(x(w, &["cursor-down"]));
+        runs.push(x(w, &["-N", "3", "cursor-right"]));
+        runs.push(x(w, &["copy-pipe-line", &sink("o7"), "ln"]));
+        runs.push(read("o7"));
+        runs.push(state(w));
+        runs.push(x(w, &["-N", "2", "copy-pipe-end-of-line", &sink("o8")]));
+        runs.push(read("o8"));
+        runs.push(state(w));
+        runs.push(x(w, &["-N", "2", "copy-pipe-line-and-cancel", &sink("o9")]));
+        runs.push(read("o9"));
+        runs.push(state(w));
+        runs.push(w.run(&["copy-mode", "-t", "a"]));
+        runs.push(x(w, &["history-top"]));
+        runs.push(x(w, &["copy-pipe-end-of-line-and-cancel", &sink("o10")]));
+        runs.push(read("o10"));
+        runs.push(state(w));
+        runs.push(w.run(&["list-buffers", "-F", "#{buffer_name}=#{buffer_sample}"]));
+        // No command: `copy-command`; none of those: nothing runs.
+        select(w, &mut runs);
+        runs.push(x(w, &["copy-pipe"]));
+        runs.push(w.run(&["set-option", "-s", "copy-command", &sink("o11")]));
+        runs.push(x(w, &["begin-selection"]));
+        runs.push(x(w, &["-N", "2", "cursor-right"]));
+        runs.push(x(w, &["copy-pipe-no-clear"]));
+        runs.push(read("o11"));
+        std::fs::remove_file(w.dir().join("o11")).ok();
+        runs.push(x(w, &["pipe", ""]));
+        runs.push(read("o11"));
+        runs.push(x(w, &["cancel"]));
+        // Formats in the command see the state before the line moves the
+        // cursor; the job's directory and environment are the server's.
+        runs.push(w.run(&["set-option", "-s", "copy-command", ""]));
+        runs.push(w.run(&["copy-mode", "-t", "a"]));
+        runs.push(x(w, &["history-top"]));
+        runs.push(x(
+            w,
+            &[
+                "copy-pipe-line-and-cancel",
+                &format!(
+                    "cat > {d}/o12-#{{copy_cursor_y}}; pwd >> {d}/o12-#{{copy_cursor_y}}; \
+                     echo $PWD >> {d}/o12-#{{copy_cursor_y}}"
+                ),
+            ],
+        ));
+        runs.push(read("o12-0"));
+        // No selection: the job still runs, with empty input.
+        runs.push(w.run(&["copy-mode", "-t", "a"]));
+        runs.push(x(w, &["copy-pipe-no-clear", &sink("o13")]));
+        runs.push(read("o13"));
+        runs.push(x(w, &["cancel"]));
+        runs.push(w.run(&["list-buffers", "-F", "#{buffer_name}=#{buffer_sample}"]));
+        runs
+    });
+}
+
+/// `refresh-on` copies the pane's screen again by itself while output
+/// arrives, `refresh-now` does it once, and neither happens without
+/// them (window-copy.c:3040-3205): `#{pane_unseen_changes}`,
+/// `#{refresh_active}`, the scroll position and the line under the
+/// cursor. Reference: tmux 3.8.
+#[test]
+fn copy_refresh() {
+    const F: &str = "[#{pane_unseen_changes}] [#{refresh_active}] [#{scroll_position}] \
+                     [#{copy_cursor_y}] [#{copy_cursor_line}]";
+    compare("copy_refresh", |w| {
+        let d = w.dir().to_string_lossy().into_owned();
+        // Two rounds of output, each started by its own `go` file.
+        let script = format!(
+            "echo first; for r in 1 2; do while [ ! -e {d}/go$r ]; do sleep 0.05; done; \
+             for i in 1 2 3; do echo r$r-$i; sleep 0.05; done; touch {d}/done$r; done; exec cat"
+        );
+        let mut runs = vec![w.run(&[
+            "new", "-d", "-s", "a", "-x", "30", "-y", "5", "sh", "-c", &script,
+        ])];
+        w.wait_for_text("a", "first");
+        let round = |w: &World, runs: &mut Vec<Run>, r: u8, on: bool| {
+            runs.push(w.run(&["copy-mode", "-t", "a"]));
+            if on {
+                runs.push(w.run(&["send-keys", "-t", "a", "-X", "refresh-on"]));
+            }
+            runs.push(w.run(&["display", "-p", "-t", "a", F]));
+            std::fs::write(format!("{d}/go{r}"), "").unwrap();
+            let done = format!("{d}/done{r}");
+            let start = Instant::now();
+            while !Path::new(&done).exists() && start.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            // The refresh timer is 50 ms; give it several.
+            std::thread::sleep(Duration::from_millis(400));
+            runs.push(w.run(&["display", "-p", "-t", "a", F]));
+        };
+        // Without a refresh the copy stays as it was; refresh-now takes it.
+        round(w, &mut runs, 1, false);
+        runs.push(w.run(&["send-keys", "-t", "a", "-X", "refresh-now"]));
+        runs.push(w.run(&["display", "-p", "-t", "a", F]));
+        runs.push(w.run(&["send-keys", "-t", "a", "-X", "cancel"]));
+        // refresh-on takes it by itself.
+        round(w, &mut runs, 2, true);
+        runs.push(w.run(&["send-keys", "-t", "a", "-X", "history-top"]));
+        runs.push(w.run(&["display", "-p", "-t", "a", F]));
+        runs.push(w.run(&["send-keys", "-t", "a", "-X", "cancel"]));
+        runs.push(w.run(&["copy-mode", "-t", "a"]));
+        for c in [
+            "refresh-on",
+            "refresh-on",
+            "refresh-toggle",
+            "refresh-toggle",
+            "refresh-off",
+        ] {
+            runs.push(w.run(&["send-keys", "-t", "a", "-X", c]));
+            runs.push(w.run(&["display", "-p", "-t", "a", "#{refresh_active}"]));
+        }
+        runs.push(w.run(&["send-keys", "-t", "a", "-X", "cancel"]));
+        runs
+    });
+}
+
 /// (9) Command lookup, flag and arity errors (the `task_0` shared facts).
 #[test]
 fn command_errors() {

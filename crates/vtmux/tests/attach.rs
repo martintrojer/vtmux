@@ -2775,6 +2775,69 @@ fn set_and_load_buffer_w_send_osc52() {
     );
 }
 
+/// The copy commands send what they copy to the clipboard of the clients
+/// showing the pane (`window_copy_copy_buffer`, window-copy.c:6096-6123):
+/// the pipe ones too, with the selection as the data, when `set-clipboard`
+/// is not off and no `-C` is given; `append-selection` sends only what it
+/// copied, and the pipe's job still runs with `set-clipboard off`.
+#[test]
+fn copy_pipe_sends_osc52() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        w.cli(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "printf 'abcdef\\nghijkl\\n'; exec cat",
+        ]);
+        let a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let out = w.home.path().join("piped");
+        let sink = format!("cat > {}", out.display());
+        let mut seen = Vec::new();
+        let mut step = |clip: &str, cmd: &[&str]| {
+            w.cli(&["set", "-s", "set-clipboard", clip]);
+            w.cli(&["copy-mode", "-t", "a"]);
+            for k in ["history-top", "start-of-line", "begin-selection"] {
+                w.cli(&["send-keys", "-t", "a", "-X", k]);
+            }
+            w.cli(&["send-keys", "-t", "a", "-X", "-N", "3", "cursor-right"]);
+            let mut full = vec!["send-keys", "-t", "a", "-X"];
+            full.extend_from_slice(cmd);
+            let label = format!("{clip} {}", cmd[0]);
+            seen.push(format!("{label} exit {:?}", w.cli(&full).status.code()));
+            w.cli(&["send-keys", "-t", "a", "-X", "cancel"]);
+        };
+        step("on", &["copy-pipe-and-cancel", &sink]);
+        step("off", &["copy-pipe-and-cancel", &sink]);
+        step("external", &["copy-pipe-and-cancel", "-C", &sink]);
+        step("on", &["copy-pipe-no-clear", "cat >/dev/null", "pre"]);
+        step("on", &["pipe", "cat >/dev/null"]);
+        step("on", &["copy-selection-and-cancel"]);
+        thread::sleep(Duration::from_millis(400));
+        seen.extend(osc52(&a.text()));
+        seen.push(format!("piped {:?}", std::fs::read_to_string(&out)));
+        results.push(seen);
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+    // abc: on (pipe), on (pipe-no-clear), on (copy-selection).
+    assert_eq!(
+        results[0][6..],
+        [
+            r"\u{1b}]52;;YWJj\u{7}",
+            r"\u{1b}]52;;YWJj\u{7}",
+            r"\u{1b}]52;;YWJj\u{7}",
+            "piped Ok(\"abc\")".to_owned().as_str(),
+        ]
+    );
+}
+
 /// The owner's copy-mode-vi bindings (`~/dotfiles/tmux/.tmux.conf`
 /// 137-143) typed on an attached client: `v` begins a selection, `C-v`
 /// makes it a rectangle, `y` copies it and leaves copy mode; the rectangle

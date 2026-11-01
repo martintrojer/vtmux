@@ -130,8 +130,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."copy-mode-commands.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."copy-mode-no-client-scroll.sh"]
 status = "xfail"

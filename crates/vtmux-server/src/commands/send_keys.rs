@@ -9,8 +9,9 @@ use vtmux_core::ids::PaneId;
 
 use super::Item;
 use crate::cmdq::{End, NewBatch};
+use crate::jobs::JobSpec;
 use crate::keys::{KeyModes, send_keys_bytes};
-use crate::mode::copy::{Action, CommandError, Copied};
+use crate::mode::copy::{Action, CommandError, Copied, Pipe};
 use crate::server::Server;
 use crate::target::Found;
 
@@ -123,6 +124,17 @@ fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Re
             *arg = super::expand(server, found, arg);
         }
     }
+    // The buffer prefix and the pipe command are formats expanded before
+    // the command runs, while the pane's mode still shows its cursor and
+    // selection (`format_single` in the command, window-copy.c:1396-1412).
+    if let Some((name, rest)) = words.split_first() {
+        let expanded =
+            crate::mode::copy::expand_args(name, rest, &|t| super::expand(server, found, t));
+        if expanded != rest {
+            words.truncate(1);
+            words.extend(expanded);
+        }
+    }
     let Some((name, rest)) = words.split_first() else {
         // window_copy_command: no command, nothing to do.
         return if server
@@ -144,8 +156,15 @@ fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Re
             return Err(EdgeError::NotImplemented(format!("copy mode command {c}")).into());
         }
     };
+    // window_copy_pipe_run runs before window_copy_copy_buffer.
+    if let Some(pipe) = outcome.pipe {
+        run_pipe(server, found, pipe);
+    }
     if let Some(copied) = outcome.copied {
-        store_copy(server, found, p, copied);
+        store_copy(server, p, copied);
+    }
+    if outcome.refresh {
+        server.copy_refresh(p, true);
     }
     if outcome.action == Action::Cancel {
         server.reset_mode(p);
@@ -157,7 +176,7 @@ fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Re
 /// (window-copy.c:6096-6123, 6183-6215): to the clipboard of every client
 /// showing the pane's window when `set-clipboard` is on or external, then
 /// into a new paste buffer, or onto the top one for an append.
-fn store_copy(server: &mut Server, found: Found, p: PaneId, copied: Copied) {
+fn store_copy(server: &mut Server, p: PaneId, copied: Copied) {
     let clip = copied.clip
         && server
             .model
@@ -174,6 +193,7 @@ fn store_copy(server: &mut Server, found: Found, p: PaneId, copied: Copied) {
         for c in clients {
             server.set_selection(c, &copied.data);
         }
+        server.model.fire_pane("pane-set-clipboard", p);
     }
     if !copied.paste {
         return;
@@ -189,12 +209,40 @@ fn store_copy(server: &mut Server, found: Found, p: PaneId, copied: Copied) {
         let _ = server.model.paste.set(data, name.as_deref(), limit);
         return;
     }
-    // format_single on the prefix argument.
-    let prefix = copied.prefix.map(|t| super::expand(server, found, &t));
-    server
-        .model
-        .paste
-        .add_prefixed(copied.data, prefix.as_deref().unwrap_or("buffer"), limit);
+    server.model.paste.add_prefixed(
+        copied.data,
+        copied.prefix.as_deref().unwrap_or("buffer"),
+        limit,
+    );
+}
+
+/// `window_copy_pipe_run` (window-copy.c:6125-6142): the selection to a
+/// job's stdin, the command given or else `copy-command`. The server does
+/// not wait for it (`JOB_NOWAIT`), and its output and status are dropped.
+fn run_pipe(server: &mut Server, found: Found, pipe: Pipe) {
+    let command = if pipe.command.is_empty() {
+        server
+            .model
+            .options
+            .get(vtmux_core::options::TreeId::Server, "copy-command")
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default()
+    } else {
+        pipe.command
+    };
+    if command.is_empty() {
+        return;
+    }
+    let spec = JobSpec {
+        command,
+        session: found.session,
+        cwd: None,
+        input: pipe.data,
+        show_stderr: false,
+        nowait: true,
+    };
+    // A job that cannot start is silently dropped, as in tmux.
+    let _ = server.job_run(&spec, Box::new(|_, _, _| {}));
 }
 
 /// Keys for a pane in a mode go through the mode's key table, not to the

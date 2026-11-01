@@ -476,7 +476,9 @@ impl Server {
                     LISTENER => self.accept(),
                     SIGNALS => self.on_signals(),
                     Token(t) if (crate::jobs::JOB_BASE..CLIENT_BASE).contains(&t) => {
-                        self.job_readable(crate::jobs::JobId(t - crate::jobs::JOB_BASE));
+                        let id = crate::jobs::JobId(t - crate::jobs::JOB_BASE);
+                        self.job_writable(id);
+                        self.job_readable(id);
                     }
                     Token(t) if t >= CLIENT_BASE => {
                         let id = ClientId(t - CLIENT_BASE);
@@ -510,6 +512,7 @@ impl Server {
                 let _ = self.on_client_input(id, &[]);
             }
             self.jobs_timers(Instant::now());
+            self.copy_refresh_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -556,6 +559,8 @@ impl Server {
                 .map(|d| d.saturating_duration_since(now)),
             self.jobs
                 .deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.copy_refresh_deadline()
                 .map(|d| d.saturating_duration_since(now)),
         ]
         .into_iter()
@@ -2562,6 +2567,7 @@ impl Server {
             exited: false,
             status: None,
             changed: false,
+            unseen_changes: false,
             last_rename: None,
             rect: ps.rect,
             history_limit,
@@ -2727,6 +2733,8 @@ impl Server {
                     // (OSC 7) redraws the status of the window's sessions.
                     let retitled = (pane.term.title(), pane.term.pwd()) != before;
                     pane.changed = true;
+                    // input.c:1061: new input while in a mode.
+                    pane.unseen_changes |= !pane.modes.is_empty();
                     let belled = pane.term.take_bells() != 0;
                     let redraw = pane.term.take_redraw();
                     let replies = pane.term.take_replies();
