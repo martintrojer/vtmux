@@ -1,0 +1,17 @@
+name = "pd_fill"
+size = [50, 14]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "13", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["bind", "a", "display-popup", "-B", "-w", "4", "-h", "2", "tmux wait-for -S up; exec cat"] },
+  { run = ["bind", "b", "display-popup", "-w", "16", "-h", "4", "printf '0123456789ab'; tmux wait-for -S up; exec cat"] },
+  { run = ["bind", "c", "display-popup", "-w", "40", "-h", "10", "-E", "printf '\\033[2J\\033[Hline1\\r\\nline2\\033[3;1H\\033[94m~                                     \\033[4;1H~                                     \\033[5;1H~                                     \\033[6;1H~                                     \\033[7;1H~                                     \\033[m\\033[8;1H< 2L, 12B           1,1           All'; tmux wait-for -S up; exec cat"] },
+  { attach = { session = "a" } },
+  { keys = "\u0002a" }, { wait_for = "up" }, { screen = {} }, { run = ["display-popup", "-C"] }, { settle = { react = true } },
+  { keys = "\u0002b" }, { wait_for = "up" }, { screen = {} },
+  { run = ["display-popup", "-T", "t"] }, { settle = { react = true } }, { screen = {} },
+  { run = ["display-popup", "-C"] }, { settle = { react = true } },
+  { keys = "\u0002c" }, { wait_for = "up" }, { settle = { quiet_ms = 400 } }, { screen = {} },
+  { keys = "\u0003" }, { screen = {} },
+]

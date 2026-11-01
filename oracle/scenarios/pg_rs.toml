@@ -1,0 +1,14 @@
+name = "pg_rs"
+size = [50, 14]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "13", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["bind", "b", "command-prompt", "-p", "ask", "display-message %%"] },
+  { attach = { session = "a" } },
+  { keys = "\u0002b" }, { screen = {} },
+  { run = ["run-shell", "-b", "tmux display-popup -w 10 -h 4 'tmux wait-for -S up; exec cat'; true"] }, { wait_for = "up" }, { settle = {} }, { screen = {} },
+  { keys = "z" }, { screen = {} },
+  { keys = "\u001b" }, { screen = {} },
+  { keys = "hi\r" }, { screen = {} },
+]

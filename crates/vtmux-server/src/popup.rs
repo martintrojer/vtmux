@@ -84,6 +84,9 @@ pub struct Popup {
     pub style: Option<String>,
     pub border_style: Option<String>,
     pub term: PaneTerm,
+    /// A full redraw has drawn the popup since it opened (see
+    /// `PopupDraw::redrawn`).
+    pub redrawn: bool,
     /// The PTY until the job closes it.
     io: Option<PaneIo>,
     /// The job's process until it is reaped.
@@ -224,6 +227,7 @@ impl Server {
             style: open.style,
             border_style: open.border_style,
             term,
+            redrawn: false,
             io: Some(io),
             pid: Some(spawned.pid.as_raw_nonzero().get()),
             running: true,
@@ -231,15 +235,18 @@ impl Server {
             step: open.step,
             caller: open.caller,
         };
-        // server_client_set_overlay: a prompt or another overlay goes
-        // first.
-        self.status_prompt_clear(c);
+        // server_client_set_overlay (server-client.c:86-87) clears only an
+        // earlier overlay; an open prompt stays and keeps the cursor.
         let Some(client) = self.clients.get_mut(&c) else {
             return false;
         };
         client.popup = Some(popup);
         self.update_focus(self.client_window(c));
         self.redraw_client(c);
+        // This draw is the first one: the empty popup.
+        if let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) {
+            p.redrawn = false;
+        }
         true
     }
 
