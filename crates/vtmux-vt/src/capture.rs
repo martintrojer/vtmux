@@ -119,29 +119,47 @@ pub(crate) struct RowCell {
     wide: Width,
     acs: bool,
     link: bool,
+    /// Ghostty's tab mark (`Cell.tab`, `patches/0002-tab-cell-mark.patch`):
+    /// 0 none, 1..=32 the first cell of a tab that many columns wide,
+    /// [`TAB_CONTINUATION`] for the other cells of it.
+    tab: u8,
 }
+
+/// `Cell.tab_continuation` in the patched Ghostty.
+const TAB_CONTINUATION: u8 = 255;
 
 impl RowCell {
     fn is_default_blank(&self) -> bool {
-        self.empty && self.style == Style::default() && self.wide == Width::Narrow && !self.link
+        self.empty
+            && self.style == Style::default()
+            && self.wide == Width::Narrow
+            && !self.link
+            && self.tab == 0
     }
 
+    /// Cells tmux does not store: the second column of a wide character and
+    /// the columns after the first of a tab (its PADDING cells).
     fn spacer(&self) -> bool {
-        matches!(self.wide, Width::SpacerTail | Width::SpacerHead)
+        matches!(self.wide, Width::SpacerTail | Width::SpacerHead) || self.tab == TAB_CONTINUATION
     }
 
     /// The cell as the renderer sees it (as [`crate::snapshot`] reads it).
     fn to_cell(&self) -> Cell {
+        // tmux stores a tab as one cell as wide as the tab, then padding.
+        let (text, width, tab) = match (self.tab, self.wide) {
+            (TAB_CONTINUATION, _) => (String::new(), 0, false),
+            (n @ 1..=32, _) => (" ".repeat(usize::from(n)), n, true),
+            (_, Width::Double) => (self.text.clone(), 2, false),
+            (_, Width::SpacerTail) => (self.text.clone(), 0, false),
+            (_, Width::Narrow | Width::SpacerHead) => (self.text.clone(), 1, false),
+        };
         Cell {
-            text: self.text.clone(),
-            width: match self.wide {
-                Width::Double => 2,
-                Width::SpacerTail => 0,
-                Width::Narrow | Width::SpacerHead => 1,
-            },
+            text,
+            width,
             style: self.style,
             acs: self.acs,
             link: self.link,
+            tab,
         }
     }
 }
@@ -185,7 +203,11 @@ impl Row {
         self.cells[..self.length()]
             .iter()
             .filter(|c| c.width != 0)
-            .map(|c| if c.text.is_empty() { " " } else { &c.text })
+            .map(|c| match (c.tab, c.text.is_empty()) {
+                (true, _) => "\t",
+                (false, true) => " ",
+                (false, false) => &c.text,
+            })
             .collect()
     }
 }
@@ -308,6 +330,7 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
         } else {
             Style::default()
         };
+        let tab = cell.tab().unwrap_or(0);
         let text = match cell.content_tag() {
             // One codepoint: no grapheme buffer needed.
             Ok(CellContentTag::Codepoint) => cell
@@ -332,6 +355,13 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
             }
             Err(_) => String::new(),
         };
+        // A tab's first cell is a TAB cell: `\t` in a capture (grid.c
+        // `grid_string_cells`), spaces everywhere else (`to_cell`).
+        let text = if matches!(tab, 1..=32) {
+            "\t".to_owned()
+        } else {
+            text
+        };
         cells.push(RowCell {
             empty: text.is_empty(),
             text,
@@ -339,9 +369,39 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
             wide,
             acs: cell.is_protected().unwrap_or(false),
             link: linked && cell.has_hyperlink().unwrap_or(false),
+            tab,
         });
     }
+    whole_tabs(&mut cells);
     (cells, wrapped)
+}
+
+/// Undo what a resize does to a tab: Ghostty reflows cell by cell and can cut a
+/// tab at the row's end, leaving its first cell without its columns or its
+/// continuation at the start of the next row. tmux wraps a TAB cell whole
+/// (`grid_reflow`), so such halves are plain blanks here. A tab tmux itself
+/// could hold (`window_copy` over a partly erased tab) stays.
+fn whole_tabs(cells: &mut [RowCell]) {
+    let blank = |c: &mut RowCell| {
+        c.tab = 0;
+        c.text.clear();
+        c.empty = true;
+    };
+    if cells.first().is_some_and(|c| c.tab == TAB_CONTINUATION) {
+        let n = cells
+            .iter()
+            .take_while(|c| c.tab == TAB_CONTINUATION)
+            .count();
+        cells[..n].iter_mut().for_each(blank);
+    }
+    if let Some(x) = cells
+        .iter()
+        .rposition(|c| c.tab != 0 && c.tab != TAB_CONTINUATION)
+        && x + usize::from(cells[x].tab) > cells.len()
+    {
+        let n = cells.len() - x;
+        cells[x..x + n].iter_mut().for_each(blank);
+    }
 }
 
 /// tmux's cell data size: `UTF8_SIZE` (tmux.h:721).

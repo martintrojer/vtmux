@@ -902,7 +902,9 @@ pub mod CellData {
     pub const COLOR_PALETTE: Type = 10;
     #[doc = " The RGB value for the cell's background color.\n Only valid when content_tag is GHOSTTY_CELL_CONTENT_BG_COLOR_RGB.\n\n Output type: GhosttyColorRgb *"]
     pub const COLOR_RGB: Type = 11;
-    #[doc = " The RGB value for the cell's background color.\n Only valid when content_tag is GHOSTTY_CELL_CONTENT_BG_COLOR_RGB.\n\n Output type: GhosttyColorRgb *"]
+    #[doc = " The tab mark of the cell (vtmux): 0 for none, 1-32 for the first\n cell of a horizontal tab covering that many columns, 255 for the\n other cells of a tab.\n\n Output type: uint8_t *"]
+    pub const TAB: Type = 12;
+    #[doc = " The tab mark of the cell (vtmux): 0 for none, 1-32 for the first\n cell of a horizontal tab covering that many columns, 255 for the\n other cells of a tab.\n\n Output type: uint8_t *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RowSemanticPrompt {
