@@ -2538,7 +2538,7 @@ impl Server {
         let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
         let rows = u16::try_from(ps.rect.sy).unwrap_or(u16::MAX).max(1);
         let spawned = sys::pty::spawn(&sys::pty::SpawnSpec {
-            argv: argv.clone(),
+            program: sys::pty::Program::Pane(argv.clone()),
             shell: shell.clone(),
             cwd: ps.cwd.clone(),
             home: find_home(&self.global_env),
