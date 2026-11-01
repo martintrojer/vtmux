@@ -520,8 +520,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."screen-redraw-popups.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."screen-redraw-scrollbars-auto-hide.sh"]
 status = "xfail"

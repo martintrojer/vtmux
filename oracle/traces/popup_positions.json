@@ -1,0 +1,755 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "popup_positions",
+  "inputs": {
+    "name": "popup_positions",
+    "size": [
+      40,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "11",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "escape-time",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-a",
+          "display-popup",
+          "-w",
+          "10",
+          "-h",
+          "4",
+          "printf C; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-b",
+          "display-popup",
+          "-w",
+          "10",
+          "-h",
+          "4",
+          "-x",
+          "3",
+          "-y",
+          "7",
+          "printf N; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-c",
+          "display-popup",
+          "-w",
+          "10",
+          "-h",
+          "4",
+          "-x",
+          "R",
+          "-y",
+          "P",
+          "printf RP; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-d",
+          "display-popup",
+          "-w",
+          "10",
+          "-h",
+          "4",
+          "-x",
+          "P",
+          "-y",
+          "S",
+          "printf PS; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-e",
+          "display-popup",
+          "-w",
+          "10",
+          "-h",
+          "4",
+          "-x",
+          "W",
+          "-y",
+          "W",
+          "printf WW; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-f",
+          "display-popup",
+          "-w",
+          "10",
+          "-h",
+          "4",
+          "-x",
+          "M",
+          "-y",
+          "L",
+          "printf ML; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-g",
+          "display-popup",
+          "-w",
+          "50%",
+          "-h",
+          "50%",
+          "-x",
+          "100",
+          "-y",
+          "-5",
+          "printf CLAMP; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-h",
+          "display-popup",
+          "-w",
+          "10",
+          "-h",
+          "4",
+          "-x",
+          "#{e|+:#{popup_centre_x},1}",
+          "-y",
+          "#{popup_height}",
+          "printf F; exec cat"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u001ba"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001bb"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001bc"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001bd"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001be"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001bf"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001bg"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001bh"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-popup",
+          "-C"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "              \\e[37m\\e[40m┌────────┐\\e[39m\\e[49m",
+          "              \\e[37m\\e[40m│C       │\\e[39m\\e[49m",
+          "              \\e[37m\\e[40m│        │\\e[39m\\e[49m",
+          "              \\e[37m\\e[40m└────────┘\\e[39m\\e[49m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          16,
+          4
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          21,
+          0
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "   \\e[37m\\e[40m┌────────┐\\e[39m\\e[49m       \\e[37m│\\e[39m",
+          "   \\e[37m\\e[40m│N       │\\e[39m\\e[49m       \\e[37m│\\e[39m",
+          "   \\e[37m\\e[40m│        │\\e[39m\\e[49m       \\e[37m│\\e[39m",
+          "   \\e[37m\\e[40m└────────┘\\e[39m\\e[49m       \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          5,
+          4
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m         \\e[37m\\e[40m┌────────┐",
+          "\\e[39m\\e[49m                    \\e[32m│\\e[39m         \\e[37m\\e[40m│RP      │",
+          "\\e[39m\\e[49m                    \\e[32m│\\e[39m         \\e[37m\\e[40m│        │",
+          "\\e[39m\\e[49m                    \\e[32m│\\e[39m         \\e[37m\\e[40m└────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          33,
+          8
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[37m\\e[40m┌────────┐\\e[39m\\e[49m",
+          "                    \\e[32m│\\e[37m\\e[40m│PS      │\\e[39m\\e[49m",
+          "                    \\e[32m│\\e[37m\\e[40m│        │\\e[39m\\e[49m",
+          "                    \\e[32m│\\e[37m\\e[40m└────────┘\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          24,
+          8
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "    \\e[37m\\e[40m┌────────┐\\e[39m\\e[49m      \\e[32m│\\e[39m",
+          "    \\e[37m\\e[40m│WW      │\\e[39m\\e[49m      \\e[32m│\\e[39m",
+          "    \\e[37m\\e[40m│        │\\e[39m\\e[49m      \\e[32m│\\e[39m",
+          "    \\e[37m\\e[40m└────────┘\\e[39m\\e[49m      \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          7,
+          8
+        ]
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m\\e[40m┌────────┐\\e[39m\\e[49m          \\e[37m│\\e[39m",
+          "\\e[37m\\e[40m│ML      │\\e[39m\\e[49m          \\e[37m│\\e[39m",
+          "\\e[37m\\e[40m│        │\\e[39m\\e[49m          \\e[37m│\\e[39m",
+          "\\e[37m\\e[40m└────────┘\\e[39m\\e[49m          \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          3,
+          1
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m\\e[40m┌──────────────────┐",
+          "\\e[39m\\e[49m                    \\e[37m\\e[40m│CLAMP\\e[39m             \\e[37m│",
+          "\\e[39m\\e[49m                    \\e[37m\\e[40m│ \\e[39m                 \\e[37m│",
+          "\\e[39m\\e[49m                    \\e[37m\\e[40m│ \\e[39m                 \\e[37m│",
+          "\\e[39m\\e[49m                    \\e[37m\\e[40m│ \\e[39m                 \\e[37m│",
+          "\\e[39m\\e[49m                    \\e[37m\\e[40m└──────────────────┘",
+          "\\e[39m\\e[49m                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          26,
+          1
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "               \\e[37m\\e[40m┌────────┐\\e[39m\\e[49m",
+          "               \\e[37m\\e[40m│F       │\\e[39m\\e[49m",
+          "               \\e[37m\\e[40m│        │\\e[39m\\e[49m",
+          "               \\e[37m\\e[40m└────────┘\\e[39m\\e[49m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m                               R"
+        ],
+        "cursor": [
+          17,
+          1
+        ]
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          21,
+          0
+        ]
+      }
+    }
+  ]
+}
