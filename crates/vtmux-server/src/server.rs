@@ -557,6 +557,7 @@ impl Server {
             self.jobs_timers(Instant::now());
             self.copy_refresh_timers(Instant::now());
             self.clock_timers(Instant::now());
+            self.panes_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -609,6 +610,8 @@ impl Server {
             self.copy_refresh_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.clock_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.panes_deadline()
                 .map(|d| d.saturating_duration_since(now)),
         ]
         .into_iter()
