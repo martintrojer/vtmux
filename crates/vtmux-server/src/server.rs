@@ -243,7 +243,9 @@ pub struct Server {
     pub causes: Vec<String>,
     pub(crate) socket: PathBuf,
     pub(crate) poll: Poll,
-    listener: UnixListener,
+    /// `None` once the server is exiting: a client that connects then is
+    /// refused, not reset (`no server running`, client.c:291-295).
+    listener: Option<UnixListener>,
     signals: Signals,
     pub(crate) clients: BTreeMap<ClientId, Client>,
     next_client: usize,
@@ -447,7 +449,7 @@ impl Server {
             causes: Vec::new(),
             socket,
             poll,
-            listener,
+            listener: Some(listener),
             signals,
             clients: BTreeMap::new(),
             next_client: 0,
@@ -682,6 +684,10 @@ impl Server {
     }
 
     fn exit_clients(&mut self) {
+        // Close the socket before the slower teardown below.
+        if let Some(mut l) = self.listener.take() {
+            let _ = self.poll.registry().deregister(&mut l);
+        }
         // server_exit -> job_kill_all (server.c:260).
         self.jobs_kill_all();
         let ids: Vec<_> = self.clients.keys().copied().collect();
@@ -696,8 +702,11 @@ impl Server {
     // ------------------------------------------------------------ clients
 
     fn accept(&mut self) {
+        let Some(listener) = self.listener.as_ref() else {
+            return;
+        };
         loop {
-            match self.listener.accept() {
+            match listener.accept() {
                 // server_accept (server.c): once exiting, a new client is
                 // closed on (`server_exit`).
                 Ok(_) if self.shutdown => {}
@@ -3025,14 +3034,17 @@ impl Server {
             return;
         };
         let mut fresh = UnixListener::from_std(std_listener);
-        let _ = self.poll.registry().deregister(&mut self.listener);
+        let Some(old) = self.listener.as_mut() else {
+            return;
+        };
+        let _ = self.poll.registry().deregister(old);
         if self
             .poll
             .registry()
             .register(&mut fresh, LISTENER, Interest::READABLE)
             .is_ok()
         {
-            self.listener = fresh;
+            self.listener = Some(fresh);
         }
     }
 
