@@ -1,0 +1,74 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 8a62b6f02..3d78596ed 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -364,6 +364,11 @@ pub const MemoryPool = struct {
+     pages: PagePool,
+     pins: PinPool,
+ 
++    /// The pool item last freed without decommitting it (see
++    /// destroyNodeExt). Only compared, never dereferenced: it may be in
++    /// use again or gone.
++    warm: ?*align(std.heap.page_size_min) [std_size]u8 = null,
++
+     pub const ResetMode = std.heap.ArenaAllocator.ResetMode;
+ 
+     pub fn init(
+@@ -392,6 +397,7 @@ pub const MemoryPool = struct {
+     }
+ 
+     pub fn reset(self: *MemoryPool, mode: ResetMode) void {
++        self.warm = null;
+         _ = self.pages.reset(mode);
+         _ = self.nodes.reset(mode);
+         _ = self.pins.reset(mode);
+@@ -1018,6 +1024,7 @@ pub fn reset(self: *PageList) void {
+     //
+     // Retained page pool items are zero (see PagePool), so there is
+     // nothing to scrub before initPages reuses them.
++    self.pool.warm = null;
+     _ = self.pool.pages.reset(.{
+         .retain_with_limit = page_count * PagePool.item_size,
+     });
+@@ -5117,10 +5124,16 @@ fn destroyNodeExt(
+             assert(page.memory.len <= std_size);
+ 
+             // Reset the memory to zero (and decommit it, where
+-            // supported) so it can be reused.
++            // supported) so it can be reused. One free item stays
++            // resident: a line limit frees a page each time output fills
++            // one, and the pool hands that page out next, so decommitting
++            // it would only fault the whole page back in.
+             const item: *align(std.heap.page_size_min) [std_size]u8 =
+                 @ptrCast(@alignCast(page.memory.ptr));
+-            _ = terminal_mem.decommit(.zero, item, page.memory.len);
++            if (keepWarm(pool, item))
++                @memset(page.memory, 0)
++            else
++                _ = terminal_mem.decommit(.zero, item, page.memory.len);
+             pool.pages.destroy(item);
+         },
+ 
+@@ -5133,6 +5146,22 @@ fn destroyNodeExt(
+     pool.nodes.destroy(node);
+ }
+ 
++/// Whether a freed pool item should stay resident: only while no other
++/// free item does.
++fn keepWarm(
++    pool: *MemoryPool,
++    item: *align(std.heap.page_size_min) [std_size]u8,
++) bool {
++    if (comptime wasm_page_pool) return false;
++    if (pool.warm) |warm| {
++        for (pool.pages.free.items) |free| {
++            if (free == warm) return false;
++        }
++    }
++    pool.warm = item;
++    return true;
++}
++
+ /// Clone the given source row into the row at `dst_y` of the given
+ /// node's page, increasing the node's capacity as necessary to fit the
+ /// source row's managed memory (styles, hyperlinks, etc.).

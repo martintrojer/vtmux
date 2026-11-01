@@ -54,17 +54,22 @@ and the probes from `review_vt_wrap`.
 - Golden: `cap_tab`
 - tmux keeps a tab as a TAB cell and captures `\t`; Ghostty stores spaces.
 
-## P5. Ghostty retains history by bytes, not lines
+## P5. Ghostty retains history by whole pages, not lines
 
-- No golden (memory only, plus the widening case below).
-- Ghostty caps history in bytes or in page-granular lines, never exactly in lines.
-  `PaneTerm` sets a byte budget from a design width of `max(2*cols, 256)` and
-  models tmux's `hsize` itself (`PaneTerm::feed`), hiding the excess. Narrow panes
-  keep more rows in RAM than `history-limit`. A pane widened beyond twice its
-  creation width (or 256 columns) can keep fewer than `history_size` rows (80 cols
-  widened to 2000 then 2300 lines fed: 276 of 2000), so `capture -S -` then
-  shows fewer lines than tmux.
-- Visible: `#{history_size}` and capture ranges after a large widening.
+- No golden (memory only; nothing tmux shows differs).
+- Ghostty's line limit (`OPT_SCROLLBACK_MAX_LINES`) prunes whole pages, so it
+  can't keep exactly `history-limit` rows. `PaneTerm::retain` sets it to
+  `max(history-limit, hsize)` plus one page of rows at the current width, with
+  the byte limit off, and models tmux's `hsize` itself (`PaneTerm::feed`),
+  hiding the excess: Ghostty keeps every row tmux has and at most one page
+  more (578 rows at 80 columns, 93 at 500), whatever the styling.
+- Resize lifts the limit, reflows and sets it again for the new width, pinning
+  tmux's oldest row; under the alternate screen it stays lifted until the
+  primary screen is back (`alt_entry`), as Ghostty reflows the primary at every
+  resize and tmux only once, on `?1049l`.
+- `history-limit 0` keeps a byte limit of 0 (no history at all), since a line
+  limit can't go below one page.
+- Visible: memory only (one page per pane).
 
 ## P6. Scroll-on-clear does not feed history
 

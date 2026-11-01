@@ -359,10 +359,20 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     let src_dir = out_dir.join("ghostty-src");
     let stamp = src_dir.join(".ghostty-commit");
 
+    // vtmux: local patches (`patches/*.patch`, VENDOR.md) applied on top of
+    // the pinned commit. The stamp records the commit and the patches, so
+    // changing either fetches afresh.
+    let patches = local_patches();
+    let mut want = String::from(GHOSTTY_COMMIT);
+    for (_, text) in &patches {
+        want.push('\n');
+        want.push_str(text);
+    }
+
     // Skip fetch if we already have the right commit.
     if stamp.exists()
         && let Ok(existing) = std::fs::read_to_string(&stamp)
-        && existing.trim() == GHOSTTY_COMMIT
+        && existing == want
     {
         return src_dir;
     }
@@ -391,9 +401,40 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
         .current_dir(&src_dir);
     run(checkout, "git checkout ghostty commit");
 
-    std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
+    for (path, _) in &patches {
+        let mut apply = Command::new("git");
+        apply.arg("apply").arg(path).current_dir(&src_dir);
+        run(apply, &format!("git apply {}", path.display()));
+    }
+
+    std::fs::write(&stamp, want).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     src_dir
+}
+
+/// The vtmux patches to apply to the fetched ghostty, in name order, with
+/// their contents.
+fn local_patches() -> Vec<(PathBuf, String)> {
+    let dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join("patches");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "patch"))
+                .collect()
+        })
+        .unwrap_or_default();
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|p| {
+            let text = std::fs::read_to_string(&p)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", p.display()));
+            (p, text)
+        })
+        .collect()
 }
 
 fn run(mut command: Command, context: &str) {

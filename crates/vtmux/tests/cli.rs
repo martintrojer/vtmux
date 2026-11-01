@@ -1355,6 +1355,76 @@ fn history_limit_retention() {
     });
 }
 
+/// A resize while the alternate screen is up leaves the primary history
+/// alone in tmux (window.c `window_pane_resize` resizes without reflow
+/// while `saved_grid` is set) and reflows it once when the alternate
+/// screen goes (screen.c `screen_alternate_off`). Ghostty reflows the
+/// primary at every resize: narrowing must not let the line limit prune
+/// the rows it split. A split and kill (80 -> 40 -> 80 columns) and a
+/// resize-window to 40x20 then 90x30, on plain and truecolour output.
+#[test]
+fn history_resize_under_the_alternate_screen() {
+    compare("history_resize_under_the_alternate_screen", |w| {
+        let script = |styled: bool| {
+            let cell = if styled {
+                "sprintf(\"\\033[38;2;%d;%d;%dm%c\", i % 256, j, (i * 7) % 256, 65 + j % 26)"
+            } else {
+                "sprintf(\"%c\", 97 + (i + j) % 26)"
+            };
+            format!(
+                "awk 'BEGIN {{ for (i = 0; i < 5000; i++) {{ s = sprintf(\"%05d \", i); \
+                 for (j = 0; j < 64; j++) s = s {cell}; print s \"\\033[m\" }} }}'; \
+                 echo DONE; read x; printf '\\033[?1049h'; echo ALT; read x; \
+                 printf '\\033[?1049l'; echo BACK; exec cat"
+            )
+        };
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "k", "cat"]),
+            w.run(&["set", "-g", "history-limit", "2000"]),
+        ];
+        let state = |t: &str| {
+            [
+                "display",
+                "-p",
+                "-t",
+                t,
+                "#{history_size} #{pane_width}x#{pane_height}",
+            ]
+            .map(String::from)
+        };
+        for (name, styled, resize) in [("p", false, false), ("q", false, true), ("s", true, true)] {
+            runs.push(w.run(&[
+                "new",
+                "-d",
+                "-s",
+                name,
+                "-x",
+                "80",
+                "-y",
+                "24",
+                &script(styled),
+            ]));
+            w.wait_for_text(name, "DONE");
+            runs.push(w.run(&["send-keys", "-t", name, "Enter"]));
+            w.wait_for_text(name, "ALT");
+            if resize {
+                runs.push(w.run(&["resize-window", "-t", name, "-x", "40", "-y", "20"]));
+                runs.push(w.run(&["resize-window", "-t", name, "-x", "90", "-y", "30"]));
+            } else {
+                runs.push(w.run(&["split-window", "-h", "-d", "-t", name, "cat"]));
+                runs.push(w.run(&["kill-pane", "-t", &format!("{name}.1")]));
+            }
+            let s = state(name);
+            runs.push(w.run(&s.each_ref().map(String::as_str)));
+            runs.push(w.run(&["send-keys", "-t", name, "Enter"]));
+            w.wait_for_text(name, "BACK");
+            runs.push(w.run(&s.each_ref().map(String::as_str)));
+            runs.push(w.run(&["capture-pane", "-p", "-S", "-", "-t", name]));
+        }
+        runs
+    });
+}
+
 /// spawn.c `spawn_pane` (379-390): a new pane with no command runs the
 /// session's `default-command` as one `$SHELL -c` word; respawn-pane and
 /// respawn-window without a command keep the pane's own. Scopes: session
