@@ -29,8 +29,7 @@ use super::Caps;
 use super::compose::draw_line_by;
 use super::window::Source;
 use crate::format_ctx::Ctx;
-use crate::prompt::Prompt;
-use crate::target::Found;
+use crate::prompt::OpenPrompt;
 
 /// A status-line message (`c->message_string` and its flags).
 #[derive(Debug)]
@@ -39,14 +38,6 @@ struct Message {
     /// `message_ignore_styles`: `#` is escaped, so `#[...]` in the text is
     /// literal.
     ignore_styles: bool,
-}
-
-/// A status-line prompt (`c->prompt`): the editor and the target its
-/// formats are expanded for (`pr->state`).
-#[derive(Debug)]
-pub struct StatusPrompt {
-    pub editor: Prompt,
-    pub state: Found,
 }
 
 /// How a message shows (`status_message_set`'s flags).
@@ -81,7 +72,7 @@ pub struct StatusLine {
     active: Vec<Vec<Cell>>,
     message: Option<Message>,
     /// `c->prompt`. A message shows over it.
-    prompt: Option<StatusPrompt>,
+    prompt: Option<OpenPrompt>,
     /// `sl->prompt_cx` and the prompt's line in `active`.
     prompt_cursor: (u16, usize),
     /// `TTY_FREEZE`: pane output is not written to the terminal while a
@@ -195,10 +186,11 @@ impl StatusLine {
 
     /// `status_prompt_set`: any message goes, then any prompt (returned,
     /// for its owner to be told); the pane area freezes unless `-C`.
-    pub fn set_prompt(&mut self, prompt: StatusPrompt) -> Option<StatusPrompt> {
+    pub fn set_prompt(&mut self, prompt: OpenPrompt) -> Option<OpenPrompt> {
         self.clear_message();
         let old = self.clear_prompt();
-        if !prompt.editor.no_freeze {
+        // status.c:612-613.
+        if !prompt.editor.no_freeze && prompt.editor.kind != crate::prompt::Kind::Incremental {
             self.frozen = true;
         }
         self.prompt = Some(prompt);
@@ -207,7 +199,7 @@ impl StatusLine {
     }
 
     /// `status_prompt_clear`: unfrozen and redrawn in full.
-    pub fn clear_prompt(&mut self) -> Option<StatusPrompt> {
+    pub fn clear_prompt(&mut self) -> Option<OpenPrompt> {
         let old = self.prompt.take()?;
         self.frozen = false;
         self.nocursor = false;
@@ -217,12 +209,12 @@ impl StatusLine {
 
     /// The prompt shown, if any.
     #[must_use]
-    pub fn prompt(&self) -> Option<&StatusPrompt> {
+    pub fn prompt(&self) -> Option<&OpenPrompt> {
         self.prompt.as_ref()
     }
 
     /// The prompt, to edit; the status is drawn again.
-    pub fn prompt_mut(&mut self) -> Option<&mut StatusPrompt> {
+    pub fn prompt_mut(&mut self) -> Option<&mut OpenPrompt> {
         self.redraw |= self.prompt.is_some();
         self.prompt.as_mut()
     }
@@ -418,16 +410,49 @@ fn prompt_rows(
     source: &Source<'_>,
     s: SessionId,
     status: &[Vec<Cell>],
-    prompt: &StatusPrompt,
+    prompt: &OpenPrompt,
     cols: usize,
     lines: usize,
 ) -> (Vec<Vec<Cell>>, (u16, usize)) {
     let tree = TreeId::Session(s);
-    let editor = &prompt.editor;
     let mut rows = status_copy(status, cols, lines);
     let line = prompt_line(source, tree, lines);
     let (ax, aw) = message_area(source, tree, cols);
+    let cursor_x = draw_prompt(source, tree, prompt, &mut rows[line], ax, aw);
+    (rows, (u16::try_from(cursor_x).unwrap_or(u16::MAX), line))
+}
 
+/// `redraw_draw_pane_prompt` (screen-redraw.c:1625-1673): a pane prompt
+/// is drawn on a blank line as wide as the pane, its whole width the
+/// prompt's area; and the cursor's column in it (`wp->prompt_cx`).
+#[must_use]
+pub fn pane_prompt_row(
+    source: &Source<'_>,
+    tree: TreeId,
+    prompt: &OpenPrompt,
+    width: usize,
+) -> (Vec<Cell>, usize) {
+    let blank = Cell {
+        text: " ".into(),
+        width: 1,
+        style: CellStyle::default(),
+    };
+    let mut row = vec![blank; width];
+    let cursor_x = draw_prompt(source, tree, prompt, &mut row, 0, width);
+    (row, cursor_x)
+}
+
+/// `prompt_draw` in the area `ax`, `aw` of `row`; returns the cursor's
+/// column.
+fn draw_prompt(
+    source: &Source<'_>,
+    tree: TreeId,
+    prompt: &OpenPrompt,
+    row: &mut Vec<Cell>,
+    ax: usize,
+    aw: usize,
+) -> usize {
+    let editor = &prompt.editor;
     let mut ctx = Ctx::new(source.model, source.info, source.env, prompt.state);
     for (k, v) in editor.format_vars() {
         ctx.extra.push((k.into(), v));
@@ -464,9 +489,12 @@ fn prompt_rows(
         Align::Default | Align::Left => ax,
     };
     let input_x = content_x + label_width;
-    let cursor_x = input_x + pcursor - offset;
+    let cursor_x = if avail == 0 {
+        content_x + label_width
+    } else {
+        input_x + pcursor - offset
+    };
 
-    let row = &mut rows[line];
     // screen_write_clearcharacter in the fill colour.
     if sy.fill != Colour::Default {
         for cell in &mut row[ax..ax + aw] {
@@ -488,7 +516,7 @@ fn prompt_rows(
         }
         draw_input(row, input_x, &cells, offset, input_width, &sy.cell);
     }
-    (rows, (u16::try_from(cursor_x).unwrap_or(u16::MAX), line))
+    cursor_x
 }
 
 /// `prompt_effective_style`: `message-style`, or `message-command-style`

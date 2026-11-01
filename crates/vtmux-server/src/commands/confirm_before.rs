@@ -9,10 +9,10 @@ use vtmux_core::error::EdgeError;
 
 use super::Item;
 use crate::cmdq::StepId;
+use crate::open_prompt::{Owner, Reply};
 use crate::prompt::Kind;
 use crate::prompt_history::PromptType;
 use crate::server::{ClientId, Server};
-use crate::status_prompt::{Owner, Reply};
 use crate::target::Found;
 
 /// `struct cmd_confirm_before_data`.
@@ -92,7 +92,7 @@ impl Pending {
                 Some(step) => {
                     server.cmdq_insert_commands(step, vec![(None, calls)]);
                 }
-                None => server.client_append(self.client, calls),
+                None => server.client_append(Some(self.client), calls),
             }
         }
         // out: the waiting command carries on, a command client (no

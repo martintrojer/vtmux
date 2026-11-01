@@ -1,5 +1,5 @@
-//! `command-prompt` (cmd-command-prompt.c) on the status line: one or more
-//! prompts (`-p a,b`, with `-I x,y` their inputs), whose answers fill the
+//! `command-prompt` (cmd-command-prompt.c) on the status line, or with
+//! `-P` over the target client's current pane: one or more prompts (`-p a,b`, with `-I x,y` their inputs), whose answers fill the
 //! template's `%1`, `%2`, `%%` (cmd.c `cmd_template_replace`), and the
 //! result runs as commands. Without a template the answer is the command.
 //!
@@ -7,7 +7,9 @@
 //! run right after it; with `-b` they go at the end of the prompt client's
 //! queue.
 //!
-//! Not here yet: `-P` (pane prompts) and `-i` (incremental).
+//! An incremental prompt (`-i`, which never waits) runs the template on
+//! every edit, the line after a direction prefix (`=`, `+`, `-`), and
+//! closes on Enter without running it again: copy mode's `C-r` / `C-s`.
 
 use std::rc::Rc;
 
@@ -17,10 +19,10 @@ use vtmux_core::error::EdgeError;
 
 use super::Item;
 use crate::cmdq::{Source, StepId};
+use crate::open_prompt::{Line, Owner, Reply};
 use crate::prompt::Kind;
 use crate::prompt_history::PromptType;
 use crate::server::{ClientId, Server};
-use crate::status_prompt::{Owner, Reply};
 use crate::target::{Found, Origin};
 
 /// The template a prompt fills (`struct args_command_state`): a `{ }`
@@ -43,30 +45,43 @@ pub(crate) struct Pending {
     /// The prompts after the first, with their inputs.
     next: std::vec::IntoIter<(String, String)>,
     answers: Vec<String>,
+    incremental: bool,
 }
 
 /// `cmd_command_prompt_exec`.
 pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), CmdError> {
-    for flag in ['P', 'i'] {
-        if args.flag(flag) {
-            return Err(EdgeError::NotImplemented(format!("command-prompt -{flag}")).into());
-        }
-    }
     let tc = target_client(server, item, args.value('t'))?;
-    if server
-        .clients
-        .get(&tc)
-        .is_some_and(|c| c.status.prompt().is_some())
-    {
-        return Ok(());
-    }
-    let wait = !args.flag('b');
     // cmdq_find_flag with no target flag: the target client's current
     // state (cmd_find_from_client).
     let state = server
         .client_session(tc)
         .map(|s| Found::from_session(&server.model, s))
         .unwrap_or_default();
+    let pane = if args.flag('P') {
+        match state.pane {
+            Some(p)
+                if server
+                    .model
+                    .panes
+                    .get(&p)
+                    .is_some_and(|x| x.prompt.is_none()) =>
+            {
+                Some(p)
+            }
+            _ => return Ok(()),
+        }
+    } else {
+        if server
+            .clients
+            .get(&tc)
+            .is_some_and(|c| c.status.prompt().is_some())
+        {
+            return Ok(());
+        }
+        None
+    };
+    let incremental = args.flag('i');
+    let wait = !args.flag('b') && !incremental;
     let template = match args.positionals.first() {
         Some(ArgValue::Commands(list)) => Template::Block(list.clone()),
         Some(value) => Template::Text(expand_if(server, args, tc, state, &value.text())),
@@ -101,6 +116,8 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
         Kind::Single
     } else if args.flag('N') {
         Kind::Numeric
+    } else if incremental {
+        Kind::Incremental
     } else if args.flag('k') {
         Kind::Key
     } else if args.flag('e') {
@@ -122,8 +139,12 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
         },
         next: list.into_iter(),
         answers: Vec::new(),
+        incremental,
     };
-    server.status_prompt_set(tc, editor, state, Owner::Command(pending));
+    match pane {
+        Some(p) => server.pane_prompt_set(p, tc, editor, state, Owner::Command(pending)),
+        None => server.status_prompt_set(tc, editor, state, Owner::Command(pending)),
+    }
     if wait {
         item.blocked = true;
     }
@@ -170,33 +191,37 @@ pub(crate) fn target_client(
 
 impl Pending {
     /// `cmd_command_prompt_callback`: collect the answer; after the last
-    /// prompt, fill the template and queue the commands.
-    pub(crate) fn input(
-        &mut self,
-        server: &mut Server,
-        c: ClientId,
-        value: Option<String>,
-    ) -> Reply {
-        let Some(value) = value else {
-            return Reply::Close;
+    /// prompt (or on an incremental prompt's edit), fill the template and
+    /// queue the commands for client `c`.
+    pub(crate) fn input(&mut self, server: &mut Server, c: Option<ClientId>, line: Line) -> Reply {
+        let (value, done) = match line {
+            Line::Done(Some(value)) => (value, true),
+            Line::Changed(value) => (value, false),
+            Line::Done(None) | Line::Move => return self.out(server),
         };
-        self.answers.push(value);
-        if let Some((label, input)) = self.next.next() {
-            return Reply::Next { label, input };
-        }
+        let answers = if done {
+            if self.incremental {
+                return self.out(server);
+            }
+            self.answers.push(value);
+            if let Some((label, input)) = self.next.next() {
+                return Reply::Next { label, input };
+            }
+            self.answers.clone()
+        } else {
+            let mut answers = self.answers.clone();
+            answers.push(value);
+            answers
+        };
         let calls = match &self.template {
-            Template::Block(list) => Ok(replace_list(list, &self.answers).calls),
+            Template::Block(list) => Ok(replace_list(list, &answers).calls),
             Template::Text(text) => {
-                let filled = self
-                    .answers
-                    .iter()
-                    .enumerate()
-                    .fold(text.clone(), |t, (i, a)| {
-                        replace(&t, a, u8::try_from(i + 1).unwrap_or(u8::MAX))
-                    });
+                let filled = answers.iter().enumerate().fold(text.clone(), |t, (i, a)| {
+                    replace(&t, a, u8::try_from(i + 1).unwrap_or(u8::MAX))
+                });
                 super::run_shell::make_commands(
                     server,
-                    Some(c),
+                    c,
                     self.origin,
                     self.source.as_deref(),
                     &ArgValue::Str(filled),
@@ -212,6 +237,17 @@ impl Pending {
                 }
                 None => server.client_append(c, calls),
             },
+        }
+        if self.incremental {
+            return Reply::Continue;
+        }
+        self.out(server)
+    }
+
+    /// `out:` the waiting command carries on and the prompt closes.
+    fn out(&mut self, server: &mut Server) -> Reply {
+        if let Some(step) = self.step.take() {
+            server.cmdq_continue(step);
         }
         Reply::Close
     }

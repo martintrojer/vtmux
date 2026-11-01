@@ -1,0 +1,46 @@
+# pane-prompt-opened / pane-prompt-closed (window.c
+# window_fire_pane_prompt: pane, window and prompt_type in the payload)
+# around command-prompt -P; a second -P on a pane with a prompt does
+# nothing (cmd-command-prompt.c:97-99); a pane killed under its prompt
+# fires no closed hook (PANE_DESTROYED, window.c:1935); #{prompt_flags}
+# has ISPANE, so the default message-style has no fill (options-table.c
+# message-style) and the line is not filled to the pane's width.
+name = "prompt_pane_hooks"
+size = [40, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-prompt-opened", "set -agF @log '|o:#{hook_prompt_type}:#{hook_pane}:#{hook_window}:#{hook_event}'"] },
+  { run = ["set-hook", "-g", "pane-prompt-closed", "set -agF @log '|c:#{hook_prompt_type}:#{hook_pane}'"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { run = ["command-prompt", "-b", "-P", "-T", "search", "-p", "x#{prompt_flags}", "set -g @x '%%'"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["command-prompt", "-b", "-P", "-p", "second", "set -g @y '%%'"] },
+  { screen = {} },
+  { keys = "abc\r" },
+  { screen = {} },
+  { run = ["show", "-gv", "@x"] },
+  { run = ["show", "-gqv", "@y"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "message-style", "bg=red,fill=blue"] },
+  { run = ["command-prompt", "-b", "-P", "-p", "f", "-I", "in", "set -g @z '%%'"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u001b" },
+  { screen = {} },
+  { run = ["show", "-gqv", "@z"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["split-window", "-t", "a", "cat"] },
+  { run = ["command-prompt", "-b", "-P", "-p", "k", "set -g @k '%%'"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["kill-pane", "-t", "%1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["show", "-gv", "@log"] },
+]

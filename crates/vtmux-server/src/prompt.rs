@@ -7,16 +7,30 @@
 //! line does and whether the prompt stays open for another one
 //! (`prompt_fire_callback`).
 //!
-//! Not here yet: incremental (`-i`) and pane (`-P`) prompts, Tab
-//! completion, mouse.
+//! An incremental (`-i`) prompt tells its owner about every edit
+//! ([`KeyOutcome::Changed`]), and arrow keys end it ([`KeyOutcome::Move`]).
+//! Where the prompt is drawn (status line or pane) is not the editor's
+//! business.
+//!
+//! Not here yet: Tab completion, mouse.
 
 use vtmux_core::keys::Key;
 use vtmux_core::width::char_width;
 
 use crate::prompt_history::{History, Position, PromptType};
+use crate::target::Found;
 
-/// How a prompt behaves (`PROMPT_*` flags); `-1`, `-N`, `-k` and `-e`
-/// exclude each other (cmd-command-prompt.c:212-221).
+/// An open prompt, on a client's status line (`c->prompt`) or over a pane
+/// (`wp->prompt`): the editor and the target its formats are expanded for
+/// (`pr->state`).
+#[derive(Debug)]
+pub struct OpenPrompt {
+    pub editor: Prompt,
+    pub state: Found,
+}
+
+/// How a prompt behaves (`PROMPT_*` flags); `-1`, `-N`, `-i`, `-k` and
+/// `-e` exclude each other (cmd-command-prompt.c:164-173).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Kind {
     #[default]
@@ -26,6 +40,9 @@ pub enum Kind {
     /// `-N` (`PROMPT_NUMERIC`): digits; any other key accepts the prompt
     /// and goes on to the key tables.
     Numeric,
+    /// `-i` (`PROMPT_INCREMENTAL`): the owner hears every edit; the line
+    /// starts empty, with the input kept for `C-r` / `C-s`.
+    Incremental,
     /// `-k` (`PROMPT_KEY`): one key, as its name.
     Key,
     /// `-e` (`PROMPT_BSPACE_EXIT`): Backspace on an empty line cancels.
@@ -47,6 +64,23 @@ pub enum KeyOutcome {
     /// `-1` with more than one character: closed without the owner seeing
     /// a line (prompt.c:1525-1528).
     Close,
+    /// An incremental prompt's line changed: the owner gets it after a
+    /// direction prefix (`=`, `+` forward, `-` backward) and the prompt
+    /// stays open (`PROMPT_KEY_HANDLED`, prompt.c:1532-1537).
+    Changed(String),
+    /// An arrow or page key in an incremental prompt
+    /// (`prompt_check_move`, `PROMPT_KEY_MOVE`): the owner says whether
+    /// the prompt stays.
+    Move,
+}
+
+/// What an edit did (the switch in `prompt_key`: `break` or `goto changed`).
+enum Edit {
+    /// Moved or nothing: no incremental callback.
+    Moved,
+    /// The line changed (`goto changed`), with the incremental prefix.
+    Changed(char),
+    Out(KeyOutcome),
 }
 
 /// What a key needs from outside the prompt.
@@ -84,8 +118,8 @@ enum Action {
     Transpose,
     Enter,
     Cancel,
-    /// `C-r` / `C-s`: only incremental prompts use them.
-    Search,
+    /// `C-r` (`true`) / `C-s`: only incremental prompts use them.
+    Search(bool),
     QuoteNext,
 }
 
@@ -119,13 +153,23 @@ pub struct Prompt {
     history_at: Position,
     /// What `C-w` cut, which `C-y` pastes before any buffer.
     copied: Option<Vec<char>>,
+    /// `pr->last`: an incremental prompt's input, which `C-r` / `C-s` on
+    /// an empty line bring back.
+    last: String,
+    /// `PROMPT_ISPANE`: drawn over a pane (`prompt_flags`).
+    pub is_pane: bool,
 }
 
 impl Prompt {
     /// `prompt_create` with `input` already expanded.
     #[must_use]
     pub fn new(label: String, input: &str, kind: Kind, ty: PromptType) -> Self {
-        let buffer: Vec<char> = input.chars().collect();
+        // prompt.c:185-191: an incremental prompt starts empty.
+        let (buffer, last) = if kind == Kind::Incremental {
+            (Vec::new(), input.to_owned())
+        } else {
+            (input.chars().collect(), String::new())
+        };
         Self {
             label,
             index: buffer.len(),
@@ -139,7 +183,16 @@ impl Prompt {
             word_separators: String::new(),
             history_at: Position::default(),
             copied: None,
+            last,
+            is_pane: false,
         }
+    }
+
+    /// `prompt_incremental_start`: what an incremental prompt tells its
+    /// owner when it opens.
+    #[must_use]
+    pub fn incremental_start(&self) -> Option<String> {
+        (self.kind == Kind::Incremental).then(|| format!("={}", self.input()))
     }
 
     /// `status-keys` and `word-separators` from the session
@@ -179,6 +232,7 @@ impl Prompt {
         match self.kind {
             Kind::Single => flags.push("SINGLE"),
             Kind::Numeric => flags.push("NUMERIC"),
+            Kind::Incremental => flags.push("INCREMENTAL"),
             Kind::Key => flags.push("KEY"),
             Kind::Line | Kind::BackspaceExit => {}
         }
@@ -193,6 +247,9 @@ impl Prompt {
         }
         if self.command_mode {
             flags.push("COMMANDMODE");
+        }
+        if self.is_pane {
+            flags.push("ISPANE");
         }
         flags.join(",")
     }
@@ -257,6 +314,20 @@ impl Prompt {
             self.quote_next = false;
             return self.append(Key::from_char(c));
         }
+        let was_command_mode = self.command_mode;
+        // prompt_check_move (prompt.c:1185-1210) on an emacs key; a vi key
+        // is checked once translated, below.
+        let moves = [
+            Key::UP,
+            Key::DOWN,
+            Key::LEFT,
+            Key::RIGHT,
+            Key::PPAGE,
+            Key::NPAGE,
+        ];
+        if self.kind == Kind::Incremental && !self.vi && moves.contains(&key) {
+            return KeyOutcome::Move;
+        }
         let action = if self.vi {
             match self.translate_vi(key) {
                 Vi::Drop => return KeyOutcome::Handled,
@@ -269,43 +340,142 @@ impl Prompt {
                 None => return self.append(key),
             }
         };
-        self.act(action, env)
+        // In vi command mode h, j, k, l (and BSpace, a) are the arrow keys
+        // by now; insert mode passes the arrows on as they are.
+        let arrow = if was_command_mode {
+            matches!(
+                action,
+                Action::Left | Action::Right | Action::HistoryUp | Action::HistoryDown
+            )
+        } else {
+            moves[..4].contains(&key)
+        };
+        if self.kind == Kind::Incremental && self.vi && arrow {
+            return KeyOutcome::Move;
+        }
+        match self.act(action, env) {
+            Edit::Moved => KeyOutcome::Handled,
+            Edit::Changed(prefix) => self.changed(prefix),
+            Edit::Out(o) => o,
+        }
     }
 
-    /// The switch in `prompt_key` (prompt.c:1260-1497).
-    fn act(&mut self, action: Action, env: &mut KeyEnv<'_>) -> KeyOutcome {
+    /// `changed:` in `prompt_key`: an incremental prompt tells its owner.
+    fn changed(&self, prefix: char) -> KeyOutcome {
+        if self.kind == Kind::Incremental {
+            KeyOutcome::Changed(format!("{prefix}{}", self.input()))
+        } else {
+            KeyOutcome::Handled
+        }
+    }
+
+    /// The switch in `prompt_key` (prompt.c:1281-1497).
+    fn act(&mut self, action: Action, env: &mut KeyEnv<'_>) -> Edit {
         let size = self.buffer.len();
-        match action {
-            Action::Left => self.index = self.index.saturating_sub(1),
-            Action::Right => self.index = (self.index + 1).min(size),
-            Action::Home => self.index = 0,
-            Action::End => self.index = size,
+        if let Some(index) = self.motion(action) {
+            self.index = index;
+            return Edit::Moved;
+        }
+        let changed = match action {
             // prompt_replace_complete: completion is not here yet.
-            Action::Complete | Action::Search => {}
+            Action::Left | Action::Right | Action::Home | Action::End | Action::Complete => false,
+            Action::Backspace if self.kind == Kind::BackspaceExit && size == 0 => {
+                return Edit::Out(KeyOutcome::Done(None));
+            }
             Action::Backspace => {
-                if self.kind == Kind::BackspaceExit && size == 0 {
-                    return KeyOutcome::Done(None);
-                }
-                if self.index != 0 {
+                self.index != 0 && {
                     self.index -= 1;
                     self.buffer.remove(self.index);
+                    true
                 }
             }
             Action::Delete => {
-                if self.index != size {
+                self.index != size && {
                     self.buffer.remove(self.index);
+                    true
                 }
             }
             Action::KillLine => {
                 self.buffer.clear();
                 self.index = 0;
+                true
             }
-            Action::KillToEnd => self.buffer.truncate(self.index),
+            Action::KillToEnd => {
+                self.index < size && {
+                    self.buffer.truncate(self.index);
+                    true
+                }
+            }
             Action::DeleteWord => {
                 let start = self.word_start(&self.word_separators.clone());
                 self.copied = Some(self.buffer.drain(start..self.index).collect());
                 self.index = start;
+                true
             }
+            Action::ForwardWord
+            | Action::ForwardWordVi(_)
+            | Action::EndWord(_)
+            | Action::BackwardWord(_) => {
+                self.word_motion(action);
+                true
+            }
+            Action::HistoryUp => match env.history.up(&mut self.history_at, self.ty) {
+                Some(line) => {
+                    self.set_line(line);
+                    true
+                }
+                None => false,
+            },
+            Action::HistoryDown => {
+                let line = env.history.down(&mut self.history_at, self.ty).to_owned();
+                self.set_line(&line);
+                true
+            }
+            Action::Paste => self.paste(env.paste),
+            Action::Transpose => {
+                let idx = (self.index + 1).min(size);
+                idx >= 2 && {
+                    self.buffer.swap(idx - 2, idx - 1);
+                    self.index = idx;
+                    true
+                }
+            }
+            Action::Enter => {
+                let line = self.input();
+                if !line.is_empty() {
+                    env.history.add(&line, self.ty, env.history_limit);
+                }
+                return Edit::Out(KeyOutcome::Done(Some(line)));
+            }
+            Action::Cancel => return Edit::Out(KeyOutcome::Done(None)),
+            Action::Search(up) => return self.search_key(up),
+            Action::QuoteNext => {
+                self.quote_next = true;
+                false
+            }
+        };
+        if changed {
+            Edit::Changed('=')
+        } else {
+            Edit::Moved
+        }
+    }
+
+    /// Where a cursor movement that is no edit puts the cursor (the
+    /// `break` cases of `prompt_key`'s arrows, Home and End).
+    fn motion(&self, action: Action) -> Option<usize> {
+        match action {
+            Action::Left => Some(self.index.saturating_sub(1)),
+            Action::Right => Some((self.index + 1).min(self.buffer.len())),
+            Action::Home => Some(0),
+            Action::End => Some(self.buffer.len()),
+            _ => None,
+        }
+    }
+
+    /// The word movements, which count as edits (`goto changed`).
+    fn word_motion(&mut self, action: Action) {
+        match action {
             Action::ForwardWord => self.forward_word(false, true),
             Action::ForwardWordVi(seps) => self.forward_word(true, seps),
             Action::EndWord(seps) => self.end_word(seps),
@@ -317,38 +487,23 @@ impl Prompt {
                 };
                 self.index = self.word_start(&seps);
             }
-            Action::HistoryUp => {
-                if let Some(line) = env.history.up(&mut self.history_at, self.ty) {
-                    self.set_line(line);
-                }
-            }
-            Action::HistoryDown => {
-                let line = env.history.down(&mut self.history_at, self.ty).to_owned();
-                self.set_line(&line);
-            }
-            Action::Paste => self.paste(env.paste),
-            Action::Transpose => {
-                let idx = if self.index < size {
-                    self.index + 1
-                } else {
-                    self.index
-                };
-                if idx >= 2 {
-                    self.buffer.swap(idx - 2, idx - 1);
-                    self.index = idx;
-                }
-            }
-            Action::Enter => {
-                let line = self.input();
-                if !line.is_empty() {
-                    env.history.add(&line, self.ty, env.history_limit);
-                }
-                return KeyOutcome::Done(Some(line));
-            }
-            Action::Cancel => return KeyOutcome::Done(None),
-            Action::QuoteNext => self.quote_next = true,
+            _ => {}
         }
-        KeyOutcome::Handled
+    }
+
+    /// `C-r` / `C-s` (prompt.c:1469-1490): only in an incremental prompt;
+    /// on an empty line the input comes back and searches in the prompt's
+    /// own direction (`=`).
+    fn search_key(&mut self, up: bool) -> Edit {
+        if self.kind != Kind::Incremental {
+            return Edit::Moved;
+        }
+        if self.buffer.is_empty() {
+            let last = self.last.clone();
+            self.set_line(&last);
+            return Edit::Changed('=');
+        }
+        Edit::Changed(if up { '-' } else { '+' })
     }
 
     /// `append_key`: the key as a character at the cursor; a key that is
@@ -363,7 +518,7 @@ impl Prompt {
             }
             return KeyOutcome::Done(Some(self.input()));
         }
-        KeyOutcome::Handled
+        self.changed('=')
     }
 
     /// Insert `key`'s character: ASCII (with control characters) or an
@@ -389,7 +544,7 @@ impl Prompt {
 
     /// `prompt_paste`: what `C-w` cut, else the top buffer up to its first
     /// control character or invalid byte.
-    fn paste(&mut self, top: Option<&[u8]>) {
+    fn paste(&mut self, top: Option<&[u8]>) -> bool {
         let chars: Vec<char> = if let Some(copied) = &self.copied {
             copied.clone()
         } else if let Some(data) = top {
@@ -399,11 +554,12 @@ impl Prompt {
             };
             valid.chars().take_while(|c| !c.is_control()).collect()
         } else {
-            return;
+            return false;
         };
         let n = chars.len();
         self.buffer.splice(self.index..self.index, chars);
         self.index += n;
+        true
     }
 
     fn space(&self, i: usize) -> bool {
@@ -644,8 +800,8 @@ fn emacs(key: Key) -> Option<Action> {
         (ctrl(b'['), Action::Cancel),
         (ctrl(b'c'), Action::Cancel),
         (ctrl(b'g'), Action::Cancel),
-        (ctrl(b'r'), Action::Search),
-        (ctrl(b's'), Action::Search),
+        (ctrl(b'r'), Action::Search(true)),
+        (ctrl(b's'), Action::Search(false)),
         (ctrl(b'v'), Action::QuoteNext),
     ];
     table.iter().find(|(k, _)| *k == key).map(|(_, a)| *a)
@@ -829,5 +985,60 @@ mod tests {
             typed(&mut p, &mut h, &[Key::BSPACE, Key::BSPACE]),
             [KeyOutcome::Handled, KeyOutcome::Done(None)]
         );
+    }
+
+    #[test]
+    fn incremental_reports_edits_searches_and_moves() {
+        let mut h = History::default();
+        let mut p = Prompt::new("(s) ".into(), "old", Kind::Incremental, PromptType::Search);
+        assert_eq!(p.input(), "");
+        assert_eq!(p.incremental_start().as_deref(), Some("="));
+        let ctrl = |c: u8| Key::ascii(c).ctrl();
+        assert_eq!(
+            typed(&mut p, &mut h, &chars("ab")),
+            [
+                KeyOutcome::Changed("=a".into()),
+                KeyOutcome::Changed("=ab".into())
+            ]
+        );
+        // Movement within the line is not an edit.
+        assert_eq!(
+            typed(&mut p, &mut h, &[ctrl(b'b'), ctrl(b'f')]),
+            [KeyOutcome::Handled, KeyOutcome::Handled]
+        );
+        assert_eq!(
+            typed(&mut p, &mut h, &[ctrl(b'r'), ctrl(b's')]),
+            [
+                KeyOutcome::Changed("-ab".into()),
+                KeyOutcome::Changed("+ab".into())
+            ]
+        );
+        assert_eq!(
+            typed(&mut p, &mut h, &[Key::BSPACE, Key::BSPACE, Key::BSPACE]),
+            [
+                KeyOutcome::Changed("=a".into()),
+                KeyOutcome::Changed("=".into()),
+                KeyOutcome::Handled
+            ]
+        );
+        // On an empty line C-s brings the input back.
+        assert_eq!(
+            typed(&mut p, &mut h, &[ctrl(b's')]),
+            [KeyOutcome::Changed("=old".into())]
+        );
+        assert_eq!(
+            typed(&mut p, &mut h, &[Key::DOWN, Key::NPAGE]),
+            [KeyOutcome::Move, KeyOutcome::Move]
+        );
+        assert_eq!(p.flags_string(), "INCREMENTAL");
+        p.is_pane = true;
+        assert_eq!(p.flags_string(), "INCREMENTAL,ISPANE");
+
+        // vi command mode: j and k are the arrow keys, and move.
+        let mut p = Prompt::new("(s) ".into(), "", Kind::Incremental, PromptType::Search)
+            .with_options(true, String::new());
+        typed(&mut p, &mut h, &chars("x"));
+        typed(&mut p, &mut h, &[Key::ascii(0x1b)]);
+        assert_eq!(typed(&mut p, &mut h, &chars("j")), [KeyOutcome::Move]);
     }
 }

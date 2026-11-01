@@ -375,7 +375,7 @@ impl Server {
             KeyKind::Paste(true) => Key::PASTE_START,
             KeyKind::Paste(false) => Key::PASTE_END,
         };
-        if self.status_prompt_key(id, core) {
+        if self.prompts_key(id, core) {
             return None;
         }
         let mut batch = NewBatch::new(
