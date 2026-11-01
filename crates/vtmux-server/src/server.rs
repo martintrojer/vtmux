@@ -314,6 +314,8 @@ pub struct Server {
     pub(crate) cmd_client: Option<ClientId>,
     /// The running command's mouse event (`state->event.m`).
     pub(crate) cmd_mouse: Option<crate::mouse::MouseEvent>,
+    /// Where idle compression got to ([`crate::compress`]).
+    pub(crate) compress: crate::compress::Rotation,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -496,6 +498,7 @@ impl Server {
             format_jobs: std::rc::Rc::default(),
             cmd_client: None,
             cmd_mouse: None,
+            compress: crate::compress::Rotation::default(),
         };
         // server_start: the hourly tidy (server.c:157-172, `evtimer_add`).
         server.format_jobs_start_tidy();
@@ -505,6 +508,7 @@ impl Server {
     /// Run until the server exits.
     pub fn run(&mut self) -> io::Result<()> {
         let mut events = Events::with_capacity(256);
+        let mut full_turn = Instant::now();
         loop {
             let timeout = self.next_timeout();
             match self.poll.poll(&mut events, timeout) {
@@ -512,6 +516,18 @@ impl Server {
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             }
+            let idle = events.is_empty() && self.backlog.is_empty();
+            // Woken only for a compression step: nothing else is due, so
+            // the rest of the turn (a full render among it) would do
+            // nothing a turn without compression would have done. The
+            // periodic checks (window names) still get a turn every
+            // NAME_INTERVAL.
+            let now = Instant::now();
+            if idle && !self.timers_due() && now < full_turn + NAME_INTERVAL {
+                self.compress_turn(now, true);
+                continue;
+            }
+            full_turn = now;
             for event in &events {
                 match event.token() {
                     LISTENER => self.accept(),
@@ -583,6 +599,7 @@ impl Server {
             self.format_jobs_flush();
             self.model.redraw_panes.clear();
             self.send_pane_resizes();
+            self.compress_turn(Instant::now(), idle);
             self.control_tick();
             if self.wants_flush() {
                 // server_loop / server_send_exit: release every waiter.
@@ -601,10 +618,26 @@ impl Server {
         }
     }
 
-    /// The poll timeout: the sooner of the loop's own needs and the next
-    /// silence timer (`alerts_reset`'s `event_add`), and the next queued
-    /// pane size.
+    /// The poll timeout: the sooner of [`Self::timers_timeout`] and the
+    /// next compression step.
     fn next_timeout(&self) -> Option<Duration> {
+        let compress = self
+            .compress_deadline()
+            .map(|d| d.saturating_duration_since(Instant::now()));
+        [self.timers_timeout(), compress]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
+    /// Whether anything but compression wants this turn.
+    fn timers_due(&self) -> bool {
+        self.timers_timeout().is_some_and(|t| t.is_zero())
+    }
+
+    /// The sooner of the loop's own needs and the next silence timer
+    /// (`alerts_reset`'s `event_add`), and the next queued pane size.
+    fn timers_timeout(&self) -> Option<Duration> {
         let own = self.own_timeout();
         let now = Instant::now();
         [
@@ -3094,6 +3127,7 @@ impl Server {
             prompt_owner: None,
             mode_prompt: None,
             mode_prompt_owner: None,
+            compress: crate::compress::PaneCompress::default(),
         })
     }
 
@@ -3173,6 +3207,7 @@ impl Server {
         // screen_reinit (spawn.c:329) under the current `extended-keys`.
         pane.term.set_extended_keys(extended_keys);
         pane.term.reset_key_mode();
+        pane.compress.observe(&pane.term, Instant::now());
         pane.io = fresh.io;
         pane.pid = fresh.pid;
         pane.argv = fresh.argv;
@@ -3265,6 +3300,7 @@ impl Server {
                     pane.term.set_extended_keys(extended_keys);
                     pane.term.feed(&bytes);
                     let passthrough = pane.term.take_passthrough();
+                    pane.compress.observe(&pane.term, Instant::now());
                     let entered_alternate = !alternate && pane.term.alternate_on();
                     // input.c:2725-2740: a new title (OSC 0/2) or path
                     // (OSC 7) redraws the status of the window's sessions.
