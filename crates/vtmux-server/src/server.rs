@@ -121,6 +121,9 @@ pub(crate) struct Client {
     /// capabilities after `terminal-features` and `terminal-overrides`.
     term: Option<vtmux_core::term_features::Term>,
     pub(crate) compositor: crate::render::Compositor,
+    /// `DCS tmux;` payloads for the terminal, written after this tick's
+    /// frame (`tty_cmd_rawstring`).
+    pub(crate) passthrough: Vec<u8>,
     /// The command a status-line prompt answers to (`c->prompt`'s
     /// callbacks); the prompt itself is in `status`.
     pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
@@ -777,6 +780,7 @@ impl Server {
                             caps: None,
                             term: None,
                             compositor: crate::render::Compositor::default(),
+                            passthrough: Vec::new(),
                         },
                     );
                 }
@@ -1779,6 +1783,12 @@ impl Server {
                 .compositor
                 .ready(queued, cols, rows)
             {
+                // tty_add drops what comes while the client is blocked.
+                self.clients
+                    .get_mut(&id)
+                    .expect("client")
+                    .passthrough
+                    .clear();
                 continue;
             }
             let mut screen = vtmux_vt::Snapshot {
@@ -1828,6 +1838,13 @@ impl Server {
             }
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
+            }
+            let client = self.clients.get_mut(&id).expect("client");
+            let mut raw = std::mem::take(&mut client.passthrough);
+            if !raw.is_empty() {
+                // The program may have moved the terminal's cursor.
+                raw.extend(client.compositor.cursor_bytes(caps));
+                self.send(id, &ServerMsg::Frame(raw));
             }
         }
     }
@@ -2929,6 +2946,7 @@ impl Server {
         // screen_reinit and a fresh input parser: alternate screen off,
         // scroll region, cursor home, visible lines cleared, modes back to
         // cursor+wrap, default attributes, default tabs.
+        pane.term.reset_input();
         pane.term.feed(
             b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l",
         );
@@ -3006,6 +3024,10 @@ impl Server {
             let cursor_style =
                 u8::try_from(self.model.number_option(TreeId::Pane(p), "cursor-style"))
                     .unwrap_or(0);
+            let input_buffer = self
+                .model
+                .number_option(TreeId::Server, "input-buffer-size");
+            let redraw_pending = self.model.redraw_panes.contains(&p);
             let Some(pane) = self.model.panes.get_mut(&p) else {
                 return;
             };
@@ -3015,7 +3037,10 @@ impl Server {
                     pane.term.set_cursor_style_option(cursor_style);
                     let before = (pane.term.title(), pane.term.pwd());
                     let alternate = pane.term.alternate_on();
+                    pane.term
+                        .set_input_buffer_size(usize::try_from(input_buffer).unwrap_or(0));
                     pane.term.feed(&bytes);
+                    let passthrough = pane.term.take_passthrough();
                     let entered_alternate = !alternate && pane.term.alternate_on();
                     // input.c:2725-2740: a new title (OSC 0/2) or path
                     // (OSC 7) redraws the status of the window's sessions.
@@ -3053,6 +3078,7 @@ impl Server {
                         self.model.alerts_queue(window, alerts::BELL);
                     }
                     self.control_output(p, &bytes);
+                    self.pane_passthrough(p, passthrough, redraw_pending);
                 }
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
@@ -3071,6 +3097,77 @@ impl Server {
                 self.pane_exited(p);
             } else if let Some(io) = self.model.panes.get_mut(&p).and_then(|x| x.io.take()) {
                 io.deregister(self.poll.registry());
+            }
+        }
+    }
+
+    /// `input_dcs_dispatch` and `screen_write_rawstring`: the payloads of
+    /// `DCS tmux; ... ST` that pane `p` wrote go to the terminals, as the
+    /// pane's `allow-passthrough` says (0 off drops them, 1 on, 2 all).
+    /// `tty_write` offers each to the clients in order
+    /// (`screen_write_set_client_cb`, screen-write.c:131-173):
+    /// - `all`: every client whose session has the pane's window, whatever
+    ///   it is drawing (`TTY_CTX_INVISIBLE_PANES`);
+    /// - `on`: the clients that show the window, unless they are in a full
+    ///   redraw or frozen under a message (skipped); a pane with a redraw
+    ///   pending ends the walk for every client after it (state -1).
+    ///
+    /// A pane in a mode has no `wp` on its screen-write context, so nothing
+    /// is written.
+    fn pane_passthrough(
+        &mut self,
+        p: PaneId,
+        payloads: Vec<vtmux_vt::Passthrough>,
+        redraw_pending: bool,
+    ) {
+        let Some(pane) = self.model.panes.get(&p) else {
+            return;
+        };
+        let mode = self
+            .model
+            .number_option(TreeId::Pane(p), "allow-passthrough");
+        if mode == 0 || payloads.is_empty() || !pane.modes.is_empty() {
+            return;
+        }
+        let window = pane.window;
+        let visible = self
+            .model
+            .windows
+            .get(&window)
+            .is_some_and(|w| w.is_visible(p));
+        let ids: Vec<ClientId> = self.clients.keys().copied().collect();
+        for payload in payloads {
+            for &id in &ids {
+                let c = &self.clients[&id];
+                let Some(s) = c.attached else { continue };
+                if c.control.is_some() || c.caps.is_none() {
+                    continue;
+                }
+                if mode == 2 {
+                    let has = self
+                        .model
+                        .sessions
+                        .get(&s)
+                        .is_some_and(|x| x.windows.values().any(|w| *w == window));
+                    if !has {
+                        continue;
+                    }
+                } else {
+                    if c.status.redraw_window_pending() || c.status.is_frozen() {
+                        continue;
+                    }
+                    if self.model.current_of(s).is_none_or(|(_, w, _)| w != window) || !visible {
+                        continue;
+                    }
+                    if payload.redraw || redraw_pending {
+                        break;
+                    }
+                }
+                self.clients
+                    .get_mut(&id)
+                    .expect("client")
+                    .passthrough
+                    .extend_from_slice(&payload.data);
             }
         }
     }

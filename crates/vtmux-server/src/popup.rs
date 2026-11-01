@@ -370,6 +370,8 @@ impl Server {
                 }
             }
         }
+        // A popup's passthrough is not forwarded (vtmux has no `-E` use for it).
+        let _ = p.term.take_passthrough();
         let replies = p.term.take_replies();
         if let Some(io) = p.io.as_mut().filter(|_| !replies.is_empty()) {
             io.write(&replies);

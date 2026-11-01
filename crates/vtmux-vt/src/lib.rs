@@ -6,9 +6,10 @@
 //! everything serialised follows tmux 3.8 (spec D4).
 
 pub mod capture;
+mod dcs;
 pub mod snapshot;
 pub mod term;
 
 pub use capture::{CaptureOpts, LineRef, Row, capture};
 pub use snapshot::{Cell, Color, Snapshot, Style, Underline, snapshot};
-pub use term::{LineMark, PaneTerm};
+pub use term::{LineMark, PaneTerm, Passthrough};

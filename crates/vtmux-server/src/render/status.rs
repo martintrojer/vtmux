@@ -139,6 +139,18 @@ impl StatusLine {
         self.redraw || self.redraw_window
     }
 
+    /// `CLIENT_REDRAWWINDOW` is set.
+    #[must_use]
+    pub fn redraw_window_pending(&self) -> bool {
+        self.redraw_window
+    }
+
+    /// `TTY_FREEZE`: a message or prompt holds the pane area.
+    #[must_use]
+    pub fn is_frozen(&self) -> bool {
+        self.frozen
+    }
+
     /// Whether this frame keeps the pane area the terminal shows (frozen
     /// and no full redraw asked for); the window redraw request is used up.
     pub fn hold_window(&mut self) -> bool {
