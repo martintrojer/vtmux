@@ -1317,9 +1317,8 @@ fn options_spawn_and_exit_empty() {
 /// column pane (40 truecolour runs per line, where a byte budget kept
 /// 9664 rows to tmux's 9979), a 500 column pane, and reflow of the wide
 /// pane's history when it narrows and widens again (grid.c `grid_reflow`
-/// keeps every line, so `history_size` passes the limit). One limit for
-/// all: tmux applies a new `history-limit` to running panes, which vtmux
-/// doesn't yet (task `hist_limit_live`).
+/// keeps every line, so `history_size` passes the limit). The live `history-limit` is pinned by the
+/// `history_limit_live*` oracle scenarios.
 #[test]
 fn history_limit_retention() {
     compare("history_limit_retention", |w| {

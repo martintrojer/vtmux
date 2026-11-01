@@ -166,5 +166,9 @@ pub fn exec(
             server.set_key_table(id, None);
         }
     }
+    // options_push_changes (options.c:1464-1466): session_update_history.
+    if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "history-limit") {
+        server.model.update_history();
+    }
     result
 }

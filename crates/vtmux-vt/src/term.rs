@@ -96,6 +96,14 @@ pub struct PaneTerm {
     /// the program replaces it, as both write the one `s->title`.
     title_override: Rc<RefCell<Option<String>>>,
     history_lines: usize,
+    /// tmux's `GRID_HISTORY`: the pane was made with a non-zero limit
+    /// (`grid_create`, grid.c:381-382), so it keeps history for good,
+    /// whatever its limit becomes. A pane made without never gets any.
+    history: bool,
+    /// Rows [`PaneTerm::set_history_limit`] collected while the alternate
+    /// screen was up, taken off again when the primary screen's history is
+    /// re-read on the way back.
+    alt_collected: usize,
     /// Rows one standard Ghostty page holds at the current width.
     page_rows: usize,
     /// The line limit last given to Ghostty (see [`PaneTerm::retain`]).
@@ -228,6 +236,8 @@ impl PaneTerm {
             bells,
             title_override,
             history_lines,
+            history: history_lines > 0,
+            alt_collected: 0,
             page_rows: page_rows(cols),
             line_limit: None,
             hsize: 0,
@@ -259,7 +269,7 @@ impl PaneTerm {
     /// at least `max(history-limit, hsize) + 1`, so every row tmux still
     /// has, and at most one page over it, whatever the styling or width.
     fn retain(&mut self) {
-        if self.history_lines == 0 {
+        if !self.history {
             return;
         }
         let limit = Some(self.history_lines.max(self.hsize) + self.page_rows);
@@ -281,10 +291,16 @@ impl PaneTerm {
     /// model is exact while rows scroll off the top of a full-width region;
     /// see `DIVERGENCES-PENDING.md` for where Ghostty's grid differs.
     pub fn feed(&mut self, bytes: &[u8]) {
-        let step = if self.history_lines == 0 {
-            usize::MAX
+        let step = if self.history {
+            // A pane lowered to limit 0 still keeps the row tmux lets in
+            // per line; a byte at a time would be slow.
+            if self.history_lines == 0 {
+                16
+            } else {
+                (self.history_lines / 2).max(1)
+            }
         } else {
-            (self.history_lines / 2).max(1)
+            usize::MAX
         };
         let mut i = 0;
         while i < bytes.len() {
@@ -364,7 +380,7 @@ impl PaneTerm {
         if piece.is_empty() {
             return;
         }
-        if self.history_lines == 0 {
+        if !self.history {
             self.term.vt_write(piece);
             return;
         }
@@ -393,6 +409,7 @@ impl PaneTerm {
                 }
                 self.clamp_history_to_retained();
             }
+            self.alt_collected = 0;
             // Resizes under the alternate screen leave the limit lifted.
             self.retain();
         }
@@ -422,7 +439,10 @@ impl PaneTerm {
             return;
         };
         let after = self.retained_rows();
-        let hsize = after.saturating_sub(hidden);
+        // What `set_history_limit` collected under the alternate screen.
+        let hsize = after
+            .saturating_sub(hidden)
+            .saturating_sub(self.alt_collected);
         if hsize == self.hsize && after == retained {
             return;
         }
@@ -600,7 +620,7 @@ impl PaneTerm {
         // stays lifted until the primary screen is back: `hsize` is
         // tmux's unreflowed count there, and pruning to it would drop the
         // rows a narrowing reflow split off (see `alt_entry`).
-        if self.history_lines > 0 {
+        if self.history {
             let _ = self.term.set_scrollback_max_lines(None);
             self.line_limit = None;
         }
@@ -770,6 +790,47 @@ impl PaneTerm {
     pub fn set_history_budget(&mut self, bytes: usize) {
         let _ = self.term.set_scrollback_max_bytes(Some(bytes.max(1)));
         if !self.alternate_on() {
+            self.clamp_history_to_retained();
+        }
+    }
+
+    /// A new `history-limit` for a running pane (`session_update_history`,
+    /// session.c:825-847): the limit is the pane's own from now on, and a
+    /// history at or over it is collected at once down to exactly the limit
+    /// (`grid_collect_history(gd, 1)`, grid.c:449-474), at least one row
+    /// (setting the limit a full history already has costs a row). Raising
+    /// the limit gives back nothing. A pane made with limit 0 keeps no
+    /// history whatever the limit becomes (see the `history` field).
+    ///
+    /// Ghostty prunes whole pages, so the rows collected here may stay
+    /// retained beneath `history_size` until its line limit catches up. The
+    /// copy of the history taken for the alternate screen is trimmed too.
+    pub fn set_history_limit(&mut self, limit: usize) {
+        self.history_lines = limit;
+        if !self.history {
+            return;
+        }
+        let hsize = self.history_size();
+        if hsize > 0 && hsize >= limit {
+            let ny = (hsize - limit).max(1).min(hsize);
+            self.hsize -= ny;
+            while self.times.len() > self.hsize {
+                self.times.pop_front();
+                self.times_base += 1;
+            }
+            if let Some(frozen) = &mut self.frozen {
+                frozen.drain(..ny.min(frozen.len()));
+                self.frozen_marks = std::mem::take(&mut self.frozen_marks)
+                    .into_iter()
+                    .filter_map(|(y, m)| Some((y.checked_sub(ny)?, m)))
+                    .collect();
+            }
+            if self.alternate_on() {
+                self.alt_collected += ny;
+            }
+        }
+        if !self.alternate_on() {
+            self.retain();
             self.clamp_history_to_retained();
         }
     }
@@ -1677,6 +1738,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// tmux's `session_update_history`: lowering trims to exactly the limit
+    /// at once, raising gives nothing back, an equal limit costs a row, and a
+    /// pane made without history never gets any.
+    #[test]
+    fn history_limit_changes_on_a_running_pane() {
+        let mut t = PaneTerm::new(80, 5, 2000);
+        t.feed(&lines(0, 1500, false));
+        assert_eq!(t.history_size(), 1496);
+        t.set_history_limit(500);
+        assert_eq!(t.history_size(), 500);
+        assert!(t.retained_rows() <= 500 + page_rows(80));
+        t.set_history_limit(800);
+        assert_eq!(t.history_size(), 500);
+        t.set_history_limit(500);
+        assert_eq!(t.history_size(), 499);
+        // The row ids and the rows themselves are still the newest ones.
+        let id = t.history_id(0);
+        assert_eq!(
+            t.history_row(id).unwrap().text(),
+            format!("{:070}", 1500 - 4 - 499)
+        );
+        t.feed(&lines(1500, 600, false));
+        assert!(t.history_size() <= 800);
+        assert_retention(&t, "after raise");
+
+        let mut none = PaneTerm::new(80, 5, 0);
+        none.set_history_limit(100);
+        none.feed(&lines(0, 300, false));
+        assert_eq!(none.history_size(), 0);
+
+        let mut off = PaneTerm::new(80, 5, 100);
+        off.feed(&lines(0, 300, false));
+        off.set_history_limit(0);
+        assert_eq!(off.history_size(), 0);
+    }
+
+    /// Lowering under the alternate screen trims the primary history now,
+    /// and the copy shown meanwhile and the history on the way back agree.
+    #[test]
+    fn history_limit_lowered_under_the_alternate_screen() {
+        let mut t = PaneTerm::new(80, 5, 1000);
+        t.feed(&lines(0, 800, false));
+        t.feed(b"\x1b[?1049h");
+        assert!(t.alternate_on());
+        let before = t.history_size();
+        t.set_history_limit(100);
+        assert!(before > 100);
+        assert_eq!(t.history_size(), 100);
+        let id = t.history_id(0);
+        assert_eq!(
+            t.history_row(id).unwrap().text(),
+            format!("{:070}", 800 - 4 - 100)
+        );
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.history_size(), 100);
+        assert_eq!(t.row(0).text(), format!("{:070}", 800 - 4 - 100));
     }
 
     /// Reflow moves rows in and out of history; the line limit follows the

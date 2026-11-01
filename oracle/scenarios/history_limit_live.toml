@@ -1,0 +1,37 @@
+name = "history_limit_live"
+# tmux applies a new history-limit to running panes at once
+# (options.c:1464-1466 -> session_update_history, session.c:825-847):
+# lowering trims to exactly the limit (grid_collect_history(gd, 1),
+# grid.c:449-474), raising gives nothing back, setting the limit a full
+# history already has costs one row, and a global change leaves a session
+# with its own value alone. Output is `seq` plus wait-for; no screens.
+steps = [
+  { run = ["new", "-d", "-s", "z", "cat"] },
+  { run = ["set", "-g", "history-limit", "2000"] },
+  { run = ["new", "-d", "-s", "a", "-x", "80", "-y", "24", "sh", "-c", "seq 1 1990; tmux wait-for -S a1; exec cat"] },
+  { run = ["new", "-d", "-s", "b", "-x", "80", "-y", "24", "sh", "-c", "seq 1 1990; tmux wait-for -S b1; exec cat"] },
+  { wait_for = "a1" },
+  { wait_for = "b1" },
+  { run = ["display", "-p", "-t", "a", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-t", "b", "history-limit", "1500"] },
+  { run = ["display", "-p", "-t", "b", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-g", "history-limit", "500"] },
+  { run = ["display", "-p", "-t", "a", "#{history_size}/#{history_limit}"] },
+  { run = ["display", "-p", "-t", "b", "#{history_size}/#{history_limit}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "a"] },
+  { run = ["set", "-g", "history-limit", "800"] },
+  { run = ["display", "-p", "-t", "a", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-g", "history-limit", "500"] },
+  { run = ["display", "-p", "-t", "a", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-t", "b", "history-limit", "1500"] },
+  { run = ["display", "-p", "-t", "b", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-t", "b", "history-limit", "300"] },
+  { run = ["display", "-p", "-t", "b", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-t", "b", "history-limit", "300"] },
+  { run = ["display", "-p", "-t", "b", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-g", "-u", "history-limit"] },
+  { run = ["display", "-p", "-t", "a", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-t", "b", "-u", "history-limit"] },
+  { run = ["display", "-p", "-t", "b", "#{history_size}/#{history_limit}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "b"] },
+]
