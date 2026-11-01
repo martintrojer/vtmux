@@ -330,9 +330,9 @@ impl PaneTerm {
                 self.account_scroll();
             } else {
                 // Back from the alternate screen (or a reset): the primary
-                // history may have changed under us.
-                let retained = self.term.scrollback_rows().unwrap_or(0);
-                self.hsize = self.hsize.min(retained);
+                // history may have changed under us (a reset, or a budget
+                // lowered while the alternate screen was up).
+                self.clamp_history_to_retained();
             }
         }
     }
@@ -634,9 +634,23 @@ impl PaneTerm {
     /// and `history_size` follow what is still retained. Ghostty keeps at
     /// least about one page whatever the budget. `bytes` is raised to 1:
     /// Ghostty's 0 erases history and stops keeping any, which is
-    /// `history-limit 0`'s job (see [`PaneTerm::new`]).
+    /// `history-limit 0`'s job (see [`PaneTerm::new`]). On a pane created
+    /// with `history_lines` 0 a budget only costs memory: `history_size`
+    /// stays 0 whatever Ghostty retains.
+    ///
+    /// Ghostty applies the budget to the primary screen only, and can only
+    /// count the active screen's history rows: under the alternate screen
+    /// the model is brought in line when the primary screen is back.
     pub fn set_history_budget(&mut self, bytes: usize) {
         let _ = self.term.set_scrollback_max_bytes(Some(bytes.max(1)));
+        if !self.alternate_on() {
+            self.clamp_history_to_retained();
+        }
+    }
+
+    /// Drop the modelled history rows (`hsize`, times) Ghostty no longer
+    /// retains. Primary screen only: `scrollback_rows` reads the active one.
+    fn clamp_history_to_retained(&mut self) {
         let retained = self.term.scrollback_rows().unwrap_or(0);
         self.hsize = self.hsize.min(retained);
         while self.times.len() > retained {
@@ -1383,6 +1397,40 @@ mod tests {
         t.feed(&b"x\r\n".repeat(2500));
         assert!(t.term.scrollback_rows().unwrap() > 2500);
         assert_eq!(t.history_size(), tmux_hsize(after, 2000, 2500));
+    }
+
+    /// Ghostty counts only the active screen's history, and the alternate
+    /// screen has none: a budget set under it must not clear tmux's
+    /// primary history.
+    #[test]
+    fn history_budget_under_the_alternate_screen_keeps_history() {
+        let mut t = PaneTerm::new(80, 5, 2000);
+        t.feed(&b"x\r\n".repeat(100));
+        let newest = t.history_id(95);
+        let time = t.history_time(newest);
+        assert_eq!(t.history_size(), 96);
+        t.feed(b"\x1b[?1049h");
+        t.set_history_budget(usize::MAX);
+        assert_eq!(t.history_size(), 96);
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.history_size(), 96);
+        assert_eq!(t.history_id(95), newest);
+        assert_eq!(t.history_time(newest), time);
+        assert_ne!(time, 0);
+    }
+
+    /// A budget lowered under the alternate screen prunes the primary
+    /// history in Ghostty; the model follows when the primary is back.
+    #[test]
+    fn history_budget_lowered_under_the_alternate_screen() {
+        let mut t = PaneTerm::new(80, 5, 2000);
+        t.feed(&b"x\r\n".repeat(2500));
+        t.feed(b"\x1b[?1049h");
+        t.set_history_budget(3 * PAGE_BYTES);
+        t.feed(b"\x1b[?1049l");
+        let retained = t.term.scrollback_rows().unwrap();
+        assert!(retained < 2000, "{retained}");
+        assert_eq!(t.history_size(), retained);
     }
 
     #[test]
