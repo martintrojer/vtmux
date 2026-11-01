@@ -371,8 +371,11 @@ fn closing_the_tty_fires_no_focus_out() {
                 "set -agF @log '|#{hook}:#{hook_pane}'",
             ]);
         }
-        let master =
-            openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC).unwrap();
+        // Close-on-exec matters: the client must not inherit the master, or
+        // dropping ours below would not hang up its terminal. posix_openpt
+        // has no O_CLOEXEC on macOS, so set it with fcntl.
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
+        rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC).unwrap();
         grantpt(&master).unwrap();
         unlockpt(&master).unwrap();
         let slave_path = ptsname(&master, Vec::new()).unwrap();

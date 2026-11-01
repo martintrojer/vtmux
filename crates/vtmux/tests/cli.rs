@@ -2309,9 +2309,27 @@ fn initial_window_name_is_the_command() {
         "-F",
         "#{window_name} #{pane_current_command} #{automatic-rename}",
     ]);
+    // Each window ends up named after what is actually running in it. Which
+    // process that is depends on the shell: bash execs the last command of
+    // `sh -c cat` (so `cat`), dash keeps `sh` in front. Either way the name
+    // and #{pane_current_command} must agree, and none may be the
+    // half-started shell state the race used to leave behind.
+    let lines: Vec<&str> = names.stdout.lines().collect();
+    assert_eq!(lines.len(), 8, "{}", names.stdout);
+    for line in &lines {
+        let f: Vec<&str> = line.split(' ').collect();
+        assert_eq!(f.len(), 3, "{line}");
+        assert_eq!(
+            f[0], f[1],
+            "window name follows the running command: {line}"
+        );
+        assert_eq!(f[2], "1", "{line}");
+    }
     assert_eq!(
-        names.stdout,
-        "cat cat 1\n".repeat(6) + "sh sh 1\nsleep sleep 1\n"
+        lines[7].split(' ').next(),
+        Some("sleep"),
+        "{}",
+        names.stdout
     );
 }
 
