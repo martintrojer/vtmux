@@ -10,6 +10,7 @@ A case file is `key=value` lines. Inputs (hand-written):
   flags    capture-pane flags, e.g. -pJe (capture kind)
   terminator  last byte of the reply to wait for (reply kind)
   limit    history-limit for the session (default: tmux's 2000)
+  cursor_style  the `cursor-style` window option as its number 0-6 (default 0)
   seq      N: the pane first prints the lines l0..l<N-1>, then `bytes`
   resize   COLSxROWS: resize-window after the pane is ready
   format   display-message -p format to expand (format kind); expected is its output
@@ -43,6 +44,10 @@ while not buf.endswith(term):
 os.write(1, ("REPLY:" + buf.hex()).encode())
 os.system(sys.argv[3] + " wait-for -S ready")
 '''
+
+
+CURSOR_STYLES = ["default", "blinking-block", "block", "blinking-underline",
+                 "underline", "blinking-bar", "bar"]
 
 
 def unescape(s):
@@ -118,6 +123,8 @@ def run_case(path):
         setup = []
         if "limit" in c:
             setup = ["set", "-g", "history-limit", c["limit"], ";"]
+        if "cursor_style" in c:
+            setup += ["set", "-wg", "cursor-style", CURSOR_STYLES[int(c["cursor_style"])], ";"]
         post = []
         if "resize" in c:
             w, h = c["resize"].split("x")

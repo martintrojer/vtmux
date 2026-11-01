@@ -1,0 +1,11 @@
+name = "reply_decrqss"
+size = [60, 12]
+# The pane program sends DECRQSS and DECRQM 12 queries from a raw tty, reads
+# each reply with dd and prints it through `cat -v` on its own line
+# (input.c:1666-1680, 2553-2617). Replies: cursor style default, DECSCUSR 5,
+# DECSCUSR 4, blink mode on/off, unknown request, and a short request.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "60", "-y", "12", "sh", "-c", "stty raw -echo min 1 time 20; q() { printf \"$1\"; dd bs=1 count=$2 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033P$q q\\033\\\\' 12; q '\\033[5 q\\033P$q q\\033\\\\' 12; q '\\033[4 q\\033P$q q\\033\\\\' 12; q '\\033[2 q\\033[?12h\\033P$q q\\033\\\\' 12; q '\\033[6 q\\033[0 q\\033P$q q\\033\\\\' 12; q '\\033[?12$p' 9; q '\\033[3 q\\033[?12l\\033[?12$p' 9; q '\\033P$qm\\033\\\\' 7; q '\\033P$q \\033\\\\' 7; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+]
