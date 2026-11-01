@@ -2911,12 +2911,18 @@ impl Server {
                 self.backlog.insert(p);
                 break;
             }
+            // DECRQSS / DECRQM 12 fall back to the pane's `cursor-style`
+            // (input.c:1666-1680, 2590-2600).
+            let cursor_style =
+                u8::try_from(self.model.number_option(TreeId::Pane(p), "cursor-style"))
+                    .unwrap_or(0);
             let Some(pane) = self.model.panes.get_mut(&p) else {
                 return;
             };
             let Some(io) = pane.io.as_mut() else { return };
             match io.read() {
                 ReadResult::Data(bytes) => {
+                    pane.term.set_cursor_style_option(cursor_style);
                     let before = (pane.term.title(), pane.term.pwd());
                     let alternate = pane.term.alternate_on();
                     pane.term.feed(&bytes);

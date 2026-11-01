@@ -4,7 +4,7 @@
 //! outside the grid (query replies, cursor position, title, path, history
 //! size) follows tmux 3.8, read from `input.c`, `format.c` and `screen.c`.
 
-use std::cell::RefCell;
+use std::cell::{Cell as StdCell, RefCell};
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::rc::Rc;
@@ -125,6 +125,8 @@ pub struct PaneTerm {
     /// to count the rows a piece scrolled into history.
     pin: Option<TrackedGridRef>,
     scan: AltModeScanner,
+    /// tmux's cursor style state, shared with the scanner and the reply hook.
+    cursor: Rc<StdCell<CursorState>>,
     /// The newest `hsize` history rows, copied when the alternate screen was
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
@@ -176,6 +178,9 @@ impl PaneTerm {
 
         let replies = Rc::new(RefCell::new(Vec::new()));
         let sink = Rc::clone(&replies);
+        let cursor = Rc::new(StdCell::new(CursorState::default()));
+        let cursor_seen = Rc::clone(&cursor);
+        let cursor_scan = Rc::clone(&cursor);
         let bells = Rc::new(std::cell::Cell::new(0u32));
         let belled = Rc::clone(&bells);
         let title_override = Rc::new(RefCell::new(None));
@@ -183,7 +188,7 @@ impl PaneTerm {
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
-                if let Some(reply) = tmux_reply(term, data) {
+                if let Some(reply) = tmux_reply(term, cursor_seen.get(), data) {
                     sink.borrow_mut().extend_from_slice(&reply);
                 }
             })
@@ -246,7 +251,11 @@ impl PaneTerm {
             times: VecDeque::new(),
             times_base: 0,
             pin: None,
-            scan: AltModeScanner::default(),
+            cursor,
+            scan: AltModeScanner {
+                cursor: cursor_scan,
+                ..AltModeScanner::default()
+            },
             frozen: None,
             alt_entry: None,
             clear_primary_history: false,
@@ -349,6 +358,14 @@ impl PaneTerm {
                     *self.title_override.borrow_mut() = Some(title);
                 }
                 i += 1;
+                if e == ScanEvent::Reset {
+                    let mut c = self.cursor.get();
+                    c.reset();
+                    self.cursor.set(c);
+                }
+                if e == ScanEvent::Decrqss {
+                    self.answer_decrqss();
+                }
                 if let ScanEvent::Osc133(mark) = e {
                     self.mark_cursor_line(mark);
                 }
@@ -362,6 +379,25 @@ impl PaneTerm {
                 }
             }
         }
+    }
+
+    /// Answer the DECRQSS the scanner just saw (`input_handle_decrqss`,
+    /// input.c:2553-2617): `DCS 1 $ r SP q Ps SP q ST` for a request that
+    /// starts `SP q`, `DCS 0 $ r ST` for any other. Ghostty's own DECRQSS
+    /// replies (SGR, DECSTBM, DECSLRM, cursor) are dropped by `tmux_reply`:
+    /// tmux knows only the cursor style.
+    fn answer_decrqss(&mut self) {
+        let Some(recognised) = self.scan.decrqss.take() else {
+            return;
+        };
+        let reply = if recognised {
+            format!("\x1bP1$r q{} q\x1b\\", self.cursor.get().decrqss_ps())
+        } else {
+            "\x1bP0$r\x1b\\".to_owned()
+        };
+        self.replies
+            .borrow_mut()
+            .extend_from_slice(reply.as_bytes());
     }
 
     /// Make Ghostty's DECSCA protection bit, which every printed cell copies
@@ -857,6 +893,15 @@ impl PaneTerm {
         self.bells.replace(0)
     }
 
+    /// The pane's `cursor-style` option (0..=6): what DECRQSS and DECRQM 12
+    /// report while the program has set no style (input.c:1666-1680,
+    /// 2590-2600). Larger values count as 0.
+    pub fn set_cursor_style_option(&mut self, value: u8) {
+        let mut c = self.cursor.get();
+        c.option = if value > 6 { 0 } else { value };
+        self.cursor.set(c);
+    }
+
     /// Take the bytes to write back to the pane program (tmux's replies).
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut *self.replies.borrow_mut())
@@ -953,6 +998,230 @@ struct AltModeScanner {
     osc: Option<Vec<u8>>,
     /// An ESC inside an OSC: a backslash next ends it (ST).
     osc_esc: bool,
+    /// Intermediate bytes (0x20-0x2f) in the CSI being scanned.
+    interm_count: u8,
+    /// The CSI had a byte tmux does not take as a parameter or intermediate
+    /// (`:` aside), or a parameter after an intermediate: tmux ignores it.
+    csi_ignored: bool,
+    /// tmux's view of the DCS in progress, kept apart from `state` (which
+    /// follows Ghostty's parser) so DECRQSS is answered the way tmux sees it.
+    dcs: Option<Dcs>,
+    /// The DECRQSS just terminated: whether tmux recognises the request.
+    decrqss: Option<bool>,
+    /// The cursor style tmux would hold, shared with the reply handler.
+    cursor: Rc<StdCell<CursorState>>,
+}
+
+/// tmux's cursor style state: `s->cstyle`, `MODE_CURSOR_BLINKING`,
+/// `MODE_CURSOR_BLINKING_SET`, and the `cursor-style` option they fall
+/// back to (input.c:1666-1680, 2553-2617).
+#[derive(Clone, Copy, Debug, Default)]
+struct CursorState {
+    /// DECSCUSR shape: 0 default (`SCREEN_CURSOR_DEFAULT`), 1 block,
+    /// 2 underline, 3 bar.
+    shape: u8,
+    blinking: bool,
+    blinking_set: bool,
+    /// The pane's `cursor-style` option, 0..=6.
+    option: u8,
+}
+
+impl CursorState {
+    /// DECSCUSR `n` (`screen_set_cursor_style`, screen.c:221-253; the
+    /// blink-set clear for 0, input.c:1879-1884). Above 6 changes nothing.
+    fn decscusr(&mut self, n: u64) {
+        match n {
+            0 => {
+                self.shape = 0;
+                self.blinking_set = false;
+            }
+            1..=6 => {
+                self.shape = u8::try_from(n.div_ceil(2)).unwrap_or(1);
+                self.blinking = n % 2 == 1;
+            }
+            _ => {}
+        }
+    }
+
+    /// `CSI ? 12 h|l` (input.c:1949-1951, 2046-2048).
+    fn set_blinking(&mut self, on: bool) {
+        self.blinking = on;
+        self.blinking_set = true;
+    }
+
+    /// RIS resets the mode bits, not the style (`screen_write_reset`,
+    /// screen-write.c:430).
+    fn reset(&mut self) {
+        self.blinking = false;
+        self.blinking_set = false;
+    }
+
+    /// The `Ps` of the DECRQSS cursor reply (input.c:2571-2604).
+    fn decrqss_ps(self) -> u8 {
+        if self.shape == 0 {
+            return self.option.min(6);
+        }
+        (self.shape - 1) * 2 + if self.blinking { 1 } else { 2 }
+    }
+
+    /// DECRQM 12: 1 blinking, 2 steady (input.c:1666-1680).
+    fn blink_report(self) -> u8 {
+        let blink = if self.shape != 0 || self.blinking_set {
+            self.blinking
+        } else {
+            matches!(self.option, 1 | 3 | 5)
+        };
+        if blink { 1 } else { 2 }
+    }
+}
+
+/// One CSI parameter as tmux's `input_split` types it (input.c:1094-1142).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Param {
+    Missing,
+    Num(u64),
+    /// Contains `:`; `input_get` answers -1 for it.
+    Text,
+}
+
+/// `input_split`: `None` when tmux gives up on the sequence (a number above
+/// `INT_MAX`, or 24 parameters: `param_list[24]`).
+fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
+    if raw.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    for piece in raw.split(|b| *b == b';') {
+        out.push(if piece.is_empty() {
+            Param::Missing
+        } else if piece.contains(&b':') {
+            Param::Text
+        } else {
+            let n: u64 = std::str::from_utf8(piece).ok()?.parse().ok()?;
+            if n > i32::MAX as u64 {
+                return None;
+            }
+            Param::Num(n)
+        });
+        if out.len() == 24 {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+/// tmux's DCS collection (input.c:632-720): just enough to know whether the
+/// string is `DCS $ q ... ST` and what it asks.
+#[derive(Debug, Default)]
+struct Dcs {
+    stage: DcsStage,
+    /// `ESC` seen in the handler stage.
+    escaped: bool,
+    interm: Vec<u8>,
+    params: usize,
+    /// The first bytes of the data (the final byte first).
+    head: Vec<u8>,
+    data_len: usize,
+    discard: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum DcsStage {
+    #[default]
+    Enter,
+    Param,
+    Intermediate,
+    Handler,
+    Ignore,
+}
+
+/// `input_buffer_size` (`INPUT_BUF_DEFAULT_SIZE`, tmux.h): the data buffer
+/// doubles while `len + 1 >= space` and the string is discarded past this.
+const DCS_INPUT_LIMIT: usize = 1 << 20;
+
+impl Dcs {
+    /// One byte after `ESC P`. `Err` when tmux leaves the DCS without
+    /// dispatching (CAN, SUB, or ESC outside the handler stage: the ESC
+    /// starts a new sequence, `Err(true)`); `Ok(true)` at ST.
+    fn push(&mut self, b: u8) -> Result<bool, bool> {
+        use DcsStage::{Enter, Handler, Ignore, Intermediate, Param};
+        if self.stage == Handler {
+            if self.escaped {
+                self.escaped = false;
+                if b == b'\\' {
+                    return Ok(true);
+                }
+                self.input(b);
+            } else if b == 0x1b {
+                self.escaped = true;
+            } else {
+                self.input(b);
+            }
+            return Ok(false);
+        }
+        match b {
+            0x18 | 0x1a => return Err(false),
+            0x1b => return Err(true),
+            _ => {}
+        }
+        match (self.stage, b) {
+            (Ignore, _) => {}
+            (_, 0x20..=0x2f) => {
+                // `interm_buf[4]` keeps 3 bytes.
+                if self.interm.len() == 3 {
+                    self.discard = true;
+                } else {
+                    self.interm.push(b);
+                }
+                self.stage = Intermediate;
+            }
+            (Enter | Param, 0x30..=0x39 | 0x3b) => {
+                // `param_buf[64]` keeps 63 bytes.
+                if self.params == 63 {
+                    self.discard = true;
+                } else {
+                    self.params += 1;
+                }
+                self.stage = Param;
+            }
+            (Enter | Param, 0x3a) | (Param, 0x3c..=0x3f) | (Intermediate, 0x30..=0x3f) => {
+                self.stage = Ignore;
+            }
+            (Enter, 0x3c..=0x3f) => {
+                if self.interm.len() == 3 {
+                    self.discard = true;
+                } else {
+                    self.interm.push(b);
+                }
+                self.stage = Param;
+            }
+            (Enter | Param | Intermediate, 0x40..=0x7e) => {
+                self.input(b);
+                self.stage = Handler;
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    fn input(&mut self, b: u8) {
+        if self.data_len + 1 >= DCS_INPUT_LIMIT {
+            self.discard = true;
+            return;
+        }
+        self.data_len += 1;
+        if self.head.len() < 3 {
+            self.head.push(b);
+        }
+    }
+
+    /// At ST: `Some(recognised)` when this is a DECRQSS
+    /// (`input_dcs_dispatch`, input.c:2641-2665); tmux only checks that the
+    /// request starts with `SP q` (`input_handle_decrqss`, input.c:2564).
+    fn into_decrqss(self) -> Option<bool> {
+        (!self.discard && self.interm == b"$" && self.head.first() == Some(&b'q'))
+            .then(|| self.data_len >= 3 && self.head[1] == b' ' && self.head[2] == b'q')
+    }
 }
 
 /// What [`AltModeScanner`] found; reported on the sequence's final byte.
@@ -968,6 +1237,8 @@ enum ScanEvent {
     Resync,
     /// An `OSC 133` that marks the cursor's line ended.
     Osc133(LineMark),
+    /// A DECRQSS ended: [`AltModeScanner::decrqss`] says what to answer.
+    Decrqss,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -985,6 +1256,35 @@ enum ScanState {
 impl AltModeScanner {
     /// Feed one byte; `Some` when it ends a sequence of interest.
     fn push(&mut self, b: u8) -> Option<ScanEvent> {
+        let dcs_end = self.push_dcs(b);
+        let event = self.push_state(b);
+        // Ghostty leaves a DCS at any ESC not followed by `\`, where tmux
+        // would keep collecting; follow Ghostty so the two never drift.
+        if !matches!(self.state, ScanState::Str | ScanState::Esc) {
+            self.dcs = None;
+        }
+        dcs_end.then_some(ScanEvent::Decrqss).or(event)
+    }
+
+    /// Feed tmux's view of a DCS; true when a DECRQSS ends here.
+    fn push_dcs(&mut self, b: u8) -> bool {
+        let Some(dcs) = self.dcs.as_mut() else {
+            return false;
+        };
+        match dcs.push(b) {
+            Ok(false) => false,
+            Ok(true) => {
+                self.decrqss = self.dcs.take().and_then(Dcs::into_decrqss);
+                self.decrqss.is_some()
+            }
+            Err(_) => {
+                self.dcs = None;
+                false
+            }
+        }
+    }
+
+    fn push_state(&mut self, b: u8) -> Option<ScanEvent> {
         // An OSC's end: BEL, or ST (`ESC \`).
         let osc_esc = std::mem::take(&mut self.osc_esc);
         if self.osc.is_some() {
@@ -1026,13 +1326,19 @@ impl AltModeScanner {
                 self.private = false;
                 self.other = false;
                 self.intermediate = None;
+                self.interm_count = 0;
+                self.csi_ignored = false;
                 self.params.clear();
             }
             (ScanState::Esc, b']') => {
                 self.state = ScanState::Str;
                 self.osc = Some(Vec::new());
             }
-            (ScanState::Esc, b'P' | b'_' | b'^' | b'X') => self.state = ScanState::Str,
+            (ScanState::Esc, b'P') => {
+                self.state = ScanState::Str;
+                self.dcs = Some(Dcs::default());
+            }
+            (ScanState::Esc, b'_' | b'^' | b'X') => self.state = ScanState::Str,
             (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(b),
             (ScanState::Esc, _) => {
                 self.state = ScanState::Ground;
@@ -1055,13 +1361,23 @@ impl AltModeScanner {
                     _ => {}
                 }
             }
-            (ScanState::Csi, b'?') if self.params.is_empty() && !self.private => {
+            (ScanState::Csi, b'?')
+                if self.params.is_empty() && !self.private && self.interm_count == 0 =>
+            {
                 self.private = true;
             }
-            (ScanState::Csi, b'0'..=b'9' | b';') => {
-                if self.params.len() < 64 {
+            (ScanState::Csi, b'0'..=b'9' | b';' | b':') => {
+                // `param_buf[64]` keeps 63 bytes, then discards; a parameter
+                // after an intermediate goes to csi_ignore (input.c:572-585).
+                if self.params.len() < 63 {
                     self.params.push(b);
+                } else {
+                    self.csi_ignored = true;
                 }
+                self.csi_ignored |= self.interm_count > 0;
+                // A sub-parameter is a string parameter to tmux, not a
+                // number (`input_split`): it stays out of the digit tests.
+                self.other |= b == b':';
             }
             (ScanState::Csi, 0x40..=0x7e) => {
                 self.state = ScanState::Ground;
@@ -1070,8 +1386,12 @@ impl AltModeScanner {
             (ScanState::Csi, 0x20..=0x2f) => {
                 self.other = true;
                 self.intermediate = Some(b);
+                self.interm_count = self.interm_count.saturating_add(1);
             }
-            (ScanState::Csi, _) => self.other = true,
+            (ScanState::Csi, _) => {
+                self.other = true;
+                self.csi_ignored = true;
+            }
         }
         (self.resync && self.state == ScanState::Ground).then_some(ScanEvent::Resync)
     }
@@ -1092,6 +1412,36 @@ impl AltModeScanner {
             (false, Some(b'"'), b'q') | (false, Some(b'!'), b'p') => {
                 self.resync = true;
                 return Some(ScanEvent::Resync);
+            }
+            // DECSCUSR: the table entry is exactly `CSI Ps SP q`.
+            (false, Some(b' '), b'q') => {
+                if self.interm_count == 1
+                    && !self.csi_ignored
+                    && let Some(params) = parse_params(&self.params)
+                {
+                    let n = match params.first() {
+                        None | Some(Param::Missing) => Some(0),
+                        Some(Param::Num(n)) => Some(*n),
+                        Some(Param::Text) => None,
+                    };
+                    if let Some(n) = n {
+                        let mut c = self.cursor.get();
+                        c.decscusr(n);
+                        self.cursor.set(c);
+                    }
+                }
+                None
+            }
+            // Private SM/RM: only the blink mode (12) touches our state.
+            (true, None, b'h' | b'l') if !self.csi_ignored => {
+                if let Some(params) = parse_params(&self.params) {
+                    let mut c = self.cursor.get();
+                    for _ in params.into_iter().filter(|p| *p == Param::Num(12)) {
+                        c.set_blinking(b == b'h');
+                    }
+                    self.cursor.set(c);
+                }
+                None
             }
             _ if self.other => None,
             (false, None, b's') => Some(CharsetOp::Save),
@@ -1160,6 +1510,8 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// - CPR -> `ESC[row;colR` from tmux's cursor, ignoring origin mode
 ///   (input.c:1730-1732)
 /// - DECRQM -> tmux's mode table (input.c:1638-1722)
+/// - DECRQSS: answered by [`PaneTerm::answer_decrqss`] from the scanner
+///   (Ghostty's own SGR/DECSTBM/DECSLRM replies are dropped here)
 /// - XTVERSION `DCS > | tmux 3.8 ST` (input.c:1885-1890), size reports
 ///   14/16/18 t (input.c:2160-2183): produced by the registered effects
 ///
@@ -1169,10 +1521,10 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// 21 t (input.c:2143-2149), every OSC query (colours, clipboard, OSC 5522,
 /// 7501; tmux answers colours only from client state), XTGETTCAP, Kitty
 /// graphics and Glyph Protocol APC.
-fn tmux_reply(term: &Terminal<'_, '_>, data: &[u8]) -> Option<Vec<u8>> {
+fn tmux_reply(term: &Terminal<'_, '_>, cursor: CursorState, data: &[u8]) -> Option<Vec<u8>> {
     if let Some(body) = data.strip_prefix(b"\x1b[") {
         if let Some(params) = body.strip_suffix(b"$y") {
-            return decrqm_reply(term, params);
+            return decrqm_reply(term, cursor, params);
         }
         return match body.last()? {
             b'c' if body.starts_with(b"?") => Some(b"\x1b[?1;2c".to_vec()),
@@ -1198,7 +1550,7 @@ fn tmux_reply(term: &Terminal<'_, '_>, data: &[u8]) -> Option<Vec<u8>> {
 
 /// DECRQM reply from tmux's table. `params` is the Ghostty reply between
 /// `ESC[` and `$y`: `[?]mode;state`.
-fn decrqm_reply(term: &Terminal<'_, '_>, params: &[u8]) -> Option<Vec<u8>> {
+fn decrqm_reply(term: &Terminal<'_, '_>, cursor: CursorState, params: &[u8]) -> Option<Vec<u8>> {
     let (private, rest) = match params.strip_prefix(b"?") {
         Some(rest) => (true, rest),
         None => (false, params),
@@ -1217,7 +1569,7 @@ fn decrqm_reply(term: &Terminal<'_, '_>, params: &[u8]) -> Option<Vec<u8>> {
             3 => 4, // DECCOLM: always reset
             6 => on(Mode::ORIGIN),
             7 => on(Mode::WRAPAROUND),
-            12 => on(Mode::CURSOR_BLINKING),
+            12 => cursor.blink_report(),
             25 => on(Mode::CURSOR_VISIBLE),
             47 | 1047 | 1049 => {
                 if matches!(term.active_screen(), Ok(Screen::Alternate)) {
@@ -1318,6 +1670,37 @@ mod tests {
         assert_eq!(replies_to(20, 5, b"\x1b[?998n\x1b[5n"), b"\x1b[0n");
         let pending = replies_to(20, 5, b"abcdefghijklmnopqrst\x1b[?6n\x1b[6n");
         assert_eq!(pending, b"\x1b[1;21R");
+    }
+
+    /// input.c:2553-2617: DECRQSS answers only `SP q`; Ghostty's own SGR,
+    /// DECSTBM and DECSLRM replies are dropped.
+    #[test]
+    fn decrqss_answers_cursor_style_only() {
+        assert_eq!(
+            replies_to(20, 5, b"\x1bP$q q\x1b\\"),
+            b"\x1bP1$r q0 q\x1b\\"
+        );
+        assert_eq!(replies_to(20, 5, b"\x1bP$qm\x1b\\"), b"\x1bP0$r\x1b\\");
+        assert_eq!(replies_to(20, 5, b"\x1bP$qr\x1b\\"), b"\x1bP0$r\x1b\\");
+        assert_eq!(replies_to(20, 5, b"\x1bP$q\x1b\\"), b"\x1bP0$r\x1b\\");
+        // Other DCS strings stay unanswered.
+        assert_eq!(replies_to(20, 5, b"\x1bP+q544e\x1b\\"), b"");
+        // DECSCUSR, mode 12 and the `cursor-style` fallback.
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_cursor_style_option(3);
+        t.feed(b"\x1bP$q q\x1b\\\x1b[?12$p");
+        assert_eq!(t.take_replies(), b"\x1bP1$r q3 q\x1b\\\x1b[?12;1$y");
+        t.feed(b"\x1b[6 q\x1bP$q q\x1b\\\x1b[?12$p");
+        assert_eq!(t.take_replies(), b"\x1bP1$r q6 q\x1b\\\x1b[?12;2$y");
+        // Split across feeds, with a stray ESC-less byte stream between.
+        t.feed(b"\x1bP$");
+        t.feed(b"q ");
+        t.feed(b"q\x1b");
+        t.feed(b"\\");
+        assert_eq!(t.take_replies(), b"\x1bP1$r q6 q\x1b\\");
+        // RIS keeps the shape and drops the blink bits.
+        t.feed(b"\x1b[1 q\x1bc\x1bP$q q\x1b\\");
+        assert_eq!(t.take_replies(), b"\x1bP1$r q2 q\x1b\\");
     }
 
     #[test]
@@ -1516,7 +1899,10 @@ mod tests {
                 .filter_map(|b| match s.push(*b)? {
                     ScanEvent::AltMode(f) => Some(f),
                     ScanEvent::ClearHistory => Some(b'J'),
-                    ScanEvent::Resync | ScanEvent::Reset | ScanEvent::Osc133(_) => None,
+                    ScanEvent::Resync
+                    | ScanEvent::Reset
+                    | ScanEvent::Osc133(_)
+                    | ScanEvent::Decrqss => None,
                 })
                 .collect::<Vec<u8>>()
         };
