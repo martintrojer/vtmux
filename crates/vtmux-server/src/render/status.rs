@@ -115,6 +115,12 @@ impl Default for StatusLine {
 }
 
 impl StatusLine {
+    /// `CLIENT_REDRAWSTATUS` is set.
+    #[must_use]
+    pub fn redraw_pending(&self) -> bool {
+        self.redraw
+    }
+
     /// `server_status_client` / `server_redraw_client`.
     pub fn request_redraw(&mut self) {
         self.redraw = true;

@@ -218,15 +218,16 @@ impl Source<'_> {
             let screen = self.clock_screen(pane, m, ctx, caps);
             return (screen, Vec::new());
         }
-        let (mut screen, selected) = match pane.modes.first().and_then(crate::mode::Mode::as_copy) {
-            Some(m) => {
+        let (mut screen, selected) = match pane.modes.first() {
+            Some(crate::mode::Mode::Copy(m)) => {
                 let vi = self
                     .model
                     .number_option(TreeId::Window(pane.window), "mode-keys")
                     == 1;
                 (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
             }
-            None => (vtmux_vt::snapshot(&pane.term), Vec::new()),
+            Some(crate::mode::Mode::Tree(t)) => (self.tree_screen(pane, &t.tree, caps), Vec::new()),
+            _ => (vtmux_vt::snapshot(&pane.term), Vec::new()),
         };
         if let Some(prompt) = pane.mode_prompt.as_ref().filter(|m| m.shown(pane)) {
             self.mode_prompt(&mut screen, prompt, tree, caps);

@@ -13,6 +13,8 @@ pub mod copy;
 pub mod grid;
 pub mod prompt;
 pub mod reader;
+pub mod tree;
+pub mod window_tree;
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::options::TreeId;
@@ -22,6 +24,7 @@ use crate::server::Server;
 
 pub use clock::ClockMode;
 pub use copy::CopyMode;
+pub use window_tree::WindowTree;
 
 /// What the server asks of a mode (`struct window_mode`). A mode without
 /// a key table gets its keys from its own handler; one without a command
@@ -85,6 +88,8 @@ impl PaneMode for CopyMode {
 pub enum Mode {
     Copy(Box<CopyMode>),
     Clock(ClockMode),
+    /// `choose-tree` (window-tree.c).
+    Tree(Box<WindowTree>),
     /// A mode with no key table and no command callback, like tmux's tree
     /// and clock modes: only tests need one before those exist.
     #[cfg(test)]
@@ -96,6 +101,7 @@ impl PaneMode for Mode {
         match self {
             Self::Copy(m) => m.name(),
             Self::Clock(m) => m.name(),
+            Self::Tree(_) => "tree-mode",
             #[cfg(test)]
             Self::Probe => "probe-mode",
         }
@@ -105,6 +111,7 @@ impl PaneMode for Mode {
         match self {
             Self::Copy(m) => m.key_table(vi),
             Self::Clock(m) => m.key_table(vi),
+            Self::Tree(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -114,6 +121,7 @@ impl PaneMode for Mode {
         match self {
             Self::Copy(m) => m.takes_commands(),
             Self::Clock(m) => m.takes_commands(),
+            Self::Tree(_) => false,
             #[cfg(test)]
             Self::Probe => false,
         }
@@ -123,6 +131,7 @@ impl PaneMode for Mode {
         match self {
             Self::Copy(m) => m.set_prefix(n),
             Self::Clock(m) => m.set_prefix(n),
+            Self::Tree(_) => {}
             #[cfg(test)]
             Self::Probe => {}
         }
@@ -138,6 +147,7 @@ impl PaneMode for Mode {
         match self {
             Self::Copy(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
             Self::Clock(m) => m.command(env, name, args, read_only_client),
+            Self::Tree(_) => Err(copy::CommandError::NotImplemented(name.to_owned())),
             #[cfg(test)]
             Self::Probe => Err(copy::CommandError::NotImplemented(name.to_owned())),
         }
@@ -150,6 +160,7 @@ impl Mode {
         match self {
             Self::Copy(m) => Some(m),
             Self::Clock(_) => None,
+            Self::Tree(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -159,8 +170,21 @@ impl Mode {
         match self {
             Self::Copy(m) => Some(m),
             Self::Clock(_) => None,
+            Self::Tree(_) => None,
             #[cfg(test)]
             Self::Probe => None,
+        }
+    }
+
+    /// `wme->kill`: leaving the mode kills the pane (`-k`).
+    fn kill(&self) -> bool {
+        match self {
+            Self::Copy(m) => m.kill,
+            Self::Tree(t) => t.kill,
+            // clock-mode has no -k.
+            Self::Clock(_) => false,
+            #[cfg(test)]
+            Self::Probe => false,
         }
     }
 }
@@ -253,6 +277,43 @@ impl Model {
         true
     }
 
+    /// `window_pane_set_mode` for tree mode: like [`Self::set_copy_mode`],
+    /// `mode` built (it may refuse, `None`) only if the pane has no tree
+    /// mode on its stack.
+    pub fn set_tree_mode(
+        &mut self,
+        p: PaneId,
+        kill: bool,
+        mode: impl FnOnce(&mut Model) -> Option<WindowTree>,
+    ) -> bool {
+        let Some(pane) = self.panes.get(&p) else {
+            return false;
+        };
+        if matches!(pane.modes.first(), Some(Mode::Tree(_))) {
+            return false;
+        }
+        let existing = pane.modes.iter().position(|m| matches!(m, Mode::Tree(_)));
+        let mut entry = match existing {
+            Some(i) => self.panes.get_mut(&p).expect("pane").modes.remove(i),
+            None => match mode(self) {
+                Some(t) => Mode::Tree(Box::new(t)),
+                None => return false,
+            },
+        };
+        if let Mode::Tree(t) = &mut entry {
+            t.kill = kill;
+        }
+        let Some(pane) = self.panes.get_mut(&p) else {
+            return false;
+        };
+        let previous = pane.modes.first().map(Mode::name);
+        let name = entry.name();
+        pane.modes.insert(0, entry);
+        self.mode_changed(p);
+        self.fire_mode_changed(p, previous, Some(name), true);
+        true
+    }
+
     /// `window_fire_pane_mode_changed` (window.c:158-178) for
     /// pane-mode-entered/exited, then pane-mode-changed.
     fn fire_mode_changed(
@@ -307,13 +368,24 @@ impl Server {
             Some(Mode::Clock(next)) => next.resize(size.0, size.1),
             _ => {}
         }
+        let tree_next = matches!(pane.modes.first(), Some(Mode::Tree(_)));
         let current = pane.modes.first().map(Mode::name);
         // A prompt of the mode that went goes with it.
         self.mode_prompt_gone(p);
         self.model.mode_changed(p);
         self.model
             .fire_mode_changed(p, Some(old.name()), current, false);
-        if old.as_copy().is_some_and(|m| m.kill) {
+        // mode_tree_free: a window the mode zoomed is unzoomed.
+        if let Mode::Tree(t) = &old
+            && let Some(w) = t.unzoom
+        {
+            self.model.unzoom(w);
+        }
+        // window_tree_resize for the mode now shown.
+        if tree_next {
+            self.tree_update(p);
+        }
+        if old.kill() {
             self.destroy_pane(p);
         }
     }
@@ -334,29 +406,33 @@ impl Server {
 impl Server {
     /// `window_pane_key` for a pane in a mode (window.c:2080-2092): the
     /// shown mode's own `key` callback gets it, with the client it came
-    /// from, after the mode's prompt. No mode has such a callback yet, and
-    /// copy mode takes keys only through its key table. Returns whether
-    /// anything took it.
+    /// from, after the mode's prompt. Copy mode takes keys only through
+    /// its key table. `typed`: a key from a client's terminal, which has a
+    /// mouse event with it (`&event->m`), unlike one `send-keys` gives
+    /// (`NULL`, cmd-send-keys.c:97). Returns whether anything took it.
     pub(crate) fn mode_key(
         &mut self,
         p: PaneId,
         c: Option<crate::server::ClientId>,
         key: vtmux_core::keys::Key,
+        typed: bool,
     ) -> bool {
         if self.mode_prompt_key(p, c, key) {
             return true;
         }
-        // window_pane_key: a mode's `key` callback runs only with a client;
-        // clock mode's leaves the mode on any key (no mouse yet).
-        let clock = self
-            .model
-            .panes
-            .get(&p)
-            .is_some_and(|x| matches!(x.modes.first(), Some(Mode::Clock(_))));
+        // window_pane_key: a mode's `key` callback runs only with a client
+        // (window.c:2088); clock mode's leaves the mode on any key (no
+        // mouse yet).
+        let top = self.model.panes.get(&p).and_then(|x| x.modes.first());
+        let clock = matches!(top, Some(Mode::Clock(_)));
+        let tree = matches!(top, Some(Mode::Tree(_)));
         if clock && c.is_some() {
             self.clock_key(p);
         }
-        false
+        if tree && c.is_some() {
+            self.tree_key(p, c, key, typed);
+        }
+        tree
     }
 
     /// Run `f` on pane `p`'s shown mode, out of the pane while it runs so
