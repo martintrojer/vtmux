@@ -3646,3 +3646,182 @@ fn refresh_client_on_a_terminal_client() {
     }
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// window-copy.c:3921-3933: a read-only client's copy mode commands that
+/// are not `WINDOW_COPY_CMD_FLAG_READONLY` are refused with the status
+/// message `client is read-only` and change nothing: no selection from
+/// `C-Space`, no buffer or clipboard write from `M-w`
+/// (`copy-pipe-and-cancel`), and `send-keys -X` with the client named by
+/// `-c` refuses `begin-selection`, `clear-selection`, `cancel` and a pipe
+/// while the movement commands still run. Both binaries, same script.
+#[test]
+fn read_only_client_cannot_run_mutating_copy_commands() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "-x",
+            "40",
+            "-y",
+            "8",
+            "sh",
+            "-c",
+            "printf 'one\\ntwo\\nthree\\n'; exec cat",
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["set", "-g", "display-time", "0"]);
+        w.cli(&["set", "-g", "set-clipboard", "on"]);
+        let mut a = w.attach_sized(&["attach", "-t", "a"], 40, 9);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let name = client_name(&w, "a");
+        thread::sleep(Duration::from_millis(300));
+        let mut seen = Vec::new();
+        let state = |w: &World| {
+            let out = w.cli(&[
+                "display-message", "-p", "-t", "a",
+                "mode=#{pane_in_mode} sel=#{selection_present} y=#{copy_cursor_y} buffers=#{?buffer_size,yes,no}",
+            ]);
+            let buffers = w.cli(&["list-buffers", "-F", "#{buffer_name}"]);
+            format!(
+                "{} / [{}]",
+                String::from_utf8_lossy(&out.stdout).trim(),
+                String::from_utf8_lossy(&buffers.stdout).trim()
+            )
+        };
+        let run = |args: &[&str]| {
+            let out = w.cli(args);
+            format!(
+                "exit {:?} {:?}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            )
+        };
+        w.cli(&["switch-client", "-c", &name, "-r"]);
+        w.cli(&["copy-mode", "-t", "a"]);
+        seen.push(state(&w));
+        // 1) C-Space (begin-selection), then Down.
+        a.keys(b"\x00");
+        thread::sleep(Duration::from_millis(300));
+        seen.push(status_row(&a));
+        a.keys(b"\x1b[B");
+        thread::sleep(Duration::from_millis(300));
+        seen.push(state(&w));
+        // 2) M-w (copy-pipe-and-cancel).
+        a.keys(b"\x1bw");
+        thread::sleep(Duration::from_millis(300));
+        seen.push(state(&w));
+        seen.push(format!("osc52 {}", a.text().contains("\x1b]52;")));
+        // 3) send-keys -X with the read-only client.
+        for cmd in [
+            &["begin-selection"][..],
+            &["clear-selection"],
+            &["copy-selection-and-cancel"],
+            &["copy-pipe", "cat"],
+            &["search-forward", "two"],
+            &["cancel"],
+        ] {
+            let mut args = vec!["send-keys", "-c", name.as_str(), "-t", "a", "-X"];
+            args.extend_from_slice(cmd);
+            seen.push(format!("{cmd:?} {}", run(&args)));
+            seen.push(state(&w));
+        }
+        // Movement commands are allowed.
+        for cmd in [&["cursor-up"][..], &["history-top"], &["cursor-down"]] {
+            let mut args = vec!["send-keys", "-c", name.as_str(), "-t", "a", "-X"];
+            args.extend_from_slice(cmd);
+            seen.push(format!("{cmd:?} {}", run(&args)));
+            seen.push(state(&w));
+        }
+        // Another client (the CLI, not read-only) is not refused.
+        seen.push(run(&["send-keys", "-t", "a", "-X", "begin-selection"]));
+        seen.push(state(&w));
+        seen.push(run(&["send-keys", "-t", "a", "-X", "cancel"]));
+        seen.push(state(&w));
+        results.push(seen);
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+    // The refusals did something visible on the reference too.
+    assert!(
+        results[0].iter().any(|l| l.contains("client is read-only")),
+        "{:?}",
+        results[0]
+    );
+}
+
+/// cmd-switch-client.c:66-74: with a session (or no) target, the lookup is
+/// `CMD_FIND_PREFER_UNATTACHED` (cmd-find.c:134-148): a bare
+/// `switch-client -c <tty>` goes to the best session no client is attached
+/// to, not the most recently active one, and when every session has a
+/// client it is the most recently active. `-t` names one; `-t @N` and
+/// `-t %N` pick among the sessions linking it the same way.
+#[test]
+fn switch_client_prefers_an_unattached_session() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        for s in ["a", "b", "c", "d"] {
+            w.cli(&["new", "-d", "-s", s, "-n", "w", "cat"]);
+            thread::sleep(Duration::from_millis(20));
+        }
+        w.cli(&["set", "-g", "status-right", "R"]);
+        // A second session links window @1 (the one in `b`).
+        w.cli(&["link-window", "-s", "b:0", "-t", "c:5"]);
+        let a = w.attach(&["attach", "-t", "b"]);
+        a.wait(|a| status_row(a).contains("[b]"));
+        let name = client_name(&w, "b");
+        let sessions = |w: &World| {
+            let out = w.cli(&["lsc", "-F", "#{client_session}"]);
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let mut seen = Vec::new();
+        for args in [
+            vec!["switch-client", "-c", &name],
+            vec!["switch-client", "-c", &name],
+            vec!["switch-client", "-c", &name, "-r"],
+            vec!["switch-client", "-c", &name, "-t", "a"],
+            vec!["switch-client", "-c", &name],
+            vec!["switch-client", "-c", &name, "-t", "@1"],
+            vec!["switch-client", "-c", &name, "-t", "%0"],
+            vec!["switch-client", "-c", &name, "-t", "d:0"],
+            vec!["switch-client", "-c", &name],
+        ] {
+            let out = w.cli(&args);
+            thread::sleep(Duration::from_millis(100));
+            seen.push(format!(
+                "{} exit {:?} {:?} -> {}",
+                args[3..].join(" "),
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).trim(),
+                sessions(&w)
+            ));
+        }
+        // With a client on every session the most recently active wins.
+        let others: Vec<Attached> = ["a", "c", "d"]
+            .iter()
+            .map(|s| {
+                let c = w.attach(&["attach", "-t", s]);
+                c.wait(|c| status_row(c).contains(&format!("[{s}]")));
+                c
+            })
+            .collect();
+        let out = w.cli(&["switch-client", "-c", &name]);
+        thread::sleep(Duration::from_millis(100));
+        seen.push(format!(
+            "all attached exit {:?} -> {}",
+            out.status.code(),
+            sessions(&w)
+        ));
+        drop(others);
+        results.push(seen);
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}

@@ -535,12 +535,21 @@ fn dispatch(
                 return Err(EdgeError::NoSessions.into());
             }
             let spec = args.target('t');
-            let found = target::resolve(
+            // cmd-attach-session.c:80-91: a pane-like target is a pane,
+            // else a session, preferring one no client is attached to.
+            let pane_like = args.value('t').is_some_and(|t| t.contains([':', '.']));
+            let attached = server.attached_sessions();
+            let found = target::resolve_preferring(
                 &server.model,
                 item.origin,
                 spec.as_ref(),
-                vtmux_core::cmd::TargetKind::Session,
+                if pane_like {
+                    vtmux_core::cmd::TargetKind::Pane
+                } else {
+                    vtmux_core::cmd::TargetKind::Session
+                },
                 vtmux_core::cmd::FindFlags::NONE,
+                (!pane_like).then_some(&attached),
             )?;
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
             // cmd-attach-session.c:108-121: -f, then -r, before the client

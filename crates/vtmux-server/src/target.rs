@@ -83,7 +83,7 @@ impl Found {
     /// `cmd_find_from_window`: the window in its best session.
     #[must_use]
     pub fn from_window(model: &Model, w: WindowId) -> Self {
-        best_with_window(model, w).unwrap_or_default()
+        best_with_window(model, w, None).unwrap_or_default()
     }
 
     /// `cmd_find_from_pane`: the pane's window in its best session.
@@ -100,23 +100,52 @@ impl Found {
     }
 }
 
+/// `CMD_FIND_PREFER_UNATTACHED` (cmd-switch-client.c:74,
+/// cmd-attach-session.c:85): the sessions that have a client attached.
+/// `None` is a lookup without the flag.
+pub type Prefer<'a> = Option<&'a std::collections::BTreeSet<SessionId>>;
+
 /// `cmd_find_best_session`: the most recently active session, optionally
-/// among those linking window `w`.
+/// among those linking window `w`. With `prefer`, a session no client is
+/// attached to beats an attached one whatever their activity
+/// (`cmd_find_session_better`, cmd-find.c:134-148).
 #[must_use]
-pub fn best_session(model: &Model, with: Option<WindowId>) -> Option<SessionId> {
-    model
+pub fn best_session(
+    model: &Model,
+    with: Option<WindowId>,
+    prefer: Prefer<'_>,
+) -> Option<SessionId> {
+    let mut best: Option<&crate::model::Session> = None;
+    for s in model
         .sessions_by_name()
         .filter(|s| model.current_of(s.id).is_some())
         .filter(|s| with.is_none_or(|w| s.windows.values().any(|x| *x == w)))
-        // timercmp(>) keeps the first of equals; activity stamps are unique.
-        .max_by_key(|s| s.activity)
-        .map(|s| s.id)
+    {
+        let better = best.is_none_or(|than| {
+            if let Some(attached) = prefer {
+                let than_attached = attached.contains(&than.id);
+                let s_attached = attached.contains(&s.id);
+                if than_attached && !s_attached {
+                    return true;
+                }
+                if !than_attached && s_attached {
+                    return false;
+                }
+            }
+            // timercmp(>) keeps the first of equals.
+            s.activity > than.activity
+        });
+        if better {
+            best = Some(s);
+        }
+    }
+    best.map(|s| s.id)
 }
 
 /// Window `w` in its best session (`cmd_find_best_session_with_window` +
 /// `cmd_find_best_winlink_with_window`).
-fn best_with_window(model: &Model, w: WindowId) -> Option<Found> {
-    let s = best_session(model, Some(w))?;
+fn best_with_window(model: &Model, w: WindowId, prefer: Prefer<'_>) -> Option<Found> {
+    let s = best_session(model, Some(w), prefer)?;
     let session = &model.sessions[&s];
     let index = if session.windows.get(&session.current) == Some(&w) {
         session.current
@@ -147,6 +176,14 @@ pub struct Origin {
 
 #[must_use]
 pub fn current(model: &Model, origin: Origin) -> Option<Found> {
+    current_preferring(model, origin, None)
+}
+
+/// [`current`] with `CMD_FIND_PREFER_UNATTACHED` for the guesses
+/// (`cmd_find_from_client` passes the flags on to `cmd_find_from_nothing`
+/// and `cmd_find_best_session_with_window`).
+#[must_use]
+pub fn current_preferring(model: &Model, origin: Origin, prefer: Prefer<'_>) -> Option<Found> {
     if let Some(f) = origin.current.filter(|f| f.still_valid(model)) {
         return Some(f);
     }
@@ -156,7 +193,7 @@ pub fn current(model: &Model, origin: Origin) -> Option<Found> {
     }
     if let Some(p) = origin.inside_pane
         && let Some(pane) = model.panes.get(&p)
-        && let Some(mut f) = best_with_window(model, pane.window)
+        && let Some(mut f) = best_with_window(model, pane.window, prefer)
     {
         f.pane = model
             .windows
@@ -164,7 +201,7 @@ pub fn current(model: &Model, origin: Origin) -> Option<Found> {
             .map(crate::model::Window::active);
         return Some(f);
     }
-    best_session(model, None).map(|s| Found::from_session(model, s))
+    best_session(model, None, prefer).map(|s| Found::from_session(model, s))
 }
 
 /// fnmatch(3) with no flags: `*`, `?`, `[...]` (with `!`/`^` negation and
@@ -326,11 +363,17 @@ fn find_window_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
 }
 
 /// `cmd_find_get_window` (cmd-find.c:469-497).
-fn find_window(model: &Model, current: Found, part: &Part, only: bool) -> Option<Found> {
+fn find_window(
+    model: &Model,
+    current: Found,
+    part: &Part,
+    only: bool,
+    prefer: Prefer<'_>,
+) -> Option<Found> {
     if part.text.starts_with('@') {
         let id: WindowId = part.text.parse().ok()?;
         model.windows.get(&id)?;
-        return best_with_window(model, id);
+        return best_with_window(model, id, prefer);
     }
     if let Some(s) = current.session
         && let Some(f) = find_window_in(model, s, part)
@@ -394,12 +437,18 @@ fn find_pane_in(model: &Model, w: WindowId, part: &str) -> Option<PaneId> {
 }
 
 /// `cmd_find_get_pane` (cmd-find.c:643-676).
-fn find_pane(model: &Model, current: Found, part: &Part, only: bool) -> Option<Found> {
+fn find_pane(
+    model: &Model,
+    current: Found,
+    part: &Part,
+    only: bool,
+    prefer: Prefer<'_>,
+) -> Option<Found> {
     let text = part.text.as_str();
     if text.starts_with('%') {
         let id: PaneId = text.parse().ok()?;
         let pane = model.panes.get(&id)?;
-        let mut f = best_with_window(model, pane.window)?;
+        let mut f = best_with_window(model, pane.window, prefer)?;
         f.pane = Some(id);
         return Some(f);
     }
@@ -411,7 +460,7 @@ fn find_pane(model: &Model, current: Found, part: &Part, only: bool) -> Option<F
             ..current
         });
     }
-    if !only && let Some(mut f) = find_window(model, current, part, false) {
+    if !only && let Some(mut f) = find_window(model, current, part, false, prefer) {
         f.pane = f
             .window
             .and_then(|w| model.windows.get(&w))
@@ -431,7 +480,22 @@ pub fn resolve(
     kind: TargetKind,
     flags: FindFlags,
 ) -> Result<Found, EdgeError> {
-    let result = resolve_inner(model, origin, spec, kind, flags.window_index);
+    resolve_preferring(model, origin, spec, kind, flags, None)
+}
+
+/// [`resolve`] with `CMD_FIND_PREFER_UNATTACHED` when `prefer` is the set
+/// of attached sessions: where the lookup has to pick a session (no
+/// target from a client with no session, `@N`, `%N`), one without a client
+/// beats the most recently active one (cmd-find.c:134-148).
+pub fn resolve_preferring(
+    model: &Model,
+    origin: Origin,
+    spec: Option<&TargetSpec>,
+    kind: TargetKind,
+    flags: FindFlags,
+    prefer: Prefer<'_>,
+) -> Result<Found, EdgeError> {
+    let result = resolve_inner(model, origin, spec, kind, flags.window_index, prefer);
     match result {
         Err(_) if flags.can_fail => Ok(partial(model, origin, spec, kind)),
         other => other,
@@ -466,7 +530,7 @@ fn partial(model: &Model, origin: Origin, spec: Option<&TargetSpec>, kind: Targe
             .map_or_else(|| session_only(Some(s)), window_found);
     }
     match (&parts.window, &parts.pane) {
-        (Some(wp), _) => match find_window(model, current, wp, parts.window_only) {
+        (Some(wp), _) => match find_window(model, current, wp, parts.window_only, None) {
             Some(f) => window_found(f),
             None if parts.window_only => session_only(current.session),
             None => Found::default(),
@@ -485,8 +549,9 @@ fn resolve_inner(
     spec: Option<&TargetSpec>,
     kind: TargetKind,
     window_index: bool,
+    prefer: Prefer<'_>,
 ) -> Result<Found, EdgeError> {
-    let current = current(model, origin).ok_or(EdgeError::NoCurrentTarget)?;
+    let current = current_preferring(model, origin, prefer).ok_or(EdgeError::NoCurrentTarget)?;
     let Some(spec) = spec else {
         return Ok(current);
     };
@@ -501,9 +566,9 @@ fn resolve_inner(
         Resolved::Parts(p) => p,
     };
     if window_index {
-        return find_index_parts(model, current, &parts);
+        return find_index_parts(model, current, &parts, prefer);
     }
-    find_parts(model, current, &parts)
+    find_parts(model, current, &parts, prefer)
 }
 
 /// `cmd_find_target` with `CMD_FIND_WINDOW_INDEX` (cmd-find.c:1157-1222):
@@ -513,6 +578,7 @@ fn find_index_parts(
     model: &Model,
     current: Found,
     parts: &TargetParts,
+    prefer: Prefer<'_>,
 ) -> Result<Found, EdgeError> {
     if parts.pane.is_some() {
         return Err(EdgeError::Message("can't specify pane here".into()));
@@ -533,7 +599,7 @@ fn find_index_parts(
     }
     // cmd_find_get_window (cmd-find.c:469-497).
     if wp.text.starts_with('@') {
-        return find_window(model, current, wp, true)
+        return find_window(model, current, wp, true, prefer)
             .map(|f| Found {
                 new_index: f.index,
                 ..f
@@ -597,7 +663,12 @@ fn find_index_in(model: &Model, s: SessionId, part: &Part) -> Option<Found> {
     })
 }
 
-fn find_parts(model: &Model, current: Found, parts: &TargetParts) -> Result<Found, EdgeError> {
+fn find_parts(
+    model: &Model,
+    current: Found,
+    parts: &TargetParts,
+    prefer: Prefer<'_>,
+) -> Result<Found, EdgeError> {
     let no_session = |p: &Part| EdgeError::SessionNotFound(p.text.clone());
     let no_window = |p: &Part| EdgeError::WindowNotFound(p.text.clone());
     let no_pane = |p: &Part| EdgeError::PaneNotFound(p.text.clone());
@@ -625,17 +696,17 @@ fn find_parts(model: &Model, current: Found, parts: &TargetParts) -> Result<Foun
     }
     match (&parts.window, &parts.pane) {
         (Some(wp), Some(pp)) => {
-            let f =
-                find_window(model, current, wp, parts.window_only).ok_or_else(|| no_window(wp))?;
+            let f = find_window(model, current, wp, parts.window_only, prefer)
+                .ok_or_else(|| no_window(wp))?;
             let w = f.window.ok_or_else(|| no_window(wp))?;
             let p = find_pane_in(model, w, &pp.text).ok_or_else(|| no_pane(pp))?;
             Ok(Found { pane: Some(p), ..f })
         }
         (Some(wp), None) => {
-            find_window(model, current, wp, parts.window_only).ok_or_else(|| no_window(wp))
+            find_window(model, current, wp, parts.window_only, prefer).ok_or_else(|| no_window(wp))
         }
         (None, Some(pp)) => {
-            find_pane(model, current, pp, parts.pane_only).ok_or_else(|| no_pane(pp))
+            find_pane(model, current, pp, parts.pane_only, prefer).ok_or_else(|| no_pane(pp))
         }
         (None, None) => Ok(current),
     }

@@ -510,7 +510,7 @@ impl Server {
                 return Some(Found::from_session(m, s));
             }
         }
-        target::best_session(m, None).map(|s| Found::from_session(m, s))
+        target::best_session(m, None, None).map(|s| Found::from_session(m, s))
     }
 
     /// The hook's option (hooks.c:121-140): the session's (or the global

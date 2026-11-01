@@ -140,12 +140,16 @@ pub fn switch_client(server: &mut Server, item: &mut Item, args: &Args) -> Resul
     } else {
         vtmux_core::cmd::TargetKind::Session
     };
-    let found = target::resolve(
+    // A session target prefers one no client is attached to
+    // (CMD_FIND_PREFER_UNATTACHED, cmd-switch-client.c:66-74).
+    let attached = server.attached_sessions();
+    let found = target::resolve_preferring(
         &server.model,
         item.origin,
         tflag.as_ref(),
         kind,
         vtmux_core::cmd::FindFlags::NONE,
+        (kind == vtmux_core::cmd::TargetKind::Session).then_some(&attached),
     )?;
 
     // -r: toggle read-only. A read-only client may only be changed by its

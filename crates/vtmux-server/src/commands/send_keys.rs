@@ -73,7 +73,7 @@ pub fn exec(
         if !takes_commands {
             return Err(EdgeError::Message("not in a mode".into()).into());
         }
-        return mode_command(server, args, found, p);
+        return mode_command(server, args, found, p, tc);
     }
     if in_mode {
         mode_keys(server, item, args, p, repeat, tc);
@@ -115,7 +115,13 @@ pub fn exec(
 }
 
 /// `send-keys -X`: a command for the pane's mode (`window_copy_command`).
-fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Result<(), CmdError> {
+fn mode_command(
+    server: &mut Server,
+    args: &Args,
+    found: Found,
+    p: PaneId,
+    tc: Option<ClientId>,
+) -> Result<(), CmdError> {
     let mut words: Vec<String> = args
         .positionals
         .iter()
@@ -161,11 +167,22 @@ fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Re
         // window_copy_command: no command, nothing to do.
         return Ok(());
     };
+    // `c` of `wme->mode->command`: the target client, whose read-only
+    // flag a mode command checks itself (window-copy.c:3925-3933).
+    let read_only = tc.is_some_and(|c| server.clients.get(&c).is_some_and(|c| c.flags.read_only));
     let result = server
-        .with_mode(p, |m, env| m.command(env, name, rest))
+        .with_mode(p, |m, env| m.command(env, name, rest, read_only))
         .ok_or_else(|| CmdError::from(EdgeError::Message("not in a mode".into())))?;
     let outcome = match result {
         Ok(o) => o,
+        Err(CommandError::ReadOnly) => {
+            // status_message_set(c, -1, 1, 0, 0, "client is read-only"):
+            // the command itself succeeds.
+            if let Some(c) = tc {
+                server.status_message_set(c, "client is read-only".to_owned());
+            }
+            return Ok(());
+        }
         Err(CommandError::NotImplemented(c)) => {
             return Err(EdgeError::NotImplemented(format!("copy mode command {c}")).into());
         }

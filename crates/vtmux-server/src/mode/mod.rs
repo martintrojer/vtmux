@@ -34,15 +34,18 @@ pub trait PaneMode {
     fn takes_commands(&self) -> bool;
     /// `wme->prefix = np` (`send-keys -N`).
     fn set_prefix(&mut self, n: u32);
-    /// `mode->command` for `send-keys -X name args...`.
+    /// `mode->command` for `send-keys -X name args...`; `read_only_client`
+    /// is `c->flags & CLIENT_READONLY` for the client it came from.
     ///
     /// # Errors
-    /// A command tmux has that vtmux does not yet.
+    /// A command tmux has that vtmux does not yet, or one a read-only
+    /// client may not run.
     fn command(
         &mut self,
         env: &copy::Env,
         name: &str,
         args: &[String],
+        read_only_client: bool,
     ) -> Result<copy::Outcome, copy::CommandError>;
 }
 
@@ -69,8 +72,9 @@ impl PaneMode for CopyMode {
         env: &copy::Env,
         name: &str,
         args: &[String],
+        read_only_client: bool,
     ) -> Result<copy::Outcome, copy::CommandError> {
-        Self::command(self, env, name, args)
+        Self::command(self, env, name, args, read_only_client)
     }
 }
 
@@ -122,9 +126,10 @@ impl PaneMode for Mode {
         env: &copy::Env,
         name: &str,
         args: &[String],
+        read_only_client: bool,
     ) -> Result<copy::Outcome, copy::CommandError> {
         match self {
-            Self::Copy(m) => PaneMode::command(&mut **m, env, name, args),
+            Self::Copy(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
             #[cfg(test)]
             Self::Probe => Err(copy::CommandError::NotImplemented(name.to_owned())),
         }
