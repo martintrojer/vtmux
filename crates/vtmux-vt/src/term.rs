@@ -61,17 +61,28 @@ const CELL_HEIGHT_PX: u32 = 32;
 /// (`Page.layout`, page.zig), 4 KiB on Linux and x86-64 macOS, 16 KiB on
 /// aarch64 macOS. Measured by probing retention (unchanged from ghostty
 /// a887df42c to 3bd54e025); `history_budget_steps_by_page` guards it.
+#[cfg(test)]
 const PAGE_BYTES: usize = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
     409_600
 } else {
     401_408
 };
-/// Bytes of a page that hold styles, graphemes and hyperlinks rather than
-/// rows. Measured as ~27 KB at 200 columns; rounded up so row counts per page
-/// are under-estimated, never over-estimated.
-const PAGE_OVERHEAD_BYTES: usize = 40_000;
-/// Bytes per cell and per row header (`@bitSizeOf(Cell)`, `@bitSizeOf(Row)` = 64).
+/// Bytes of a standard page left for row headers and cells once the
+/// styles, graphemes, strings and hyperlinks are laid out
+/// (`Capacity.availableBytesForGrid`, page.zig): the page minus a fixed
+/// 26 128 bytes of metadata. Fitted exactly to the rows per page Ghostty
+/// keeps at every width from 1 to 700 columns and at 800-20 000;
+/// `page_rows_matches_ghostty` guards it.
+const PAGE_GRID_BYTES: usize = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    409_600 - 26_128
+} else {
+    401_408 - 26_128
+};
+/// Bytes per cell and per row header (`@sizeOf(Cell)`, `@sizeOf(Row)`).
 const CELL_BYTES: usize = 8;
+/// Alignment of a page's cell array: Zig's `std.atomic.cache_line`, 128 on
+/// x86-64 and aarch64 (`cells_align`, page.zig).
+const CELLS_ALIGN: usize = 128;
 
 /// One pane's terminal. Owns the libghostty terminal; `'static` for callers.
 #[derive(Debug)]
@@ -85,6 +96,10 @@ pub struct PaneTerm {
     /// the program replaces it, as both write the one `s->title`.
     title_override: Rc<RefCell<Option<String>>>,
     history_lines: usize,
+    /// Rows one standard Ghostty page holds at the current width.
+    page_rows: usize,
+    /// The line limit last given to Ghostty (see [`PaneTerm::retain`]).
+    line_limit: Option<usize>,
     /// tmux's `hsize` for the primary grid, modelled (see [`PaneTerm::feed`]).
     hsize: usize,
     /// Rows ever scrolled into the primary history: the newest history row
@@ -127,6 +142,11 @@ impl PaneTerm {
     /// Create a terminal of `cols` x `rows` keeping `history_lines` lines of
     /// scrollback (tmux's `history-limit`). Zero sizes are raised to one.
     ///
+    /// Ghostty keeps history by line count (`OPT_SCROLLBACK_MAX_LINES`), see
+    /// [`PaneTerm::retain`]; the byte limit is off. `history_lines` 0 uses
+    /// a byte limit of 0, which keeps no history at all: a line limit can't
+    /// go below one page.
+    ///
     /// # Panics
     /// Only if libghostty fails to allocate.
     #[must_use]
@@ -135,7 +155,7 @@ impl PaneTerm {
         let mut term = Terminal::new(TerminalOptions {
             cols,
             rows,
-            max_scrollback: history_budget(cols, rows, history_lines),
+            max_scrollback: if history_lines == 0 { 0 } else { usize::MAX },
         })
         .expect("libghostty terminal allocation");
 
@@ -195,12 +215,14 @@ impl PaneTerm {
         let _ = term.set_kitty_image_storage_limit(0);
         let _ = term.set_glyph_protocol_enabled(false);
 
-        Self {
+        let mut pane = Self {
             term,
             replies,
             bells,
             title_override,
             history_lines,
+            page_rows: page_rows(cols),
+            line_limit: None,
             hsize: 0,
             scrolled: 0,
             generation: 0,
@@ -213,6 +235,29 @@ impl PaneTerm {
             redraw: false,
             marks: Vec::new(),
             frozen_marks: Vec::new(),
+        };
+        pane.retain();
+        pane
+    }
+
+    /// Give Ghostty the line limit: one page more than tmux's history can
+    /// hold, `max(history-limit, hsize)` (a narrowing reflow leaves `hsize`
+    /// above the limit until scrolling collects it, as in tmux; grid.c
+    /// `grid_reflow` never collects).
+    ///
+    /// Ghostty prunes whole pages from the top and never the page holding
+    /// the active area's first row, so it keeps between `limit + 1 -
+    /// page_rows` and `limit` history rows (PageList.zig `Limits.enforce`):
+    /// at least `max(history-limit, hsize) + 1`, so every row tmux still
+    /// has, and at most one page over it, whatever the styling or width.
+    fn retain(&mut self) {
+        if self.history_lines == 0 {
+            return;
+        }
+        let limit = Some(self.history_lines.max(self.hsize) + self.page_rows);
+        if limit != self.line_limit {
+            let _ = self.term.set_scrollback_max_lines(limit);
+            self.line_limit = limit;
         }
     }
 
@@ -359,6 +404,7 @@ impl PaneTerm {
         // count unknown; assume everything retained is new.
         let scrolled = retained.saturating_sub(above_pin.unwrap_or(0));
         self.hsize = tmux_hsize(self.hsize, self.history_lines, scrolled).min(retained);
+        self.retain();
         self.scrolled += scrolled as u64;
         if scrolled > 0 {
             // grid_line_set_time: the server loop's `current_time`.
@@ -496,15 +542,36 @@ impl PaneTerm {
         let before = self.term.scrollback_rows().unwrap_or(0);
         let same_width = cols.max(1) == self.cols();
         let on_primary = !self.alternate_on();
+        // The oldest row tmux has (the active top when it has none): rows
+        // above it stay hidden however the reflow splits or joins them.
+        let oldest = on_primary
+            .then(|| {
+                let y = u32::try_from(before.saturating_sub(self.hsize)).ok()?;
+                self.term
+                    .track_grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
+                    .ok()
+            })
+            .flatten();
+        // Lift the line limit so the reflow keeps every row; `retain`
+        // sets it again for the new width.
+        if self.history_lines > 0 {
+            let _ = self.term.set_scrollback_max_lines(None);
+            self.line_limit = None;
+        }
         self.term
             .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
             .expect("libghostty resize");
+        self.page_rows = page_rows(cols.max(1));
         if on_primary {
-            // Reflow moves rows in and out of history: keep the rows hidden
-            // from tmux's view constant. (While the alternate screen is up
-            // the frozen copy is not reflowed.)
+            // Reflow moves rows in and out of history: tmux's history
+            // starts at the row that was its oldest. (While the alternate
+            // screen is up the frozen copy is not reflowed.)
             let after = self.term.scrollback_rows().unwrap_or(0);
-            self.hsize = (self.hsize + after).saturating_sub(before).min(after);
+            let hidden = oldest
+                .and_then(|pin| pin.point(PointSpace::Screen).ok().flatten())
+                .and_then(|p| usize::try_from(p.y).ok())
+                .unwrap_or(before.saturating_sub(self.hsize));
+            self.hsize = after.saturating_sub(hidden);
             let scrolled = (self.scrolled + after as u64).saturating_sub(before as u64);
             if same_width {
                 // No reflow: history rows keep their ids and times; rows a
@@ -530,6 +597,10 @@ impl PaneTerm {
                 self.times.clear();
                 self.times_base = self.scrolled;
             }
+        }
+        self.retain();
+        if on_primary {
+            self.clamp_history_to_retained();
         }
         self.generation += 1;
     }
@@ -629,8 +700,17 @@ impl PaneTerm {
         }
     }
 
-    /// Cap the bytes Ghostty retains for history (`OPT_SCROLLBACK_MAX_BYTES`).
-    /// Lowering it prunes whole history pages at once; history ids, times
+    /// History rows Ghostty retains on the active screen: at least
+    /// [`PaneTerm::history_size`] and at most one page more than
+    /// `max(history-limit, history_size)` (see [`PaneTerm::retain`]).
+    #[must_use]
+    pub fn retained_rows(&self) -> usize {
+        self.term.scrollback_rows().unwrap_or(0)
+    }
+
+    /// Cap the bytes Ghostty retains for history (`OPT_SCROLLBACK_MAX_BYTES`),
+    /// on top of the line limit that normally bounds it (the pane's own
+    /// byte limit is off, see [`PaneTerm::new`]). Lowering it prunes whole history pages at once; history ids, times
     /// and `history_size` follow what is still retained. Ghostty keeps at
     /// least about one page whatever the budget. `bytes` is raised to 1:
     /// Ghostty's 0 erases history and stops keeping any, which is
@@ -934,24 +1014,22 @@ impl AltModeScanner {
     }
 }
 
-/// Byte budget for Ghostty's scrollback limit (`OPT_SCROLLBACK_MAX_BYTES`)
-/// that keeps at least `lines` lines of history.
-///
-/// Ghostty cannot trim by lines, so this over-retains and `history_size`
-/// hides the excess. The budget assumes a design width of twice the current
-/// width (at least 256 columns) so a later widening does not drop below the
-/// limit; narrower panes then keep far more than `lines` rows in memory.
-fn history_budget(cols: u16, rows: u16, lines: usize) -> usize {
-    if lines == 0 {
-        return 0;
+/// Rows one standard Ghostty page holds at `cols` columns
+/// (`initialCapacity`, PageList.zig, through `Capacity.adjust`, page.zig):
+/// as many row headers and rows of cells as fit in [`PAGE_GRID_BYTES`],
+/// with the cell array aligned to [`CELLS_ALIGN`]. This is also Ghostty's
+/// smallest line limit (`Limits.minMaxLines`). A width no row fits in gets
+/// a bigger page of `std_capacity`'s 215 rows.
+fn page_rows(cols: u16) -> usize {
+    let row_bytes = CELL_BYTES * (usize::from(cols) + 1);
+    let mut rows = (PAGE_GRID_BYTES / row_bytes).min(usize::from(u16::MAX));
+    while rows > 0
+        && (CELL_BYTES * rows).next_multiple_of(CELLS_ALIGN) + CELL_BYTES * rows * usize::from(cols)
+            > PAGE_GRID_BYTES
+    {
+        rows -= 1;
     }
-    let design_cols = (usize::from(cols) * 2).max(256);
-    let row_bytes = CELL_BYTES * (design_cols + 1);
-    let rows_per_page = ((PAGE_BYTES - PAGE_OVERHEAD_BYTES) / row_bytes).max(1);
-    // Two extra pages: the active area straddles a page boundary, and pruning
-    // works a whole page at a time.
-    let pages = (lines + usize::from(rows)).div_ceil(rows_per_page) + 2;
-    pages.saturating_mul(PAGE_BYTES)
+    if rows == 0 { 215 } else { rows }
 }
 
 fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
@@ -1395,7 +1473,7 @@ mod tests {
         // Raising it again keeps what scrolls in from now on.
         t.set_history_budget(usize::MAX);
         t.feed(&b"x\r\n".repeat(2500));
-        assert!(t.term.scrollback_rows().unwrap() > 2500);
+        assert!(t.term.scrollback_rows().unwrap() > 2000);
         assert_eq!(t.history_size(), tmux_hsize(after, 2000, 2500));
     }
 
@@ -1456,12 +1534,146 @@ mod tests {
         let pages = 3;
         let fewer = kept(pages * PAGE_BYTES - 1);
         let full = kept(pages * PAGE_BYTES);
-        let rows_per_page = (PAGE_BYTES - PAGE_OVERHEAD_BYTES) / (CELL_BYTES * 81);
+        let rows_per_page = page_rows(80);
         assert!(
             full - fewer >= rows_per_page,
             "{fewer} -> {full}, page holds >= {rows_per_page}"
         );
         assert_eq!(kept(pages * PAGE_BYTES + PAGE_BYTES - 1), full);
+    }
+
+    /// `page_rows` is the row count of Ghostty's standard page: with the
+    /// smallest line limit (one page), the history drops by exactly a page
+    /// once the second page fills.
+    #[test]
+    fn page_rows_matches_ghostty() {
+        for cols in [1, 2, 7, 80, 81, 120, 200, 215, 216, 333, 500, 1000, 5000] {
+            let mut t = PaneTerm::new(cols, 1, 1);
+            let mut prev = 0;
+            let mut dropped = None;
+            for _ in 0..3 * page_rows(cols) {
+                t.term.vt_write(b"\n");
+                let n = t.term.scrollback_rows().unwrap();
+                if n < prev {
+                    dropped = Some(prev + 1 - n);
+                    break;
+                }
+                prev = n;
+            }
+            assert_eq!(dropped, Some(page_rows(cols)), "{cols} columns");
+        }
+    }
+
+    /// 70-digit lines numbered from `from`; with `styled` every cell has
+    /// its own truecolour, so pages fill their style tables and grow.
+    fn lines(from: usize, n: usize, styled: bool) -> Vec<u8> {
+        let mut out = String::new();
+        for i in from..from + n {
+            let line = format!("{i:070}");
+            if styled {
+                for (j, c) in line.chars().enumerate() {
+                    let _ = write!(out, "\x1b[38;2;{};{j};{}m{c}", i % 256, (i / 256) % 256);
+                }
+                out.push_str("\x1b[m");
+            } else {
+                out.push_str(&line);
+            }
+            out.push_str("\r\n");
+        }
+        out.into_bytes()
+    }
+
+    /// Ghostty keeps every row tmux has (`hsize`) and at most one page
+    /// more than `max(history-limit, hsize)`.
+    fn assert_retention(t: &PaneTerm, what: &str) {
+        let retained = t.term.scrollback_rows().unwrap();
+        let ceiling = t.history_lines.max(t.hsize) + page_rows(t.cols());
+        assert!(
+            t.hsize <= retained && retained <= ceiling,
+            "{what}: hsize {} retained {retained} ceiling {ceiling}",
+            t.hsize
+        );
+    }
+
+    /// The history-memory spec's criterion 2: retained rows stay within
+    /// one page of `history-limit` at any width, plain or styled, and
+    /// `history_size` stays tmux's sawtooth.
+    #[test]
+    fn retained_rows_track_history_limit() {
+        for cols in [80, 200, 500] {
+            for styled in [false, true] {
+                let limit = 1000;
+                let mut t = PaneTerm::new(cols, 10, limit);
+                let mut fed = 0;
+                for chunk in [300, 700, 1, 1500, 2345] {
+                    t.feed(&lines(fed, chunk, styled));
+                    fed += chunk;
+                    let what = format!("{cols} cols styled={styled} after {fed}");
+                    assert_retention(&t, &what);
+                    let scrolled = (fed + 1).saturating_sub(10);
+                    assert_eq!(t.history_size(), tmux_hsize(0, limit, scrolled), "{what}");
+                    if scrolled >= limit {
+                        assert!(t.term.scrollback_rows().unwrap() >= limit, "{what}");
+                    }
+                }
+                // The oldest row tmux has is the right one.
+                let oldest = fed + 1 - 10 - t.history_size();
+                let opts = crate::capture::CaptureOpts {
+                    start: crate::capture::LineRef::Start,
+                    end: crate::capture::LineRef::Line(-i64::try_from(t.history_size()).unwrap()),
+                    ..Default::default()
+                };
+                let row = crate::capture::capture(&t, opts);
+                assert_eq!(
+                    String::from_utf8_lossy(&row).trim_end(),
+                    format!("{oldest:070}"),
+                    "{cols} styled={styled}"
+                );
+            }
+        }
+    }
+
+    /// Reflow moves rows in and out of history; the line limit follows the
+    /// width so the bound holds after every resize, and narrowing never
+    /// drops a row tmux keeps (its `hsize` may pass the limit, grid.c
+    /// `grid_reflow`).
+    #[test]
+    fn retained_rows_track_history_limit_across_resizes() {
+        for styled in [false, true] {
+            let mut t = PaneTerm::new(80, 10, 1000);
+            t.feed(&lines(0, 3000, styled));
+            assert_retention(&t, "80");
+            for (cols, rows) in [(200, 10), (500, 20), (40, 10), (20, 5), (80, 10), (80, 30)] {
+                let before = t.history_size();
+                t.resize(cols, rows);
+                let what = format!("{cols}x{rows} styled={styled}");
+                assert_retention(&t, &what);
+                if cols < 80 {
+                    assert!(
+                        t.history_size() > before,
+                        "{what}: {before} -> {}",
+                        t.history_size()
+                    );
+                }
+                t.feed(&lines(0, 1500, styled));
+                assert_retention(&t, &format!("{what} then output"));
+                assert!(t.history_size() <= 1000, "{what}");
+            }
+        }
+    }
+
+    /// A reset (RIS), a history clear (ED3) and the alternate screen keep
+    /// the line limit.
+    #[test]
+    fn retained_rows_track_history_limit_after_reset_and_clear() {
+        for seq in [&b"\x1bc"[..], b"\x1b[3J", b"\x1b[?1049h\x1b[?1049l"] {
+            let mut t = PaneTerm::new(80, 10, 1000);
+            t.feed(&lines(0, 3000, false));
+            t.feed(seq);
+            t.feed(&lines(0, 3000, false));
+            assert_retention(&t, &String::from_utf8_lossy(seq));
+            assert!(t.term.scrollback_rows().unwrap() >= 1000);
+        }
     }
 
     #[test]
