@@ -280,6 +280,10 @@ impl FormatContext for Overlay<'_> {
     fn options(&self, scope: OptionScope) -> Option<OptionsLoop<'_>> {
         self.parent.options(scope)
     }
+
+    fn job(&self, raw: &str, expanded: &str) -> String {
+        self.parent.job(raw, expanded)
+    }
 }
 
 /// `format_add_window_neighbour` (format.c:5323-5347).
@@ -302,6 +306,8 @@ impl Eval<'_> {
             wall: self.wall,
             now: self.now,
             time_mode: self.time_mode,
+            nojobs: self.nojobs,
+            nocycle: self.nocycle,
         }
         .expand(body, depth)
     }
