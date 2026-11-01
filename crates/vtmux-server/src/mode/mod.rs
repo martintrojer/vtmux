@@ -187,6 +187,9 @@ impl Server {
             return;
         }
         let old = pane.modes.remove(0);
+        if pane.modes.is_empty() {
+            pane.unseen_changes = false;
+        }
         if let Some(Mode::Copy(next)) = pane.modes.first_mut() {
             next.resize(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         }
@@ -209,5 +212,73 @@ impl Server {
         {
             self.reset_mode(p);
         }
+    }
+}
+
+impl Server {
+    /// The soonest automatic refresh of a copy mode on top of a pane.
+    pub(crate) fn copy_refresh_deadline(&self) -> Option<std::time::Instant> {
+        self.model
+            .panes
+            .values()
+            .filter_map(|p| match p.modes.first() {
+                Some(Mode::Copy(m)) => m.refresh_due(),
+                _ => None,
+            })
+            .min()
+    }
+
+    /// `window_copy_refresh_timer` (window-copy.c:3116-3143) for every copy
+    /// mode that is due: with unseen output and no selection being made,
+    /// copy the pane's screen again, following it if the cursor was at the
+    /// bottom; then arm the timer again.
+    pub(crate) fn copy_refresh_timers(&mut self, now: std::time::Instant) {
+        let due: Vec<PaneId> = self
+            .model
+            .panes
+            .iter()
+            .filter(|(_, p)| match p.modes.first() {
+                Some(Mode::Copy(m)) => m.refresh_due().is_some_and(|at| at <= now),
+                _ => false,
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for p in due {
+            let unseen = self.model.panes.get(&p).is_some_and(|x| x.unseen_changes);
+            if unseen {
+                self.copy_refresh(p, false);
+            }
+            if let Some(Mode::Copy(m)) = self
+                .model
+                .panes
+                .get_mut(&p)
+                .and_then(|x| x.modes.first_mut())
+            {
+                m.refresh_arm(now);
+            }
+        }
+    }
+
+    /// `window_copy_do_refresh`: the copy of pane `p`'s screen is taken
+    /// again and the pane's unseen changes are seen. A timer refresh
+    /// (`forced` false) leaves a selection in progress alone.
+    pub(crate) fn copy_refresh(&mut self, p: PaneId, forced: bool) {
+        let Some(env) = self.model.copy_env(p) else {
+            return;
+        };
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return;
+        };
+        let term = &pane.term;
+        let Some(Mode::Copy(m)) = pane.modes.first_mut() else {
+            return;
+        };
+        if !forced && !m.refresh_ready() {
+            return;
+        }
+        let follow = m.follows();
+        m.refresh(&env, term, follow);
+        pane.unseen_changes = false;
+        self.model.redraw_panes.insert(p);
     }
 }

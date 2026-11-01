@@ -189,7 +189,8 @@ pub fn exec(
         let spec = command.map(|command| JobSpec {
             command,
             session,
-            cwd,
+            cwd: Some(cwd),
+            input: Vec::new(),
             show_stderr: args.flag('E'),
             nowait: !wait,
         });
@@ -348,7 +349,8 @@ pub fn if_shell(
     let spec = JobSpec {
         command: shellcmd.clone(),
         session: found.session,
-        cwd: server.client_cwd(item.client, found.session),
+        cwd: Some(server.client_cwd(item.client, found.session)),
+        input: Vec::new(),
         show_stderr: false,
         nowait: false,
     };

@@ -181,6 +181,8 @@ pub struct Pane {
     /// Output arrived since the last automatic-rename check (tmux's
     /// `PANE_CHANGED`).
     pub changed: bool,
+    /// `PANE_UNSEENCHANGES`: output arrived while the pane was in a mode.
+    pub unseen_changes: bool,
     pub last_rename: Option<Instant>,
     /// `wp->xoff`, `wp->yoff`, `wp->sx`, `wp->sy` as `layout_fix_panes` set
     /// them.

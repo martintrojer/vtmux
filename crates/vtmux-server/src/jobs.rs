@@ -53,6 +53,9 @@ struct Job {
     /// The process, until it is reaped.
     pid: Option<i32>,
     output: Vec<u8>,
+    /// Bytes still to write to the job's stdin; its write side is shut
+    /// once they are gone (`job_write_callback`).
+    input: Vec<u8>,
     status: Option<JobStatus>,
     /// `JOB_NOWAIT`: the server may exit with it running.
     nowait: bool,
@@ -98,7 +101,11 @@ pub struct JobSpec {
     pub command: String,
     /// The session whose environment the job gets (`environ_for_session`).
     pub session: Option<SessionId>,
-    pub cwd: PathBuf,
+    /// The directory it starts in; `None` (`job_run`'s NULL `cwd`) stays
+    /// in the server's.
+    pub cwd: Option<PathBuf>,
+    /// What it reads on stdin (`bufferevent_write` after `job_run`).
+    pub input: Vec<u8>,
     /// `JOB_SHOWSTDERR`.
     pub show_stderr: bool,
     /// `JOB_NOWAIT`.
@@ -113,7 +120,7 @@ impl Server {
         let spawned = sys::job::spawn(&sys::job::JobSpec {
             shell: PathBuf::from("/bin/sh"),
             command: spec.command.clone(),
-            cwd: Some(spec.cwd.clone()),
+            cwd: spec.cwd.clone(),
             home: crate::server::find_home(&self.global_env),
             env: self.job_environ(spec.session),
             show_stderr: spec.show_stderr,
@@ -123,7 +130,7 @@ impl Server {
         self.poll.registry().register(
             &mut SourceFd(&spawned.fd.as_raw_fd()),
             Token(JOB_BASE + id.0),
-            Interest::READABLE,
+            Interest::READABLE | Interest::WRITABLE,
         )?;
         self.jobs.running.insert(
             id,
@@ -131,13 +138,15 @@ impl Server {
                 fd: Some(spawned.fd),
                 pid: Some(spawned.pid.as_raw_nonzero().get()),
                 output: Vec::new(),
+                input: spec.input.clone(),
                 status: None,
                 nowait: spec.nowait,
                 complete: Some(complete),
             },
         );
-        // Output may already be waiting: edge-triggered events only
-        // report what arrives later.
+        // Output may already be waiting and the input may fit: edge-
+        // triggered events only report what changes later.
+        self.job_writable(id);
         self.job_readable(id);
         Ok(id)
     }
@@ -164,6 +173,30 @@ impl Server {
             false,
         );
         env.for_process()
+    }
+
+    /// Write what the job's stdin takes of its input; once all of it is
+    /// written (or the job stopped reading) the write side is shut, so the
+    /// job sees EOF (`job_write_callback`, job.c:325-336).
+    pub(crate) fn job_writable(&mut self, id: JobId) {
+        let Some(job) = self.jobs.running.get_mut(&id) else {
+            return;
+        };
+        let Some(fd) = job.fd.as_ref() else {
+            return;
+        };
+        while !job.input.is_empty() {
+            match rustix::io::write(fd, &job.input) {
+                Ok(n) => {
+                    job.input.drain(..n);
+                }
+                Err(rustix::io::Errno::AGAIN) => return,
+                Err(rustix::io::Errno::INTR) => {}
+                // The job closed its stdin: nothing more can be written.
+                Err(_) => job.input.clear(),
+            }
+        }
+        let _ = rustix::net::shutdown(fd, rustix::net::Shutdown::Write);
     }
 
     /// The job's output is readable: take all of it; at EOF the output is

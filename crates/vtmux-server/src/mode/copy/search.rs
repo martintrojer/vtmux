@@ -745,7 +745,7 @@ impl CopyMode {
         self.search_match_at().unwrap_or_default()
     }
 
-    fn search_match_at(&self) -> Option<String> {
+    pub(super) fn search_match_at(&self) -> Option<String> {
         self.search.marks.as_ref()?;
         let (cx, cy) = self.grid_cursor();
         let mut at = self.mark_at(cx, cy)?;
