@@ -279,7 +279,7 @@ impl Server {
     /// handed over (`send-keys -K`), right after that command. A control
     /// client sees them in guards with flags 0; an attached terminal client
     /// gets a failure as its status-line message (`cmdq::End::Quiet`).
-    fn run_binding(&mut self, id: ClientId, commands: &CommandList, repeat: bool, _key: Key) {
+    fn run_binding(&mut self, id: ClientId, commands: &CommandList, repeat: bool, key: Key) {
         let Some(c) = self.clients.get(&id) else {
             return;
         };
@@ -291,6 +291,7 @@ impl Server {
         item.env.clone_from(&hello.env);
         item.utf8 = hello.flags.utf8;
         item.repeat = repeat;
+        item.key = Some(key);
         item.origin = Origin {
             attached: c.attached,
             inside_pane: None,
