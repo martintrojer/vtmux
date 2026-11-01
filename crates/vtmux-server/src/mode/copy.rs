@@ -395,11 +395,76 @@ const TMUX_COMMANDS: &[&str] = &[
     "top-line",
 ];
 
+/// The copy mode commands a read-only client may run
+/// (`WINDOW_COPY_CMD_FLAG_READONLY` in `window_copy_cmd_table`,
+/// window-copy.c:3293-3890): movement, scrolling, marks and cancel. Every
+/// other command in the table writes (selections, copies, pipes) or
+/// searches and is refused (window-copy.c:3925-3933).
+const READ_ONLY_COMMANDS: &[&str] = &[
+    "back-to-indentation",
+    "bottom-line",
+    "cancel",
+    "cursor-down",
+    "cursor-down-and-cancel",
+    "cursor-left",
+    "cursor-right",
+    "cursor-up",
+    "cursor-centre-vertical",
+    "cursor-centre-horizontal",
+    "end-of-line",
+    "goto-line",
+    "halfpage-down",
+    "halfpage-down-and-cancel",
+    "halfpage-up",
+    "history-bottom",
+    "history-top",
+    "jump-to-mark",
+    "line-numbers-on",
+    "line-numbers-off",
+    "line-numbers-toggle",
+    "next-prompt",
+    "previous-prompt",
+    "middle-line",
+    "next-matching-bracket",
+    "next-paragraph",
+    "next-space",
+    "next-space-end",
+    "next-word",
+    "next-word-end",
+    "page-down",
+    "page-down-and-cancel",
+    "page-up",
+    "previous-matching-bracket",
+    "previous-paragraph",
+    "previous-space",
+    "previous-word",
+    "recentre-top-bottom",
+    "refresh-on",
+    "refresh-off",
+    "refresh-now",
+    "refresh-toggle",
+    "scroll-bottom",
+    "scroll-down",
+    "scroll-down-and-cancel",
+    "scroll-middle",
+    "scroll-to-mouse",
+    "scroll-top",
+    "scroll-up",
+    "set-mark",
+    "start-of-line",
+    "toggle-position",
+    "top-line",
+];
+
 /// A command [`CopyMode::command`] could not run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandError {
     /// tmux has it, vtmux not yet.
     NotImplemented(String),
+    /// The client is read-only and the command is not
+    /// `WINDOW_COPY_CMD_FLAG_READONLY`: nothing ran, and the client's
+    /// status line says `client is read-only`.
+    ReadOnly,
 }
 
 /// Text a copy command took (`window_copy_copy_buffer`,
@@ -1051,7 +1116,14 @@ impl CopyMode {
         env: &Env,
         name: &str,
         args: &[String],
+        read_only_client: bool,
     ) -> Result<Outcome, CommandError> {
+        // Before anything else, and before the repeat count is used up:
+        // the refusal leaves the mode as it was (window-copy.c:3921-3929).
+        if read_only_client && TMUX_COMMANDS.contains(&name) && !READ_ONLY_COMMANDS.contains(&name)
+        {
+            return Err(CommandError::ReadOnly);
+        }
         let np = std::mem::replace(&mut self.prefix, 1).max(1);
         let Some(args) = parse_args(name, args) else {
             return Ok(Action::Stay.into());
@@ -2669,7 +2741,7 @@ mod tests {
     }
 
     fn cmd(m: &mut CopyMode, name: &str) -> Action {
-        m.command(&env(), name, &[]).unwrap().action
+        m.command(&env(), name, &[], false).unwrap().action
     }
 
     /// Reference (tmux 3.8, 30x6, emacs keys): entering puts the cursor at
@@ -2766,9 +2838,9 @@ mod tests {
                 "cursor-right",
                 "cursor-right",
             ] {
-                mode.command(&environ, c, &[]).unwrap();
+                mode.command(&environ, c, &[], false).unwrap();
             }
-            let out = mode.command(&environ, name, &args).unwrap();
+            let out = mode.command(&environ, name, &args, false).unwrap();
             (mode, out)
         };
         let (mode, out) = go("copy-pipe", &["cat", "pre"]);
@@ -2866,11 +2938,20 @@ mod tests {
         cmd(&mut m, "refresh-toggle");
         cmd(&mut m, "refresh-off");
         assert!(!m.refresh_active());
-        assert!(m.command(&env(), "refresh-now", &[]).unwrap().refresh);
+        assert!(
+            m.command(&env(), "refresh-now", &[], false)
+                .unwrap()
+                .refresh
+        );
         let mut other = CopyMode::new(&t, (30, 6), true, (false, false), false, None);
         cmd(&mut other, "refresh-on");
         assert!(!other.refresh_active());
-        assert!(!other.command(&env(), "refresh-now", &[]).unwrap().refresh);
+        assert!(
+            !other
+                .command(&env(), "refresh-now", &[], false)
+                .unwrap()
+                .refresh
+        );
     }
 
     #[test]
@@ -2915,7 +2996,7 @@ mod selection_tests {
             let mut words = c.split(' ');
             let name = words.next().unwrap();
             let args: Vec<String> = words.map(str::to_owned).collect();
-            copied = m.command(e, name, &args).unwrap().copied.or(copied);
+            copied = m.command(e, name, &args, false).unwrap().copied.or(copied);
         }
         copied
     }
@@ -2977,5 +3058,33 @@ mod selection_tests {
         assert_eq!(g.in_set(3, 0, WHITESPACE), 1);
         assert_eq!(g.in_set(3, 0, "-"), 0);
         assert_eq!(g.in_set(0, 0, "a"), 1);
+    }
+
+    /// window-copy.c:3921-3933 with the table's READONLY flags
+    /// (3293-3890): 53 of the 99 commands are read-only; a read-only client
+    /// is refused the other 46 before anything runs, the repeat count
+    /// is kept, and the mode is not touched.
+    #[test]
+    fn read_only_client_runs_only_read_only_commands() {
+        assert_eq!(READ_ONLY_COMMANDS.len(), 53);
+        assert_eq!(TMUX_COMMANDS.len(), 99);
+        assert!(READ_ONLY_COMMANDS.iter().all(|c| TMUX_COMMANDS.contains(c)));
+        let mut m = mode("a b\r\nc d\r\n", false);
+        let e = env(false);
+        m.prefix = 4;
+        for name in TMUX_COMMANDS {
+            let r = m.command(&e, name, &[], true);
+            if READ_ONLY_COMMANDS.contains(name) {
+                assert_ne!(r, Err(CommandError::ReadOnly), "{name}");
+                m.prefix = 4;
+            } else {
+                assert_eq!(r, Err(CommandError::ReadOnly), "{name}");
+                assert_eq!(m.prefix, 4, "{name} used the count up");
+            }
+        }
+        // Not a read-only client: begin-selection runs.
+        assert!(m.command(&e, "begin-selection", &[], false).is_ok());
+        // A name tmux does not have is not refused, as it is not found.
+        assert!(m.command(&e, "no-such", &[], true).is_ok());
     }
 }
