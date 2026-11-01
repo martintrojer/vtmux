@@ -80,7 +80,11 @@ impl Normalizer {
             return format!("<CLOCKGLYPHS {}>", colours.join(" "));
         }
         if let Some(c) = CLOCK_COMPACT.captures(&r) {
-            return format!("{}<CLOCK>{}", &c[1], &c[2]);
+            // The padding's SGRs first, then its spaces: where the colour
+            // starts within the blanks depends on the time's own width.
+            let sgrs: String = SGR.find_iter(&c[1]).map(|m| m.as_str()).collect();
+            let spaces = SGR.replace_all(&c[1], "").len();
+            return format!("{sgrs}{}<CLOCK>{}", " ".repeat(spaces), &c[2]);
         }
         r
     }
@@ -221,6 +225,10 @@ mod tests {
             "\\e[34m      <CLOCK>\\e[39m"
         );
         assert_eq!(n.row("   17:54"), "   <CLOCK>");
+        assert_eq!(
+            n.row("      \\e[31m10:05 PM\\e[39m"),
+            n.row("\\e[31m      10:05 PM\\e[39m")
+        );
         assert_eq!(n.row("   17:54:09"), "   <CLOCK>");
         // Text that merely has a time in it stays.
         assert_eq!(n.row("meeting at 12:30"), "meeting at 12:30");
