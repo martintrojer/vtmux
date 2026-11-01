@@ -123,6 +123,12 @@ pub(crate) struct Client {
     /// The popup over the client's screen (`c->overlay_data` with
     /// `popup_draw_cb`).
     pub(crate) popup: Option<crate::popup::Popup>,
+    /// `c->flags` the commands can change (`switch-client -r`,
+    /// `refresh-client -f`).
+    pub(crate) flags: crate::client_flags::ClientFlags,
+    /// `TTY_OSC52QUERY`: a clipboard query (`refresh-client -l`) is out
+    /// until this instant, and its reply becomes a paste buffer.
+    pub(crate) clipboard_query: Option<Instant>,
 }
 
 /// Frame bytes the client has not yet written to its terminal: in
@@ -727,6 +733,8 @@ impl Server {
                             status: crate::render::status::StatusLine::default(),
                             prompt_owner: None,
                             popup: None,
+                            flags: crate::client_flags::ClientFlags::default(),
+                            clipboard_query: None,
                             written: 0,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
@@ -879,6 +887,46 @@ impl Server {
     /// `tty_set_selection` (tty.c:2149-2166): OSC 52 through the client
     /// terminal's `Ms`, whatever `set-clipboard` says, once its tty has
     /// started.
+    /// `tty_clipboard_query` (tty.c:3206-3216): ask the terminal for its
+    /// clipboard, once at a time, for a started terminal that has `Ms`.
+    /// The reply is the next OSC 52 the client sends; none within
+    /// `TTY_QUERY_TIMEOUT` and the query is forgotten.
+    pub(crate) fn clipboard_query(&mut self, id: ClientId) {
+        let now = Instant::now();
+        let Some(c) = self.clients.get_mut(&id) else {
+            return;
+        };
+        if c.clipboard_query.is_some_and(|until| until > now) {
+            return;
+        }
+        let Some(bytes) = c
+            .attached
+            .and(c.caps.as_ref())
+            .and(c.term.as_ref())
+            .and_then(vtmux_core::term_features::Term::clipboard_query)
+        else {
+            return;
+        };
+        c.clipboard_query = Some(now + Duration::from_secs(5));
+        self.send(id, &ServerMsg::Frame(bytes));
+    }
+
+    /// `server_client_set_flags` (server-client.c:3120-3159).
+    pub(crate) fn set_client_flags(&mut self, id: ClientId, flags: &str) {
+        let Some(c) = self.clients.get_mut(&id) else {
+            return;
+        };
+        let control = c.control.is_some();
+        let no_output = c.flags.no_output;
+        c.flags.set(control, flags);
+        let reset = c.flags.no_output && !no_output;
+        if reset {
+            self.control_reset_panes(id);
+        }
+        // Flags can change which clients size a window (`ignore-size`).
+        self.recalculate_sizes();
+    }
+
     pub(crate) fn set_selection(&mut self, id: ClientId, data: &[u8]) {
         let Some(bytes) = self
             .clients
@@ -1067,8 +1115,29 @@ impl Server {
                 Vec::new()
             }
         };
+        let calls = self.read_only_gate(id, &mut item, calls);
         self.cmdq_append(Some(id), crate::cmdq::NewBatch::new(item, calls, end));
         self.cmdq_process();
+    }
+
+    /// A read-only client's commands are refused unless every one is
+    /// `CMD_READONLY` (`server_client_read_only`, server-client.c:2797-2800,
+    /// 2884-2887; key-bindings.c:752-755, 766-769): the list becomes one
+    /// error, `client is read-only`, on `item`. A control client's stdin
+    /// lines are not checked (control.c:695-727).
+    pub(crate) fn read_only_gate(
+        &mut self,
+        id: ClientId,
+        item: &mut Item,
+        calls: Vec<cmd::CommandCall>,
+    ) -> Vec<cmd::CommandCall> {
+        let refused = self.clients.get(&id).is_some_and(|c| c.flags.read_only)
+            && !calls.iter().all(|c| c.entry.read_only());
+        if !refused {
+            return calls;
+        }
+        item.error(self, b"client is read-only".to_vec());
+        Vec::new()
     }
 
     pub(crate) fn send_output(&mut self, id: ClientId, item: &mut Item) {
@@ -1432,6 +1501,17 @@ impl Server {
             };
             match event {
                 crate::input::Event::Ignore => {}
+                crate::input::Event::Clipboard(data) => {
+                    // tty_keys_clipboard: with a query out, the reply
+                    // becomes a paste buffer.
+                    if c.clipboard_query
+                        .take()
+                        .is_some_and(|until| until > Instant::now())
+                    {
+                        let limit = crate::commands::buffer_limit(self);
+                        self.model.paste.add(data, limit);
+                    }
+                }
                 crate::input::Event::Sync(sync) => {
                     // tty_keys_sync: only a supported reply changes anything.
                     if let (true, Some(term)) = (sync, &mut c.term) {
@@ -1591,14 +1671,16 @@ impl Server {
         Some(self.model.current_of(s)?.2)
     }
 
-    /// `window_pane_key` with no mode: the key encoded for the pane.
-    pub(crate) fn forward_key(&mut self, p: PaneId, key: &crate::keys::Key) {
+    /// `window_pane_key`: the key from client `c` goes to the pane's shown
+    /// mode if it is in one, else encoded to the program.
+    pub(crate) fn forward_key(&mut self, p: PaneId, c: Option<ClientId>, key: &crate::keys::Key) {
         let Some(pane) = self.model.panes.get(&p) else {
             return;
         };
-        // window_pane_key: a pane in a mode gives the key to the mode, and
-        // copy mode takes keys only through its table (no `key` callback).
+        // A pane in a mode gives the key to the mode, and copy mode takes
+        // keys only through its table (no `key` callback).
         if !pane.modes.is_empty() {
+            self.mode_key(p, c, key.to_core());
             return;
         }
         let modes = crate::keys::KeyModes {
@@ -2141,6 +2223,7 @@ impl Server {
                 |t| t.features().list(),
             ),
             colours: c.caps.map(|caps| caps.colours),
+            flags: c.flags.clone(),
         }
     }
 
@@ -2683,6 +2766,8 @@ impl Server {
             search: None,
             prompt: None,
             prompt_owner: None,
+            mode_prompt: None,
+            mode_prompt_owner: None,
         })
     }
 
@@ -2771,6 +2856,9 @@ impl Server {
         // window_pane_destroy: window_pane_clear_prompt frees the prompt's
         // owner, with no pane-prompt-closed (PANE_DESTROYED).
         if let Some(owner) = pane.prompt_owner.take() {
+            owner.free(self);
+        }
+        if let Some(owner) = pane.mode_prompt_owner.take() {
             owner.free(self);
         }
         if let Some(io) = pane.io.take() {

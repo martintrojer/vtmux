@@ -11,6 +11,9 @@ pub enum Event {
     Sync(bool),
     /// `KEYC_FOCUS_IN` / `KEYC_FOCUS_OUT` (`CSI I` / `CSI O`).
     Focus(bool),
+    /// An OSC 52 clipboard reply (`tty_keys_clipboard`), decoded; what a
+    /// `refresh-client -l` asked for.
+    Clipboard(Vec<u8>),
     Ignore,
 }
 /// `escape-time` default (options-table.c).
@@ -83,6 +86,51 @@ fn key(base: Base) -> Key {
         esc_prefix: false,
     }
 }
+/// `tty_keys_clipboard` (tty-keys.c:1394-1445): the body after `ESC ] 52 ;`
+/// is the clipboard name, `;` and base64 text; no text, or text that does
+/// not decode, is no event.
+fn clipboard(body: &[u8]) -> Event {
+    let Some(at) = body.iter().position(|&b| b == b';') else {
+        return Event::Ignore;
+    };
+    let text = &body[at + 1..];
+    if text.len() <= 1 {
+        return Event::Ignore;
+    }
+    base64_decode(text).map_or(Event::Ignore, Event::Clipboard)
+}
+
+/// `b64_pton`: padded standard base64.
+fn base64_decode(text: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let (mut acc, mut bits) = (0u32, 0u32);
+    let mut pad = 0;
+    for &b in text {
+        let v = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => {
+                pad += 1;
+                continue;
+            }
+            _ => return None,
+        };
+        if pad > 0 {
+            return None;
+        }
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(u8::try_from((acc >> bits) & 0xff).ok()?);
+        }
+    }
+    (pad <= 2 && text.len().is_multiple_of(4)).then_some(out)
+}
+
 #[allow(clippy::too_many_lines)] // terminal sequence dispatch table
 fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, usize)> {
     if bytes[0] != 0x1b {
@@ -106,11 +154,15 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
     .find(|p| p.starts_with(&bytes[..bytes.len().min(p.len())]));
     if let Some(prefix) = reply.filter(|p| bytes.len() >= p.len()) {
         for i in prefix.len()..bytes.len() {
-            if bytes[i] == 7 {
-                return Some((Event::Ignore, i + 1));
-            }
-            if bytes[i] == b'\\' && bytes[i - 1] == 0x1b {
-                return Some((Event::Ignore, i + 1));
+            let end = bytes[i] == 7 || (bytes[i] == b'\\' && bytes[i - 1] == 0x1b);
+            if end {
+                let body_end = if bytes[i] == 7 { i } else { i - 1 };
+                let event = if prefix == b"\x1b]52;" {
+                    clipboard(&bytes[prefix.len()..body_end])
+                } else {
+                    Event::Ignore
+                };
+                return Some((event, i + 1));
             }
         }
         if bytes.len() > 4096 || expired {
@@ -450,6 +502,22 @@ mod tests {
         assert_eq!(
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]
+        );
+    }
+
+    /// tty-keys.c:1394-1445: an OSC 52 reply is its decoded text; a name
+    /// with no text is nothing.
+    #[test]
+    fn clipboard_replies() {
+        let mut d = Decoder::default();
+        d.feed(b"\x1b]52;c;aGVsbG8=\x07\x1b]52;;\x07\x1b]52;;Zm9v\x1b\\");
+        assert_eq!(
+            d.drain(Instant::now()),
+            vec![
+                Event::Clipboard(b"hello".to_vec()),
+                Event::Ignore,
+                Event::Clipboard(b"foo".to_vec())
+            ]
         );
     }
 

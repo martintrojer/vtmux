@@ -52,8 +52,13 @@ fn select(
     let previous = cycle == Some(false) || args.flag('p');
 
     // A control client without new-layouts gets the v1 form
-    // (LAYOUT_CUSTOM_OLD_FORMAT); vtmux has no refresh-client -f yet.
-    let current = dump(server, w, item.control.is_some());
+    // (LAYOUT_CUSTOM_OLD_FORMAT, cmd-select-layout.c:93-96).
+    let old_format = item.control.is_some()
+        && !item
+            .client
+            .and_then(|c| server.clients.get(&c))
+            .is_some_and(|c| c.flags.new_layouts);
+    let current = dump(server, w, old_format);
     let window = server.model.windows.get_mut(&w).expect("target window");
     let old = std::mem::replace(&mut window.old_layout, current);
 

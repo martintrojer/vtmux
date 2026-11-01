@@ -374,6 +374,14 @@ impl Term {
         Some(expand_ss(ms, clip, &base64(data)))
     }
 
+    /// `tty_clipboard_query` (tty.c:3206-3216): `Ms` with an empty
+    /// clipboard name and `?`, or `None` when the terminal has no `Ms`.
+    #[must_use]
+    pub fn clipboard_query(&self) -> Option<Vec<u8>> {
+        let ms = self.ms.as_deref().filter(|_| self.has(Cap::Ms))?;
+        Some(expand_ss(ms, "", "?"))
+    }
+
     /// The terminal is xterm-derived: it has `XT` and `bce` in terminfo.
     #[must_use]
     pub fn is_xterm(&self) -> bool {
@@ -750,6 +758,7 @@ mod selection_tests {
             term.set_selection("", b"hello-off").unwrap(),
             b"\x1b]52;;aGVsbG8tb2Zm\x07"
         );
+        assert_eq!(term.clipboard_query().unwrap(), b"\x1b]52;;?\x07");
         assert_eq!(base64(b""), "");
         assert_eq!(base64(b"f"), "Zg==");
         assert_eq!(base64(b"fo"), "Zm8=");

@@ -158,6 +158,11 @@ pub struct Prompt {
     last: String,
     /// `PROMPT_ISPANE`: drawn over a pane (`prompt_flags`).
     pub is_pane: bool,
+    /// `PROMPT_ISMODE`: drawn on a mode's screen.
+    pub is_mode: bool,
+    /// `PROMPT_NOFORMAT`: the input is not a format (`prompt_create`,
+    /// `prompt_update`); the label still is (`prompt_expand1`).
+    pub no_format: bool,
 }
 
 impl Prompt {
@@ -185,6 +190,8 @@ impl Prompt {
             copied: None,
             last,
             is_pane: false,
+            is_mode: false,
+            no_format: false,
         }
     }
 
@@ -225,7 +232,8 @@ impl Prompt {
         self.command_mode
     }
 
-    /// `prompt_flags_to_string`, the flags this prompt can have.
+    /// `prompt_flags_to_string`, the flags this prompt can have, in
+    /// tmux's order (prompt.c:92-126).
     #[must_use]
     pub fn flags_string(&self) -> String {
         let mut flags = Vec::new();
@@ -233,8 +241,13 @@ impl Prompt {
             Kind::Single => flags.push("SINGLE"),
             Kind::Numeric => flags.push("NUMERIC"),
             Kind::Incremental => flags.push("INCREMENTAL"),
-            Kind::Key => flags.push("KEY"),
-            Kind::Line | Kind::BackspaceExit => {}
+            Kind::Key | Kind::Line | Kind::BackspaceExit => {}
+        }
+        if self.no_format {
+            flags.push("NOFORMAT");
+        }
+        if self.kind == Kind::Key {
+            flags.push("KEY");
         }
         if self.quote_next {
             flags.push("QUOTENEXT");
@@ -250,6 +263,9 @@ impl Prompt {
         }
         if self.is_pane {
             flags.push("ISPANE");
+        }
+        if self.is_mode {
+            flags.push("ISMODE");
         }
         flags.join(",")
     }

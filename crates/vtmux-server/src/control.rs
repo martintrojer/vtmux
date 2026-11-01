@@ -64,9 +64,36 @@ pub struct ControlState {
     finished: bool,
     /// `c->retval`: 1 once any command failed (cmd-queue.c `cmdq_error`).
     retval: i32,
+    /// `cs->panes`: panes the client turned off or paused
+    /// (`refresh-client -A`); a pane not here sends its output.
+    panes: std::collections::BTreeMap<PaneId, PaneOutput>,
+    /// `cs->windows` (`refresh-client -C @N:XxY`).
+    windows: std::collections::BTreeMap<WindowId, (u32, u32)>,
+    /// `c->tty.sx`, `c->tty.sy` (`refresh-client -C XxY`).
+    size: Option<(u32, u32)>,
+}
+
+/// `CONTROL_PANE_OFF` and `CONTROL_PANE_PAUSED`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaneOutput {
+    Off,
+    Paused,
 }
 
 impl ControlState {
+    /// The client's size: what `refresh-client -C` set, else 80x24
+    /// (server-client.c:299).
+    #[must_use]
+    pub fn size(&self) -> (u32, u32) {
+        self.size.unwrap_or((80, 24))
+    }
+
+    /// `control_get_window_size`: a size `refresh-client -C @N:XxY` gave.
+    #[must_use]
+    pub fn window_size(&self, w: WindowId) -> Option<(u32, u32)> {
+        self.windows.get(&w).copied()
+    }
+
     fn write_line(&mut self, line: &[u8]) {
         self.out.extend_from_slice(line);
         self.out.push(b'\n');
@@ -464,7 +491,89 @@ impl Server {
         };
         let linking: BTreeSet<SessionId> = self.model.sessions_with(w).map(|s| s.id).collect();
         let line = output_line(pane, data);
-        self.control_notify(&|s| s.filter(|s| linking.contains(s)).map(|_| line.clone()));
+        for id in self.control_ids() {
+            let Some(c) = self.clients.get(&id) else {
+                continue;
+            };
+            // control_pane_offset: no output at all with `no-output`, none
+            // for a pane turned off or paused (control.c:330-345).
+            let wanted = !c.flags.no_output
+                && c.control
+                    .as_ref()
+                    .is_some_and(|cs| !cs.panes.contains_key(&pane))
+                && c.attached.is_some_and(|s| linking.contains(&s));
+            if wanted {
+                self.control_notify_one(id, true, line.clone());
+            }
+        }
+    }
+
+    /// `control_set_pane_off`, `control_set_pane_on`, `control_pause_pane`
+    /// and `control_continue_pane` for `refresh-client -A %N:state`
+    /// (control.c:349-402): `on` and `continue` only act on a pane that is
+    /// off or paused, and `continue` says so.
+    pub(crate) fn control_pane_state(&mut self, id: ClientId, pane: PaneId, state: &str) {
+        let Some(cs) = self.control_mut(id) else {
+            return;
+        };
+        let had = cs.panes.get(&pane).copied();
+        let line = match (state, had) {
+            ("on", Some(PaneOutput::Off)) => {
+                cs.panes.remove(&pane);
+                None
+            }
+            ("continue", Some(PaneOutput::Paused)) => {
+                cs.panes.remove(&pane);
+                Some(format!("%continue {pane}"))
+            }
+            ("off", _) => {
+                cs.panes.insert(pane, PaneOutput::Off);
+                None
+            }
+            ("pause", Some(PaneOutput::Paused)) => None,
+            ("pause", _) => {
+                cs.panes.insert(pane, PaneOutput::Paused);
+                Some(format!("%pause {pane}"))
+            }
+            _ => None,
+        };
+        if let Some(line) = line {
+            self.control_notify_one(id, false, line.into_bytes());
+        }
+    }
+
+    /// `control_set_window_size` / `control_clear_window_size`.
+    pub(crate) fn control_window_size(
+        &mut self,
+        id: ClientId,
+        w: WindowId,
+        size: Option<(u32, u32)>,
+    ) {
+        if let Some(cs) = self.control_mut(id) {
+            match size {
+                Some(size) => {
+                    cs.windows.insert(w, size);
+                }
+                None => {
+                    cs.windows.remove(&w);
+                }
+            }
+        }
+    }
+
+    /// `control_reset_offsets`: every pane's on/off/paused state is
+    /// forgotten (`refresh-client -f no-output`).
+    pub(crate) fn control_reset_panes(&mut self, id: ClientId) {
+        if let Some(cs) = self.control_mut(id) {
+            cs.panes.clear();
+        }
+    }
+
+    /// `tty_set_size` for a control client.
+    pub(crate) fn control_set_size(&mut self, id: ClientId, size: (u32, u32)) {
+        if let Some(cs) = self.control_mut(id) {
+            cs.size = Some(size);
+        }
     }
 
     /// The control-mode sink of the event layer (control-notify.c

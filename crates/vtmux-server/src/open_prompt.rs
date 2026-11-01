@@ -27,6 +27,15 @@ use crate::target::Found;
 pub(crate) enum Owner {
     Command(command_prompt::Pending),
     Confirm(confirm_before::Pending),
+    /// A mode's own prompt on its screen (`mode_tree_prompt`).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the tree modes open mode prompts; tests do for now"
+        )
+    )]
+    Mode(Box<dyn crate::mode::prompt::ModePromptOwner>),
 }
 
 /// What the owner is told (`enum prompt_key_result` with the line).
@@ -58,12 +67,24 @@ pub(crate) enum Reply {
 pub(crate) enum Place {
     Status(ClientId),
     Pane(PaneId),
+    /// The shown mode's prompt on the pane's mode screen.
+    Mode(PaneId),
 }
 
 impl Owner {
     /// The input callback (`c` is the client the key came from).
-    fn input(&mut self, server: &mut Server, c: Option<ClientId>, line: Line) -> Reply {
+    fn input(
+        &mut self,
+        server: &mut Server,
+        place: Place,
+        c: Option<ClientId>,
+        line: Line,
+    ) -> Reply {
         match self {
+            Self::Mode(o) => match place {
+                Place::Mode(p) => o.input(server, p, c, line),
+                Place::Status(_) | Place::Pane(_) => Reply::Close,
+            },
             Self::Command(p) => p.input(server, c, line),
             Self::Confirm(p) => match line {
                 Line::Done(value) => p.input(server, value.as_deref()),
@@ -80,6 +101,7 @@ impl Owner {
             // (cmd-confirm-before.c:157-163): a prompt replaced or lost
             // before an answer leaves it waiting, as in tmux.
             Self::Confirm(_) => {}
+            Self::Mode(o) => o.free(server),
         }
     }
 }
@@ -244,6 +266,10 @@ impl Server {
                 self.model.redraw_panes.insert(p);
                 self.model.panes.get_mut(&p)?.prompt.as_mut()
             }
+            Place::Mode(p) => {
+                self.model.redraw_panes.insert(p);
+                Some(&mut self.model.panes.get_mut(&p)?.mode_prompt.as_mut()?.open)
+            }
         }
     }
 
@@ -251,6 +277,7 @@ impl Server {
         match place {
             Place::Status(c) => self.clients.get_mut(&c)?.prompt_owner.take(),
             Place::Pane(p) => self.model.panes.get_mut(&p)?.prompt_owner.take(),
+            Place::Mode(p) => self.model.panes.get_mut(&p)?.mode_prompt_owner.take(),
         }
     }
 
@@ -274,6 +301,14 @@ impl Server {
                     return;
                 }
             }
+            Place::Mode(p) => {
+                if let Some(pane) = self.model.panes.get_mut(&p)
+                    && pane.mode_prompt.is_some()
+                {
+                    pane.mode_prompt_owner = Some(owner);
+                    return;
+                }
+            }
         }
         owner.free(self);
     }
@@ -283,6 +318,7 @@ impl Server {
         match place {
             Place::Status(c) => self.status_prompt_clear(c),
             Place::Pane(p) => self.pane_prompt_clear(p),
+            Place::Mode(p) => self.mode_prompt_clear(p),
         }
     }
 
@@ -325,6 +361,56 @@ impl Server {
             .find(|p| has(p) && window.is_visible(*p))
     }
 
+    /// `prompt_key` on the prompt at `place`; `true` when it took the key
+    /// (the key is used up unless the prompt passes it on).
+    pub(crate) fn prompt_key_at(&mut self, place: Place, c: ClientId, key: Key) -> bool {
+        !matches!(self.prompt_key(place, c, key), Taken::No)
+    }
+
+    /// `mode_tree_set_prompt` (mode-tree.c:1130-1178): `editor` on pane
+    /// `p`'s mode screen, opened by client `c`, for the mode on top of the
+    /// pane's stack. Any prompt already there is cleared (its owner freed).
+    /// The prompt is on the first row with `status-position top` in the
+    /// client's session (the global one with no client).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the tree modes open mode prompts; tests do for now"
+        )
+    )]
+    pub(crate) fn mode_prompt_set(
+        &mut self,
+        p: PaneId,
+        c: Option<ClientId>,
+        mut editor: Prompt,
+        state: Found,
+        owner: Owner,
+    ) {
+        self.mode_prompt_clear(p);
+        editor.is_mode = true;
+        let start = editor.incremental_start();
+        let tree = c
+            .and_then(|c| self.client_session(c))
+            .map_or(TreeId::GlobalSession, TreeId::Session);
+        let top = self.model.status_top(tree);
+        let Some(pane) = self.model.panes.get_mut(&p).filter(|x| !x.modes.is_empty()) else {
+            owner.free(self);
+            return;
+        };
+        let depth = pane.modes.len();
+        pane.mode_prompt = Some(crate::mode::prompt::ModePrompt::new(
+            OpenPrompt { editor, state },
+            top,
+            depth,
+        ));
+        pane.mode_prompt_owner = Some(owner);
+        self.model.redraw_panes.insert(p);
+        if let Some(start) = start {
+            self.prompt_fire(Place::Mode(p), c, Line::Changed(start), false);
+        }
+    }
+
     /// `prompt_key` on the prompt at `place` for a key from client `c`,
     /// and what follows from it (`status_prompt_key`,
     /// `window_pane_prompt_key`).
@@ -344,6 +430,14 @@ impl Server {
             Place::Pane(p) => {
                 self.model.redraw_panes.insert(p);
                 self.model.panes.get_mut(&p).and_then(|x| x.prompt.as_mut())
+            }
+            Place::Mode(p) => {
+                self.model.redraw_panes.insert(p);
+                self.model
+                    .panes
+                    .get_mut(&p)
+                    .and_then(|x| x.mode_prompt.as_mut())
+                    .map(|m| &mut m.open)
             }
         };
         let Some(prompt) = editor else {
@@ -401,18 +495,24 @@ impl Server {
         let Some(mut owner) = self.take_owner(place) else {
             return false;
         };
-        match owner.input(self, c, line) {
+        match owner.input(self, place, c, line) {
             Reply::Continue if !always_close => {
                 self.restore_owner(place, owner);
                 false
             }
             Reply::Next { label, input } if !always_close => {
-                let state = self.open_prompt_mut(place).map(|p| p.state);
-                let Some(state) = state else {
+                let open = self
+                    .open_prompt_mut(place)
+                    .map(|p| (p.state, p.editor.no_format));
+                let Some((state, no_format)) = open else {
                     owner.free(self);
                     return true;
                 };
-                let input = self.prompt_input(state, &input);
+                let input = if no_format {
+                    input
+                } else {
+                    self.prompt_input(state, &input)
+                };
                 if let Some(p) = self.open_prompt_mut(place) {
                     p.editor.update(label, &input);
                 }

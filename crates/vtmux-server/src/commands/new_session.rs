@@ -150,6 +150,10 @@ pub fn exec(
         item.print(&text);
     }
     if !detached {
+        // cmd-new-session.c:335-336.
+        if let (Some(c), Some(flags)) = (item.client, args.value('f')) {
+            server.set_client_flags(c, flags);
+        }
         super::attach(server, item, s, false, false)?;
     }
     // cmd-new-session.c:361-362.
