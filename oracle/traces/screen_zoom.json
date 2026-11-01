@@ -104,6 +104,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -117,6 +122,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -126,6 +136,11 @@
           "-t",
           "%2"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -237,7 +252,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 12,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -259,7 +274,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 13,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -268,7 +283,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 15,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -290,7 +305,7 @@
       }
     },
     {
-      "step": 14,
+      "step": 16,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -299,7 +314,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
