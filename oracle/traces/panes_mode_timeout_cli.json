@@ -313,6 +313,40 @@
           "display-panes",
           "-d",
           "0",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "[#{pane_mode}] #{pane_in_mode} #{window_zoomed_flag}"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
           "-k",
           "-t",
           "%1"
@@ -777,7 +811,7 @@
       "step": 35,
       "observation": {
         "kind": "cli",
-        "stdout": "[panes-mode] 1 1\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -786,7 +820,7 @@
       "step": 36,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "[clock-mode] 1 0\n",
         "stderr": "",
         "exit": 0
       }
@@ -795,9 +829,9 @@
       "step": 37,
       "observation": {
         "kind": "cli",
-        "stdout": "%0 [] 0\n%2 [] 0\n%3 [] 0\n%4 [] 0\n",
-        "stderr": "",
-        "exit": 0
+        "stdout": "",
+        "stderr": "not in a mode\n",
+        "exit": 1
       }
     },
     {
@@ -813,7 +847,7 @@
       "step": 39,
       "observation": {
         "kind": "cli",
-        "stdout": "[panes-mode] 1 0\n",
+        "stdout": "[panes-mode] 1 1\n",
         "stderr": "",
         "exit": 0
       }
@@ -831,7 +865,7 @@
       "step": 41,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "%0 [clock-mode] 0\n%2 [] 0\n%3 [] 0\n%4 [] 0\n",
         "stderr": "",
         "exit": 0
       }
@@ -840,7 +874,7 @@
       "step": 42,
       "observation": {
         "kind": "cli",
-        "stdout": "%0 [panes-mode] 0 60x19 60x19\n%2 [] 0 60x9 60x9\n%3 [] 0 60x4 60x4\n%4 [] 0 60x4 60x4\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -849,7 +883,7 @@
       "step": 43,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "[panes-mode] 2 0\n",
         "stderr": "",
         "exit": 0
       }
@@ -867,7 +901,7 @@
       "step": 45,
       "observation": {
         "kind": "cli",
-        "stdout": "%0 [] 0\n%2 [] 0\n%3 [] 0\n%4 [] 0\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -876,7 +910,7 @@
       "step": 46,
       "observation": {
         "kind": "cli",
-        "stdout": "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}\n",
+        "stdout": "%0 [panes-mode] 0 60x19 60x19\n%2 [] 0 60x9 60x9\n%3 [] 0 60x4 60x4\n%4 [] 0 60x4 60x4\n",
         "stderr": "",
         "exit": 0
       }
@@ -885,7 +919,7 @@
       "step": 47,
       "observation": {
         "kind": "cli",
-        "stdout": "bg=themedarkgrey,fg=themelightgrey\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -894,7 +928,7 @@
       "step": 48,
       "observation": {
         "kind": "cli",
-        "stdout": "themeblue\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -903,13 +937,49 @@
       "step": 49,
       "observation": {
         "kind": "cli",
+        "stdout": "%0 [] 0\n%2 [] 0\n%3 [] 0\n%4 [] 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bg=themedarkgrey,fg=themelightgrey\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "themeblue\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
         "stdout": "",
         "stderr": "command display-panes: too many arguments (need at most 1)\n",
         "exit": 1
       }
     },
     {
-      "step": 50,
+      "step": 54,
       "observation": {
         "kind": "cli",
         "stdout": "",
