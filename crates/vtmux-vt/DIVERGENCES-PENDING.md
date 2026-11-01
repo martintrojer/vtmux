@@ -40,6 +40,8 @@ and the probes from `review_vt_wrap`.
 - Visible: `#{history_size}`, `#{cursor_x}`, `#{cursor_y}`, CPR and
   `capture-pane` after any narrowing resize with content in the top rows.
 
+- Also (review_hist_limit_live, reviewer-63, `/tmp/rv/t7.sh`, `t6.sh`): after a reflow of a full history (limit set at creation or lowered live), vtmux's `history_size` is one higher than tmux's: limit 100, 300 styled 130-column lines at 50 columns, `resize-window -x 30` then `-x 50`: tmux 172 then 99, vtmux 173 then 100 (limit 200: 322/189 vs 323/190; 333-335 match). Same family: reflow and the history count differ around the limit.
+
 ## P3. ZWJ sequences do not cluster
 
 - Golden: `fmt_zwj_cursor_x`
