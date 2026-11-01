@@ -3241,3 +3241,162 @@ fn waiting_prompts_answer_the_command_client() {
         );
     }
 }
+
+/// Cells a stream of terminal output writes into the rectangle `(x, y, w, h)`
+/// after the first `skip` bytes: printed characters and erases (ECH, EL),
+/// counted by where the cursor is when they happen, even when they rewrite
+/// what is already there (a diff of the screen would miss those).
+fn writes_into(bytes: &[u8], skip: usize, size: (u16, u16), rect: (u16, u16, u16, u16)) -> usize {
+    let mut term = PaneTerm::new(size.0, size.1, 0);
+    term.feed(&bytes[..skip]);
+    let inside = |col: u16, row: u16| {
+        (rect.0..rect.0 + rect.2).contains(&col) && (rect.1..rect.1 + rect.3).contains(&row)
+    };
+    let text = String::from_utf8_lossy(&bytes[skip..]).into_owned();
+    let chars: Vec<char> = text.chars().collect();
+    let mut writes = 0;
+    let mut at = 0;
+    while at < chars.len() {
+        let mut buf = [0; 4];
+        let ch = chars[at];
+        let (col, row) = term.cursor();
+        if ch == '\x1b' && chars.get(at + 1) == Some(&'[') {
+            // CSI: parameters, then a final byte in 0x40..=0x7e.
+            let mut end_at = at + 2;
+            while end_at < chars.len() && !('\x40'..='\x7e').contains(&chars[end_at]) {
+                end_at += 1;
+            }
+            let params: String = chars[at + 2..end_at].iter().collect();
+            let n: u16 = params
+                .trim_start_matches(|c: char| !c.is_ascii_digit())
+                .split(';')
+                .next()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(1);
+            match chars.get(end_at) {
+                Some('X') => writes += (col..col + n).filter(|&c| inside(c, row)).count(),
+                Some('K') => {
+                    let range = match params.as_str() {
+                        "1" => 0..col + 1,
+                        "2" => 0..size.0,
+                        _ => col..size.0,
+                    };
+                    writes += range.filter(|&c| inside(c, row)).count();
+                }
+                _ => {}
+            }
+            let end = (end_at + 1).min(chars.len());
+            let seq: String = chars[at..end].iter().collect();
+            term.feed(seq.as_bytes());
+            at = end;
+        } else if ch == '\x1b' && chars.get(at + 1) == Some(&']') {
+            // OSC: up to BEL or ST.
+            let mut end_at = at + 2;
+            while end_at < chars.len() && chars[end_at] != '\x07' && chars[end_at] != '\x1b' {
+                end_at += 1;
+            }
+            let end = (if chars.get(end_at) == Some(&'\x1b') {
+                end_at + 2
+            } else {
+                end_at + 1
+            })
+            .min(chars.len());
+            let seq: String = chars[at..end].iter().collect();
+            term.feed(seq.as_bytes());
+            at = end;
+        } else if ch.is_control() {
+            term.feed(ch.encode_utf8(&mut buf).as_bytes());
+            at += 1;
+        } else {
+            writes += usize::from(inside(col, row));
+            term.feed(ch.encode_utf8(&mut buf).as_bytes());
+            at += 1;
+        }
+    }
+    writes
+}
+
+/// tty.c:1425-1455, 2268-2270: tmux trims pane draws to the cells outside
+/// a popup, so pane output never lands in the popup. What it writes there
+/// are its own repaints of the popup, on every full redraw of the client
+/// (here the start timer, tty.c `tty_start_timer_callback`, 5 s after the
+/// attach, which lands inside the flood; 72 border writes in a 3000-line
+/// flood when it did). vtmux composes the popup into one frame and writes
+/// nothing there unless the popup itself changes.
+#[test]
+fn pane_flood_under_a_popup_writes_nothing_into_it() {
+    const SIZE: (u16, u16) = (80, 24);
+    // x, y, w, h of the popup on the client's screen.
+    const RECT: (u16, u16, u16, u16) = (30, 5, 30, 10);
+    // Output every 10 ms for as long as the pane lives.
+    let flood = "i=0; while :; do seq $i $((i+40)); i=$((i+1)); sleep 0.01; done";
+    let mut counts = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let start = Instant::now();
+        let a = w.attach_sized(
+            &["new", "-s", "a", "-n", "w", "sh", "-c", flood],
+            SIZE.0,
+            SIZE.1,
+        );
+        a.wait(|a| pane_text(a).contains("[a] 0:w"));
+        // A CLI display-popup waits until the popup closes (CMD_RETURN_WAIT).
+        let mut popup = Command::new(&w.bin)
+            .args(w.args())
+            .args([
+                "display-popup",
+                "-t",
+                "a",
+                "-w",
+                "30",
+                "-h",
+                "10",
+                "-x",
+                "30",
+                "-y",
+                "15",
+            ])
+            .args(["-T", "popup", "exec cat"])
+            .env_clear()
+            .envs(w.env())
+            .spawn()
+            .unwrap();
+        a.wait(|a| pane_text(a).contains("popup"));
+        thread::sleep(Duration::from_millis(500));
+        let skip = a.bytes.lock().unwrap().len();
+        // Past the start timer (5 s) with the flood still running.
+        while start.elapsed() < Duration::from_millis(7500) {
+            thread::sleep(Duration::from_millis(50));
+        }
+        let bytes = a.bytes.lock().unwrap().clone();
+        assert!(
+            bytes.len() > skip + 20_000,
+            "the flood is running: {} {skip}",
+            bytes.len()
+        );
+        // The popup is intact at the end.
+        let screen = pane_text(&a);
+        let rows: Vec<&str> = screen.lines().collect();
+        let row = |y: u16| -> String {
+            rows[usize::from(y)]
+                .chars()
+                .skip(usize::from(RECT.0))
+                .take(usize::from(RECT.2))
+                .collect()
+        };
+        assert!(row(RECT.1).starts_with('┌'), "{screen}");
+        assert!(row(RECT.1 + RECT.3 - 1).starts_with('└'), "{screen}");
+        counts.push(writes_into(&bytes, skip, SIZE, RECT));
+        let _ = w.cli(&["display-popup", "-C", "-t", "a"]);
+        let _ = popup.wait();
+    }
+    eprintln!(
+        "writes into the popup: vtmux {}, reference {}",
+        counts[0], counts[1]
+    );
+    assert_eq!(counts[0], 0, "vtmux wrote into the popup during the flood");
+    assert!(
+        counts[1] > 0,
+        "the reference repaints its popup during a flood"
+    );
+}
