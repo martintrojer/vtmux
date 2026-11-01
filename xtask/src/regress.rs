@@ -6,9 +6,16 @@
 //! `compat/patches/*.patch` there (`git apply -p1` from the copy's parent with
 //! repository discovery disabled, so patch paths read `a/regress/<test>.sh`), and runs every test with tmux's
 //! Makefile environment (`env -i`), in parallel, with a timeout. Pass means
-//! exit 0. `TMUX_TMPDIR` is deliberately not set: isolation comes from the
-//! tests' own `-L` labels, and `terminal-feature-utf8.sh` re-runs a nested
-//! client under its own `env -i`.
+//! exit 0. Each script gets a private short `TMUX_TMPDIR`, removed afterwards;
+//! its servers are told apart by the tests' own `-L` labels, which end in the
+//! script's `$$`.
+//!
+//! Servers daemonize (setsid), so they leave the script's process group and a
+//! failing or timed-out script never reaches its own `kill-server`. After every
+//! script (pass, fail or timeout) `reap_servers` kills each leftover server of
+//! the binary under test whose label carries that script's pid. Scripts that
+//! set their own `TMUX_TMPDIR`, or run a nested client under `env -i`
+//! (`terminal-feature-utf8.sh`), are covered by the label match, not the dir.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
@@ -17,10 +24,11 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::ref_tmux;
+use crate::{reap, ref_tmux};
 
 const TIMEOUT: Duration = Duration::from_secs(120);
 const REGRESS_REL: &str = "compat/tmux-3.8/regress";
@@ -356,10 +364,89 @@ fn kill_group(pid: u32) {
         .status();
 }
 
+/// Pids of `tmux` processes in `ps` output (`pid args...` per line) whose
+/// global `-L` label has `script_pid` as its first number: the `-LtestA$$`,
+/// `-Li$$`, `-Lcovers-inner-$$-n` convention of the suite. Never `own`.
+fn labelled_pids(ps: &str, tmux: &Path, script_pid: u32, own: u32) -> Vec<u32> {
+    let tmux = tmux.to_string_lossy();
+    reap::pids_where(ps, own, |args| {
+        let Some(rest) = args.strip_prefix(tmux.as_ref()) else {
+            return false;
+        };
+        let words: Vec<&str> = rest.split_whitespace().collect();
+        let label = words
+            .iter()
+            .enumerate()
+            .find_map(|(i, w)| match w.strip_prefix("-L")? {
+                "" => words.get(i + 1).copied(),
+                l => Some(l),
+            });
+        let digits: String = label
+            .unwrap_or("")
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(char::is_ascii_digit)
+            .collect();
+        rest.starts_with(' ') && digits == script_pid.to_string()
+    })
+}
+
+/// Kill every server (and attached client) the script `script_pid` left
+/// behind.
+fn reap_servers(tmux: &Path, script_pid: u32) {
+    reap::kill_matching(|ps| labelled_pids(ps, tmux, script_pid, std::process::id()));
+}
+
+/// A fresh private `TMUX_TMPDIR`. Short and under `/tmp`, never `$TMPDIR` or
+/// `target/`: socket paths must fit `sun_path` (104 bytes on macOS).
+fn private_tmpdir() -> Result<PathBuf> {
+    use std::os::unix::fs::DirBuilderExt;
+    static SEQ: AtomicUsize = AtomicUsize::new(0);
+    let dir = PathBuf::from(format!(
+        "/tmp/vtr-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    Ok(dir)
+}
+
 fn run_one(tmux: &Path, dir: &Path, logs: &Path, name: &str) -> Ran {
-    use std::os::unix::process::CommandExt;
     let start = Instant::now();
-    let outcome = (|| -> Result<Outcome> {
+    let mut script_pid = None;
+    let tmpdir = private_tmpdir();
+    let outcome = tmpdir
+        .as_ref()
+        .map_err(ToString::to_string)
+        .and_then(|t| {
+            run_script(tmux, dir, logs, name, t, start, &mut script_pid).map_err(|e| e.to_string())
+        })
+        .unwrap_or_else(|e| Outcome::Fail(format!("harness error: {e}")));
+    if let Some(pid) = script_pid {
+        reap_servers(tmux, pid);
+    }
+    if let Ok(t) = &tmpdir {
+        let _ = fs::remove_dir_all(t);
+    }
+    Ran {
+        name: name.to_owned(),
+        outcome,
+        secs: start.elapsed().as_secs_f64(),
+    }
+}
+
+fn run_script(
+    tmux: &Path,
+    dir: &Path,
+    logs: &Path,
+    name: &str,
+    tmpdir: &Path,
+    start: Instant,
+    script_pid: &mut Option<u32>,
+) -> Result<Outcome> {
+    use std::os::unix::process::CommandExt;
+    {
         let log = File::create(logs.join(format!("{}.log", name.trim_end_matches(".sh"))))?;
         let mut child = Command::new("sh")
             .args(["-x", name])
@@ -370,11 +457,13 @@ fn run_one(tmux: &Path, dir: &Path, logs: &Path, name: &str) -> Ran {
             .env("TERM", "screen")
             .env("SHELL", "/bin/sh")
             .env("TEST_TMUX", tmux)
+            .env("TMUX_TMPDIR", tmpdir)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
             .process_group(0)
             .spawn()?;
+        *script_pid = Some(child.id());
         loop {
             if let Some(st) = child.try_wait()? {
                 return Ok(if st.success() {
@@ -391,12 +480,6 @@ fn run_one(tmux: &Path, dir: &Path, logs: &Path, name: &str) -> Ran {
             }
             thread::sleep(Duration::from_millis(25));
         }
-    })()
-    .unwrap_or_else(|e| Outcome::Fail(format!("harness error: {e}")));
-    Ran {
-        name: name.to_owned(),
-        outcome,
-        secs: start.elapsed().as_secs_f64(),
     }
 }
 
@@ -653,6 +736,48 @@ fn run_inner() -> Result<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reap::ps;
+
+    #[test]
+    fn labels_select_a_scripts_servers() {
+        let tmux = Path::new("/w/vtmux");
+        let ps = "  10 /w/vtmux -LtestA42 -f/dev/null new -d\n\
+                  11 /w/vtmux -Lcovers-inner-42-3 -f/dev/null attach\n\
+                  12 /w/vtmux -L i42 -f/dev/null new\n\
+                  13 /w/vtmux -LtestA421 -f/dev/null new\n\
+                  14 /w/vtmuxer -LtestA42 x\n\
+                  15 /other/tmux -LtestA42 x\n\
+                  16 /w/vtmux -LtestA42 -f/dev/null new\n\
+                  17 sh -c /w/vtmux -LtestA42\n";
+        assert_eq!(labelled_pids(ps, tmux, 42, 16), [10, 11, 12]);
+    }
+
+    /// A script that fails after starting a "server" (a process whose argv
+    /// names the binary under test and a `-LtestA$$` label) must not leave it
+    /// behind, and runs with a private `TMUX_TMPDIR`.
+    #[test]
+    fn failing_script_leaves_no_server() {
+        let base = workspace_root()
+            .join("target")
+            .join(format!("regress-leak-{}", std::process::id()));
+        fs::create_dir_all(&base).unwrap();
+        fs::write(
+            base.join("leak.sh"),
+            "echo $$ >pid\necho \"$TMUX_TMPDIR\" >tmpdir\n\
+             (bash -c 'exec -a \"$0 -LtestA$1 -f/dev/null new\" sleep 1000' \"$TEST_TMUX\" $$ &)\n\
+             sleep 0.3\nexit 1\n",
+        )
+        .unwrap();
+        let ran = run_one(Path::new("/usr/bin/true"), &base, &base, "leak.sh");
+        assert!(!ran.outcome.passed());
+        let pid = fs::read_to_string(base.join("pid")).unwrap();
+        let label = format!("-LtestA{}", pid.trim());
+        assert!(!ps().contains(&label), "server survived: {label}");
+        let tmpdir = fs::read_to_string(base.join("tmpdir")).unwrap();
+        assert!(tmpdir.trim().starts_with("/tmp/vtr-"), "{tmpdir}");
+        assert!(!Path::new(tmpdir.trim()).exists());
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn globbing() {
