@@ -80,6 +80,10 @@ pub(crate) struct Client {
     unacked: Unacked,
     /// Exit has been queued; close once the output is flushed.
     pub(crate) closing: bool,
+    /// `CLIENT_DEAD` (server-client.c:491): being dropped. Nothing more is
+    /// sent to it, and a second drop (from a write that fails while its
+    /// own lost-client hooks run) does nothing.
+    pub(crate) dead: bool,
     pub(crate) hello: Option<Hello>,
     pub(crate) attached: Option<SessionId>,
     /// Control mode (`-C`) state; `None` for terminal and command clients.
@@ -733,6 +737,7 @@ impl Server {
                             outbuf: Vec::new(),
                             unacked: Unacked::default(),
                             closing: false,
+                            dead: false,
                             hello: None,
                             attached: None,
                             control: None,
@@ -811,6 +816,10 @@ impl Server {
     /// (`cmd_wait_for_client_lost`, then `cmdq_next` drops the dead
     /// client's queue).
     fn drop_client(&mut self, id: ClientId) {
+        match self.clients.get_mut(&id) {
+            Some(c) if !c.dead => c.dead = true,
+            _ => return,
+        }
         // server_client_lost (server-client.c:508-514): client-detached for
         // an attached client, client-closed for a control or terminal one,
         // while the client is still there to name.
@@ -963,7 +972,7 @@ impl Server {
 
     /// Queue a message; write what the socket takes now.
     pub(crate) fn send(&mut self, id: ClientId, msg: &ServerMsg) {
-        let Some(c) = self.clients.get_mut(&id) else {
+        let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead) else {
             return;
         };
         // Large payloads are split so no frame exceeds MAX_FRAME.
@@ -994,7 +1003,7 @@ impl Server {
     }
 
     pub(crate) fn flush_client(&mut self, id: ClientId) {
-        let Some(c) = self.clients.get_mut(&id) else {
+        let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead) else {
             return;
         };
         while !c.outbuf.is_empty() {
