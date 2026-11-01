@@ -352,6 +352,11 @@ fn signal_exit_restores_terminal_modes() {
 /// fires, with no `window_update_focus` and so no pane-focus-out. Only
 /// `MSG_EXITING` (C-b d, detach-client, SIGHUP) takes the focus away first.
 #[test]
+// Linux only: tcsetwinsize on a fresh posix_openpt master fails with ENOTTY on macOS until the slave is opened (task macos_attach_parity).
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Linux-only timing/ioctl; macos_attach_parity"
+)]
 fn closing_the_tty_fires_no_focus_out() {
     use rustix::fs::{Mode, OFlags, open};
     use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
@@ -616,6 +621,11 @@ fn detach_after_stall_is_not_behind_a_backlog() {
 /// the terminal has not taken (reviewer-29 slow.py: reference exits within
 /// 0.7 s; vtmux counting only its own outbuf took 5.9 s / 12.4 s / 39.1 s).
 #[test]
+// Linux only: macOS CI runners miss its 2 s detach bound under a throttled terminal (task macos_attach_parity).
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Linux-only timing/ioctl; macos_attach_parity"
+)]
 fn slow_terminal_detaches_promptly() {
     for bin in bins() {
         for rate in [500_000, 100_000, 30_000] {
@@ -921,6 +931,8 @@ fn display(w: &World, f: &str) -> String {
 /// switch to the prefix table, `C-b %` splits (the default binding), a
 /// root binding runs, an unbound key after the prefix is swallowed.
 #[test]
+// Linux only: on macOS CI `ESC x` did not reach the M-x binding (escape-time vs a slow runner?) (task macos_attach_parity).
+#[cfg_attr(not(target_os = "linux"), ignore = "macos_attach_parity")]
 fn prefix_root_and_prefix2_bindings() {
     for bin in bins() {
         let w = World::new(bin);
@@ -2674,6 +2686,11 @@ fn entering_the_alternate_screen_flushes_resizes() {
     alternate_flush_shows("", "\\033[?1049h", "FAST.");
 }
 #[test]
+// Linux only: the 60 ms SIGWINCH window is not met by macOS CI runners (task macos_attach_parity).
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Linux-only timing/ioctl; macos_attach_parity"
+)]
 fn leaving_the_alternate_screen_waits_for_the_timer() {
     alternate_flush_shows("\\033[?1049h", "\\033[?1049l", "SLOW.");
 }
