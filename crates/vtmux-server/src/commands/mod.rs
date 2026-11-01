@@ -13,6 +13,7 @@
 
 mod break_pane;
 mod capture_pane;
+mod clear_history;
 pub(crate) mod command_prompt;
 pub(crate) mod confirm_before;
 pub(crate) mod copy_mode;
@@ -29,6 +30,7 @@ mod kill_session;
 mod kill_window;
 mod list_buffers;
 mod list_clients;
+mod list_commands;
 mod list_panes;
 mod list_sessions;
 mod list_windows;
@@ -56,6 +58,7 @@ mod set_buffer;
 mod set_environment;
 mod set_option;
 mod show_environment;
+mod show_messages;
 mod show_options;
 pub mod source_file;
 mod split_window;
@@ -140,6 +143,9 @@ pub struct Item {
     /// client once its guard is written (cmd-queue.c:597-598), so its
     /// output reaches that client without guards.
     pub borrow_client: bool,
+    /// The key whose binding this batch runs (`state->event.key`); the
+    /// message log names it.
+    pub key: Option<vtmux_core::keys::Key>,
 }
 
 /// The client's stdout can be used once (`file_write_open` dups it and
@@ -180,6 +186,7 @@ impl Item {
             found: None,
             hook_target: None,
             borrow_client: false,
+            key: None,
         }
     }
 
@@ -238,9 +245,14 @@ impl Item {
         self.status = 1;
         if self.client.is_none() {
             // cmdq_error with no client: a cause while the config loads,
-            // else the server message log, which vtmux has not got.
-            if !server.cfg_finished {
-                let msg = vtmux_core::rawstr::from_bytes(&line);
+            // else the server message log (cmd-queue.c:850-868).
+            let msg = vtmux_core::rawstr::from_bytes(&line);
+            if server.cfg_finished {
+                server.add_message(match &self.source {
+                    Some(src) => format!("message: {}:{}: {msg}", src.file, src.line),
+                    None => format!("message: {msg}"),
+                });
+            } else {
                 let cause = match &self.source {
                     Some(src) => format!("{}:{}: {msg}", src.file, src.line),
                     None => msg,
@@ -248,6 +260,16 @@ impl Item {
                 server.causes.push(cause);
             }
             return;
+        }
+        // A client with no session, or a control client, gets the error
+        // as it is (cmd-queue.c:869); an attached one gets a status
+        // message, which logs itself.
+        if let Some(c) = self.client
+            && (server.client_session(c).is_none() || server.is_control(c))
+        {
+            let msg = vtmux_core::rawstr::from_bytes(&line);
+            let text = format!("{} message: {msg}", server.client_name(c));
+            server.add_message(text);
         }
         let mut line = if self.utf8 {
             line
@@ -458,6 +480,12 @@ fn dispatch(
         "load-buffer" => load_buffer::exec(server, item, args, found),
         "paste-buffer" => paste_buffer::exec(server, args, found),
         "list-buffers" => list_buffers::exec(server, item, args),
+        "list-commands" => list_commands::exec(server, item, args),
+        "show-messages" => {
+            show_messages::exec(server, item, args);
+            Ok(())
+        }
+        "clear-history" => clear_history::exec(server, found),
         "bind-key" | "unbind-key" => keys::bind_or_unbind(server, call),
         "list-keys" => keys::list_keys(server, item, args, found),
         "send-prefix" => keys::send_prefix(server, item, args, found),

@@ -126,7 +126,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("choose-buffer", None, "F:f:K:kNO:rt:yZ", 0, Some(1), "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("choose-client", None, "F:f:hiK:kNO:rt:yZ", 0, Some(1), "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("choose-tree", None, "F:f:GhK:kNO:rst:wyZ", 0, Some(1), "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
-    cmd("clear-history", Some("clearhist"), "Ht:", 0, Some(0), "[-H] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("clear-history", Some("clearhist"), "Ht:", 0, Some(0), "[-H] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("clear-prompt-history", Some("clearphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, true),
     cmd("clock-mode", None, "t:", 0, Some(0), "[-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("command-prompt", None, "1CbeFiklI:NPp:t:T:", 0, Some(1), "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]", None, None, false, true),
@@ -152,7 +152,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("link-window", Some("linkw"), "abdks:t:", 0, Some(0), "[-abdk] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, true),
     cmd("list-buffers", Some("lsb"), "F:f:O:r", 0, Some(0), "[-F format] [-f filter] [-O order]", None, None, false, true),
     cmd("list-clients", Some("lsc"), "F:f:O:rt:", 0, Some(0), "[-F format] [-f filter] [-O order][-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
-    cmd("list-commands", Some("lscm"), "F:", 0, Some(1), "[-F format] [command]", None, None, true, false),
+    cmd("list-commands", Some("lscm"), "F:", 0, Some(1), "[-F format] [command]", None, None, true, true),
     cmd("list-keys", Some("lsk"), "1aF:NO:P:rT:", 0, Some(1), "[-1aNr] [-F format] [-O order] [-P prefix-string][-T key-table] [key]", None, None, true, true),
     cmd("list-panes", Some("lsp"), "aF:f:O:rst:", 0, Some(0), "[-asr] [-F format] [-f filter] [-O order][-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("list-sessions", Some("ls"), "F:f:O:r", 0, Some(0), "[-r] [-F format] [-f filter] [-O order]", None, None, false, true),
@@ -196,7 +196,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("show-buffer", Some("showb"), "b:", 0, Some(0), "[-b buffer-name]", None, None, false, true),
     cmd("show-environment", Some("showenv"), "hgst:", 0, Some(1), "[-hgs] [-t target-session] [variable]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, true),
     cmd("show-hooks", None, "BF:gpt:w", 0, Some(1), "[-Bgpw] [-F format] [-t target-pane] [hook]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
-    cmd("show-messages", Some("showmsgs"), "JTt:", 0, Some(0), "[-JT] [-t target-client]", None, None, false, false),
+    cmd("show-messages", Some("showmsgs"), "JTt:", 0, Some(0), "[-JT] [-t target-client]", None, None, false, true),
     cmd("show-options", Some("show"), "AgF:Hpqst:vw", 0, Some(1), "[-AgHpqsvw] [-F format] [-t target-pane] [option]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("show-prompt-history", Some("showphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, true),
     cmd("show-window-options", Some("showw"), "F:gvt:", 0, Some(1), "[-gv] [-F format] [-t target-window] [option]", Some(slot('t', TargetKind::Window, FindFlags::CANFAIL)), None, false, true),
@@ -426,7 +426,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 73);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 76);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

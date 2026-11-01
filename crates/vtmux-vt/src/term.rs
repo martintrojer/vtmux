@@ -830,6 +830,37 @@ impl PaneTerm {
         }
     }
 
+    /// `grid_clear_history` (grid.c:515-525), as `clear-history` calls it on
+    /// the pane's base grid (cmd-capture-pane.c:426): every history row
+    /// goes, the visible screen stays, and history ids stop naming rows
+    /// (`scroll_generation`). Under the alternate screen the primary
+    /// history is the one cleared, as for ED3 (input.c:1758): it goes
+    /// when the primary screen is back.
+    ///
+    /// Ghostty has no scrollback-clear call that is safe in the middle of
+    /// an escape sequence (`CSI 3 J` fed here would corrupt one in flight),
+    /// so the history is erased by taking its byte budget to zero, which
+    /// "erases retained history", and putting the budget back.
+    pub fn clear_history(&mut self) {
+        self.generation += 1;
+        if self.alternate_on() {
+            self.frozen = Some(Vec::new());
+            self.hsize = 0;
+            self.clear_primary_history = true;
+            return;
+        }
+        if !self.history {
+            return;
+        }
+        let budget = self.term.scrollback_max_bytes().ok().flatten();
+        let _ = self.term.set_scrollback_max_bytes(Some(0));
+        let _ = self.term.set_scrollback_max_bytes(budget);
+        self.hsize = 0;
+        self.times.clear();
+        self.times_base = self.scrolled;
+        self.clamp_history_to_retained();
+    }
+
     /// A new `history-limit` for a running pane (`session_update_history`,
     /// session.c:825-847): the limit is the pane's own from now on, and a
     /// history at or over it is collected at once down to exactly the limit
@@ -2211,6 +2242,55 @@ mod tests {
                 assert!(t.history_size() <= 1000, "{what}");
             }
         }
+    }
+
+    /// `clear-history` (`grid_clear_history`): the history goes, the
+    /// visible rows stay, ids change, and the pane keeps collecting history
+    /// within its limit afterwards, on the primary screen or under the
+    /// alternate one.
+    #[test]
+    fn clear_history_keeps_the_screen_and_the_limit() {
+        for styled in [false, true] {
+            let mut t = PaneTerm::new(80, 10, 1000);
+            t.feed(&lines(0, 3000, styled));
+            let screen = |t: &PaneTerm| {
+                (0..10)
+                    .map(|y| t.row(t.history_size() + y).text())
+                    .collect::<Vec<_>>()
+            };
+            let visible = screen(&t);
+            let generation = t.history_generation();
+            assert!(t.history_size() > 0);
+            t.clear_history();
+            assert_eq!(
+                (t.history_size(), t.retained_rows()),
+                (0, 0),
+                "styled={styled}"
+            );
+            assert_ne!(t.history_generation(), generation);
+            assert_eq!(screen(&t), visible, "styled={styled}");
+            // A second clear on an empty history is a no-op.
+            t.clear_history();
+            assert_eq!(t.history_size(), 0);
+            t.feed(&lines(3000, 3000, styled));
+            assert!(t.history_size() > 0 && t.history_size() <= 1000);
+            assert_retention(&t, &format!("after clear styled={styled}"));
+
+            // Under the alternate screen the primary history goes, and is
+            // gone when the primary screen is back.
+            t.feed(b"\x1b[?1049h");
+            t.clear_history();
+            assert_eq!(t.history_size(), 0);
+            t.feed(b"\x1b[?1049l");
+            assert_eq!((t.history_size(), t.retained_rows()), (0, 0));
+            t.feed(&lines(0, 3000, styled));
+            assert_retention(&t, &format!("after alt clear styled={styled}"));
+        }
+        // A pane with no history has nothing to clear and stays so.
+        let mut t = PaneTerm::new(80, 10, 0);
+        t.feed(&lines(0, 100, false));
+        t.clear_history();
+        assert_eq!(t.history_size(), 0);
     }
 
     /// A reset (RIS), a history clear (ED3) and the alternate screen keep

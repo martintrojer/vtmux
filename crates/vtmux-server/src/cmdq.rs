@@ -126,6 +126,19 @@ pub struct Cmdq {
     dirty: bool,
     /// The queue and state of the step firing now.
     current_state: Option<(QueueId, Rc<StepState>)>,
+    /// The server message log, oldest first (`message_log`).
+    messages: VecDeque<Message>,
+    /// `message_next`: the number the next message takes.
+    message_next: u32,
+}
+
+/// One entry of the message log (`struct message_entry`).
+#[derive(Debug)]
+pub struct Message {
+    pub number: u32,
+    /// Seconds since the epoch.
+    pub time: i64,
+    pub text: String,
 }
 
 impl Cmdq {
@@ -296,6 +309,51 @@ impl NewBatch {
 }
 
 impl Server {
+    /// `server_add_message` (server.c:539-566): log `text`, then drop what
+    /// `message-limit` no longer keeps.
+    pub(crate) fn add_message(&mut self, text: String) {
+        let limit = self
+            .model
+            .number_option(vtmux_core::options::TreeId::Server, "message-limit");
+        let limit = u32::try_from(limit).unwrap_or(u32::MAX);
+        let q = &mut self.cmdq;
+        q.messages.push_back(Message {
+            number: q.message_next,
+            time: crate::model::now_epoch(),
+            text,
+        });
+        q.message_next = q.message_next.wrapping_add(1);
+        while let Some(m) = q.messages.front() {
+            if m.number.wrapping_add(limit) >= q.message_next {
+                break;
+            }
+            q.messages.pop_front();
+        }
+    }
+
+    /// The message log, newest first (the order `show-messages` prints).
+    pub(crate) fn messages_newest_first(&self) -> impl Iterator<Item = &Message> {
+        self.cmdq.messages.iter().rev()
+    }
+
+    /// `cmdq_add_message` (cmd-queue.c:534-567): every command fired once
+    /// the config has loaded is logged, with the client and the key that
+    /// ran it.
+    fn cmdq_add_message(&mut self, item: &Item, call: &CommandCall) {
+        let text = call.print();
+        let line = match item.client {
+            Some(c) => {
+                let name = self.client_name(c);
+                match item.key.filter(|_| self.client_session(c).is_some()) {
+                    Some(key) => format!("{name} key {}: {text}", key.name(false)),
+                    None => format!("{name} command: {text}"),
+                }
+            }
+            None => format!("command: {text}"),
+        };
+        self.add_message(line);
+    }
+
     /// `cmdq_append`: a new batch at the end of queue `q`. Returns the ID of
     /// its first step, `None` if `q`'s client has gone.
     pub(crate) fn cmdq_append(&mut self, q: QueueId, batch: NewBatch) -> Option<StepId> {
@@ -533,6 +591,9 @@ impl Server {
                 if !self.cmd_formats.iter().any(|(k, _)| k == "command") {
                     self.cmd_formats
                         .push(("command".to_owned(), call.entry.name.to_owned()));
+                }
+                if self.cfg_finished {
+                    self.cmdq_add_message(&item, &call);
                 }
                 let ok = commands::fire(self, &mut item, &call);
                 self.info.current_file = outer;

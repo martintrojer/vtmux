@@ -55,7 +55,7 @@ reason = "not implemented (M0 baseline)"
 
 [tests."clear-on-attach.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs pipe-pane (the script captures the outer client's output with `pipe-pane -O`), not clear-history; it fails with `not implemented in vtmux yet: pipe-pane`"
 
 [tests."client-key-order-focus.sh"]
 status = "pass"
@@ -388,8 +388,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."list-commands.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."list-keys-sort-name.sh"]
 status = "pass"
