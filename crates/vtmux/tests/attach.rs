@@ -4111,3 +4111,66 @@ fn set_titles_needs_the_title_feature() {
         a.exited(0);
     }
 }
+
+/// The screen as plain text, trailing spaces trimmed per line.
+fn screen_text(a: &Attached) -> String {
+    String::from_utf8(capture(&a.screen(), CaptureOpts::default()))
+        .unwrap()
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The owner's `bind S choose-tree -sZ -O name` (dotfiles .tmux.conf:132)
+/// and the default `s` and `w` bindings (`choose-tree -Zs`, `-Zw`,
+/// key-bindings.c:439,443): the tree opens zoomed on the current session
+/// or window, sessions by name; Enter switches the client
+/// (`switch-client -Zt`) and the window is unzoomed when the mode goes.
+#[test]
+fn choose_tree_bindings_s_w_and_owner_s() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&[
+            "new", "-d", "-s", "mmm", "-n", "a", "-x", "60", "-y", "12", "cat",
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["splitw", "-d", "-t", "mmm", "cat"]);
+        w.cli(&["new", "-d", "-s", "bbb", "-n", "b", "cat"]);
+        w.cli(&["neww", "-d", "-t", "bbb:1", "-n", "c", "cat"]);
+        w.cli(&["new", "-d", "-s", "zzz", "-n", "d", "cat"]);
+        for p in ["%0", "%1", "%2", "%3", "%4"] {
+            w.cli(&["select-pane", "-t", p, "-T", "t"]);
+        }
+        w.cli(&["bind", "S", "choose-tree", "-sZ", "-O", "name"]);
+        let mut a = w.attach_sized(&["attach", "-t", "mmm"], 60, 12);
+        a.wait(|a| status_row(a).contains("[mmm]"));
+        let mut seen = Vec::new();
+        let show = |w: &World, f: &str| {
+            String::from_utf8_lossy(&w.cli(&["display", "-p", "-t", "mmm", f]).stdout)
+                .trim()
+                .to_owned()
+        };
+        let zoomed = |w: &World| show(w, "#{window_zoomed_flag}");
+        for keys in [&b"\x02S"[..], b"\x02s", b"\x02w"] {
+            a.keys(keys);
+            a.wait(|a| screen_text(a).contains("(0)"));
+            seen.push(screen_text(&a));
+            seen.push(zoomed(&w));
+            a.keys(b"q");
+            a.wait(|a| !screen_text(a).contains("(0)"));
+            seen.push(zoomed(&w));
+        }
+        // C-b S, to the last session (zzz), Enter: the client moves there
+        // and the window it left is unzoomed.
+        a.keys(b"\x02S");
+        a.wait(|a| screen_text(a).contains("(2)"));
+        a.keys(b"G\r");
+        a.wait(|a| status_row(a).contains("[zzz]"));
+        seen.push(screen_text(&a));
+        seen.push(zoomed(&w));
+        results.push(seen);
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}
