@@ -1,0 +1,773 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "panes_mode_copy_over_stack",
+  "inputs": {
+    "name": "panes_mode_copy_over_stack",
+    "size": [
+      60,
+      20
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "19",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-mode-changed",
+          "set -ag @log '[#{pane_id}:#{pane_mode}]'"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "x"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
+          "-t",
+          "%1"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%1",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "x"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%1",
+          "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                         \\e[31m30x19\\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[34m29x19",
+          "\\e[39m                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "            \\e[41m     \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m \\e[49m   \\e[41m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m \\e[49m   \\e[41m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m \\e[49m   \\e[41m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m     \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*Z\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          31,
+          18
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 panes-mode 1 2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "not in a mode\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 copy-mode 0 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 copy-mode 0 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                         \\e[30m\\e[43m[0/0]\\e[33m\\e[49m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0  0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 clock-mode 0 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "                              \\e[33m│\\e[39m",
+          "\\e[34m\\e[44m#####\\e[39m\\e[49m \\e[34m\\e[44m#####\\e[39m\\e[49m       \\e[34m\\e[44m#####\\e[39m\\e[49m \\e[34m\\e[44m#####\\e[39m\\e[49m \\e[33m│\\e[39m",
+          "    \\e[34m\\e[44m#\\e[39m\\e[49m     \\e[34m\\e[44m#\\e[39m\\e[49m   \\e[34m\\e[44m#\\e[39m\\e[49m   \\e[34m\\e[44m#\\e[39m\\e[49m   \\e[34m\\e[44m#\\e[39m\\e[49m     \\e[34m\\e[44m#\\e[39m\\e[49m \\e[33m│\\e[39m",
+          "\\e[34m\\e[44m#####\\e[39m\\e[49m \\e[34m\\e[44m#####\\e[39m\\e[49m       \\e[34m\\e[44m#\\e[39m\\e[49m   \\e[34m\\e[44m#\\e[39m\\e[49m     \\e[34m\\e[44m#\\e[39m\\e[49m \\e[33m│\\e[39m",
+          "\\e[34m\\e[44m#\\e[39m\\e[49m     \\e[34m\\e[44m#\\e[39m\\e[49m       \\e[34m\\e[44m#\\e[39m\\e[49m   \\e[34m\\e[44m#\\e[39m\\e[49m   \\e[34m\\e[44m#\\e[39m\\e[49m     \\e[34m\\e[44m#\\e[39m\\e[49m \\e[33m│\\e[39m",
+          "\\e[34m\\e[44m#####\\e[39m\\e[49m \\e[34m\\e[44m#####\\e[39m\\e[49m       \\e[34m\\e[44m#####\\e[39m\\e[49m     \\e[34m\\e[44m#\\e[39m\\e[49m \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "                              \\e[37m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          29,
+          10
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0  0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%1 panes-mode 1 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                         \\e[31m30x19\\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[34m29x19",
+          "\\e[39m                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "            \\e[41m     \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m \\e[49m   \\e[41m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m \\e[49m   \\e[41m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m \\e[49m   \\e[41m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "            \\e[41m     \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[44m \\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*Z\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          31,
+          18
+        ]
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0  0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}][#{pane_id}:#{pane_mode}]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0  0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%1 panes-mode 0 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
