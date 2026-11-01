@@ -1,0 +1,15 @@
+name = "panes_mode_sendkeys_literal"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { attach = { session = "a" } },
+  { run = ["send-keys", "-t", "%0", "-l", "visible"] },
+  { run = ["display-panes", "-d", "0", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["send-keys", "-t", "%0", "-l", "zz"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id} #{pane_mode} #{window_zoomed_flag}"] },
+  { screen = {} },
+]

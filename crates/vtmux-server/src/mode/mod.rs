@@ -271,6 +271,14 @@ impl Model {
         self.redraw(Redraw::WindowStatus(w));
     }
 
+    /// Whether `window_pane_set_mode` goes on for a mode: the pane exists
+    /// and `is_same` is false of the mode on top (window.c:1751-1752).
+    pub(crate) fn pane_may_enter(&self, p: PaneId, is_same: impl Fn(&Mode) -> bool) -> bool {
+        self.panes
+            .get(&p)
+            .is_some_and(|x| !x.modes.first().is_some_and(is_same))
+    }
+
     /// `window_pane_set_mode` for copy mode, `mode` built only if the pane
     /// is not in copy mode already. Returns whether the mode was entered
     /// (tmux's 0); a mode already on top is left alone, one further down
@@ -281,12 +289,26 @@ impl Model {
         kill: bool,
         mode: impl FnOnce(&Model) -> CopyMode,
     ) -> bool {
-        let Some(pane) = self.panes.get(&p) else {
-            return false;
-        };
-        if matches!(pane.modes.first(), Some(Mode::Copy(_))) {
+        if self
+            .panes
+            .get(&p)
+            .is_none_or(|pane| matches!(pane.modes.first(), Some(Mode::Copy(_))))
+        {
             return false;
         }
+        self.push_copy_mode(p, kill, mode)
+    }
+
+    /// The rest of `window_pane_set_mode` for copy mode, after the check
+    /// for it on top: the copy mode further down comes to the top, else
+    /// one is made.
+    fn push_copy_mode(
+        &mut self,
+        p: PaneId,
+        kill: bool,
+        mode: impl FnOnce(&Model) -> CopyMode,
+    ) -> bool {
+        let pane = &self.panes[&p];
         let existing = pane.modes.iter().position(|m| matches!(m, Mode::Copy(_)));
         let mut entry = match existing {
             Some(i) => self.panes.get_mut(&p).expect("pane").modes.remove(i),
@@ -438,6 +460,37 @@ impl Server {
 }
 
 impl Server {
+    /// `window_pane_set_mode` for copy mode (window.c:1747-1775): nothing
+    /// if it is on top, else a `NO_STACK` mode on top is reset first
+    /// (firing its own events) and copy mode is entered anyway, even when
+    /// the reset brought it to the top.
+    pub(crate) fn enter_copy_mode(
+        &mut self,
+        p: PaneId,
+        kill: bool,
+        mode: impl FnOnce(&Model) -> CopyMode,
+    ) -> bool {
+        if !self.model.pane_may_enter(p, |m| matches!(m, Mode::Copy(_))) {
+            return false;
+        }
+        self.reset_no_stack(p);
+        self.model.push_copy_mode(p, kill, mode)
+    }
+
+    /// `window_pane_set_mode`'s `WINDOW_MODE_NO_STACK` reset of the mode on
+    /// top (window.c:1755-1756).
+    pub(crate) fn reset_no_stack(&mut self, p: PaneId) {
+        if self
+            .model
+            .panes
+            .get(&p)
+            .and_then(|x| x.modes.first())
+            .is_some_and(Mode::no_stack)
+        {
+            self.reset_mode(p);
+        }
+    }
+
     /// `window_pane_key` for a pane in a mode (window.c:2080-2092): the
     /// shown mode's own `key` callback gets it, with the client it came
     /// from, after the mode's prompt. Only panes mode has such a callback;

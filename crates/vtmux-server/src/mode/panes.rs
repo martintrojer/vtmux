@@ -10,10 +10,13 @@
 //! zoomed before; a preview of the pane's screen is kept from before the
 //! zoom.
 //!
-//! The screen is drawn by [`crate::render::panes`] each frame from the
-//! pane screens kept in the mode, which tmux draws once at `init` and at
-//! every resize ([`PanesMode::frozen`]); option and format changes show at
-//! the next frame, where tmux keeps its drawing. The mouse (`KEYC_MOUSEDOWN1_PANE`) and
+//! The screen is drawn by [`crate::render::panes`] each frame from what
+//! the mode read when tmux draws: once at `init` and at every resize of
+//! the pane ([`PanesMode::drawn`]: the layout, pane order and numbers, the
+//! active pane, the pane screens and the format text). Panes made, killed,
+//! swapped or selected afterwards are not in it, as in tmux. The styles and
+//! colours are read at each frame, where tmux's are in the drawing already.
+//! The mouse (`KEYC_MOUSEDOWN1_PANE`) and
 //! the floating layer are not here yet, so neither the click areas nor the
 //! floating borders are.
 //!
@@ -31,6 +34,7 @@ use vtmux_core::cmd::{ArgValue, Args, CmdError, CommandList};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::keys::Key;
+use vtmux_core::layout::Layout;
 use vtmux_core::options::TreeId;
 use vtmux_vt::Snapshot;
 
@@ -45,6 +49,25 @@ use crate::target::{Found, Origin};
 enum Template {
     Block(CommandList),
     Text(String),
+}
+
+/// What `window_panes_draw_screen` read when it drew: the window's layout,
+/// the tiled panes with the index each had, the active pane and every
+/// pane's screen. Panes created, killed, swapped or selected afterwards
+/// are not in the drawing until the pane is resized.
+#[derive(Clone, Debug)]
+pub struct Drawn {
+    pub layout: Layout,
+    pub tiled: Vec<(PaneId, u32)>,
+    pub active: PaneId,
+    pub screens: BTreeMap<PaneId, Snapshot>,
+    /// `display-panes-format` expanded for each tiled pane then (it shows
+    /// the pane's size and title of that moment); empty when unset.
+    pub formats: BTreeMap<PaneId, String>,
+    /// `display-panes-format` was not empty then.
+    pub format_set: bool,
+    /// The size of the drawing: the pane's.
+    pub size: (u16, u16),
 }
 
 /// `struct window_panes_modedata`.
@@ -62,11 +85,10 @@ pub struct PanesMode {
     unzoom_on_exit: bool,
     /// The target pane's screen from before the zoom (`data->preview`).
     pub preview: Option<Snapshot>,
-    /// Every pane's screen as it was when the numbers were last drawn
-    /// (window-panes.c draws at `init` and in `resize`, not again).
-    pub frozen: BTreeMap<PaneId, Snapshot>,
-    /// The size of that drawing: the pane's.
-    pub size: (u16, u16),
+    /// What the numbers were last drawn from (window-panes.c draws at
+    /// `init` and in `resize`, not again); none until the source window
+    /// was found.
+    pub drawn: Option<Drawn>,
     /// When the timeout ends the mode; none for `-d 0`.
     deadline: Option<Instant>,
     template: Template,
@@ -158,8 +180,7 @@ pub fn enter(
         ignore_keys: args.flag('N'),
         unzoom_on_exit: zoom,
         preview: zoom.then(|| vtmux_vt::snapshot(&server.model.panes[&p].term)),
-        frozen: BTreeMap::new(),
-        size: (0, 0),
+        drawn: None,
         deadline: (delay != 0)
             .then(|| Instant::now() + Duration::from_millis(u64::try_from(delay).unwrap_or(0))),
         template,
@@ -191,26 +212,69 @@ pub fn enter(
 }
 
 impl crate::model::Model {
-    /// `window_panes_draw_screen`'s reading of the panes: every pane of
-    /// the source window as it is now, kept in pane `p`'s mode.
-    fn panes_redrawn(&mut self, p: PaneId) {
+    /// `window_panes_draw_screen`'s reading of the source window, kept in
+    /// pane `p`'s mode at the moment it runs: `window_panes_init`, or
+    /// `window_pane_resize` while a command's `layout_fix_panes` is still
+    /// walking the panes (a pane not yet reached has its old size, which
+    /// the format shows). Nothing changes if the window is gone
+    /// (`window_panes_get_source` fails and the old drawing stays).
+    pub(crate) fn panes_redrawn(&mut self, p: PaneId) {
         let Some(Mode::Panes(m)) = self.panes.get(&p).and_then(|x| x.modes.first()) else {
             return;
         };
         let Some(window) = self.windows.get(&m.source_window) else {
             return;
         };
-        let frozen = window
+        let tiled: Vec<(PaneId, u32)> = window
+            .panes
+            .panes
+            .iter()
+            .filter(|q| !window.is_floating(**q))
+            .filter_map(|q| Some((*q, self.pane_index(*q)?)))
+            .collect();
+        let screens = window
             .panes
             .panes
             .iter()
             .filter_map(|q| Some((*q, vtmux_vt::snapshot(&self.panes.get(q)?.term))))
             .collect();
+        let format = self
+            .options
+            .get(
+                TreeId::Window(self.panes[&p].window),
+                "display-panes-format",
+            )
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default();
+        let formats = match (source_link(self, m), &self.format_base) {
+            (Some((session, index)), Some(base)) if !format.is_empty() => tiled
+                .iter()
+                .map(|(q, _)| {
+                    let found = Found {
+                        session: Some(session),
+                        index: Some(index),
+                        window: Some(m.source_window),
+                        pane: Some(*q),
+                        new_index: None,
+                    };
+                    let ctx = crate::format_ctx::Ctx::new(self, &base.0, &base.1, found);
+                    (*q, vtmux_core::format::expand_str(&format, &ctx))
+                })
+                .collect(),
+            _ => BTreeMap::new(),
+        };
         let term = &self.panes[&p].term;
-        let size = (term.cols(), term.rows());
+        let drawn = Drawn {
+            layout: window.full_layout().clone(),
+            tiled,
+            active: window.active(),
+            screens,
+            formats,
+            format_set: !format.is_empty(),
+            size: (term.cols(), term.rows()),
+        };
         if let Some(Mode::Panes(m)) = self.panes.get_mut(&p).and_then(|x| x.modes.first_mut()) {
-            m.frozen = frozen;
-            m.size = size;
+            m.drawn = Some(drawn);
         }
     }
 
@@ -228,7 +292,7 @@ impl crate::model::Model {
             .filter(|q| {
                 self.panes.get(q).is_some_and(|x| {
                     matches!(x.modes.first(), Some(Mode::Panes(m))
-                        if m.size != (x.term.cols(), x.term.rows()))
+                        if m.drawn.as_ref().is_none_or(|d| d.size != (x.term.cols(), x.term.rows())))
                 })
             })
             .collect();
@@ -469,6 +533,52 @@ mod tests {
         assert_eq!(server.panes_key_pane(&m, Key::ascii(b'a')), None);
         assert_eq!(server.panes_key_pane(&m, Key::ascii(b'0').ctrl()), None);
         assert_eq!(server.panes_key_pane(&m, Key::ascii(b'a').meta()), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// window.c:1750-1756: copy mode over panes mode resets panes mode
+    /// (exited and changed) and then enters copy mode (entered and changed)
+    /// even though that left copy mode, which was under it, on top.
+    #[test]
+    fn copy_mode_over_panes_mode_fires_both() {
+        let (mut server, p, _, _, dir) = setup();
+        enter_for(&mut server, p, &["-d", "0"]).unwrap();
+        assert_eq!(server.model.panes[&p].modes.len(), 2);
+        server.model.events.clear();
+        let entered = server.enter_copy_mode(p, false, |m| {
+            crate::mode::CopyMode::new(
+                &m.panes[&p].term,
+                (20, 5),
+                false,
+                (false, false),
+                false,
+                None,
+            )
+        });
+        assert!(entered);
+        let names: Vec<String> = server
+            .model
+            .events
+            .iter()
+            .filter_map(|q| match q {
+                crate::events::Queued::Event(e) => Some(e.name.clone()),
+                crate::events::Queued::Focus(_) => None,
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "pane-mode-exited",
+                "pane-mode-changed",
+                "pane-mode-entered",
+                "pane-mode-changed"
+            ]
+        );
+        assert_eq!(server.model.panes[&p].modes.len(), 1);
+        // Already on top: nothing at all.
+        server.model.events.clear();
+        assert!(!server.enter_copy_mode(p, false, |_| unreachable!()));
+        assert!(server.model.events.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -18,7 +18,7 @@ use crate::sys;
 use crate::target::Found;
 
 /// Server-wide values formats can read.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ServerInfo {
     pub socket_path: String,
     pub pid: u32,

@@ -263,6 +263,11 @@ pub struct Model {
     /// output is frozen under a message; cleared once every client drew
     /// (server-client.c:1929-1940).
     pub(crate) redraw_panes: std::collections::BTreeSet<PaneId>,
+    /// The server's own info and environment, which a drawing made inside
+    /// the model (`display-panes-format`) expands formats with. Set by
+    /// the server; `#{current_file}` is empty there.
+    pub(crate) format_base:
+        Option<std::rc::Rc<(crate::format_ctx::ServerInfo, crate::environ::Environ)>>,
     /// Events fired since the sinks last heard ([`crate::events`]).
     pub events: Vec<crate::events::Queued>,
 }
@@ -285,6 +290,7 @@ impl Default for Model {
             alerts_list: Vec::new(),
             redraws: Vec::new(),
             redraw_panes: std::collections::BTreeSet::new(),
+            format_base: None,
             events: Vec::new(),
         }
     }

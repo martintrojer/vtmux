@@ -452,9 +452,11 @@ impl Server {
         );
         let mut model = Model::default();
         model.options = OptionsStore::new(&defaults);
+        let info = ServerInfo::new(socket.to_string_lossy().into_owned());
+        model.format_base = Some(std::rc::Rc::new((info.clone(), global_env.clone())));
         let mut server = Self {
             model,
-            info: ServerInfo::new(socket.to_string_lossy().into_owned()),
+            info,
             global_env,
             shutdown: false,
             source_depths: BTreeMap::new(),
