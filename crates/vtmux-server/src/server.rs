@@ -544,6 +544,7 @@ impl Server {
             self.drain_events();
             self.cmdq_process();
             self.apply_redraws();
+            self.tree_updates();
             self.render_clients();
             self.model.redraw_panes.clear();
             self.send_pane_resizes();
@@ -1683,7 +1684,7 @@ impl Server {
         // A pane in a mode gives the key to the mode, and copy mode takes
         // keys only through its table (no `key` callback).
         if !pane.modes.is_empty() {
-            self.mode_key(p, c, key.to_core());
+            self.mode_key(p, c, key.to_core(), true);
             return;
         }
         let modes = crate::keys::KeyModes {

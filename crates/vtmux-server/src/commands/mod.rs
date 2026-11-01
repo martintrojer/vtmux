@@ -13,6 +13,7 @@
 
 mod break_pane;
 mod capture_pane;
+mod choose_tree;
 mod clear_history;
 pub(crate) mod clock_mode;
 pub(crate) mod command_prompt;
@@ -50,6 +51,7 @@ mod respawn_pane;
 mod respawn_window;
 mod rotate_window;
 mod run_shell;
+pub(crate) use run_shell::make_commands;
 mod save_buffer;
 mod select_layout;
 mod select_pane;
@@ -475,6 +477,7 @@ fn dispatch(
         "send-keys" => send_keys::exec(server, item, args, found),
         "clock-mode" => clock_mode::exec(server, found),
         "copy-mode" => copy_mode::exec(server, item, args, source, found),
+        "choose-tree" => choose_tree::exec(server, item, args, found),
         "set-buffer" => set_buffer::exec(server, item, args),
         "delete-buffer" => delete_buffer::exec(server, args),
         "show-buffer" => save_buffer::exec(server, item, args, found, true),
