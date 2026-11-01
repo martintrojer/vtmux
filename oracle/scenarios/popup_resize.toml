@@ -1,0 +1,45 @@
+# A client resize moves and clips an open popup (popup.c popup_resize_cb:
+# the opening size and position are the preference, fitted to the new
+# terminal; the job's terminal follows, so its SIGWINCH handler prints the
+# new `stty size` on a fresh line: output starting a row is what the
+# compositor's one-frame model reproduces exactly). The popup is opened through a bind (a CLI display-popup
+# waits until it closes) and closed with display-popup -C.
+name = "popup_resize"
+size = [60, 16]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "15", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["bind", "-n", "M-a", "display-popup", "-w", "30", "-h", "8", "-x", "25", "-y", "6", "sh", "-c", "trap 'printf \"\\n%s\" \"$(stty size)\"' WINCH; printf \"%s\" \"$(stty size)\"; sleep 100000 & while :; do wait; done"] },
+  { run = ["bind", "-n", "M-b", "display-popup", "-B", "-w", "20", "-h", "5", "-x", "30", "-y", "8", "sh", "-c", "trap 'printf \"\\n%s\" \"$(stty size)\"' WINCH; printf \"%s\" \"$(stty size)\"; sleep 100000 & while :; do wait; done"] },
+  { attach = { session = "a" } },
+  { keys = "\u001ba" },
+  { screen = {} },
+  { resize = [40, 12] },
+  { screen = {} },
+  { resize = [20, 6] },
+  { screen = {} },
+  { resize = [30, 3] },
+  { screen = {} },
+  { resize = [2, 12] },
+  { screen = {} },
+  { resize = [60, 16] },
+  { screen = {} },
+  { resize = [50, 10] },
+  { screen = {} },
+  { resize = [60, 16] },
+  { screen = {} },
+  { run = ["display-popup", "-C"] },
+  { settle = { react = true } },
+  { keys = "\u001bb" },
+  { screen = {} },
+  { resize = [40, 10] },
+  { screen = {} },
+  { resize = [16, 4] },
+  { screen = {} },
+  { resize = [60, 16] },
+  { screen = {} },
+  { run = ["display-popup", "-C"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

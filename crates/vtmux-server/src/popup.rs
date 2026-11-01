@@ -73,6 +73,9 @@ pub struct Open {
 
 /// One client's popup (`struct popup_data`).
 pub struct Popup {
+    /// The size and position it was opened with (`ppx`, `ppy`, `psx`,
+    /// `psy`): a client resize fits them to the new terminal again.
+    pub(crate) preferred: (u16, u16, u16, u16),
     pub px: u16,
     pub py: u16,
     pub sx: u16,
@@ -217,6 +220,7 @@ impl Server {
         // screen_set_default_cursor and no history: a popup keeps none.
         let term = PaneTerm::new(jx.max(1), jy.max(1), 0);
         let popup = Popup {
+            preferred: (open.px, open.py, open.sx, open.sy),
             px: open.px,
             py: open.py,
             sx: open.sx,
@@ -288,6 +292,31 @@ impl Server {
             p.rules = rules;
         }
         self.redraw_client(c);
+    }
+
+    /// `popup_resize_cb` (popup.c:285-322): the client's terminal changed
+    /// size. The popup keeps its preferred rectangle where it fits, else is
+    /// clipped to the terminal and moved back inside; its terminal and job
+    /// follow, unless a bordered popup shrank to 2 cells or fewer.
+    pub(crate) fn popup_resize(&mut self, c: ClientId) {
+        let Some((cols, rows)) = self.tty_size(c) else {
+            return;
+        };
+        let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
+            return;
+        };
+        let (ppx, ppy, psx, psy) = p.preferred;
+        p.sy = psy.min(rows);
+        p.sx = psx.min(cols);
+        p.py = if ppy + p.sy > rows { rows - p.sy } else { ppy };
+        p.px = if ppx + p.sx > cols { cols - p.sx } else { ppx };
+        if p.lines == BoxLines::None || (p.sx > 2 && p.sy > 2) {
+            let (jx, jy) = p.inner();
+            p.term.resize(jx.max(1), jy.max(1));
+            if let Some(io) = &p.io {
+                let _ = io.resize(jx.max(1), jy.max(1));
+            }
+        }
     }
 
     /// `server_client_clear_overlay` for a popup (`popup_free_cb`): the job
