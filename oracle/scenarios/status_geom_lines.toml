@@ -1,7 +1,7 @@
 name = "status_geom_lines"
 size = [40, 10]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "sh"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh", "-c", "printf '$ '; while read l; do eval \"$l\"; printf '$ '; done"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },
   { run = ["set", "-g", "status-format[1]", ""] },
   { run = ["set", "-g", "status-format[2]", ""] },

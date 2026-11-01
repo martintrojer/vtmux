@@ -1,7 +1,7 @@
 name = "status_geom_off"
 size = [40, 8]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "sh"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "sh", "-c", "printf '$ '; while read l; do eval \"$l\"; printf '$ '; done"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },
   { run = ["splitw", "-v", "-t", "a", "sh", "-c", "printf 'B '; exec cat"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },

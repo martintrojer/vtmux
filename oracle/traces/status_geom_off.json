@@ -17,7 +17,9 @@
           "a",
           "-n",
           "w",
-          "sh"
+          "sh",
+          "-c",
+          "printf '$ '; while read l; do eval \"$l\"; printf '$ '; done"
         ]
       },
       {
@@ -145,7 +147,7 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
@@ -183,7 +185,7 @@
       "observation": {
         "kind": "screen",
         "rows": [
-          "sh-5.3$",
+          "$",
           "",
           "",
           "",
