@@ -325,7 +325,7 @@ impl StatusLine {
                 *cell = theme.cell(drawn);
             }
             let bgs: Vec<Colour> = drawn.iter().map(|c| c.style.bg).collect();
-            draw_line_by(cells, &bgs, Colour::Default, caps.bce, false);
+            draw_line_by(cells, &bgs, Colour::Default, caps.clear(), false);
         }
     }
 
