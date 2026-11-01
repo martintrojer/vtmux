@@ -146,8 +146,7 @@ status = "pass"
 status = "pass"
 
 [tests."copy-mode-test-emacs.sh"]
-status = "xfail"
-reason = "D-011: Ghostty keeps no TAB cells, so copying a tab-indented line gives eight spaces where tmux copies a TAB (d_tab_capture); every other assertion passes"
+status = "pass"
 
 [tests."copy-mode-test-vi.sh"]
 status = "pass"

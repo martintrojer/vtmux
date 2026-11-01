@@ -1,0 +1,228 @@
+diff --git a/include/ghostty/vt/screen.h b/include/ghostty/vt/screen.h
+index 2899989dd..73d501676 100644
+--- a/include/ghostty/vt/screen.h
++++ b/include/ghostty/vt/screen.h
+@@ -224,6 +224,15 @@ typedef enum GHOSTTY_ENUM_TYPED {
+    * Output type: GhosttyColorRgb *
+    */
+   GHOSTTY_CELL_DATA_COLOR_RGB = 11,
++
++  /**
++   * The tab mark of the cell (vtmux): 0 for none, 1-32 for the first
++   * cell of a horizontal tab covering that many columns, 255 for the
++   * other cells of a tab.
++   *
++   * Output type: uint8_t *
++   */
++  GHOSTTY_CELL_DATA_TAB = 12,
+   GHOSTTY_CELL_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttyCellData;
+ 
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 1037e4e61..abd885603 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -923,6 +923,7 @@ fn printSliceFill(
+         "style_id",
+         "wide",
+         "hyperlink",
++        "tab",
+     }, 4);
+ 
+     // The bit offset of the codepoint content within a Cell, used to
+@@ -1211,6 +1212,7 @@ fn printSliceFill(
+                 const cell = &cells[k + offset];
+                 if (cell.wide != .narrow or
+                     cell.hasGrapheme() or
++                    cell.tab != 0 or
+                     cell.hyperlink) break :fill;
+             }
+             for (0..general_count) |offset| {
+@@ -1685,6 +1687,9 @@ fn writeCell(
+ 
+     const cell = self.screens.active.cursor.page_cell;
+ 
++    // vtmux: writing over part of a tab clears all of it.
++    if (cell.tab != 0) self.clearTabAtCursor();
++
+     // If the wide property of this cell is the same, then we don't
+     // need to do the special handling here because the structure will
+     // be the same. If it is NOT the same, then we may need to clear some
+@@ -2327,7 +2332,12 @@ pub fn cursorIsAtPrompt(self: *Terminal) bool {
+ 
+ /// Horizontal tab moves the cursor to the next tabstop, clearing
+ /// the screen to the left the tabstop.
++///
++/// vtmux: when the tab moves over blank cells that all look alike it also
++/// marks them as a tab (`Cell.tab`), the way tmux stores a TAB cell
++/// (input_c0_dispatch, input.c, case HT: `grid_set_tab`).
+ pub fn horizontalTab(self: *Terminal) void {
++    const start_x = self.screens.active.cursor.x;
+     while (self.screens.active.cursor.x < self.scrolling_region.right) {
+         // Move the cursor right
+         self.screens.active.cursorRight(1);
+@@ -2335,8 +2345,74 @@ pub fn horizontalTab(self: *Terminal) void {
+         // If the last cursor position was a tabstop we return. We do
+         // "last cursor position" because we want a space to be written
+         // at the tabstop unless we're at the end (the while condition).
+-        if (self.tabstops.get(self.screens.active.cursor.x)) return;
+-    }
++        if (self.tabstops.get(self.screens.active.cursor.x)) break;
++    }
++    self.markTab(start_x, self.screens.active.cursor.x);
++}
++
++/// Whether two blank cells look the same (`grid_cells_look_equal`, for
++/// cells that are already known to be blank).
++fn blankLooksAlike(a: Cell, b: Cell) bool {
++    return a.content_tag == b.content_tag and
++        a.style_id == b.style_id and
++        a.hyperlink == b.hyperlink and
++        a.protected == b.protected and
++        (a.content_tag == .codepoint or
++            @as(u24, @bitCast(a.content)) == @as(u24, @bitCast(b.content)));
++}
++
++/// A cell tmux would call a plain space: no text (or a space), narrow,
++/// not part of a tab.
++fn blankForTab(c: Cell) bool {
++    return switch (c.content_tag) {
++        .codepoint => (c.content.codepoint.data == 0 or c.content.codepoint.data == ' ') and
++            c.wide == .narrow and c.tab == 0,
++        .codepoint_grapheme => false,
++        .bg_color_palette, .bg_color_rgb => c.wide == .narrow and c.tab == 0,
++    };
++}
++
++/// Mark the columns `from..to` of the cursor row as one tab when the tab
++/// that just moved the cursor there crossed only blank cells (the rule of
++/// input.c's HT case). The first cell holds the width, the rest are
++/// `Cell.tab_continuation`.
++fn markTab(self: *Terminal, from: usize, to: usize) void {
++    if (to <= from) return;
++    const width = to - from;
++    if (width > Cell.tab_max) return;
++
++    // tmux has no margins: with any, the cursor stopped somewhere it
++    // would not have.
++    if (self.scrolling_region.left != 0 or
++        self.scrolling_region.right != self.cols - 1) return;
++    if (self.modes.get(.insert)) return;
++
++    const here: [*]Cell = @ptrCast(self.screens.active.cursor.page_cell);
++    const cur = self.screens.active.cursor.x;
++    // `here` is the cursor, at `to`: the row starts `to` cells back.
++    const row = here - cur;
++    const first = row[from];
++    for (from..to) |x| {
++        if (!blankForTab(row[x]) or !blankLooksAlike(row[x], first)) return;
++    }
++
++    row[from].tab = @intCast(width);
++    for (from + 1..to) |x| row[x].tab = Cell.tab_continuation;
++    self.screens.active.cursorMarkDirty();
++}
++
++/// Drop the tab mark of the whole tab that includes the cursor cell, before
++/// the cell is overwritten (screen_write_overwrite, screen-write.c: writing
++/// over any part of a tab clears the rest of it).
++fn clearTabAtCursor(self: *Terminal) void {
++    const cur = self.screens.active.cursor.x;
++    const here: [*]Cell = @ptrCast(self.screens.active.cursor.page_cell);
++    const row = here - cur;
++    var start = cur;
++    while (start > 0 and row[start].tab == Cell.tab_continuation) start -= 1;
++    var end = cur;
++    while (end + 1 < self.cols and row[end + 1].tab == Cell.tab_continuation) end += 1;
++    for (start..end + 1) |x| row[x].tab = 0;
+ }
+ 
+ // Same as horizontalTab but moves to the previous tabstop instead of the next.
+diff --git a/src/terminal/c/cell.zig b/src/terminal/c/cell.zig
+index 5ae088169..d6256fb0c 100644
+--- a/src/terminal/c/cell.zig
++++ b/src/terminal/c/cell.zig
+@@ -89,6 +89,11 @@ pub const CellData = enum(c_int) {
+     /// Output type: GhosttyColorRgb *
+     color_rgb = 11,
+ 
++    /// vtmux: the tab mark of the cell (uint8_t): 0 for none, 1-32 for
++    /// the first cell of a horizontal tab covering that many columns,
++    /// 255 for the other cells of a tab.
++    tab = 12,
++
+     /// Output type expected for querying the data of the given kind.
+     pub fn OutType(comptime self: CellData) type {
+         return switch (self) {
+@@ -101,6 +106,7 @@ pub const CellData = enum(c_int) {
+             .semantic_content => SemanticContent,
+             .color_palette => u8,
+             .color_rgb => color.RGB.C,
++            .tab => u8,
+         };
+     }
+ };
+@@ -169,6 +175,7 @@ fn getTyped(
+             const rgb = cell.content.color_rgb;
+             out.* = .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
+         },
++        .tab => out.* = cell.tab,
+     }
+ 
+     return .success;
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+index 48d405b5f..63fe56a9c 100644
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -2218,7 +2218,15 @@ pub const Cell = packed struct(u64) {
+     /// boundary points for content.
+     semantic_content: SemanticContent = .output,
+ 
+-    _padding: u16 = 0,
++    /// vtmux: a horizontal tab (HT) that moved the cursor over blank
++    /// cells marks them the way tmux stores a TAB cell (grid_set_tab):
++    /// the first cell holds the number of columns the tab covers
++    /// (1...tab_max), the others are `tab_continuation`. Every cell
++    /// carries its own mark, so overwriting or erasing a cell only drops
++    /// that cell's mark. Zero is no tab.
++    tab: u8 = 0,
++
++    _padding: u8 = 0,
+ 
+     pub const ContentTag = enum(u2) {
+         /// A single codepoint, could be zero to be empty cell.
+@@ -2257,6 +2265,12 @@ pub const Cell = packed struct(u64) {
+         spacer_head = 3,
+     };
+ 
++    /// The widest tab tmux stores as a cell (sizeof grid_cell data).
++    pub const tab_max: u8 = 32;
++
++    /// `tab` of the cells after the first one of a tab.
++    pub const tab_continuation: u8 = 255;
++
+     pub const SemanticContent = enum(u2) {
+         /// Regular output content, such as command output.
+         output = 0,
+@@ -2312,6 +2326,7 @@ pub const Cell = packed struct(u64) {
+         .style_id = .{ .type_name = "GhosttyStyleId" },
+         .wide = .{ .type_name = "GhosttyCellWide" },
+         .semantic_content = .{ .type_name = "GhosttyCellSemanticContent" },
++        .tab = .{ .omit = true },
+         ._padding = .{ .omit = true },
+     } });
+ 
+diff --git a/src/terminal/snapshot/grid.zig b/src/terminal/snapshot/grid.zig
+index 9c7d9bc23..f83cb0853 100644
+--- a/src/terminal/snapshot/grid.zig
++++ b/src/terminal/snapshot/grid.zig
+@@ -385,7 +385,8 @@ const native_matches_wire = native: {
+                 .style_id = 0xBEEF,
+                 .wide = .spacer_tail,
+                 .protected = true,
+-                ._padding = 0x1D2C,
++                .tab = 0x2C,
++                ._padding = 0x1D,
+             },
+             .wire = .{
+                 .kind = 1,

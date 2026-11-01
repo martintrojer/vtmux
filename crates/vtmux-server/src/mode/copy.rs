@@ -932,7 +932,8 @@ impl CopyMode {
     /// lines, ended by `separators`, a space or an empty cell.
     #[must_use]
     pub fn cursor_word(&self, separators: &str) -> String {
-        let is_sep = |c: &Cell| c.text.is_empty() || c.text == " " || separators.contains(&*c.text);
+        let is_sep =
+            |c: &Cell| c.tab || c.text.is_empty() || c.text == " " || separators.contains(&*c.text);
         let cell = |x: usize, y: usize| self.backing.cell(x, y);
         let (mut x, mut y) = (self.cx, self.abs(self.cy));
         let mut found = false;
@@ -1038,12 +1039,32 @@ impl CopyMode {
         let mut cells = Vec::with_capacity(sx * sy);
         for py in 0..sy {
             let row = self.row(self.abs(py));
+            // Columns left of the TAB cell being drawn as spaces.
+            let mut tab_left = 0;
             for x in 0..sx {
                 let blank = || Cell {
                     width: 1,
                     ..Cell::default()
                 };
                 let mut c = row.cells.get(x).cloned().unwrap_or_else(blank);
+                // window_copy_write_one: a TAB cell is written as its width
+                // in spaces and its padding is skipped; one cut by the edge
+                // is a single space.
+                if c.tab {
+                    tab_left = usize::from(c.width);
+                    if x + tab_left > sx {
+                        c = blank();
+                    }
+                }
+                if tab_left > 0 {
+                    tab_left -= 1;
+                    c = Cell {
+                        text: " ".to_owned(),
+                        width: 1,
+                        tab: false,
+                        ..c
+                    };
+                }
                 // window_copy_write_one: a wide character cut by the edge is
                 // a space.
                 if c.width == 2 && x + 1 >= sx {
@@ -1885,8 +1906,8 @@ impl CopyMode {
     }
 
     /// `window_copy_copy_line`: columns `sx..ex` of line `y`, and a newline
-    /// unless the line wraps onto the next and all of it was taken. Tabs
-    /// are the spaces Ghostty keeps (`d_tab_capture`).
+    /// unless the line wraps onto the next and all of it was taken. A TAB
+    /// cell is copied as `\t`.
     fn copy_line(&self, buf: &mut Vec<u8>, y: usize, sx: usize, ex: usize) {
         if sx > ex {
             return;
@@ -1901,7 +1922,9 @@ impl CopyMode {
         let (sx, ex) = (sx.min(xx), ex.min(xx));
         for x in sx..ex {
             let c = self.backing.cell(x, y);
-            if c.width != 0 {
+            if c.tab {
+                buf.push(b'\t');
+            } else if c.width != 0 {
                 buf.extend_from_slice(cell_text(&c).as_bytes());
             }
         }
@@ -2382,6 +2405,9 @@ impl CopyMode {
             return false;
         };
         let c = self.backing.cell(x, y);
+        if c.tab && want == '\t' {
+            return true;
+        }
         let mut text = cell_text(&c).chars();
         c.width != 0 && text.next() == Some(want) && text.next().is_none()
     }
