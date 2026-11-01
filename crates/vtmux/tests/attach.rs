@@ -1444,6 +1444,9 @@ fn alerts_bell_forwarding_and_status() {
             if !opt.is_empty() {
                 w.cli(&["set", "-g", opt[0], opt[1]]);
             }
+            // The default status-right holds the host name, which on CI is
+            // long enough to push window 1 off the 40-column status line.
+            w.cli(&["set", "-g", "status-right", ""]);
             // The activity alert would ring too (visual-activity is off).
             w.cli(&["set", "-g", "activity-action", "none"]);
             w.cli(&["set", "-g", "monitor-activity", "on"]);

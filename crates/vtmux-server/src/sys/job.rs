@@ -84,12 +84,7 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
     let devnull = cstring(b"/dev/null")?;
     let fd_limit = super::pty::fd_limit();
 
-    let (ours, theirs) = rustix::net::socketpair(
-        rustix::net::AddressFamily::UNIX,
-        rustix::net::SocketType::STREAM,
-        rustix::net::SocketFlags::CLOEXEC,
-        None,
-    )?;
+    let (ours, theirs) = cloexec_socketpair()?;
     let child_fd = theirs.as_raw_fd();
     let show_stderr = spec.show_stderr;
 
@@ -152,6 +147,22 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
         fd: ours,
         pid: Pid::from_raw(pid).expect("fork returned a positive pid"),
     })
+}
+
+/// A Unix stream socket pair, both ends close-on-exec. `SOCK_CLOEXEC` does not
+/// exist on macOS, so the flag is set with fcntl afterwards (the child dup2s
+/// its end onto 0/1/2, which clears it there).
+fn cloexec_socketpair() -> io::Result<(rustix::fd::OwnedFd, rustix::fd::OwnedFd)> {
+    let (a, b) = rustix::net::socketpair(
+        rustix::net::AddressFamily::UNIX,
+        rustix::net::SocketType::STREAM,
+        rustix::net::SocketFlags::empty(),
+        None,
+    )?;
+    for fd in [&a, &b] {
+        rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
+    }
+    Ok((a, b))
 }
 
 #[cfg(test)]
