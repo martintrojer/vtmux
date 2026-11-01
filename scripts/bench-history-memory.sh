@@ -22,20 +22,9 @@
 # runs per binary, the fastest is shown), BASE (another vtmux binary to
 # compare, e.g. a build of the previous commit; shown as `base`). Run cargo through
 # `mise exec --`: the script builds the release binaries first.
-set -euo pipefail
-cd "$(dirname "$0")/.."
-
-IDLE="${IDLE:-10}"
-VTMUX="${VTMUX:-target/release/vtmux}"
-REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
-[ -x "$REF" ] || { echo "no reference tmux at $REF (cargo xtask ref-tmux)" >&2; exit 1; }
-
-cargo build --release -q -p vtmux --bin vtmux
-cargo build --release -q -p vtmux-vt --example history_retention
-RETENTION=target/release/examples/history_retention
-
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+#
+# The script can be sourced (it then only defines functions); scripts/bench.sh's
+# `history` scenario runs it as a command and parses the table.
 
 gen_spec() {
   awk 'BEGIN { for (i = 0; i < 150000; i++)
@@ -84,40 +73,59 @@ run() {
   "${t[@]}" kill-server
 }
 
-scenarios=("$@")
-[ ${#scenarios[@]} -gt 0 ] || scenarios=(spec narrow wide)
-# Runs per binary; the table shows the fastest output time (and its RSS).
-RUNS="${RUNS:-1}"
+main() {
+  set -euo pipefail
+  cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-printf '%-7s %-9s %6s %7s %10s %9s %8s %8s\n' scenario binary size limit rss_mb hist_size retained output_s
-for s in "${scenarios[@]}"; do
-  case $s in
-    spec) cols=120 rows=40 limit=100000 ;;
-    narrow) cols=80 rows=24 limit=10000 ;;
-    wide) cols=500 rows=24 limit=10000 ;;
-    flood) cols=120 rows=40 limit=2000 ;;
-    flood100k) cols=120 rows=40 limit=100000 ;;
-    *) echo "unknown scenario $s" >&2; exit 2 ;;
-  esac
-  file="$work/$s.txt"
-  "gen_$s" > "$file"
-  binaries=(tmux vtmux)
-  [ -z "${BASE:-}" ] || binaries=(tmux base vtmux)
-  for which in "${binaries[@]}"; do
-    case $which in tmux) bin=$REF ;; base) bin=$BASE ;; *) bin=$VTMUX ;; esac
-    secs=
-    for n in $(seq "$RUNS"); do
-      read -r rss1 hs1 secs1 < <(run "$bin" "bench-$which-$$-$n" $cols $rows $limit "$file")
-      if [ -z "$secs" ] || [ "$(echo "$secs1 < $secs" | bc)" = 1 ]; then
-        rss=$rss1 hs=$hs1 secs=$secs1
+  IDLE="${IDLE:-10}"
+  VTMUX="${VTMUX:-target/release/vtmux}"
+  REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
+  [ -x "$REF" ] || { echo "no reference tmux at $REF (cargo xtask ref-tmux)" >&2; exit 1; }
+
+  cargo build --release -q -p vtmux --bin vtmux
+  cargo build --release -q -p vtmux-vt --example history_retention
+  RETENTION=target/release/examples/history_retention
+
+  work="$(mktemp -d)"
+  trap 'rm -rf "$work"' EXIT
+
+  scenarios=("$@")
+  [ ${#scenarios[@]} -gt 0 ] || scenarios=(spec narrow wide)
+  # Runs per binary; the table shows the fastest output time (and its RSS).
+  RUNS="${RUNS:-1}"
+
+  printf '%-7s %-9s %6s %7s %10s %9s %8s %8s\n' scenario binary size limit rss_mb hist_size retained output_s
+  for s in "${scenarios[@]}"; do
+    case $s in
+      spec) cols=120 rows=40 limit=100000 ;;
+      narrow) cols=80 rows=24 limit=10000 ;;
+      wide) cols=500 rows=24 limit=10000 ;;
+      flood) cols=120 rows=40 limit=2000 ;;
+      flood100k) cols=120 rows=40 limit=100000 ;;
+      *) echo "unknown scenario $s" >&2; exit 2 ;;
+    esac
+    file="$work/$s.txt"
+    "gen_$s" > "$file"
+    binaries=(tmux vtmux)
+    [ -z "${BASE:-}" ] || binaries=(tmux base vtmux)
+    for which in "${binaries[@]}"; do
+      case $which in tmux) bin=$REF ;; base) bin=$BASE ;; *) bin=$VTMUX ;; esac
+      secs=
+      for n in $(seq "$RUNS"); do
+        read -r rss1 hs1 secs1 < <(run "$bin" "bench-$which-$$-$n" $cols $rows $limit "$file")
+        if [ -z "$secs" ] || [ "$(echo "$secs1 < $secs" | bc)" = 1 ]; then
+          rss=$rss1 hs=$hs1 secs=$secs1
+        fi
+      done
+      retained=-
+      if [ $which = vtmux ]; then
+        read -r hs2 retained < <("$RETENTION" $cols $rows $limit "$file")
+        [ "$hs2" = "$hs" ] || retained="$retained(hs=$hs2)"
       fi
+      printf '%-7s %-9s %6s %7s %10.1f %9s %8s %8.2f\n' "$s" $which "${cols}x$rows" $limit \
+        "$(echo "$rss / 1024" | bc -l)" "$hs" "$retained" "$secs"
     done
-    retained=-
-    if [ $which = vtmux ]; then
-      read -r hs2 retained < <("$RETENTION" $cols $rows $limit "$file")
-      [ "$hs2" = "$hs" ] || retained="$retained(hs=$hs2)"
-    fi
-    printf '%-7s %-9s %6s %7s %10.1f %9s %8s %8.2f\n' "$s" $which "${cols}x$rows" $limit \
-      "$(echo "$rss / 1024" | bc -l)" "$hs" "$retained" "$secs"
   done
-done
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
