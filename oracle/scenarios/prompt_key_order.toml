@@ -1,0 +1,35 @@
+# Keys in the same read as the key that opens a prompt
+# (server-client.c server_client_handle_key0): a key is checked against
+# the prompt when it is read, then queued (server_client_key_callback).
+# command-prompt and confirm-before without -b wait, which holds the
+# client's queue, so "abc" after `C-b :` is not typed into the prompt but
+# reaches the pane once C-c closes it. With -b nothing waits, but the keys
+# were queued before the prompt opened: they go to the pane while it is
+# open. Keys in a later read go to the prompt.
+name = "prompt_key_order"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["bind", "-n", "M-b", "command-prompt", "-b", "-p", "b", "set -g @b '%%'"] },
+  { run = ["bind", "-n", "M-y", "confirm-before", "-p", "ok?", "set -g @y yes"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002:abc" },
+  { screen = {} },
+  { keys = "\u0003" },
+  { screen = {} },
+  { keys = "\u001bbxy" },
+  { screen = {} },
+  { keys = "z\r" },
+  { screen = {} },
+  { run = ["show", "-gv", "@b"] },
+  { keys = "\u001byqy" },
+  { screen = {} },
+  { keys = "y" },
+  { screen = {} },
+  { run = ["show", "-gqv", "@y"] },
+  { keys = "\u0002:display -d 0 hi\r" },
+  { screen = {} },
+  { keys = "\u0003" },
+  { screen = {} },
+]

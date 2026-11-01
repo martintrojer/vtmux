@@ -3,8 +3,8 @@
 # %2, -1 taking one key, -N taking digits until a non-digit accepts it and
 # the key goes on to the key tables (prompt.c:1242-1249), -k naming a key,
 # -e cancelling on BSpace when empty, -l keeping a comma in the prompt,
-# the default `(name)` prompt, and -b not waiting. Keys that open a prompt
-# are sent apart from the keys for it.
+# the default `(name)` prompt, and -b not waiting. Keys after the one that
+# opens a prompt are in their own write (prompt_key_order).
 name = "prompt_templates"
 size = [40, 6]
 steps = [

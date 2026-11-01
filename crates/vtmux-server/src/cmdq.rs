@@ -58,6 +58,10 @@ pub enum Work {
     /// `cmd_source_file_complete_cb`: report the causes, one level less
     /// deep; `failed` if a file did not load.
     SourceDone { failed: bool },
+    /// `server_client_key_callback`: a key through the key tables, queued
+    /// so it runs after the commands earlier keys queued, and waits while
+    /// the queue waits (a prompt without `-b`).
+    Key(crate::key_dispatch::KeyEvent),
     /// A batch's last step.
     End(End),
 }
@@ -564,6 +568,10 @@ impl Server {
                     self.flush_item(&mut item);
                     self.cmdq.batches.insert(batch, item);
                 }
+                false
+            }
+            Work::Key(event) => {
+                self.fire_key(id, &event);
                 false
             }
             Work::End(end) => {
