@@ -2435,12 +2435,27 @@ impl Server {
         } else {
             self.default_shell(session_tree)
         };
+        // spawn.c:379-390: with no command and not respawning, the
+        // session's `default-command` is the one word `$SHELL -c` runs.
+        // A respawn keeps the pane's stored words.
+        let mut argv = ps.argv.clone();
+        if argv.is_empty() && ps.shell.is_none() {
+            let cmd = self
+                .model
+                .options
+                .get(session_tree, "default-command")
+                .map(|e| e.value.to_text(e.def, None, false))
+                .unwrap_or_default();
+            if !cmd.is_empty() {
+                argv.push(cmd);
+            }
+        }
         child.set("SHELL", &shell.to_string_lossy(), false);
 
         let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
         let rows = u16::try_from(ps.rect.sy).unwrap_or(u16::MAX).max(1);
         let spawned = sys::pty::spawn(&sys::pty::SpawnSpec {
-            argv: ps.argv.clone(),
+            argv: argv.clone(),
             shell: shell.clone(),
             cwd: ps.cwd.clone(),
             home: find_home(&self.global_env),
@@ -2463,7 +2478,7 @@ impl Server {
             term,
             io: Some(io),
             pid: spawned.pid.as_raw_nonzero().get(),
-            argv: ps.argv.clone(),
+            argv,
             shell,
             cwd: ps.cwd.clone(),
             exited: false,

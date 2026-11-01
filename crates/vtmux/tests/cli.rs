@@ -1100,6 +1100,80 @@ fn options_spawn_and_exit_empty() {
     });
 }
 
+/// spawn.c `spawn_pane` (379-390): a new pane with no command runs the
+/// session's `default-command` as one `$SHELL -c` word; respawn-pane and
+/// respawn-window without a command keep the pane's own. Scopes: session
+/// value over global, `set -u` falls back, an empty value is a login shell,
+/// and `default-shell` is the shell that runs it.
+#[test]
+fn default_command_spawns_panes() {
+    compare("default_command_spawns_panes", |w| {
+        use std::os::unix::fs::PermissionsExt;
+        let shell = w.dir().join("shell");
+        std::fs::write(
+            &shell,
+            "#!/bin/sh\nprintf 'configured-shell\\n'\nexec /bin/sh \"$@\"\n",
+        )
+        .expect("write shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let list = |w: &World| {
+            // The child execs the command after the fork: wait for the
+            // listing to settle.
+            let args = [
+                "list-panes",
+                "-a",
+                "-F",
+                "#{session_name}:#{window_index}.#{pane_index} [#{pane_start_command}] [#{pane_current_command}]",
+            ];
+            let mut last = w.run(&args);
+            std::thread::sleep(Duration::from_millis(150));
+            for _ in 0..40 {
+                let now = w.run(&args);
+                if now == last {
+                    break;
+                }
+                last = now;
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            last
+        };
+        let mut runs = vec![
+            w.run(&["new", "-d", "-x", "80", "-y", "24", "-s", "a", "cat"]),
+            w.run(&["set", "-g", "default-command", "cat"]),
+            w.run(&["split-window", "-d", "-t", "a"]),
+            w.run(&["new-window", "-d", "-t", "a"]),
+            w.run(&["new-session", "-d", "-s", "b"]),
+            w.run(&["set", "-t", "a", "default-command", "sleep 99"]),
+            w.run(&["new-window", "-d", "-t", "a"]),
+            w.run(&["split-window", "-d", "-t", "b"]),
+            list(w),
+            // respawn without a command keeps the stored one.
+            w.run(&["respawn-pane", "-k", "-t", "a:1.0"]),
+            w.run(&["respawn-window", "-k", "-t", "a:2"]),
+            w.run(&["set", "-g", "default-command", "exec cat"]),
+            w.run(&["respawn-pane", "-k", "-t", "a:0.1"]),
+            list(w),
+            w.run(&["set", "-u", "-t", "a", "default-command"]),
+            w.run(&["new-window", "-d", "-t", "a"]),
+            w.run(&["set", "-g", "default-command", ""]),
+            w.run(&["new-window", "-d", "-t", "b"]),
+            w.run(&["set", "-g", "default-shell", shell.to_str().expect("utf-8")]),
+            w.run(&["new-window", "-d", "-t", "b"]),
+            w.run(&["set", "-g", "default-command", "exec cat"]),
+            w.run(&["new-window", "-d", "-t", "b"]),
+            w.run(&["new-session", "-d", "-s", "c"]),
+            list(w),
+        ];
+        w.wait_for_text("b:2", "configured-shell");
+        w.wait_for_text("b:3", "configured-shell");
+        runs.push(w.run(&["capture-pane", "-p", "-t", "b:2"]));
+        runs.push(w.run(&["capture-pane", "-p", "-t", "b:3"]));
+        runs.push(w.run(&["show", "-gv", "default-command"]));
+        runs.push(w.run(&["show", "-v", "-t", "a", "default-command"]));
+        runs
+    });
+}
+
 /// Owner acceptance: strip only top-level run/run-shell/if-shell, the
 /// mu-crew source-file and vtmux-only options, preserving bindings and
 /// environment lines. Their
