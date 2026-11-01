@@ -4961,3 +4961,33 @@ fn killed_control_client_leaves_the_server_up() {
         out
     });
 }
+
+/// `choose-tree` with no client (cmd-choose-tree.c, window-tree.c):
+/// `-O` must be a sort order, the target must be a pane; the mode is
+/// entered once (a second `choose-tree` leaves it), `send-keys -X` is "not
+/// in a mode" (no command callback), and a key `send-keys` gives with no
+/// client does not reach it (window.c:2088), so `q` does not leave it.
+#[test]
+fn choose_tree_without_a_client() {
+    compare("choose_tree_without_a_client", |w| {
+        let mode = |w: &World| w.run(&["display", "-p", "#{pane_mode}|#{pane_in_mode}"]);
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&["choose-tree", "-O", "bogus"]),
+            w.run(&["choose-tree", "-t", "nosuch"]),
+            w.run(&["choose-tree", "-N", "-O", "SIZE"]),
+        ];
+        runs.push(mode(w));
+        runs.push(w.run(&["choose-tree", "-N"]));
+        runs.push(mode(w));
+        runs.push(w.run(&["send-keys", "-X", "cancel"]));
+        runs.push(w.run(&["send-keys", "-N", "2"]));
+        runs.push(w.run(&["send-keys", "q"]));
+        runs.push(mode(w));
+        runs.push(w.run(&["copy-mode"]));
+        runs.push(mode(w));
+        runs.push(w.run(&["send-keys", "-X", "cancel"]));
+        runs.push(mode(w));
+        runs
+    });
+}
