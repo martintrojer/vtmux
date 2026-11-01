@@ -396,8 +396,7 @@ impl ConfigEnv for GlobalEnv<'_> {
 
     /// `expanded` (cmd-parse.y:197-217): `cmd_find_from_client` for the
     /// parsing client, then `format_defaults` over that state.
-    /// vtmux never runs `#()` while expanding (D9), which matches
-    /// `FORMAT_NOJOBS`.
+    /// Expanded with `FORMAT_NOJOBS`: `#()` is empty.
     fn expand(&self, template: &str) -> String {
         let origin = self.client.as_ref().map(|c| c.0).unwrap_or_default();
         let found = crate::target::current(self.model, origin).unwrap_or_default();
@@ -406,7 +405,7 @@ impl ConfigEnv for GlobalEnv<'_> {
             ctx.client.clone_from(client);
             ctx.clients = std::rc::Rc::clone(clients);
         }
-        vtmux_core::format::expand_str(template, &ctx)
+        vtmux_core::format::expand_str_nojobs(template, &ctx)
     }
 }
 
