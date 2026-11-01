@@ -1672,16 +1672,22 @@ impl Server {
             // or the message clears. Borders and pane status lines still
             // draw (CLIENT_REDRAWBORDERS is not frozen).
             let client = self.clients.get_mut(&id).expect("client");
-            let held = client
-                .status
-                .hold_window()
+            let frozen = client.status.hold_window();
+            let held = frozen
                 .then(|| client.compositor.shown_rows(cols, rows, scene_y, area))
+                .flatten()
+                .map(<[vtmux_vt::Cell]>::to_vec);
+            // The popup's rectangle is frozen the same way: its job's
+            // output is not written under a prompt (tty.c:1646), so the
+            // terminal keeps what it shows until a full redraw.
+            let held_popup = frozen
+                .then(|| client.compositor.shown_rows(cols, rows, 0, rows))
                 .flatten()
                 .map(<[vtmux_vt::Cell]>::to_vec);
             self.draw_window(s, caps, &mut screen, scene_y, area, held.as_deref());
             self.draw_status(id, s, caps, &mut screen, lines, top);
             // screen-redraw.c:1813: the overlay over everything else.
-            self.draw_popup(id, caps, &mut screen);
+            self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
             let frame = self
                 .clients
                 .get_mut(&id)
@@ -1742,7 +1748,13 @@ impl Server {
 
     /// Client `id`'s popup over `screen` (`popup_draw_cb`), and the cursor
     /// in it (`popup_mode_cb`, server-client.c:2198-2200).
-    fn draw_popup(&self, id: ClientId, caps: crate::render::Caps, screen: &mut vtmux_vt::Snapshot) {
+    fn draw_popup(
+        &self,
+        id: ClientId,
+        caps: crate::render::Caps,
+        screen: &mut vtmux_vt::Snapshot,
+        held: Option<&[vtmux_vt::Cell]>,
+    ) {
         let Some(p) = self.clients.get(&id).and_then(|c| c.popup.as_ref()) else {
             return;
         };
@@ -1765,6 +1777,7 @@ impl Server {
             defaults: &defaults,
             title: &p.title,
             content: &content,
+            redrawn: p.redrawn,
         };
         // popup_draw_cb clears overlay_check while it draws (popup.c:229-231):
         // its own empty runs are erased as without an overlay.
@@ -1773,9 +1786,22 @@ impl Server {
             ..caps
         }
         .clear();
-        crate::render::popup::draw(&draw, &source.theme(caps), clear, screen);
-        let (cx, cy) = p.cursor();
-        screen.cursor = Some((cx.min(screen.cols), cy.min(screen.rows.saturating_sub(1))));
+        if let Some(held) = held {
+            crate::render::popup::keep(&draw, held, screen);
+        } else {
+            crate::render::popup::draw(&draw, &source.theme(caps), clear, screen);
+        }
+        // server_client_reset_state: an open prompt keeps the cursor
+        // (server-client.c:2220-2222); the popup's screen still gives the
+        // cursor's visibility (its mode).
+        let prompt = self
+            .clients
+            .get(&id)
+            .is_some_and(|c| c.status.prompt().is_some());
+        if !prompt {
+            let (cx, cy) = p.cursor();
+            screen.cursor = Some((cx.min(screen.cols), cy.min(screen.rows.saturating_sub(1))));
+        }
         screen.cursor_visible = content.cursor_visible;
     }
 
@@ -1996,6 +2022,10 @@ impl Server {
     pub(crate) fn redraw_client(&mut self, id: ClientId) {
         if let Some(c) = self.clients.get_mut(&id) {
             c.status.request_full_redraw();
+            // CLIENT_REDRAWOVERLAY: the popup is drawn again in full.
+            if let Some(p) = c.popup.as_mut() {
+                p.redrawn = true;
+            }
         }
     }
 

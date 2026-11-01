@@ -83,6 +83,12 @@ pub struct PopupDraw<'a> {
     /// The title, already expanded at the command (`-T`).
     pub title: &'a str,
     pub content: &'a Snapshot,
+    /// The popup was drawn again in full since it opened
+    /// (`popup_draw_cb` over everything). Until then the terminal shows
+    /// the empty popup the first draw made with the job's output written
+    /// over it (`popup_job_update_cb`), so what the job left blank on a
+    /// row stays as that empty draw.
+    pub redrawn: bool,
 }
 
 /// Draw `p` over `screen` (`popup_draw_cb`), clipped to the screen.
@@ -147,29 +153,37 @@ pub fn draw(p: &PopupDraw<'_>, theme: &Theme, clear: Clear, screen: &mut Snapsho
     };
     for y in 0..sy {
         let mut cells = draw_row(y, true);
-        // tmux draws the whole popup once, then writes the job's output
+        // tmux draws the empty popup once, then writes the job's output
         // into it as it comes (popup_job_update_cb): past what the job
-        // wrote on a row, the row stays as that draw of the empty popup
-        // left it. Without a border an empty row has no cells at all
-        // (cellsize 0, tty-draw.c:241-245), so it is erased.
-        let off = usize::from(framed);
+        // wrote on a row, a bordered row stays as that draw of the empty
+        // popup left it until a full redraw, and the spaces the job wrote
+        // stay spaces in the colours it wrote them in (tty_cmd_cells), not
+        // runs the draw would erase. Without a border an empty row has no
+        // cells at all (cellsize 0, tty-draw.c:241-245), so it is erased,
+        // first draw or not.
         let boxed_row = framed && sx > 2 && sy > 2 && (1..sy - 1).contains(&y);
-        if boxed_row || !framed {
+        let first = !p.redrawn;
+        if (first && boxed_row) || !framed {
+            let off = usize::from(framed);
             let end = sx - off;
-            let from = (off + used_width(p.content, y - off)).min(end);
+            let used = used_width(p.content, y - off);
+            let from = (off + used).min(end);
             if framed {
                 let empty = draw_row(y, false);
                 cells[from..end].clone_from_slice(&empty[from..end]);
             } else {
-                for c in &mut cells[from..end] {
-                    *c = Cell {
-                        width: 1,
-                        style: vtmux_vt::Style {
-                            bg,
-                            ..vtmux_vt::Style::default()
-                        },
-                        ..Cell::default()
-                    };
+                // The tail is its own run of empty cells: spaces in the
+                // defaults' colours when short, erased from ten.
+                let mut tail: Vec<Cell> = (from..end).map(|_| content(None).0).collect();
+                let bgs = vec![p.defaults.bg; tail.len()];
+                draw_line_by(&mut tail, &bgs, p.defaults.bg, clear, false);
+                cells[from..end].clone_from_slice(&tail);
+            }
+            if first {
+                for x in 0..used.min(end - off) {
+                    if let Some(c) = inner(x, y - off).filter(|c| c.text == " " && c.width == 1) {
+                        cells[off + x] = content(Some(c)).0;
+                    }
                 }
             }
         }
@@ -182,6 +196,22 @@ pub fn draw(p: &PopupDraw<'_>, theme: &Theme, clear: Clear, screen: &mut Snapsho
         let n = sx.min(cols.saturating_sub(at_x));
         let start = at_y * cols + at_x;
         screen.cells[start..start + n].clone_from_slice(&cells[..n]);
+    }
+}
+
+/// The popup's rectangle as the terminal still shows it (`held`, the
+/// whole last frame): nothing is written while the tty is frozen.
+pub fn keep(p: &PopupDraw<'_>, held: &[Cell], screen: &mut Snapshot) {
+    let cols = usize::from(screen.cols);
+    for y in
+        usize::from(p.py)..(usize::from(p.py) + usize::from(p.sy)).min(usize::from(screen.rows))
+    {
+        let x0 = usize::from(p.px);
+        let x1 = (x0 + usize::from(p.sx)).min(cols);
+        if y * cols + x1 <= held.len() {
+            screen.cells[y * cols + x0..y * cols + x1]
+                .clone_from_slice(&held[y * cols + x0..y * cols + x1]);
+        }
     }
 }
 
@@ -304,6 +334,7 @@ mod tests {
             defaults: &style,
             title: "T",
             content: &content,
+            redrawn: false,
         };
         draw(&p, &Theme::default(), Clear::Bce, &mut screen);
         assert_eq!(
