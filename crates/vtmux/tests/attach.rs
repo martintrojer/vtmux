@@ -3830,3 +3830,117 @@ fn switch_client_prefers_an_unattached_session() {
     }
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// The titles the client wrote to its terminal so far (`tsl` `title` `fsl`
+/// with xterm's `\e]0;` and BEL).
+fn titles(a: &Attached) -> Vec<String> {
+    let bytes = a.bytes.lock().unwrap().clone();
+    let text = String::from_utf8_lossy(&bytes);
+    text.split("\x1b]0;")
+        .skip(1)
+        .filter_map(|rest| rest.split_once('\x07').map(|(t, _)| t.to_owned()))
+        .collect()
+}
+
+/// server-client.c `server_client_set_title` (2588-2610): with `set-titles`
+/// on, a redraw writes `set-titles-string` (expanded for the client) between
+/// `tsl` and `fsl`, unless it is the title last written. Reference probe:
+/// `\e]0;T:a:neww\a` after `rename-window neww`. Everything is compared
+/// raw against tmux 3.8.
+#[test]
+fn set_titles_emits_the_expanded_string_once_per_change() {
+    let steps: &[&[&str]] = &[
+        &["set", "-g", "set-titles", "on"],
+        &["set", "-g", "set-titles-string", "T:#S:#W"],
+        // The same redraw again: nothing is written.
+        &["refresh-client"],
+        &["rename-window", "neww"],
+        &["new-window", "-d", "-n", "other", "cat"],
+        &["select-window", "-t", ":other"],
+        &["select-window", "-t", ":neww"],
+        // The owner's string (~/dotfiles/tmux/.tmux.conf:20) over a user option.
+        &["set", "-g", "@win_label", "lbl-#{window_index}"],
+        &["set", "-g", "set-titles-string", "#S · #{T:@win_label}"],
+        &["set", "-g", "set-titles", "off"],
+        &["rename-window", "hidden"],
+        &["set", "-g", "set-titles", "on"],
+        &["refresh-client"],
+        // Same text as the last title written: still nothing.
+        &["set", "-g", "set-titles-string", "#S · #{T:@win_label}"],
+        &["refresh-client"],
+    ];
+    let mut all = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        assert!(
+            w.cli(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "10", "cat"
+            ])
+            .status
+            .success()
+        );
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).starts_with("[a]"));
+        // With set-titles off (the default) nothing is written.
+        assert_eq!(titles(&a), Vec::<String>::new());
+        let mut seen = Vec::new();
+        for step in steps {
+            assert!(w.cli(step).status.success(), "{step:?}");
+            // Let the redraw land before the next step.
+            thread::sleep(Duration::from_millis(300));
+            seen.push(titles(&a));
+        }
+        a.keys(b"\x02d");
+        a.exited(0);
+        all.push(seen);
+    }
+    assert_eq!(all[0], all[1], "vtmux (left) vs tmux 3.8 (right)");
+    // What the reference wrote, in order (the first is the default string, which has the host name).
+    let default = all[0][0][0].clone();
+    assert!(default.starts_with("a:0:w - \""), "{default:?}");
+    let want = [
+        default.as_str(),
+        "T:a:w",
+        "T:a:neww",
+        "T:a:other",
+        "T:a:neww",
+        "a · lbl-0",
+    ];
+    // Per step: nothing new for the repeated redraw (step 2), the unchanged
+    // string (last) and the title that goes with set-titles off (10).
+    let counts: Vec<usize> = all[0].iter().map(Vec::len).collect();
+    assert_eq!(
+        counts,
+        [1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 6, 6, 6, 6, 6][..counts.len()]
+    );
+    assert_eq!(all[0].last().unwrap(), &want);
+}
+
+/// `tty_set_title` needs `tsl` and `fsl`: `terminal-features` without
+/// `title` writes no title at all, and `title` on `TERM=xterm-256color`
+/// is what the default `xterm*` entry gives.
+#[test]
+fn set_titles_needs_the_title_feature() {
+    for bin in bins() {
+        let w = World::new(bin);
+        assert!(
+            w.cli(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"])
+                .status
+                .success()
+        );
+        for args in [
+            &["set", "-s", "terminal-features[10]", "xterm*:title@"][..],
+            &["set", "-g", "set-titles", "on"],
+            &["set", "-g", "set-titles-string", "X#S"],
+        ] {
+            assert!(w.cli(args).status.success());
+        }
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).starts_with("[a]"));
+        assert!(w.cli(&["rename-window", "n"]).status.success());
+        thread::sleep(Duration::from_millis(500));
+        assert!(!a.text().contains("\x1b]0;"), "{:?}", a.text());
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}

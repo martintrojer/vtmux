@@ -127,6 +127,12 @@ impl StatusLine {
         self.redraw_window = true;
     }
 
+    /// Any of `CLIENT_ALLREDRAWFLAGS` is set: the next frame redraws.
+    #[must_use]
+    pub fn redraw_pending(&self) -> bool {
+        self.redraw || self.redraw_window
+    }
+
     /// Whether this frame keeps the pane area the terminal shows (frozen
     /// and no full redraw asked for); the window redraw request is used up.
     pub fn hold_window(&mut self) -> bool {
