@@ -119,7 +119,7 @@ pub(crate) struct Client {
     pub(crate) compositor: crate::render::Compositor,
     /// The command a status-line prompt answers to (`c->prompt`'s
     /// callbacks); the prompt itself is in `status`.
-    pub(crate) prompt_owner: Option<crate::status_prompt::Owner>,
+    pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
 }
 
 /// Frame bytes the client has not yet written to its terminal: in
@@ -1439,7 +1439,7 @@ impl Server {
                         vtmux_core::keys::Key::FOCUS_OUT
                     };
                     let taken = self.clients.get_mut(&id).is_none_or(|c| c.status.key())
-                        || self.status_prompt_key(id, key);
+                        || self.prompts_key(id, key);
                     if !taken {
                         self.touch_client(id);
                         if focused {
@@ -1703,10 +1703,88 @@ impl Server {
                 }
             }
         }
+        self.draw_pane_prompts(s, &source, &theme, &draw, caps, &mut window);
         let at = usize::from(y) * cols;
         screen.cells[at..at + window.cells.len()].clone_from_slice(&window.cells);
         screen.cursor = window.cursor.map(|(x, cy)| (x, cy + y));
         screen.cursor_visible = window.cursor_visible;
+    }
+
+    /// `redraw_draw_pane_prompt` for every visible pane of session `s`'s
+    /// window (screen-redraw.c:1625-1673, 1780-1788): the prompt over the
+    /// pane's last line, or its first under a top status; and
+    /// `server_client_prompt_cursor` (server-client.c:2129-2165): with a
+    /// prompt on the active pane the cursor goes to its edit point, shown.
+    fn draw_pane_prompts(
+        &self,
+        s: SessionId,
+        source: &crate::render::window::Source<'_>,
+        theme: &crate::render::compose::Theme,
+        draw: &crate::render::compose::Draw,
+        caps: crate::render::Caps,
+        window: &mut vtmux_vt::Snapshot,
+    ) {
+        let Some((_, w, active)) = self.model.current_of(s) else {
+            return;
+        };
+        let Some(win) = self.model.windows.get(&w) else {
+            return;
+        };
+        let tree = TreeId::Session(s);
+        let top = self.model.status_top(tree);
+        let cols = usize::from(window.cols);
+        for &p in &win.panes.panes {
+            let Some(pane) = self.model.panes.get(&p) else {
+                continue;
+            };
+            let Some(prompt) = pane.prompt.as_ref() else {
+                continue;
+            };
+            let (sx, sy) = (pane.rect.sx, pane.rect.sy);
+            if !win.is_visible(p) || sx == 0 || sy == 0 {
+                continue;
+            }
+            let offset = i32::from(draw.offset);
+            let wy = pane.rect.yoff + offset + if top { 0 } else { int(sy) - 1 };
+            let xoff = pane.rect.xoff + offset;
+            let (Ok(wy), Ok(width)) = (usize::try_from(wy), usize::try_from(sx)) else {
+                continue;
+            };
+            if wy >= usize::from(window.rows) {
+                continue;
+            }
+            let (row, cx) = crate::render::status::pane_prompt_row(source, tree, prompt, width);
+            // Columns left of the scene are cut off (`offset`), and the
+            // line ends at the scene's edge.
+            let skip = usize::try_from(-xoff).unwrap_or(0);
+            let px = usize::try_from(xoff).unwrap_or(0);
+            if px >= cols || skip >= width {
+                continue;
+            }
+            let n = (width - skip).min(cols - px);
+            let at = wy * cols + px;
+            let cells = &mut window.cells[at..at + n];
+            for (cell, drawn) in cells.iter_mut().zip(&row[skip..]) {
+                *cell = theme.cell(drawn);
+            }
+            let bgs: Vec<vtmux_core::colour::Colour> =
+                row[skip..skip + n].iter().map(|c| c.style.bg).collect();
+            crate::render::compose::draw_line_by(
+                cells,
+                &bgs,
+                vtmux_core::colour::Colour::Default,
+                caps.bce,
+                false,
+            );
+            if p == active {
+                let x = xoff + int(u32::try_from(cx).unwrap_or(u32::MAX));
+                window.cursor = u16::try_from(x)
+                    .ok()
+                    .filter(|&x| x <= window.cols)
+                    .map(|x| (x.min(window.cols), u16::try_from(wy).unwrap_or(0)));
+                window.cursor_visible = window.cursor.is_some();
+            }
+        }
     }
 
     /// The client's status lines, or its message, over `screen`
@@ -2494,6 +2572,8 @@ impl Server {
             resize_timer: None,
             modes: Vec::new(),
             search: None,
+            prompt: None,
+            prompt_owner: None,
         })
     }
 
@@ -2578,7 +2658,12 @@ impl Server {
         Ok(())
     }
 
-    pub(crate) fn close_pane_io(&self, mut pane: Pane) {
+    pub(crate) fn close_pane_io(&mut self, mut pane: Pane) {
+        // window_pane_destroy: window_pane_clear_prompt frees the prompt's
+        // owner, with no pane-prompt-closed (PANE_DESTROYED).
+        if let Some(owner) = pane.prompt_owner.take() {
+            owner.free(self);
+        }
         if let Some(io) = pane.io.take() {
             io.deregister(self.poll.registry());
             // window_pane_destroy closes the master; the kernel sends the
@@ -2878,4 +2963,8 @@ fn sig_name(sig: i32) -> String {
         }
     }
     sig.to_string()
+}
+
+fn int(n: u32) -> i32 {
+    i32::try_from(n).unwrap_or(i32::MAX)
 }

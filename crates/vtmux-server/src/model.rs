@@ -205,6 +205,11 @@ pub struct Pane {
     /// (`wp->searchstr`, `wp->searchregex`): `#{pane_search_string}`, and
     /// what the next copy mode's search-again looks for.
     pub search: Option<(String, bool)>,
+    /// `wp->prompt`: a prompt drawn over the pane's last line
+    /// (`command-prompt -P`), and the command it answers to
+    /// (`wp->prompt_data`).
+    pub prompt: Option<crate::prompt::OpenPrompt>,
+    pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its

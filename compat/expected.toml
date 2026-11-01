@@ -472,7 +472,7 @@ reason = "needs choose-tree (tree-mode prompts)"
 
 [tests."prompt-mechanics.sh"]
 status = "xfail"
-reason = "needs choose-tree, pane prompts (-P) and the pane-prompt-opened/closed hooks"
+reason = "needs choose-tree (tree-mode prompts); the pane-prompt (-P) and pane-prompt-opened/closed section before it passes"
 
 [tests."prompt-words-history.sh"]
 status = "skip"
