@@ -18,6 +18,7 @@ use super::compose::{Draw, PaneDraw, Theme, pane_status};
 use super::scene::{Indicators, Lines, Scene, ScenePane, WindowView};
 use crate::environ::Environ;
 use crate::format_ctx::{Ctx, ServerInfo};
+use crate::format_jobs::{JobHandle, TAG_PANE};
 use crate::mode::copy::Paint;
 use crate::model::Model;
 use crate::target::Found;
@@ -34,6 +35,20 @@ impl Source<'_> {
         let mut ctx = Ctx::new(self.model, self.info, self.env, found);
         ctx.extra
             .push(("client_colours".into(), caps.colours.to_string()));
+        ctx
+    }
+
+    /// `window_make_pane_status`'s format tree (window-border.c:199): the
+    /// client's jobs, tagged with the pane, for a status line.
+    fn border_ctx(&self, found: Found, p: PaneId, caps: Caps, jobs: Option<&JobHandle>) -> Ctx<'_> {
+        let mut ctx = self.ctx(
+            Found {
+                pane: Some(p),
+                ..found
+            },
+            caps,
+        );
+        ctx.jobs = jobs.map(|j| j.clone().with_tag(TAG_PANE | p.0));
         ctx
     }
 
@@ -101,7 +116,14 @@ impl Source<'_> {
     /// The scene and drawing data for session `s`'s current window on a
     /// `cols` x `rows` area.
     #[must_use]
-    pub fn window(&self, s: SessionId, cols: u16, rows: u16, caps: Caps) -> Option<(Scene, Draw)> {
+    pub fn window(
+        &self,
+        s: SessionId,
+        cols: u16,
+        rows: u16,
+        caps: Caps,
+        jobs: Option<&JobHandle>,
+    ) -> Option<(Scene, Draw)> {
         let found = Found::from_session(self.model, s);
         let w = found.window?;
         let window = self.model.windows.get(&w)?;
@@ -181,13 +203,7 @@ impl Source<'_> {
             if under.is_empty() {
                 continue;
             }
-            let ctx = self.ctx(
-                Found {
-                    pane: Some(p.id),
-                    ..found
-                },
-                caps,
-            );
+            let ctx = self.border_ctx(found, p.id, caps, jobs);
             let format = self.string(TreeId::Pane(p.id), "pane-border-format");
             let expanded = vtmux_core::format::expand_time(&format, &ctx);
             let d = draws.get_mut(&p.id).expect("drawn pane");

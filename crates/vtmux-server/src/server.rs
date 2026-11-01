@@ -1811,6 +1811,8 @@ impl Server {
             // draw (CLIENT_REDRAWBORDERS is not frozen).
             let client = self.clients.get_mut(&id).expect("client");
             let redrawing = client.status.redraw_pending();
+            let (jobs, window_jobs) = self.redraw_jobs(id, redrawing);
+            let client = self.clients.get_mut(&id).expect("client");
             let frozen = client.status.hold_window();
             let held = frozen
                 .then(|| client.compositor.shown_rows(cols, rows, scene_y, area))
@@ -1823,8 +1825,16 @@ impl Server {
                 .then(|| client.compositor.shown_rows(cols, rows, 0, rows))
                 .flatten()
                 .map(<[vtmux_vt::Cell]>::to_vec);
-            self.draw_window(s, caps, &mut screen, scene_y, area, held.as_deref());
-            self.draw_status(id, s, caps, &mut screen, lines, top);
+            self.draw_window(
+                s,
+                caps,
+                &mut screen,
+                scene_y,
+                area,
+                held.as_deref(),
+                &window_jobs,
+            );
+            self.draw_status(id, s, caps, &mut screen, lines, top, jobs);
             // screen-redraw.c:1813: the overlay over everything else.
             self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
             let mut frame = self
@@ -1850,6 +1860,26 @@ impl Server {
                 self.send(id, &ServerMsg::Frame(raw));
             }
         }
+    }
+
+    /// The job handles for one frame: the status line's, and the pane
+    /// borders'. `CLIENT_STATUSFORCE` (used up here) runs the status line's jobs
+    /// again; a border's are never forced (window-border.c:199 passes
+    /// `FORMAT_STATUS` alone). Pane status lines only expand, and so only start
+    /// jobs, when the status or borders redraw (`redraw_screen`,
+    /// screen-redraw.c:1876-1879); other frames show what the jobs last said.
+    fn redraw_jobs(
+        &mut self,
+        id: ClientId,
+        redrawing: bool,
+    ) -> (crate::format_jobs::JobHandle, crate::format_jobs::JobHandle) {
+        let force = self
+            .clients
+            .get_mut(&id)
+            .is_some_and(|c| c.status.take_force());
+        let border = self.job_handle(Some(id)).status(false);
+        let border = if redrawing { border } else { border.peek() };
+        (self.job_handle(Some(id)).status(force), border)
     }
 
     /// `server_client_set_title` (server-client.c:2588-2610), run on a
@@ -1881,6 +1911,7 @@ impl Server {
     /// `y..y + rows` of `screen`, with the active pane's cursor. `held` is
     /// what the terminal shows in those rows while pane output is frozen:
     /// pane content cells keep it.
+    #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
     fn draw_window(
         &self,
         s: SessionId,
@@ -1889,13 +1920,14 @@ impl Server {
         y: u16,
         rows: u16,
         held: Option<&[vtmux_vt::Cell]>,
+        jobs: &crate::format_jobs::JobHandle,
     ) {
         let source = crate::render::window::Source {
             model: &self.model,
             info: &self.info,
             env: &self.global_env,
         };
-        let Some((scene, draw)) = source.window(s, screen.cols, rows, caps) else {
+        let Some((scene, draw)) = source.window(s, screen.cols, rows, caps, Some(jobs)) else {
             return;
         };
         let theme = source.theme(caps);
@@ -2068,6 +2100,7 @@ impl Server {
     /// The client's status lines, or its message, over `screen`
     /// ([`crate::render::status::draw`]), expanded in the client's format
     /// tree when they need drawing again.
+    #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
     fn draw_status(
         &mut self,
         id: ClientId,
@@ -2076,6 +2109,7 @@ impl Server {
         screen: &mut vtmux_vt::Snapshot,
         lines: u16,
         top: bool,
+        jobs: crate::format_jobs::JobHandle,
     ) {
         let Some(mut status) = self
             .clients
@@ -2092,8 +2126,9 @@ impl Server {
             };
             let mut ctx =
                 self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
-            // status_redraw (status.c:244): the format tree is the client's.
-            ctx.jobs = Some(self.job_handle(Some(id)));
+            // status_redraw (status.c:241-244): the client's tree, FORMAT_STATUS
+            // and maybe FORMAT_FORCE.
+            ctx.jobs = Some(jobs);
             status.draw(&source, &mut ctx, s, caps, screen, lines, top);
         }
         if let Some(c) = self.clients.get_mut(&id) {

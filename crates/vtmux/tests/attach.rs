@@ -4328,3 +4328,62 @@ fn palette_oscs_drop_the_next_passthrough_payload_under_on() {
         }
     }
 }
+
+/// The number after `CNT` in the status row, if any.
+fn status_count(a: &Attached) -> Option<u32> {
+    let row = status_row(a);
+    let rest = row.split_once("CNT")?.1;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// status.c:241-243, format.c `format_job_get`/`format_job_complete`,
+/// cmd-refresh-client.c:275-280: a `#()` in the status line shows what its
+/// job printed once the job reports, runs again on every `status-interval`
+/// tick (a later second) and on `refresh-client -S` (`FORMAT_FORCE`), and
+/// with neither nothing runs. The job counts its runs in a file.
+#[test]
+fn status_jobs_refresh_on_interval_and_refresh_client() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        let a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
+        a.wait(|a| status_row(a).contains("0:w"));
+        let counter = w.home.path().join("n");
+        let script = w.home.path().join("count.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nn=$(cat {c} 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > {c}\necho CNT$n\n",
+                c = counter.display()
+            ),
+        )
+        .unwrap();
+        w.cli(&["set", "-g", "status-interval", "0"]);
+        w.cli(&[
+            "set",
+            "-g",
+            "status-right",
+            &format!("#(sh {})", script.display()),
+        ]);
+        let what = bin.display();
+        // The first expansion starts the job; its completion redraws.
+        a.wait(|a| status_count(a) == Some(1));
+        // No interval, no refresh: the line stays.
+        thread::sleep(Duration::from_millis(2200));
+        assert_eq!(status_count(&a), Some(1), "{what}: ran without a reason");
+        // refresh-client -S forces the job even in the same second.
+        w.cli(&["refresh-client", "-S"]);
+        a.wait(|a| status_count(a) == Some(2));
+        // status-interval: each tick runs the job again.
+        w.cli(&["set", "-g", "status-interval", "1"]);
+        a.wait(|a| status_count(a) >= Some(4));
+        let seen = status_count(&a).unwrap();
+        // Back to none: it settles at the last run.
+        w.cli(&["set", "-g", "status-interval", "0"]);
+        thread::sleep(Duration::from_millis(1500));
+        let settled = status_count(&a).unwrap();
+        assert!(settled >= seen, "{what}: went back");
+        thread::sleep(Duration::from_millis(2200));
+        assert_eq!(status_count(&a), Some(settled), "{what}: kept running");
+    }
+}

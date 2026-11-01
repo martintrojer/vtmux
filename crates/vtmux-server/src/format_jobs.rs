@@ -20,6 +20,10 @@
 //!   when its expanded command changed, or when forced (`refresh-client -S`);
 //! - `<'cmd' not ready>` shows while the job runs, started over a second ago,
 //!   with no output yet;
+//! - a status line's job that reports redraws that client's status, at most
+//!   once a second while it runs and once when it ends; `refresh-client`
+//!   forces the status line's jobs (not a pane border's), and the
+//!   `status-interval` tick redraws the status, which looks at them again;
 //! - freeing a job SIGTERMs its process only (`job_free`), and a client's jobs
 //!   go with the client (`format_lost_client`); the rest go after an hour
 //!   unused (`format_tidy_jobs`).
@@ -37,6 +41,10 @@ use crate::server::{ClientId, Server};
 pub const STATUS: u8 = 1;
 /// `FORMAT_FORCE`: run the jobs again even if they ran this second.
 pub const FORCE: u8 = 2;
+/// Not in tmux: the expansion only reads what the jobs last said. A pane
+/// border's format is expanded again on every frame here, but tmux makes a
+/// new one only when the status redraws (`REDRAW_PANE_STATUS`).
+pub const PEEK: u8 = 4;
 
 /// `server_ev_tidy`'s period (server.c:156-170) and a job's idle limit.
 const TIDY: Duration = Duration::from_secs(3600);
@@ -119,6 +127,10 @@ impl FormatJobs {
         now: i64,
     ) -> String {
         let key = (client, tag, raw.to_owned());
+        if flags & PEEK != 0 {
+            let out = self.index.get(&key).and_then(|id| self.fjs.get(id));
+            return out.and_then(|fj| fj.out.clone()).unwrap_or_default();
+        }
         let id = *self.index.entry(key).or_insert_with(|| {
             self.next += 1;
             let id = FjId(self.next);
@@ -291,6 +303,13 @@ impl JobHandle {
     #[must_use]
     pub fn status(mut self, force: bool) -> Self {
         self.flags |= STATUS | if force { FORCE } else { 0 };
+        self
+    }
+
+    /// A handle that starts and forces nothing ([`PEEK`]).
+    #[must_use]
+    pub fn peek(mut self) -> Self {
+        self.flags |= PEEK;
         self
     }
 
@@ -543,6 +562,20 @@ mod tests {
         j.complete(s.fj, b"x\ny\nz".to_vec());
         // Only the first line of what is left: format_job_complete.
         assert_eq!(j.get(C, 0, 0, "c", "c", 100), "x");
+    }
+
+    #[test]
+    fn peek_shows_the_last_output_and_starts_nothing() {
+        let mut j = FormatJobs::default();
+        assert_eq!(j.get(C, 0, PEEK, "c", "c", 100), "");
+        assert!(j.actions.is_empty());
+        j.get(C, 0, 0, "c", "c", 100);
+        let Some(Action::Start(s)) = j.actions.pop() else {
+            panic!("no start");
+        };
+        j.complete(s.fj, b"x".to_vec());
+        assert_eq!(j.get(C, 0, PEEK | FORCE, "c", "c", 105), "x");
+        assert!(j.actions.is_empty());
     }
 
     #[test]

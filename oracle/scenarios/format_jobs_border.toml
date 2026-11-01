@@ -1,0 +1,27 @@
+name = "format_jobs_border"
+size = [40, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "8", "cat"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
+  { run = ["run-shell", 'echo one > "$HOME/f"'] },
+  { run = ["set", "-g", "status-interval", "0"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "pane-border-status", "top"] },
+  { run = ["set", "-g", "pane-border-format", '<#(cat "$HOME/f")>'] },
+  { attach = { session = "a" } },
+  # window-border.c:199: a pane border's format is a status format, so its
+  # job's report redraws the border line.
+  { settle = { react = true } },
+  { screen = {} },
+  # A job starts again only in a later second than its last start
+  # (format.c:437), so let one pass.
+  { settle = { quiet_ms = 1300 } },
+  { run = ["run-shell", 'echo two > "$HOME/f"'] },
+  { run = ["refresh-client", "-S"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["run-shell", 'echo three > "$HOME/f"'] },
+  { run = ["set", "-g", "status-interval", "1"] },
+  { settle = { react = true, quiet_ms = 2600 } },
+  { screen = {} },
+]
