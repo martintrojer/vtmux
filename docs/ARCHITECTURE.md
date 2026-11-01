@@ -134,3 +134,5 @@ Three sources of truth are checked against each other:
 - **Reference comparisons in tests:** the CLI, attach and control tests run each scenario against both binaries and compare the results directly.
 
 `scripts/check.sh` runs all of it: fmt, clippy, unit tests, regress and oracle replay. CI runs it on Linux and macOS.
+
+Memory and CPU against tmux 3.8, and how to reproduce them: [PERFORMANCE.md](PERFORMANCE.md).
