@@ -12,6 +12,17 @@ static DATE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static CLOCK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b\d\d:\d\d \d\d-[A-Z][a-z]{2}-\d\d\b").unwrap());
+/// A clock-mode glyph row as a screen row is stored (`\e` for ESC): only
+/// spaces, SGR sequences and at least one `#` that has a colour set.
+static CLOCK_GLYPHS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?: |#|\\e\[[0-9;]*m)*#(?: |#|\\e\[[0-9;]*m)*$").unwrap());
+static SGR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\e\[([0-9;]*)m").unwrap());
+/// A compact clock-mode row: the time alone on the row (`%l:%M `+AM/PM,
+/// or `%H:%M`, with or without seconds).
+static CLOCK_COMPACT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^((?:\\e\[[0-9;]*m| )*?)[ 0-9]?\d:\d\d(?::\d\d)?(?: [AP]M)?((?:\\e\[[0-9;]*m)*)$")
+        .unwrap()
+});
 static TTY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/dev/(pts/\d+|tty[A-Za-z0-9]*|pty[A-Za-z0-9]*)").unwrap());
 static ENV_TMUX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(<SOCKET>),\d+,").unwrap());
@@ -46,6 +57,32 @@ impl Normalizer {
         out = CLOCK.replace_all(&out, "<CLOCK>").into_owned();
         out = TTY.replace_all(&out, "<TTY>").into_owned();
         out
+    }
+
+    /// One screen row, stored with `\e` for ESC: [`Self::text`], then
+    /// clock mode's rows, whose digits depend on the time of day. A glyph
+    /// row becomes `<CLOCKGLYPHS fg bg>` (the colours it was drawn in, so a
+    /// wrong `clock-mode-colour` still shows); a compact clock keeps its
+    /// padding and colour and loses the time, `<CLOCK>`. The cursor, which
+    /// the screen observation carries, pins where the compact text ends.
+    pub fn row(&self, r: &str) -> String {
+        let r = self.text(r);
+        if CLOCK_GLYPHS.is_match(&r) && r.contains("\\e[") {
+            let mut colours: Vec<&str> = SGR
+                .captures_iter(&r)
+                .filter_map(|c| c.get(1))
+                .map(|m| m.as_str())
+                .filter(|c| !matches!(*c, "" | "0" | "39" | "49"))
+                .collect();
+            colours.dedup();
+            colours.sort_unstable();
+            colours.dedup();
+            return format!("<CLOCKGLYPHS {}>", colours.join(" "));
+        }
+        if let Some(c) = CLOCK_COMPACT.captures(&r) {
+            return format!("{}<CLOCK>{}", &c[1], &c[2]);
+        }
+        r
     }
 
     /// A control-mode stream (or any stdout): `text`, guard lines with
@@ -162,6 +199,32 @@ mod tests {
         );
         assert_eq!(n.text("\"myhost\" 20:23 29-Oct-26"), "\"myhost\" <CLOCK>");
         assert_eq!(n.text("/tmp/r/s,4242,0"), "<SOCKET>,<PID>,0");
+    }
+
+    #[test]
+    fn clock_mode_rows_lose_their_time() {
+        let n = norm();
+        // Large clock (5x5 glyphs, `#` in fg and bg colour red).
+        assert_eq!(
+            n.row("      \\e[31m\\e[41m#####\\e[39m\\e[49m \\e[31m\\e[41m#\\e[39m\\e[49m"),
+            "<CLOCKGLYPHS 31 41>"
+        );
+        // A row of `#` with no colour is the pane's own text.
+        assert_eq!(n.row("#### ####"), "#### ####");
+        // Compact clock: 12h and 24h, with and without seconds.
+        assert_eq!(
+            n.row("\\e[31m       5:54 PM\\e[39m"),
+            "\\e[31m      <CLOCK>\\e[39m"
+        );
+        assert_eq!(
+            n.row("\\e[34m      12:07 AM\\e[39m"),
+            "\\e[34m      <CLOCK>\\e[39m"
+        );
+        assert_eq!(n.row("   17:54"), "   <CLOCK>");
+        assert_eq!(n.row("   17:54:09"), "   <CLOCK>");
+        // Text that merely has a time in it stays.
+        assert_eq!(n.row("meeting at 12:30"), "meeting at 12:30");
+        assert_eq!(n.row("$ date"), "$ date");
     }
 
     #[test]

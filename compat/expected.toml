@@ -61,8 +61,7 @@ reason = "needs pipe-pane (the script captures the outer client's output with `p
 status = "pass"
 
 [tests."clock-mode.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."cmd-template-replace.sh"]
 status = "pass"
