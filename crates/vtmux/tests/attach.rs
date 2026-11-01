@@ -3830,3 +3830,67 @@ fn switch_client_prefers_an_unattached_session() {
     }
     assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// `show-messages` with an attached client (cmd-queue.c:549-563,
+/// status.c:354-362): a command run by a key is logged `<tty> key <key>:
+/// <command>`, a status-line message `<tty> message: <text>`, a command run
+/// by the CLI `client-PID command: ...`; `-T` lists the client's terminal
+/// (the reference lists every terminfo capability under the header, which
+/// vtmux has no model for: only the header line is compared, D-017).
+#[test]
+fn show_messages_names_keys_and_terminals() {
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", "exec cat"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        assert!(
+            w.cli(&["bind", "-n", "F5", "display-message", "hi"])
+                .status
+                .success()
+        );
+        assert!(
+            w.cli(&["bind", "x", "set", "-g", "@x", "1"])
+                .status
+                .success()
+        );
+        assert!(
+            w.cli(&["bind", "-n", "M-Up", "set", "-g", "@y", "1"])
+                .status
+                .success()
+        );
+        a.keys(b"\x1b[15~");
+        a.wait(|_| {
+            String::from_utf8_lossy(&w.cli(&["show-messages"]).stdout).contains("message: hi")
+        });
+        a.keys(b"\x02x");
+        a.wait(|_| display(&w, "#{@x}") == "1");
+        a.keys(b"\x1b\x1b[A");
+        a.wait(|_| display(&w, "#{@y}") == "1");
+        let tty = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_tty}"]).stdout)
+            .trim()
+            .to_owned();
+        let log = String::from_utf8_lossy(&w.cli(&["show-messages"]).stdout).into_owned();
+        let mut text = String::new();
+        for line in log.lines().skip(1) {
+            let line = line.get(7..).unwrap_or(line).replace(&tty, "TTY");
+            if line.starts_with("client-") {
+                continue;
+            }
+            text.push_str(&line);
+            text.push('\n');
+        }
+        let terminals =
+            String::from_utf8_lossy(&w.cli(&["show-messages", "-T"]).stdout).into_owned();
+        let header = terminals
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .replace(&tty, "TTY");
+        // flags differ by terminfo (0x20 VT100LIKE is set for both).
+        outputs.push((text, header));
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+}

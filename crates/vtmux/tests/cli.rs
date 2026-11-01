@@ -4741,3 +4741,181 @@ fn world_drop_reaps_the_server_on_panic() {
         "server {pid:?} survived a panicking test"
     );
 }
+
+/// The message log without its volatile parts: the `HH:MM: ` prefix goes and
+/// `client-PID` becomes `client-N`.
+fn log_lines(run: &Run) -> Run {
+    let mut stdout = String::new();
+    for line in run.stdout.lines() {
+        let mut text = line.get(7..).unwrap_or(line).to_owned();
+        while let Some(at) = text.find("client-") {
+            let digits = text[at + 7..]
+                .bytes()
+                .take_while(u8::is_ascii_digit)
+                .count();
+            text.replace_range(at + 7..at + 7 + digits, "N");
+            text.replace_range(at..at + 7, "client_");
+        }
+        stdout.push_str(&text.replace("client_", "client-"));
+        stdout.push('\n');
+    }
+    Run {
+        stdout,
+        stderr: run.stderr.clone(),
+        code: run.code,
+    }
+}
+
+/// `list-commands` (cmd-list-commands.c:40-100) against the reference: the
+/// whole table, one command by name and by alias, `-F` with the three
+/// variables, an empty expansion (no line), a lookup error and an ambiguous
+/// prefix.
+/// Reference: `tmux list-commands [-F fmt] [cmd]` with an isolated server.
+#[test]
+fn list_commands_table_formats_and_errors() {
+    compare("list_commands_table_formats_and_errors", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&["list-commands"]),
+            w.run(&["lscm", "kill-server"]),
+            w.run(&["list-commands", "lscm"]),
+            w.run(&["list-commands", "new-session"]),
+            w.run(&[
+                "list-commands",
+                "-F",
+                "#{command_list_name}|#{command_list_alias}|#{command_list_usage}",
+                "list-commands",
+            ]),
+            w.run(&["list-commands", "-F", "#{command_list_name}", "show-env"]),
+            w.run(&["list-commands", "-F", "", "list-commands"]),
+            w.run(&[
+                "list-commands",
+                "-F",
+                "#{?command_list_alias,A,-}",
+                "kill-server",
+            ]),
+            w.run(&["list-commands", "-F", "#{command_list_name}"]),
+            w.run(&["list-commands", "nosuchcommand"]),
+            w.run(&["list-commands", "list"]),
+            w.run(&["list-commands", "a", "b"]),
+        ]
+    });
+}
+
+/// `show-messages` (cmd-show-messages.c:77-110, cmd-queue.c:534-567 and
+/// 850-886, server.c:539-566): every command fired once the config has run
+/// is logged `client-PID command: <cmd_print>`, an error for a client with
+/// no session `client-PID message: <error>`, newest first; `-t` and `-J`
+/// and `-T` with nothing to list print nothing; `message-limit` trims.
+/// Reference: the same commands on the isolated reference server.
+#[test]
+fn show_messages_log_flags_and_limit() {
+    compare("show_messages_log_flags_and_limit", |w| {
+        let mut out = vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&[
+                "new-window",
+                "-d",
+                "-n",
+                "two words",
+                ";",
+                "set",
+                "-g",
+                "@x",
+                "a b",
+            ]),
+            w.run(&["display-message", "-p", "#{session_name}"]),
+            w.run(&["nosuchcommand"]),
+            w.run(&["kill-pane", "-t", "nosuch"]),
+            w.run(&["send-keys", "-t", "a", "-l", "it's \"q\""]),
+        ];
+        out.push(log_lines(&w.run(&["show-messages"])));
+        out.push(log_lines(&w.run(&["showmsgs", "-t", "nosuch"])));
+        out.push(w.run(&["show-messages", "-J"]));
+        out.push(w.run(&["show-messages", "-T"]));
+        out.push(w.run(&["show-messages", "-JT"]));
+        out.push(w.run(&["set", "-g", "message-limit", "3"]));
+        for _ in 0..4 {
+            w.run(&["display-message", "-p", "x"]);
+        }
+        out.push(log_lines(&w.run(&["show-messages"])));
+        out.push(w.run(&["set", "-g", "message-limit", "0"]));
+        out.push(log_lines(&w.run(&["show-messages"])));
+        out
+    });
+}
+
+/// `show-messages -J` (job.c:436-450): one `Job N: cmd [fd, pid, status]`
+/// line per job, newest first; fd and pid vary and are masked.
+#[test]
+fn show_messages_lists_jobs() {
+    compare("show_messages_lists_jobs", |w| {
+        let mask = |mut r: Run| {
+            for key in ["fd=", "pid="] {
+                while let Some(at) = r.stdout.find(key) {
+                    let n = r.stdout[at + key.len()..]
+                        .bytes()
+                        .take_while(|b| b.is_ascii_digit() || *b == b'-')
+                        .count();
+                    r.stdout
+                        .replace_range(at..at + key.len() + n, &key.replace('=', "#"));
+                }
+            }
+            r
+        };
+        let mut out = vec![w.run(&["new", "-d", "-s", "a", "cat"])];
+        out.push(w.run(&["show-messages", "-J"]));
+        out.push(w.run(&["run-shell", "-b", "sleep 30"]));
+        out.push(w.run(&["run-shell", "-b", "sleep 31"]));
+        out.push(mask(w.run(&["show-messages", "-J"])));
+        out.push(mask(w.run(&["show-messages", "-JT"])));
+        out
+    });
+}
+
+/// `clear-history` (cmd-capture-pane.c:424-431): history goes, the visible
+/// screen stays, the pane leaves copy mode, `-H` is accepted, a new target
+/// error is the usual one; output after the clear collects history again.
+/// Reference: the same commands on the isolated reference server.
+#[test]
+fn clear_history_keeps_the_screen() {
+    compare("clear_history_keeps_the_screen", |w| {
+        let fmt = "#{history_size} #{pane_in_mode} #{cursor_y}";
+        let mut out = vec![
+            w.run(&["set", "-g", "history-limit", "500"]),
+            w.run(&[
+                "new",
+                "-d",
+                "-s",
+                "a",
+                "-x",
+                "20",
+                "-y",
+                "5",
+                "sh",
+                "-c",
+                "seq 1 40; exec cat",
+            ]),
+        ];
+        w.wait_for_text("a", "40");
+        out.push(w.run(&["display", "-p", "-t", "a", fmt]));
+        out.push(w.run(&["capture-pane", "-p", "-t", "a"]));
+        out.push(w.run(&["capture-pane", "-p", "-S", "-", "-E", "-1", "-t", "a"]));
+        out.push(w.run(&["copy-mode", "-t", "a"]));
+        out.push(w.run(&["display", "-p", "-t", "a", fmt]));
+        out.push(w.run(&["clear-history", "-t", "a"]));
+        out.push(w.run(&["display", "-p", "-t", "a", fmt]));
+        out.push(w.run(&["capture-pane", "-p", "-t", "a"]));
+        out.push(w.run(&["capture-pane", "-p", "-S", "-", "-E", "-1", "-t", "a"]));
+        out.push(w.run(&["clear-history", "-t", "a"]));
+        out.push(w.run(&["clearhist", "-H", "-t", "a"]));
+        out.push(w.run(&["display", "-p", "-t", "a", fmt]));
+        out.push(w.run(&["send-keys", "-t", "a", "-l", "x\nx\nx\nx\nx\nx\nx\n"]));
+        w.wait_for_text("a", "x");
+        std::thread::sleep(Duration::from_millis(300));
+        out.push(w.run(&["display", "-p", "-t", "a", fmt]));
+        out.push(w.run(&["clear-history", "-t", "nosuch"]));
+        out.push(w.run(&["clear-history", "extra"]));
+        out
+    });
+}

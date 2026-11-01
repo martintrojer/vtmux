@@ -48,6 +48,11 @@ pub type Complete = Box<dyn FnOnce(&mut Server, Vec<u8>, JobStatus)>;
 pub type Deferred = Box<dyn FnOnce(&mut Server)>;
 
 struct Job {
+    /// The command line (`job->cmd`).
+    command: String,
+    /// The descriptor's number (`job->fd`), kept for the summary after
+    /// the output has closed.
+    raw_fd: i32,
     /// Our end of the socket pair, until the job closes its output.
     fd: Option<OwnedFd>,
     /// The process, until it is reaped.
@@ -87,6 +92,32 @@ impl Jobs {
         self.running
             .values()
             .any(|j| !j.nowait && j.fd.is_some() && j.pid.is_some())
+    }
+
+    /// `job_print_summary` (job.c:436-450): the lines for every job,
+    /// newest first, each `Job N: cmd [fd=, pid=, status=]`. A job that
+    /// has been reaped has pid -1 (`job_check_died`) and its raw wait
+    /// status.
+    #[must_use]
+    pub fn summary(&self) -> Vec<String> {
+        self.running
+            .values()
+            .rev()
+            .enumerate()
+            .map(|(n, j)| {
+                let status = match j.status {
+                    None => 0,
+                    Some(JobStatus::Exited(code)) => (code & 0xff) << 8,
+                    Some(JobStatus::Signaled(sig)) => sig & 0x7f,
+                };
+                format!(
+                    "Job {n}: {} [fd={}, pid={}, status={status}]",
+                    j.command,
+                    j.raw_fd,
+                    j.pid.unwrap_or(-1)
+                )
+            })
+            .collect()
     }
 
     /// The soonest timer.
@@ -135,6 +166,8 @@ impl Server {
         self.jobs.running.insert(
             id,
             Job {
+                command: spec.command.clone(),
+                raw_fd: spawned.fd.as_raw_fd(),
                 fd: Some(spawned.fd),
                 pid: Some(spawned.pid.as_raw_nonzero().get()),
                 output: Vec::new(),

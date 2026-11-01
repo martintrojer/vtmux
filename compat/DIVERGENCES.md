@@ -158,3 +158,19 @@ product reasons" category.
 - vtmux behaviour: the cursor is placed on the prompt's row.
 - Evidence: 40x8, `set -g status off; set -g status-position top`, copy-mode, `g`: tmux cursor 13,7 with the prompt on row 0; vtmux 13,0.
 - Category: Do not copy tmux bug (the cursor away from the text being edited).
+
+### D-017: `show-messages -T` lists features, not terminfo capabilities
+
+- Test / assertion: `crates/vtmux/tests/attach.rs` `show_messages_names_keys_and_terminals` (the `Terminal N: ...` header line only).
+- tmux behaviour: `cmd_show_messages_terminals` (cmd-show-messages.c:47-70) prints `Terminal N: <TERM> for <client>, flags=0x..:` and then `tty_term_describe` for every capability the terminfo entry has or lacks (237 lines for `TERM=screen`).
+- vtmux behaviour: vtmux has no terminfo model (D8, D-007). It prints the same header line (flags: 0x1 256 colours, 0x10 RGB, 0x20 VT100-like) and one `   features: <list>` line with what vtmux knows. A client with no open terminal (a control or command client) is skipped, as in tmux.
+- Evidence: reference tmux 3.8 on a PTY client, `TERM=screen`, `xterm-256color` and `xterm-256color` with `COLORTERM=truecolor`: flags `0x20`, `0x20`, `0x31`; `show-messages -T | wc -l` is 237 for `screen`.
+- Category: Deferred
+
+### D-018: `clear-history -H` has no hyperlink table to reset
+
+- Test / assertion: none; `capture-pane-hyperlink.sh` stays xfail.
+- tmux behaviour: `-H` calls `screen_reset_hyperlinks` (cmd-capture-pane.c:427-428), emptying the pane's OSC 8 link table, which `capture-pane -H` and `#{mouse_hyperlink}` read.
+- vtmux behaviour: `-H` is accepted and changes nothing. libghostty-vt keeps links with the pages that hold the rows and vtmux exposes no table (`capture-pane -H` and `#{mouse_hyperlink}` are not implemented), so nothing observable depends on it.
+- Evidence: `clear-history -H` and `clear-history` give the same `history_size` and capture output on the reference and on vtmux (`cli.rs` `clear_history_keeps_the_screen`).
+- Category: Deferred

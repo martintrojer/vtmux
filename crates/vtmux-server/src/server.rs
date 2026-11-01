@@ -2045,6 +2045,8 @@ impl Server {
         delay_ms: Option<u64>,
         flags: crate::render::status::MessageFlags,
     ) {
+        // status_message_set (status.c:354-362): logged first.
+        self.add_message(format!("{} message: {text}", self.client_name(id)));
         let Some(s) = self
             .clients
             .get(&id)
@@ -2226,6 +2228,18 @@ impl Server {
             colours: c.caps.map(|caps| caps.colours),
             flags: c.flags.clone(),
         }
+    }
+
+    /// What `show-messages -T` says about a client's terminal: its `TERM`
+    /// name, `tty_term`'s `flags` (`TERM_256COLOURS` 0x1, `TERM_RGBCOLOURS`
+    /// 0x10, `TERM_VT100LIKE` 0x20) and its feature list. `None` before the
+    /// terminal is open.
+    pub(crate) fn client_term(&self, id: ClientId) -> Option<(String, u32, String)> {
+        let c = self.clients.get(&id)?;
+        let term = c.term.as_ref()?;
+        let name = c.hello.as_ref()?.tty.as_ref()?.term.clone();
+        let flags = 0x20 | u32::from(term.colours256()) | if term.rgb() { 0x10 } else { 0 };
+        Some((name, flags, term.features().list()))
     }
 
     /// `cmd_find_best_client` (cmd-find.c:112-130): the most recently active
