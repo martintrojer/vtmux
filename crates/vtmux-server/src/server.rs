@@ -1839,7 +1839,10 @@ impl Server {
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
             }
-            let client = self.clients.get_mut(&id).expect("client");
+            // The frame's write may have dropped the client.
+            let Some(client) = self.clients.get_mut(&id) else {
+                continue;
+            };
             let mut raw = std::mem::take(&mut client.passthrough);
             if !raw.is_empty() {
                 // The program may have moved the terminal's cursor.
