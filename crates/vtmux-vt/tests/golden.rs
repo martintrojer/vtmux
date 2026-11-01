@@ -197,6 +197,13 @@ golden! {
     fmt_reflow_narrow_history_size,
     #[ignore = "D-pending: tmux reflow on narrowing pushes the top row into history; Ghostty keeps both rows on screen"]
     fmt_reflow_narrow_cursor_y,
+    fmt_reflow_pending_wrap_cursor_x,
+    #[ignore = "D-pending: P2 tmux reflow of a pending-wrap wide line leaves the cursor at 4,3 with history_size 6; Ghostty at 2,4 with history_size 4"]
+    fmt_reflow_pending_wrap_wide_cursor_x,
+    #[ignore = "D-pending: P2 tmux reflow of a pending-wrap wide line leaves the cursor at 4,3 with history_size 6; Ghostty at 2,4 with history_size 4"]
+    fmt_reflow_pending_wrap_wide_cursor_y,
+    #[ignore = "D-pending: P2 tmux reflow of a pending-wrap wide line leaves the cursor at 4,3 with history_size 6; Ghostty at 2,4 with history_size 4"]
+    fmt_reflow_pending_wrap_wide_history_size,
     #[ignore = "D-pending: tmux clusters ZWJ sequences (cursor_x 4 for x+family+y); Ghostty without mode 2027 does not, like xterm"]
     fmt_zwj_cursor_x,
     cap_ed3_alt,
