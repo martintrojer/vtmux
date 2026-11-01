@@ -7,6 +7,8 @@
 //! cache; without it each test prints why and checks vtmux alone against
 //! the recorded expectations embedded below.
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -266,7 +268,9 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
+        let pid = common::parse_pid(&self.run(&["display", "-p", "#{pid}"]).stdout);
         let _ = self.run(&["kill-server"]);
+        common::reap(pid);
     }
 }
 
@@ -4716,4 +4720,24 @@ fn byte_0xff_ends_a_parsed_command_string() {
             ),
         ]
     });
+}
+
+/// A test that panics mid-way must not leave its server behind: `World`'s
+/// drop records the server pid, runs kill-server and SIGKILLs a survivor.
+#[test]
+fn world_drop_reaps_the_server_on_panic() {
+    let (_keep, as_tmux) = vtmux_as_tmux();
+    let pid = std::sync::Mutex::new(None);
+    let caught = std::panic::catch_unwind(|| {
+        let w = World::new(&as_tmux);
+        w.run(&["new", "-d", "-s", "a", "cat"]);
+        *pid.lock().unwrap() = common::parse_pid(&w.run(&["display", "-p", "#{pid}"]).stdout);
+        panic!("deliberate");
+    });
+    assert!(caught.is_err());
+    let pid = pid.lock().unwrap().expect("server pid");
+    assert!(
+        rustix::process::test_kill_process(pid).is_err(),
+        "server {pid:?} survived a panicking test"
+    );
 }

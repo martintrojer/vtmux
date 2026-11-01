@@ -1,4 +1,6 @@
 //! Real binary under a PTY; all runs have private labels and pinned env.
+mod common;
+
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::fmt::Write as _;
 use std::io::{Read, Write};
@@ -146,7 +148,10 @@ impl World {
 }
 impl Drop for World {
     fn drop(&mut self) {
+        let out = self.cli(&["display", "-p", "#{pid}"]);
+        let pid = common::parse_pid(&String::from_utf8_lossy(&out.stdout));
         let _ = self.cli(&["kill-server"]);
+        common::reap(pid);
     }
 }
 struct Attached {

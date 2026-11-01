@@ -21,6 +21,8 @@ use std::time::{Duration, Instant};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use vtmux_vt::{CaptureOpts, PaneTerm, capture};
 
+use crate::reap;
+
 use super::normalize::Normalizer;
 use super::scenario::{Divergence, Observation, Scenario, Setup, Step};
 
@@ -177,8 +179,18 @@ impl Drop for Runner<'_> {
             let _ = a.child.kill();
             let _ = a.child.wait();
         }
+        // A wedged or unreachable server survives kill-server (it daemonized):
+        // kill whatever still holds this run's socket.
+        let socket = self.socket.to_string_lossy().into_owned();
+        reap::kill_matching(|ps| socket_pids(ps, &socket, std::process::id()));
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+/// Pids of processes started with `-S <socket>` (the run root is unique).
+fn socket_pids(ps: &str, socket: &str, own: u32) -> Vec<u32> {
+    let needle = format!("-S {socket} ");
+    reap::pids_where(ps, own, |args| format!("{args} ").contains(&needle))
 }
 
 /// Run `sc` against `bin` and return its normalised observations.
