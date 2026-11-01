@@ -734,8 +734,8 @@ fn copy_pipe_commands() {
             &[
                 "copy-pipe-line-and-cancel",
                 &format!(
-                    "cat > {d}/o12-#{{copy_cursor_y}}; pwd >> {d}/o12-#{{copy_cursor_y}}; \
-                     echo $PWD >> {d}/o12-#{{copy_cursor_y}}"
+                    "cat > {d}/o12.t; pwd >> {d}/o12.t; echo $PWD >> {d}/o12.t; \
+                     mv {d}/o12.t {d}/o12-#{{copy_cursor_y}}"
                 ),
             ],
         ));
