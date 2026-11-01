@@ -1,0 +1,27 @@
+name = "history_limit_live_alt"
+# history-limit lowered while the alternate screen is up trims the primary
+# history at once (session_update_history works on gd, the primary grid),
+# and what is left is what shows when the program leaves. A window linked
+# into two sessions takes the limit of the session applied last
+# (session names sort a, b: b's wins).
+steps = [
+  { run = ["new", "-d", "-s", "z", "cat"] },
+  { run = ["set", "-g", "history-limit", "600"] },
+  { run = ["new", "-d", "-s", "a", "-x", "40", "-y", "10", "-n", "w", "sh", "-c", "stty -echo; seq 1 700; printf '\\033[?1049h'; echo ALT; tmux wait-for -S alt; read x; printf '\\033[?1049l'; echo BACK; tmux wait-for -S back; exec cat"] },
+  { wait_for = "alt" },
+  { run = ["display", "-p", "-t", "a", "#{alternate_on} #{history_size}/#{history_limit}"] },
+  { run = ["set", "-g", "history-limit", "200"] },
+  { run = ["display", "-p", "-t", "a", "#{alternate_on} #{history_size}/#{history_limit}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "a"] },
+  { feed = { pane = "%1", bytes = "\r" } },
+  { wait_for = "back" },
+  { run = ["display", "-p", "-t", "a", "#{alternate_on} #{history_size}/#{history_limit}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "a"] },
+  { run = ["new", "-d", "-s", "b", "cat"] },
+  { run = ["set", "-t", "b", "history-limit", "30"] },
+  { run = ["link-window", "-s", "a:w", "-t", "b:"] },
+  { run = ["set", "-g", "history-limit", "100"] },
+  { run = ["display", "-p", "-t", "a:w", "#{history_size}/#{history_limit}"] },
+  { run = ["set", "-g", "history-limit", "40"] },
+  { run = ["display", "-p", "-t", "a:w", "#{history_size}/#{history_limit}"] },
+]

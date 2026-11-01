@@ -187,7 +187,8 @@ pub struct Pane {
     /// `wp->xoff`, `wp->yoff`, `wp->sx`, `wp->sy` as `layout_fix_panes` set
     /// them.
     pub rect: Geometry,
-    /// `grid->hlimit`: the session's `history-limit` when the pane was made.
+    /// `grid->hlimit`: the session's `history-limit` when the pane was made,
+    /// then as [`Model::update_history`] last set it.
     pub history_limit: usize,
     /// `PANE_INPUTOFF` (select-pane -d / -e).
     pub input_off: bool,
@@ -355,6 +356,35 @@ impl Model {
             .collect();
         links.sort_by_key(|(_, _, stamp)| *stamp);
         links.into_iter().map(|(s, i, _)| (s, i)).collect()
+    }
+
+    /// `session_update_history` for every session (options.c:1464-1466,
+    /// `options_push_changes("history-limit")`): each session in name order
+    /// gives the panes of its windows its `history-limit`, so a window
+    /// linked into several sessions ends with the last one's.
+    pub fn update_history(&mut self) {
+        let limits: Vec<(Vec<WindowId>, usize)> = self
+            .sessions_by_name()
+            .map(|s| {
+                let limit =
+                    usize::try_from(self.number_option(TreeId::Session(s.id), "history-limit"))
+                        .unwrap_or(0);
+                (s.windows.values().copied().collect(), limit)
+            })
+            .collect();
+        for (windows, limit) in limits {
+            for w in windows {
+                let Some(window) = self.windows.get(&w) else {
+                    continue;
+                };
+                for id in window.panes.panes.clone() {
+                    if let Some(p) = self.panes.get_mut(&id) {
+                        p.history_limit = limit;
+                        p.term.set_history_limit(limit);
+                    }
+                }
+            }
+        }
     }
 
     /// A number-valued option as seen from `tree`.
