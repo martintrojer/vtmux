@@ -543,7 +543,7 @@ impl Server {
         let mut due: Vec<PaneId> = self
             .clients
             .values()
-            .filter(|c| c.control.is_none() && c.status.redraw_pending())
+            .filter(|c| c.control.is_none() && c.status.status_redraw_pending())
             .filter_map(|c| c.attached)
             .filter_map(|s| self.model.current_of(s))
             .filter_map(|(_, w, _)| self.model.windows.get(&w))
