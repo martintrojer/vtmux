@@ -1336,6 +1336,22 @@ fn history_limit_retention() {
         ];
         w.wait_for_text("s", "DONE");
         w.wait_for_text("w", "DONE");
+        // DONE on screen can come before the server has fed every byte to
+        // the pane under load: wait until history_size stops changing.
+        for target in ["s", "w"] {
+            let mut last = String::new();
+            let start = Instant::now();
+            loop {
+                let now = w
+                    .run(&["display", "-p", "-t", target, "#{history_size}"])
+                    .stdout;
+                if now == last || start.elapsed() > Duration::from_secs(10) {
+                    break;
+                }
+                last = now;
+                std::thread::sleep(Duration::from_millis(300));
+            }
+        }
         let state = ["display", "-p", "-t", "", "#{history_size} #{pane_width}"];
         for (target, size) in [
             ("s", None),
