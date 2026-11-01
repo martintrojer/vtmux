@@ -133,3 +133,11 @@ product reasons" category.
 - Evidence: `set -g @o "$(printf '\370\210\200\200\200')"; display -p '#{s/./x/:@o}'`: tmux `x`, vtmux `\370\210\200\200\200`; `/tmp/bytes_args/p7.sh` (bytes_args worker) lists every differing row.
 - Also (review_bytes_args_2, reviewer-54, `/tmp/r54/n.sh`): names. tmux's `utf8_isvalid` decodes through `mbtowc`, so a window, session or buffer name containing `\364\220\200\200` (F4 90..F4 BF leads, U+110000..U+13FFFF) is accepted; vtmux rejects it as `invalid window/buffer/session name`. And surrogates: glibc decodes `\355\240\200` (U+D800, ED A0..ED BF leads) as one character for `regexec`/`fnmatch`, so `#{s/./Z/:@p}` on `a<ED A0 80>b` gives `ZZZ` in tmux and `Z<ED A0 80>Z` in vtmux; `m/r` and captures differ the same way.
 - Category: Deferred (only byte sequences that are not valid UTF-8 but that glibc decodes anyway; every valid UTF-8 sequence, including U+10FF80..U+10FFFF and U+FFFD, matches the reference, and so does every byte glibc rejects).
+
+### D-014: the partial-key delay doesn't wait on the terminal size query
+
+- Test / assertion: none; reviewer-55's `/tmp/rev55/esc.py` (review_prompt_core_2).
+- tmux behaviour: when the outer terminal reports no pixel size (`ws_xpixel == 0`), `tty_resize` (tty.c:144-150) sends `ESC[18t ESC[14t` and sets `TTY_WINSIZEQUERY`; until a `4;h;w` reply arrives, `tty_keys_next` (tty-keys.c:1002-1008) keeps the 500 ms partial-key delay, so a lone ESC waits 500 ms indefinitely on terminals that never answer.
+- vtmux behaviour: vtmux doesn't send the size query, so after the first 5 s a lone ESC is taken after about 10 ms, as tmux does once the query is answered or when pixel sizes are known.
+- Evidence: with `ws_xpixel=0`, tmux redraws 501 ms after a lone ESC at t=3/8/17/27/42 s; vtmux 503 ms at t=3 s, then 12 ms from t=7.6 s. With pixel sizes set, both are about 10 ms after 5 s.
+- Category: Deferred (pixel-size queries come with image passthrough work; the visible effect is Escape responsiveness, in vtmux's favour).
