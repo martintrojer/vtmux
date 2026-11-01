@@ -38,6 +38,10 @@ Recorded per commit in git history; the list is kept current:
   `set_scrollback_max_lines` (`GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES`,
   `GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES`, already in the bindings);
   vtmux keeps history by line count with it.
+- `libghostty-vt/src/terminal.rs`: `Terminal::memory_usage`
+  (`GHOSTTY_TERMINAL_DATA_MEMORY_USAGE`, a sized struct, already in the
+  bindings) re-exported as `terminal::MemoryUsage`; vtmux's compression
+  tests read compressed pages and resident bytes from it.
 - `libghostty-vt-sys/build.rs`: applies `libghostty-vt-sys/patches/*.patch`
   (name order, `git apply`) to the fetched ghostty; the source stamp
   records the commit and the patch contents. Not applied to a

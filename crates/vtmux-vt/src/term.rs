@@ -12,8 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use libghostty_vt::screen::{Screen, TrackedGridRef};
 use libghostty_vt::terminal::{
-    ConformanceLevel, DeviceAttributes, DeviceType, Mode, Point, PointCoordinate, PointSpace,
-    PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize, TertiaryDeviceAttributes,
+    CompressionMode, CompressionResult, ConformanceLevel, DeviceAttributes, DeviceType, Mode,
+    Point, PointCoordinate, PointSpace, PrimaryDeviceAttributes, SecondaryDeviceAttributes,
+    SizeReportSize, TertiaryDeviceAttributes,
 };
 use libghostty_vt::{Terminal, TerminalOptions};
 
@@ -25,6 +26,44 @@ pub(crate) enum HistoryRow<'a> {
     Screen(usize),
     /// The primary history copied when the alternate screen came up.
     Frozen(&'a FrozenRow),
+}
+
+thread_local! {
+    /// Reads of history Ghostty holds, by any pane on this thread (see
+    /// [`history_reads`]).
+    static HISTORY_READS: StdCell<u64> = const { StdCell::new(0) };
+}
+
+/// How many history rows were read out of Ghostty on this thread, by any
+/// pane. A read restores the compressed page it falls in without changing
+/// Ghostty's compression activity token (PageList.zig `Node.page`), so a
+/// caller that saw this change should look at
+/// [`PaneTerm::compression_activity`] again.
+#[must_use]
+pub fn history_reads() -> u64 {
+    HISTORY_READS.with(StdCell::get)
+}
+
+/// Compared with an earlier value: whether scrollback may have pages to
+/// compress that it did not have then. Ghostty's token (pages added,
+/// pruned or reflowed) plus the pane's own history reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CompressionActivity {
+    ghostty: Option<libghostty_vt::terminal::CompressionActivity>,
+    reads: u64,
+}
+
+/// What one [`PaneTerm::compress_step`] left to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compression {
+    /// More steps would compress more (or verify the pass).
+    Pending,
+    /// The pass is over. Another step would start a new one, so call again
+    /// only once [`PaneTerm::compression_activity`] changed.
+    Complete,
+    /// Ghostty cannot give compressed memory back on this target
+    /// (`mem.zig` `canReclaim`).
+    Unsupported,
 }
 
 /// A line flag OSC 133 sets on the cursor's line (input.c:3264-3330).
@@ -153,6 +192,8 @@ pub struct PaneTerm {
     marks: Vec<(TrackedGridRef, LineMark)>,
     /// The marks of the history copied when the alternate screen came up.
     frozen_marks: Vec<(usize, LineMark)>,
+    /// History rows read out of Ghostty (see [`history_reads`]).
+    reads: StdCell<u64>,
 }
 
 impl PaneTerm {
@@ -262,6 +303,7 @@ impl PaneTerm {
             redraw: false,
             marks: Vec::new(),
             frozen_marks: Vec::new(),
+            reads: StdCell::new(0),
         };
         pane.retain();
         pane
@@ -569,6 +611,7 @@ impl PaneTerm {
 
     /// Copy the newest `hsize` primary history rows.
     fn freeze_history(&self) -> Vec<FrozenRow> {
+        self.note_history_read();
         let cols = usize::from(self.cols());
         let hidden = self.term.scrollback_rows().unwrap_or(0) - self.hsize;
         (0..self.hsize)
@@ -936,6 +979,51 @@ impl PaneTerm {
     /// Take the bytes to write back to the pane program (tmux's replies).
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut *self.replies.borrow_mut())
+    }
+
+    /// A history row was read out of Ghostty (see [`history_reads`]).
+    pub(crate) fn note_history_read(&self) {
+        self.reads.set(self.reads.get().wrapping_add(1));
+        HISTORY_READS.with(|r| r.set(r.get().wrapping_add(1)));
+    }
+
+    /// See [`CompressionActivity`]. Cheap: one Ghostty query.
+    #[must_use]
+    pub fn compression_activity(&self) -> CompressionActivity {
+        CompressionActivity {
+            ghostty: self.term.compression_activity().ok(),
+            reads: self.reads.get(),
+        }
+    }
+
+    /// Whether Ghostty may hold history to compress. It compresses only
+    /// the primary screen's pages before the one holding the active area's
+    /// top row (PageList.zig `CompressionIterator`), so under a page of
+    /// history there is none. Under the alternate screen the primary
+    /// history can't be counted, so the answer is yes.
+    #[must_use]
+    pub fn has_history(&self) -> bool {
+        self.alternate_on() || self.retained_rows() >= self.page_rows
+    }
+
+    /// One bounded step of scrollback compression
+    /// (`ghostty_terminal_compress`, incremental): at most one page
+    /// compressed out of at most eight inspected. Compressed pages read
+    /// back the same; reading one restores it.
+    pub fn compress_step(&mut self) -> Compression {
+        match self.term.compress(CompressionMode::Incremental) {
+            Ok(CompressionResult::Pending) => Compression::Pending,
+            Ok(CompressionResult::Complete) => Compression::Complete,
+            Ok(CompressionResult::Unsupported) | Err(_) => Compression::Unsupported,
+        }
+    }
+
+    /// Primary-screen pages Ghostty holds compressed now.
+    #[must_use]
+    pub fn compressed_pages(&self) -> u64 {
+        self.term
+            .memory_usage()
+            .map_or(0, |u| u.primary_compressed_pages)
     }
 }
 

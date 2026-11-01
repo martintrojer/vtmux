@@ -11,4 +11,4 @@ pub mod term;
 
 pub use capture::{CaptureOpts, LineRef, Row, capture};
 pub use snapshot::{Cell, Color, Snapshot, Style, Underline, snapshot};
-pub use term::{LineMark, PaneTerm};
+pub use term::{Compression, CompressionActivity, LineMark, PaneTerm, history_reads};

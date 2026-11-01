@@ -106,6 +106,8 @@ Control-mode clients (`vtmux -C`) use the same socket. They send command lines o
 
 libghostty-vt runs **inside the server, once per pane**, holding the screen state that tmux's own emulator would hold. This is the "grid follows Ghostty" half of D4. Anything a script can read is still shaped like tmux, even when the cells underneath came from Ghostty: `capture-pane` output, `#{cursor_x}`, history size, query replies. Where the two genuinely differ, the difference is recorded with evidence in [`compat/DIVERGENCES.md`](../compat/DIVERGENCES.md).
 
+Idle scrollback is compressed in place (`compress.rs`): five seconds after a pane's history last changed, or after vtmux last read it (capture-pane, copy mode), the loop runs one bounded libghostty-vt compression step at a time, round-robin across such panes, only in turns that woke for nothing else, and rests between steps. Reading compressed history restores it transparently, so no command's output changes. A pane with nothing to compress sets no timer.
+
 If your outer terminal is Ghostty, the final picture is parsed a second time by Ghostty's own copy of libghostty. That double parse is the cost of being a drop-in tmux that works inside any terminal and over plain SSH. Superlogical's Rex avoids it by making its client the terminal, which gives up compatibility.
 
 ## Compatibility is at the edge

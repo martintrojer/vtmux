@@ -217,6 +217,8 @@ pub struct Pane {
     /// screen, and the mode's callbacks for it (`mtd->prompt_data`).
     pub mode_prompt: Option<crate::mode::prompt::ModePrompt>,
     pub(crate) mode_prompt_owner: Option<crate::open_prompt::Owner>,
+    /// When its idle history is compressed ([`crate::compress`]).
+    pub compress: crate::compress::PaneCompress,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its
@@ -385,6 +387,7 @@ impl Model {
                     if let Some(p) = self.panes.get_mut(&id) {
                         p.history_limit = limit;
                         p.term.set_history_limit(limit);
+                        p.compress.observe(&p.term, Instant::now());
                     }
                 }
             }
@@ -1430,6 +1433,7 @@ impl Pane {
         }
         self.resizes.push((from, (rect.sx, rect.sy)));
         self.term.resize(clamp16(rect.sx), clamp16(rect.sy));
+        self.compress.observe(&self.term, Instant::now());
         // window_pane_resize: the shown mode follows.
         let size = (usize::from(self.term.cols()), usize::from(self.term.rows()));
         match self.modes.first_mut() {

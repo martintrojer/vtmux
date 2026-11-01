@@ -197,7 +197,10 @@ impl PaneTerm {
     pub fn history_row(&self, id: u64) -> Option<Row> {
         let cols = usize::from(self.cols());
         let (cells, wrapped) = match self.history_screen_row(id)? {
-            HistoryRow::Screen(y) => read_screen_row(&self.term, y, cols),
+            HistoryRow::Screen(y) => {
+                self.note_history_read();
+                read_screen_row(&self.term, y, cols)
+            }
             HistoryRow::Frozen(f) => f.thaw(),
         };
         Some(Row {
@@ -269,6 +272,9 @@ impl FrozenRow {
 fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCell>, bool) {
     if term.alternate_on() && y < hsize {
         return term.frozen_row(y).map(FrozenRow::thaw).unwrap_or_default();
+    }
+    if y < hsize {
+        term.note_history_read();
     }
     // Ghostty may retain more history than tmux has: skip the oldest rows.
     let retained = term.term.scrollback_rows().unwrap_or(0);
