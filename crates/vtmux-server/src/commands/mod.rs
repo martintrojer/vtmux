@@ -22,6 +22,7 @@ pub(crate) mod copy_mode;
 mod delete_buffer;
 mod detach_client;
 mod display_message;
+mod display_panes;
 pub(crate) mod display_popup;
 pub(crate) mod file_io;
 mod join_pane;
@@ -50,7 +51,7 @@ mod resize_window;
 mod respawn_pane;
 mod respawn_window;
 mod rotate_window;
-mod run_shell;
+pub(crate) mod run_shell;
 pub(crate) use run_shell::make_commands;
 mod save_buffer;
 mod select_layout;
@@ -475,6 +476,7 @@ fn dispatch(
         "respawn-window" => respawn_window::exec(server, item, args, found),
         "rotate-window" => rotate_window::exec(server, args, found),
         "display-message" => display_message::exec(server, item, args, found),
+        "display-panes" => display_panes::exec(server, item, args, source, found),
         "capture-pane" => capture_pane::exec(server, item, args, found),
         "send-keys" => send_keys::exec(server, item, args, found),
         "clock-mode" => clock_mode::exec(server, found),

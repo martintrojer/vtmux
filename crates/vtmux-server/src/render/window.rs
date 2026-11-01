@@ -30,14 +30,14 @@ pub struct Source<'a> {
 }
 
 impl Source<'_> {
-    fn ctx(&self, found: Found, caps: Caps) -> Ctx<'_> {
+    pub(super) fn ctx(&self, found: Found, caps: Caps) -> Ctx<'_> {
         let mut ctx = Ctx::new(self.model, self.info, self.env, found);
         ctx.extra
             .push(("client_colours".into(), caps.colours.to_string()));
         ctx
     }
 
-    fn string(&self, tree: TreeId, name: &str) -> String {
+    pub(super) fn string(&self, tree: TreeId, name: &str) -> String {
         self.model
             .options
             .get(tree, name)
@@ -101,6 +101,7 @@ impl Source<'_> {
     /// The scene and drawing data for session `s`'s current window on a
     /// `cols` x `rows` area.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // one pass over the window's panes
     pub fn window(&self, s: SessionId, cols: u16, rows: u16, caps: Caps) -> Option<(Scene, Draw)> {
         let found = Found::from_session(self.model, s);
         let w = found.window?;
@@ -122,6 +123,11 @@ impl Source<'_> {
             }
             let floating = window.is_floating(p);
             let lines = self.lines(w, p, floating);
+            let hides = window.zoom.as_ref().is_some_and(|z| z.pane == p)
+                && pane
+                    .modes
+                    .first()
+                    .is_some_and(crate::mode::Mode::hides_pane_status);
             let mut rect = pane.rect;
             rect.xoff += i32::from(offset);
             rect.yoff += i32::from(offset);
@@ -130,7 +136,11 @@ impl Source<'_> {
                 rect,
                 floating,
                 lines,
-                status: self.pane_status(w, p, floating, lines),
+                status: if hides {
+                    PaneStatus::Off
+                } else {
+                    self.pane_status(w, p, floating, lines)
+                },
             });
             let ctx = self.ctx(
                 Found {
@@ -219,6 +229,9 @@ impl Source<'_> {
         if let Some(crate::mode::Mode::Clock(m)) = pane.modes.first() {
             let screen = self.clock_screen(pane, m, ctx, caps);
             return (screen, Vec::new());
+        }
+        if let Some(crate::mode::Mode::Panes(m)) = pane.modes.first() {
+            return (self.panes_screen(pane, m, caps), Vec::new());
         }
         let (mut screen, selected) = match pane.modes.first() {
             Some(crate::mode::Mode::Copy(m)) => {
@@ -471,6 +484,13 @@ pub fn cursor(screen: &mut Snapshot, draw: &Draw, model: &Model, rows: u16) {
     let y = pane.rect.yoff + i32::from(cy) + i32::from(draw.offset);
     let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
         return;
+    };
+    // Panes mode leaves the cursor one past its last write; at the
+    // window's edge the terminal keeps it in the last column.
+    let x = if x == screen.cols {
+        x.saturating_sub(1)
+    } else {
+        x
     };
     if x < screen.cols && y < rows {
         screen.cursor = Some((x, y));

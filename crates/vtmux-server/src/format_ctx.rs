@@ -470,6 +470,19 @@ impl<'a> Ctx<'a> {
             "pane_index" => self.model.pane_index(p.id)?.to_string(),
             "pane_pid" => p.pid.to_string(),
             "pane_width" => r.sx.to_string(),
+            // format_cb_pane_unzoomed_width / _height (format.c:2704-2776):
+            // the pane's cell in the full layout, the row of a pane status
+            // line not counted, scrollbars aside.
+            "pane_unzoomed_width" => {
+                let root = &w.full_layout().root;
+                root.get(&root.find_pane(p.id)?).g().sx.to_string()
+            }
+            "pane_unzoomed_height" => {
+                let layout = w.full_layout();
+                let g = layout.root.get(&layout.root.find_pane(p.id)?).g();
+                let border = layout.pane_needs_border(p.id) && g.sy > 1;
+                (g.sy - u32::from(border)).to_string()
+            }
             "pane_height" => r.sy.to_string(),
             "pane_left" | "pane_x" => r.xoff.to_string(),
             "pane_top" | "pane_y" => r.yoff.to_string(),

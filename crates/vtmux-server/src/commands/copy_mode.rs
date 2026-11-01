@@ -30,6 +30,15 @@ pub fn exec(
     } else {
         p
     };
+    // window_pane_set_mode: a mode that is not stacked goes first
+    // (window.c:1755-1756).
+    if server.model.panes[&p]
+        .modes
+        .first()
+        .is_some_and(crate::mode::Mode::no_stack)
+    {
+        server.reset_mode(p);
+    }
     let flags = (args.flag('e'), args.flag('H'));
     let vi = server.model.mode_keys_vi(p);
     server.model.set_copy_mode(p, args.flag('k'), |model| {

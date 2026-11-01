@@ -180,7 +180,7 @@ reason = "not implemented (M0 baseline)"
 
 [tests."display-panes.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "panes-mode is done (entry, zoom, -Z, -s, keys, template, format, border-status); the script runs to its floating half (regress/display-panes.sh:258-297) and stops at new-pane -B none -X -Y, not implemented. Its scrollbar block (117-137) passes only because vtmux has no scrollbars: pane-scrollbars is accepted and ignored"
 
 [tests."environ-update.sh"]
 status = "pass"
