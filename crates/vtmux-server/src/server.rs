@@ -2844,6 +2844,7 @@ impl Server {
         let history_limit =
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
         let mut term = PaneTerm::new(cols, rows, history_limit);
+        term.set_colour_names(vtmux_core::colour::is_x11_name);
         let host = &self.info.host;
         if !host.chars().any(char::is_control) {
             term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
