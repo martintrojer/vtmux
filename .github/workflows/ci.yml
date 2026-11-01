@@ -52,6 +52,8 @@ jobs:
       - name: Reference comparison suites (macOS; informational)
         if: runner.os == 'macOS'
         continue-on-error: true
+        # A hang here (macos_attach_parity) must not cancel the job.
+        timeout-minutes: 15
         run: |
           cargo test -p vtmux --test cli --test attach
           cargo xtask regress && cargo xtask oracle replay
