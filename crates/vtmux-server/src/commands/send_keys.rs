@@ -309,7 +309,7 @@ fn mode_keys(
             // A mode with no key table takes the key itself
             // (`window_pane_key`, cmd-send-keys.c:97-98).
             let Some(table) = table else {
-                server.mode_key(p, tc, key);
+                server.mode_key(p, tc, key, false);
                 continue;
             };
             let Some(commands) = server

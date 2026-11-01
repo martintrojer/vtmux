@@ -11,6 +11,7 @@ pub mod compose;
 pub mod popup;
 pub mod scene;
 pub mod status;
+pub mod tree;
 pub mod window;
 use vtmux_core::colour::{self, Colour, tty::Depth};
 use vtmux_core::protocol::Hello;

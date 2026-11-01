@@ -28,13 +28,6 @@ pub(crate) enum Owner {
     Command(command_prompt::Pending),
     Confirm(confirm_before::Pending),
     /// A mode's own prompt on its screen (`mode_tree_prompt`).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the tree modes open mode prompts; tests do for now"
-        )
-    )]
     Mode(Box<dyn crate::mode::prompt::ModePromptOwner>),
 }
 
@@ -372,13 +365,6 @@ impl Server {
     /// pane's stack. Any prompt already there is cleared (its owner freed).
     /// The prompt is on the first row with `status-position top` in the
     /// client's session (the global one with no client).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the tree modes open mode prompts; tests do for now"
-        )
-    )]
     pub(crate) fn mode_prompt_set(
         &mut self,
         p: PaneId,

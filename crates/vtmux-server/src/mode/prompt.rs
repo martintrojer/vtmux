@@ -47,13 +47,6 @@ pub struct ModePrompt {
 }
 
 impl ModePrompt {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the tree modes open mode prompts; tests do for now"
-        )
-    )]
     pub(crate) fn new(open: OpenPrompt, top: bool, depth: usize) -> Self {
         Self { open, top, depth }
     }
