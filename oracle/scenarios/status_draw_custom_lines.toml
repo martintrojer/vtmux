@@ -9,10 +9,13 @@ steps = [
   { attach = { session = "a" } },
   { screen = {} },
   { run = ["set", "-t", "a", "status", "3"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["set", "-gu", "status-format[1]"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["set", "-g", "status-style", "bg=magenta"] },
   { run = ["set", "-g", "status-fg", "cyan"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

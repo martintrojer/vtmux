@@ -11,7 +11,9 @@ steps = [
   { screen = {} },
   { run = ["display", "-p", "-t", "a", "[#{pane_flags}][#{P:#{pane_flags}|}]"] },
   { run = ["set", "-t", "a", "status", "3"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["selectw", "-t", "a:1"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

@@ -9,6 +9,7 @@ steps = [
   { attach = { session = "a" } },
   { screen = {} },
   { run = ["resize-pane", "-Z", "-t", "a:1"] },
+  { settle = { react = true } },
   { screen = {} },
   # cmd-select-window.c:136-139: session_select returns 1 for the current
   # window, so no server_redraw_session and the status stays stale.
@@ -18,9 +19,11 @@ steps = [
   { run = ["display-message", "-d", "1500", "-t", "a", "m"] },
   { run = ["send-keys", "-t", "a:0", "hello", "Enter"] },
   { run = ["new-window", "-d", "-t", "a", "-n", "y", "cat"] },
+  { settle = { react = true } },
   { screen = {} },
-  { settle = { quiet_ms = 1700 } },
+  { settle = { quiet_ms = 3500 } },
   { screen = {} },
   { run = ["next-window", "-t", "a"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

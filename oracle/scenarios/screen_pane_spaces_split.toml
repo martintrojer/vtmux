@@ -9,5 +9,6 @@ steps = [
   { attach = { session = "a" } },
   { screen = {} },
   { run = ["selectp", "-t", "%0"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

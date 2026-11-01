@@ -17,6 +17,7 @@ steps = [
   { run = ["send-keys", "-t", "a", "-X", "cursor-down"] },
   { run = ["send-keys", "-t", "a", "-X", "-N", "2", "cursor-right"] },
   { run = ["send-keys", "-t", "a", "-X", "selection-mode", "line"] },
+  { settle = { react = true } },
   { run = ["display", "-p", "-t", "a", "[#{selection_mode}] [#{selection_start_x},#{selection_start_y}-#{selection_end_x},#{selection_end_y}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
   { screen = {} },
   { run = ["send-keys", "-t", "a", "-X", "copy-selection"] },
@@ -31,6 +32,7 @@ steps = [
   { run = ["send-keys", "-t", "a", "-X", "-N", "2", "cursor-right"] },
   { run = ["send-keys", "-t", "a", "-X", "selection-mode", "line"] },
   { run = ["send-keys", "-t", "a", "-X", "cursor-up"] },
+  { settle = { react = true } },
   { run = ["display", "-p", "-t", "a", "[#{selection_mode}] [#{selection_start_x},#{selection_start_y}-#{selection_end_x},#{selection_end_y}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
   { screen = {} },
   { run = ["send-keys", "-t", "a", "-X", "copy-selection"] },
@@ -64,6 +66,7 @@ steps = [
   { run = ["send-keys", "-t", "a", "-X", "select-line"] },
   { run = ["send-keys", "-t", "a", "-X", "copy-selection-and-cancel"] },
   { run = ["show-buffer"] },
+  { settle = { react = true } },
   { run = ["display", "-p", "-t", "a", "#{pane_in_mode}"] },
   { screen = {} },
 ]

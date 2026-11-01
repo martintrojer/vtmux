@@ -10,5 +10,6 @@ steps = [
   { attach = { session = "a" } },
   { screen = {} },
   { run = ["set", "-w", "-t", "a", "pane-border-format", "a         b"] },
+  { settle = { react = true } },
   { screen = {} },
 ]

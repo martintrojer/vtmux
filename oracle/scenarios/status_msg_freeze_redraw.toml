@@ -9,12 +9,14 @@ steps = [
   { run = ["splitw", "-d", "-t", "a.0", "cat"] },
   { attach = { session = "a" } },
   { run = ["send-keys", "-t", "a.1", "one", "Enter"] },
+  { settle = { react = true } },
   { screen = {} },
   # With the status off the message takes the last row and still freezes.
   { run = ["display-message", "-d", "1500", "-t", "a", "m"] },
   { run = ["send-keys", "-t", "a.0", "hello", "Enter"] },
+  { settle = { react = true } },
   { screen = {} },
-  { settle = { quiet_ms = 1700 } },
+  { settle = { quiet_ms = 3500 } },
   { screen = {} },
   # PANE_REDRAW draws one pane through the freeze: a screen switch
   # (screen-write.c:3154) and respawn-pane (cmd-respawn-pane.c:92).
@@ -22,9 +24,11 @@ steps = [
   { run = ["display-message", "-d", "2000", "-t", "a", "m"] },
   { run = ["send-keys", "-t", "a.0", "again", "Enter"] },
   { run = ["send-keys", "-t", "a.2", "Enter"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["respawn-pane", "-k", "-t", "a.1", "sh", "-c", "echo fresh; exec cat"] },
+  { settle = { react = true } },
   { screen = {} },
-  { settle = { quiet_ms = 2200 } },
+  { settle = { quiet_ms = 4000 } },
   { screen = {} },
 ]

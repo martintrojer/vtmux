@@ -1,10 +1,12 @@
 name = "keys_attached"
 size = [40, 10]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "stty raw -echo; exec cat -v"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "stty raw -echo; tmux wait-for -S ready; exec cat -v"] },
+  { wait_for = "ready" },
   { run = ["bind", "-n", "M-x", "rename-window", "mx"] },
   { run = ["set", "-g", "prefix2", "C-a"] },
   { attach = { session = "a" } },
+  { settle = {} },
   { keys = "\u0002%" },
   { settle = {} },
   { run = ["display", "-p", "-t", "a", "#{window_panes}"] },

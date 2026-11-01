@@ -63,7 +63,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 1000
+          "quiet_ms": 2500
         }
       },
       {
@@ -87,7 +87,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 1000
+          "quiet_ms": 2500
         }
       },
       {
@@ -118,7 +118,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 1800
+          "quiet_ms": 3500
         }
       },
       {

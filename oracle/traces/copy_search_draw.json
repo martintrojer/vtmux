@@ -69,6 +69,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "run": [
           "display",
           "-p",
@@ -90,6 +95,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -101,6 +111,11 @@
           "search-forward",
           "b.r"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "run": [
@@ -122,6 +137,11 @@
           "-X",
           "cursor-left"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "run": [
@@ -146,6 +166,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "run": [
           "display",
           "-p",
@@ -165,6 +190,11 @@
           "-X",
           "page-up"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -190,6 +220,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -200,6 +235,11 @@
           "-X",
           "jump-to-mark"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "run": [
@@ -257,6 +297,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "run": [
           "display",
           "-p",
@@ -289,6 +334,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -299,6 +349,11 @@
           "-X",
           "cancel"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "run": [
@@ -370,7 +425,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "[1] [17] [foo] [10,6]\n",
@@ -379,7 +434,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 9,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -401,7 +456,7 @@
       }
     },
     {
-      "step": 9,
+      "step": 10,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -410,7 +465,7 @@
       }
     },
     {
-      "step": 10,
+      "step": 12,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -432,7 +487,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 13,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -441,7 +496,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 15,
       "observation": {
         "kind": "cli",
         "stdout": "[1] [8] [bar] [13,0]\n",
@@ -450,7 +505,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 16,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -472,7 +527,7 @@
       }
     },
     {
-      "step": 14,
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -481,7 +536,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 19,
       "observation": {
         "kind": "cli",
         "stdout": "[0] [12,0]\n",
@@ -490,7 +545,7 @@
       }
     },
     {
-      "step": 16,
+      "step": 20,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -512,7 +567,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 21,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -521,7 +576,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 23,
       "observation": {
         "kind": "cli",
         "stdout": "[1] [1] [世界] [5,8]\n",
@@ -530,7 +585,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 24,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -552,7 +607,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 25,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -561,7 +616,7 @@
       }
     },
     {
-      "step": 21,
+      "step": 27,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -579,86 +634,6 @@
         "cursor": [
           5,
           1
-        ]
-      }
-    },
-    {
-      "step": 22,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 23,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 24,
-      "observation": {
-        "kind": "screen",
-        "rows": [
-          "line1 foo bar foo                  \\e[30m\\e[43m[2/2]",
-          "line2\\e[33m\\e[40m \\e[30m\\e[43mfoo bar foo",
-          "\\e[39m\\e[49mline3 foo bar foo",
-          "line4 foo bar foo",
-          "line5 foo bar foo",
-          "line6 foo bar foo",
-          "line7 foo bar foo",
-          "line8 foo bar foo",
-          "wide 世界 foo",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
-        ],
-        "cursor": [
-          5,
-          4
-        ]
-      }
-    },
-    {
-      "step": 25,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 26,
-      "observation": {
-        "kind": "cli",
-        "stdout": "[5,0] [1]\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 27,
-      "observation": {
-        "kind": "screen",
-        "rows": [
-          "line2 foo bar foo                  \\e[30m\\e[43m[1/2]",
-          "\\e[39m\\e[49mline3 foo bar foo",
-          "line4 foo bar foo",
-          "\\e[30m\\e[43mline5\\e[33m\\e[40m \\e[30m\\e[43mfoo bar foo",
-          "\\e[39m\\e[49mline6 foo bar foo",
-          "line7 foo bar foo",
-          "line8 foo bar foo",
-          "wide 世界 foo",
-          "end",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
-        ],
-        "cursor": [
-          5,
-          0
         ]
       }
     },
@@ -681,21 +656,25 @@
       }
     },
     {
-      "step": 30,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 31,
       "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
+        "kind": "screen",
+        "rows": [
+          "line1 foo bar foo                  \\e[30m\\e[43m[2/2]",
+          "line2\\e[33m\\e[40m \\e[30m\\e[43mfoo bar foo",
+          "\\e[39m\\e[49mline3 foo bar foo",
+          "line4 foo bar foo",
+          "line5 foo bar foo",
+          "line6 foo bar foo",
+          "line7 foo bar foo",
+          "line8 foo bar foo",
+          "wide 世界 foo",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          5,
+          4
+        ]
       }
     },
     {
@@ -708,7 +687,83 @@
       }
     },
     {
-      "step": 33,
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[5,0] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "line2 foo bar foo                  \\e[30m\\e[43m[1/2]",
+          "\\e[39m\\e[49mline3 foo bar foo",
+          "line4 foo bar foo",
+          "\\e[30m\\e[43mline5\\e[33m\\e[40m \\e[30m\\e[43mfoo bar foo",
+          "\\e[39m\\e[49mline6 foo bar foo",
+          "line7 foo bar foo",
+          "line8 foo bar foo",
+          "wide 世界 foo",
+          "end",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m             \\e[30m\"t\" <CLOCK>"
+        ],
+        "cursor": [
+          5,
+          0
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
       "observation": {
         "kind": "cli",
         "stdout": "[1] [17] [foo] [14,0]\n",
@@ -717,7 +772,7 @@
       }
     },
     {
-      "step": 34,
+      "step": 43,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -739,7 +794,7 @@
       }
     },
     {
-      "step": 35,
+      "step": 44,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -748,7 +803,7 @@
       }
     },
     {
-      "step": 36,
+      "step": 45,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -757,7 +812,7 @@
       }
     },
     {
-      "step": 37,
+      "step": 47,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -779,7 +834,7 @@
       }
     },
     {
-      "step": 38,
+      "step": 48,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -788,7 +843,7 @@
       }
     },
     {
-      "step": 39,
+      "step": 50,
       "observation": {
         "kind": "cli",
         "stdout": "[foo]\n",
@@ -797,7 +852,7 @@
       }
     },
     {
-      "step": 40,
+      "step": 51,
       "observation": {
         "kind": "screen",
         "rows": [

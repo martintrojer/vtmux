@@ -57,6 +57,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -86,6 +91,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -107,6 +117,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -117,6 +132,11 @@
           "a",
           "status-format[0]"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -181,7 +201,7 @@
       }
     },
     {
-      "step": 6,
+      "step": 7,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -201,7 +221,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "8 8\n",
@@ -210,7 +230,7 @@
       }
     },
     {
-      "step": 10,
+      "step": 11,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -230,7 +250,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 12,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -239,7 +259,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 14,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -259,7 +279,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 15,
       "observation": {
         "kind": "cli",
         "stdout": "7 7\n",
@@ -268,7 +288,7 @@
       }
     },
     {
-      "step": 14,
+      "step": 16,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -277,7 +297,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -297,7 +317,7 @@
       }
     },
     {
-      "step": 16,
+      "step": 19,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -306,7 +326,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 21,
       "observation": {
         "kind": "screen",
         "rows": [
