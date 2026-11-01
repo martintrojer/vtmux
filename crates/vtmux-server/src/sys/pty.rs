@@ -1,5 +1,5 @@
-//! Spawning a pane's process on a new PTY (spawn.c `spawn_pane`,
-//! 455-574).
+//! Spawning a process on a new PTY: a pane's (spawn.c `spawn_pane`,
+//! 455-574) or a PTY job's (job.c `job_run` with `JOB_PTY`, 70-232).
 
 use std::ffi::{CString, OsStr};
 use std::io;
@@ -9,12 +9,24 @@ use std::path::{Path, PathBuf};
 
 use rustix::process::Pid;
 
-/// What to run in a new pane.
+/// What runs on the PTY.
+#[derive(Clone, Debug)]
+pub enum Program {
+    /// A pane's command words: empty runs a login shell, one word runs
+    /// `<shell> -c <word>`, more are `execvp`ed directly (spawn.c:547-574).
+    /// The terminal gets tmux's erase character and `IUTF8`.
+    Pane(Vec<String>),
+    /// A job's shell command: `<shell> -c <command>`, argv[0] the shell's
+    /// basename (job.c:204-208). The terminal is as `forkpty` made it.
+    Command(String),
+    /// A job's argument vector, `execvp`ed as it is (job.c:209-212).
+    Argv(Vec<String>),
+}
+
+/// What to run on a new PTY.
 #[derive(Clone, Debug)]
 pub struct SpawnSpec {
-    /// The command words: empty runs a login shell, one word runs
-    /// `<shell> -c <word>`, more are `execvp`ed directly (spawn.c:547-574).
-    pub argv: Vec<String>,
+    pub program: Program,
     /// `default-shell`, already checked.
     pub shell: PathBuf,
     pub cwd: PathBuf,
@@ -59,18 +71,34 @@ fn shell_argv(shell: &Path, argv: &[String]) -> Vec<Vec<u8>> {
     }
 }
 
-/// Fork a child on a new PTY of `cols` x `rows` and exec the command.
-pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
-    // Everything the child needs is built before fork.
-    let direct = spec.argv.len() > 1;
-    let words: Vec<Vec<u8>> = if direct {
-        spec.argv
+/// The argv to exec, whether it is `execvp`ed (`direct`), and whether the
+/// terminal takes a pane's settings.
+fn program_words(program: &Program, shell: &Path) -> (bool, Vec<Vec<u8>>, bool) {
+    let bytes = |words: &[String]| -> Vec<Vec<u8>> {
+        words
             .iter()
             .map(|a| vtmux_core::rawstr::to_bytes(a).into_owned())
             .collect()
-    } else {
-        shell_argv(&spec.shell, &spec.argv)
     };
+    match program {
+        Program::Pane(argv) if argv.len() > 1 => (true, bytes(argv), true),
+        Program::Pane(argv) => (false, shell_argv(shell, argv), true),
+        Program::Command(command) => (
+            false,
+            shell_argv(shell, std::slice::from_ref(command)),
+            false,
+        ),
+        Program::Argv(argv) => (true, bytes(argv), false),
+    }
+}
+
+/// Fork a child on a new PTY of `cols` x `rows` and exec the command.
+pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
+    // Everything the child needs is built before fork.
+    let (direct, words, pane) = program_words(&spec.program, &spec.shell);
+    if words.is_empty() {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
     let argv: Vec<CString> = words
         .iter()
         .map(|w| cstring(w))
@@ -155,6 +183,7 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
                 candidates: &candidates,
                 sh_argv: &mut sh_argv,
                 direct,
+                pane,
                 fd_limit,
             })
         }
@@ -252,6 +281,9 @@ struct Child<'a> {
     sh_argv: &'a mut [*const libc::c_char],
     /// A multi-word command, run as `execvp` does (spawn.c:552).
     direct: bool,
+    /// A pane's terminal settings (spawn.c:524-538); a job keeps
+    /// `forkpty`'s.
+    pane: bool,
     fd_limit: libc::c_int,
 }
 
@@ -273,14 +305,16 @@ unsafe fn child(c: &mut Child<'_>) -> ! {
             }
         }
         // VERASE is tmux's backspace (\177) and IUTF8 is on (spawn.c:524-538).
-        let mut tio: libc::termios = std::mem::zeroed();
-        if libc::tcgetattr(0, &raw mut tio) != 0 {
-            libc::_exit(1);
-        }
-        tio.c_cc[libc::VERASE] = 0o177;
-        tio.c_iflag |= libc::IUTF8;
-        if libc::tcsetattr(0, libc::TCSANOW, &raw const tio) != 0 {
-            libc::_exit(1);
+        if c.pane {
+            let mut tio: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(0, &raw mut tio) != 0 {
+                libc::_exit(1);
+            }
+            tio.c_cc[libc::VERASE] = 0o177;
+            tio.c_iflag |= libc::IUTF8;
+            if libc::tcsetattr(0, libc::TCSANOW, &raw const tio) != 0 {
+                libc::_exit(1);
+            }
         }
         clear_signals();
         close_from(3, c.fd_limit);
@@ -423,5 +457,51 @@ mod tests {
             shell_argv(sh, &["cat".into()]),
             vec![b"sh".to_vec(), b"-c".to_vec(), b"cat".to_vec()]
         );
+    }
+
+    /// Everything a PTY child writes until it closes the terminal.
+    fn output(spec: &SpawnSpec) -> String {
+        let spawned = spawn(spec).expect("spawn");
+        let mut file = std::fs::File::from(spawned.master);
+        let mut out = Vec::new();
+        let mut buf = [0u8; 256];
+        loop {
+            match std::io::Read::read(&mut file, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => out.extend_from_slice(&buf[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                // EIO once the child is gone.
+                Err(_) => break,
+            }
+        }
+        let _ = rustix::process::waitpid(Some(spawned.pid), rustix::process::WaitOptions::empty());
+        String::from_utf8(out).expect("utf-8")
+    }
+
+    #[test]
+    fn job_programs_follow_job_c() {
+        // job.c:204-212: `<shell> -c cmd` with the shell's basename as $0,
+        // or argv execvp'd; the PTY has the size asked for.
+        let spec = |program| SpawnSpec {
+            program,
+            shell: PathBuf::from("/bin/sh"),
+            cwd: PathBuf::from("/"),
+            home: None,
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            cols: 18,
+            rows: 4,
+        };
+        let out = output(&spec(Program::Command("echo $0; stty size; pwd".into())));
+        assert_eq!(out, "sh\r\n4 18\r\n/\r\n");
+        let out = output(&spec(Program::Argv(vec![
+            "sh".into(),
+            "-c".into(),
+            "echo $0 $1".into(),
+            "a".into(),
+            "b".into(),
+        ])));
+        assert_eq!(out, "a b\r\n");
     }
 }
