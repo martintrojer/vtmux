@@ -464,6 +464,30 @@ pub fn pane_prompt_row(
     (row, cursor_x)
 }
 
+/// The text cell of a column [`mode_prompt_row`] did not draw.
+pub const KEEP: &str = "\u{0}";
+
+/// `mode_tree_draw_prompt` (mode-tree.c:1046-1070): the prompt drawn with
+/// `prompt_draw` over a row of a mode's screen `width` cells wide. Only
+/// the cells the prompt draws are not [`KEEP`]; the others keep what the
+/// mode drew. Returns the row and the cursor's column.
+#[must_use]
+pub fn mode_prompt_row(
+    source: &Source<'_>,
+    tree: TreeId,
+    prompt: &OpenPrompt,
+    width: usize,
+) -> (Vec<Cell>, usize) {
+    let keep = Cell {
+        text: KEEP.into(),
+        width: 1,
+        style: CellStyle::default(),
+    };
+    let mut row = vec![keep; width];
+    let cursor_x = draw_prompt(source, tree, prompt, &mut row, 0, width);
+    (row, cursor_x)
+}
+
 /// `prompt_draw` in the area `ax`, `aw` of `row`; returns the cursor's
 /// column.
 fn draw_prompt(

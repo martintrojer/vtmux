@@ -141,7 +141,7 @@ impl Source<'_> {
             } else {
                 "pane-border-style"
             };
-            let (content, selected) = self.pane_screen(pane, &ctx, caps);
+            let (content, selected) = self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
             draws.insert(
                 p,
                 PaneDraw {
@@ -209,10 +209,11 @@ impl Source<'_> {
     fn pane_screen(
         &self,
         pane: &crate::model::Pane,
+        tree: TreeId,
         ctx: &Ctx<'_>,
         caps: Caps,
     ) -> (Snapshot, Vec<bool>) {
-        match pane.modes.first().and_then(crate::mode::Mode::as_copy) {
+        let (mut screen, selected) = match pane.modes.first().and_then(crate::mode::Mode::as_copy) {
             Some(m) => {
                 let vi = self
                     .model
@@ -221,7 +222,40 @@ impl Source<'_> {
                 (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
             }
             None => (vtmux_vt::snapshot(&pane.term), Vec::new()),
+        };
+        if let Some(prompt) = pane.mode_prompt.as_ref().filter(|m| m.shown(pane)) {
+            self.mode_prompt(&mut screen, prompt, tree, caps);
         }
+        (screen, selected)
+    }
+
+    /// `mode_tree_draw_prompt` (mode-tree.c:1046-1070): the mode's prompt
+    /// over the last row of its screen, or the first with
+    /// `status-position top`, and the cursor on it, shown.
+    fn mode_prompt(
+        &self,
+        screen: &mut Snapshot,
+        prompt: &crate::mode::prompt::ModePrompt,
+        tree: TreeId,
+        caps: Caps,
+    ) {
+        let (cols, rows) = (usize::from(screen.cols), usize::from(screen.rows));
+        if cols == 0 || rows == 0 {
+            return;
+        }
+        let py = if prompt.top { 0 } else { rows - 1 };
+        let (row, cx) = super::status::mode_prompt_row(self, tree, &prompt.open, cols);
+        let theme = self.theme(caps);
+        for (x, drawn) in row.iter().enumerate() {
+            if drawn.text != super::status::KEEP {
+                screen.cells[py * cols + x] = theme.cell(drawn);
+            }
+        }
+        screen.cursor = Some((
+            u16::try_from(cx.min(cols - 1)).unwrap_or(0),
+            u16::try_from(py).unwrap_or(0),
+        ));
+        screen.cursor_visible = true;
     }
 
     /// Copy mode's screen for `pane` (`window_copy_write_line`): the rows in

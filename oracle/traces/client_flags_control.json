@@ -1,0 +1,497 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "client_flags_control",
+  "inputs": {
+    "name": "client_flags_control",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p 'f=#{client_flags} ro=#{client_readonly}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -f new-layouts,wait-exit,pause-after=5,bogus"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p 'f=#{client_flags}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -F '!new-layouts,!pause-after,ignore-size,no-detach-on-destroy'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p 'f=#{client_flags}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -f read-only"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -f '!read-only'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p 'f=#{client_flags} ro=#{client_readonly}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -r"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p 'f=#{client_flags} ro=#{client_readonly}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -r"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p 'f=#{client_flags} ro=#{client_readonly}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -C 100,50"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "ls -F 's=#{window_width}x#{window_height}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -C @0:40x10"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "ls -F 's=#{window_width}x#{window_height}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -C @0:"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "ls -F 's=#{window_width}x#{window_height}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -C 0x5"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%error"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -C nonsense"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%error"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -A '%0:pause'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -A '%0:continue'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -S"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -t nosuch"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%error"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -c nosuch -t b"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%error"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "switch-client -F -t b"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p '#{client_session}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "f=attached,focused,control-mode,UTF-8 ro=0",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%begin <TIME> #4 1",
+          "f=attached,focused,control-mode,wait-exit,new-layouts,pause-after=5,UTF-8",
+          "%end <TIME> #4 1",
+          "%begin <TIME> #5 1",
+          "%end <TIME> #5 1",
+          "%begin <TIME> #6 1",
+          "f=attached,focused,control-mode,ignore-size,no-detach-on-destroy,wait-exit,UTF-8",
+          "%end <TIME> #6 1",
+          "%begin <TIME> #7 1",
+          "%end <TIME> #7 1",
+          "%begin <TIME> #8 1",
+          "%end <TIME> #8 1",
+          "%begin <TIME> #9 1",
+          "f=attached,focused,control-mode,ignore-size,no-detach-on-destroy,wait-exit,read-only,UTF-8 ro=1",
+          "%end <TIME> #9 1",
+          "%begin <TIME> #10 1",
+          "%end <TIME> #10 1",
+          "%session-changed $0 a",
+          "%begin <TIME> #11 1",
+          "f=attached,focused,control-mode,no-detach-on-destroy,wait-exit,UTF-8 ro=0",
+          "%end <TIME> #11 1",
+          "%begin <TIME> #12 1",
+          "%end <TIME> #12 1",
+          "%session-changed $0 a",
+          "%begin <TIME> #13 1",
+          "f=attached,focused,control-mode,ignore-size,no-detach-on-destroy,wait-exit,read-only,UTF-8 ro=1",
+          "%end <TIME> #13 1",
+          "%begin <TIME> #14 1",
+          "%end <TIME> #14 1",
+          "%layout-change @0 ac7d,100x50,0,0,0 ac7d,100x50,0,0,0 *",
+          "%begin <TIME> #15 1",
+          "s=100x50",
+          "s=80x24",
+          "%end <TIME> #15 1",
+          "%begin <TIME> #16 1",
+          "%end <TIME> #16 1",
+          "%layout-change @0 9f5d,40x10,0,0,0 9f5d,40x10,0,0,0 *",
+          "%begin <TIME> #17 1",
+          "s=40x10",
+          "s=80x24",
+          "%end <TIME> #17 1",
+          "%begin <TIME> #18 1",
+          "%end <TIME> #18 1",
+          "%layout-change @0 ac7d,100x50,0,0,0 ac7d,100x50,0,0,0 *",
+          "%begin <TIME> #19 1",
+          "s=100x50",
+          "s=80x24",
+          "%end <TIME> #19 1",
+          "%begin <TIME> #20 1",
+          "size too small or too big",
+          "%error <TIME> #20 1",
+          "%begin <TIME> #21 1",
+          "bad size argument",
+          "%error <TIME> #21 1",
+          "%begin <TIME> #22 1",
+          "%end <TIME> #22 1",
+          "%pause %0",
+          "%begin <TIME> #23 1",
+          "%end <TIME> #23 1",
+          "%continue %0",
+          "%begin <TIME> #24 1",
+          "%end <TIME> #24 1",
+          "%begin <TIME> #25 1",
+          "can't find client: nosuch",
+          "%error <TIME> #25 1",
+          "%begin <TIME> #26 1",
+          "can't find client: nosuch",
+          "%error <TIME> #26 1",
+          "%begin <TIME> #27 1",
+          "%end <TIME> #27 1",
+          "%session-changed $1 b",
+          "%layout-change @1 ac7e,100x50,0,0,1 ac7e,100x50,0,0,1 *",
+          "%begin <TIME> #28 1",
+          "b",
+          "%end <TIME> #28 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 1
+      }
+    }
+  ]
+}

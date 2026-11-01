@@ -1,5 +1,7 @@
 //! `send-keys` (cmd-send-keys.c:155-268) for keys and literal text, `-K`,
-//! and `-X` and keys for a pane in a mode; `-M`, `-R` and `-F` are later.
+//! and `-N`, `-X` and keys for a pane in any mode ([`PaneMode`]); `-c`
+//! names the client whose read-only flag and `-K` keys count. `-M` and
+//! `-R` are later.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -11,8 +13,9 @@ use super::Item;
 use crate::cmdq::{End, NewBatch};
 use crate::jobs::JobSpec;
 use crate::keys::{KeyModes, send_keys_bytes};
+use crate::mode::PaneMode;
 use crate::mode::copy::{Action, CommandError, Copied, Pipe};
-use crate::server::Server;
+use crate::server::{ClientId, Server};
 use crate::target::Found;
 
 pub fn exec(
@@ -21,10 +24,20 @@ pub fn exec(
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    if args.flag('K') {
-        return inject(server, item, args);
+    // CMD_CLIENT_CFLAG|CMD_CLIENT_CANFAIL: the `-c` client, or the
+    // current one; none is not an error.
+    let tc = target_client(server, item, args);
+    // cmd-send-keys.c:178-181.
+    if !args.flag('X')
+        && tc.is_some_and(|c| server.clients.get(&c).is_some_and(|c| c.flags.read_only))
+    {
+        return Err(EdgeError::Message("client is read-only".into()).into());
     }
-    for flag in ['M', 'R', 'c'] {
+    if args.flag('K') {
+        inject(server, args, tc);
+        return Ok(());
+    }
+    for flag in ['M', 'R'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("send-keys -{flag}")).into());
         }
@@ -40,21 +53,30 @@ pub fn exec(
     } else {
         1
     };
-    let in_mode = server
+    let top = server
         .model
         .panes
         .get(&p)
-        .is_some_and(|pane| !pane.modes.is_empty());
-    // The repeat count of a mode command (cmd-send-keys.c:191-197).
+        .and_then(|pane| pane.modes.first());
+    let in_mode = top.is_some();
+    let takes_commands = top.is_some_and(PaneMode::takes_commands);
+    // The repeat count of a mode command (cmd-send-keys.c:191-197): a mode
+    // with no command callback is "not in a mode".
     if args.flag('N') && in_mode && (args.flag('X') || args.positionals.is_empty()) {
+        if !takes_commands {
+            return Err(EdgeError::Message("not in a mode".into()).into());
+        }
         let n = u32::try_from(repeat).unwrap_or(u32::MAX);
-        super::copy_mode::with_copy(server, p, |m, _| m.prefix = n);
+        server.with_mode(p, |m, _| m.set_prefix(n));
     }
     if args.flag('X') {
+        if !takes_commands {
+            return Err(EdgeError::Message("not in a mode".into()).into());
+        }
         return mode_command(server, args, found, p);
     }
     if in_mode {
-        mode_keys(server, item, args, p, repeat);
+        mode_keys(server, item, args, p, repeat, tc);
         return Ok(());
     }
     let literal = args.flag('l');
@@ -137,18 +159,10 @@ fn mode_command(server: &mut Server, args: &Args, found: Found, p: PaneId) -> Re
     }
     let Some((name, rest)) = words.split_first() else {
         // window_copy_command: no command, nothing to do.
-        return if server
-            .model
-            .panes
-            .get(&p)
-            .is_some_and(|x| !x.modes.is_empty())
-        {
-            Ok(())
-        } else {
-            Err(EdgeError::Message("not in a mode".into()).into())
-        };
+        return Ok(());
     };
-    let result = super::copy_mode::with_copy(server, p, |m, env| m.command(env, name, rest))
+    let result = server
+        .with_mode(p, |m, env| m.command(env, name, rest))
         .ok_or_else(|| CmdError::from(EdgeError::Message("not in a mode".into())))?;
     let outcome = match result {
         Ok(o) => o,
@@ -250,10 +264,14 @@ fn run_pipe(server: &mut Server, found: Found, pipe: Pipe) {
 /// key runs its commands after this command, any other key does nothing.
 /// The commands run with the command's own current target, where tmux
 /// gives them the send-keys target.
-fn mode_keys(server: &mut Server, item: &mut Item, args: &Args, p: PaneId, repeat: i64) {
-    let Some(table) = server.model.mode_key_table(p) else {
-        return;
-    };
+fn mode_keys(
+    server: &mut Server,
+    item: &mut Item,
+    args: &Args,
+    p: PaneId,
+    repeat: i64,
+    tc: Option<ClientId>,
+) {
     let mut keys = Vec::new();
     for arg in &args.positionals {
         let arg = &*arg.text();
@@ -267,9 +285,16 @@ fn mode_keys(server: &mut Server, item: &mut Item, args: &Args, p: PaneId, repea
             None => keys.extend(arg.chars().map(CoreKey::from_char)),
         }
     }
+    let table = server.model.mode_key_table(p);
     let mut after = item.step;
     for _ in 0..repeat {
         for &key in &keys {
+            // A mode with no key table takes the key itself
+            // (`window_pane_key`, cmd-send-keys.c:97-98).
+            let Some(table) = table else {
+                server.mode_key(p, tc, key);
+                continue;
+            };
             let Some(commands) = server
                 .key_bindings
                 .get(table, key)
@@ -296,12 +321,9 @@ fn mode_keys(server: &mut Server, item: &mut Item, args: &Args, p: PaneId, repea
 /// (cmd-send-keys.c:75-92), handled after this command. No target client
 /// is not an error (`CMD_CLIENT_CANFAIL`). Names that are not keys are
 /// sent character by character (`cmd_send_keys_inject_string`).
-fn inject(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdError> {
-    if args.value('c').is_some() {
-        return Err(EdgeError::NotImplemented("send-keys -c".into()).into());
-    }
-    let Some(tc) = server.target_client(item.client, item.origin) else {
-        return Ok(());
+fn inject(server: &mut Server, args: &Args, tc: Option<ClientId>) {
+    let Some(tc) = tc else {
+        return;
     };
     let repeat = if args.flag('N') {
         args.value('N')
@@ -325,5 +347,79 @@ fn inject(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdError>
             }
         }
     }
-    Ok(())
+}
+
+/// `cmd_find_client` for `-c` (a miss is quiet: `CMD_CLIENT_CANFAIL`), else
+/// the current client.
+fn target_client(server: &Server, item: &Item, args: &Args) -> Option<ClientId> {
+    server.find_client(item.client, item.origin, args.value('c'))
+}
+
+#[cfg(test)]
+mod tests {
+    use vtmux_core::cmd::parse_argv_bytes;
+
+    use super::*;
+    use crate::mode::Mode;
+    use crate::mode::prompt::tests::setup;
+
+    fn run(server: &mut Server, p: PaneId, words: &[&str]) -> Result<(), String> {
+        let mut argv: Vec<Vec<u8>> = vec![b"send-keys".to_vec()];
+        argv.extend(words.iter().map(|w| w.as_bytes().to_vec()));
+        let calls = parse_argv_bytes(&argv).map_err(|e| e.to_string())?;
+        let mut item = Item::new(None, std::path::PathBuf::new());
+        let found = Found {
+            pane: Some(p),
+            ..Found::default()
+        };
+        exec(server, &mut item, &calls[0].args, found).map_err(|e| e.to_string())
+    }
+
+    /// cmd-send-keys.c:191-203 for a mode with no command callback:
+    /// `-X`, and `-N` with `-X` or with no keys, are "not in a mode"; keys
+    /// and `-N` with keys are not, and a mode with no key table gets them
+    /// from its own handler (a probe takes none).
+    #[test]
+    fn a_mode_without_a_command_callback_is_not_in_a_mode() {
+        let (mut server, p, _, _, dir) = setup();
+        server.reset_mode_all(p);
+        server
+            .model
+            .panes
+            .get_mut(&p)
+            .unwrap()
+            .modes
+            .push(Mode::Probe);
+        let not = Err("not in a mode".to_owned());
+        assert_eq!(run(&mut server, p, &["-X", "cancel"]), not);
+        assert_eq!(run(&mut server, p, &["-N", "3", "-X", "cancel"]), not);
+        assert_eq!(run(&mut server, p, &["-N", "3"]), not);
+        assert_eq!(run(&mut server, p, &["-X"]), not);
+        assert_eq!(run(&mut server, p, &["-N", "2", "a", "b"]), Ok(()));
+        assert_eq!(run(&mut server, p, &["a"]), Ok(()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Copy mode behaves as before through the trait: `-N` sets its repeat
+    /// count for the next command, `-X` with no command does nothing, an
+    /// unknown command is nothing, and `cancel` leaves the mode.
+    #[test]
+    fn copy_mode_still_takes_commands() {
+        let (mut server, p, _, _, dir) = setup();
+        assert_eq!(run(&mut server, p, &["-N", "3", "-X"]), Ok(()));
+        assert_eq!(
+            server.model.panes[&p].modes[0].as_copy().map(|m| m.prefix),
+            Some(3)
+        );
+        assert_eq!(run(&mut server, p, &["-X"]), Ok(()));
+        assert_eq!(run(&mut server, p, &["-X", "no-such-command"]), Ok(()));
+        assert_eq!(run(&mut server, p, &["-X", "cancel"]), Ok(()));
+        assert!(server.model.panes[&p].modes.is_empty());
+        // No mode: -X is "not in a mode" again.
+        assert_eq!(
+            run(&mut server, p, &["-X", "cancel"]),
+            Err("not in a mode".to_owned())
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

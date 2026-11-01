@@ -58,8 +58,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."client-key-order-focus.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."clock-mode.sh"]
 status = "xfail"
@@ -98,8 +97,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."control-client-new-layouts.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."control-client-popup.sh"]
 status = "pass"
@@ -111,8 +109,7 @@ status = "pass"
 status = "pass"
 
 [tests."control-client-size.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."control-client-wait-exit.sh"]
 status = "xfail"
@@ -122,8 +119,7 @@ reason = "not implemented (M0 baseline)"
 status = "pass"
 
 [tests."control-notify-guard.sh"]
-status = "xfail"
-reason = "needs refresh-client, which vtmux has not got"
+status = "pass"
 
 [tests."control-subscriptions.sh"]
 status = "xfail"

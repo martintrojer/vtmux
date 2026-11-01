@@ -172,7 +172,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("pipe-pane", Some("pipep"), "IOot:", 0, Some(1), "[-IOo] [-t target-pane] [shell-command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
     cmd("previous-layout", Some("prevl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("previous-window", Some("prev"), "at:", 0, Some(0), "[-a] [-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
-    cmd("refresh-client", Some("refresh"), "A:B:cC:Df:r:F:lLRSt:U", 0, Some(1), "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]", None, None, false, false),
+    cmd("refresh-client", Some("refresh"), "A:B:cC:Df:r:F:lLRSt:U", 0, Some(1), "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]", None, None, false, true),
     cmd("rename-session", Some("rename"), "t:", 1, Some(1), "[-t target-session] new-name", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("rename-window", Some("renamew"), "t:", 1, Some(1), "[-t target-window] new-name", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("resize-pane", Some("resizep"), "D::L::MR::Tt:U::x:y:Z", 0, Some(1), "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
@@ -322,7 +322,24 @@ const AFTER_HOOK: &[&str] = &[
     "unbind-key",
 ];
 
+/// The commands with `CMD_READONLY`: all a read-only client may run
+/// (server-client.c:2812, 2884; key-bindings.c:766-769).
+const READ_ONLY: &[&str] = &[
+    "attach-session",
+    "copy-mode",
+    "detach-client",
+    "list-clients",
+    "send-keys",
+    "switch-client",
+];
+
 impl CmdEntry {
+    /// Whether a read-only client may run it (`CMD_READONLY`).
+    #[must_use]
+    pub fn read_only(&self) -> bool {
+        READ_ONLY.contains(&self.name)
+    }
+
     /// Whether the queue fires `after-<name>` for this command.
     #[must_use]
     pub fn after_hook(&self) -> bool {
@@ -409,7 +426,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 72);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 73);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

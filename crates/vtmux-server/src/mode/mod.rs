@@ -3,10 +3,14 @@
 //! own screen and given its keys.
 //!
 //! Only copy mode exists so far; view mode, tree modes and clock mode are
-//! later work.
+//! later work. What a mode offers the rest of the server is [`PaneMode`]
+//! (`struct window_mode`: `name`, `key_table`, `command`), and a mode that
+//! asks the user a question keeps a [`prompt::ModePrompt`] on its pane
+//! (`mode_tree_set_prompt`).
 
 pub mod copy;
 pub mod grid;
+pub mod prompt;
 pub mod reader;
 
 use vtmux_core::ids::PaneId;
@@ -17,40 +21,131 @@ use crate::server::Server;
 
 pub use copy::CopyMode;
 
+/// What the server asks of a mode (`struct window_mode`). A mode without
+/// a key table gets its keys from its own handler; one without a command
+/// callback answers `send-keys -X` and `-N` with "not in a mode"
+/// (cmd-send-keys.c:191-203).
+pub trait PaneMode {
+    /// `mode->name`.
+    fn name(&self) -> &'static str;
+    /// `mode->key_table`: `None` when the mode has none.
+    fn key_table(&self, vi: bool) -> Option<&'static str>;
+    /// `mode->command != NULL`.
+    fn takes_commands(&self) -> bool;
+    /// `wme->prefix = np` (`send-keys -N`).
+    fn set_prefix(&mut self, n: u32);
+    /// `mode->command` for `send-keys -X name args...`.
+    ///
+    /// # Errors
+    /// A command tmux has that vtmux does not yet.
+    fn command(
+        &mut self,
+        env: &copy::Env,
+        name: &str,
+        args: &[String],
+    ) -> Result<copy::Outcome, copy::CommandError>;
+}
+
+impl PaneMode for CopyMode {
+    fn name(&self) -> &'static str {
+        "copy-mode"
+    }
+
+    /// `window_copy_key_table`.
+    fn key_table(&self, vi: bool) -> Option<&'static str> {
+        Some(if vi { "copy-mode-vi" } else { "copy-mode" })
+    }
+
+    fn takes_commands(&self) -> bool {
+        true
+    }
+
+    fn set_prefix(&mut self, n: u32) {
+        self.prefix = n;
+    }
+
+    fn command(
+        &mut self,
+        env: &copy::Env,
+        name: &str,
+        args: &[String],
+    ) -> Result<copy::Outcome, copy::CommandError> {
+        Self::command(self, env, name, args)
+    }
+}
+
 /// One mode on a pane's stack (`struct window_mode_entry`).
 #[derive(Clone, Debug)]
 pub enum Mode {
     Copy(Box<CopyMode>),
+    /// A mode with no key table and no command callback, like tmux's tree
+    /// and clock modes: only tests need one before those exist.
+    #[cfg(test)]
+    Probe,
+}
+
+impl PaneMode for Mode {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Copy(m) => m.name(),
+            #[cfg(test)]
+            Self::Probe => "probe-mode",
+        }
+    }
+
+    fn key_table(&self, vi: bool) -> Option<&'static str> {
+        match self {
+            Self::Copy(m) => m.key_table(vi),
+            #[cfg(test)]
+            Self::Probe => None,
+        }
+    }
+
+    fn takes_commands(&self) -> bool {
+        match self {
+            Self::Copy(m) => m.takes_commands(),
+            #[cfg(test)]
+            Self::Probe => false,
+        }
+    }
+
+    fn set_prefix(&mut self, n: u32) {
+        match self {
+            Self::Copy(m) => m.set_prefix(n),
+            #[cfg(test)]
+            Self::Probe => {}
+        }
+    }
+
+    fn command(
+        &mut self,
+        env: &copy::Env,
+        name: &str,
+        args: &[String],
+    ) -> Result<copy::Outcome, copy::CommandError> {
+        match self {
+            Self::Copy(m) => PaneMode::command(&mut **m, env, name, args),
+            #[cfg(test)]
+            Self::Probe => Err(copy::CommandError::NotImplemented(name.to_owned())),
+        }
+    }
 }
 
 impl Mode {
-    /// `wme->mode->name`.
-    #[must_use]
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Copy(_) => "copy-mode",
-        }
-    }
-
-    /// `window_copy_key_table`.
-    #[must_use]
-    pub fn key_table(&self, vi: bool) -> &'static str {
-        match self {
-            Self::Copy(_) if vi => "copy-mode-vi",
-            Self::Copy(_) => "copy-mode",
-        }
-    }
-
     #[must_use]
     pub fn as_copy(&self) -> Option<&CopyMode> {
         match self {
             Self::Copy(m) => Some(m),
+            #[cfg(test)]
+            Self::Probe => None,
         }
     }
 
     pub fn as_copy_mut(&mut self) -> Option<&mut CopyMode> {
         match self {
             Self::Copy(m) => Some(m),
+            #[cfg(test)]
+            Self::Probe => None,
         }
     }
 }
@@ -87,11 +182,12 @@ impl Model {
         })
     }
 
-    /// The pane's newest mode's key table (`wme->mode->key_table`).
+    /// The pane's newest mode's key table (`wme->mode->key_table`), if it
+    /// has one.
     #[must_use]
     pub fn mode_key_table(&self, p: PaneId) -> Option<&'static str> {
         let mode = self.panes.get(&p)?.modes.first()?;
-        Some(mode.key_table(self.mode_keys_vi(p)))
+        mode.key_table(self.mode_keys_vi(p))
     }
 
     /// A pane's mode changed: `PANE_CHANGED`, so the next name check
@@ -194,6 +290,8 @@ impl Server {
             next.resize(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         }
         let current = pane.modes.first().map(Mode::name);
+        // A prompt of the mode that went goes with it.
+        self.mode_prompt_gone(p);
         self.model.mode_changed(p);
         self.model
             .fire_mode_changed(p, Some(old.name()), current, false);
@@ -216,6 +314,43 @@ impl Server {
 }
 
 impl Server {
+    /// `window_pane_key` for a pane in a mode (window.c:2080-2092): the
+    /// shown mode's own `key` callback gets it, with the client it came
+    /// from, after the mode's prompt. No mode has such a callback yet, and
+    /// copy mode takes keys only through its key table. Returns whether
+    /// anything took it.
+    pub(crate) fn mode_key(
+        &mut self,
+        p: PaneId,
+        c: Option<crate::server::ClientId>,
+        key: vtmux_core::keys::Key,
+    ) -> bool {
+        self.mode_prompt_key(p, c, key)
+    }
+
+    /// Run `f` on pane `p`'s shown mode, out of the pane while it runs so
+    /// it can read the pane's terminal. `None` when the pane is in no mode.
+    pub(crate) fn with_mode<R>(
+        &mut self,
+        p: PaneId,
+        f: impl FnOnce(&mut Mode, &copy::Env) -> R,
+    ) -> Option<R> {
+        let pane = self.model.panes.get_mut(&p)?;
+        if pane.modes.is_empty() {
+            return None;
+        }
+        let mut mode = pane.modes.remove(0);
+        let result = self.model.copy_env(p).map(|env| f(&mut mode, &env));
+        if let Some(pane) = self.model.panes.get_mut(&p) {
+            if let Some(m) = mode.as_copy() {
+                pane.search.clone_from(&m.pane_search);
+            }
+            pane.modes.insert(0, mode);
+        }
+        self.model.redraw_panes.insert(p);
+        result
+    }
+
     /// The soonest automatic refresh of a copy mode on top of a pane.
     pub(crate) fn copy_refresh_deadline(&self) -> Option<std::time::Instant> {
         self.model
