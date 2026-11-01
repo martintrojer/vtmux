@@ -129,6 +129,9 @@ pub(crate) struct Client {
     /// `TTY_OSC52QUERY`: a clipboard query (`refresh-client -l`) is out
     /// until this instant, and its reply becomes a paste buffer.
     pub(crate) clipboard_query: Option<Instant>,
+    /// `c->title`: the last title written to the terminal, so an
+    /// unchanged one is not written again.
+    title: Option<String>,
 }
 
 /// Frame bytes the client has not yet written to its terminal: in
@@ -746,6 +749,7 @@ impl Server {
                             popup: None,
                             flags: crate::client_flags::ClientFlags::default(),
                             clipboard_query: None,
+                            title: None,
                             written: 0,
                             pasting: false,
                             decoder: crate::input::Decoder::default(),
@@ -1769,6 +1773,7 @@ impl Server {
             // or the message clears. Borders and pane status lines still
             // draw (CLIENT_REDRAWBORDERS is not frozen).
             let client = self.clients.get_mut(&id).expect("client");
+            let redrawing = client.status.redraw_pending();
             let frozen = client.status.hold_window();
             let held = frozen
                 .then(|| client.compositor.shown_rows(cols, rows, scene_y, area))
@@ -1785,16 +1790,44 @@ impl Server {
             self.draw_status(id, s, caps, &mut screen, lines, top);
             // screen-redraw.c:1813: the overlay over everything else.
             self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
-            let frame = self
+            let mut frame = self
                 .clients
                 .get_mut(&id)
                 .expect("client")
                 .compositor
                 .frame(screen, caps);
+            if redrawing && let Some(title) = self.client_title(id, s) {
+                frame.splice(0..0, title);
+            }
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
             }
         }
+    }
+
+    /// `server_client_set_title` (server-client.c:2588-2610), run on a
+    /// redraw with `set-titles` on: `set-titles-string` expanded for the
+    /// client, as `tty_set_title` writes it unless it is the title last
+    /// written.
+    fn client_title(&mut self, id: ClientId, s: SessionId) -> Option<Vec<u8>> {
+        let tree = TreeId::Session(s);
+        if self.model.number_option(tree, "set-titles") == 0 {
+            return None;
+        }
+        let template = self
+            .model
+            .options
+            .get(tree, "set-titles-string")
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default();
+        let ctx = self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
+        let title = vtmux_core::format::expand_time(&template, &ctx);
+        let client = self.clients.get_mut(&id)?;
+        if client.title.as_deref() == Some(title.as_str()) {
+            return None;
+        }
+        client.title = Some(title.clone());
+        client.term.as_ref()?.set_title(&title)
     }
 
     /// Session `s`'s current window composed into rows

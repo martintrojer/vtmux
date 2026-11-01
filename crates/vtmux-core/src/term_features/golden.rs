@@ -83,6 +83,6 @@ fn a_late_sync_reply_adds_the_feature_and_capability() {
     term.sync_supported();
     assert_eq!(
         describe(&term),
-        "bpaste,ccolour,clipboard,cstyle,focus,sync,title|16|Sync Ss Se Ms"
+        "bpaste,ccolour,clipboard,cstyle,focus,sync,title|16|Sync Ss Se Ms tsl fsl"
     );
 }
