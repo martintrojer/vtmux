@@ -1,0 +1,18 @@
+name = "panes_mode_keeps_drawing_kill_z"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-v", "-t", "%1", "cat"] },
+  { attach = { session = "a" } },
+  { run = ["display-panes", "-d", "0", "-Z", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["kill-pane", "-t", "%1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "q" },
+  { settle = { react = true } },
+  { screen = {} },
+]

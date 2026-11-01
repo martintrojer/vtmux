@@ -1,0 +1,14 @@
+name = "clock_mode_sendkeys_exit"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { attach = { session = "a" } },
+  { run = ["clock-mode", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["send-keys", "-t", "%0", "x", "y", "z"] },
+  { settle = { react = true } },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} [#{pane_mode}] z=#{window_zoomed_flag}"] },
+]

@@ -303,10 +303,23 @@ fn mode_keys(
             None => keys.extend(arg.chars().map(CoreKey::from_char)),
         }
     }
-    let table = server.model.mode_key_table(p);
     let mut after = item.step;
     for _ in 0..repeat {
         for &key in &keys {
+            // Each key looks at the pane's mode again: one that a key left
+            // (panes or clock mode) lets the rest go to the program, as
+            // `cmd_send_keys_inject_key` takes `TAILQ_FIRST(&wp->modes)`
+            // per key (cmd-send-keys.c:93-104, window.c:2080-2105).
+            if server
+                .model
+                .panes
+                .get(&p)
+                .is_none_or(|pane| pane.modes.is_empty())
+            {
+                pane_key(server, p, key);
+                continue;
+            }
+            let table = server.model.mode_key_table(p);
             // A mode with no key table takes the key itself
             // (`window_pane_key`, cmd-send-keys.c:97-98).
             let Some(table) = table else {
@@ -333,6 +346,24 @@ fn mode_keys(
             };
         }
     }
+}
+
+/// `window_pane_key` for a pane in no mode: the key's bytes to the program.
+fn pane_key(server: &mut Server, p: PaneId, key: CoreKey) {
+    let Some(pane) = server.model.panes.get_mut(&p) else {
+        return;
+    };
+    let Some(key) = crate::keys::Key::from_core(key) else {
+        return;
+    };
+    let modes = KeyModes {
+        app_cursor: pane.term.app_cursor(),
+        app_keypad: pane.term.app_keypad(),
+    };
+    if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
+        io.write(&crate::keys::encode(&key, modes));
+    }
+    server.pane_output_queued(p);
 }
 
 /// `send-keys -K`: each key goes to the target client as if typed
@@ -438,6 +469,22 @@ mod tests {
             run(&mut server, p, &["-X", "cancel"]),
             Err("not in a mode".to_owned())
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// cmd-send-keys.c:93-104: each key looks at the pane's mode when it is
+    /// sent, so a key that leaves panes or clock mode lets the rest go to
+    /// the program, and a mode that stays takes all of them.
+    #[test]
+    fn keys_after_a_mode_is_left_go_to_the_pane() {
+        let (mut server, p, _, _, dir) = setup();
+        server.reset_mode_all(p);
+        server.model.set_clock_mode(p);
+        // No client: a clock's key callback does not run, the mode stays.
+        assert_eq!(run(&mut server, p, &["x", "y"]), Ok(()));
+        assert_eq!(server.model.panes[&p].modes.len(), 1);
+        server.reset_mode_all(p);
+        assert_eq!(run(&mut server, p, &["x", "y"]), Ok(()));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

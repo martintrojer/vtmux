@@ -218,12 +218,18 @@ impl Model {
     /// `window_pane_set_mode` for clock mode: one already on top is left
     /// alone, one further down comes to the top.
     pub fn set_clock_mode(&mut self, p: PaneId) -> bool {
+        if !self.pane_may_enter(p, |m| matches!(m, Mode::Clock(_))) {
+            return false;
+        }
+        self.push_clock_mode(p)
+    }
+
+    /// The rest of `window_pane_set_mode` for clock mode, after the check
+    /// for it on top.
+    fn push_clock_mode(&mut self, p: PaneId) -> bool {
         let Some(pane) = self.panes.get_mut(&p) else {
             return false;
         };
-        if matches!(pane.modes.first(), Some(Mode::Clock(_))) {
-            return false;
-        }
         let entry = match pane.modes.iter().position(|m| matches!(m, Mode::Clock(_))) {
             Some(i) => pane.modes.remove(i),
             None => Mode::Clock(ClockMode::new(
@@ -241,6 +247,19 @@ impl Model {
 }
 
 impl Server {
+    /// `window_pane_set_mode` for clock mode: a `NO_STACK` mode on top is
+    /// reset first and clock mode is entered anyway (window.c:1747-1775).
+    pub(crate) fn enter_clock_mode(&mut self, p: PaneId) -> bool {
+        if !self
+            .model
+            .pane_may_enter(p, |m| matches!(m, Mode::Clock(_)))
+        {
+            return false;
+        }
+        self.reset_no_stack(p);
+        self.model.push_clock_mode(p)
+    }
+
     /// `window_clock_key`: a key from a client leaves a clock on top.
     pub(super) fn clock_key(&mut self, p: PaneId) {
         self.reset_mode(p);

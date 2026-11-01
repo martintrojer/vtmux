@@ -13,6 +13,8 @@ use vtmux_core::style::CellStyle;
 use vtmux_core::styled;
 use vtmux_vt::{Cell, Snapshot, Style};
 
+use std::collections::BTreeMap;
+
 use super::Caps;
 use super::status::KEEP;
 use super::window::Source;
@@ -443,23 +445,19 @@ impl Source<'_> {
             cx: 0,
             cy: 0,
         };
-        let Some(window) = self.model.windows.get(&m.source_window) else {
+        // The drawing window-panes.c made at init or the last resize.
+        let (Some(drawn), Some(window)) = (&m.drawn, self.model.windows.get(&m.source_window))
+        else {
             return canvas.snap;
         };
-        let layout = window.full_layout();
+        let layout = &drawn.layout;
         let os = (layout.sx, layout.sy);
         let ds = (u32::from(cols), u32::from(rows));
         let theme = self.theme(caps);
         let wtree = TreeId::Window(pane.window);
-        let tiled: Vec<PaneId> = window
-            .panes
-            .panes
-            .iter()
-            .copied()
-            .filter(|p| !window.is_floating(*p))
-            .collect();
-        for &q in &tiled {
-            self.panes_draw_pane(&mut canvas, pane, m, q, (layout, os, ds), caps);
+        let tiled: Vec<PaneId> = drawn.tiled.iter().map(|(q, _)| *q).collect();
+        for &(q, index) in &drawn.tiled {
+            self.panes_draw_pane(&mut canvas, pane, m, (q, index), (layout, os, ds), caps);
         }
         // The borders over the panes.
         let mut borders = Borders {
@@ -518,10 +516,13 @@ impl Source<'_> {
         canvas: &mut Canvas,
         mode_pane: &Pane,
         m: &PanesMode,
-        q: PaneId,
+        (q, index): (PaneId, u32),
         (layout, os, ds): (&Layout, (u32, u32), (u32, u32)),
         caps: Caps,
     ) {
+        let Some(drawn) = m.drawn.as_ref() else {
+            return;
+        };
         let Some(path) = layout.root.find_pane(q) else {
             return;
         };
@@ -529,19 +530,12 @@ impl Source<'_> {
         let Some(a) = geometry(layout.root.get(&path).g(), os, ds, border) else {
             return;
         };
-        let Some(index) = self.model.pane_index(q) else {
-            return;
-        };
-        let live;
-        let src = match (q == mode_pane.id, m.preview.as_ref(), m.frozen.get(&q)) {
+        let src = match (q == mode_pane.id, m.preview.as_ref(), drawn.screens.get(&q)) {
             (true, Some(pre), _) if a.sx <= u32::from(pre.cols) && a.sy <= u32::from(pre.rows) => {
                 pre
             }
-            (_, _, Some(frozen)) => frozen,
-            _ => {
-                live = vtmux_vt::snapshot(&self.model.panes[&q].term);
-                &live
-            }
+            (_, _, Some(screen)) => screen,
+            _ => return,
         };
         if os.0 <= ds.0 && os.1 <= ds.1 {
             canvas.copy(src, a.x, a.y, a.sx, a.sy);
@@ -571,13 +565,13 @@ impl Source<'_> {
         if a.sx < len {
             return;
         }
-        let Some(window) = self.model.windows.get(&m.source_window) else {
+        let Some(drawn) = m.drawn.as_ref() else {
             return;
         };
         let wtree = TreeId::Window(mode_pane.window);
         let found = self.panes_found(m, m.source_window, q);
         let ctx = self.ctx(found, caps);
-        let name = if window.active() == q {
+        let name = if drawn.active == q {
             "display-panes-active-colour"
         } else {
             "display-panes-colour"
@@ -601,7 +595,7 @@ impl Source<'_> {
             bg: fg,
             ..Style::default()
         };
-        let format = !self.string(wtree, "display-panes-format").is_empty();
+        let format = drawn.format_set;
         let big = len * 6 - 1;
         if a.sx < big || a.sy < if format { 7 } else { 5 } {
             let mut width = len;
@@ -615,7 +609,7 @@ impl Source<'_> {
                 canvas.puts(cx + len, cy, &format!(" {l}"), text_style);
             }
             if format && a.sy > 1 {
-                self.panes_draw_format(canvas, wtree, &found, a, colour, caps);
+                self.panes_draw_format(canvas, &drawn.formats, &found, a, colour, caps);
             }
             return;
         }
@@ -644,7 +638,7 @@ impl Source<'_> {
         if a.sy <= 6 {
             return;
         }
-        self.panes_draw_format(canvas, wtree, &found, a, colour, caps);
+        self.panes_draw_format(canvas, &drawn.formats, &found, a, colour, caps);
         if let Some(l) = letter {
             canvas.puts(a.x + px - 2, a.y + py + 5, &l.to_string(), text_style);
         }
@@ -656,7 +650,7 @@ impl Source<'_> {
     fn panes_draw_format(
         &self,
         canvas: &mut Canvas,
-        wtree: TreeId,
+        formats: &BTreeMap<PaneId, String>,
         found: &Found,
         a: &Area,
         colour: Colour,
@@ -668,12 +662,10 @@ impl Source<'_> {
         // screen_write_cursormove(x, y), then format_draw puts it back.
         canvas.cx = a.x;
         canvas.cy = a.y;
-        let format = self.string(wtree, "display-panes-format");
-        if format.is_empty() {
+        // The text drawn at init or the last resize.
+        let Some(expanded) = found.pane.and_then(|q| formats.get(&q)) else {
             return;
-        }
-        let ctx = self.ctx(*found, caps);
-        let expanded = vtmux_core::format::expand_str(&format, &ctx);
+        };
         if expanded.is_empty() {
             return;
         }
@@ -689,7 +681,7 @@ impl Source<'_> {
             };
             a.sx as usize
         ];
-        let drawn = styled::draw_onto(&base, under, &expanded, false, false);
+        let drawn = styled::draw_onto(&base, under, expanded, false, false);
         let theme = self.theme(caps);
         for (i, c) in drawn.cells.iter().enumerate() {
             if c.text != KEEP {
