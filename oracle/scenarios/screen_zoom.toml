@@ -12,9 +12,12 @@ steps = [
   { attach = { session = "a" } },
   { screen = {} },
   { run = ["resizep", "-Z", "-t", "%2"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["set", "-w", "-t", "a", "pane-border-status", "top"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["resizep", "-Z", "-t", "%2"] },
+  { settle = { react = true } },
   { screen = {} },
 ]
