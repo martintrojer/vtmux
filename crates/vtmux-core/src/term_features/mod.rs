@@ -76,6 +76,8 @@ impl Feature {
             Self::CursorStyle => &[Cap::Ss, Cap::Se],
             Self::Rgb => &[Cap::SetRgbF, Cap::SetRgbB],
             Self::Sync => &[Cap::Sync],
+            Self::Title => &[Cap::Tsl, Cap::Fsl],
+            Self::Osc7 => &[Cap::Fsl],
             Self::UnderlineStyles => &[Cap::Smulx, Cap::Setulc],
             _ => &[],
         }
@@ -165,11 +167,14 @@ pub enum Cap {
     Se,
     /// OSC 52 clipboard.
     Ms,
+    /// Start and end of a title (`tsl`, `fsl`).
+    Tsl,
+    Fsl,
 }
 
 impl Cap {
     /// Every capability, in the order the goldens list them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Tc,
         Self::Rgb,
         Self::SetRgbF,
@@ -180,6 +185,8 @@ impl Cap {
         Self::Ss,
         Self::Se,
         Self::Ms,
+        Self::Tsl,
+        Self::Fsl,
     ];
 
     /// The terminfo name.
@@ -196,6 +203,19 @@ impl Cap {
             Self::Ss => "Ss",
             Self::Se => "Se",
             Self::Ms => "Ms",
+            Self::Tsl => "tsl",
+            Self::Fsl => "fsl",
+        }
+    }
+
+    /// The value a feature gives a string capability
+    /// (`tty_feature_*_capabilities`), escapes decoded.
+    fn feature_value(self) -> Option<&'static str> {
+        match self {
+            Self::Ms => Some(MS),
+            Self::Tsl => Some("\x1b]0;"),
+            Self::Fsl => Some("\x07"),
+            _ => None,
         }
     }
 
@@ -218,6 +238,8 @@ struct Base {
     colours: u32,
     caps: u16,
     xterm: bool,
+    /// terminfo's `tsl` (`fsl` is BEL where there is one).
+    tsl: Option<&'static str>,
 }
 
 impl Base {
@@ -238,8 +260,11 @@ impl Base {
                     Cap::Ss,
                     Cap::Se,
                     Cap::Ms,
+                    Cap::Tsl,
+                    Cap::Fsl,
                 ]),
                 xterm: true,
+                tsl: Some("\x1b]2;"),
             });
         }
         if name.starts_with("xterm") {
@@ -261,18 +286,24 @@ impl Base {
                 colours,
                 caps: caps(&xterm_caps) | if direct { Cap::Rgb.bit() } else { 0 },
                 xterm: true,
+                tsl: None,
             });
         }
-        let (colours, caps) = match name {
-            "tmux-256color" => (256, caps(&[Cap::Smulx, Cap::Ss, Cap::Se, Cap::Ms])),
-            "screen" => (8, 0),
-            "screen-256color" => (256, 0),
+        let (colours, caps, tsl) = match name {
+            "tmux-256color" => (
+                256,
+                caps(&[Cap::Smulx, Cap::Ss, Cap::Se, Cap::Ms, Cap::Tsl, Cap::Fsl]),
+                Some("\x1b]0;"),
+            ),
+            "screen" => (8, 0, None),
+            "screen-256color" => (256, 0, None),
             _ => return None,
         };
         Some(Self {
             colours,
             caps,
             xterm: false,
+            tsl,
         })
     }
 }
@@ -287,6 +318,8 @@ pub struct Term {
     applied: u32,
     caps: u16,
     ms: Option<String>,
+    tsl: Option<String>,
+    fsl: Option<String>,
     /// `TERM_256COLOURS`.
     colours256: bool,
     /// `TERM_RGBCOLOURS`.
@@ -315,6 +348,8 @@ impl Term {
             applied: 0,
             caps: base.caps,
             ms: (base.caps & Cap::Ms.bit() != 0).then(|| MS.to_owned()),
+            tsl: base.tsl.map(str::to_owned),
+            fsl: base.tsl.map(|_| "\x07".to_owned()),
             colours256: false,
             rgb: false,
             overrides: overrides.to_vec(),
@@ -380,6 +415,15 @@ impl Term {
     pub fn clipboard_query(&self) -> Option<Vec<u8>> {
         let ms = self.ms.as_deref().filter(|_| self.has(Cap::Ms))?;
         Some(expand_ss(ms, "", "?"))
+    }
+
+    /// `tty_set_title` (tty.c:743-752): `tsl`, the title and `fsl`, or
+    /// `None` when the terminal lacks either.
+    #[must_use]
+    pub fn set_title(&self, title: &str) -> Option<Vec<u8>> {
+        let tsl = self.tsl.as_deref().filter(|_| self.has(Cap::Tsl))?;
+        let fsl = self.fsl.as_deref().filter(|_| self.has(Cap::Fsl))?;
+        Some([tsl, title, fsl].concat().into_bytes())
     }
 
     /// The terminal is xterm-derived: it has `XT` and `bce` in terminfo.
@@ -451,7 +495,7 @@ impl Term {
                 if feature == Feature::CursorStyle && self.has(cap) {
                     continue;
                 }
-                self.set(cap, (cap == Cap::Ms).then_some(MS));
+                self.set(cap, cap.feature_value());
             }
             if matches!(feature, Feature::Colours256 | Feature::Rgb) {
                 self.colours256 = true;
@@ -484,15 +528,22 @@ impl Term {
 
     fn set(&mut self, cap: Cap, template: Option<&str>) {
         self.caps |= cap.bit();
-        if cap == Cap::Ms {
-            self.ms = Some(template.unwrap_or_default().to_owned());
+        let value = || Some(template.unwrap_or_default().to_owned());
+        match cap {
+            Cap::Ms => self.ms = value(),
+            Cap::Tsl => self.tsl = value(),
+            Cap::Fsl => self.fsl = value(),
+            _ => {}
         }
     }
 
     fn clear(&mut self, cap: Cap) {
         self.caps &= !cap.bit();
-        if cap == Cap::Ms {
-            self.ms = None;
+        match cap {
+            Cap::Ms => self.ms = None,
+            Cap::Tsl => self.tsl = None,
+            Cap::Fsl => self.fsl = None,
+            _ => {}
         }
     }
 

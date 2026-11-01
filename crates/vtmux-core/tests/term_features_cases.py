@@ -15,7 +15,7 @@ Per row, isolated (env -u TMUX -u TMUX_PANE, -L, -f /dev/null, SHELL=/bin/sh):
   `-T args`, and
   list-clients -F '#{client_termfeatures}|#{client_colours}|' followed by
   `#{?#{Ic:NAME},NAME ,}` for each of Tc RGB setrgbf setrgbb Sync Smulx Setulc
-  Ss Se Ms (the capabilities the client's terminal ended up with).
+  Ss Se Ms tsl fsl (the capabilities the client's terminal ended up with).
 The server is never left empty: the `keep` session lives until kill-server.
 xterm-ghostty needs Ghostty's terminfo ($GHOSTTY_TERMINFO)."""
 import fcntl, os, pty, struct, subprocess, sys, termios, time
@@ -26,7 +26,7 @@ REF = os.environ.get('VTMUX_REFERENCE_TMUX') or os.path.join(
     os.environ.get('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'vtmux/tmux-3.8/bin/tmux')
 TERMINFO = os.environ.get('GHOSTTY_TERMINFO',
                           os.path.expanduser('~/.local/opt/ghostty-1.4.0/share/terminfo'))
-CODES = 'Tc RGB setrgbf setrgbb Sync Smulx Setulc Ss Se Ms'.split()
+CODES = 'Tc RGB setrgbf setrgbb Sync Smulx Setulc Ss Se Ms tsl fsl'.split()
 FMT = '#{client_termfeatures}|#{client_colours}|' + ''.join(
     '#{?#{Ic:%s},%s ,}' % (c, c) for c in CODES)
 
