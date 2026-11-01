@@ -6,6 +6,9 @@
 #   spec    120x40,  limit 100000, 150k log lines of ~100 characters
 #   narrow  80x24,   limit 10000,  12k lines, every cell its own truecolour
 #   wide    500x24,  limit 10000,  12k lines of ~450 characters
+#   flood   120x40,  limit 2000,   1M log lines of ~60 characters (the
+#           output time is the number: pruning cost; not run by default)
+#   flood100k  the same with limit 100000
 #
 # Per binary it reports: server RSS after the output and IDLE seconds of
 # idle (VmRSS, or ps rss on macOS), #{history_size}, and the seconds from
@@ -15,7 +18,9 @@
 #
 # Usage: scripts/bench-history-memory.sh [scenario...]
 # Env: VTMUX (default target/release/vtmux), VTMUX_REFERENCE_TMUX (default
-# the `cargo xtask ref-tmux` cache), IDLE (default 10). Run cargo through
+# the `cargo xtask ref-tmux` cache), IDLE (default 10), RUNS (default 1:
+# runs per binary, the fastest is shown), BASE (another vtmux binary to
+# compare, e.g. a build of the previous commit; shown as `base`). Run cargo through
 # `mise exec --`: the script builds the release binaries first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -42,6 +47,11 @@ gen_narrow() {
     for (j = 0; j < 70; j++) s = s sprintf("\033[38;2;%d;%d;%dm%c", i % 256, j, (i * 7) % 256, 65 + j % 26)
     print s "\033[m" } }'
 }
+gen_flood() {
+  awk 'BEGIN { for (i = 1; i <= 1000000; i++)
+    printf "line %d some log text here status=200 path=/api/v1/items/%d\n", i, i }'
+}
+gen_flood100k() { gen_flood; }
 gen_wide() {
   awk 'BEGIN { for (i = 0; i < 12000; i++) { s = sprintf("%05d", i)
     while (length(s) < 450) s = s " " i; print s } }'
@@ -76,6 +86,8 @@ run() {
 
 scenarios=("$@")
 [ ${#scenarios[@]} -gt 0 ] || scenarios=(spec narrow wide)
+# Runs per binary; the table shows the fastest output time (and its RSS).
+RUNS="${RUNS:-1}"
 
 printf '%-7s %-9s %6s %7s %10s %9s %8s %8s\n' scenario binary size limit rss_mb hist_size retained output_s
 for s in "${scenarios[@]}"; do
@@ -83,13 +95,23 @@ for s in "${scenarios[@]}"; do
     spec) cols=120 rows=40 limit=100000 ;;
     narrow) cols=80 rows=24 limit=10000 ;;
     wide) cols=500 rows=24 limit=10000 ;;
+    flood) cols=120 rows=40 limit=2000 ;;
+    flood100k) cols=120 rows=40 limit=100000 ;;
     *) echo "unknown scenario $s" >&2; exit 2 ;;
   esac
   file="$work/$s.txt"
   "gen_$s" > "$file"
-  for which in tmux vtmux; do
-    if [ $which = tmux ]; then bin=$REF; else bin=$VTMUX; fi
-    read -r rss hs secs < <(run "$bin" "bench-$which-$$" $cols $rows $limit "$file")
+  binaries=(tmux vtmux)
+  [ -z "${BASE:-}" ] || binaries=(tmux base vtmux)
+  for which in "${binaries[@]}"; do
+    case $which in tmux) bin=$REF ;; base) bin=$BASE ;; *) bin=$VTMUX ;; esac
+    secs=
+    for n in $(seq "$RUNS"); do
+      read -r rss1 hs1 secs1 < <(run "$bin" "bench-$which-$$-$n" $cols $rows $limit "$file")
+      if [ -z "$secs" ] || [ "$(echo "$secs1 < $secs" | bc)" = 1 ]; then
+        rss=$rss1 hs=$hs1 secs=$secs1
+      fi
+    done
     retained=-
     if [ $which = vtmux ]; then
       read -r hs2 retained < <("$RETENTION" $cols $rows $limit "$file")
