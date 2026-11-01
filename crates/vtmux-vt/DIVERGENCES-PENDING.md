@@ -124,3 +124,8 @@ and the probes from `review_vt_wrap`.
   erase the cells printed without `ESC ( 0` and keep the ones printed with it.
   ED/EL/ECH are unaffected: the most recent protection mode is always DEC.
 - Visible: a program that sends `CSI ? J`/`CSI ? K` (rare; tmux drops them).
+
+## P9. capture-pane -e and TABs: trailing styled blank, DECLRMM
+
+- From review_d_tab_capture (rv-d_tab_capture). (1) `printf 'a\t\033[41m \033[0m'`, `capture-pane -p -e`: tmux emits `a\t` ESC[41m, a space, ESC[49m; vtmux emits `a\t` ESC[41m with no blank. With two red spaces tmux emits no blank and vtmux one (3-6 match). (2) After DECLRMM (`?69h`, `3;10s`), a TAB is kept as spaces: vtmux's tab marking bails when left/right margins are set (patch 0002); tmux has no DECLRMM, so its cursor stop differs anyway.
+- Visible: `capture-pane -e` bytes after a TAB followed by one or two styled blanks; capture after DECLRMM. Rare.
