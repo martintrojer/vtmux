@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::Instant;
 
 use mio::unix::SourceFd;
@@ -44,6 +45,11 @@ impl JobStatus {
 /// The completion callback (`job_complete_cb`): the output and status.
 pub type Complete = Box<dyn FnOnce(&mut Server, Vec<u8>, JobStatus)>;
 
+/// `job_update_cb` (job.c:309-323): the output so far, after each read that
+/// brought bytes. The callback may take what it has used out of the buffer
+/// (`evbuffer_readline`); what is left is the job's output at completion.
+pub type Update = Rc<dyn Fn(&mut Server, &mut Vec<u8>)>;
+
 /// A callback a timer runs.
 pub type Deferred = Box<dyn FnOnce(&mut Server)>;
 
@@ -64,6 +70,7 @@ struct Job {
     status: Option<JobStatus>,
     /// `JOB_NOWAIT`: the server may exit with it running.
     nowait: bool,
+    update: Option<Update>,
     complete: Option<Complete>,
 }
 
@@ -141,6 +148,8 @@ pub struct JobSpec {
     pub show_stderr: bool,
     /// `JOB_NOWAIT`.
     pub nowait: bool,
+    /// `updatecb`: told of output as it arrives.
+    pub update: Option<Update>,
 }
 
 impl Server {
@@ -174,6 +183,7 @@ impl Server {
                 input: spec.input.clone(),
                 status: None,
                 nowait: spec.nowait,
+                update: spec.update.clone(),
                 complete: Some(complete),
             },
         );
@@ -242,18 +252,33 @@ impl Server {
             return;
         };
         let mut buf = [0u8; 16 * 1024];
+        let mut got = false;
         let closed = loop {
             match rustix::io::read(fd, &mut buf) {
                 Ok(0) => break true,
-                Ok(n) => job.output.extend_from_slice(&buf[..n]),
+                Ok(n) => {
+                    job.output.extend_from_slice(&buf[..n]);
+                    got = true;
+                }
                 Err(rustix::io::Errno::AGAIN) => break false,
                 Err(rustix::io::Errno::INTR) => {}
                 Err(_) => break true,
             }
         };
+        // job_read_callback: the update callback sees what arrived.
+        if got && let Some(update) = job.update.clone() {
+            let mut output = std::mem::take(&mut job.output);
+            update(self, &mut output);
+            if let Some(job) = self.jobs.running.get_mut(&id) {
+                job.output = output;
+            }
+        }
         if !closed {
             return;
         }
+        let Some(job) = self.jobs.running.get_mut(&id) else {
+            return;
+        };
         if let Some(fd) = job.fd.take() {
             let _ = self
                 .poll
@@ -294,6 +319,24 @@ impl Server {
         };
         if let Some(complete) = job.complete.take() {
             complete(self, job.output, job.status.unwrap_or(JobStatus::Exited(0)));
+        }
+    }
+
+    /// `job_free` (job.c:269-287) on a running job: it is forgotten, its
+    /// completion never runs, and SIGTERM goes to its process (only that
+    /// pid, so what the shell started survives) unless it has been reaped.
+    pub(crate) fn job_free(&mut self, id: JobId) {
+        let Some(job) = self.jobs.running.remove(&id) else {
+            return;
+        };
+        if let Some(pid) = job.pid.and_then(rustix::process::Pid::from_raw) {
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+        }
+        if let Some(fd) = &job.fd {
+            let _ = self
+                .poll
+                .registry()
+                .deregister(&mut SourceFd(&fd.as_raw_fd()));
         }
     }
 

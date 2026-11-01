@@ -732,7 +732,10 @@ impl Server {
                 continue;
             };
             let found = crate::target::Found::from_winlink(&self.model, s, index);
-            let ctx = self.format_ctx(found, Some(id));
+            let mut ctx = self.format_ctx(found, Some(id));
+            // control_notify_layout_change (control-notify.c:99): the
+            // client's own format tree.
+            ctx.jobs = Some(self.job_handle(Some(id)));
             let line =
                 vtmux_core::rawstr::to_bytes(&vtmux_core::format::expand_str(TEMPLATE, &ctx))
                     .into_owned();

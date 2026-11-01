@@ -89,7 +89,9 @@ impl Source<'_> {
         let ctx = self.ctx(Found::default(), caps);
         Theme(SLOTS.map(|slot| {
             let value = self.string(TreeId::Server, &format!("{prefix}-theme-{slot}"));
-            match Colour::parse(&vtmux_core::format::expand_str(&value, &ctx)) {
+            // server_client_update_theme_colours (server-client.c:1293):
+            // FORMAT_NOJOBS.
+            match Colour::parse(&vtmux_core::format::expand_str_nojobs(&value, &ctx)) {
                 None | Some(Colour::Theme(_)) => Color::Default,
                 Some(c) => Theme::default().colour(c),
             }
@@ -405,7 +407,9 @@ impl Source<'_> {
         ctx.extra
             .push(("is_outside".into(), if inside { "0" } else { "1" }.into()));
         let value = self.string(TreeId::Window(w), "fill-character");
-        let expanded = vtmux_core::format::expand_str(&value, &ctx);
+        // window_get_border_cell's fill-character (window-border.c:41):
+        // FORMAT_NOJOBS.
+        let expanded = vtmux_core::format::expand_str_nojobs(&value, &ctx);
         let cell = styled::draw(&CellStyle::default(), 1, &expanded, false, false)
             .cells
             .remove(0);

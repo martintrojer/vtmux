@@ -301,6 +301,12 @@ pub struct Server {
     pub(crate) prompt_history: crate::prompt_history::History,
     /// Closed popups' processes not yet reaped.
     pub(crate) orphans: Vec<i32>,
+    /// The `#()` jobs formats have asked for (format.c `format_jobs` and
+    /// each client's `c->jobs`); see [`crate::format_jobs`].
+    pub(crate) format_jobs: std::rc::Rc<std::cell::RefCell<crate::format_jobs::FormatJobs>>,
+    /// `cmdq_get_client(item)` of the command running now: the client whose
+    /// jobs its formats use.
+    pub(crate) cmd_client: Option<ClientId>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -446,7 +452,7 @@ impl Server {
         );
         let mut model = Model::default();
         model.options = OptionsStore::new(&defaults);
-        Ok(Self {
+        let mut server = Self {
             model,
             info: ServerInfo::new(socket.to_string_lossy().into_owned()),
             global_env,
@@ -478,7 +484,12 @@ impl Server {
             event_waits: Vec::new(),
             prompt_history: crate::prompt_history::History::default(),
             orphans: Vec::new(),
-        })
+            format_jobs: std::rc::Rc::default(),
+            cmd_client: None,
+        };
+        // server_start: the hourly tidy (server.c:157-172, `evtimer_add`).
+        server.format_jobs_start_tidy();
+        Ok(server)
     }
 
     /// Run until the server exits.
@@ -555,6 +566,7 @@ impl Server {
             self.apply_redraws();
             self.tree_updates();
             self.render_clients();
+            self.format_jobs_flush();
             self.model.redraw_panes.clear();
             self.send_pane_resizes();
             self.control_tick();
@@ -602,7 +614,10 @@ impl Server {
     }
 
     fn own_timeout(&self) -> Option<Duration> {
-        if !self.backlog.is_empty() || self.cmdq.runnable() {
+        if !self.backlog.is_empty()
+            || self.cmdq.runnable()
+            || !self.format_jobs.borrow().actions.is_empty()
+        {
             return Some(Duration::ZERO);
         }
 
@@ -850,6 +865,8 @@ impl Server {
         if let Some(mut c) = self.clients.remove(&id) {
             let _ = self.poll.registry().deregister(&mut c.stream);
         }
+        // server-client.c:548.
+        self.format_jobs_lost_client(id);
         self.waits.client_lost(id);
         self.event_waits.retain(|w| w.client != id);
         self.cmdq_client_lost(id);
@@ -2055,6 +2072,8 @@ impl Server {
             };
             let mut ctx =
                 self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
+            // status_redraw (status.c:244): the format tree is the client's.
+            ctx.jobs = Some(self.job_handle(Some(id)));
             status.draw(&source, &mut ctx, s, caps, screen, lines, top);
         }
         if let Some(c) = self.clients.get_mut(&id) {
@@ -2364,6 +2383,9 @@ impl Server {
         );
         ctx.clients = self.client_views();
         ctx.client = client.and_then(|id| Some(self.client_view(id, self.clients.get(&id)?)));
+        // format_create(cmdq_get_client(item), ...): the running command's
+        // client owns the jobs, whatever client the formats describe.
+        ctx.jobs = Some(self.job_handle(self.cmd_client));
         ctx
     }
 

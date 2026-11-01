@@ -10,8 +10,10 @@ use vtmux_core::options::{OptionValue, OptionsStore, Target, TreeId};
 
 use crate::alerts;
 use crate::environ::Environ;
+use crate::format_jobs::{JobHandle, TAG_PANE, TAG_WINDOW};
 use crate::model::Model;
 use crate::names::parse_window_name;
+use crate::server::ClientId;
 use crate::sys;
 use crate::target::Found;
 
@@ -131,6 +133,9 @@ pub struct Ctx<'a> {
     /// The paste buffer the buffer variables describe (`ft->pb`); the top
     /// automatic buffer when unset (`format_defaults`, format.c:7032).
     pub buffer: Option<String>,
+    /// The `#()` job cache this expansion reaches (`ft->client`, `ft->tag`,
+    /// `ft->flags`); without one `#()` is empty.
+    pub jobs: Option<JobHandle>,
 }
 
 impl<'a> Ctx<'a> {
@@ -166,6 +171,7 @@ impl<'a> Ctx<'a> {
             clients: Rc::from([]),
             client: None,
             buffer: None,
+            jobs: None,
         }
     }
 
@@ -175,6 +181,15 @@ impl<'a> Ctx<'a> {
         c.options = self.options;
         c.clients = Rc::clone(&self.clients);
         c.client = client;
+        // format_create(c, item, FORMAT_NONE, ft->flags): the client, the flags.
+        c.jobs = self.jobs.clone().map(|j| j.with_tag(0));
+        c
+    }
+
+    /// A loop child with its own tag (`FORMAT_WINDOW|id`, `FORMAT_PANE|id`).
+    fn tagged_child(&self, target: Found, client: Option<ClientView>, tag: u32) -> Ctx<'a> {
+        let mut c = self.child(target, client);
+        c.jobs = c.jobs.map(|j| j.with_tag(tag));
         c
     }
 
@@ -655,6 +670,12 @@ impl Ctx<'_> {
 }
 
 impl FormatContext for Ctx<'_> {
+    fn job(&self, raw: &str, expanded: &str) -> String {
+        self.jobs
+            .as_ref()
+            .map_or_else(String::new, |j| j.get(raw, expanded))
+    }
+
     fn get(&self, name: &str) -> Option<String> {
         self.find_before_environ(name)
             // format_find falls back to the session, then global,
@@ -724,7 +745,7 @@ impl FormatContext for Ctx<'_> {
                 .filter_map(|(&index, &w)| {
                     let window = self.model.windows.get(&w)?;
                     Some(LoopItem {
-                        ctx: Box::new(self.child(
+                        ctx: Box::new(self.tagged_child(
                             Found {
                                 session: Some(s.id),
                                 index: Some(index),
@@ -732,6 +753,7 @@ impl FormatContext for Ctx<'_> {
                                 ..Found::default()
                             },
                             self.client.clone(),
+                            TAG_WINDOW | w.0,
                         )),
                         keys: LoopKeys {
                             active: s.current == index,
@@ -759,12 +781,13 @@ impl FormatContext for Ctx<'_> {
                 .filter_map(|&p| {
                     let pane = self.model.panes.get(&p)?;
                     Some(LoopItem {
-                        ctx: Box::new(self.child(
+                        ctx: Box::new(self.tagged_child(
                             Found {
                                 pane: Some(p),
                                 ..self.target
                             },
                             self.client.clone(),
+                            TAG_PANE | p.0,
                         )),
                         keys: LoopKeys {
                             active: w.active() == p,
@@ -798,7 +821,14 @@ impl FormatContext for Ctx<'_> {
                     self.target
                 };
                 LoopItem {
-                    ctx: Box::new(self.child(target, Some(c.clone()))),
+                    ctx: {
+                        // format_create(c, ...): the looped client's own jobs.
+                        let mut child = self.child(target, Some(c.clone()));
+                        child.jobs = child
+                            .jobs
+                            .map(|j| j.with_client(Some(ClientId(c.order as usize))));
+                        Box::new(child)
+                    },
                     keys: LoopKeys {
                         id: c.order,
                         name: c.name.clone(),
