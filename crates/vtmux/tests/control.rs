@@ -6,6 +6,8 @@
 //! Isolation: environment cleared, a private `TMUX_TMPDIR` and `HOME`, an
 //! explicit `-L`, `-f /dev/null`, pane command pinned to `cat`.
 
+mod common;
+
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -119,7 +121,13 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
+        let pid = self
+            .command(&["display", "-p", "#{pid}"])
+            .output()
+            .ok()
+            .and_then(|o| common::parse_pid(&String::from_utf8_lossy(&o.stdout)));
         let _ = self.command(&["kill-server"]).output();
+        common::reap(pid);
     }
 }
 

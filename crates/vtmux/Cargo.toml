@@ -23,4 +23,4 @@ workspace = true
 tempfile = "3"
 portable-pty = "0.9"
 vtmux-vt.workspace = true
-rustix = { version = "1", default-features = false, features = ["std", "termios", "fs", "pty"] }
+rustix = { version = "1", default-features = false, features = ["std", "termios", "fs", "pty", "process"] }
