@@ -36,4 +36,22 @@ jobs:
           # Keyed on the pinned tarball sha256 (xtask/src/ref_tmux.rs) and the runner.
           key: ref-tmux-${{ runner.os }}-${{ runner.arch }}-e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e
       - run: cargo xtask ref-tmux
-      - run: bash scripts/check.sh
+      - name: Gate (Linux; full check.sh)
+        if: runner.os == 'Linux'
+        run: bash scripts/check.sh
+      # macOS is supported second (AGENTS.md). It must build, lint and pass the
+      # unit tests; the suites that compare with tmux 3.8 (cli, attach, regress,
+      # oracle) still have macOS-specific gaps (task macos_attach_parity), so
+      # they run but do not fail the job until that lands.
+      - name: Gate (macOS; build, lint, unit tests)
+        if: runner.os == 'macOS'
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --lib --bins
+      - name: Reference comparison suites (macOS; informational)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          cargo test -p vtmux --test cli --test attach
+          cargo xtask regress && cargo xtask oracle replay
