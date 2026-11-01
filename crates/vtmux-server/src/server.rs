@@ -1218,8 +1218,9 @@ impl Server {
         Ok(())
     }
 
-    /// The sessions with a client (`s->attached != 0`).
-    fn attached_sessions(&self) -> std::collections::BTreeSet<SessionId> {
+    /// The sessions with a client (`s->attached != 0`), for
+    /// `CMD_FIND_PREFER_UNATTACHED`.
+    pub(crate) fn attached_sessions(&self) -> std::collections::BTreeSet<SessionId> {
         self.clients.values().filter_map(|c| c.attached).collect()
     }
 
