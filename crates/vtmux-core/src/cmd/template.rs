@@ -88,7 +88,6 @@ pub fn replace_list(list: &CommandList, argv: &[String]) -> CommandList {
         for value in &mut call.args.positionals {
             *value = match value {
                 ArgValue::Str(s) => ArgValue::Str(fill(s)),
-                ArgValue::Bytes { text, .. } => ArgValue::Str(fill(text)),
                 ArgValue::Commands(inner) => ArgValue::Commands(replace_list(inner, argv)),
             };
         }
