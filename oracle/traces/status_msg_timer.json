@@ -49,7 +49,7 @@
         "run": [
           "display-message",
           "-d",
-          "800",
+          "2400",
           "-t",
           "a",
           "first"
@@ -75,7 +75,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 1100
+          "quiet_ms": 3300
         }
       },
       {
@@ -85,7 +85,7 @@
         "run": [
           "display-message",
           "-d",
-          "1500",
+          "4500",
           "-t",
           "a",
           "first"
@@ -117,7 +117,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 1800
+          "quiet_ms": 5400
         }
       },
       {
@@ -127,7 +127,7 @@
         "run": [
           "display-message",
           "-d",
-          "500",
+          "1500",
           "-t",
           "a",
           "first"
@@ -137,7 +137,7 @@
         "run": [
           "display-message",
           "-d",
-          "1500",
+          "4500",
           "-t",
           "a",
           "third"
@@ -145,7 +145,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 800
+          "quiet_ms": 2400
         }
       },
       {
@@ -153,7 +153,7 @@
       },
       {
         "settle": {
-          "quiet_ms": 1200
+          "quiet_ms": 3600
         }
       },
       {
