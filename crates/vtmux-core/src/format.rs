@@ -13,13 +13,15 @@
 //! trimming/padding (`=`, `p`), colours/quoting (`c`, `q`), repeats (`R`),
 //! environment loops (`V`), session/window/pane/client/option loops (`S`, `W`, `P`,
 //! `L`, `O`, see [`loops`]), name tests (`N`) and pane-search hooks (`C`).
-//! `E` re-expands; `T` is currently like `E` (its strftime pass is deferred).
+//! `E` re-expands; `T` re-expands after a strftime pass.
 //! Bare `t` formats a time variable as `ctime` text. [`expand_time`] runs
 //! strftime over the template first. Escapes and `#[style]` pass through.
 //! Unsupported modifiers become [`Node::Deferred`] and expand to nothing;
 //! [`Parsed::deferred`] lists them so the server can log them.
-//! `#(cmd)` also expands to nothing (jobs are the server's business, D9) and is
-//! reported in `deferred` as `#()`.
+//! `#(cmd)` is [`Node::Job`]: the command is expanded (no jobs, no cycles, no strftime),
+//! handed to [`FormatContext::job`], and the last line of what that returns is expanded
+//! again. Running and caching jobs is the server's business (D9); the default hook
+//! returns nothing. [`expand_nojobs`] is `FORMAT_EXPAND_NOJOBS`: `#()` is always empty.
 
 mod colour;
 mod colour_names;
@@ -163,6 +165,15 @@ pub trait FormatContext {
     fn options(&self, _scope: OptionScope) -> Option<OptionsLoop<'_>> {
         None
     }
+
+    /// `#(cmd)` (`format_job_get`, format.c:394-460). `raw` is the command as written
+    /// (tmux keys its job cache by it and names it in `<'raw' not ready>`); `expanded`
+    /// is what to run. Returns the job's output so far, of which only the last line is
+    /// used and which is expanded once more; `""` while there is none. A context that
+    /// runs no jobs keeps this.
+    fn job(&self, _raw: &str, _expanded: &str) -> String {
+        String::new()
+    }
 }
 
 pub use loops::{LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop};
@@ -204,6 +215,9 @@ impl<T: FormatContext + ?Sized> FormatContext for &T {
     }
     fn options(&self, scope: OptionScope) -> Option<OptionsLoop<'_>> {
         (**self).options(scope)
+    }
+    fn job(&self, raw: &str, expanded: &str) -> String {
+        (**self).job(raw, expanded)
     }
 }
 
@@ -251,7 +265,7 @@ pub struct Format {
 pub struct Parsed {
     pub ast: Format,
     /// Constructs that parsed but are not evaluated yet: each modifier name of
-    /// every unsupported modifier list, and `#()` for shell jobs.
+    /// every unsupported modifier list.
     pub deferred: Vec<String>,
 }
 
@@ -264,6 +278,8 @@ enum Node {
     },
     /// An unsupported modifier list (first modifier named); expands to nothing.
     Deferred(String),
+    /// `#(cmd)`: the command as written, and as a template.
+    Job(String, Format),
     /// tmux stops expanding here and returns what it has so far.
     Abort,
 }
@@ -425,6 +441,23 @@ pub fn expand(ast: &Format, ctx: &dyn FormatContext) -> String {
     expand_with(ast, ctx, &SystemClock::new(), &SystemWallClock)
 }
 
+/// Expand a parsed template with `FORMAT_EXPAND_NOJOBS` (format.c:150): `#()` expands
+/// to nothing and its hook is never called. For `%if`, hooks, `wait-for`, styles and
+/// other places where tmux refuses to start jobs.
+#[must_use]
+pub fn expand_nojobs(ast: &Format, ctx: &dyn FormatContext) -> String {
+    let clock = SystemClock::new();
+    let mut eval = Eval::new(ctx, &clock, &SystemWallClock, false);
+    eval.nojobs = true;
+    eval.expand(ast, 0)
+}
+
+/// [`expand_nojobs`] on template text.
+#[must_use]
+pub fn expand_str_nojobs(template: &str, ctx: &dyn FormatContext) -> String {
+    expand_nojobs(&parse(template).ast, ctx)
+}
+
 /// Expand a parsed template; `clock` drives the [`TIME_LIMIT_MS`] cut-off.
 #[must_use]
 pub fn expand_with_clock(ast: &Format, ctx: &dyn FormatContext, clock: &dyn Clock) -> String {
@@ -496,6 +529,12 @@ struct Eval<'a> {
     now: i64,
     /// `FORMAT_EXPAND_TIME` (format.c:149): templates pass through strftime first.
     time_mode: bool,
+    /// `FORMAT_EXPAND_NOJOBS` (format.c:150): `#()` is empty.
+    nojobs: bool,
+    /// `FORMAT_EXPAND_NOCYCLE` (format.c:151): no `A:` animation frames inside a
+    /// job's command or output.
+    #[allow(dead_code)] // read by the `A:` modifier, which is not implemented yet
+    nocycle: bool,
 }
 
 impl<'a> Eval<'a> {
@@ -512,6 +551,8 @@ impl<'a> Eval<'a> {
             wall,
             now: wall.now(),
             time_mode,
+            nojobs: false,
+            nocycle: false,
         }
     }
 }
@@ -539,7 +580,7 @@ mod tests {
     #[test]
     fn deferred_modifiers_are_reported() {
         let p = parse("a#{l:x}b#{=3:@n}#{s/a/b/;E:@n}#(true)#{@v}#{m:a,b}#{t/p:@n}");
-        assert_eq!(p.deferred, ["#()"]);
+        assert_eq!(p.deferred, Vec::<String>::new());
         assert_eq!(expand(&p.ast, &map(&[("@v", "v")])), "axbv0");
         assert_eq!(
             parse("#{?@x,a,b}#{E:@y}#{||:1,0}#S").deferred,
@@ -601,6 +642,159 @@ mod tests {
         let wall = FixedWallClock::new(1_793_305_246, "UTC").expect("zoneinfo");
         assert_eq!(expand_time_at("%H %% #S", &ctx, &wall), "20 % a");
         assert_eq!(expand_time_at("#S", &ctx, &wall), "a");
+    }
+
+    /// A fake job runner: `echo X` returns X (after the shell's quote removal, which
+    /// is all these probes need), `printf` returns its argument with `\n` unescaped,
+    /// anything else nothing. Records `(raw, expanded)` of every call.
+    struct Jobs {
+        vars: Map,
+        calls: std::cell::RefCell<Vec<(String, String)>>,
+    }
+
+    impl Jobs {
+        fn new(pairs: &[(&str, &str)]) -> Self {
+            Self {
+                vars: map(pairs),
+                calls: std::cell::RefCell::default(),
+            }
+        }
+        fn calls(&self) -> Vec<(String, String)> {
+            self.calls.borrow().clone()
+        }
+    }
+
+    impl FormatContext for Jobs {
+        fn get(&self, name: &str) -> Option<String> {
+            self.vars.get(name)
+        }
+        fn job(&self, raw: &str, expanded: &str) -> String {
+            self.calls
+                .borrow_mut()
+                .push((raw.to_owned(), expanded.to_owned()));
+            if let Some(rest) = expanded.strip_prefix("echo ") {
+                rest.trim_matches('"').to_owned()
+            } else if let Some(rest) = expanded.strip_prefix("printf ") {
+                rest.trim_matches('"').replace("\\n", "\n")
+            } else {
+                String::new()
+            }
+        }
+    }
+
+    /// Reference (`-L`, isolated; each `#()` run chained on one command line with a
+    /// `run -d1` between, as a fresh client never sees job output):
+    /// `display -p 'a[#(echo hi)]'` then, a second later, `b[hi]`.
+    #[test]
+    fn job_runs_through_the_hook() {
+        let ctx = Jobs::new(&[]);
+        assert_eq!(expand_str("a[#(echo hi)]b", &ctx), "a[hi]b");
+        assert_eq!(ctx.calls(), [("echo hi".to_owned(), "echo hi".to_owned())]);
+        // The default hook is empty; the template parses without deferrals.
+        assert_eq!(expand_str("a[#(echo hi)]b", &map(&[])), "a[]b");
+        assert_eq!(parse("#(echo hi)").deferred, Vec::<String>::new());
+    }
+
+    /// Reference: `#(echo "##{session_name}")` gives `s`: the command expands to
+    /// `echo "#{session_name}"`, and the output is expanded once more.
+    #[test]
+    fn job_command_and_output_are_both_expanded() {
+        let ctx = Jobs::new(&[("session_name", "s"), ("@x", "X")]);
+        assert_eq!(expand_str("#(echo \"##{session_name}\")", &ctx), "s");
+        assert_eq!(
+            ctx.calls(),
+            [(
+                "echo \"##{session_name}\"".to_owned(),
+                "echo \"#{session_name}\"".to_owned()
+            )]
+        );
+        // A variable in the command is substituted before the job runs.
+        let ctx = Jobs::new(&[("@x", "X")]);
+        assert_eq!(expand_str("#(echo #{@x})", &ctx), "X");
+        assert_eq!(
+            ctx.calls()[0],
+            ("echo #{@x}".to_owned(), "echo X".to_owned())
+        );
+        // A nested `#()` is empty in the command (NOJOBS) and in the output.
+        let ctx = Jobs::new(&[]);
+        assert_eq!(expand_str("#(echo a#(echo b)c)", &ctx), "ac");
+        // Reference: `#(echo "x#(echo y)")` gives `x`.
+        let ctx = Jobs::new(&[]);
+        assert_eq!(expand_str("#(echo \"x#(echo y)\")", &ctx), "x");
+        assert_eq!(ctx.calls().len(), 1);
+        // ... and so does a job whose output holds one.
+        let ctx = Jobs::new(&[("@o", "z#(echo y)")]);
+        assert_eq!(expand_str("#(echo #{@o})", &ctx), "z");
+    }
+
+    /// Reference: `printf "a\nb\nc"` gives `c`; a trailing newline does not make
+    /// the last line empty (`evbuffer_readline`).
+    #[test]
+    fn job_keeps_only_the_last_line() {
+        let ctx = Jobs::new(&[]);
+        assert_eq!(expand_str("[#(printf \"a\\nb\\nc\")]", &ctx), "[c]");
+        assert_eq!(expand_str("[#(printf \"a\\nb\\n\")]", &ctx), "[b]");
+        assert_eq!(expand_str("[#(printf \"a\\n\\n\")]", &ctx), "[a]");
+    }
+
+    /// NOJOBS (format.c:6776): `#()` is empty and the hook is never called, also
+    /// inside conditionals and `E`.
+    #[test]
+    fn nojobs_disables_jobs() {
+        let ctx = Jobs::new(&[("@j", "#(echo hi)")]);
+        assert_eq!(expand_str_nojobs("[#(echo hi)]", &ctx), "[]");
+        assert_eq!(expand_str_nojobs("#{?#(echo 1),a,b}", &ctx), "b");
+        assert_eq!(expand_str_nojobs("[#{E:@j}]", &ctx), "[]");
+        assert_eq!(ctx.calls(), Vec::<(String, String)>::new());
+        // Jobs run through `E` and conditionals otherwise.
+        assert_eq!(expand_str("[#{E:@j}]", &ctx), "[hi]");
+        assert_eq!(expand_str("#{?#(echo 1),a,b}", &ctx), "a");
+    }
+
+    /// Reference (17:xx local): `@k='#(echo %H)'` with `#{T:@k}` gives `17` (`T` runs
+    /// strftime on the value before the job starts). `display -p '#(echo %%H)'` gives
+    /// `%H`: `display`'s own pass turns `%%` into `%`, and neither the command nor the
+    /// output gets another. `set -gF @o '#(echo %%H)'` (no pass) gives `%%H`.
+    #[test]
+    fn job_command_gets_strftime_only_from_t_or_the_caller() {
+        let wall = FixedWallClock::new(1_793_305_246, "UTC").expect("zoneinfo");
+        let ctx = Jobs::new(&[("@k", "#(echo %H)")]);
+        // Plain expansion never runs strftime.
+        assert_eq!(expand_at(&parse("#{@k}").ast, &ctx, &wall), "#(echo %H)");
+        assert_eq!(expand_at(&parse("#{T:@k}").ast, &ctx, &wall), "20");
+        assert_eq!(ctx.calls(), [("echo 20".to_owned(), "echo 20".to_owned())]);
+        // A time-aware expansion: the caller's pass runs on the whole template, and
+        // the job's command and output get none more.
+        let ctx = Jobs::new(&[]);
+        assert_eq!(expand_time_at("#(echo %%H)", &ctx, &wall), "%H");
+        assert_eq!(ctx.calls(), [("echo %H".to_owned(), "echo %H".to_owned())]);
+        let ctx = Jobs::new(&[]);
+        assert_eq!(expand_time_at("#(echo %H)", &ctx, &wall), "20");
+        // Not time-aware: `%H` stays literal in the command.
+        let ctx = Jobs::new(&[]);
+        assert_eq!(expand_at(&parse("#(echo %H)").ast, &ctx, &wall), "%H");
+    }
+
+    /// Jobs seen through a loop child reach the parent's hook.
+    #[test]
+    fn job_hook_survives_loops() {
+        struct Loop(Jobs);
+        impl FormatContext for Loop {
+            fn get(&self, name: &str) -> Option<String> {
+                self.0.get(name)
+            }
+            fn job(&self, raw: &str, expanded: &str) -> String {
+                self.0.job(raw, expanded)
+            }
+            fn sessions(&self) -> Vec<LoopItem<'_>> {
+                vec![LoopItem {
+                    ctx: Box::new(&self.0),
+                    keys: LoopKeys::default(),
+                }]
+            }
+        }
+        let ctx = Loop(Jobs::new(&[("session_name", "s")]));
+        assert_eq!(expand_str("#{S:#(echo #S)}", &ctx), "s");
     }
 
     #[test]

@@ -110,7 +110,9 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
         i += 1;
         match ch {
             b'(' => {
-                // `#(cmd)`: jobs belong to the server (D9); expands to nothing.
+                // `#(cmd)` (format.c:6762-6785): the command is a template of its own
+                // (expanded without jobs or time at evaluation); running it is the
+                // context's business.
                 let mut brackets = 1;
                 let mut close = None;
                 for (at, &c) in b.iter().enumerate().skip(i) {
@@ -129,7 +131,8 @@ pub(super) fn template(s: &str, depth: usize, deferred: &mut Vec<String>) -> For
                     out.node(Node::Abort);
                     break;
                 };
-                deferred.push("#()".to_owned());
+                let cmd = template(&s[i..close], depth + 1, deferred);
+                out.node(Node::Job(s[i..close].to_owned(), cmd));
                 i = close + 1;
             }
             b'{' => {

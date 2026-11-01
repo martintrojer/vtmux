@@ -14,6 +14,15 @@ const MAX_WIDTH: i64 = 10_000;
 const MAX_REPEAT: i64 = 10_000;
 const MAX_REPEAT_SIZE: usize = 65_536;
 
+/// What `format_job_update` and `format_job_complete` keep of a job's output
+/// (format.c:326-390): the last line, where `evbuffer_readline` ends a line at any run of
+/// CR and LF.
+fn last_line(out: &str) -> &str {
+    out.rsplit(['\r', '\n'])
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+}
+
 fn flag01(b: bool) -> String {
     String::from(if b { "1" } else { "0" })
 }
@@ -49,6 +58,7 @@ impl Eval<'_> {
                 Node::Text(t) => out.push_str(t),
                 Node::Deferred(_) => {}
                 Node::Abort => break,
+                Node::Job(raw, cmd) => out.push_str(&self.job(raw, cmd, depth + 1)),
                 Node::Replace { value, post } => match self.replace(value, post, depth) {
                     Some(v) => out.push_str(&v),
                     // `format_replace` failed: tmux ends this expansion here.
@@ -56,6 +66,24 @@ impl Eval<'_> {
                 },
             }
         }
+        out
+    }
+
+    /// `#(cmd)` (`format_job_get`, format.c:394-460, and the `(` case of
+    /// `format_expand1`, 6762). Both the command and the output are expanded with
+    /// NOJOBS and NOCYCLE and without the strftime pass; only the last line of the
+    /// output counts.
+    fn job(&mut self, raw: &str, cmd: &Format, depth: usize) -> String {
+        if self.nojobs {
+            return String::new();
+        }
+        let saved = (self.time_mode, self.nojobs, self.nocycle);
+        (self.time_mode, self.nojobs, self.nocycle) = (false, true, true);
+        let cmd = self.expand(cmd, depth);
+        let out = self.ctx.job(raw, &cmd);
+        let out = parse::template(last_line(&out), depth, &mut Vec::new());
+        let out = self.expand(&out, depth);
+        (self.time_mode, self.nojobs, self.nocycle) = saved;
         out
     }
 
