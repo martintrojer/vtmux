@@ -13,4 +13,7 @@ pub mod term;
 
 pub use capture::{CaptureOpts, LineRef, Row, capture};
 pub use snapshot::{Cell, Color, Snapshot, Style, Underline, snapshot};
-pub use term::{ExtendedKeys, KeyMode, LineMark, MouseModes, MouseTracking, PaneTerm, Passthrough};
+pub use term::{
+    Compression, CompressionActivity, ExtendedKeys, KeyMode, LineMark, MouseModes, MouseTracking,
+    PaneTerm, Passthrough, history_reads,
+};

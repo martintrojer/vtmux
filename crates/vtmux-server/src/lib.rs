@@ -7,6 +7,7 @@ pub mod alerts;
 pub mod client_flags;
 pub mod cmdq;
 pub mod commands;
+pub mod compress;
 pub mod control;
 pub mod environ;
 pub mod events;

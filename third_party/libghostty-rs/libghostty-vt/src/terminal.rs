@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[doc(inline)]
-pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
+pub use ffi::{SizeReportSize, TerminalMemoryUsage as MemoryUsage, TerminalScrollbar as Scrollbar};
 
 /// Complete terminal emulator state and rendering.
 ///
@@ -599,6 +599,24 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn kitty_keyboard_flags(&self) -> Result<key::KittyKeyFlags> {
         self.get::<ffi::KittyKeyFlags>(Data::KITTY_KEYBOARD_FLAGS)
             .map(key::KittyKeyFlags::from_bits_retain)
+    }
+
+    /// Get the memory the terminal holds (`GHOSTTY_TERMINAL_DATA_MEMORY_USAGE`):
+    /// pages, compressed pages and images, per screen.
+    pub fn memory_usage(&self) -> Result<MemoryUsage> {
+        let mut value = MemoryUsage {
+            size: std::mem::size_of::<MemoryUsage>(),
+            ..MemoryUsage::default()
+        };
+        let result = unsafe {
+            ffi::ghostty_terminal_get(
+                self.inner.as_raw(),
+                Data::MEMORY_USAGE,
+                (&raw mut value).cast(),
+            )
+        };
+        from_result(result)?;
+        Ok(value)
     }
 
     /// Get the scrollbar state for the terminal viewport.
