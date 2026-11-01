@@ -1262,6 +1262,9 @@ impl Server {
         // server-client.c:2729: server_redraw_client.
         client.status.request_full_redraw();
         self.recalculate_sizes();
+        self.popup_resize(id);
+        // server-client.c:2729: server_redraw_client, the popup in full.
+        self.redraw_client(id);
     }
 
     /// `status_line_size` (status.c:113-122) with `CLIENT_STATUSOFF`
@@ -1800,7 +1803,13 @@ impl Server {
             .is_some_and(|c| c.status.prompt().is_some());
         if !prompt {
             let (cx, cy) = p.cursor();
-            screen.cursor = Some((cx.min(screen.cols), cy.min(screen.rows.saturating_sub(1))));
+            // A popup clipped to a narrow terminal leaves the cursor beyond
+            // it (popup_resize_cb keeps the job's screen); the terminal
+            // clamps a cursor move to its last column.
+            screen.cursor = Some((
+                cx.min(screen.cols.saturating_sub(1)),
+                cy.min(screen.rows.saturating_sub(1)),
+            ));
         }
         screen.cursor_visible = content.cursor_visible;
     }
