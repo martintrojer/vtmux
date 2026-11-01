@@ -23,14 +23,22 @@ and the probes from `review_vt_wrap`.
 ## P2. Narrowing reflow does not push rows into history
 
 - Golden: `cap_reflow_narrow`, `fmt_reflow_narrow_history_size`,
-  `fmt_reflow_narrow_cursor_y`
+  `fmt_reflow_narrow_cursor_y`, `fmt_reflow_pending_wrap_wide_cursor_x`,
+  `fmt_reflow_pending_wrap_wide_cursor_y`,
+  `fmt_reflow_pending_wrap_wide_history_size`
 - tmux: `screen_reflow` / `grid_reflow` on resize pushes the top row into history
   when narrowing 20->10 with `hello world` on row 0 (`hello worl` goes to history,
   `#{history_size}` 1, `#{cursor_y}` 0, CPR `1;2R`).
 - vtmux (Ghostty): both rows stay on screen (`history_size` 0, cursor row 1,
   CPR `2;2R`).
-- Visible: `#{history_size}`, `#{cursor_y}`, CPR and `capture-pane` after any
-  narrowing resize with content in the top rows.
+- Pending-wrap cursor: 20x5, `0123456789abcdefghij0123`, `short`, then ten
+  wide `漢字` cells filling the row (wrap pending), resized to 7x5: tmux puts
+  the cursor at 4,3 with `#{history_size}` 6. Ghostty 3bd54e025 gives 2,4
+  with `history_size` 4 (ghostty a887df42c gave 7,4, past the last column).
+  The ASCII case (20 chars at 20x5, resize 7x5) now matches tmux's
+  `cursor_x` 6 (`fmt_reflow_pending_wrap_cursor_x`; a887df42c gave 7).
+- Visible: `#{history_size}`, `#{cursor_x}`, `#{cursor_y}`, CPR and
+  `capture-pane` after any narrowing resize with content in the top rows.
 
 ## P3. ZWJ sequences do not cluster
 
