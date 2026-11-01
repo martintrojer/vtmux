@@ -4919,3 +4919,45 @@ fn clear_history_keeps_the_screen() {
         out
     });
 }
+
+/// A control client killed outright (SIGKILL, so no exit message) is lost
+/// like any other (server-client.c:478-564, `CLIENT_DEAD`): the server and
+/// its sessions survive. vtmux once recursed through its own client-closed
+/// notification to the dead socket until the stack overflowed.
+#[test]
+fn killed_control_client_leaves_the_server_up() {
+    compare("killed_control_client_leaves_the_server_up", |w| {
+        let mut out = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+        w.run(&["set-hook", "-g", "client-closed", "set -g @closed 1"]);
+        // stdin held open: a control client exits on stdin EOF.
+        let mut c = Command::new(&w.bin)
+            .args(["-L", &w.label, "-f", "/dev/null", "-C", "attach"])
+            .current_dir(w.dir())
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", w.dir())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn binary");
+        let start = Instant::now();
+        while w.run(&["lsc", "-F", "#{client_control_mode}"]).stdout != "1\n"
+            && start.elapsed() < Duration::from_secs(5)
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        c.kill().expect("kill");
+        let _ = c.wait();
+        let start = Instant::now();
+        while w.run(&["show", "-gv", "@closed"]).stdout != "1\n"
+            && start.elapsed() < Duration::from_secs(5)
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        out.push(w.run(&["ls", "-F", "#{session_name}"]));
+        out.push(w.run(&["lsc"]));
+        out.push(w.run(&["show", "-gv", "@closed"]));
+        out
+    });
+}
