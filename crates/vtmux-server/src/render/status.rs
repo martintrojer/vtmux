@@ -64,6 +64,9 @@ pub struct StatusLine {
     /// `CLIENT_REDRAWWINDOW`: the pane area is drawn again at the next
     /// frame even while frozen.
     redraw_window: bool,
+    /// `CLIENT_STATUSFORCE`: the next status redraw runs its `#()` jobs again
+    /// (`refresh-client`, cmd-refresh-client.c:275-280).
+    force: bool,
     /// `sl->screen`: the status lines as last drawn, one row per line. It
     /// keeps its last content while the status is off.
     screen: Vec<Vec<Cell>>,
@@ -100,6 +103,7 @@ impl Default for StatusLine {
         Self {
             redraw: true,
             redraw_window: false,
+            force: false,
             screen: Vec::new(),
             active: Vec::new(),
             message: None,
@@ -124,6 +128,16 @@ impl StatusLine {
     /// `server_status_client` / `server_redraw_client`.
     pub fn request_redraw(&mut self) {
         self.redraw = true;
+    }
+
+    /// `CLIENT_STATUSFORCE`, set with a redraw by `refresh-client`.
+    pub fn force_jobs(&mut self) {
+        self.force = true;
+    }
+
+    /// `CLIENT_STATUSFORCE` as the redraw uses it up.
+    pub fn take_force(&mut self) -> bool {
+        std::mem::take(&mut self.force)
     }
 
     /// `server_redraw_client` (`CLIENT_ALLREDRAWFLAGS`): the status and the

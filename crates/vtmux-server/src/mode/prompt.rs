@@ -234,7 +234,7 @@ pub(crate) mod tests {
             colours: 256,
             overlay: false,
         };
-        let (_, draw) = source.window(s, 20, 5, caps).unwrap();
+        let (_, draw) = source.window(s, 20, 5, caps, None).unwrap();
         let content = &draw.panes[&p].content;
         let text = (0..content.rows)
             .map(|y| {
