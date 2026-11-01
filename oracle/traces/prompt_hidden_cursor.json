@@ -28,6 +28,23 @@
         "run": [
           "set",
           "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
           "prompt-history-limit",
           "2"
         ]
@@ -294,7 +311,25 @@
       }
     },
     {
-      "step": 20,
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
       "observation": {
         "kind": "cli",
         "stdout": "History for command:\n\n1: set -g @h 2\n2: set -g @h 3\n\nHistory for search:\n\n\n",
@@ -303,7 +338,7 @@
       }
     },
     {
-      "step": 21,
+      "step": 23,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -312,7 +347,7 @@
       }
     },
     {
-      "step": 26,
+      "step": 28,
       "observation": {
         "kind": "cli",
         "stdout": "History for command:\n\n\nHistory for search:\n\n\n",
@@ -321,7 +356,7 @@
       }
     },
     {
-      "step": 27,
+      "step": 29,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -330,7 +365,7 @@
       }
     },
     {
-      "step": 31,
+      "step": 33,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -339,7 +374,7 @@
       }
     },
     {
-      "step": 32,
+      "step": 34,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -357,7 +392,7 @@
       }
     },
     {
-      "step": 34,
+      "step": 36,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -375,30 +410,12 @@
       }
     },
     {
-      "step": 35,
+      "step": 37,
       "observation": {
         "kind": "cli",
         "stdout": "",
         "stderr": "",
         "exit": 0
-      }
-    },
-    {
-      "step": 36,
-      "observation": {
-        "kind": "screen",
-        "rows": [
-          "",
-          "",
-          "",
-          "",
-          "",
-          "\\e[30m\\e[43mshort\\e[39m"
-        ],
-        "cursor": [
-          5,
-          5
-        ]
       }
     },
     {
@@ -411,7 +428,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[43m:abcd\\e[39m"
+          "\\e[30m\\e[43mshort\\e[39m"
         ],
         "cursor": [
           5,
@@ -447,6 +464,24 @@
           "",
           "",
           "",
+          "\\e[30m\\e[43m:abcd\\e[39m"
+        ],
+        "cursor": [
+          5,
+          5
+        ]
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
           "\\e[30m\\e[43m:ijklmnopqrstuvwxyz0123456789\\e[39m"
         ],
         "cursor": [
@@ -456,7 +491,7 @@
       }
     },
     {
-      "step": 44,
+      "step": 46,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -472,14 +507,14 @@
       }
     },
     {
-      "step": 46,
+      "step": 48,
       "observation": {
         "kind": "screen",
         "rows": [
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                 \\e[30m\"linuxpc\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                         \\e[30mR"
         ],
         "cursor": [
           0,
@@ -488,7 +523,7 @@
       }
     },
     {
-      "step": 47,
+      "step": 49,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -497,7 +532,7 @@
       }
     },
     {
-      "step": 49,
+      "step": 51,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -513,7 +548,7 @@
       }
     },
     {
-      "step": 51,
+      "step": 53,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -529,7 +564,7 @@
       }
     },
     {
-      "step": 53,
+      "step": 55,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -545,16 +580,7 @@
       }
     },
     {
-      "step": 54,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 55,
+      "step": 56,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -565,11 +591,20 @@
     {
       "step": 57,
       "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 59,
+      "observation": {
         "kind": "screen",
         "rows": [
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                 \\e[30m\"linuxpc\" <CLOCK>",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                         \\e[30mR",
           "\\e[43m:\\e[39m"
         ],
         "cursor": [
@@ -579,7 +614,7 @@
       }
     },
     {
-      "step": 59,
+      "step": 61,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -588,11 +623,11 @@
       }
     },
     {
-      "step": 61,
+      "step": 63,
       "observation": {
         "kind": "screen",
         "rows": [
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                 \\e[30m\"linuxpc\" <CLOCK>",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                         \\e[30mR",
           "\\e[43m:\\e[39m",
           "",
           ""
@@ -604,12 +639,12 @@
       }
     },
     {
-      "step": 63,
+      "step": 65,
       "observation": {
         "kind": "screen",
         "rows": [
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                 \\e[30m\"linuxpc\" <CLOCK>",
-          " P: \\e[4m0:[linuxpc]*\\e[0m\\e[42m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                         \\e[30mR",
+          " P: \\e[4m0:[t]*\\e[0m\\e[42m",
           "",
           ""
         ],

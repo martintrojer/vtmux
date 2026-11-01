@@ -6,6 +6,7 @@ name = "prompt_history_keys"
 size = [40, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
   { run = ["setb", "pa\u0001ste\nmore"] },
   { run = ["bind", "-n", "M-l", "command-prompt", "-l", "-p", "a,b", "-I", "x,y", "set -g @l '%%'"] },
   { run = ["bind", "-n", "M-m", "command-prompt", "-p", "a,b,c", "-I", "1", "set -g @m '%1-%2-%3'"] },

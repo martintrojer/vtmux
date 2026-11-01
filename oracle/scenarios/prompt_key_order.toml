@@ -10,6 +10,7 @@ name = "prompt_key_order"
 size = [40, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
   { run = ["bind", "-n", "M-b", "command-prompt", "-b", "-p", "b", "set -g @b '%%'"] },
   { run = ["bind", "-n", "M-y", "confirm-before", "-p", "ok?", "set -g @y yes"] },
   { attach = { session = "a" } },

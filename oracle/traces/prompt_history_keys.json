@@ -26,6 +26,14 @@
       },
       {
         "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
           "setb",
           "pa\u0001ste\nmore"
         ]
@@ -403,7 +411,16 @@
       }
     },
     {
-      "step": 21,
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -421,7 +438,7 @@
       }
     },
     {
-      "step": 24,
+      "step": 25,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -439,7 +456,7 @@
       }
     },
     {
-      "step": 26,
+      "step": 27,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -457,7 +474,7 @@
       }
     },
     {
-      "step": 28,
+      "step": 29,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -475,7 +492,7 @@
       }
     },
     {
-      "step": 30,
+      "step": 31,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -493,7 +510,7 @@
       }
     },
     {
-      "step": 32,
+      "step": 33,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -511,7 +528,7 @@
       }
     },
     {
-      "step": 34,
+      "step": 35,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -529,7 +546,7 @@
       }
     },
     {
-      "step": 36,
+      "step": 37,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -547,7 +564,7 @@
       }
     },
     {
-      "step": 38,
+      "step": 39,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -565,7 +582,7 @@
       }
     },
     {
-      "step": 40,
+      "step": 41,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -583,7 +600,7 @@
       }
     },
     {
-      "step": 42,
+      "step": 43,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -601,7 +618,7 @@
       }
     },
     {
-      "step": 44,
+      "step": 45,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -619,7 +636,7 @@
       }
     },
     {
-      "step": 46,
+      "step": 47,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -637,7 +654,7 @@
       }
     },
     {
-      "step": 48,
+      "step": 49,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -655,7 +672,7 @@
       }
     },
     {
-      "step": 51,
+      "step": 52,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -673,7 +690,7 @@
       }
     },
     {
-      "step": 53,
+      "step": 54,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -691,7 +708,7 @@
       }
     },
     {
-      "step": 56,
+      "step": 57,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -709,7 +726,7 @@
       }
     },
     {
-      "step": 59,
+      "step": 60,
       "observation": {
         "kind": "cli",
         "stdout": "x,y\n",
@@ -718,7 +735,7 @@
       }
     },
     {
-      "step": 61,
+      "step": 62,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -736,7 +753,7 @@
       }
     },
     {
-      "step": 63,
+      "step": 64,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -754,7 +771,7 @@
       }
     },
     {
-      "step": 65,
+      "step": 66,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -772,7 +789,7 @@
       }
     },
     {
-      "step": 68,
+      "step": 69,
       "observation": {
         "kind": "cli",
         "stdout": "1--\n",
@@ -781,7 +798,7 @@
       }
     },
     {
-      "step": 72,
+      "step": 73,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -799,7 +816,7 @@
       }
     },
     {
-      "step": 74,
+      "step": 75,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -808,7 +825,7 @@
       }
     },
     {
-      "step": 78,
+      "step": 79,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -826,7 +843,7 @@
       }
     },
     {
-      "step": 80,
+      "step": 81,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -835,7 +852,7 @@
       }
     },
     {
-      "step": 85,
+      "step": 86,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -853,7 +870,7 @@
       }
     },
     {
-      "step": 87,
+      "step": 88,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -862,7 +879,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
         ],
         "cursor": [
           0,
@@ -871,7 +888,7 @@
       }
     },
     {
-      "step": 88,
+      "step": 89,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -880,7 +897,7 @@
       }
     },
     {
-      "step": 89,
+      "step": 90,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -889,7 +906,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[43m[|||0]m \\e[42m       \"linuxpc\" <CLOCK>"
+          "\\e[30m\\e[43m[|||0]m \\e[42m \\e[39m                              \\e[30mR"
         ],
         "cursor": [
           0,

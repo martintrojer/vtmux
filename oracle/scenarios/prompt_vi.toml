@@ -7,6 +7,7 @@ name = "prompt_vi"
 size = [30, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "5", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "status-keys", "vi"] },
   { attach = { session = "a" } },
   { keys = "\u0002:" },
