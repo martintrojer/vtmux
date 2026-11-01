@@ -141,3 +141,19 @@ product reasons" category.
 - vtmux behaviour: vtmux doesn't send the size query, so after the first 5 s a lone ESC is taken after about 10 ms, as tmux does once the query is answered or when pixel sizes are known.
 - Evidence: with `ws_xpixel=0`, tmux redraws 501 ms after a lone ESC at t=3/8/17/27/42 s; vtmux 503 ms at t=3 s, then 12 ms from t=7.6 s. With pixel sizes set, both are about 10 ms after 5 s.
 - Category: Deferred (pixel-size queries come with image passthrough work; the visible effect is Escape responsiveness, in vtmux's favour).
+
+### D-015: the cell after a pane prompt's input keeps message-style at some widths
+
+- Test / assertion: none; reviewer-57's raw-byte probe (review_pane_prompt).
+- tmux behaviour: the pane prompt row is drawn with `tty_draw_line` up to the line's `cellsize` (screen-redraw.c:1671, tty-draw.c:161-166), and `cellsize` comes from `grid_expand_line`'s rounding to sx/4 or sx/2 (grid.c). So whether the cell after the input is drawn in message-style depends on the pane width: at widths 48-51 tmux sends `(goto line)\e[39m\e[49m\e[K`; at 20, 30, 35, 46, 47, 52, 55, 99, 100 it sends a styled space.
+- vtmux behaviour: always draws the styled space after the input.
+- Evidence: reviewer-57's raw PTY bytes from the reference, `command-prompt -b -P -p '(goto line)'`, widths listed above.
+- Category: Do not copy tmux bug (an allocation-rounding artefact; one cell's background at four widths).
+
+### D-016: the pane prompt's cursor with status off and status-position top
+
+- Test / assertion: none; reviewer-57's oracle live scenario (review_pane_prompt).
+- tmux behaviour: the prompt row follows `status-position` (screen-redraw.c:1616-1617, 1641), but the cursor is placed using `status_at_line(c) == 0` (server-client.c:2141-2144), which is -1 with status off (status.c:90-91, 106). With `status off` and `status-position top`, the prompt is drawn on row 0 and the cursor is put on the last row.
+- vtmux behaviour: the cursor is placed on the prompt's row.
+- Evidence: 40x8, `set -g status off; set -g status-position top`, copy-mode, `g`: tmux cursor 13,7 with the prompt on row 0; vtmux 13,0.
+- Category: Do not copy tmux bug (the cursor away from the text being edited).
