@@ -7,6 +7,8 @@ name = "prompt_hidden_cursor"
 size = [40, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "a", "-T", "t"] },
   { run = ["set", "-g", "prompt-history-limit", "2"] },
   { attach = { session = "a" } },
   { settle = {} },

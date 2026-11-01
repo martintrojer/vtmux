@@ -9,6 +9,7 @@ name = "prompt_templates"
 size = [40, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
   { run = ["bind", "-n", "M-a", "command-prompt", "-p", "name,val", "-I", "#{window_name},v", "set -g @%1 '%2'"] },
   { run = ["bind", "-n", "M-s", "command-prompt", "-1", "-p", "key?", "set -g @one '%%'"] },
   { run = ["bind", "-n", "M-n", "command-prompt", "-N", "-p", "num", "-I", "4", "set -g @num '%%'"] },

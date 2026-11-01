@@ -9,6 +9,7 @@ name = "prompt_command"
 size = [40, 6]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
   { attach = { session = "a" } },
   { keys = "\u0002:" },
   { screen = {} },

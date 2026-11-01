@@ -26,6 +26,14 @@
       },
       {
         "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
           "bind",
           "-n",
           "M-b",
@@ -148,7 +156,16 @@
       }
     },
     {
-      "step": 6,
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -166,7 +183,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 9,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -175,7 +192,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
         ],
         "cursor": [
           3,
@@ -184,7 +201,7 @@
       }
     },
     {
-      "step": 10,
+      "step": 11,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -202,7 +219,7 @@
       }
     },
     {
-      "step": 12,
+      "step": 13,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -211,7 +228,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
         ],
         "cursor": [
           5,
@@ -220,7 +237,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 14,
       "observation": {
         "kind": "cli",
         "stdout": "z\n",
@@ -229,7 +246,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 16,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -247,7 +264,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -256,7 +273,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
         ],
         "cursor": [
           7,
@@ -265,7 +282,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 19,
       "observation": {
         "kind": "cli",
         "stdout": "yes\n",
@@ -274,7 +291,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 21,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -292,7 +309,7 @@
       }
     },
     {
-      "step": 22,
+      "step": 23,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -301,7 +318,7 @@
           "",
           "",
           "",
-          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m       \"linuxpc\" <CLOCK>"
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
         ],
         "cursor": [
           0,

@@ -325,9 +325,26 @@ fn record(root: &Path, scenarios: &[Scenario]) -> Result<ExitCode> {
                     bad += 1;
                     continue;
                 }
+                let host = current_host();
+                // A screen showing the host name (the default status-right) has
+                // padding that depends on the name's length, which no
+                // normalisation can undo on another machine. Pin status-right.
+                if let Some(it) = observations.iter().find(|i| {
+                    matches!(i.observation, Observation::Screen { .. })
+                        && !host.is_empty()
+                        && serde_json::to_string(&i.observation)
+                            .is_ok_and(|j| normalize::replace_hosts(&j, &[&host]) != j)
+                }) {
+                    eprintln!(
+                        "record {}: step {} shows the host name; set status-right (or the status format) to something fixed",
+                        sc.name, it.step
+                    );
+                    bad += 1;
+                    continue;
+                }
                 let trace = Trace {
                     tmux_version: TMUX_VERSION.into(),
-                    recorded_host: current_host(),
+                    recorded_host: host,
                     name: sc.name.clone(),
                     inputs: sc.clone(),
                     observations,

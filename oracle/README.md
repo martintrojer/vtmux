@@ -86,3 +86,5 @@ Observations are matched by step index (and order within a step), so a timeout o
 nothing never shifts later diffs onto the wrong step; unmatched items are reported per side. `live --self`
 ignores `divergence` annotations (both sides are the reference); `replay` and `live` judge annotated steps
 against their `expect`.
+
+**Host names on screen.** A screen showing the recording machine's host name (the default `status-right`, or a pane title in `status-format[1]`) has padding that depends on the name's length, which no normalisation can undo elsewhere. `oracle record` refuses such a screen: pin `status-right` and the pane titles (`select-pane -T`).
