@@ -7,6 +7,7 @@
 
 pub mod capture;
 mod dcs;
+mod palette;
 pub mod snapshot;
 pub mod term;
 

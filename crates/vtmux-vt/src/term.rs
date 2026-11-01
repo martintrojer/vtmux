@@ -7,6 +7,7 @@
 use std::cell::{Cell as StdCell, RefCell};
 use std::collections::VecDeque;
 use std::fmt::Write as _;
+use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,6 +20,7 @@ use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
 use crate::dcs::{self, Dcs, Dispatch, Step};
+use crate::palette::{self, Palette};
 
 /// Where a history row is read from.
 pub(crate) enum HistoryRow<'a> {
@@ -277,6 +279,7 @@ impl PaneTerm {
             cursor,
             scan: AltModeScanner {
                 cursor: cursor_scan,
+                osc_cap: dcs::capacity(dcs::DEFAULT_BUFFER_SIZE),
                 ..AltModeScanner::default()
             },
             frozen: None,
@@ -353,7 +356,11 @@ impl PaneTerm {
             let mut j = i;
             let mut event = None;
             while j < bytes.len() && j - i < step {
-                if let Some(e) = self.scan.push(bytes[j]) {
+                let e = self.scan.push(bytes[j]);
+                // A palette OSC ended: tmux redraws the pane at once, ahead
+                // of whatever follows in this input.
+                self.redraw |= std::mem::take(&mut self.scan.palette_redraw);
+                if let Some(e) = e {
                     event = Some(e);
                     break;
                 }
@@ -478,11 +485,19 @@ impl PaneTerm {
     pub fn reset_input(&mut self) {
         self.scan.end_dcs();
         self.scan.state = ScanState::Ground;
+        self.scan.palette_osc = None;
     }
 
     /// Set `input-buffer-size` (`input_set_buffer_size`).
     pub fn set_input_buffer_size(&mut self, size: usize) {
         self.input_buffer_size = size;
+        self.scan.osc_cap = dcs::capacity(size);
+    }
+
+    /// Tell the pane which strings are colour names (`colour_byname`); the
+    /// table lives above this crate. Until set, no name parses.
+    pub fn set_colour_names(&mut self, is_name: palette::NameCheck) {
+        self.scan.palette.set_name_check(is_name);
     }
 
     /// The `DCS tmux;` payloads since the last call, in order.
@@ -1119,6 +1134,15 @@ struct AltModeScanner {
     osc: Option<Vec<u8>>,
     /// An ESC inside an OSC: a backslash next ends it (ST).
     osc_esc: bool,
+    /// The OSC in progress as tmux collects it (`input_input`), kept only
+    /// while it can be a palette OSC; `osc_cap` is its size limit.
+    palette_osc: Option<Vec<u8>>,
+    palette_discard: bool,
+    osc_cap: usize,
+    /// tmux's palette, to tell which palette OSCs redraw the pane.
+    palette: Palette,
+    /// A palette OSC just ended with a redraw ([`PaneTerm::feed`] takes it).
+    palette_redraw: bool,
     /// Intermediate bytes (0x20-0x2f) in the CSI being scanned.
     interm_count: u8,
     /// The CSI had a byte tmux does not take as a parameter or intermediate
@@ -1260,10 +1284,41 @@ enum ScanState {
 impl AltModeScanner {
     /// Feed one byte; `Some` when it ends a sequence of interest.
     fn push(&mut self, b: u8) -> Option<ScanEvent> {
+        if self.state == ScanState::Str {
+            self.push_palette_osc(b);
+        }
         self.push_state(b)
     }
 
-    fn push_state(&mut self, b: u8) -> Option<ScanEvent> {
+    /// tmux's view of an OSC (`input_state_osc_string_table`): collected
+    /// until BEL, or any CAN, SUB or ESC, which end it where they stand
+    /// (`input_set_state` runs the state's exit, `input_exit_osc`).
+    fn push_palette_osc(&mut self, b: u8) {
+        let Some(buf) = self.palette_osc.as_mut() else {
+            return;
+        };
+        match b {
+            0x07 | 0x18 | 0x1a | 0x1b => {
+                let osc = self.palette_osc.take().unwrap_or_default();
+                if !self.palette_discard && self.palette.osc(&osc) {
+                    self.palette_redraw = true;
+                }
+            }
+            0x00..=0x06 | 0x08..=0x17 | 0x19 | 0x1c..=0x1f => {}
+            _ if buf.len() >= self.osc_cap => self.palette_discard = true,
+            _ => {
+                buf.push(b);
+                // Keep only what may be a palette OSC: after the number,
+                // anything else is not one.
+                if !b.is_ascii_digit() && !palette::is_palette_osc(buf) {
+                    self.palette_osc = None;
+                }
+            }
+        }
+    }
+
+    /// Track the OSC being skipped, to find OSC 133; `Some` at its end.
+    fn push_osc(&mut self, b: u8) -> ControlFlow<Option<ScanEvent>> {
         // An OSC's end: BEL, or ST (`ESC \`).
         let osc_esc = std::mem::take(&mut self.osc_esc);
         if self.osc.is_some() {
@@ -1272,10 +1327,11 @@ impl AltModeScanner {
             if ends {
                 self.state = ScanState::Ground;
                 let osc = self.osc.take().unwrap_or_default();
-                return osc
-                    .strip_prefix(b"133;")
-                    .and_then(osc133_mark)
-                    .map(ScanEvent::Osc133);
+                return ControlFlow::Break(
+                    osc.strip_prefix(b"133;")
+                        .and_then(osc133_mark)
+                        .map(ScanEvent::Osc133),
+                );
             }
             match (self.state, b) {
                 (ScanState::Str, 0x1b) => self.osc_esc = true,
@@ -1288,6 +1344,13 @@ impl AltModeScanner {
                 }
                 _ => self.osc = None,
             }
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn push_state(&mut self, b: u8) -> Option<ScanEvent> {
+        if let ControlFlow::Break(end) = self.push_osc(b) {
+            return end;
         }
         match (self.state, b) {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
@@ -1312,6 +1375,8 @@ impl AltModeScanner {
             }
             (ScanState::Esc, b']') => {
                 self.state = ScanState::Str;
+                self.palette_osc = Some(Vec::new());
+                self.palette_discard = false;
                 self.osc = Some(Vec::new());
             }
             (ScanState::Esc, b'P') => {
@@ -1326,6 +1391,8 @@ impl AltModeScanner {
                     b'7' => self.charset_op(CharsetOp::Save),
                     b'8' => self.charset_op(CharsetOp::Restore),
                     b'c' => {
+                        // RIS: `colour_palette_clear` (input.c:1408).
+                        self.palette.clear();
                         self.charset_op(CharsetOp::Reset);
                         return Some(ScanEvent::Reset);
                     }
@@ -1892,6 +1959,55 @@ mod tests {
         assert!(t.take_redraw());
         t.feed(b"\x1bc");
         assert!(t.take_redraw());
+    }
+
+    /// input.c:2970, 3099, 3115, 3142, 3158, 3455, 3478: the palette OSCs
+    /// ask for a full pane redraw when they change something, ended by BEL,
+    /// ST, or the ESC that starts the next sequence.
+    #[test]
+    fn palette_oscs_ask_for_a_redraw() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_colour_names(|n| n == "red");
+        for (bytes, redraw) in [
+            (&b"\x1b]4;1;#ff0000\x07"[..], true),
+            (b"\x1b]4;1;red\x1b\\", true),
+            (b"\x1b]4;1;red\x1b[m", true),
+            (b"\x1b]4;1;zzz\x07", false),
+            (b"\x1b]4;1;?\x07", false),
+            (b"\x1b]10;#ffffff\x07", true),
+            (b"\x1b]11;#000000\x07", true),
+            (b"\x1b]10;?\x07", false),
+            (b"\x1b]12;#ff0000\x07", false),
+            (b"\x1b]112\x07", false),
+            (b"\x1b]104;1\x07", true),
+            (b"\x1b]104\x07", true),
+            (b"\x1b]110\x07\x1b]111\x07", true),
+            (b"\x1b]110;x\x07", false),
+            (b"\x1b_]4;1;red\x07\x1b\\", false),
+            (b"\x1b_\x1b]4;1;red\x07", true),
+            (b"\x1b]4;1;red\x18", true),
+        ] {
+            t.feed(bytes);
+            assert_eq!(
+                t.take_redraw(),
+                redraw,
+                "{:?}",
+                String::from_utf8_lossy(bytes)
+            );
+        }
+        // One OSC across two feeds; a payload after it sees the redraw.
+        t.feed(b"\x1b]4;1;#ff");
+        assert!(!t.take_redraw());
+        t.feed(b"0000\x07\x1bPtmux;a\x1b\\");
+        assert!(t.take_passthrough()[0].redraw);
+        assert!(t.take_redraw());
+        t.feed(b"\x1bPtmux;b\x1b\\");
+        assert!(!t.take_passthrough()[0].redraw);
+        // RIS clears the palette, so an `OSC 104;1` after it changes nothing.
+        t.feed(b"\x1bc");
+        t.take_redraw();
+        t.feed(b"\x1b]104;1\x07");
+        assert!(!t.take_redraw());
     }
 
     /// OSC 133 marks the cursor's line (input.c `input_osc_133`), with BEL

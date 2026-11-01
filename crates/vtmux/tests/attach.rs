@@ -4246,3 +4246,85 @@ fn allow_passthrough_delivers_dcs_tmux_payloads_raw() {
         }
     }
 }
+
+/// input.c:2970, 3099, 3115, 3142, 3158, 3455, 3478: an OSC that changes the
+/// pane's palette (4, 104, 10, 11, 110, 111) makes tmux redraw the whole pane
+/// (`screen_write_fullredraw`, `PANE_REDRAW`), and `allow-passthrough on`
+/// drops a payload that follows in the same redraw cycle
+/// (screen-write.c:150). One that changes nothing (a bad colour, a query,
+/// OSC 12) does not. Each case is a list of steps, one per Enter; the last
+/// ends with the payload.
+#[test]
+fn palette_oscs_drop_the_next_passthrough_payload_under_on() {
+    const OSC52: &[u8] = b"\x1b]52;c;aGk=\x07";
+    let cases: &[(&[&[u8]], bool)] = &[
+        (&[b"\x1b]4;1;#ff0000\x07"], false),
+        (&[b"\x1b]4;1;rgb:ff/00/00\x1b\\"], false),
+        (&[b"\x1b]4;1;1,2,3\x07"], false),
+        (&[b"\x1b]4;1;red\x07"], false),
+        (&[b"\x1b]4;1;zzz\x07"], true),
+        (&[b"\x1b]4;1;#ff00\x07"], true),
+        (&[b"\x1b]4;999;red\x07"], true),
+        (&[b"\x1b]10;#ffffff\x07"], false),
+        (&[b"\x1b]11;#000000\x07"], false),
+        (&[b"\x1b]12;#ff0000\x07"], true),
+        (&[b"\x1b]104\x07"], false),
+        (&[b"\x1b]110\x07"], false),
+        (&[b"\x1b]111\x07"], false),
+        (&[b"\x1b]110;x\x07"], true),
+        (&[b"\x1b]112\x07"], true),
+        // OSC 104;N redraws only once an entry has been set.
+        (&[b"\x1b]104;1\x07"], true),
+        (&[b"\x1b]4;1;red\x07", b"\x1b]104;1\x07"], false),
+        (&[b"\x1b]4;1;red\x07", b"\x1b]104\x07\x1b]104;1\x07"], false),
+        // The redraw of an earlier cycle is over by the next one.
+        (&[b"\x1b]4;1;red\x07", b"-"], true),
+    ];
+    for bin in bins() {
+        for (steps, want) in cases {
+            let w = World::new(bin.clone());
+            let mut script = String::new();
+            for (i, step) in steps.iter().enumerate() {
+                let mut data = (*step).to_vec();
+                if i + 1 == steps.len() {
+                    data.extend_from_slice(b"X\x1bPtmux;\x1b");
+                    data.extend_from_slice(OSC52);
+                    data.extend_from_slice(b"\x1b\\Y");
+                }
+                let file = w.home.path().join(format!("step{i}"));
+                std::fs::write(&file, data).unwrap();
+                write!(script, "read x; cat {}; ", file.display()).unwrap();
+            }
+            script.push_str("exec cat");
+            let a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+            a.wait(|a| status_row(a).contains("0:w"));
+            w.cli(&["set", "-g", "allow-passthrough", "on"]);
+            w.cli(&["set", "-g", "status-right", ""]);
+            let mut start = 0;
+            for _ in 0..steps.len() {
+                start = a.bytes.lock().unwrap().len();
+                w.cli(&["send-keys", "-t", "a:0", "Enter"]);
+                // Let the redraw of this cycle happen before the next.
+                thread::sleep(Duration::from_millis(500));
+            }
+            let end = Instant::now() + Duration::from_secs(5);
+            loop {
+                let out = w.cli(&["capture-pane", "-p", "-t", "a:0"]);
+                if String::from_utf8_lossy(&out.stdout).contains('Y') {
+                    break;
+                }
+                assert!(Instant::now() < end, "{}: no marker", bin.display());
+                thread::sleep(Duration::from_millis(20));
+            }
+            thread::sleep(Duration::from_millis(300));
+            let got = a.bytes.lock().unwrap()[start..].to_vec();
+            let n = got.windows(OSC52.len()).filter(|x| *x == OSC52).count();
+            assert_eq!(
+                n,
+                usize::from(*want),
+                "{} {steps:?}: OSC 52 in {got:?}",
+                bin.display()
+            );
+        }
+    }
+}

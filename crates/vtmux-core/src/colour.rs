@@ -211,6 +211,14 @@ fn by_name(name: &str) -> Option<Colour> {
         .map(|&(_, (r, g, b))| Colour::Rgb(r, g, b))
 }
 
+/// Whether `colour_byname` (colour.c:566) knows `name`: the `greyN` forms and
+/// the X11 names. `vtmux-vt` asks this to tell which OSC colour arguments
+/// tmux's `colour_parseX11` accepts.
+#[must_use]
+pub fn is_x11_name(name: &str) -> bool {
+    by_name(name).is_some()
+}
+
 impl fmt::Display for Colour {
     /// `colour_tostring` (colour.c:226).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
