@@ -34,6 +34,10 @@ Recorded per commit in git history; the list is kept current:
   - The clipboard-write callback returns `void` and answers through the
     request's `reply` function; the wrapper's trampoline calls it.
   - New `Terminal::scrollback_max_bytes`/`set_scrollback_max_bytes`.
+- `libghostty-vt/src/terminal.rs`: `Terminal::scrollback_max_lines` and
+  `set_scrollback_max_lines` (`GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES`,
+  `GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES`, already in the bindings);
+  vtmux keeps history by line count with it.
 
   Checked by diffing the old and new bindings: no constant was renumbered
   or removed, and struct layouts only grew at the end (`ClipboardWrite`,
@@ -54,5 +58,6 @@ Recorded per commit in git history; the list is kept current:
    for `stddef.h`. Diff the old and new bindings for removed or changed
    functions, callback types and struct fields (a changed callback type
    still compiles), and fix the wrapper.
-4. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES` and
-   friends) and run the slow gate.
+4. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES`,
+   `PAGE_GRID_BYTES`, `CELLS_ALIGN`; `page_rows_matches_ghostty` fails if
+   the page layout changed) and run the slow gate.
