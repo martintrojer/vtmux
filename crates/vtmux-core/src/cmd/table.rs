@@ -426,7 +426,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 78);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 79);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
