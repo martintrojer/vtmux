@@ -638,6 +638,15 @@ impl Layout {
         Some(g)
     }
 
+    /// `layout_add_horizontal_border(root, lc, status)` for a tiled
+    /// pane's cell: it needs a row for the pane status line.
+    #[must_use]
+    pub fn pane_needs_border(&self, pane: PaneId) -> bool {
+        self.root.find_pane(pane).is_some_and(|path| {
+            !self.root.get(&path).is_floating() && pos_at(&self.root, &path).border(self.env())
+        })
+    }
+
     /// `layout_split_pane` for a new pane `new` next to `target`
     /// (`-f`: next to the whole layout). On success the new pane has its
     /// cell; the caller adds it to the window's pane list.

@@ -582,15 +582,30 @@ impl Model {
         if let Some(z) = &mut window.zoom {
             z.saved.opts.status = status;
         }
+        let hidden = window.zoom.as_ref().map(|z| z.pane).filter(|z| {
+            // window_pane_get_pane_status (window.c:2936-2940): the
+            // zoomed pane of a mode that hides it has no status line.
+            self.panes.get(z).is_some_and(|x| {
+                x.modes
+                    .first()
+                    .is_some_and(crate::mode::Mode::hides_pane_status)
+            })
+        });
         for p in window.panes.panes.iter().filter(|p| Some(**p) != skip) {
             // Panes hidden by a zoom keep their last rectangle.
-            let Some(rect) = window.layout.pane_rect(*p) else {
+            let Some(mut rect) = window.layout.pane_rect(*p) else {
                 continue;
             };
+            if hidden == Some(*p)
+                && let Some(path) = window.layout.root.find_pane(*p)
+            {
+                rect = *window.layout.root.get(&path).g();
+            }
             if let Some(pane) = self.panes.get_mut(p) {
                 pane.set_rect(rect);
             }
         }
+        self.panes_resized(w);
     }
 
     pub fn insert_session(&mut self, session: Session) {
