@@ -485,6 +485,7 @@ impl Source<'_> {
                         style,
                         acs: true,
                         link: false,
+                        tab: false,
                     },
                 );
             }

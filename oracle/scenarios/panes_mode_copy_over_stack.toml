@@ -31,7 +31,6 @@ steps = [
   { run = ["clock-mode", "-t", "%0"] },
   { settle = { react = true } },
   { run = ["display", "-p", "-t", "a", "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"] },
-  { screen = {} },
   { keys = "x" },
   { settle = { react = true } },
   { run = ["display", "-p", "-t", "a", "#{pane_id} #{pane_mode} #{window_zoomed_flag} #{pane_in_mode}"] },
