@@ -4133,13 +4133,13 @@ fn choose_tree_bindings_s_w_and_owner_s() {
     for bin in bins() {
         let w = World::new(bin.clone());
         w.cli(&[
-            "new", "-d", "-s", "mmm", "-n", "a", "-x", "60", "-y", "12", "cat",
+            "new", "-d", "-s", "mmm", "-n", "a", "-x", "60", "-y", "12", "exec cat",
         ]);
         w.cli(&["set", "-g", "status-right", "R"]);
-        w.cli(&["splitw", "-d", "-t", "mmm", "cat"]);
-        w.cli(&["new", "-d", "-s", "bbb", "-n", "b", "cat"]);
-        w.cli(&["neww", "-d", "-t", "bbb:1", "-n", "c", "cat"]);
-        w.cli(&["new", "-d", "-s", "zzz", "-n", "d", "cat"]);
+        w.cli(&["splitw", "-d", "-t", "mmm", "exec cat"]);
+        w.cli(&["new", "-d", "-s", "bbb", "-n", "b", "exec cat"]);
+        w.cli(&["neww", "-d", "-t", "bbb:1", "-n", "c", "exec cat"]);
+        w.cli(&["new", "-d", "-s", "zzz", "-n", "d", "exec cat"]);
         for p in ["%0", "%1", "%2", "%3", "%4"] {
             w.cli(&["select-pane", "-t", p, "-T", "t"]);
         }
