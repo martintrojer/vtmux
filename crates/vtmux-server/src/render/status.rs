@@ -316,12 +316,15 @@ impl StatusLine {
         } else {
             screen.rows.saturating_sub(n)
         };
-        if self.prompt.is_some() && self.message.is_none() && !self.nocursor {
-            // status_prompt_cursor (server-client.c:2220-2222).
+        if self.prompt.is_some() {
+            // server-client.c:2220-2222: while a prompt is set the cursor
+            // goes to status_prompt_cursor, hidden or not (a message over
+            // the prompt, TTY_NOCURSOR kept after it). A column past the
+            // last one stays pending wrap (tty_cursor, tty.c:2468).
             let (x, line) = self.prompt_cursor;
             let row = y.saturating_add(u16::try_from(line).unwrap_or(0));
-            screen.cursor = Some((x.min(screen.cols - 1), row.min(screen.rows - 1)));
-            screen.cursor_visible = true;
+            screen.cursor = Some((x.min(screen.cols), row.min(screen.rows - 1)));
+            screen.cursor_visible = !self.nocursor;
         }
         let theme = source.theme(caps);
         for (row, drawn) in (y..screen.rows).zip(rows) {

@@ -206,10 +206,7 @@ impl Compositor {
                 x += u16::from(cell.width.max(1));
             }
         }
-        out.push_str("\x1b[0m");
-        if let Some((x, y)) = screen.cursor {
-            let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
-        }
+        place_cursor(&mut out, &mut style, &screen, caps);
         if screen.cursor_visible {
             out.push_str("\x1b[?25h");
         }
@@ -218,6 +215,34 @@ impl Compositor {
         }
         self.last = Some(screen);
         out.into_bytes()
+    }
+}
+/// End the frame's drawing (`\x1b[0m`) and move the cursor. A column
+/// past the last one is the terminal's pending wrap after the row's last
+/// cell, which `tty_cursor` leaves alone (tty.c:2468); writing that cell
+/// again puts the terminal there.
+fn place_cursor(out: &mut String, style: &mut Style, screen: &Snapshot, caps: Caps) {
+    match screen.cursor {
+        Some((x, y)) if x >= screen.cols => {
+            let last = (0..screen.cols)
+                .rev()
+                .find_map(|cx| screen.cell(cx, y).filter(|c| c.width != 0).map(|c| (cx, c)));
+            if let Some((cx, cell)) = last {
+                let _ = write!(out, "\x1b[{};{}H", y + 1, cx + 1);
+                set_style(out, style, cell.style, caps);
+                out.push_str(if cell.text.is_empty() {
+                    " "
+                } else {
+                    &cell.text
+                });
+            }
+            out.push_str("\x1b[0m");
+        }
+        Some((x, y)) => {
+            out.push_str("\x1b[0m");
+            let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
+        }
+        None => out.push_str("\x1b[0m"),
     }
 }
 fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
