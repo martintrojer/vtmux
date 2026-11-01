@@ -1,0 +1,7 @@
+kind=capture
+cols=20
+rows=4
+bytes=abcd\033[4h\r\tX
+flags=-p
+command=new-session -d -x 20 -y 4 'sh -c 'printf '"'"'abcd\033[4h\r\tX'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p
+expected=abcd    X\n\n\n\n

@@ -56,6 +56,24 @@ Recorded per commit in git history; the list is kept current:
   prefix is rejected", in both test binaries) fails the same way on
   unpatched 3bd54e025 on this host.
 
+- `patches/0002-tab-cell-mark.patch` (`page.zig` `Cell.tab`,
+  `Terminal.zig` `horizontalTab`/`markTab`/`writeCell`,
+  `c/cell.zig`, `include/ghostty/vt/screen.h`, the snapshot codec's
+  layout probe): a horizontal tab that moves over blank cells all alike
+  (tmux's HT rule, input.c `input_c0_dispatch`) marks the cells in 8
+  spare bits of `Cell` (width of the tab on the first cell, 255 on the
+  others), `GHOSTTY_CELL_DATA_TAB` reads it, and writing over any cell of
+  a tab clears the whole mark (`screen_write_overwrite`); the print
+  fast path skips a cell that carries a mark. Other erase and shift
+  operations drop the mark with the cell, as they do for tmux's TAB cell
+  when the cell is cleared. The bits are not in the snapshot wire
+  format, so a tab does not survive a snapshot round trip. `Cell.tab` and
+  `Cell::tab()` are reflected in `bindings.rs` and `screen.rs`.
+  Upstream candidate if Ghostty ever wants tab cells (`vtmux-vt`
+  `capture.rs` is the one consumer). Not run: ghostty's own
+  `zig build test-lib-vt` (`zig build` of the library with the patch
+  passes and vtmux's goldens exercise it).
+
   Checked by diffing the old and new bindings: no constant was renumbered
   or removed, and struct layouts only grew at the end (`ClipboardWrite`,
   `TerminalScrollViewportValue`).

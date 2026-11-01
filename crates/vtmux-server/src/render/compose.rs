@@ -81,6 +81,7 @@ impl Theme {
             style: self.style(&c.style),
             acs: c.style.attrs.contains(Attrs::ACS),
             link: c.style.link.is_some(),
+            tab: false,
         }
     }
 }

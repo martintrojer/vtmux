@@ -65,6 +65,11 @@ pub struct Cell {
     pub acs: bool,
     /// Inside an OSC 8 hyperlink (tmux's `gc->link != 0`).
     pub link: bool,
+    /// A TAB cell (tmux's `GRID_FLAG_TAB`), only in a [`crate::Row`]: the
+    /// text is the `width` spaces the tab covers and the cells after it
+    /// are width 0. [`Snapshot`] cells never have it (a tab draws as the
+    /// blanks it covers).
+    pub tab: bool,
 }
 
 /// The visible grid at one moment, row-major.
@@ -196,6 +201,7 @@ pub fn snapshot(term: &PaneTerm) -> Snapshot {
                 style,
                 acs,
                 link,
+                tab: false,
             });
         }
     }

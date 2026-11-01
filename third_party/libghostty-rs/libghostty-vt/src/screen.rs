@@ -395,6 +395,12 @@ impl Cell {
     pub fn bg_color_rgb(self) -> Result<RgbColor> {
         Ok(self.get::<ffi::ColorRgb>(ffi::CellData::COLOR_RGB)?.into())
     }
+    /// vtmux: the tab mark. 0 is no tab, 1-32 the first cell of a
+    /// horizontal tab covering that many columns, 255 the other cells of
+    /// a tab (`patches/0002-tab-cell-mark.patch`).
+    pub fn tab(self) -> Result<u8> {
+        self.get(ffi::CellData::TAB)
+    }
 }
 
 /// Row semantic prompt state.

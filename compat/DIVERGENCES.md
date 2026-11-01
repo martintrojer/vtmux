@@ -110,13 +110,13 @@ product reasons" category.
 - Evidence: `cargo xtask oracle replay --only 'copy_*'`; cli.rs `copy_mode_formats` and `copy_selection_formats` equal tmux 3.8; attach.rs `owner_copy_mode_vi_bindings`, `owner_prompt_jumps`; regress `copy-mode-selection-mode.sh` passes.
 - Category: Deferred
 
-### D-011: copied text and word movement over cells Ghostty stores differently
+### D-011: word movement over a cell Ghostty stores differently (U+0085)
 
-- Test / assertion: regress `copy-mode-test-emacs.sh` (`printf "words\n\tIndented"`) and `copy-mode-unicode-whitespace.sh` (`check_cursor 2,17` after next-word over `xa\302\205b c`), both xfail; each passes with only that assertion changed.
-- tmux behaviour: a TAB that moves over blank cells is stored as one TAB cell (`grid_set_tab`, input.c:1354-1360), copied as `\t` (`window_copy_copy_line`) and whitespace to word movement. U+0085 has no width (`utf8_width`: wcwidth -1, a C1 control, 0) and combines into the cell before it, so `xa\302\205b` is three cells.
-- vtmux behaviour: Ghostty stores a tab as the blank cells it moved over (`d_tab_capture`, vt P4), so copy mode copies spaces; word movement still treats them as whitespace, so cursor positions agree. Ghostty prints U+0085 as a cell of its own (`#{cursor_x}` 6 vs tmux 5 after `xa\302\205b c`), so next-word over it stops one column later.
-- Evidence: `printf 'aa\tbb'` then `capture-pane -p`: tmux `aa^Ibb`, vtmux `aa      bb`; `printf 'xa\302\205b c'` then `display -p '#{cursor_x}'`: tmux 5, vtmux 6.
-- Category: Deferred (grid-level, D4 arbiter not run; the tab case follows `d_tab_capture`)
+- Test / assertion: regress `copy-mode-unicode-whitespace.sh` (`check_cursor 2,17` after next-word over `xa\302\205b c`), xfail; it passes with only that assertion changed.
+- tmux behaviour: U+0085 has no width (`utf8_width`: wcwidth -1, a C1 control, 0) and combines into the cell before it, so `xa\302\205b` is three cells.
+- vtmux behaviour: Ghostty prints U+0085 as a cell of its own (`#{cursor_x}` 6 vs tmux 5 after `xa\302\205b c`), so next-word over it stops one column later.
+- Evidence: `printf 'xa\302\205b c'` then `display -p '#{cursor_x}'`: tmux 5, vtmux 6.
+- Category: Deferred (grid-level, D4 arbiter not run). The TAB half of this entry is closed: `d_tab_capture` patches Ghostty to mark the cells an HT crosses (`third_party/libghostty-rs/VENDOR.md`, `0002-tab-cell-mark.patch`) and vtmux rebuilds tmux's TAB cell from them, so capture-pane and copy mode give `\t` and `copy-mode-test-emacs.sh` passes. Left over, folded into the P2 reflow entry of `crates/vtmux-vt/DIVERGENCES-PENDING.md`: narrowing a line that holds a tab wraps it in tmux (`grid_reflow` keeps the TAB cell whole) and not in vtmux.
 
 ### D-012: a new window's first automatic-rename check waits one name interval
 

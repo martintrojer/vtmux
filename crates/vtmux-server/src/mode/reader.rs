@@ -76,14 +76,15 @@ impl Grid {
     }
 
     /// `grid_in_set`: the columns the character at `(x, y)` covers if it
-    /// is in `set`, else 0. Ghostty keeps no tab cells (`d_tab_capture`),
-    /// so a tab is the blanks it left.
+    /// is in `set`, else 0. A TAB cell is in any set holding a space or a
+    /// tab and covers the columns of the tab.
     #[must_use]
     pub fn in_set(&self, x: usize, y: usize, set: &str) -> usize {
-        let has_space = set.contains(' ') || set.contains('\t');
+        let has_tab = set.contains('\t');
+        let has_space = set.contains(' ');
         let c = self.cell(x, y);
         if c.width == 0 {
-            if !has_space {
+            if !has_tab && !has_space {
                 return 0;
             }
             let mut px = x;
@@ -95,12 +96,15 @@ impl Grid {
                     break;
                 }
             }
-            if set.contains(' ') && has_whitespace(cell_text(&prev)) {
+            if prev.tab || (has_space && has_whitespace(cell_text(&prev))) {
                 return usize::from(prev.width).saturating_sub(x - px);
             }
             return 0;
         }
-        if set.contains(' ') && has_whitespace(cell_text(&c)) {
+        if (has_tab || has_space) && c.tab {
+            return usize::from(c.width);
+        }
+        if has_space && has_whitespace(cell_text(&c)) {
             return usize::from(c.width.max(1));
         }
         // utf8_cstrhas: the cell is one of the set's characters.
@@ -370,7 +374,7 @@ impl<'a> Reader<'a> {
             let xx = self.gd.length(py);
             for px in 0..xx {
                 let c = self.gd.cell(px, py);
-                if c.width != 0 && cell_text(&c) != " " {
+                if c.width != 0 && !c.tab && cell_text(&c) != " " {
                     (self.cx, self.cy) = (px, py);
                     return;
                 }

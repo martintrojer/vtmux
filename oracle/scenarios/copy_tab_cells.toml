@@ -1,0 +1,47 @@
+# A TAB cell in copy mode (input.c HT case, grid_set_tab; window-copy.c):
+# copied as \t (selection and copy-line), searched for as \t or as the
+# spaces it covers (window_copy_search_lr's padding), marked over the
+# columns of the whole tab, one word separator for next-word and
+# jump-to-forward \t, drawn as spaces. A tab that crossed text, was
+# written over, or was cut by the edge is not a TAB cell.
+name = "copy_tab_cells"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "8", "sh", "-c", "printf 'a\\tb c\\n\\tIndented\\nxy\\t\\tz\\nabcdefghijk\\r\\tX\\nq\\tr\\r\\033[3CZ\\n1234567\\t\\tab\\n'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { attach = { session = "a" } },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "history-top"] },
+  { run = ["send-keys", "-t", "a", "-X", "begin-selection"] },
+  { run = ["send-keys", "-t", "a", "-X", "end-of-line"] },
+  { run = ["send-keys", "-t", "a", "-X", "copy-selection-no-clear"] },
+  { run = ["show-buffer"] },
+  { run = ["send-keys", "-t", "a", "-X", "clear-selection"] },
+  { run = ["send-keys", "-t", "a", "-X", "start-of-line"] },
+  { run = ["send-keys", "-t", "a", "-X", "next-word"] },
+  { run = ["display", "-p", "-t", "a", "[#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_word}] [#{copy_cursor_line}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "next-word"] },
+  { run = ["display", "-p", "-t", "a", "[#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_word}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "start-of-line"] },
+  { run = ["send-keys", "-t", "a", "-X", "jump-to-forward", "\t"] },
+  { run = ["display", "-p", "-t", "a", "[#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-down"] },
+  { run = ["send-keys", "-t", "a", "-X", "back-to-indentation"] },
+  { run = ["display", "-p", "-t", "a", "[#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_word}]"] },
+  { run = ["send-keys", "-t", "a", "-X", "copy-line"] },
+  { run = ["show-buffer"] },
+  { run = ["send-keys", "-t", "a", "-X", "history-top"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward-text", "\t"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward-text", "y  "] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "search-forward", "a +b"] },
+  { run = ["display", "-p", "-t", "a", "[#{search_present}] [#{search_count}] [#{search_match}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "cancel"] },
+]

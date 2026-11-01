@@ -1,0 +1,7 @@
+kind=capture
+cols=20
+rows=4
+bytes=a\t\tb
+flags=-p
+command=new-session -d -x 20 -y 4 'sh -c 'printf '"'"'a\t\tb'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p
+expected=a\t\tb\n\n\n\n

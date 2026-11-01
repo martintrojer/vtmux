@@ -1,0 +1,8 @@
+kind=capture
+cols=10
+rows=4
+bytes=ab\tc
+flags=-p
+resize=20x4
+command=new-session -d -x 10 -y 4 'sh -c 'printf '"'"'ab\tc'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; resize-window -t 0 -x 20 -y 4 ; capturep -p
+expected=ab\tc\n\n\n\n

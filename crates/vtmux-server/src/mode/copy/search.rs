@@ -114,20 +114,30 @@ impl Grid {
         self.last() + 1 - self.hsize()
     }
 
-    /// A cell's data and width as `grid_get_cell` gives them: a space for
-    /// a blank, nothing for padding.
+    /// A cell's string and width as `window_copy_cellstring` gives them: a
+    /// space for a blank, `\t` for a TAB cell, nothing for padding.
     fn data(&self, x: usize, y: usize) -> (&str, u8) {
         match self.row(y).cells.get(x) {
             None => (" ", 1),
             Some(c) if c.width == 0 => ("", 0),
+            Some(c) if c.tab => ("\t", c.width),
             Some(c) if c.text.is_empty() => (" ", 1),
             Some(c) => (&c.text, c.width),
         }
     }
 
-    /// `window_copy_search_compare`.
+    /// `window_copy_search_compare`: a TAB cell matches a tab in the
+    /// pattern; otherwise the cell's own data is compared (the spaces of a
+    /// TAB cell).
     fn compare(&self, x: usize, y: usize, (text, width): &(String, u8), cis: bool) -> bool {
-        let (d, w) = self.data(x, y);
+        let cell = self.row(y).cells.get(x);
+        if text == "\t" && cell.is_some_and(|c| c.tab) {
+            return true;
+        }
+        let (d, w) = match cell {
+            Some(c) if c.width != 0 && c.tab => (c.text.as_str(), c.width),
+            _ => self.data(x, y),
+        };
         if d.len() != text.len() || w != *width {
             return false;
         }
@@ -138,17 +148,30 @@ impl Grid {
     }
 
     /// Whether `pat` matches at column `ax` of line `py`, following wrapped
-    /// lines.
+    /// lines. A TAB cell in the text shifts the columns after it by the
+    /// padding it brings (`window_copy_search_lr`).
     fn matches_at(&self, pat: &Pattern, ax: usize, py: usize) -> bool {
         let (sx, endline) = (self.sx(), self.last());
-        pat.cells.iter().enumerate().all(|(bx, cell)| {
-            let (mut px, mut y) = (ax + bx, py);
+        let mut padding = 0;
+        for (bx, cell) in pat.cells.iter().enumerate() {
+            let (mut px, mut y) = (ax + bx + padding, py);
             while px >= sx && y < endline && self.wrapped(y) {
                 px -= sx;
                 y += 1;
             }
-            px < sx && self.compare(px, y, cell, pat.cis)
-        })
+            if px - padding.min(px) >= sx {
+                return false;
+            }
+            if let Some(c) = self.row(y).cells.get(px)
+                && c.tab
+            {
+                padding += usize::from(c.width) - 1;
+            }
+            if !self.compare(px, y, cell, pat.cis) {
+                return false;
+            }
+        }
+        true
     }
 
     /// `window_copy_search_lr`: the first match starting in
@@ -599,20 +622,30 @@ impl CopyMode {
     }
 
     /// `window_copy_search_mark_match`: mark `width` cells from
-    /// `(px, py)` with the next generation; how many cells it covers.
-    fn mark_match(&mut self, px: usize, py: usize, width: usize) -> usize {
+    /// `(px, py)` with the next generation; how many cells it covers. A
+    /// plain-text match over a TAB cell covers all the columns of the tab.
+    fn mark_match(&mut self, px: usize, py: usize, width: usize, regex: bool) -> usize {
         let Some(b) = self.mark_at(px, py) else {
             return width;
         };
         let total = self.backing.sx() * self.backing.sy();
-        let w = width.min(total.saturating_sub(b));
+        let clip = |w: usize| w.min(total.saturating_sub(b));
+        let mut w = clip(width);
         let generation = self.search.generation;
-        if let Some(marks) = &mut self.search.marks {
-            for m in marks.iter_mut().skip(b).take(w) {
-                if *m == 0 {
-                    *m = generation;
+        let mut i = b;
+        while i < b + w {
+            if !regex {
+                let c = self.backing.cell(px + (i - b), py);
+                if c.tab {
+                    w = clip(w + usize::from(c.width) - 1);
                 }
             }
+            if let Some(m) = self.search.marks.as_mut().and_then(|m| m.get_mut(i))
+                && *m == 0
+            {
+                *m = generation;
+            }
+            i += 1;
         }
         self.search.generation = if generation == u8::MAX {
             1
@@ -672,7 +705,7 @@ impl CopyMode {
                     };
                     let Some((x, width)) = found else { break };
                     nfound += 1;
-                    let w = self.mark_match(x, py, width);
+                    let w = self.mark_match(x, py, width, re.is_some());
                     if w == 0 {
                         break;
                     }
