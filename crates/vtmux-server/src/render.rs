@@ -106,6 +106,17 @@ impl Compositor {
     pub fn invalidate(&mut self) {
         self.last = None;
     }
+    /// Move the terminal's cursor back to where the last frame left it,
+    /// after raw bytes (passthrough) may have moved it.
+    #[must_use]
+    pub fn cursor_bytes(&self, caps: Caps) -> Vec<u8> {
+        let Some(last) = self.last.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = String::new();
+        place_cursor(&mut out, &mut Style::default(), last, caps);
+        out.into_bytes()
+    }
     /// Rows `y..y + n` of the last frame sent, if it had this size: what
     /// the terminal shows there.
     #[must_use]

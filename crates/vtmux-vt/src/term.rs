@@ -18,6 +18,7 @@ use libghostty_vt::terminal::{
 use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
+use crate::dcs::{self, Dcs, Dispatch, Step};
 
 /// Where a history row is read from.
 pub(crate) enum HistoryRow<'a> {
@@ -83,6 +84,9 @@ const CELL_BYTES: usize = 8;
 /// Alignment of a page's cell array: Zig's `std.atomic.cache_line`, 128 on
 /// x86-64 and aarch64 (`cells_align`, page.zig).
 const CELLS_ALIGN: usize = 128;
+
+/// tmux's ground timer (input.c `input_start_ground_timer`).
+const DCS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// One pane's terminal. Owns the libghostty terminal; `'static` for callers.
 #[derive(Debug)]
@@ -153,6 +157,25 @@ pub struct PaneTerm {
     marks: Vec<(TrackedGridRef, LineMark)>,
     /// The marks of the history copied when the alternate screen came up.
     frozen_marks: Vec<(usize, LineMark)>,
+    /// tmux's own parser for DCS strings, which Ghostty never sees.
+    dcs: Dcs,
+    /// `input-buffer-size`, the most a DCS payload may hold.
+    input_buffer_size: usize,
+    /// `DCS tmux; ... ST` payloads since the last
+    /// [`PaneTerm::take_passthrough`].
+    passthrough: Vec<Passthrough>,
+    /// When the DCS being read began (tmux's five-second ground timer).
+    dcs_since: Option<std::time::Instant>,
+}
+
+/// A `DCS tmux;` payload (input.c `input_dcs_dispatch`), unescaped, for the
+/// server to write to the clients when `allow-passthrough` says so.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Passthrough {
+    pub data: Vec<u8>,
+    /// The pane already had a redraw coming from earlier in the same input
+    /// (`PANE_REDRAW`, screen-write.c:155).
+    pub redraw: bool,
 }
 
 impl PaneTerm {
@@ -262,6 +285,10 @@ impl PaneTerm {
             redraw: false,
             marks: Vec::new(),
             frozen_marks: Vec::new(),
+            dcs: Dcs::default(),
+            input_buffer_size: dcs::DEFAULT_BUFFER_SIZE,
+            passthrough: Vec::new(),
+            dcs_since: None,
         };
         pane.retain();
         pane
@@ -311,8 +338,18 @@ impl PaneTerm {
         } else {
             usize::MAX
         };
+        // `input_start_ground_timer` (input.c:2548 and the other string
+        // starts): a string not ended in five seconds is abandoned. Nothing
+        // shows until the next byte, so noticing then is the same.
+        if self.scan.in_dcs() && self.dcs_since.is_some_and(|t| t.elapsed() >= DCS_TIMEOUT) {
+            self.scan.end_dcs();
+        }
         let mut i = 0;
         while i < bytes.len() {
+            if self.scan.in_dcs() {
+                i = self.feed_dcs(bytes, i);
+                continue;
+            }
             let mut j = i;
             let mut event = None;
             while j < bytes.len() && j - i < step {
@@ -324,6 +361,16 @@ impl PaneTerm {
             }
             self.feed_piece(&bytes[i..j]);
             i = j;
+            if event == Some(ScanEvent::DcsStart) {
+                // `ESC P` is tmux's alone: Ghostty has the ESC (it ended
+                // whatever string was open, as in tmux) and CAN takes it
+                // back to the ground state.
+                self.term.vt_write(b"\x18");
+                self.dcs.begin();
+                self.dcs_since = Some(std::time::Instant::now());
+                i += 1;
+                continue;
+            }
             if let Some(e) = event {
                 let alternate = self.alternate_on();
                 match e {
@@ -363,9 +410,6 @@ impl PaneTerm {
                     c.reset();
                     self.cursor.set(c);
                 }
-                if e == ScanEvent::Decrqss {
-                    self.answer_decrqss();
-                }
                 if let ScanEvent::Osc133(mark) = e {
                     self.mark_cursor_line(mark);
                 }
@@ -381,15 +425,12 @@ impl PaneTerm {
         }
     }
 
-    /// Answer the DECRQSS the scanner just saw (`input_handle_decrqss`,
+    /// Answer a DECRQSS that just ended (`input_handle_decrqss`,
     /// input.c:2553-2617): `DCS 1 $ r SP q Ps SP q ST` for a request that
     /// starts `SP q`, `DCS 0 $ r ST` for any other. Ghostty's own DECRQSS
     /// replies (SGR, DECSTBM, DECSLRM, cursor) are dropped by `tmux_reply`:
     /// tmux knows only the cursor style.
-    fn answer_decrqss(&mut self) {
-        let Some(recognised) = self.scan.decrqss.take() else {
-            return;
-        };
+    fn answer_decrqss(&mut self, recognised: bool) {
         let reply = if recognised {
             format!("\x1bP1$r q{} q\x1b\\", self.cursor.get().decrqss_ps())
         } else {
@@ -398,6 +439,55 @@ impl PaneTerm {
         self.replies
             .borrow_mut()
             .extend_from_slice(reply.as_bytes());
+    }
+
+    /// The bytes of a DCS from `bytes[i..]`, through its end; the index
+    /// after them. An ESC that is not a doubled one or ST starts a new
+    /// sequence and is left for the caller (input.c's `ANYWHERE` rule).
+    fn feed_dcs(&mut self, bytes: &[u8], mut i: usize) -> usize {
+        while i < bytes.len() {
+            match self.dcs.push(bytes[i], self.input_buffer_size) {
+                Step::Stay => i += 1,
+                Step::End(dispatch) => {
+                    match dispatch {
+                        Dispatch::Passthrough(data) => {
+                            let redraw = self.redraw;
+                            self.passthrough.push(Passthrough { data, redraw });
+                        }
+                        Dispatch::Decrqss(recognised) => self.answer_decrqss(recognised),
+                        Dispatch::Ignore => {}
+                    }
+                    self.scan.end_dcs();
+                    return i + 1;
+                }
+                Step::Cancel => {
+                    self.scan.end_dcs();
+                    return i + 1;
+                }
+                Step::Escape => {
+                    self.scan.end_dcs();
+                    return i;
+                }
+            }
+        }
+        i
+    }
+
+    /// Start from the ground state, as a fresh pane process does: nothing
+    /// half-parsed is carried over (a respawned pane).
+    pub fn reset_input(&mut self) {
+        self.scan.end_dcs();
+        self.scan.state = ScanState::Ground;
+    }
+
+    /// Set `input-buffer-size` (`input_set_buffer_size`).
+    pub fn set_input_buffer_size(&mut self, size: usize) {
+        self.input_buffer_size = size;
+    }
+
+    /// The `DCS tmux;` payloads since the last call, in order.
+    pub fn take_passthrough(&mut self) -> Vec<Passthrough> {
+        std::mem::take(&mut self.passthrough)
     }
 
     /// Make Ghostty's DECSCA protection bit, which every printed cell copies
@@ -1034,11 +1124,6 @@ struct AltModeScanner {
     /// The CSI had a byte tmux does not take as a parameter or intermediate
     /// (`:` aside), or a parameter after an intermediate: tmux ignores it.
     csi_ignored: bool,
-    /// tmux's view of the DCS in progress, kept apart from `state` (which
-    /// follows Ghostty's parser) so DECRQSS is answered the way tmux sees it.
-    dcs: Option<Dcs>,
-    /// The DECRQSS just terminated: whether tmux recognises the request.
-    decrqss: Option<bool>,
     /// The cursor style tmux would hold, shared with the reply handler.
     cursor: Rc<StdCell<CursorState>>,
 }
@@ -1141,120 +1226,6 @@ fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
     Some(out)
 }
 
-/// tmux's DCS collection (input.c:632-720): just enough to know whether the
-/// string is `DCS $ q ... ST` and what it asks.
-#[derive(Debug, Default)]
-struct Dcs {
-    stage: DcsStage,
-    /// `ESC` seen in the handler stage.
-    escaped: bool,
-    interm: Vec<u8>,
-    params: usize,
-    /// The first bytes of the data (the final byte first).
-    head: Vec<u8>,
-    data_len: usize,
-    discard: bool,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum DcsStage {
-    #[default]
-    Enter,
-    Param,
-    Intermediate,
-    Handler,
-    Ignore,
-}
-
-/// `input_buffer_size` (`INPUT_BUF_DEFAULT_SIZE`, tmux.h): the data buffer
-/// doubles while `len + 1 >= space` and the string is discarded past this.
-const DCS_INPUT_LIMIT: usize = 1 << 20;
-
-impl Dcs {
-    /// One byte after `ESC P`. `Err` when tmux leaves the DCS without
-    /// dispatching (CAN, SUB, or ESC outside the handler stage: the ESC
-    /// starts a new sequence, `Err(true)`); `Ok(true)` at ST.
-    fn push(&mut self, b: u8) -> Result<bool, bool> {
-        use DcsStage::{Enter, Handler, Ignore, Intermediate, Param};
-        if self.stage == Handler {
-            if self.escaped {
-                self.escaped = false;
-                if b == b'\\' {
-                    return Ok(true);
-                }
-                self.input(b);
-            } else if b == 0x1b {
-                self.escaped = true;
-            } else {
-                self.input(b);
-            }
-            return Ok(false);
-        }
-        match b {
-            0x18 | 0x1a => return Err(false),
-            0x1b => return Err(true),
-            _ => {}
-        }
-        match (self.stage, b) {
-            (Ignore, _) => {}
-            (_, 0x20..=0x2f) => {
-                // `interm_buf[4]` keeps 3 bytes.
-                if self.interm.len() == 3 {
-                    self.discard = true;
-                } else {
-                    self.interm.push(b);
-                }
-                self.stage = Intermediate;
-            }
-            (Enter | Param, 0x30..=0x39 | 0x3b) => {
-                // `param_buf[64]` keeps 63 bytes.
-                if self.params == 63 {
-                    self.discard = true;
-                } else {
-                    self.params += 1;
-                }
-                self.stage = Param;
-            }
-            (Enter | Param, 0x3a) | (Param, 0x3c..=0x3f) | (Intermediate, 0x30..=0x3f) => {
-                self.stage = Ignore;
-            }
-            (Enter, 0x3c..=0x3f) => {
-                if self.interm.len() == 3 {
-                    self.discard = true;
-                } else {
-                    self.interm.push(b);
-                }
-                self.stage = Param;
-            }
-            (Enter | Param | Intermediate, 0x40..=0x7e) => {
-                self.input(b);
-                self.stage = Handler;
-            }
-            _ => {}
-        }
-        Ok(false)
-    }
-
-    fn input(&mut self, b: u8) {
-        if self.data_len + 1 >= DCS_INPUT_LIMIT {
-            self.discard = true;
-            return;
-        }
-        self.data_len += 1;
-        if self.head.len() < 3 {
-            self.head.push(b);
-        }
-    }
-
-    /// At ST: `Some(recognised)` when this is a DECRQSS
-    /// (`input_dcs_dispatch`, input.c:2641-2665); tmux only checks that the
-    /// request starts with `SP q` (`input_handle_decrqss`, input.c:2564).
-    fn into_decrqss(self) -> Option<bool> {
-        (!self.discard && self.interm == b"$" && self.head.first() == Some(&b'q'))
-            .then(|| self.data_len >= 3 && self.head[1] == b' ' && self.head[2] == b'q')
-    }
-}
-
 /// What [`AltModeScanner`] found; reported on the sequence's final byte.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScanEvent {
@@ -1268,8 +1239,8 @@ enum ScanEvent {
     Resync,
     /// An `OSC 133` that marks the cursor's line ended.
     Osc133(LineMark),
-    /// A DECRQSS ended: [`AltModeScanner::decrqss`] says what to answer.
-    Decrqss,
+    /// `ESC P`: a DCS starts (on the `P`).
+    DcsStart,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1280,39 +1251,16 @@ enum ScanState {
     /// `ESC` then an intermediate byte (`(`, `)`, `#`, ...).
     EscIntermediate(u8),
     Csi,
-    /// OSC, DCS, APC, PM or SOS: skipped to ST (or BEL).
+    /// OSC, APC, PM or SOS: skipped to ST (or BEL).
     Str,
+    /// Inside a DCS, which [`Dcs`] reads.
+    Dcs,
 }
 
 impl AltModeScanner {
     /// Feed one byte; `Some` when it ends a sequence of interest.
     fn push(&mut self, b: u8) -> Option<ScanEvent> {
-        let dcs_end = self.push_dcs(b);
-        let event = self.push_state(b);
-        // Ghostty leaves a DCS at any ESC not followed by `\`, where tmux
-        // would keep collecting; follow Ghostty so the two never drift.
-        if !matches!(self.state, ScanState::Str | ScanState::Esc) {
-            self.dcs = None;
-        }
-        dcs_end.then_some(ScanEvent::Decrqss).or(event)
-    }
-
-    /// Feed tmux's view of a DCS; true when a DECRQSS ends here.
-    fn push_dcs(&mut self, b: u8) -> bool {
-        let Some(dcs) = self.dcs.as_mut() else {
-            return false;
-        };
-        match dcs.push(b) {
-            Ok(false) => false,
-            Ok(true) => {
-                self.decrqss = self.dcs.take().and_then(Dcs::into_decrqss);
-                self.decrqss.is_some()
-            }
-            Err(_) => {
-                self.dcs = None;
-                false
-            }
-        }
+        self.push_state(b)
     }
 
     fn push_state(&mut self, b: u8) -> Option<ScanEvent> {
@@ -1345,7 +1293,8 @@ impl AltModeScanner {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
             // Strings are skipped; further intermediates change nothing we track.
-            (ScanState::Str, _) | (ScanState::EscIntermediate(_), 0x20..=0x2f) => {}
+            (ScanState::Str | ScanState::Dcs, _) | (ScanState::EscIntermediate(_), 0x20..=0x2f) => {
+            }
             // SO and SI are executed anywhere outside a string, even inside
             // an escape sequence.
             (_, 0x0e | 0x0f) => self.charset_op(CharsetOp::Shift(b == 0x0e)),
@@ -1366,8 +1315,8 @@ impl AltModeScanner {
                 self.osc = Some(Vec::new());
             }
             (ScanState::Esc, b'P') => {
-                self.state = ScanState::Str;
-                self.dcs = Some(Dcs::default());
+                self.state = ScanState::Dcs;
+                return Some(ScanEvent::DcsStart);
             }
             (ScanState::Esc, b'_' | b'^' | b'X') => self.state = ScanState::Str,
             (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(b),
@@ -1425,6 +1374,16 @@ impl AltModeScanner {
             }
         }
         (self.resync && self.state == ScanState::Ground).then_some(ScanEvent::Resync)
+    }
+
+    fn in_dcs(&self) -> bool {
+        self.state == ScanState::Dcs
+    }
+
+    fn end_dcs(&mut self) {
+        if self.in_dcs() {
+            self.state = ScanState::Ground;
+        }
     }
 
     fn charset_op(&mut self, op: CharsetOp) {
@@ -1541,7 +1500,7 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// - CPR -> `ESC[row;colR` from tmux's cursor, ignoring origin mode
 ///   (input.c:1730-1732)
 /// - DECRQM -> tmux's mode table (input.c:1638-1722)
-/// - DECRQSS: answered by [`PaneTerm::answer_decrqss`] from the scanner
+/// - DECRQSS: answered by [`PaneTerm::answer_decrqss`] from the DCS parser
 ///   (Ghostty's own SGR/DECSTBM/DECSLRM replies are dropped here)
 /// - XTVERSION `DCS > | tmux 3.8 ST` (input.c:1885-1890), size reports
 ///   14/16/18 t (input.c:2160-2183): produced by the registered effects
@@ -1663,11 +1622,45 @@ fn clean_name(raw: &str, untrusted: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::snapshot;
 
     fn replies_to(cols: u16, rows: u16, bytes: &[u8]) -> Vec<u8> {
         let mut t = PaneTerm::new(cols, rows, 100);
         t.feed(bytes);
         t.take_replies()
+    }
+
+    /// A DCS is tmux's, not Ghostty's: a `tmux;` payload comes out for the
+    /// server and nothing of it reaches the grid or the title, even though
+    /// Ghostty would end the string at the first ESC.
+    #[test]
+    fn dcs_passthrough_is_taken_before_ghostty() {
+        let mut t = PaneTerm::new(20, 3, 100);
+        t.feed(b"A\x1bPtmux;\x1b\x1b]2;INNER\x07\x1b\x1b[31mXY\x1b\\B");
+        let p = t.take_passthrough();
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].data, b"\x1b]2;INNER\x07\x1b[31mXY");
+        assert_eq!(t.title(), "");
+        let mut plain = PaneTerm::new(20, 3, 100);
+        plain.feed(b"AB");
+        assert_eq!(snapshot(&t).cells, snapshot(&plain).cells);
+        // Split across feeds, byte by byte.
+        for b in b"\x1bPtmux;a\x1b\x1bb\x1b\\C" {
+            t.feed(&[*b]);
+        }
+        assert_eq!(t.take_passthrough()[0].data, b"a\x1bb");
+        // Other DCS strings are consumed and give nothing.
+        t.feed(b"\x1bP1$rx\x1b\\\x1bPqabc\x1b\\");
+        assert_eq!(t.take_passthrough().len(), 0);
+    }
+
+    #[test]
+    fn dcs_ended_by_a_new_escape_sequence() {
+        let mut t = PaneTerm::new(20, 3, 100);
+        // ESC [ inside a DCS (outside its payload) starts a CSI.
+        t.feed(b"\x1bP1:\x1b[31mR");
+        assert_eq!(t.take_passthrough().len(), 0);
+        assert_eq!(t.cursor(), (1, 0));
     }
 
     #[test]
@@ -1933,7 +1926,7 @@ mod tests {
                     ScanEvent::Resync
                     | ScanEvent::Reset
                     | ScanEvent::Osc133(_)
-                    | ScanEvent::Decrqss => None,
+                    | ScanEvent::DcsStart => None,
                 })
                 .collect::<Vec<u8>>()
         };
