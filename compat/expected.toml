@@ -51,7 +51,7 @@ reason = "not implemented (M0 baseline)"
 
 [tests."choose-tree.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "choose-tree list view passes up to the i info view (window-tree preview, choose_tree part c); then J/K, : and X"
 
 [tests."clear-on-attach.sh"]
 status = "xfail"
@@ -233,7 +233,7 @@ reason = "not implemented (M0 baseline)"
 
 [tests."format-render-contexts.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs customize-mode (its choose-tree section passes)"
 
 [tests."format-strings.sh"]
 status = "pass"
@@ -383,7 +383,7 @@ reason = "not implemented (M0 baseline)"
 
 [tests."lifecycle-deferred.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs refresh-client -B (subscriptions), and switch-client -c finding a control client by name; its choose-tree section passes"
 
 [tests."list-commands.sh"]
 status = "pass"
@@ -401,11 +401,11 @@ reason = "not implemented (M0 baseline)"
 
 [tests."mode-kill.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs choose-buffer and display-panes (choose-tree -k passes)"
 
 [tests."mode-mutation.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs choose-buffer and choose-client (its choose-tree section passes)"
 
 [tests."mode-tree-scroll.sh"]
 status = "xfail"
@@ -460,11 +460,11 @@ reason = "not implemented (M0 baseline)"
 
 [tests."prompt-keys.sh"]
 status = "xfail"
-reason = "needs choose-tree (tree-mode prompts)"
+reason = "a 24-row client of an 80x24 window (window-size manual) needs the pan offset to the mode prompt (tty_window_offset); with that, a status-prompt invalid-UTF-8 append"
 
 [tests."prompt-mechanics.sh"]
 status = "xfail"
-reason = "needs choose-tree (tree-mode prompts); the pane-prompt (-P) and pane-prompt-opened/closed section before it passes"
+reason = "a 24-row client of an 80x24 window (window-size manual) needs the pan offset to the mode prompt (tty_window_offset); with that, its tree-mode sections pass up to command-prompt Tab completion"
 
 [tests."prompt-words-history.sh"]
 status = "skip"
