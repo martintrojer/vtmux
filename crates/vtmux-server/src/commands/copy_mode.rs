@@ -6,7 +6,7 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::ids::PaneId;
 
 use super::Item;
-use crate::mode::{CopyMode, Mode};
+use crate::mode::CopyMode;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -68,23 +68,7 @@ pub(crate) fn with_copy<R>(
     p: PaneId,
     f: impl FnOnce(&mut CopyMode, &crate::mode::copy::Env) -> R,
 ) -> Option<R> {
-    let pane = server.model.panes.get_mut(&p)?;
-    if !matches!(pane.modes.first(), Some(Mode::Copy(_))) {
-        return None;
-    }
-    // Out of the pane while it runs, so it can read the pane's terminal.
-    let mut mode = pane.modes.remove(0);
-    let result = server
-        .model
-        .copy_env(p)
-        .zip(mode.as_copy_mut())
-        .map(|(env, m)| f(m, &env));
-    if let Some(pane) = server.model.panes.get_mut(&p) {
-        if let Some(m) = mode.as_copy() {
-            pane.search.clone_from(&m.pane_search);
-        }
-        pane.modes.insert(0, mode);
-    }
-    server.model.redraw_panes.insert(p);
-    result
+    server
+        .with_mode(p, |mode, env| mode.as_copy_mut().map(|m| f(m, env)))
+        .flatten()
 }

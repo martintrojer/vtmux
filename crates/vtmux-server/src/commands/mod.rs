@@ -38,6 +38,7 @@ mod new_session;
 mod new_window;
 mod paste_buffer;
 mod prompt_history;
+mod refresh_client;
 mod rename_session;
 mod rename_window;
 mod resize_pane;
@@ -459,8 +460,9 @@ fn dispatch(
         "list-buffers" => list_buffers::exec(server, item, args),
         "bind-key" | "unbind-key" => keys::bind_or_unbind(server, call),
         "list-keys" => keys::list_keys(server, item, args, found),
-        "send-prefix" => keys::send_prefix(server, args, found),
+        "send-prefix" => keys::send_prefix(server, item, args, found),
         "switch-client" => keys::switch_client(server, item, args),
+        "refresh-client" => refresh_client::exec(server, item, args),
         "source-file" => source_file::exec(server, item, args, found),
         "wait-for" => wait_for::exec(server, item, args),
         "run-shell" => run_shell::exec(server, item, args, found),
@@ -541,6 +543,19 @@ fn dispatch(
                 vtmux_core::cmd::FindFlags::NONE,
             )?;
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
+            // cmd-attach-session.c:108-121: -f, then -r, before the client
+            // takes the session (and with no client, nothing at all).
+            if let Some(c) = item.client {
+                if let Some(flags) = args.value('f') {
+                    server.set_client_flags(c, flags);
+                }
+                if args.flag('r')
+                    && let Some(client) = server.clients.get_mut(&c)
+                {
+                    client.flags.read_only = true;
+                    client.flags.ignore_size = true;
+                }
+            }
             attach(server, item, session, !args.flag('E'), true)
         }
         "detach-client" => detach_client::exec(server, item, args),
@@ -638,7 +653,7 @@ pub(crate) fn latest_client(server: &Server, item: &Item) -> Option<ClientId> {
 }
 
 /// `buffer-limit`.
-fn buffer_limit(server: &Server) -> i64 {
+pub(crate) fn buffer_limit(server: &Server) -> i64 {
     server
         .model
         .number_option(vtmux_core::options::TreeId::Server, "buffer-limit")

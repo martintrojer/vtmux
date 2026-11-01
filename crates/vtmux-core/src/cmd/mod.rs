@@ -63,6 +63,15 @@ pub struct CommandList {
     pub calls: Vec<CommandCall>,
 }
 
+impl CommandList {
+    /// `cmd_list_all_have(cmdlist, CMD_READONLY)`: a read-only client may
+    /// run the list.
+    #[must_use]
+    pub fn all_read_only(&self) -> bool {
+        self.calls.iter().all(|c| c.entry.read_only())
+    }
+}
+
 /// Why text did not become commands, or why a command cannot run. `Display`
 /// is the exact stderr line (without the `file:line: ` prefix tmux adds when
 /// parsing a file; the caller owns that).

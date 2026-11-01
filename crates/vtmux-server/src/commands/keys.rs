@@ -95,7 +95,12 @@ pub fn list_keys(
 
 /// `send-prefix [-2]`: the session's prefix key to the pane, as
 /// `send-keys` would send it.
-pub fn send_prefix(server: &mut Server, args: &Args, found: Found) -> Result<(), CmdError> {
+pub fn send_prefix(
+    server: &mut Server,
+    item: &Item,
+    args: &Args,
+    found: Found,
+) -> Result<(), CmdError> {
     let (Some(s), Some(p)) = (found.session, found.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
@@ -110,24 +115,19 @@ pub fn send_prefix(server: &mut Server, args: &Args, found: Found) -> Result<(),
         _ => Key::NONE,
     };
     if let Some(k) = crate::keys::Key::from_core(key) {
-        server.forward_key(p, &k);
+        let tc = server.target_client(item.client, item.origin);
+        server.forward_key(p, tc, &k);
     }
     Ok(())
 }
 
 /// `switch-client` (cmd-switch-client.c:48-163): `-T` switches the key
-/// table, `-n`/`-p`/`-l` and `-t` the session. `-c` names are not looked
-/// up yet: the target client is the current client.
+/// table, `-n`/`-p`/`-l` and `-t` the session, `-c` names the client and
+/// `-r` toggles its read-only flag. `-F` is in the usage but tmux 3.8
+/// reads nothing from it.
 pub fn switch_client(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), CmdError> {
-    for flag in ['c', 'r', 'F'] {
-        if args.flag(flag) {
-            return Err(EdgeError::NotImplemented(format!("switch-client -{flag}")).into());
-        }
-    }
     // CMD_CLIENT_CFLAG: the target client must exist before anything else.
-    let tc = server
-        .target_client(item.client, item.origin)
-        .ok_or(EdgeError::NoCurrentClient)?;
+    let tc = super::command_prompt::target_client(server, item, args.value('c'))?;
 
     // -t: a pane-ish target (`:`, `.`, `%`, or `=`) or a session that
     // prefers unattached ones (cmd-switch-client.c:66-74).
@@ -147,6 +147,17 @@ pub fn switch_client(server: &mut Server, item: &mut Item, args: &Args) -> Resul
         kind,
         vtmux_core::cmd::FindFlags::NONE,
     )?;
+
+    // -r: toggle read-only. A read-only client may only be changed by its
+    // own user (cmd-switch-client.c:82-95); every client here is ours.
+    if args.flag('r')
+        && let Some(c) = server.clients.get_mut(&tc)
+    {
+        let read_only = !c.flags.read_only;
+        c.flags.read_only = read_only;
+        c.flags.ignore_size = read_only;
+        server.recalculate_sizes();
+    }
 
     if let Some(table) = args.value('T') {
         if server.key_bindings.table(table).is_none() {

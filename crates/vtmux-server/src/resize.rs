@@ -96,12 +96,23 @@ impl Server {
             .unwrap_or((80, 24))
     }
 
-    /// `ignore_client_size` (resize.c:87-113): no session, exiting, or a
-    /// control client (vtmux has no `refresh-client -C`, so a control
-    /// client never has a size of its own). vtmux has no read-only
-    /// attach, so `CLIENT_IGNORESIZE` never applies.
-    fn ignore_client_size(c: &Client) -> bool {
-        c.attached.is_none() || c.closing || c.control.is_some()
+    /// `ignore_client_size` (resize.c:87-113): no session, exiting, a
+    /// `CLIENT_IGNORESIZE` client while an attached client is without it,
+    /// or a control client that has not given a size
+    /// (`refresh-client -C`).
+    fn ignore_client_size(&self, c: &Client) -> bool {
+        if c.attached.is_none() || c.closing {
+            return true;
+        }
+        if c.flags.ignore_size
+            && self
+                .clients
+                .values()
+                .any(|l| l.attached.is_some() && !l.closing && !l.flags.ignore_size)
+        {
+            return true;
+        }
+        c.control.is_some() && !c.flags.size_changed && !c.flags.window_size_changed
     }
 
     fn session_has(&self, s: Option<SessionId>, w: WindowId) -> bool {
@@ -129,13 +140,21 @@ impl Server {
     }
 
     /// The client's terminal less its status lines (resize.c:194-198),
-    /// and less `frame` cells each way for the focus ring.
-    fn client_size(&self, c: &Client, frame: u32) -> Option<(u32, u32)> {
-        let tty = c.hello.as_ref()?.tty.as_ref()?;
-        let sy = tty.rows.saturating_sub(self.status_line_size(c));
+    /// and less `frame` cells each way for the focus ring. A control
+    /// client has the size `refresh-client -C` gave it (80x24 before
+    /// that), or for window `w` the one it gave that window
+    /// (resize.c:189-195).
+    fn client_size(&self, c: &Client, frame: u32, w: Option<WindowId>) -> Option<(u32, u32)> {
+        let (cols, rows) = if let Some(cs) = &c.control {
+            w.and_then(|w| cs.window_size(w))
+                .unwrap_or_else(|| cs.size())
+        } else {
+            let tty = c.hello.as_ref()?.tty.as_ref()?;
+            (tty.cols, tty.rows.saturating_sub(self.status_line_size(c)))
+        };
         Some((
-            tty.cols.saturating_sub(frame).max(1),
-            sy.saturating_sub(frame).max(1),
+            cols.saturating_sub(frame).max(1),
+            rows.saturating_sub(frame).max(1),
         ))
     }
 
@@ -150,7 +169,7 @@ impl Server {
     fn clients_with_window(&self, w: WindowId) -> usize {
         self.clients
             .values()
-            .filter(|c| !Self::ignore_client_size(c) && self.session_has(c.attached, w))
+            .filter(|c| !self.ignore_client_size(c) && self.session_has(c.attached, w))
             .take(2)
             .count()
     }
@@ -179,13 +198,13 @@ impl Server {
         };
         let mut size: Option<(u32, u32)> = None;
         for (&id, c) in &self.clients {
-            if Some(id) != given && (Self::ignore_client_size(c) || self.skip_client(c, among)) {
+            if Some(id) != given && (self.ignore_client_size(c) || self.skip_client(c, among)) {
                 continue;
             }
             if only.is_some_and(|latest| latest != Some(id)) {
                 continue;
             }
-            let Some((cx, cy)) = self.client_size(c, frame) else {
+            let Some((cx, cy)) = self.client_size(c, frame, w) else {
                 continue;
             };
             size = Some(match (size, policy) {
@@ -194,7 +213,29 @@ impl Server {
                 (Some((sx, sy)), _) => (sx.min(cx), sy.min(cy)),
             });
         }
-        size
+        // resize.c:225-252: no size is larger than a per-window size a
+        // control client gave this window.
+        let (Some(w), Some(mut size)) = (w, size) else {
+            return size;
+        };
+        for (&id, c) in &self.clients {
+            if Some(id) != given && (self.ignore_client_size(c) || self.skip_client(c, among)) {
+                continue;
+            }
+            if !c.flags.window_size_changed {
+                continue;
+            }
+            let Some((cx, cy)) = c.control.as_ref().and_then(|cs| cs.window_size(w)) else {
+                continue;
+            };
+            if cx != 0 {
+                size.0 = size.0.min(cx);
+            }
+            if cy != 0 {
+                size.1 = size.1.min(cy);
+            }
+        }
+        Some(size)
     }
 
     /// `default_window_size` (resize.c:291-343): the size for a new window
@@ -221,8 +262,8 @@ impl Server {
         let given = given.and_then(|id| Some((id, self.clients.get(&id)?)));
         if policy == SizePolicy::Latest
             && let Some((_, c)) = given
-            && !Self::ignore_client_size(c)
-            && let Some(size) = self.client_size(c, frame)
+            && !self.ignore_client_size(c)
+            && let Some(size) = self.client_size(c, frame, w)
         {
             return clamp_size(size);
         }
@@ -271,9 +312,15 @@ impl Server {
     /// `recalculate_sizes` (resize.c:426-466): [`Self::recalculate_size`]
     /// for every window.
     pub fn recalculate_sizes(&mut self) {
+        self.recalculate_sizes_now(false);
+    }
+
+    /// `recalculate_sizes_now`: with `now`, windows are resized at once
+    /// rather than at the next check.
+    pub fn recalculate_sizes_now(&mut self, now: bool) {
         let windows: Vec<_> = self.model.windows.keys().copied().collect();
         for w in windows {
-            self.recalculate_size(w, false);
+            self.recalculate_size(w, now);
         }
     }
 

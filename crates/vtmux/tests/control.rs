@@ -355,3 +355,148 @@ fn decode_reverses_octal_escapes() {
         ["%begin <T> #1 0", "%end <T> #1 0", "%begin <T> #2 1", "x"]
     );
 }
+
+/// Send each line of `lines` to control client `c` and wait for its reply
+/// block; the whole stream after the session announcement, normalised.
+fn script(w: &World, c: &mut Control, lines: &[&str]) -> Vec<String> {
+    let mark = |t: &str| t.matches("%end").count() + t.matches("%error").count();
+    for line in lines {
+        let before = mark(&c.text());
+        c.send(line);
+        c.wait(line, |t| mark(t) > before);
+    }
+    normalise_guards(&w.normalise(&c.text()))
+        .into_iter()
+        .filter(|l| !l.starts_with("%output") && !l.starts_with("%session"))
+        .collect()
+}
+
+/// cmd-refresh-client.c:196-284 and server-client.c:3120-3199 on a control
+/// client: `-f` flags (a flag that does not apply to a control client, an
+/// unknown one, `!` to clear, read-only that stays), `-F` as `-f`, the
+/// error for `-A`/`-B`/`-C` on a client that is not a control client is
+/// in the attach tests; here `-C` forms and their errors, `-A` pane
+/// states, `-S`, `-t`, and `switch-client -r` toggling read-only.
+#[test]
+fn refresh_client_flags_and_sizes() {
+    compare("refresh_client_flags_and_sizes", |w| {
+        w.run(&["new", "-d", "-s", "c", "-x", "80", "-y", "24", "cat"]);
+        let mut c = w.control(&["attach", "-t", "c"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        let flags = "display -p 'f=#{client_flags} ro=#{client_readonly}'";
+        let size = "ls -F 's=#{window_width}x#{window_height}'";
+        let out = script(
+            w,
+            &mut c,
+            &[
+                flags,
+                "refresh-client -f new-layouts,wait-exit,pause-after=5",
+                flags,
+                "refresh-client -f '!new-layouts,!pause-after,bogus'",
+                flags,
+                "refresh-client -F no-output,ignore-size,no-detach-on-destroy",
+                flags,
+                "refresh-client -f '!no-output,!ignore-size,!no-detach-on-destroy,!wait-exit'",
+                flags,
+                "refresh-client -f read-only",
+                flags,
+                // A read-only client may not clear it with -f.
+                "refresh-client -f '!read-only'",
+                flags,
+                "switch-client -r",
+                flags,
+                "switch-client -r",
+                flags,
+                "refresh-client -C 100,50",
+                size,
+                "refresh-client -C 120x30",
+                size,
+                "refresh-client -C 5x",
+                "refresh-client -C 0x5",
+                "refresh-client -C 10001x5",
+                "refresh-client -C nonsense",
+                "refresh-client -C @0:40x10",
+                size,
+                "refresh-client -C @0:",
+                size,
+                "refresh-client -C @0:0x10",
+                "refresh-client -A %0:off",
+                "refresh-client -A %0:on",
+                "refresh-client -A %0:pause",
+                "refresh-client -A %0:pause",
+                "refresh-client -A %0:continue",
+                "refresh-client -A %0:continue",
+                "refresh-client -A '%9:pause' -A '%0:off'",
+                "refresh-client -A nonsense",
+                "refresh-client -S",
+                "refresh-client",
+                "refresh-client -t nosuch",
+                "refresh-client -l",
+                "switch-client -c nosuch -r",
+                "switch-client -F",
+            ],
+        );
+        let (_, _, code) = c.close();
+        (out, code)
+    });
+}
+
+/// `refresh-client -A %0:off` stops `%output` for the pane, `on` brings it
+/// back, `pause` and `continue` announce themselves (control.c:349-402),
+/// and `no-output` silences everything until `!no-output` (control.c:330).
+#[test]
+fn refresh_client_pane_output_states() {
+    compare("refresh_client_pane_output_states", |w| {
+        w.run(&["new", "-d", "-s", "c", "-n", "w", "cat"]);
+        let mut c = w.control(&["attach", "-t", "c"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        let mut seen = Vec::new();
+        let mut step = |c: &mut Control, w: &World, line: &str, text: &str| {
+            c.send(line);
+            c.send(&format!("send-keys -t c -l {text}"));
+            c.send("display -p synced");
+            c.wait("sync", |t| t.matches("synced").count() > seen.len());
+            seen.push(String::from_utf8_lossy(&pane_output(&c.text())).into_owned());
+            let _ = w;
+        };
+        step(&mut c, w, "display -p one", "AAA");
+        step(&mut c, w, "refresh-client -A %0:off", "BBB");
+        step(&mut c, w, "refresh-client -A %0:on", "CCC");
+        step(&mut c, w, "refresh-client -A %0:pause", "DDD");
+        step(&mut c, w, "refresh-client -A %0:continue", "EEE");
+        step(&mut c, w, "refresh-client -f no-output", "FFF");
+        step(&mut c, w, "refresh-client -f '!no-output'", "GGG");
+        let (out, _, code) = c.close();
+        let events: Vec<String> = normalise_guards(&out)
+            .into_iter()
+            .filter(|l| l.starts_with("%pause") || l.starts_with("%continue"))
+            .collect();
+        (seen, events, code)
+    });
+}
+
+/// `refresh-client -f new-layouts` changes the layout form control clients
+/// see (cmd-select-layout.c:93-96, format.c:859-896).
+#[test]
+fn refresh_client_new_layouts_format() {
+    compare("refresh_client_new_layouts_format", |w| {
+        w.run(&["new", "-d", "-s", "c", "-x", "80", "-y", "24", "cat"]);
+        w.run(&["split-window", "-h", "-t", "c"]);
+        let mut c = w.control(&["attach", "-t", "c"]);
+        c.wait("%session-changed", |t| t.contains("%session-changed"));
+        let layout = "display -p '#{window_layout} #{window_visible_layout}'";
+        let out = script(
+            w,
+            &mut c,
+            &[
+                layout,
+                "refresh-client -f new-layouts",
+                layout,
+                "refresh-client -f '!new-layouts'",
+                layout,
+            ],
+        );
+        let (_, _, code) = c.close();
+        (out, code)
+    });
+}

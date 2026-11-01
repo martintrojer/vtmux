@@ -7,7 +7,10 @@
 //! A pane in a mode looks keys up in the mode's table while the client is
 //! in its default table.
 //!
-//! Not here yet: mouse keys, read-only clients, and `assume-paste-time` (every terminal vtmux attaches to has
+//! A read-only client's keys reach no pane and only bindings made of
+//! `CMD_READONLY` commands run (server-client.c:1693-1702).
+//!
+//! Not here yet: mouse keys and `assume-paste-time` (every terminal vtmux attaches to has
 //! bracketed paste, which turns it off: server-client.c:1352).
 
 use std::time::{Duration, Instant};
@@ -296,7 +299,8 @@ impl Server {
         if control {
             item.control = Some(0);
         }
-        let batch = NewBatch::new(item, commands.calls.clone(), End::Quiet);
+        let calls = self.read_only_gate(id, &mut item, commands.calls.clone());
+        let batch = NewBatch::new(item, calls, End::Quiet);
         if let Some(after) = self.key_after {
             self.key_after = self.cmdq_insert_batch(after, batch);
         } else {
@@ -316,6 +320,9 @@ impl Server {
         let old = c.attached;
         if c.control.is_some() {
             self.control_attach(id, s);
+            // server-client.c:466: the window the client now sees is
+            // fitted to it (a control client with a size of its own).
+            self.recalculate_sizes();
         } else {
             let c = self.clients.get_mut(&id).expect("client");
             c.attached = Some(s);
@@ -367,7 +374,10 @@ impl Server {
         after: Option<StepId>,
     ) -> Option<StepId> {
         let c = self.clients.get_mut(&id).filter(|c| c.attached.is_some())?;
-        if c.status.key() {
+        // server-client.c:1785: a read-only client's messages and prompts
+        // are not fed by keys.
+        let read_only = c.flags.read_only;
+        if !read_only && c.status.key() {
             return None;
         }
         let core = match &kind {
@@ -377,7 +387,7 @@ impl Server {
         };
         // server-client.c:1792-1802: the overlay takes every key at once
         // (the queue may be waiting on the popup's command).
-        if self.popup_key(id, core) || self.prompts_key(id, core) {
+        if !read_only && (self.popup_key(id, core) || self.prompts_key(id, core)) {
             return None;
         }
         let mut batch = NewBatch::new(
@@ -410,6 +420,7 @@ impl Server {
                 // server_client_is_bracket_paste: the markers reach a pane
                 // that asked for bracketed paste.
                 if let Some(p) = self.client_pane(id)
+                    && !self.clients[&id].flags.read_only
                     && self.model.panes[&p].term.bracketed_paste()
                     && self.model.panes[&p].modes.is_empty()
                 {
@@ -426,8 +437,11 @@ impl Server {
                 let outer = self.key_after.replace(step);
                 let taken = !pasting && self.handle_key(id, key.to_core());
                 self.key_after = outer;
-                if !taken && let Some(p) = self.client_pane(id) {
-                    self.forward_key(p, &key);
+                if !taken
+                    && !self.clients[&id].flags.read_only
+                    && let Some(p) = self.client_pane(id)
+                {
+                    self.forward_key(p, Some(id), &key);
                 }
             }
         }

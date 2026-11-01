@@ -213,6 +213,10 @@ pub struct Pane {
     /// (`wp->prompt_data`).
     pub prompt: Option<crate::prompt::OpenPrompt>,
     pub(crate) prompt_owner: Option<crate::open_prompt::Owner>,
+    /// `mtd->prompt`: the shown mode's own prompt, drawn on the mode's
+    /// screen, and the mode's callbacks for it (`mtd->prompt_data`).
+    pub mode_prompt: Option<crate::mode::prompt::ModePrompt>,
+    pub(crate) mode_prompt_owner: Option<crate::open_prompt::Owner>,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its

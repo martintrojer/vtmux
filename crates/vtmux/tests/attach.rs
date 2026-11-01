@@ -3400,3 +3400,249 @@ fn pane_flood_under_a_popup_writes_nothing_into_it() {
         "the reference repaints its popup during a flood"
     );
 }
+
+/// The client names `list-clients` gives, session by session.
+fn client_name(w: &World, session: &str) -> String {
+    let out = w.cli(&["lsc", "-t", session, "-F", "#{client_name}"]);
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// cmd-switch-client.c:48-163 with `CMD_CLIENT_CFLAG`: `-c` picks the client
+/// that moves (by name or tty, `/dev/` optional, a trailing colon dropped)
+/// and the other stays; an unknown name is an error before anything else;
+/// `-F` is a flag that does nothing (3.8 reads nothing from it).
+#[test]
+fn switch_client_c_moves_the_named_client() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["new", "-d", "-s", "b", "-n", "bw", "cat"]);
+        w.cli(&["new", "-d", "-s", "c", "-n", "cw", "cat"]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        let a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let b = w.attach(&["attach", "-t", "b"]);
+        b.wait(|b| status_row(b).contains("[b]"));
+        let (na, nb) = (client_name(&w, "a"), client_name(&w, "b"));
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let run = |args: &[&str]| {
+            let out = w.cli(args);
+            // Client names are ttys, which differ run to run.
+            let args = format!("{args:?}")
+                .replace(&na, "<A>")
+                .replace(&nb, "<B>")
+                .replace(nb.trim_start_matches("/dev/"), "<B>");
+            seen.borrow_mut().push(format!(
+                "{args} exit {:?} out {:?} err {:?}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        };
+        run(&["switch-client", "-c", &na, "-t", "c"]);
+        a.wait(|a| status_row(a).contains("[c]"));
+        thread::sleep(Duration::from_millis(200));
+        seen.borrow_mut()
+            .push(format!("{} / {}", status_row(&a), status_row(&b)));
+        let short = format!("{}:", nb.trim_start_matches("/dev/"));
+        run(&["switch-client", "-c", &short, "-t", "c"]);
+        b.wait(|b| status_row(b).contains("[c]"));
+        run(&["switch-client", "-c", "nosuch", "-t", "a"]);
+        run(&["switch-client", "-c", "nosuch", "-r"]);
+        // -F takes no argument: `-F x` is a stray argument.
+        run(&["switch-client", "-c", &na, "-F", "x", "-t", "a"]);
+        run(&["switch-client", "-c", &na, "-F", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        run(&["switch-client", "-c", &nb, "-n"]);
+        run(&["switch-client", "-c", &nb, "-T", "nope"]);
+        run(&["switch-client", "-c", &nb, "-T", "prefix"]);
+        run(&["lsc", "-F", "#{client_session} #{client_key_table}"]);
+        results.push(seen.into_inner());
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+/// `switch-client -r` toggles `CLIENT_READONLY|CLIENT_IGNORESIZE`
+/// (cmd-switch-client.c:82-95): `#{client_readonly}` and the flag list show
+/// it, keys reach neither the pane nor the key tables' commands (a binding
+/// of other than read-only commands says `client is read-only`; `send-keys`
+/// and `switch-client` bindings run), typing does nothing, and a second `-r`
+/// restores it. A read-only client does not size windows while another
+/// client without the flag is attached (resize.c:95-107).
+#[test]
+fn switch_client_r_makes_a_client_read_only() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["set", "-g", "display-time", "0"]);
+        w.cli(&["bind", "-n", "M-d", "display-message", "ran-display"]);
+        w.cli(&["bind", "-n", "M-s", "send-keys", "-l", "viabinding"]);
+        w.cli(&[
+            "bind",
+            "-n",
+            "M-m",
+            "display-message",
+            "one",
+            ";",
+            "send-keys",
+            "x",
+        ]);
+        let mut a = w.attach_sized(&["attach", "-t", "a"], 60, 10);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let name = client_name(&w, "a");
+        let flags = |w: &World| {
+            let out = w.cli(&["lsc", "-F", "#{client_readonly}|#{client_flags}"]);
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        let mut seen = vec![flags(&w)];
+        let out = w.cli(&["switch-client", "-c", &name, "-r"]);
+        seen.push(format!("exit {:?}", out.status.code()));
+        seen.push(flags(&w));
+        // Typed text and bindings.
+        a.keys(b"typed\r");
+        thread::sleep(Duration::from_millis(300));
+        a.keys(b"\x1bd");
+        thread::sleep(Duration::from_millis(300));
+        seen.push(status_row(&a));
+        a.keys(b"\x1bs");
+        a.keys(b"\x1bm");
+        thread::sleep(Duration::from_millis(300));
+        seen.push(status_row(&a));
+        let cap = w.cli(&["capture-pane", "-p", "-t", "a"]);
+        seen.push(String::from_utf8_lossy(&cap.stdout).trim().to_owned());
+        // Commands from the command line: refused unless read-only ones.
+        let out = w.cli(&["display-message", "-p", "no"]);
+        seen.push(format!(
+            "exit {:?} {:?}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+        // The same client sends commands: a client that is not read-only
+        // (this CLI client) is unaffected; the attached one stays read-only.
+        let out = w.cli(&["send-keys", "-c", &name, "-t", "a", "refused", "Enter"]);
+        seen.push(format!(
+            "exit {:?} {:?}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+        let out = w.cli(&["send-keys", "-c", &name, "-t", "a", "-X", "cancel"]);
+        seen.push(format!(
+            "exit {:?} {:?}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+        let out = w.cli(&["send-keys", "-c", "nosuch", "-t", "a", "ok"]);
+        seen.push(format!("exit {:?}", out.status.code()));
+        let out = w.cli(&["switch-client", "-c", &name, "-r"]);
+        seen.push(format!("exit {:?}", out.status.code()));
+        seen.push(flags(&w));
+        a.keys(b"back\r");
+        thread::sleep(Duration::from_millis(300));
+        let cap = w.cli(&["capture-pane", "-p", "-t", "a"]);
+        seen.push(String::from_utf8_lossy(&cap.stdout).trim().to_owned());
+        results.push(seen);
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+/// `attach -r` starts a client read-only and `-f` sets flags before it takes
+/// the session (cmd-attach-session.c:108-121), `new -f` too
+/// (cmd-new-session.c:335-336).
+#[test]
+fn attach_r_and_f_set_client_flags() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        let a = w.attach(&["attach", "-r", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let out = w.cli(&["lsc", "-F", "#{client_readonly}|#{client_flags}"]);
+        let mut seen = vec![String::from_utf8_lossy(&out.stdout).trim().to_owned()];
+        drop(a);
+        let w2 = World::new(bin.clone());
+        w2.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w2.cli(&["set", "-g", "status-right", "R"]);
+        let b = w2.attach(&[
+            "attach",
+            "-f",
+            "ignore-size,no-detach-on-destroy",
+            "-t",
+            "a",
+        ]);
+        b.wait(|b| status_row(b).contains("[a]"));
+        let out = w2.cli(&["lsc", "-F", "#{client_readonly}|#{client_flags}"]);
+        seen.push(String::from_utf8_lossy(&out.stdout).trim().to_owned());
+        drop(b);
+        let w3 = World::new(bin.clone());
+        let c = w3.attach(&["new", "-f", "read-only", "-s", "n", "-n", "w", "cat"]);
+        c.wait(|c| status_row(c).contains("[n]"));
+        let out = w3.cli(&["lsc", "-F", "#{client_readonly}|#{client_flags}"]);
+        seen.push(String::from_utf8_lossy(&out.stdout).trim().to_owned());
+        results.push(seen);
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+/// cmd-refresh-client.c:196-284 on an attached terminal client: `-A`, `-B`
+/// and `-C` are for control clients; plain `refresh-client` and `-S` redraw
+/// (here observed as the status line showing a changed option), `-f` and
+/// `-F` set flags, the adjustment of the pan flags is checked first, `-t`
+/// names the client, and `-r` is accepted.
+#[test]
+fn refresh_client_on_a_terminal_client() {
+    let mut results = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&["new", "-d", "-s", "a", "-n", "w", "cat"]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["set", "-g", "status-interval", "0"]);
+        let a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| status_row(a).contains("[a]"));
+        let name = client_name(&w, "a");
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let run = |args: &[&str]| {
+            let out = w.cli(args);
+            // The client's name is its tty, which differs run to run.
+            let args = format!("{args:?}").replace(&name, "<CLIENT>");
+            seen.borrow_mut().push(format!(
+                "{args} exit {:?} out {:?} err {:?}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        };
+        run(&["refresh-client", "-A", "%0:on"]);
+        run(&["refresh-client", "-B", "x"]);
+        run(&["refresh-client", "-C", "80x24"]);
+        run(&["refresh-client", "-C", "@0:80x24"]);
+        run(&["refresh-client", "-t", "nosuch"]);
+        run(&["refresh-client", "-t", &name, "-f", "ignore-size"]);
+        run(&["lsc", "-F", "#{client_flags}"]);
+        run(&["refresh-client", "-t", &name, "-F", "!ignore-size"]);
+        run(&["lsc", "-F", "#{client_flags}"]);
+        run(&["refresh-client", "-L", "x"]);
+        run(&["refresh-client", "-U", "0"]);
+        run(&["refresh-client", "-r", "%0:rgb:ffff/0000/0000"]);
+        // The status line after option changes, with and without a redraw
+        // being asked for (set-option already asks for one).
+        w.cli(&["set", "-g", "status-left", "[L1] "]);
+        thread::sleep(Duration::from_millis(300));
+        seen.borrow_mut()
+            .push(format!("before {}", status_row(&a).contains("L1")));
+        run(&["refresh-client", "-S"]);
+        a.wait(|a| status_row(a).contains("L1"));
+        seen.borrow_mut()
+            .push(format!("after -S {}", status_row(&a).contains("L1")));
+        w.cli(&["set", "-g", "status-left", "[L2] "]);
+        run(&["refresh-client"]);
+        a.wait(|a| status_row(a).contains("L2"));
+        seen.borrow_mut()
+            .push(format!("after plain {}", status_row(&a).contains("L2")));
+        results.push(seen.into_inner());
+    }
+    assert_eq!(results[0], results[1], "vtmux (left) vs tmux 3.8 (right)");
+}

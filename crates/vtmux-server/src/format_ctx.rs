@@ -81,21 +81,33 @@ pub struct ClientView {
     pub colours: Option<u32>,
     /// Frame bytes written (`c->written`).
     pub written: usize,
+    /// The flags commands change (`c->flags`).
+    pub flags: crate::client_flags::ClientFlags,
 }
 
 impl ClientView {
+    /// A control client without `new-layouts` (`LAYOUT_CUSTOM_OLD_FORMAT`).
+    #[must_use]
+    pub fn old_layouts(&self) -> bool {
+        self.control && !self.flags.new_layouts
+    }
+
     /// `server_client_get_flags` (server-client.c:3163-3199) for the flags
     /// vtmux clients have: every listed client is attached.
     fn flags(&self) -> String {
-        let mut flags = vec!["attached"];
+        let mut flags = vec!["attached".to_owned()];
         if self.focused {
-            flags.push("focused");
+            flags.push("focused".to_owned());
         }
         if self.control {
-            flags.push("control-mode");
+            flags.push("control-mode".to_owned());
+        }
+        flags.extend(self.flags.listed_before_read_only());
+        if self.flags.read_only {
+            flags.push("read-only".to_owned());
         }
         if self.utf8 {
-            flags.push("UTF-8");
+            flags.push("UTF-8".to_owned());
         }
         flags.join(",")
     }
@@ -190,8 +202,7 @@ impl<'a> Ctx<'a> {
 
     /// The client variables (format.c `format_cb_client_*`, 1540-1830).
     /// `client_termfeatures` is the terminal-features work's; vtmux has
-    /// no pixel sizes (0, as tmux without them), discard count, theme or
-    /// read-only clients yet.
+    /// no pixel sizes (0, as tmux without them), discard count or theme yet.
     fn client_value(&self, name: &str) -> Option<String> {
         let c = self.client.as_ref()?;
         let flag = |b: bool| u8::from(b).to_string();
@@ -212,7 +223,7 @@ impl<'a> Ctx<'a> {
             "client_tty" => c.tty.clone()?,
             "client_flags" => c.flags(),
             "client_control_mode" => flag(c.control),
-            "client_readonly" => flag(false),
+            "client_readonly" => flag(c.flags.read_only),
             "client_utf8" => flag(c.utf8),
             "client_pid" => c.pid.to_string(),
             "client_key_table" => c.key_table.clone(),
@@ -405,12 +416,14 @@ impl<'a> Ctx<'a> {
                 s.link_alerts.get(&i).copied().unwrap_or(0) & alerts::SILENCE != 0
             })),
             // format_cb_window_layout: the saved layout while zoomed.
-            // format.c:859-896: a control client without new-layouts (which
-            // vtmux has not got) sees the v1 form.
-            "window_layout" if self.client.as_ref().is_some_and(|c| c.control) => {
+            // format.c:859-896: a control client without new-layouts sees
+            // the v1 form.
+            "window_layout" if self.client.as_ref().is_some_and(ClientView::old_layouts) => {
                 w.full_layout().dump_v1()
             }
-            "window_visible_layout" if self.client.as_ref().is_some_and(|c| c.control) => {
+            "window_visible_layout"
+                if self.client.as_ref().is_some_and(ClientView::old_layouts) =>
+            {
                 w.layout.dump_v1()
             }
             "window_layout" => w.full_layout().dump_v2(&self.layout_panes(w))?,
@@ -517,7 +530,7 @@ impl<'a> Ctx<'a> {
             "history_size" => p.term.history_size().to_string(),
             "history_limit" => p.history_limit.to_string(),
             "pane_in_mode" => p.modes.len().to_string(),
-            "pane_mode" => p.modes.first()?.name().to_owned(),
+            "pane_mode" => crate::mode::PaneMode::name(p.modes.first()?).to_owned(),
             // format_cb_pane_search_string: the copy mode's own search
             // while it is shown, else the pane's last.
             "pane_search_string" => p
