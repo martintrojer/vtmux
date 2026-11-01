@@ -16,6 +16,17 @@ const BUF_START: usize = 32;
 const INTERM_MAX: usize = 3;
 const PARAM_MAX: usize = 63;
 
+/// The most bytes `input_input` collects under `input-buffer-size` `limit`:
+/// the buffer starts at `INPUT_BUF_START`, doubles while it fills, and the
+/// string is discarded when it would pass `limit`.
+pub(crate) fn capacity(limit: usize) -> usize {
+    let mut space = BUF_START;
+    while space * 2 <= limit {
+        space *= 2;
+    }
+    space - 1
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Phase {
     #[default]
@@ -239,7 +250,10 @@ mod tests {
     fn payload_over_the_buffer_size_is_dropped() {
         // limit 64: the buffer holds up to 63 bytes (input_input).
         let ok = [b"tmux;".as_slice(), &[b'x'; 58], b"\x1b\\"].concat();
-        assert_eq!(run(&ok, 64).pop(), Some(Step::End(Dispatch::Passthrough(vec![b'x'; 58]))));
+        assert_eq!(
+            run(&ok, 64).pop(),
+            Some(Step::End(Dispatch::Passthrough(vec![b'x'; 58])))
+        );
         let big = [b"tmux;".as_slice(), &[b'x'; 59], b"\x1b\\"].concat();
         assert_eq!(run(&big, 64).pop(), Some(Step::End(Dispatch::Ignore)));
     }
