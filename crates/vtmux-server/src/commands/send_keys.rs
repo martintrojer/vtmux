@@ -271,6 +271,7 @@ fn run_pipe(server: &mut Server, found: Found, pipe: Pipe) {
         input: pipe.data,
         show_stderr: false,
         nowait: true,
+        update: None,
     };
     // A job that cannot start is silently dropped, as in tmux.
     let _ = server.job_run(&spec, Box::new(|_, _, _| {}));

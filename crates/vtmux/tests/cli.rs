@@ -4991,3 +4991,180 @@ fn choose_tree_without_a_client() {
         runs
     });
 }
+
+/// How many processes have `marker` in their command line, once it is `want`
+/// or 5 s have passed.
+fn procs_with(marker: &str, want: usize) -> usize {
+    let start = Instant::now();
+    loop {
+        let out = Command::new("pgrep")
+            .args(["-f", "-c", marker])
+            .output()
+            .expect("pgrep");
+        let n = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        if n == want || start.elapsed() > Duration::from_secs(5) {
+            return n;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// `#()` in formats (format.c `format_job_get`): each client has its own job
+/// cache, so the output shows only to a later expansion in the *same*
+/// client, hence the chained commands; jobs run in the client's directory
+/// with the global environment, only the last line counts, the command and
+/// the output are both expanded, `T:` runs strftime on the command first,
+/// and a job that is still running after a second shows `<'cmd' not ready>`.
+#[test]
+fn format_jobs_chained() {
+    compare("format_jobs_chained", |w| {
+        let again = |fmt: &str| -> Run {
+            let mut a = vec!["display", "-p", fmt, ";", "run", "-d1", "", ";"];
+            a.extend(["display", "-p", fmt]);
+            w.run(&a)
+        };
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "s", "cat"]),
+            w.run(&["setenv", "-g", "GV", "gv"]),
+            w.run(&["setenv", "SV", "sv"]),
+            w.run(&["set", "-g", "@k", "#(echo %H)"]),
+            // A fresh client never sees job output.
+            w.run(&["display", "-p", "a[#(echo hi)]"]),
+            w.run(&["display", "-p", "a[#(echo hi)]"]),
+            again("b[#(echo hi)]"),
+            again("#{?#(echo 1),a,b}"),
+            again("#(echo P=$PWD G=$GV S=$SV)"),
+            again("#(printf 'a\\nb\\nc')"),
+            again("#(printf 'a\\r\\nb')"),
+            again("#(echo \"##{session_name}\")"),
+            again("#(echo %%H)"),
+            again("#(echo '#(echo nested)')"),
+            again("#{S:#(echo s)}#{P:#(echo p)}#{W:#(echo w)}"),
+            again("#(echo #{session_name})"),
+            again("#(exit 3)"),
+            again("#(echo err >&2)"),
+            again("#(true)"),
+        ];
+        // T: runs strftime on the command: no `%H` is left over.
+        let t = again("#{T:@k}");
+        runs.push(Run {
+            stdout: t
+                .stdout
+                .chars()
+                .map(|c| if c.is_ascii_digit() { 'N' } else { c })
+                .collect(),
+            ..t
+        });
+        // Still running after a second: the placeholder.
+        runs.push(w.run(&[
+            "display",
+            "-p",
+            "x<#(exec sleep 5)>",
+            ";",
+            "run",
+            "-d3",
+            "",
+            ";",
+            "display",
+            "-p",
+            "x<#(exec sleep 5)>",
+        ]));
+        runs
+    });
+}
+
+/// A client's jobs go with it (`format_lost_client`, format.c:515-518), and
+/// the server's with the server (`job_kill_all`); only the job's own process
+/// is signalled.
+#[test]
+fn format_jobs_do_not_leak() {
+    let marker = format!("sleep 600.{}", std::process::id());
+    compare("format_jobs_do_not_leak", |w| {
+        let cmd = format!("#(exec {marker})");
+        let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+        let count = |want: usize| Run {
+            stdout: format!("{}\n", procs_with(&marker, want)),
+            stderr: String::new(),
+            code: 0,
+        };
+        // A client's job lives while the client does. `[.]` keeps the
+        // counting shell's own command line out of the match.
+        let alive = format!("pgrep -fc 'sleep 600[.]{}'", std::process::id());
+        runs.push(w.run(&[
+            "display", "-p", &cmd, ";", "run", "-d1", "", ";", "run", &alive,
+        ]));
+        runs.push(count(0));
+        // One with no client (a window name's) goes with the server.
+        runs.push(w.run(&["set", "-g", "automatic-rename-format", &cmd]));
+        runs.push(w.run(&["new-window", "-d", "-n", "x", "cat"]));
+        runs.push(count(1));
+        runs.push(w.run(&["kill-server"]));
+        runs.push(count(0));
+        runs
+    });
+}
+
+/// `#()` through `set -F`, `if -F` and a loop (the status-less users of
+/// `format_job_get`), chained like [`format_jobs_chained`].
+#[test]
+fn format_jobs_in_commands() {
+    compare("format_jobs_in_commands", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "s", "cat"]),
+            w.run(&[
+                "set",
+                "-gF",
+                "@f",
+                "#(echo hi)",
+                ";",
+                "run",
+                "-d1",
+                "",
+                ";",
+                "set",
+                "-gF",
+                "@f",
+                "#(echo hi)",
+                ";",
+                "show",
+                "-gv",
+                "@f",
+            ]),
+            w.run(&[
+                "if",
+                "-F",
+                "#(echo 1)",
+                "display -p y",
+                "display -p n",
+                ";",
+                "run",
+                "-d1",
+                "",
+                ";",
+                "if",
+                "-F",
+                "#(echo 1)",
+                "display -p y",
+                "display -p n",
+            ]),
+            w.run(&[
+                "list-clients",
+                "-F",
+                "#(echo hi)",
+                ";",
+                "run",
+                "-d1",
+                "",
+                ";",
+                "display",
+                "-p",
+                "-t",
+                "s",
+                "#{L:#(echo l)}",
+            ]),
+        ]
+    });
+}

@@ -296,7 +296,9 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
         item.client = server.target_client(None, item.origin);
         item.control = item.client.filter(|&c| server.is_control(c)).map(|_| 0);
     }
+    server.cmd_client = item.client;
     let result = run_one(server, item, call);
+    server.cmd_client = None;
     // The events the command fired go to their sinks inside its guard
     // (control notifications are deferred until it closes), then its
     // after- or command-error hook (cmd-queue.c:625-653).
