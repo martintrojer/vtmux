@@ -156,9 +156,20 @@ pub struct Draw {
     /// (window-border.c `window_set_fill_cells`).
     pub outside: styled::Cell,
     pub inside: styled::Cell,
-    /// The terminal has genuine background colour erase (tty.c
-    /// `tty_fake_bce`).
-    pub bce: bool,
+    /// How empty runs are cleared ([`Clear`]).
+    pub clear: Clear,
+}
+
+/// How `tty_draw_line_clear` (tty-draw.c:52-90) clears a run of ten or
+/// more empty cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Clear {
+    /// Genuine background colour erase: any run is erased.
+    Bce,
+    /// No BCE (`tty_fake_bce`): only a run in the default background is.
+    FakeBce,
+    /// An overlay is up: never erased, written as spaces.
+    Spaces,
 }
 
 /// `window_copy_fill_cell`: the fill's text and attributes over `base`, its
@@ -257,7 +268,7 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
             let cells = &mut screen.cells[row + usize::from(x)..row + usize::from(end)];
             let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
             let keep = selected_span(d, scene, x, end, y);
-            let written = draw_line_keeping(cells, &bgs, Color::Default, d.bce, wrapped, &keep);
+            let written = draw_line_keeping(cells, &bgs, Color::Default, d.clear, wrapped, &keep);
             ended_written = full && written;
             x = end;
         }
@@ -326,7 +337,8 @@ fn is_empty<T: PartialEq>(c: &Cell, bg: &T, last: &T) -> bool {
 #[cfg(test)]
 pub(crate) fn draw_line(cells: &mut [Cell], bce: bool, wrapped: bool) -> bool {
     let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
-    draw_line_by(cells, &bgs, Color::Default, bce, wrapped)
+    let clear = if bce { Clear::Bce } else { Clear::FakeBce };
+    draw_line_by(cells, &bgs, Color::Default, clear, wrapped)
 }
 
 /// [`draw_line`] where "the same background" is decided on `bgs`, one per
@@ -338,10 +350,10 @@ pub(crate) fn draw_line_by<T: PartialEq + Clone>(
     cells: &mut [Cell],
     bgs: &[T],
     default: T,
-    bce: bool,
+    clear: Clear,
     wrapped: bool,
 ) -> bool {
-    draw_line_keeping(cells, bgs, default, bce, wrapped, &[])
+    draw_line_keeping(cells, bgs, default, clear, wrapped, &[])
 }
 
 /// [`draw_line_by`] where the cells `keep` marks are never empty: a
@@ -351,7 +363,7 @@ fn draw_line_keeping<T: PartialEq + Clone>(
     cells: &mut [Cell],
     bgs: &[T],
     default: T,
-    bce: bool,
+    clear: Clear,
     mut wrapped: bool,
     keep: &[bool],
 ) -> bool {
@@ -381,7 +393,13 @@ fn draw_line_keeping<T: PartialEq + Clone>(
             i += 1;
         }
         let last = cells[i - 1].style;
-        let erase = !wrapped && i - start >= 10 && (bce || last.bg == Color::Default);
+        let erase = !wrapped
+            && i - start >= 10
+            && match clear {
+                Clear::Bce => true,
+                Clear::FakeBce => last.bg == Color::Default,
+                Clear::Spaces => false,
+            };
         wrapped = false;
         written = !erase;
         let cell = if erase {

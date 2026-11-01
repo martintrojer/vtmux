@@ -8,6 +8,7 @@
 use std::fmt::Write as _;
 
 pub mod compose;
+pub mod popup;
 pub mod scene;
 pub mod status;
 pub mod window;
@@ -34,8 +35,23 @@ pub struct Caps {
     pub xterm: bool,
     /// `#{client_colours}`.
     pub colours: u32,
+    /// An overlay (a popup) is up: `tty_draw_line_clear` writes spaces,
+    /// never erases (`overlay_check != NULL`, tty-draw.c:61).
+    pub overlay: bool,
 }
 impl Caps {
+    /// How [`compose::draw_line_by`] may clear a run of empty cells.
+    #[must_use]
+    pub fn clear(self) -> compose::Clear {
+        if self.overlay {
+            compose::Clear::Spaces
+        } else if self.bce {
+            compose::Clear::Bce
+        } else {
+            compose::Clear::FakeBce
+        }
+    }
+
     /// `tty_term_create` for a client's hello: `None` for a terminal vtmux
     /// has no table for.
     #[must_use]
@@ -64,6 +80,7 @@ impl Caps {
             bce: term.is_xterm(),
             xterm: term.is_xterm(),
             colours: term.colours(),
+            overlay: false,
         }
     }
     #[must_use]
@@ -192,6 +209,7 @@ impl Compositor {
                         })
                     })
                     && caps.bce
+                    && !caps.overlay
                 {
                     set_style(&mut out, &mut style, cell.style, caps);
                     out.push_str("\x1b[K");
@@ -320,6 +338,7 @@ mod tests {
             bce: true,
             xterm: true,
             colours: 256,
+            overlay: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -349,6 +368,7 @@ mod tests {
             bce: true,
             xterm: true,
             colours: 256,
+            overlay: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");

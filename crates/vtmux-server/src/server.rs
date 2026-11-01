@@ -1778,7 +1778,7 @@ impl Server {
                 cells,
                 &bgs,
                 vtmux_core::colour::Colour::Default,
-                caps.bce,
+                caps.clear(),
                 false,
             );
             if p == active {
