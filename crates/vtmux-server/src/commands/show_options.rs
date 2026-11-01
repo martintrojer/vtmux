@@ -15,6 +15,7 @@ pub fn exec(
     found: Found,
 ) -> Result<(), OptionError> {
     let (clients, client) = client_parts(server, item, found);
+    let jobs = server.job_handle(item.client);
     let lines = apply_show(
         &server.model.options,
         call,
@@ -27,6 +28,7 @@ pub fn exec(
             clients,
             client,
             formats: server.cmd_formats.clone(),
+            jobs: Some(jobs),
         },
     )?;
     for line in lines {

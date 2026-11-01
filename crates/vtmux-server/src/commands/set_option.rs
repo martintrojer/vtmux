@@ -10,6 +10,7 @@ use vtmux_core::options::{OptionError, OptionHost, OptionsStore, SetOutcome, Tar
 
 use super::Item;
 use crate::format_ctx::{ClientView, Ctx, ServerInfo};
+use crate::format_jobs::JobHandle;
 use crate::model::Model;
 use crate::server::{GlobalEnv, Server, check_shell};
 use crate::target::Found;
@@ -35,6 +36,8 @@ pub(super) struct Host<'a> {
     pub client: Option<ClientView>,
     /// A hook's formats (`cmdq_merge_formats`).
     pub formats: Vec<(String, String)>,
+    /// The running command's client's `#()` jobs (`format_single_from_target`).
+    pub jobs: Option<JobHandle>,
 }
 
 /// The attached clients and the command's target client, for [`Host`].
@@ -105,6 +108,10 @@ impl FormatContext for Vars<'_, '_> {
     fn options(&self, scope: OptionScope) -> Option<OptionsLoop<'_>> {
         self.ctx.options(scope)
     }
+
+    fn job(&self, raw: &str, expanded: &str) -> String {
+        self.ctx.job(raw, expanded)
+    }
 }
 
 impl OptionHost for Host<'_> {
@@ -113,6 +120,7 @@ impl OptionHost for Host<'_> {
         ctx.options = store;
         ctx.clients = Rc::clone(&self.clients);
         ctx.client.clone_from(&self.client);
+        ctx.jobs.clone_from(&self.jobs);
         ctx.extra.extend(
             self.formats
                 .iter()
@@ -137,6 +145,7 @@ pub fn exec(
     found: Found,
 ) -> Result<SetOutcome, OptionError> {
     let (clients, client) = client_parts(server, item, found);
+    let jobs = server.job_handle(item.client);
     // Split ownership temporarily rather than cloning the full store for
     // every set. Always restore it, including on validation errors.
     let mut options = std::mem::replace(
@@ -155,6 +164,7 @@ pub fn exec(
             clients,
             client,
             formats: server.cmd_formats.clone(),
+            jobs: Some(jobs),
         },
     );
     server.model.options = options;

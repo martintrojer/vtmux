@@ -193,6 +193,7 @@ pub fn exec(
             input: Vec::new(),
             show_stderr: args.flag('E'),
             nowait: !wait,
+            update: None,
         });
         server.timer_add(
             at,
@@ -353,6 +354,7 @@ pub fn if_shell(
         input: Vec::new(),
         show_stderr: false,
         nowait: false,
+        update: None,
     };
     let job_done = done.clone();
     let complete = Box::new(move |server: &mut Server, _: Vec<u8>, status: JobStatus| {
