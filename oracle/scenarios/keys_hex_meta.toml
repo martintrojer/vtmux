@@ -5,7 +5,8 @@
 name = "keys_hex_meta"
 size = [40, 6]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "stty raw -echo; exec cat -v"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "stty raw -echo; tmux wait-for -S raw; exec cat -v"] },
+  { wait_for = "raw" },
   { run = ["send-keys", "-t", "a", "0x01", "0x41", "0x7F", "0x263A"] },
   { run = ["bind", "-n", "M-k", "command-prompt", "-k", "-p", "key", "set -ga @k '%% '"] },
   { attach = { session = "a" } },

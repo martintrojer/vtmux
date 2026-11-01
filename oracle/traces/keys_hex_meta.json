@@ -23,8 +23,11 @@
           "5",
           "sh",
           "-c",
-          "stty raw -echo; exec cat -v"
+          "stty raw -echo; tmux wait-for -S raw; exec cat -v"
         ]
+      },
+      {
+        "wait_for": "raw"
       },
       {
         "run": [
@@ -124,7 +127,16 @@
       }
     },
     {
-      "step": 4,
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
       "observation": {
         "kind": "cli",
         "stdout": "^AA^?M-bM-^XM-:\n\n\n\n\n",
@@ -133,7 +145,7 @@
       }
     },
     {
-      "step": 13,
+      "step": 14,
       "observation": {
         "kind": "cli",
         "stdout": "M-P M-] \n",
