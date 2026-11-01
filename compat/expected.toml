@@ -340,7 +340,7 @@ reason = "not implemented (M0 baseline)"
 
 [tests."input-replies.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs remain-on-exit (dead panes): the script respawns a remain-on-exit window for each query and vtmux exits after the first. The replies themselves (DSR, DA, DECRQM, DECRQSS) match tmux: goldens in crates/vtmux-vt/tests/golden/reply_*.case and oracle scenario reply_decrqss; the OSC colour and clipboard queries are not answered yet"
 
 [tests."input-requests.sh"]
 status = "xfail"

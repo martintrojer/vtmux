@@ -23,6 +23,8 @@ struct Case {
     limit: usize,
     /// `resize=COLSxROWS`: the pane is resized after its bytes are written.
     resize: Option<(u16, u16)>,
+    /// `cursor_style=N`: the pane's `cursor-style` option, 0..=6.
+    cursor_style: u8,
     /// `format=...`: the `display-message -p` format (format kind).
     format: String,
 }
@@ -77,6 +79,7 @@ fn load(name: &str) -> Case {
             let (w, h) = v.split_once('x').unwrap();
             (w.parse().unwrap(), h.parse().unwrap())
         }),
+        cursor_style: get("cursor_style").map_or(0, |v| v.parse().unwrap()),
         format: get("format").unwrap_or_default(),
     }
 }
@@ -100,6 +103,7 @@ fn line_ref(flags: &str, flag: &str, default: LineRef, dash: LineRef) -> LineRef
 fn run(name: &str) {
     let c = load(name);
     let mut term = PaneTerm::new(c.cols, c.rows, c.limit);
+    term.set_cursor_style_option(c.cursor_style);
     // The reference pane sits behind a pty with ONLCR, so a program's `\n`
     // reaches the terminal as `\r\n`.
     let mut written = (0..c.seq)
@@ -239,4 +243,18 @@ golden! {
     reply_decrqm_irm,
     reply_decrqm_ansi_unknown,
     reply_decxcpr,
+    reply_decrqss_cursor_default,
+    reply_decrqss_cursor_set,
+    reply_decrqss_cursor_steady_underline,
+    reply_decrqss_cursor_blink_mode,
+    reply_decrqss_cursor_reset_default,
+    reply_decrqss_cursor_option,
+    reply_decrqss_cursor_ris,
+    reply_decrqss_cursor_blink_off,
+    reply_decrqss_unknown,
+    reply_decrqss_short,
+    reply_decrqm_blink_default,
+    reply_decrqm_blink_option,
+    reply_decrqm_blink_set,
+    reply_decrqm_blink_reset,
 }
