@@ -181,6 +181,7 @@ impl Mode {
             Self::Copy(m) => m.key_mode,
             Self::Clock(m) => m.key_mode,
             Self::Tree(m) => m.key_mode,
+            Self::Panes(m) => m.key_mode,
             #[cfg(test)]
             Self::Probe => vtmux_vt::KeyMode::Standard,
         }
