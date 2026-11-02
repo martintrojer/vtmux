@@ -5203,3 +5203,277 @@ fn focus_ring_clicks_land_on_the_drawn_pane() {
         }
     }
 }
+
+/// A pane program that turns on the mouse modes `modes` (printf escapes),
+/// then copies what it reads, raw, to `file`.
+fn mouse_recorder(file: &std::path::Path, modes: &str) -> String {
+    format!(
+        "stty raw -echo; printf '{modes}'; exec cat > {}",
+        file.display()
+    )
+}
+
+/// Type `.` and wait (at most 5 s) for `file` to end with it: everything
+/// before it has reached the pane. The bytes before the `.`.
+fn recorded(a: &mut Attached, file: &std::path::Path) -> String {
+    a.keys(b".");
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        let bytes = std::fs::read(file).unwrap_or_default();
+        if let Some(b) = bytes.strip_suffix(b".") {
+            return String::from_utf8_lossy(b).escape_debug().to_string();
+        }
+        assert!(Instant::now() < end, "{bytes:?}");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The events [`mouse_forwarding_matches_tmux`] sends, as SGR or X10 at
+/// 1-based client cells: a click on the left pane (no mouse modes), then
+/// on the recorder: press, drag, release (a drag end), motion with no
+/// button, wheel up and down, buttons 2 and 3, a C- press.
+fn forwarded_events(x10: bool) -> Vec<u8> {
+    let events: [(u32, u32, u32, bool); 14] = [
+        (0, 5, 4, false),
+        (0, 5, 4, true),
+        (0, 25, 4, false),
+        (32, 26, 5, false),
+        (0, 26, 5, true),
+        (35, 27, 6, false),
+        (64, 25, 4, false),
+        (65, 25, 4, false),
+        (1, 24, 3, false),
+        (1, 24, 3, true),
+        (2, 28, 7, false),
+        (2, 28, 7, true),
+        (16, 40, 10, false),
+        (16, 40, 10, true),
+    ];
+    let mut out = Vec::new();
+    for (b, x, y, release) in events {
+        if x10 {
+            let b = if release { 3 } else { b };
+            out.extend_from_slice(b"\x1b[M");
+            out.extend([b + 32, x + 32, y + 32].map(|v| u8::try_from(v).unwrap()));
+        } else {
+            let end = if release { 'm' } else { 'M' };
+            out.extend(format!("\x1b[<{b};{x};{y}{end}").into_bytes());
+        }
+    }
+    out
+}
+
+/// input-keys.c `input_key_get_mouse` through the default bindings
+/// (`send -M`) and the unbound path (`input_key_pane`, only to the pane
+/// under the pointer): the bytes a program gets for each of 1000, 1002 and
+/// 1003 with no extension, 1005 or 1006, for SGR and X10 reports from the
+/// terminal, at its own position (the right pane, below a top status line);
+/// and with `mouse off`, where every event is forwarded unbound.
+#[test]
+fn mouse_forwarding_matches_tmux() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let mut got = Vec::new();
+        let mut cases = Vec::new();
+        for tracking in ["1000", "1002", "1003"] {
+            for ext in ["", "1005", "1006"] {
+                for x10 in [false, true] {
+                    cases.push((tracking, ext, x10, "on"));
+                }
+            }
+        }
+        cases.push(("1002", "1006", false, "off"));
+        cases.push(("1003", "", true, "off"));
+        for (tracking, ext, x10, mouse) in cases {
+            let w = World::new(bin.clone());
+            let file = w.home.path().join("mouse");
+            let mut modes = format!(r"\033[?{tracking}h");
+            if !ext.is_empty() {
+                write!(modes, r"\033[?{ext}h").unwrap();
+            }
+            let script = mouse_recorder(&file, &modes);
+            for cmd in [
+                &[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
+                ][..],
+                &["splitw", "-h", "-t", "a", "sh", "-c", &script],
+                &["set", "-g", "status-right", ""],
+                &["set", "-g", "status-position", "top"],
+                &["set", "-g", "mouse", mouse],
+            ] {
+                assert!(w.cli(cmd).status.success(), "{cmd:?}");
+            }
+            let end = Instant::now() + Duration::from_secs(5);
+            while display_t(&w, "a:0.1", "#{mouse_any_flag}") != "1" {
+                assert!(Instant::now() < end);
+                thread::sleep(Duration::from_millis(20));
+            }
+            let mut a = w.attach(&["attach", "-t", "a"]);
+            a.wait(|a| pane_text(a).contains("[a]"));
+            a.keys(&forwarded_events(x10));
+            let what = format!(
+                "{tracking} {ext:4} {} mouse {mouse}",
+                if x10 { "x10" } else { "sgr" }
+            );
+            got.push(format!("{what}: {}", recorded(&mut a, &file)));
+        }
+        seen.push(got);
+    }
+    assert_eq!(
+        seen[1][16],
+        concat!(
+            r"1003 1006 sgr mouse on: \u{1b}[<0;4;3M\u{1b}[<32;5;4M\u{1b}[<0;5;4m",
+            r"\u{1b}[<35;6;5M\u{1b}[<64;4;3M\u{1b}[<65;4;3M\u{1b}[<1;3;2M\u{1b}[<1;3;2m",
+            r"\u{1b}[<2;7;6M\u{1b}[<2;7;6m\u{1b}[<16;19;9M\u{1b}[<16;19;9m"
+        ),
+        "tmux 3.8"
+    );
+    for (v, t) in seen[0].iter().zip(&seen[1]) {
+        assert_eq!(v, t, "vtmux (left) vs tmux 3.8 (right)");
+    }
+}
+
+/// input-keys.c:767-789: X10 clamps a position past 0xff - 0x21 to 0xff;
+/// UTF-8 (1005) writes it as two bytes; SGR (1006) needs an SGR report
+/// from the terminal and falls back to X10 for an X10 one.
+#[test]
+fn mouse_forwarding_far_columns() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let mut got = Vec::new();
+        for (ext, report) in [
+            ("", "sgr"),
+            ("1005", "sgr"),
+            ("1006", "sgr"),
+            ("1006", "x10"),
+        ] {
+            let w = World::new(bin.clone());
+            let file = w.home.path().join("mouse");
+            let mut modes = r"\033[?1000h".to_owned();
+            if !ext.is_empty() {
+                write!(modes, r"\033[?{ext}h").unwrap();
+            }
+            let mut a = w.attach_sized(
+                &[
+                    "set",
+                    "-g",
+                    "status",
+                    "off",
+                    ";",
+                    "new",
+                    "-s",
+                    "a",
+                    "-n",
+                    "w",
+                    "sh",
+                    "-c",
+                    &mouse_recorder(&file, &modes),
+                ],
+                240,
+                5,
+            );
+            let end = Instant::now() + Duration::from_secs(5);
+            while display(&w, "#{mouse_any_flag}") != "1" {
+                assert!(Instant::now() < end);
+                thread::sleep(Duration::from_millis(20));
+            }
+            // A click at column 230, row 2.
+            if report == "sgr" {
+                a.keys(b"\x1b[<0;230;2M\x1b[<0;230;2m");
+            } else {
+                a.keys(b"\x1b[M\x20\xff\x22\x1b[M\x23\xff\x22");
+            }
+            got.push(format!("{ext} {report}: {}", recorded(&mut a, &file)));
+        }
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+/// The default `WheelUpPane` (`if -F '#{||:#{alternate_on},#{pane_in_mode},
+/// #{mouse_any_flag}}' { send -M } { copy-mode -e }`): over a shell the
+/// wheel enters copy mode; a pane with `?1000h` gets it; on the alternate
+/// screen with no mouse mode nothing happens (tmux does not make arrow
+/// keys of it). Motion in the prefix table goes to a `?1003h` pane and
+/// keeps the prefix (server-client.c:1655-1661).
+#[test]
+fn wheel_up_pane_enters_copy_mode_or_forwards() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let mut got = Vec::new();
+        for modes in [
+            "",
+            r"\033[?1000h",
+            r"\033[?1049h",
+            r"\033[?1003h\033[?1006h",
+        ] {
+            let w = World::new(bin.clone());
+            let file = w.home.path().join("mouse");
+            let mut a = w.attach(&[
+                "set",
+                "-g",
+                "status-right",
+                "",
+                ";",
+                "bind",
+                "x",
+                "set",
+                "-g",
+                "@p",
+                "1",
+                ";",
+                "new",
+                "-s",
+                "a",
+                "-n",
+                "w",
+                "sh",
+                "-c",
+                &mouse_recorder(&file, modes),
+            ]);
+            a.wait(|a| pane_text(a).contains("[a]"));
+            let end = Instant::now() + Duration::from_secs(5);
+            while !file.exists() {
+                assert!(Instant::now() < end);
+                thread::sleep(Duration::from_millis(20));
+            }
+            a.keys(b"\x1b[<64;5;3M");
+            if modes.contains("1003") {
+                a.keys(b"\x02\x1b[<35;6;4Mx");
+                a.wait(|_| user_option(&w, "@p") == "1");
+            }
+            // Over the shell: copy mode, then out of it so `.` reaches the
+            // pane. Otherwise the `.` after the wheel shows it was handled.
+            let mode = if modes.is_empty() {
+                let mode = settles(&w, "#{pane_in_mode}", "1");
+                a.keys(b"q");
+                settles(&w, "#{pane_in_mode}", "0");
+                mode
+            } else {
+                String::new()
+            };
+            let bytes = recorded(&mut a, &file);
+            let mode = if mode.is_empty() {
+                display(&w, "#{pane_in_mode}")
+            } else {
+                mode
+            };
+            got.push(format!(
+                "{modes}: in mode {mode}, alternate {}, got {}",
+                display(&w, "#{alternate_on}"),
+                bytes
+            ));
+        }
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(
+        seen[1],
+        [
+            ": in mode 1, alternate 0, got ",
+            r"\033[?1000h: in mode 0, alternate 0, got \u{1b}[M`%#",
+            r"\033[?1049h: in mode 0, alternate 1, got ",
+            r"\033[?1003h\033[?1006h: in mode 0, alternate 0, got \u{1b}[<64;5;3M\u{1b}[<35;6;4M",
+        ]
+    );
+}
