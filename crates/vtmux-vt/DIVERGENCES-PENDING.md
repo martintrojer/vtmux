@@ -102,16 +102,27 @@ and the probes from `review_vt_wrap`.
 - Visible: `#{history_size}`, `capture-pane -S`, copy mode after every Ctrl-L.
   `ESC[3J` (ncurses `clear`) already matches.
 
-## P7. RIS (`ESC c`) drops history
+## P7. RIS (`ESC c`) drops history and leaves the alternate screen
 
 - Golden: `cap_ris`, `fmt_ris`, `cap_ris_alt`, `fmt_ris_alt` (follow-up
   `history_parity`)
-- tmux: `screen_reinit` (screen.c:109-130) turns the alternate screen off and
-  clears only the visible lines (`grid_clear_lines(hsize, sy)`), so history
-  stays: `ESC c` after `l0..l9` leaves `#{history_size}` 10; under the alternate
-  screen it leaves the primary 6.
-- vtmux (Ghostty): a full reset drops scrollback, `history_size` 0.
-- Visible: `#{history_size}`, capture and copy mode after `reset` / `tput reset`.
+- tmux: `INPUT_ESC_RIS` (input.c:1407-1412) calls `screen_write_reset`
+  (screen-write.c:423-439), not `screen_reinit` (screen.c:109, which only
+  `screen_init`/spawn.c:329 reach). It resets `s->mode`, tabs and the scroll
+  region, then `screen_write_clearscreen` (screen-write.c:2073), which with
+  `scroll-on-clear` (default on) runs `grid_view_clear_history`: this is P6, the
+  used rows join history. It does not call `screen_alternate_off`, so the
+  alternate screen stays on. `ESC c` after `l0..l9` on 20x5 leaves
+  `#{history_size}` 10. After `ESC[?1049h ESC c` the pane is still on the
+  alternate screen: `#{alternate_on}` 1, DECRQM `?1049` 1, the primary history
+  6 (re-probed against the reference 3.8).
+- vtmux (Ghostty): a full reset drops scrollback (`history_size` 0), and
+  returns to the primary screen (`alternate_on` 0, DECRQM `?1049` 2).
+- Why not fixed with the mouse modes: both need RIS emulated outside Ghostty's
+  `fullReset` (keep screen and history, and P6's scroll-on-clear); the mouse
+  bits already match.
+- Visible: `#{history_size}`, `#{alternate_on}`, capture and copy mode after
+  `reset` / `tput reset`.
 
 ## P8. Selective erase spares DEC-graphics cells
 

@@ -385,6 +385,10 @@ impl PaneTerm {
                 i += 1;
                 continue;
             }
+            if event == Some(ScanEvent::Skip) {
+                i += 1;
+                continue;
+            }
             if let Some(e) = event {
                 let alternate = self.alternate_on();
                 match e {
@@ -1346,6 +1350,9 @@ enum ScanEvent {
     Osc133(LineMark),
     /// `ESC P`: a DCS starts (on the `P`).
     DcsStart,
+    /// A byte tmux ignores inside a CSI (0x7f-0xff, input.c:579, 597, 612,
+    /// 628) without leaving it: Ghostty must not see it.
+    Skip,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1519,6 +1526,9 @@ impl AltModeScanner {
                 self.intermediate = Some(b);
                 self.interm_count = self.interm_count.saturating_add(1);
             }
+            // 0x7f-0xff are no action and no state change in every CSI
+            // state (input.c:579, 597, 612, 628); Ghostty would print them.
+            (ScanState::Csi, 0x7f..=0xff) => return Some(ScanEvent::Skip),
             (ScanState::Csi, _) => {
                 self.other = true;
                 self.csi_ignored = true;
@@ -1873,6 +1883,24 @@ mod tests {
         assert_eq!(
             mouse_after(b"\x1b[?7;1003;2004h").tracking,
             MouseTracking::All
+        );
+    }
+
+    #[test]
+    fn csi_top_bit_bytes_are_ignored_not_fatal() {
+        // 0x7f-0xff: no action, no state change (input.c:579, 597, 612, 628).
+        for b in [&b"\xa0"[..], b"\x7f", b"\xff", b"\x80", b"\xc3\xa9"] {
+            let seq = [&b"\x1b[?1000h\x1b[?1002"[..], b, b"h"].concat();
+            let mut t = PaneTerm::new(20, 5, 100);
+            t.feed(&seq);
+            assert_eq!(t.mouse_modes().tracking, MouseTracking::Button, "{b:?}");
+            // Nothing printed: Ghostty never saw the bytes.
+            assert_eq!(t.row(0).length(), 0, "{b:?}");
+        }
+        assert_eq!(
+            // Mid-number: the digits join, as in tmux's `param_buf`.
+            mouse_after(b"\x1b[?100\xa02h").tracking,
+            MouseTracking::Button
         );
     }
 
@@ -2236,7 +2264,8 @@ mod tests {
                     ScanEvent::Resync
                     | ScanEvent::Reset
                     | ScanEvent::Osc133(_)
-                    | ScanEvent::DcsStart => None,
+                    | ScanEvent::DcsStart
+                    | ScanEvent::Skip => None,
                 })
                 .collect::<Vec<u8>>()
         };
