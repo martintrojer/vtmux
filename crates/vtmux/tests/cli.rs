@@ -4146,9 +4146,6 @@ fn libc_o_nonblock() -> i32 {
 /// leave the writer without a reader. Reference: the writer succeeds, the
 /// buffer is `late:10`.
 #[test]
-// Linux only: on macOS a FIFO with no writer yet polls as hung up, so the
-// wait-for-writer path differs and the test hung CI (task macos_attach_parity).
-#[cfg_attr(not(target_os = "linux"), ignore = "macos_attach_parity")]
 fn load_buffer_of_a_fifo_waits_for_the_writer() {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt;

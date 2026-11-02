@@ -6,9 +6,10 @@
 //! Files are opened as tmux opens them (`O_NONBLOCK`, so a FIFO with no
 //! reader fails with `ENXIO` instead of waiting). A write then switches to
 //! blocking for the transfer: this process has nothing else to do. A read
-//! waits for the file to poll readable before each `read(2)`, as
-//! libevent's bufferevent does: a FIFO that has never had a writer would
-//! read as an empty file, but polls readable only once a writer connects.
+//! waits for the file to be readable before each `read(2)`, as libevent's
+//! bufferevent does: a FIFO that has never had a writer would read as an
+//! empty file, but is readable only once a writer connects
+//! (`sys::fdwait::wait_readable`: `select` on macOS, as tmux there).
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write as _};
@@ -17,7 +18,6 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
-use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use vtmux_core::protocol::{self, ClientMsg};
 
@@ -30,19 +30,6 @@ fn errno(e: &io::Error) -> i32 {
 fn open(opts: &mut OpenOptions, path: &Path) -> io::Result<File> {
     opts.custom_flags(OFlags::NONBLOCK.bits().cast_signed())
         .open(path)
-}
-
-/// Block until `f` polls readable (or hung up, or in error: the next
-/// `read(2)` says which).
-fn wait_readable(f: &File) -> io::Result<()> {
-    loop {
-        let mut fds = [PollFd::new(f, PollFlags::IN)];
-        match poll(&mut fds, None) {
-            Ok(_) => return Ok(()),
-            Err(rustix::io::Errno::INTR) => {}
-            Err(e) => return Err(e.into()),
-        }
-    }
 }
 
 fn blocking(f: File) -> io::Result<File> {
@@ -110,7 +97,7 @@ pub fn read(stream: &mut UnixStream, path: Option<&Path>) {
         Ok(mut f) => {
             let mut buf = vec![0u8; 64 * 1024];
             loop {
-                if wait_readable(&f).is_err() {
+                if vtmux_server::sys::fdwait::wait_readable(f.as_fd()).is_err() {
                     break EIO;
                 }
                 match f.read(&mut buf) {
