@@ -1,5 +1,14 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    # m1 always points at a commit main already has: don't build it twice.
+    branches-ignore: [m1]
+  pull_request:
+# A newer push to a worker branch supersedes its running check; every
+# push to main is checked to the end.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   check:
     strategy:
