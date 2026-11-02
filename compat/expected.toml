@@ -62,6 +62,8 @@ status = "pass"
 
 [tests."clock-mode.sh"]
 status = "pass"
+reason = "test race, not a vtmux read-path difference: the compact-clock wait loop accepts the first capture-pane of the outer pane that shows a time, but the inner client's repaint can span two outer PTY reads (tmux reads a pane once per libevent callback, window.c window_pane_read_callback, then disables EV_READ until server_client_loop; vtmux reads once per turn, up to 64 KiB, server.rs pane_readable), so a capture queued between them sees new rows over old glyph rows. Seen once under check.sh load; 33/33 reference tmux and 58/58 vtmux passes under nproc/2 busy loops"
+flaky = true
 
 [tests."cmd-template-replace.sh"]
 status = "pass"
