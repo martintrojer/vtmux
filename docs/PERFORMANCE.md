@@ -39,24 +39,34 @@ Run of 2026-11-02 on the perf_owner branch (147e54b, before rebase onto main; sa
 | | poller CPU over 60 s (not the server) | 180 ms | 220 ms | 1.2x |
 | owner_startup, `start-server` until `display -p ok` answers, 20x | median (min - max) | 62.9 ms (58.9 - 74.1) | 61.8 ms (58.3 - 80.5) | 0.98x |
 
-Attached-client run of 2026-11-02 after `render_flood_cpu`, commit `e1b2ae7`, same host, load 3.2 at start (2.2-3.7 during), median of 3. Raw output: [`test-health/2026-11-02-render-flood.md`](test-health/2026-11-02-render-flood.md) and `.json`; the run before the fix (commit `96dc4ad`, load 7-9) is [`test-health/2026-11-02-perf-attached.md`](test-health/2026-11-02-perf-attached.md). Server CPU only; the client's CPU is in the raw run (at most 0.02 s for either binary).
+Attached-client run of 2026-11-02, commit `4a1bcf4` (render_flood_cpu round 2), same host, load 2.0 at start and 1.1 at the end, median of 3. Raw output: [`test-health/2026-11-02-render-flood-r2.md`](test-health/2026-11-02-render-flood-r2.md) and `.json`, with the key-echo latency run. The last column is the run before `render_flood_cpu` (commit `96dc4ad`, [`test-health/2026-11-02-perf-attached.md`](test-health/2026-11-02-perf-attached.md)); it was taken at load 7-9 and before `status-right` and `status-interval` were pinned, so only its ratios are comparable, not its absolute times. Server CPU only; the client's CPU is in the raw run (at most 0.02 s for either binary). Terminal bytes are per input byte, or per synchronized-update frame where sync is on (total terminal bytes / `ESC[?2026h` count).
 
-| scenario | metric | tmux 3.8 | vtmux | vtmux / tmux | before the fix |
+| scenario | metric | tmux 3.8 | vtmux | vtmux / tmux | before `render_flood_cpu` |
 |---|---|---|---|---|---|
-| throughput_attached, 100 MB plain log, 200x50 client, sync off | wall / server CPU | 2.84 s / 2.70 s | 1.44 s / 1.39 s | 0.51x CPU | 15.99 s, 6.0x |
+| throughput_attached, 100 MB plain log, 200x50 client, sync off | wall / server CPU | 2.84 s / 2.72 s | 1.44 s / 1.44 s | 0.53x CPU | 6.0x |
 | | terminal bytes per input byte | 1.03 | 0.05 | 0.05x | 2.15 |
-| throughput_attached, plain, sync on | wall / server CPU | 2.84 s / 2.73 s | 1.43 s / 1.42 s | 0.52x | 18.57 s, 6.7x |
-| throughput_attached, 19% SGR, sync off | wall / server CPU | 4.06 s / 3.86 s | 3.67 s / 3.47 s | 0.90x | 38.20 s, 9.8x |
-| | terminal bytes per input byte | 1.04 | 0.12 | 0.12x | 5.72 |
-| throughput_attached, 19% SGR, sync on | wall / server CPU | 3.86 s / 3.82 s | 3.68 s / 3.50 s | 0.92x | 41.49 s, 7.0x |
-| render, 4 panes x 3000 cursor-addressed frames (22 MB), sync off | wall / server CPU | 0.66 s / 0.65 s | 0.45 s / 0.40 s | 0.62x | 1.98 s, 2.4x |
+| throughput_attached, plain, sync on | wall / server CPU | 2.84 s / 2.76 s | 1.45 s / 1.42 s | 0.51x | 6.7x |
+| | sync frames / bytes per frame | 25815 / 3.9 KB | 133 / 40 KB | | |
+| throughput_attached, 19% SGR, sync off | wall / server CPU | 4.06 s / 3.85 s | 3.69 s / 3.48 s | 0.90x | 9.8x |
+| | terminal bytes per input byte | 1.04 | 0.13 | 0.12x | 5.72 |
+| throughput_attached, 19% SGR, sync on | wall / server CPU | 4.06 s / 3.83 s | 3.68 s / 3.51 s | 0.92x | 7.0x |
+| | sync frames / bytes per frame | 25776 / 4.0 KB | 271 / 45 KB | | |
+| render, 4 panes x 3000 cursor-addressed frames (22 MB), sync off | wall / server CPU | 0.66 s / 0.63 s | 0.45 s / 0.40 s | 0.63x | 2.4x |
 | | terminal bytes | 10.1 MB | 0.49 MB | 0.05x | 4.9 MB |
-| render, sync on | wall / server CPU | 0.87 s / 0.66 s | 0.45 s / 0.40 s | 0.61x | 1.85 s, 2.3x |
-| | peak RSS | 5.4 MB | 11.8 MB | 2.2x | 11.9 MB |
-| many_clients, 8 clients, 20 MB flood in one pane, sync off | wall / server CPU | 1.43 s / 1.33 s | 0.86 s / 0.81 s | 0.61x | 15.04 s, 11x |
+| render, sync on | wall / server CPU | 0.66 s / 0.64 s | 0.46 s / 0.41 s | 0.64x | 2.3x |
+| | sync frames / bytes per frame | 1357 / 7.3 KB | 34 / 15 KB | | |
+| | peak RSS | 5.4 MB | 11.4 MB | 2.1x | 11.9 MB |
+| many_clients, 8 clients, 20 MB flood in one pane, sync off | wall / server CPU | 1.43 s / 1.28 s | 0.87 s / 0.76 s | 0.59x | 11x |
 | | terminal bytes (sum) | 29.1 MB | 2.2 MB | 0.08x | 61.9 MB |
-| many_clients, sync on | wall / server CPU | 5.17 s / 5.12 s | 0.86 s / 0.86 s | 0.17x | 15.46 s, 2.8x |
-| | RSS attached idle / after flood | 6.4 / 7.4 MB | 15.3 / 16.2 MB | 2.4x / 2.2x | 14.9 / 16.5 MB |
+| many_clients, sync on | wall / server CPU | 5.17 s / 5.10 s | 0.87 s / 0.83 s | 0.16x | 2.8x |
+| | RSS attached idle / after flood (sync off) | 6.5 / 7.3 MB | 14.0 / 17.7 MB | 2.2x / 2.4x | 14.9 / 16.5 MB |
+
+Key-to-echo latency with a client attached (the reviewer's `lat.py`: 200x50 client, window split in two, `yes` in one pane, a raw echo program in the other, 60 keys 30 ms apart, two runs each; same load):
+
+| | tmux 3.8 p50 / p90 / max | vtmux p50 / p90 / max |
+|---|---|---|
+| a flood in the other pane | 0.8 / 0.8 / 1.0 ms | 2.8-3.1 / 5.9-7.0 / 7.9-8.2 ms |
+| no flood | 0.3 / 0.6 / 1.0 ms | 4.7-5.0 / 5.1-5.9 / 5.5-6.4 ms |
 
 The history rows come from `scripts/bench-history-memory.sh` (details in [`test-health/2026-11-01-history-memory.md`](test-health/2026-11-01-history-memory.md); the output-time column is in the raw run).
 
@@ -64,11 +74,11 @@ The history rows come from `scripts/bench-history-memory.sh` (details in [`test-
 
 - **CPU: a win when consuming output, a loss when creating panes.** With no client, vtmux consumes 100 MB of pane output with 0.46x (plain) and 0.78x (19% SGR) of tmux's server CPU, and in 1.2x to 2.2x less wall time. The idle server uses no CPU and takes no wakeups, same as tmux. Creating 400 panes costs 1.6x more CPU (430 ms against 270 ms). Startup is a wash: `new -d` is 7.0 ms against 9.1 ms, and the server pid is gone 2.4 ms after `kill-server` starts for both.
 - **Throughput wall time is coarse.** The done marker is polled with `capture-pane` every 0.2 s, so each wall time is accurate to about 0.2 s (up to 17% of vtmux's 1.2 s plain run). The error adds about the same to both binaries, which pulls the ratio toward 1, so the speed-up is if anything understated. Server CPU is not affected by the polling beyond the cost of the `capture-pane` calls themselves.
-- **Memory is the cost.** vtmux runs one libghostty terminal per pane, so every pane pays for Ghostty's page allocation up front: 33 KB per idle pane against tmux's 5.4 KB, and 3 MB more for a bare server. Both are small in absolute terms, but at 400 panes the ratio is 3x. Filed as `perf_scale_rss` (the only ratio above 2x).
+- **Memory is the cost.** vtmux runs one libghostty terminal per pane, so every pane pays for Ghostty's page allocation up front: 33 KB per idle pane against tmux's 5.4 KB, and 3 MB more for a bare server. Both are small in absolute terms, but at 400 panes the ratio is 3x. Filed as `perf_scale_rss`.
 - **Scrollback.** Ghostty stores 8 bytes for every cell of every retained row, where tmux stores only the used cells, so wide and mostly-empty rows cost more (1.6x on plain logs and on 500-column rows). `hist_retain` already fixed the retention count (the line limit follows `history-limit`; 148 MB before it, 105 MB now). Compressing idle scrollback is `hist_compress`, not yet merged, so these rows will move.
-- **Attached, vtmux now draws less often than tmux under a flood.** vtmux composes whole frames (D14), so its cost follows how many frames it draws, not how much output arrives. Before `render_flood_cpu` it drew one full frame per loop turn, about one per 18 KB of pane output, and a 100 MB flood cost 6x to 10x tmux's server CPU (16 s against 2.7 s plain); per-phase timers showed 94% of that in building and diffing whole frames. Now a frame waits while the client still has an unwritten one (tmux defers its redraw the same way, `server_client_check_redraw`), and while a pane still has output waiting frames go at most every 10 ms. The flood costs 0.5x (plain) to 0.9x (SGR) of tmux's server CPU and sends 0.05 to 0.12 terminal bytes per input byte, where tmux writes every update, about one byte per input byte. With 8 clients it is 0.6x (sync off) and 0.17x (sync on), and the cost no longer stays at 15 s whatever the client count. What remains in the SGR row is mostly Ghostty parsing the input (the no-client throughput row is 2.49 s).
+- **Attached, vtmux draws fewer, larger frames than tmux under a flood.** vtmux composes whole frames (D14), so its cost follows how many frames it draws, not how much output arrives. Before `render_flood_cpu` it drew one full frame per loop turn, about one per 18 KB of pane output, and a 100 MB flood cost 6x to 10x tmux's server CPU; per-phase timers showed 94% of that in building and diffing whole frames. Now a frame waits while the client still has an unwritten one (tmux defers its redraw the same way, `server_client_check_redraw`), and while a pane still has output waiting, frames of that output go at most every 10 ms. The flood costs 0.5x (plain) to 0.9x (SGR) of tmux's server CPU. With sync on, where frames can be counted, vtmux sends 133 frames of about 40 KB for the plain log where tmux sends 25815 updates of about 4 KB; per input byte that is 0.05 against 1.03. With 8 clients it is 0.6x (sync off) and 0.16x (sync on). What remains in the SGR row is mostly Ghostty parsing the input (the no-client throughput row is 2.49 s). Sync-off rows have no frame count.
 - **Attached, diffed frames do show in the bytes.** In `render`, where each pane repaints full screens with cursor addressing, vtmux sends 0.49 MB against tmux's 10.1 MB at 0.6x the server CPU. Each frame on the terminal is the latest picture, so the intermediate repaints a pane made within one frame interval never reach the terminal; the final screen is the same.
-- **The attached rows are a flood case.** A frame is held back only while a pane still has unread output (its read budget ran out) or the client has a frame unwritten, so a key's echo still goes out at once.
+- **Key echo is slower than tmux's, flood or not.** Only flood output is paced: a frame that also shows output from a pane that was not flooding (a key's echo), a pane to redraw whole or a status redraw goes at once. Next to a flood the echo takes 3 ms (p50) and at most 8 ms against tmux's 0.8 ms; with the pacing applied to every frame it was 8-10 ms p50 and 16.5 ms max. Without any flood vtmux takes 5 ms against 0.3 ms at 200x50: that is composing and diffing a whole frame for one changed cell, which is the cost of D14, not of pacing, and is not addressed here.
 - **Peak RSS in throughput** is about 5 MB above tmux's: the per-pane terminal plus the history it keeps for the 100 MB of output, capped by the default `history-limit` of 2000.
 
 - **With the owner's config the idle server is not idle, and the cause is outside it.** The mu-crew poller wakes about once a second and runs `tmux show-options -g` (and `set-option` when a value changes) as clients of the server, so the server's 187 ms (tmux) and 48 ms (vtmux) over 60 s are the cost of answering those clients: about 3 ms against 0.8 ms per wake-up round. vtmux does less server work per request here (0.26x); the RSS gap is the same 3 MB as for a bare server (1.7x). The poller's own CPU (a Python process plus the `tmux` client processes it starts, counted from `/proc/<pid>/stat` with children) is 180 ms and 220 ms: it is outside the server. The 40 ms difference between the two was not investigated (3 runs, shared host). Only the cheapest probe (`uptime`, a `/proc` read every 60 s) is on; the owner's real list adds `murmur_remote memory cpu uptime muzzle`, which starts `murmur status` and `muzzle status` every 5 to 10 s and is not measured here because it needs a network and the owner's state.
@@ -95,7 +105,7 @@ Owner scenarios (`owner_idle`, `owner_startup`; Linux only, skipped elsewhere wi
 
 How it measures: the server pid comes from `display -p '#{pid}'` on a private socket (`-L` and `TMUX_TMPDIR`), and is checked gone after `kill-server`; pids are never found by name. Only the server process is measured, never its pane children.
 
-- **Linux CPU:** `/proc/<pid>/stat` utime+stime (fields 14 and 15) deltas per phase, which count all threads and exclude children. Idle uses the nanosecond `schedstat` sum, because 10 ms ticks are too coarse. Never `cutime`/`cstime`, `getrusage` of children or `time(1)`: those include the reaped pane processes.
+- **Linux CPU:** `/proc/<pid>/stat` utime+stime (fields 14 and 15) deltas per phase, which count all threads and exclude children. Idle and the attached scenarios use the nanosecond `schedstat` sum, because 10 ms ticks are too coarse. Never `cutime`/`cstime`, `getrusage` of children or `time(1)`: those include the reaped pane processes.
 - **Linux RSS:** settled `VmRSS`, and the per-phase peak is `VmHWM` after `echo 5 > /proc/<pid>/clear_refs`.
 - **Wakeups:** deltas of `voluntary_ctxt_switches` over all threads.
 - **macOS:** `ps -o rss=,time=` sampled every 100 ms (peak RSS is the largest sample; wakeups are not reported). `scale` raises `ulimit -n` to 4096, or is skipped with the reason if it can't. The macOS numbers have not been collected yet.
