@@ -147,6 +147,12 @@ impl StatusLine {
         self.redraw_window = true;
     }
 
+    /// `CLIENT_REDRAWWINDOW` alone: a deferred frame keeps a pane's
+    /// `PANE_REDRAW` for later (server-client.c:2549-2553).
+    pub fn request_window_redraw(&mut self) {
+        self.redraw_window = true;
+    }
+
     /// Any of `CLIENT_ALLREDRAWFLAGS` is set: the next frame redraws.
     #[must_use]
     pub fn redraw_pending(&self) -> bool {

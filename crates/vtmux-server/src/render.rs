@@ -102,13 +102,42 @@ impl Caps {
     }
 }
 
+/// The shortest gap between two frames to one client while a pane is
+/// flooding (it still had output when its read budget ran out). Frames are
+/// composed whole (D14), so their cost follows how often they are drawn,
+/// not how much output arrived; tmux instead writes each pane update as it
+/// happens. A frame that comes sooner waits for the rest of the interval
+/// and then shows everything since. Without a flood (a key's echo) the
+/// frame goes at once.
+pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+
 #[derive(Default)]
 pub struct Compositor {
     last: Option<Snapshot>,
     /// The client is not keeping up: compose nothing until it drains.
     blocked: bool,
+    /// When the last frame was sent.
+    sent: Option<std::time::Instant>,
+    /// A frame was held back by [`FRAME_INTERVAL`] until then.
+    due: Option<std::time::Instant>,
 }
 impl Compositor {
+    /// Whether a frame may be composed `now`, with a pane flooding or not.
+    /// If not, the frame is due once the interval since the last one is
+    /// over ([`Self::due`]).
+    pub fn paced(&mut self, now: std::time::Instant, flood: bool) -> bool {
+        let wait = self
+            .sent
+            .map(|t| t + FRAME_INTERVAL)
+            .filter(|&d| flood && d > now);
+        self.due = wait;
+        wait.is_none()
+    }
+    /// When a held-back frame is due: the loop wakes then.
+    #[must_use]
+    pub fn due(&self) -> Option<std::time::Instant> {
+        self.due
+    }
     pub fn invalidate(&mut self) {
         self.last = None;
     }
@@ -142,6 +171,9 @@ impl Compositor {
     /// output instead; vtmux's queue is whole protocol messages, so it keeps
     /// them and composes nothing more, which bounds the queue the same way.
     pub fn ready(&mut self, queued: usize, cols: u16, rows: u16) -> bool {
+        // Only [`Self::paced`], later in the same frame, holds a frame back
+        // by time; a blocked client waits for its acks instead.
+        self.due = None;
         let cells = usize::from(cols) * usize::from(rows);
         if self.blocked {
             if queued > cells / 8 {
@@ -250,6 +282,7 @@ impl Compositor {
             out.push_str("\x1b[?2026l");
         }
         self.last = Some(screen);
+        self.sent = Some(std::time::Instant::now());
         out.into_bytes()
     }
 }
@@ -372,6 +405,36 @@ mod tests {
         let frame = compositor.frame(screen, caps);
         assert!(frame.contains(&b'X'));
         assert!(!frame.contains(&b'O'));
+    }
+
+    /// Under a flood a frame waits out `FRAME_INTERVAL` since the last one and
+    /// is then due; without one it goes at once. Blocking forgets the due
+    /// time (the acks wake the loop instead).
+    #[test]
+    fn frames_are_paced_only_under_a_flood() {
+        let caps = Caps {
+            rgb: false,
+            palette_colours: 256,
+            theme_palette: false,
+            sync: false,
+            bce: true,
+            xterm: true,
+            colours: 256,
+            overlay: false,
+        };
+        let mut c = Compositor::default();
+        let t0 = std::time::Instant::now();
+        assert!(c.paced(t0, true), "the first frame is never held");
+        let _ = c.frame(vtmux_vt::snapshot(&vtmux_vt::PaneTerm::new(4, 2, 0)), caps);
+        let sent = c.sent.expect("sent");
+        assert!(c.paced(sent, false), "no flood: at once");
+        assert_eq!(c.due(), None);
+        assert!(!c.paced(sent, true));
+        assert_eq!(c.due(), Some(sent + FRAME_INTERVAL));
+        assert!(c.ready(0, 4, 2));
+        assert_eq!(c.due(), None);
+        assert!(c.paced(sent + FRAME_INTERVAL, true));
+        assert_eq!(c.due(), None);
     }
 
     /// tty.c:82-83 thresholds for an 80x24 client: block at 15361 queued
