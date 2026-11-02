@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "macmini",
   "name": "keys_attached",
   "inputs": {
     "name": "keys_attached",
@@ -44,6 +44,14 @@
           "-g",
           "prefix2",
           "C-a"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "default-command",
+          "PS1='$ ' exec sh"
         ]
       },
       {
@@ -166,7 +174,16 @@
       }
     },
     {
-      "step": 8,
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
       "observation": {
         "kind": "cli",
         "stdout": "2\n",
@@ -175,7 +192,7 @@
       }
     },
     {
-      "step": 11,
+      "step": 12,
       "observation": {
         "kind": "cli",
         "stdout": "mx\n",
@@ -184,7 +201,7 @@
       }
     },
     {
-      "step": 14,
+      "step": 15,
       "observation": {
         "kind": "cli",
         "stdout": "3\n",
@@ -193,7 +210,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 18,
       "observation": {
         "kind": "cli",
         "stdout": "$ |\n\n\n\n",
@@ -202,7 +219,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 21,
       "observation": {
         "kind": "cli",
         "stdout": "",

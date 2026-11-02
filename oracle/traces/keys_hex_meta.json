@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "macmini",
   "name": "keys_hex_meta",
   "inputs": {
     "name": "keys_hex_meta",
@@ -23,7 +23,7 @@
           "5",
           "sh",
           "-c",
-          "stty raw -echo; tmux wait-for -S raw; exec cat -v"
+          "stty raw -echo; tmux wait-for -S raw; LC_ALL=C exec cat -v"
         ]
       },
       {

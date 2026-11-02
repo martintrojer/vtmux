@@ -5,6 +5,9 @@ steps = [
   { wait_for = "ready" },
   { run = ["bind", "-n", "M-x", "rename-window", "mx"] },
   { run = ["set", "-g", "prefix2", "C-a"] },
+  # The splits' shell prints exactly `$ `: a login sh would read the
+  # host's /etc/profile (macOS sets PS1 to host and user there).
+  { run = ["set", "-g", "default-command", "PS1='$ ' exec sh"] },
   { attach = { session = "a" } },
   { settle = {} },
   { keys = "\u0002%" },
