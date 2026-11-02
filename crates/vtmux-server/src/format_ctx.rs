@@ -79,6 +79,8 @@ pub struct ClientView {
     pub last_session: Option<SessionId>,
     /// `#{client_termfeatures}` (`tty_get_features(c->term_features)`).
     pub termfeatures: String,
+    /// `#{client_termtype}`: the terminal's XTVERSION text.
+    pub termtype: String,
     /// `#{client_colours}`; `None` before the terminal is open
     /// (format.c `format_cb_client_colours` needs `TTY_STARTED`).
     pub colours: Option<u32>,
@@ -235,7 +237,7 @@ impl<'a> Ctx<'a> {
                 "0".to_owned()
             }
             "client_termname" => c.term_name.clone(),
-            "client_termtype" => String::new(),
+            "client_termtype" => c.termtype.clone(),
             "client_tty" => c.tty.clone()?,
             "client_flags" => c.flags(),
             "client_control_mode" => flag(c.control),
@@ -566,6 +568,12 @@ impl<'a> Ctx<'a> {
             "mouse_all_flag" => flag(p.term.mouse_modes().tracking == MouseTracking::All),
             "mouse_sgr_flag" => flag(p.term.mouse_modes().sgr),
             "mouse_utf8_flag" => flag(p.term.mouse_modes().utf8),
+            "pane_key_mode" => match self.model.pane_key_mode(p.id)? {
+                vtmux_vt::KeyMode::Standard => "VT10x",
+                vtmux_vt::KeyMode::Extended1 => "Ext 1",
+                vtmux_vt::KeyMode::Extended2 => "Ext 2",
+            }
+            .to_owned(),
             "history_size" => p.term.history_size().to_string(),
             "history_limit" => p.history_limit.to_string(),
             "pane_in_mode" => p.modes.len().to_string(),

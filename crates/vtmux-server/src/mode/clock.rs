@@ -58,6 +58,8 @@ const STYLE_24_SECONDS: i64 = 3;
 /// One clock mode on a pane's stack (`struct window_clock_mode_data`).
 #[derive(Clone, Debug)]
 pub struct ClockMode {
+    /// The key mode of the mode's screen (`#{pane_key_mode}`).
+    pub key_mode: vtmux_vt::KeyMode,
     sx: usize,
     sy: usize,
     /// `data->tim`: the time last drawn, to see a new second.
@@ -110,6 +112,7 @@ impl ClockMode {
     #[must_use]
     pub fn new(sx: usize, sy: usize) -> Self {
         Self {
+            key_mode: vtmux_vt::KeyMode::Standard,
             sx,
             sy,
             tim: now(),
@@ -227,15 +230,18 @@ impl Model {
     /// The rest of `window_pane_set_mode` for clock mode, after the check
     /// for it on top.
     fn push_clock_mode(&mut self, p: PaneId) -> bool {
+        let key_mode = super::screen_key_mode(self);
         let Some(pane) = self.panes.get_mut(&p) else {
             return false;
         };
         let entry = match pane.modes.iter().position(|m| matches!(m, Mode::Clock(_))) {
             Some(i) => pane.modes.remove(i),
-            None => Mode::Clock(ClockMode::new(
-                usize::from(pane.term.cols()),
-                usize::from(pane.term.rows()),
-            )),
+            None => {
+                let mut m =
+                    ClockMode::new(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
+                m.key_mode = key_mode;
+                Mode::Clock(m)
+            }
         };
         let previous = pane.modes.first().map(Mode::name);
         let name = entry.name();

@@ -79,6 +79,8 @@ pub enum Tag {
 /// `struct window_tree_modedata`.
 #[derive(Clone, Debug)]
 pub struct WindowTree {
+    /// The key mode of the mode's screen (`#{pane_key_mode}`).
+    pub key_mode: vtmux_vt::KeyMode,
     pub tree: ModeTree<Tag, Item>,
     format: String,
     key_format: String,
@@ -401,6 +403,7 @@ impl WindowTree {
         }
         tree.view_name = Some("preview");
         Self {
+            key_mode: vtmux_vt::KeyMode::Standard,
             tree,
             format: o.format.unwrap_or_else(|| DEFAULT_FORMAT.to_owned()),
             key_format: o
