@@ -219,11 +219,7 @@ pub(crate) mod tests {
 
     /// The pane's drawn screen rows, as text.
     fn rows(server: &Server, p: PaneId, s: SessionId) -> (Vec<String>, Option<(u16, u16)>) {
-        let source = crate::render::window::Source {
-            model: &server.model,
-            info: &server.info,
-            env: &server.global_env,
-        };
+        let source = server.render_source();
         let caps = Caps {
             rgb: false,
             palette_colours: 256,

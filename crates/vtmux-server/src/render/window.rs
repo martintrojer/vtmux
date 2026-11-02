@@ -28,6 +28,8 @@ pub struct Source<'a> {
     pub model: &'a Model,
     pub info: &'a ServerInfo,
     pub env: &'a Environ,
+    /// The attached clients (`#{session_attached_list}`).
+    pub clients: std::rc::Rc<[crate::format_ctx::ClientView]>,
 }
 
 impl Source<'_> {
@@ -257,7 +259,7 @@ impl Source<'_> {
                     == 1;
                 (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
             }
-            Some(crate::mode::Mode::Tree(t)) => (self.tree_screen(pane, &t.tree, caps), Vec::new()),
+            Some(crate::mode::Mode::Tree(t)) => (self.tree_screen(pane, t, caps), Vec::new()),
             _ => (vtmux_vt::snapshot(&pane.term), Vec::new()),
         };
         if let Some(prompt) = pane.mode_prompt.as_ref().filter(|m| m.shown(pane)) {
