@@ -5821,3 +5821,108 @@ fn focus_ring_border_drag_and_double_click() {
     a.keys(&c);
     assert_eq!(buffer_settles(&w), "beta");
 }
+
+/// The default pane bindings with drag callbacks and forwarding together:
+/// a pane with no mouse mode beside one with `?1000h`. `MouseDrag1Pane`
+/// (`if -F '#{||:#{pane_in_mode},#{mouse_any_flag}}' { send -M }
+/// { copy-mode -M }`) drag-selects in the first and is forwarded to the
+/// second; `DoubleClick1Pane` copies the word in the first and is
+/// forwarded to the second; `WheelUpPane` enters copy mode in the first
+/// and is forwarded to the second; `MouseDrag1Border` still resizes.
+#[test]
+fn default_bindings_drag_or_forward() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let file = w.home.path().join("mouse");
+        let text = format!("stty raw -echo; printf '{TEXT}'; exec cat");
+        let recorder = mouse_recorder(&file, r"\033[?1000h");
+        for cmd in [
+            &[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", &text,
+            ][..],
+            &["splitw", "-h", "-t", "a", "sh", "-c", &recorder],
+            &["set", "-g", "status-right", ""],
+            &["select-pane", "-t", "a:0.0", "-T", "t"],
+            &["select-pane", "-t", "a:0.1", "-T", "t"],
+        ] {
+            assert!(w.cli(cmd).status.success(), "{cmd:?}");
+        }
+        let end = Instant::now() + Duration::from_secs(5);
+        while display_t(&w, "a:0.1", "#{mouse_any_flag}") != "1" {
+            assert!(Instant::now() < end);
+            thread::sleep(Duration::from_millis(20));
+        }
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| pane_text(a).contains("[a]"));
+        a.wait(|a| pane_text(a).contains("gamma"));
+        let mut got = Vec::new();
+        // Drag in the left pane: "beta" (column 6, row 0) to row 1.
+        a.keys(b"\x1b[<0;7;1M\x1b[<32;8;1M\x1b[<32;4;2M\x1b[<0;4;2m");
+        got.push(format!("drag {:?}", buffer_settles(&w)));
+        got.push(settles(&w, "#{pane_in_mode}", "0"));
+        thread::sleep(Duration::from_millis(400));
+        // Double click on "beta" in the left pane.
+        assert!(w.cli(&["delete-buffer"]).status.success());
+        let mut c = click(9, 1);
+        c.extend(click(9, 1));
+        a.keys(&c);
+        got.push(format!("double {:?}", buffer_settles(&w)));
+        got.push(settles(&w, "#{pane_in_mode}", "0"));
+        thread::sleep(Duration::from_millis(400));
+        // The wheel over the left pane: copy mode.
+        a.keys(b"\x1b[<64;5;3M");
+        let end = Instant::now() + Duration::from_secs(5);
+        while display_t(&w, "a:0.0", "#{pane_in_mode}") != "1" && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        got.push(format!(
+            "wheel left {}",
+            display_t(&w, "a:0.0", "#{pane_in_mode}")
+        ));
+        assert!(
+            w.cli(&["send", "-t", "a:0.0", "-X", "cancel"])
+                .status
+                .success()
+        );
+        thread::sleep(Duration::from_millis(400));
+        // The right pane: a press (which selects it), a drag, a release,
+        // the wheel both ways, a double click; all to the program.
+        a.keys(b"\x1b[<0;25;3M\x1b[<32;26;4M\x1b[<32;27;4M\x1b[<0;27;4m");
+        a.keys(b"\x1b[<64;25;3M\x1b[<65;25;3M");
+        thread::sleep(Duration::from_millis(400));
+        let mut c = click(30, 5);
+        c.extend(click(30, 5));
+        a.keys(&c);
+        got.push(format!("right {}", recorded(&mut a, &file)));
+        got.push(format!(
+            "right mode {}, buffer {:?}",
+            display_t(&w, "a:0.1", "#{pane_in_mode}"),
+            top_buffer(&w)
+        ));
+        // The border (column 20) dragged to column 14.
+        let before = geometry(&w);
+        a.keys(b"\x1b[<0;21;3M\x1b[<32;18;3M\x1b[<32;15;3M\x1b[<0;15;3m");
+        got.push(changed(&before, || geometry(&w)));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    // The left pane is 20 wide: row 1 is the wrapped "ta". ?1000h gets
+    // the press and release but not the motion between.
+    assert_eq!(
+        seen[1],
+        [
+            r#"drag "beta-gamma delta""#,
+            "0",
+            r#"double "beta""#,
+            "0",
+            "wheel left 1",
+            concat!(
+                r"right \u{1b}[M $#\u{1b}[M#&$\u{1b}[M`$#\u{1b}[Ma$#",
+                r"\u{1b}[M )%\u{1b}[M#)%\u{1b}[M )%\u{1b}[M#)%"
+            ),
+            r#"right mode 0, buffer "beta""#,
+            "%0 0,0 14x9\n%1 15,0 25x9",
+        ]
+    );
+}
