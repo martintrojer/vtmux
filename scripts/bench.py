@@ -3,7 +3,7 @@
 
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
-Scenarios: idle scale history startup throughput (default: all).
+Scenarios: idle scale history startup throughput owner_idle owner_startup (default: all).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
@@ -18,13 +18,18 @@ Medians over RUNS runs. A Markdown table goes to stdout, a JSON file to $OUT.jso
 Env: RUNS (3), IDLE_SECS (60), VTMUX (target/release/vtmux), VTMUX_REFERENCE_TMUX (the
 `cargo xtask ref-tmux` cache), BASE (another vtmux binary, shown as `base`), OUT
 (default target/bench/bench-<utc>), NO_BUILD=1 (skip cargo build), STARTUP_N (100),
-THROUGHPUT_MB (100), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s). Run cargo through `mise exec --`.
+THROUGHPUT_MB (100), OWNER_STARTUP_N (20), OWNER_TMUX_CONF / OWNER_PLUGINS / OWNER_MUCREW (the
+owner's config, plugin and mu-crew dirs that owner_* copy; default ~/.tmux.conf, ~/.tmux/plugins,
+~/.local/share/mu-crew-dotfiles), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s). Run cargo through `mise exec --`.
 """
+import hashlib
 import json
 import os
 import platform
 import random
+import re
 import resource
+import signal
 import shutil
 import statistics
 import subprocess
@@ -185,6 +190,10 @@ class Env:
         self.bins = bins
         self.work = tempfile.mkdtemp(prefix="vtmux-bench-")
         self.n = 0
+
+    def next(self):
+        self.n += 1
+        return self.n
 
     def server(self, which):
         self.n += 1
@@ -354,6 +363,228 @@ def scenario_throughput(env):
             "throughput": results}
 
 
+# ---- owner config scenarios (owner_idle, owner_startup) --------------------------
+# The owner's real ~/.tmux.conf, TPM plugins and mu-crew-dotfiles, copied into a hermetic
+# $HOME per run (HOME=<work>/<label>/home) so nothing touches ~ or the owner's own server.
+# The binary under test is symlinked as <work>/<label>/bin/tmux, first on PATH, because the
+# config, TPM and the poller all run `tmux` from PATH (vtmux run as tmux: D20).
+# Changes to the copy: @fingers-skip-wizard 1 on top (no install wizard) and
+# @mu_crew_probes "uptime" (the cheapest probe: a /proc read every 60 s, no subprocess; the
+# owner's real list is "murmur_remote memory cpu uptime muzzle").
+
+OWNER_PROBES = "uptime"
+OWNER_STARTUP_N = int(os.environ.get("OWNER_STARTUP_N", "20"))
+
+
+def _git_rev(path):
+    rev = sh("git", "-C", path, "rev-parse", "--short", "HEAD") or "no git"
+    return rev + ("+dirty" if sh("git", "-C", path, "status", "--porcelain", "--untracked-files=no") else "")
+
+
+def owner_sources():
+    """Where the owner's files are, and the revisions recorded in the output."""
+    if not LINUX:
+        raise Skip("the owner config scenarios run on Linux only (the poller, TPM and paths are the Linux ones)")
+    home = os.path.expanduser("~")
+    conf = os.path.realpath(os.environ.get("OWNER_TMUX_CONF") or os.path.join(home, ".tmux.conf"))
+    src = {"conf": conf,
+           "plugins": os.environ.get("OWNER_PLUGINS") or os.path.join(home, ".tmux/plugins"),
+           "mucrew": os.environ.get("OWNER_MUCREW") or os.path.join(home, ".local/share/mu-crew-dotfiles")}
+    for k, v in src.items():
+        if not os.path.exists(v):
+            raise Skip(f"owner {k} not found at {v}")
+    with open(conf, "rb") as f:
+        sha = hashlib.sha256(f.read()).hexdigest()[:12]
+    revs = {"tmux.conf": f"{_git_rev(os.path.dirname(conf))} sha256:{sha}", "mu-crew-dotfiles": _git_rev(src["mucrew"])}
+    for d in sorted(os.listdir(src["plugins"])):
+        revs[f"plugin {d}"] = _git_rev(os.path.join(src["plugins"], d))
+    src["revs"] = revs
+    return src
+
+
+def _environ_has(pid, marker):
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            return marker in f.read().split(b"\0")
+    except OSError:
+        return False
+
+
+def procs_with_home(home):
+    """(pid, argv) of every process whose environment has HOME=<home>: everything the hermetic
+    server started (its panes, run-shell jobs, the poller). Matched by environment, never by
+    name, so neither the bench's own shell nor the owner's real processes can match."""
+    marker = f"HOME={home}".encode()
+    found = []
+    for d in os.listdir("/proc"):
+        if d.isdigit() and int(d) != os.getpid() and _environ_has(d, marker):
+            try:
+                with open(f"/proc/{d}/cmdline", "rb") as f:
+                    argv = f.read().replace(b"\0", b" ").decode(errors="replace").strip()
+            except OSError:
+                continue
+            found.append((int(d), argv))
+    return found
+
+
+def proc_cpu_ms(pid, children=False):
+    """utime+stime of the process; with children also cutime+cstime (its reaped children)."""
+    with open(f"/proc/{pid}/stat") as f:
+        fields = f.read().rsplit(")", 1)[1].split()
+    n = 4 if children else 2
+    return sum(int(x) for x in fields[11:11 + n]) * 1000 / CLK_TCK
+
+
+class OwnerServer(Server):
+    """A server started with the owner's config in a hermetic HOME."""
+
+    def __init__(self, binary, work, label, src):
+        root = os.path.join(work, label)
+        self.home = os.path.join(root, "home")
+        bindir = os.path.join(root, "bin")
+        os.makedirs(bindir)
+        os.symlink(binary, os.path.join(bindir, "tmux"))
+        super().__init__(os.path.join(bindir, "tmux"), work, label)
+        self.root = root
+        ignore = shutil.ignore_patterns(".git", "target", "node_modules")
+        shutil.copytree(src["plugins"], os.path.join(self.home, ".tmux/plugins"), symlinks=True, ignore=ignore)
+        shutil.copytree(src["mucrew"], os.path.join(self.home, ".local/share/mu-crew-dotfiles"), symlinks=True, ignore=ignore)
+        with open(src["conf"]) as f:
+            conf = f.read()
+        conf, n = re.subn(r'^set -g @mu_crew_probes .*$', f'set -g @mu_crew_probes "{OWNER_PROBES}"', conf, flags=re.M)
+        if n != 1:
+            raise RuntimeError(f"expected one `set -g @mu_crew_probes` line in {src['conf']}, found {n}")
+        with open(os.path.join(self.home, ".tmux.conf"), "w") as f:
+            f.write("set -g @fingers-skip-wizard 1\n" + conf)
+        for k in [k for k in self.env if k.startswith("XDG_")]:
+            del self.env[k]
+        self.env.update(HOME=self.home, PATH=bindir + os.pathsep + self.env.get("PATH", ""))
+
+    def run(self, *args, check=True):
+        # no -f: the config is the one in $HOME, found the way a user's tmux finds it
+        r = subprocess.run([self.bin, "-L", self.label, *args], env=self.env, capture_output=True, text=True, timeout=120)
+        if check and r.returncode:
+            raise RuntimeError(f"{self.bin} {' '.join(args[:6])}: {r.stderr.strip()}")
+        return r.stdout
+
+    def poller_pid(self):
+        """The poller's pid from its pidfile (under the hermetic HOME), or None."""
+        d = os.path.join(self.home, ".local/state/mu-crew")
+        try:
+            for name in os.listdir(d):
+                if name.startswith("poller-") and name.endswith(".pid"):
+                    pid = int(open(os.path.join(d, name)).read().strip())
+                    if os.path.exists(f"/proc/{pid}"):
+                        return pid
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def cleanup(self):
+        """Wait up to 5 s for everything carrying our HOME to exit by itself (the poller leaves
+        when its server is gone), then SIGKILL what is left and return it (empty = clean)."""
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and procs_with_home(self.home):
+            time.sleep(0.05)
+        left = procs_with_home(self.home)
+        for p, _ in left:
+            try:
+                os.kill(p, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        while procs_with_home(self.home):
+            time.sleep(0.02)
+        shutil.rmtree(self.root, ignore_errors=True)
+        return left
+
+
+def scenario_owner_idle(env):
+    src = owner_sources()
+    leftovers = []
+
+    def one(which):
+        s = OwnerServer(env.bins[which], env.work, f"o{os.getpid()}i{env.next()}", src)
+        try:
+            s.run("new", "-d", "-s", "idle", "cat")
+            s.find_pid()
+            probes = s.run("show", "-gv", "@mu_crew_probes").strip()
+            if probes != OWNER_PROBES:
+                raise RuntimeError(f"owner config not loaded: @mu_crew_probes = {probes!r}")
+            deadline = time.monotonic() + 15
+            while not s.poller_pid() and time.monotonic() < deadline:
+                time.sleep(0.1)
+            poller = s.poller_pid()
+            if not poller:
+                raise RuntimeError("the mu-crew poller did not start")
+            time.sleep(10)  # settle: TPM's background init and the poller's first rounds
+            pc0 = proc_cpu_ms(poller, children=True)
+            with Phase(s.pid, fine=True) as p:
+                time.sleep(IDLE_SECS)
+            if s.poller_pid() != poller:
+                raise RuntimeError("the poller died during the idle phase")
+            return {"rss_mb": rss_kb(s.pid) / 1024, "cpu_ms": p.cpu, "wakeups_per_s": p.wakeups / p.wall,
+                    "poller_cpu_ms": proc_cpu_ms(poller, children=True) - pc0}
+        finally:
+            try:
+                s.kill()
+            finally:
+                leftovers.extend(s.cleanup())
+    res = env.per_binary(one)
+    return {"title": f"owner_idle (owner config, 1 session, {IDLE_SECS:g} s)", "results": res,
+            "config": src["revs"], "leftovers": [f"{p} {a}" for p, a in leftovers]}
+
+
+def scenario_owner_startup(env):
+    src = owner_sources()
+    leftovers = []
+
+    def one(which):
+        ms = []
+        for _ in range(OWNER_STARTUP_N):
+            s = OwnerServer(env.bins[which], env.work, f"o{os.getpid()}s{env.next()}", src)
+            try:
+                t0 = time.monotonic()
+                out = s.run("start-server", ";", "display", "-p", "ok")  # the config is sourced before the first command runs
+                ms.append((time.monotonic() - t0) * 1000)
+                if out.strip() != "ok":
+                    raise RuntimeError(f"owner_startup: display -p ok printed {out!r}")
+                # the server may already have exited (no session): that is fine
+                s.run("kill-server", check=False)
+            finally:
+                leftovers.extend(s.cleanup())
+        return {"median_ms": med(ms), "min_ms": min(ms), "max_ms": max(ms), "n": len(ms)}
+    res = {w: one(w) for w in env.bins}
+    return {"title": f"owner_startup (start-server with the owner config until `display -p ok` answers, {OWNER_STARTUP_N}x)",
+            "results": res, "config": src["revs"], "leftovers": [f"{p} {a}" for p, a in leftovers]}
+
+
+def _owner_footer(res):
+    left = res["leftovers"]
+    out = [f"\nProcesses still carrying the hermetic HOME 5 s after kill-server (the bench SIGKILLed them), summed over all runs: {len(left)}"]
+    out += [f"- {x}" for x in left[:10]]
+    out.append("\nConfig snapshot: " + "; ".join(f"{k} {v}" for k, v in res["config"].items()))
+    return "\n".join(out) + "\n"
+
+
+def render_owner_idle(res):
+    rows = [[b, fmt(m["rss_mb"]), fmt(m["cpu_ms"], 2), fmt(m["wakeups_per_s"], 2), fmt(m["poller_cpu_ms"], 0)]
+            for b, m in res["results"].items()]
+    return (f"### {res['title']}\n\n"
+            + table(["binary", "RSS MB", "server CPU ms", "server wakeups/s", "poller CPU ms (outside the server)"], rows)
+            + "\n\nThe poller column is the mu-crew-poller process itself plus the `tmux` clients it ran, not the server.\n"
+            + _owner_footer(res))
+
+
+def render_owner_startup(res):
+    rows = [[b, fmt(m["median_ms"]), fmt(m["min_ms"]), fmt(m["max_ms"]), str(m["n"])] for b, m in res["results"].items()]
+    return f"### {res['title']}\n\n" + table(["binary", "median ms", "min ms", "max ms", "runs"], rows) + "\n" + _owner_footer(res)
+
+
+OWNER_FUNCS = {"owner_idle": scenario_owner_idle, "owner_startup": scenario_owner_startup}
+OWNER_RENDER = {"owner_idle": render_owner_idle, "owner_startup": render_owner_startup}
+ALL += list(OWNER_FUNCS)
+
+
 # ---- output -----------------------------------------------------------------
 
 def fmt(v, nd=1):
@@ -367,6 +598,8 @@ def table(header, rows):
 
 
 def render(name, res):
+    if name in OWNER_RENDER:
+        return OWNER_RENDER[name](res)
     out = [f"### {res['title']}", ""]
     if name == "idle":
         rows = [[b, fmt(m["rss_mb"]), fmt(m["cpu_ms"], 2), fmt(m["wakeups_per_s"], 2)] for b, m in res["results"].items()]
@@ -436,6 +669,7 @@ def main():
     env = Env(bins)
     funcs = {"idle": scenario_idle, "scale": scenario_scale, "history": scenario_history,
              "startup": scenario_startup, "throughput": scenario_throughput}
+    funcs.update(OWNER_FUNCS)
     results, md = {}, []
     try:
         for name in scenarios:
