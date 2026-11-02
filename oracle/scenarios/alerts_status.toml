@@ -15,11 +15,15 @@ steps = [
   { screen = {} },
   { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
   { run = ["select-window", "-t", "a:1"] },
+  # The switch redraws the client: wait for that output (README, *Races
+  # under load*), or a slow host shows the old window.
+  { settle = { react = true } },
   { screen = {} },
   { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
   { run = ["send-keys", "-t", "a:2", "Enter"] },
   { screen = {} },
   { run = ["next-window", "-a"] },
+  { settle = { react = true } },
   { screen = {} },
   { run = ["lsw", "-F", "#{window_index}#{window_flags}"] },
 ]
