@@ -424,8 +424,14 @@ impl Server {
                     && !self.clients[&id].flags.read_only
                     && self.model.panes[&p].term.bracketed_paste()
                     && self.model.panes[&p].modes.is_empty()
+                    && self.model.panes[&p].io.is_some()
+                    && !self.model.panes[&p].input_off
                 {
-                    self.write_pane(p, if start { b"\x1b[200~" } else { b"\x1b[201~" });
+                    // window_pane_paste (window.c:2053-2069): the marker,
+                    // then a copy of its bytes to the synchronized panes.
+                    let marker: &[u8] = if start { b"\x1b[200~" } else { b"\x1b[201~" };
+                    self.write_pane(p, marker);
+                    self.copy_to_synchronized(p, |_, _| marker.to_vec());
                 }
             }
             KeyKind::Key(key) => {
@@ -442,7 +448,7 @@ impl Server {
                     && !self.clients[&id].flags.read_only
                     && let Some(p) = self.client_pane(id)
                 {
-                    self.forward_key(p, Some(id), &key);
+                    self.forward_key(p, Some(id), &key, pasting);
                 }
             }
         }

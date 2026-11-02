@@ -12,7 +12,7 @@ use vtmux_core::ids::PaneId;
 use super::Item;
 use crate::cmdq::{End, NewBatch};
 use crate::jobs::JobSpec;
-use crate::keys::{KeyModes, send_keys_bytes};
+use crate::keys::{KeyModes, Sent, send_keys_item};
 use crate::mode::PaneMode;
 use crate::mode::copy::{Action, CommandError, Copied, Pipe};
 use crate::server::{ClientId, Server};
@@ -81,14 +81,14 @@ pub fn exec(
     }
     let literal = args.flag('l');
     let hex = args.flag('H');
-    let Some(pane) = server.model.panes.get_mut(&p) else {
+    let Some(pane) = server.model.panes.get(&p) else {
         return Ok(());
     };
-    let modes = KeyModes {
+    let modes_of = |pane: &crate::model::Pane| KeyModes {
         app_cursor: pane.term.app_cursor(),
         app_keypad: pane.term.app_keypad(),
     };
-    let mut bytes = Vec::new();
+    let mut sent = Vec::new();
     for _ in 0..repeat {
         for arg in &args.positionals {
             // `utf8_fromcstr` keeps a byte that is not UTF-8 as a one-byte
@@ -99,18 +99,29 @@ pub fn exec(
                 if let Ok(b) = u8::from_str_radix(arg, 16)
                     && !arg.is_empty()
                 {
-                    bytes.push(b);
+                    sent.push(Sent::Raw(vec![b]));
                 }
                 continue;
             }
-            bytes.extend(send_keys_bytes(arg, literal, modes));
+            sent.push(send_keys_item(arg, literal));
         }
     }
+    let bytes_for = |modes: KeyModes| -> Vec<u8> {
+        sent.iter().flat_map(|s| s.bytes(modes)).collect()
+    };
+    let bytes = bytes_for(modes_of(pane));
     // window_pane_key (window.c:2095): nothing reaches an input-off pane.
-    if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
-        io.write(&bytes);
-    }
-    server.pane_output_queued(p);
+    server.write_pane(p, &bytes);
+    // window_pane_copy_key: each key again for the synchronized panes, in
+    // their own key modes.
+    server.copy_to_synchronized(p, |server, other| {
+        server
+            .model
+            .panes
+            .get(&other)
+            .map(|o| bytes_for(modes_of(o)))
+            .unwrap_or_default()
+    });
     Ok(())
 }
 
