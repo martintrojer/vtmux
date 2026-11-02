@@ -367,6 +367,9 @@ fn mode_keys(
 /// or for a literal key (`-H`) the byte as it is (`input_key_pane`,
 /// input-keys.c:585-589).
 fn pane_key(server: &mut Server, p: PaneId, key: CoreKey, literal: Option<u8>) {
+    let Some(modes) = server.model.key_modes(p) else {
+        return;
+    };
     let Some(pane) = server.model.panes.get_mut(&p) else {
         return;
     };
@@ -376,13 +379,7 @@ fn pane_key(server: &mut Server, p: PaneId, key: CoreKey, literal: Option<u8>) {
         let Some(key) = crate::keys::Key::from_core(key) else {
             return;
         };
-        crate::keys::encode(
-            &key,
-            KeyModes {
-                app_cursor: pane.term.app_cursor(),
-                app_keypad: pane.term.app_keypad(),
-            },
-        )
+        crate::keys::encode(&key, modes)
     };
     if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
         io.write(&bytes);

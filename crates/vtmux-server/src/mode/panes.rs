@@ -99,6 +99,8 @@ pub struct PanesMode {
     source: Option<Rc<Source>>,
     /// `-k`: the pane is killed when the mode ends.
     pub kill: bool,
+    /// The key mode of the mode's screen (`#{pane_key_mode}`).
+    pub key_mode: vtmux_vt::KeyMode,
 }
 
 impl PaneMode for PanesMode {
@@ -190,6 +192,7 @@ pub fn enter(
         template,
         source: cmd_source,
         kill: args.flag('k'),
+        key_mode: crate::mode::screen_key_mode(&server.model),
     };
     // A mode that is not stacked goes first (window.c:1755-1756).
     if server.model.panes[&p]

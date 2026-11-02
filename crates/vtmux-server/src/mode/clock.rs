@@ -234,14 +234,13 @@ impl Model {
         let Some(pane) = self.panes.get_mut(&p) else {
             return false;
         };
-        let entry = match pane.modes.iter().position(|m| matches!(m, Mode::Clock(_))) {
-            Some(i) => pane.modes.remove(i),
-            None => {
-                let mut m =
-                    ClockMode::new(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
-                m.key_mode = key_mode;
-                Mode::Clock(m)
-            }
+        let entry = if let Some(i) = pane.modes.iter().position(|m| matches!(m, Mode::Clock(_))) {
+            pane.modes.remove(i)
+        } else {
+            let mut m =
+                ClockMode::new(usize::from(pane.term.cols()), usize::from(pane.term.rows()));
+            m.key_mode = key_mode;
+            Mode::Clock(m)
         };
         let previous = pane.modes.first().map(Mode::name);
         let name = entry.name();
