@@ -267,11 +267,7 @@ impl Server {
         let s = c.attached?;
         let cols = c.hello.as_ref()?.tty.as_ref()?.cols;
         let lines = self.status_line_size(c);
-        let source = crate::render::window::Source {
-            model: &self.model,
-            info: &self.info,
-            env: &self.global_env,
-        };
+        let source = self.render_source();
         let ctx = self.format_ctx(Found::from_session(&self.model, s), Some(id));
         let ranges = crate::render::status::status_ranges(
             &source,
