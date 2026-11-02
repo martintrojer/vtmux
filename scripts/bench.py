@@ -9,8 +9,9 @@ Scenarios: idle scale history startup throughput owner_idle owner_startup throug
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
 kill-server. Only the server process is measured, never its pane children:
-  Linux  CPU     /proc/<pid>/stat utime+stime (fields 14+15) deltas per phase; idle uses
-                 the nanosecond /proc/<pid>/task/*/schedstat sum when present
+  Linux  CPU     /proc/<pid>/stat utime+stime (fields 14+15) deltas per phase; idle and
+                 the attached scenarios use the nanosecond /proc/<pid>/task/*/schedstat
+                 sum when present
          RSS     settled VmRSS; per-phase peak VmHWM after `echo 5 > clear_refs`
          wakeups voluntary_ctxt_switches deltas (all threads)
   macOS  CPU/RSS `ps -o rss=,time=` sampled every 100 ms (peak = max sample)
@@ -647,8 +648,11 @@ class Client:
                 break
             self.bytes += len(b)
             data = tail + b
-            self.bsu += data.count(BSU)
-            tail = data[-8:]
+            # Carry one byte less than a BSU, so one that ends a read is
+            # not counted again with the next; one split across two is
+            # counted once.
+            self.bsu += (tail[-(len(BSU) - 1):] + b).count(BSU)
+            tail = data[-(len(QUERY) - 1):]
             if self.reply and not self.replied and QUERY in data:
                 self.replied = True
                 os.write(self.master, b"\x1b[?2026;2$y")
