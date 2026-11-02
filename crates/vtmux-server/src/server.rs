@@ -283,6 +283,10 @@ pub struct Server {
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
     backlog: std::collections::BTreeSet<PaneId>,
+    /// Panes whose output this turn started a burst (they were not in the
+    /// backlog): a key's echo or a prompt, not more of a flood. A frame
+    /// that shows one is not paced ([`crate::render::FRAME_INTERVAL`]).
+    burst_started: std::collections::BTreeSet<PaneId>,
     /// Command clients whose commands are done, with their exit codes:
     /// told after this turn's frames, as `server_client_loop` runs
     /// `server_client_check_exit` for a client after the redraws of the
@@ -493,6 +497,7 @@ impl Server {
             key_after: None,
             jobs: crate::jobs::Jobs::default(),
             backlog: std::collections::BTreeSet::new(),
+            burst_started: std::collections::BTreeSet::new(),
             pending_exits: Vec::new(),
             waits: WaitChannels::default(),
             files: BTreeMap::new(),
@@ -537,7 +542,7 @@ impl Server {
             full_turn = now;
             self.dispatch(&events);
             for p in std::mem::take(&mut self.backlog) {
-                self.pane_readable(p);
+                self.pane_readable(p, true);
             }
             self.expire_repeat(Instant::now());
             self.start_timers(Instant::now());
@@ -624,7 +629,8 @@ impl Server {
                         self.pane_writable(p);
                     }
                     if event.is_readable() || event.is_read_closed() {
-                        self.pane_readable(p);
+                        let flooding = self.backlog.contains(&p);
+                        self.pane_readable(p, flooding);
                     }
                 }
             }
@@ -1959,7 +1965,7 @@ impl Server {
 
     /// This turn's frames, then the command clients whose commands are
     /// done ([`Self::pending_exits`]) and the format jobs; the turn's pane
-    /// redraws are used up.
+    /// redraws and bursts are used up.
     fn render_and_exit(&mut self) {
         self.render_clients();
         for (id, code) in std::mem::take(&mut self.pending_exits) {
@@ -1967,6 +1973,7 @@ impl Server {
         }
         self.format_jobs_flush();
         self.model.redraw_panes.clear();
+        self.burst_started.clear();
     }
 
     fn render_clients(&mut self) {
@@ -2095,14 +2102,20 @@ impl Server {
     /// frame; the client's `FrameAck` turns the loop and lands here again. A
     /// flood is then drawn at the rate the terminal takes it, and while a
     /// pane still has output waiting (the backlog) at most once per
-    /// [`crate::render::FRAME_INTERVAL`], not once per pane read. A pane's
+    /// [`crate::render::FRAME_INTERVAL`], not once per pane read, unless the
+    /// frame also shows a change the flood did not make
+    /// ([`Self::urgent_change`]). A pane's
     /// `PANE_REDRAW` (cleared at the end of this turn) becomes
     /// `CLIENT_REDRAWWINDOW`, as tmux's deferred redraw does.
     fn defer_frame(&mut self, id: ClientId, s: SessionId, queued: usize) -> bool {
         let flood = !self.backlog.is_empty();
+        let urgent = self.urgent_change(id, s);
         let Some(client) = self.clients.get_mut(&id) else {
             return true;
         };
+        if urgent {
+            client.compositor.expedite();
+        }
         if queued == 0 && client.compositor.paced(Instant::now(), flood) {
             return false;
         }
@@ -2116,6 +2129,32 @@ impl Server {
             client.status.request_window_redraw();
         }
         true
+    }
+
+    /// Whether client `id`'s next frame shows a change that is not flood
+    /// output, so the flood's pacing must not delay it: output that started
+    /// a burst in a pane of its current window (a key's echo next to a
+    /// flood), a pane of that window to redraw whole (a mode entered or
+    /// left, a screen switch), or a status or window redraw asked for.
+    fn urgent_change(&self, id: ClientId, s: SessionId) -> bool {
+        let Some(client) = self.clients.get(&id) else {
+            return false;
+        };
+        if client.status.redraw_pending() {
+            return true;
+        }
+        self.model
+            .current_of(s)
+            .is_some_and(|(_, w, _)| self.unpaced_change_in(w))
+    }
+
+    /// A pane of window `w` started a burst of output this turn or is to be
+    /// redrawn whole.
+    fn unpaced_change_in(&self, w: WindowId) -> bool {
+        self.burst_started
+            .iter()
+            .chain(&self.model.redraw_panes)
+            .any(|p| self.model.panes.get(p).is_some_and(|x| x.window == w))
     }
 
     /// The job handles for one frame: the status line's, and the pane
@@ -3339,7 +3378,9 @@ impl Server {
 
     /// Read a bounded amount from pane `p` (tmux reads once per libevent
     /// callback), so a pane flooding output cannot starve clients.
-    fn pane_readable(&mut self, p: PaneId) {
+    /// `flooding`: the pane was in the backlog, so what it wrote is more of
+    /// a flood rather than the start of a burst.
+    fn pane_readable(&mut self, p: PaneId, flooding: bool) {
         const READS_PER_TURN: usize = 1;
         let mut closed = false;
         for turn in 0.. {
@@ -3398,6 +3439,9 @@ impl Server {
                         w.activity_secs = crate::model::now_epoch();
                     }
                     self.model.alerts_queue(window, alerts::ACTIVITY);
+                    if !flooding {
+                        self.burst_started.insert(p);
+                    }
                     if redraw {
                         self.model.redraw_panes.insert(p);
                     }
@@ -3572,7 +3616,8 @@ impl Server {
                     if let Some(p) = found {
                         // Drain what is left, then the read side reports
                         // the close (EIO) and destroys the pane.
-                        self.pane_readable(p);
+                        let flooding = self.backlog.contains(&p);
+                        self.pane_readable(p, flooding);
                         let drained = self
                             .model
                             .panes
@@ -3695,4 +3740,31 @@ fn sig_name(sig: i32) -> String {
 
 fn int(n: u32) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mode::prompt::tests::setup;
+
+    /// Only a change a flood did not make lifts the pacing: a pane that
+    /// started a burst (not in the backlog when read) or one to redraw
+    /// whole, in the window shown; flood output alone does not.
+    #[test]
+    fn only_non_flood_changes_lift_the_pacing() {
+        let (mut server, p, s, _, dir) = setup();
+        let w = server.model.current_of(s).unwrap().1;
+        server.model.redraw_panes.clear();
+        server.backlog.insert(p);
+        assert!(!server.unpaced_change_in(w), "a flood alone is paced");
+        server.burst_started.insert(p);
+        assert!(server.unpaced_change_in(w), "a burst (a key's echo)");
+        server.burst_started.clear();
+        server.model.redraw_panes.insert(p);
+        assert!(server.unpaced_change_in(w), "a whole-pane redraw");
+        server.model.redraw_panes.clear();
+        let other = vtmux_core::ids::WindowId(w.0 + 1);
+        server.burst_started.insert(p);
+        assert!(!server.unpaced_change_in(other), "another window's pane");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

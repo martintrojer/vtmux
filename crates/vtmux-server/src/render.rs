@@ -107,8 +107,10 @@ impl Caps {
 /// composed whole (D14), so their cost follows how often they are drawn,
 /// not how much output arrived; tmux instead writes each pane update as it
 /// happens. A frame that comes sooner waits for the rest of the interval
-/// and then shows everything since. Without a flood (a key's echo) the
-/// frame goes at once.
+/// and then shows everything since. Without a flood, or when the frame
+/// also carries a change that is not flood output (a key's echo in a quiet
+/// pane, a mode or status redraw: [`Compositor::expedite`]), the frame goes
+/// at once.
 pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
 
 #[derive(Default)]
@@ -120,6 +122,9 @@ pub struct Compositor {
     sent: Option<std::time::Instant>,
     /// A frame was held back by [`FRAME_INTERVAL`] until then.
     due: Option<std::time::Instant>,
+    /// The next frame carries a change that is not flood output, so the
+    /// flood's pacing does not hold it back.
+    expedited: bool,
 }
 impl Compositor {
     /// Whether a frame may be composed `now`, with a pane flooding or not.
@@ -129,9 +134,17 @@ impl Compositor {
         let wait = self
             .sent
             .map(|t| t + FRAME_INTERVAL)
-            .filter(|&d| flood && d > now);
+            .filter(|&d| flood && !self.expedited && d > now);
         self.due = wait;
+        if wait.is_none() {
+            self.expedited = false;
+        }
         wait.is_none()
+    }
+    /// The next frame shows a change that is not flood output: it is not
+    /// paced. The next frame [`Self::paced`] lets through uses it up.
+    pub fn expedite(&mut self) {
+        self.expedited = true;
     }
     /// When a held-back frame is due: the loop wakes then.
     #[must_use]
@@ -435,6 +448,12 @@ mod tests {
         assert_eq!(c.due(), None);
         assert!(c.paced(sent + FRAME_INTERVAL, true));
         assert_eq!(c.due(), None);
+        // A change that is not flood output goes at once, flood or not,
+        // until a frame has carried it.
+        c.expedite();
+        assert!(c.paced(sent, true), "expedited: at once");
+        assert_eq!(c.due(), None);
+        assert!(!c.paced(sent, true), "that frame used it up");
     }
 
     /// tty.c:82-83 thresholds for an 80x24 client: block at 15361 queued
