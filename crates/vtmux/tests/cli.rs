@@ -2753,6 +2753,13 @@ fn initial_window_name_is_the_command() {
     );
 }
 
+/// Whether the reference's libc answers like glibc for bytes that are not
+/// UTF-8 and code points past U+10FFFF, as vtmux-core does on every system
+/// (compat/DIVERGENCES.md D-019). On macOS tmux 3.8 calls Darwin's
+/// `regexec`, `wctomb` and `isalnum`, which differ there, so the rows that
+/// test exactly that are compared on Linux only.
+const GLIBC_REFERENCE: bool = cfg!(target_os = "linux");
+
 /// Runs each argv in order (all through `World::run`).
 fn steps(w: &World, steps: &[&[&str]]) -> Vec<Run> {
     steps.iter().map(|a| w.run(a)).collect()
@@ -4457,11 +4464,22 @@ fn non_utf8_bytes_in_command_strings() {
     compare("non_utf8_bytes_in_command_strings", |w| {
         // reference: T display -p "c$(printf '\351')" | od -c  -> c 351
         let file = w.dir().join("f");
+        // \U00110000 and \U7fffffff: glibc's wctomb writes the old long
+        // forms, Darwin's fails (D-019).
+        let long_forms: &[u8] = if GLIBC_REFERENCE {
+            b"display -p \\U00110000\ndisplay -p \\U7fffffff\n"
+        } else {
+            b""
+        };
         std::fs::write(
             &file,
-            b"display -p \"c\\351\"\ndisplay -p \\U00110000\ndisplay -p \\U7fffffff\n\
-              display -p \\U80000000\nA=x\\377y\ndisplay -p \"$A\"\n\
-              %if \"\\377\"\ndisplay -p yes\n%endif\nrun -C \"display -p \\\"z\\351\\\"\"\n",
+            [
+                &b"display -p \"c\\351\"\n"[..],
+                long_forms,
+                b"display -p \\U80000000\nA=x\\377y\ndisplay -p \"$A\"\n\
+                  %if \"\\377\"\ndisplay -p yes\n%endif\nrun -C \"display -p \\\"z\\351\\\"\"\n",
+            ]
+            .concat(),
         )
         .unwrap();
         let f = file.to_str().unwrap().as_bytes().to_vec();
@@ -4475,8 +4493,13 @@ fn non_utf8_bytes_in_command_strings() {
             w.run_bytes(&[b"if", b"-F", b"1", b"display -p x\xe9"]),
             w.run_bytes(&[b"if", b"-F", b"x\xe9", b"display -p yes"]),
             w.run_bytes(&[b"display", b"-p", b"\\U00110000"]),
-            // A bad flag byte is reported as the byte.
-            w.run_bytes(&[b"display", b"-\xe9"]),
+            // A bad flag byte is reported as the byte. Darwin's isalnum is
+            // true for 0xe9 (`unknown flag`, D-019), so use 0x01 there.
+            if GLIBC_REFERENCE {
+                w.run_bytes(&[b"display", b"-\xe9"])
+            } else {
+                w.run_bytes(&[b"display", b"-\x01"])
+            },
             // Printed back as the command was written: octal for each byte.
             w.run_bytes(&[b"bind", b"-T", b"foo", b"x", b"display", b"a\xff"]),
             w.run_bytes(&[b"list-keys", b"-T", b"foo"]),
@@ -4517,8 +4540,18 @@ fn non_utf8_bytes_through_options_and_formats() {
             "#{n:@o}",
             "#{b:@o}",
             "#{q/e:@o}",
-            "#{s/b/Z/:@o}",
-            "#{s/./Z/:@o}",
+            // s/// runs regexec over the bytes, which Darwin's refuses
+            // for any byte that is not UTF-8 (D-019).
+            if GLIBC_REFERENCE {
+                "#{s/b/Z/:@o}"
+            } else {
+                "#{n:@o}"
+            },
+            if GLIBC_REFERENCE {
+                "#{s/./Z/:@o}"
+            } else {
+                "#{n:@o}"
+            },
             "#{m/r:a.b,#{@o}}",
             "#{m:a?b*,#{@o}}",
             "#{R:#{@o},2}",
@@ -4546,7 +4579,11 @@ fn non_utf8_bytes_through_options_and_formats() {
                 b"#{=2:@o}",
                 b"#{=-2:@o}",
                 b"#{p4:@o}|",
-                b"#{s/./x/:@o}",
+                if GLIBC_REFERENCE {
+                    b"#{s/./x/:@o}"
+                } else {
+                    b"#{n:@o}"
+                },
                 b"#{m:?,#{@o}}",
                 b"#{m/r:^.$,#{@o}}",
             ] {
@@ -4609,7 +4646,13 @@ fn plane16_characters_are_ordinary_text() {
             steps.push(w.run_bytes(&[
                 b"display",
                 b"-p",
-                b"#{s/./Z/:@p}|#{s/x*/-/:@p}|#{m/r:^a.b$,#{@p}}|#{m:a?b,#{@p}}|#{q:@p}",
+                // s/x*/-/ steps one byte into the character (D-003) and runs
+                // regexec on the rest, which Darwin's refuses (D-019).
+                if GLIBC_REFERENCE {
+                    b"#{s/./Z/:@p}|#{s/x*/-/:@p}|#{m/r:^a.b$,#{@p}}|#{m:a?b,#{@p}}|#{q:@p}"
+                } else {
+                    b"#{s/./Z/:@p}|#{m/r:^a.b$,#{@p}}|#{m:a?b,#{@p}}|#{q:@p}"
+                },
             ]));
         }
         steps.push(w.run(&["rename-session", p]));
