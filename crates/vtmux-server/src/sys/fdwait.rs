@@ -2,7 +2,9 @@
 //! sees it.
 
 use std::io;
-use std::os::fd::{AsRawFd, BorrowedFd};
+#[cfg(target_os = "macos")]
+use std::os::fd::AsRawFd;
+use std::os::fd::BorrowedFd;
 
 /// Block until `fd` is readable, at end of file, or in error (the next
 /// `read(2)` says which).
