@@ -354,8 +354,7 @@ pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
         // unless its Meta was an Escape prefix; without it, Meta is an
         // Escape before a named key (input-keys.c:658-671).
         let typed_implied = key.meta && !key.esc_prefix;
-        new.esc_prefix =
-            new.meta && !typed_implied && option.code() & KEYC_IMPLIED_META == 0;
+        new.esc_prefix = new.meta && !typed_implied && option.code() & KEYC_IMPLIED_META == 0;
         if new.base == Base::Named(Named::Backspace) {
             // `backspace BSpace`: no table entry for it, so it is ignored.
             return true;
