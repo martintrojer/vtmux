@@ -412,15 +412,40 @@ fn encode_char(c: char, key: &Key) -> Vec<u8> {
     out
 }
 
-/// The bytes `send-keys` writes for one argument: a key name if it is one,
-/// otherwise the text itself, character by character
+/// What `send-keys` injects for one argument: a key (named, encoded for
+/// each pane that gets it) or the text's own bytes
 /// (cmd-send-keys.c `cmd_send_keys_inject_string`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Sent {
+    Key(Key),
+    Raw(Vec<u8>),
+}
+
+impl Sent {
+    /// The bytes for a pane in `modes` (`input_key` on its screen).
+    #[must_use]
+    pub fn bytes(&self, modes: KeyModes) -> Vec<u8> {
+        match self {
+            Sent::Key(key) => encode(key, modes),
+            Sent::Raw(bytes) => bytes.clone(),
+        }
+    }
+}
+
+/// `send-keys`'s injection of one argument: a key name if it is one,
+/// otherwise the text itself, character by character.
+#[must_use]
+pub fn send_keys_item(arg: &str, literal: bool) -> Sent {
+    if !literal && let Some(key) = lookup(arg) {
+        return Sent::Key(key);
+    }
+    Sent::Raw(vtmux_core::rawstr::to_bytes(arg).into_owned())
+}
+
+/// The bytes `send-keys` writes for one argument, for a pane in `modes`.
 #[must_use]
 pub fn send_keys_bytes(arg: &str, literal: bool, modes: KeyModes) -> Vec<u8> {
-    if !literal && let Some(key) = lookup(arg) {
-        return encode(&key, modes);
-    }
-    vtmux_core::rawstr::to_bytes(arg).into_owned()
+    send_keys_item(arg, literal).bytes(modes)
 }
 
 #[cfg(test)]

@@ -1724,8 +1724,19 @@ impl Server {
     }
 
     /// `window_pane_key`: the key from client `c` goes to the pane's shown
-    /// mode if it is in one, else encoded to the program.
-    pub(crate) fn forward_key(&mut self, p: PaneId, c: Option<ClientId>, key: &crate::keys::Key) {
+    /// mode if it is in one, else encoded to the program, and with
+    /// `synchronize-panes` to the window's other panes
+    /// (`window_pane_copy_key`, each encoded for its own screen).
+    /// `pasting` is a key inside a bracketed paste, which tmux writes as
+    /// the bytes the terminal sent (`window_pane_paste`, which copies
+    /// them to the other panes as they are).
+    pub(crate) fn forward_key(
+        &mut self,
+        p: PaneId,
+        c: Option<ClientId>,
+        key: &crate::keys::Key,
+        pasting: bool,
+    ) {
         let Some(pane) = self.model.panes.get(&p) else {
             return;
         };
@@ -1739,7 +1750,58 @@ impl Server {
             app_cursor: pane.term.app_cursor(),
             app_keypad: pane.term.app_keypad(),
         };
-        self.write_pane(p, &crate::keys::encode(key, modes));
+        let bytes = crate::keys::encode(key, modes);
+        self.write_pane(p, &bytes);
+        self.copy_to_synchronized(p, |server, other| {
+            if pasting {
+                return bytes.clone();
+            }
+            server
+                .model
+                .panes
+                .get(&other)
+                .map(|o| {
+                    crate::keys::encode(
+                        key,
+                        crate::keys::KeyModes {
+                            app_cursor: o.term.app_cursor(),
+                            app_keypad: o.term.app_keypad(),
+                        },
+                    )
+                })
+                .unwrap_or_default()
+        });
+    }
+
+    /// `window_pane_copy_key` / `window_pane_copy_paste` (window.c:2019-2050)
+    /// after a write to pane `p`: with `synchronize-panes` on for `p`, and
+    /// `p` taking input (no mode, a program, input not off), every other
+    /// pane of the window with the option on that is not in a mode, has a
+    /// program, takes input and is visible (not hidden by a zoom) gets the
+    /// bytes `bytes_for` makes for it.
+    pub(crate) fn copy_to_synchronized(
+        &mut self,
+        p: PaneId,
+        bytes_for: impl Fn(&Self, PaneId) -> Vec<u8>,
+    ) {
+        let Some(pane) = self.model.panes.get(&p) else {
+            return;
+        };
+        if !pane.modes.is_empty() || pane.io.is_none() || pane.input_off {
+            return;
+        }
+        for other in self.model.synchronized_peers(p) {
+            let bytes = bytes_for(self, other);
+            if let Some(io) = self
+                .model
+                .panes
+                .get_mut(&other)
+                .and_then(|o| o.io.as_mut())
+            {
+                io.write(&bytes);
+            }
+            self.pane_output_queued(other);
+        }
     }
 
     /// Bytes to a pane's PTY, unless its input is off (window.c:2095).

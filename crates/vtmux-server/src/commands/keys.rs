@@ -116,7 +116,7 @@ pub fn send_prefix(
     };
     if let Some(k) = crate::keys::Key::from_core(key) {
         let tc = server.target_client(item.client, item.origin);
-        server.forward_key(p, tc, &k);
+        server.forward_key(p, tc, &k, false);
     }
     Ok(())
 }

@@ -528,6 +528,7 @@ impl<'a> Ctx<'a> {
             "pane_floating_flag" => flag(w.is_floating(p.id)),
             "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),
             "pane_input_off" => flag(p.input_off),
+            "pane_synchronized" => flag(self.model.pane_synchronized(p.id)),
             "pane_unseen_changes" => flag(p.unseen_changes),
             "pane_dead" => flag(p.exited && io.is_none()),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),

@@ -426,6 +426,40 @@ impl Model {
         self.number_option(tree, "status-position") == 0
     }
 
+    /// `synchronize-panes` of pane `p` (`wp->options`, so the window's
+    /// value unless the pane sets its own).
+    #[must_use]
+    pub fn pane_synchronized(&self, p: PaneId) -> bool {
+        self.number_option(TreeId::Pane(p), "synchronize-panes") != 0
+    }
+
+    /// The panes `window_pane_copy_key` and `window_pane_copy_paste`
+    /// (window.c:2019-2050) copy input to: when `p` is synchronized, every
+    /// other pane of its window that is synchronized, not in a mode, has
+    /// a program, takes input and is visible.
+    #[must_use]
+    pub fn synchronized_peers(&self, p: PaneId) -> Vec<PaneId> {
+        let Some(window) = self.panes.get(&p).and_then(|x| self.windows.get(&x.window)) else {
+            return Vec::new();
+        };
+        if !self.pane_synchronized(p) {
+            return Vec::new();
+        }
+        window
+            .panes
+            .panes
+            .iter()
+            .copied()
+            .filter(|&o| o != p && window.is_visible(o))
+            .filter(|&o| {
+                self.panes
+                    .get(&o)
+                    .is_some_and(|x| x.modes.is_empty() && x.io.is_some() && !x.input_off)
+            })
+            .filter(|&o| self.pane_synchronized(o))
+            .collect()
+    }
+
     /// `#{pane_index}`: position in the window's pane list plus
     /// `pane-base-index` (`window_pane_index`).
     #[must_use]
