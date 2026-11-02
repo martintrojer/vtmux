@@ -175,11 +175,7 @@ fn position(
     let at_top = lines != 0 && top;
     if lines != 0 {
         let wl = found.index;
-        let source = crate::render::window::Source {
-            model: &server.model,
-            info: &server.info,
-            env: &server.global_env,
-        };
+        let source = server.render_source();
         let ctx = server.format_ctx(Found::from_session(&server.model, s), Some(tc));
         let ranges = crate::render::status::status_ranges(
             &source,

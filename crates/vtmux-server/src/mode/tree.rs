@@ -253,6 +253,8 @@ pub struct ModeTree<K, D> {
     pub filter: Option<String>,
     pub no_matches: bool,
     pub help: bool,
+    /// How many times the items were built.
+    builds: u64,
 }
 
 impl<K, D> Default for ModeTree<K, D> {
@@ -276,6 +278,7 @@ impl<K, D> Default for ModeTree<K, D> {
             filter: None,
             no_matches: false,
             help: false,
+            builds: 0,
         }
     }
 }
@@ -350,6 +353,33 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
         self.maxdepth
     }
 
+    /// How many times the items were built.
+    #[must_use]
+    pub fn builds(&self) -> u64 {
+        self.builds
+    }
+
+    /// The size of the area inside the preview's box, if it is drawn
+    /// (mode-tree.c:991-1035): the preview is on and there is room for
+    /// the box under the list.
+    #[must_use]
+    pub fn preview_size(&self) -> Option<(usize, usize)> {
+        let (w, h, sy) = (self.width, self.height, self.size.1);
+        if self.preview == Preview::Off
+            || self.lines.is_empty()
+            || w == 0
+            || h == 0
+            || sy <= 4
+            || h < 2
+            || sy - h <= 4
+            || w <= 4
+        {
+            return None;
+        }
+        let (x, y) = (w - 4, sy - h - 2);
+        (x != 0 && y != 0).then_some((x, y))
+    }
+
     /// The current line's item (`mode_tree_get_current`).
     #[must_use]
     pub fn current_item(&self) -> Option<&Item<K, D>> {
@@ -377,6 +407,7 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
             roots: Vec::new(),
             saved,
         };
+        self.builds += 1;
         let mut chosen = build(&mut b, &self.sort, self.filter.as_deref());
         self.no_matches = b.roots.is_empty();
         if self.no_matches {
