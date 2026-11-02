@@ -1,0 +1,19 @@
+# A terminal that never answers the device attributes query: tty_start_timer_callback (tty.c:311-324) gives up after TTY_QUERY_TIMEOUT (5 s) and tty_update_features redraws the client (server_redraw_client), which builds the tree again (server_client_check_modes): the killed pane's row goes and a pane's new output shows.
+name = "tree_preview_start_timer"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "80", "-y", "23", "exec cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "status-interval", "0"] },
+  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "exec cat"] },
+  { run = ["splitw", "-d", "-t", "aaa:1", "exec cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0", ";", "select-pane", "-t", "%1", "-T", "t1", ";", "select-pane", "-t", "%2", "-T", "t2"] },
+  { attach = { session = "aaa" } },
+  { run = ["choose-tree", "-t", "aaa:0.0"] },
+  { run = ["kill-pane", "-t", "%2"] },
+  { feed = { pane = "%1", bytes = "LIVE\r" } },
+  { run = ["run-shell", "sleep 6"] },
+  { settle = {} },
+  { keys = "jj" },
+  { screen = {} },
+]

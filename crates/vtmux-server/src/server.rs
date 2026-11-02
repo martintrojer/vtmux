@@ -578,6 +578,7 @@ impl Server {
             self.cmdq_process();
             self.apply_redraws();
             self.tree_updates();
+            self.tree_draws();
             self.render_clients();
             self.format_jobs_flush();
             self.model.redraw_panes.clear();
@@ -1252,12 +1253,13 @@ impl Server {
         if !out.is_empty() {
             self.send(id, &ServerMsg::Frame(out));
         }
-        if changed {
-            if let Some(c) = self.clients.get_mut(&id) {
-                c.compositor.invalidate();
-            }
-            self.redraw_client(id);
+        if changed && let Some(c) = self.clients.get_mut(&id) {
+            c.compositor.invalidate();
         }
+        // tty_update_features ends in server_redraw_client whether or not
+        // the capabilities changed: an open tree mode is built again
+        // (server_client_check_modes), so its list and preview catch up.
+        self.redraw_client(id);
     }
 
     /// `tty_start_timer_callback` (tty.c:311-322): `TTY_QUERY_TIMEOUT`
@@ -1646,7 +1648,8 @@ impl Server {
                     }
                 }
                 crate::input::Event::Sync(sync) => {
-                    // tty_keys_sync: only a supported reply changes anything.
+                    // tty_keys_sync: only a supported reply changes anything,
+                    // and tty_update_features redraws the client.
                     if let (true, Some(term)) = (sync, &mut c.term) {
                         term.sync_supported();
                         self.update_features(id);

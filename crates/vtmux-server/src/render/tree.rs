@@ -202,6 +202,7 @@ const KEEP: &str = "\u{0}";
 
 /// The screen being drawn: styled cells, turned into terminal cells at
 /// the end.
+#[derive(Clone, Debug)]
 struct Canvas {
     cols: usize,
     rows: usize,
@@ -381,8 +382,18 @@ impl Canvas {
     }
 }
 
+/// A tree mode's screen as `mode_tree_draw` last drew it (`mtd->screen`):
+/// what the pane shows until the mode draws again, however the panes it
+/// previews or the items it lists change meanwhile.
+#[derive(Clone, Debug)]
+pub struct Frame {
+    canvas: Canvas,
+    cursor: Option<u16>,
+}
+
 impl Source<'_> {
-    /// `mode_tree_draw` for a window tree on pane `pane`.
+    /// The pane's screen in tree mode: the mode's last [`Frame`], or a
+    /// fresh one if it has none for the pane's size.
     #[must_use]
     pub fn tree_screen(
         &self,
@@ -390,6 +401,39 @@ impl Source<'_> {
         mode: &WindowTree,
         caps: Caps,
     ) -> Snapshot {
+        let (cols, rows) = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
+        let fresh;
+        let frame = if let Some(f) = mode
+            .frame
+            .as_ref()
+            .filter(|f| (f.canvas.cols, f.canvas.rows) == (cols, rows))
+        {
+            f
+        } else {
+            fresh = self.tree_frame(pane, mode);
+            &fresh
+        };
+        let theme = self.theme(caps);
+        let cells = frame
+            .canvas
+            .cells
+            .iter()
+            .zip(&frame.canvas.raw)
+            .map(|(x, raw)| raw.clone().unwrap_or_else(|| theme.cell(x)))
+            .collect();
+        Snapshot {
+            cols: pane.term.cols(),
+            rows: pane.term.rows(),
+            cells,
+            wrapped: Vec::new(),
+            cursor: frame.cursor.map(|y| (0, y)),
+            cursor_visible: false,
+        }
+    }
+
+    /// `mode_tree_draw` for a window tree on pane `pane`.
+    #[must_use]
+    pub fn tree_frame(&self, pane: &crate::model::Pane, mode: &WindowTree) -> Frame {
         let tree = &mode.tree;
         let (cols, rows) = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         let mut c = Canvas {
@@ -419,22 +463,9 @@ impl Source<'_> {
         if tree.help {
             self.tree_help(&mut c, &found, &border);
         }
-        let theme = self.theme(caps);
-        let cells = c
-            .cells
-            .iter()
-            .zip(c.raw)
-            .map(|(x, raw)| raw.unwrap_or_else(|| theme.cell(x)))
-            .collect();
-        Snapshot {
-            cols: pane.term.cols(),
-            rows: pane.term.rows(),
-            cells,
-            wrapped: Vec::new(),
-            cursor: u16::try_from(tree.current.saturating_sub(tree.offset))
-                .ok()
-                .map(|y| (0, y)),
-            cursor_visible: false,
+        Frame {
+            canvas: c,
+            cursor: u16::try_from(tree.current.saturating_sub(tree.offset)).ok(),
         }
     }
 
