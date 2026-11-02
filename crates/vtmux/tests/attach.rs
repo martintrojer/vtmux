@@ -5205,17 +5205,35 @@ fn focus_ring_clicks_land_on_the_drawn_pane() {
 }
 
 /// A pane program that turns on the mouse modes `modes` (printf escapes),
-/// then copies what it reads, raw, to `file`.
+/// prints [`RECORDING`], then copies what it reads, raw, to `file`.
 fn mouse_recorder(file: &std::path::Path, modes: &str) -> String {
     format!(
-        "stty raw -echo; printf '{modes}'; exec cat > {}",
+        "stty raw -echo; printf '{modes}{RECORDING}'; exec cat > {}",
         file.display()
     )
 }
 
+/// What [`mouse_recorder`] prints after its modes.
+const RECORDING: &str = "recording";
+
+/// Wait for a [`mouse_recorder`] on `a`'s screen: the server has its
+/// modes, so the next event goes by them, not by the shell's. The
+/// recording file existing is not enough: it can be there before the
+/// server has read the modes (CI flake of
+/// `wheel_up_pane_enters_copy_mode_or_forwards`).
+fn recorder_ready(a: &Attached, file: &std::path::Path) {
+    a.wait(|a| pane_text(a).contains(RECORDING));
+    let end = Instant::now() + Duration::from_secs(5);
+    while !file.exists() {
+        assert!(Instant::now() < end, "no {}", file.display());
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// Type `.` and wait (at most 5 s) for `file` to end with it: everything
-/// before it has reached the pane. The bytes before the `.`.
-fn recorded(a: &mut Attached, file: &std::path::Path) -> String {
+/// before it has reached the pane. The bytes before the `.`; a timeout
+/// names case `what` and shows the screen.
+fn recorded(a: &mut Attached, file: &std::path::Path, what: &str) -> String {
     a.keys(b".");
     let end = Instant::now() + Duration::from_secs(5);
     loop {
@@ -5223,7 +5241,11 @@ fn recorded(a: &mut Attached, file: &std::path::Path) -> String {
         if let Some(b) = bytes.strip_suffix(b".") {
             return String::from_utf8_lossy(b).escape_debug().to_string();
         }
-        assert!(Instant::now() < end, "{bytes:?}");
+        assert!(
+            Instant::now() < end,
+            "{what}: the `.` never reached the pane; recorded {bytes:?}, screen:\n{}",
+            pane_text(a)
+        );
         thread::sleep(Duration::from_millis(20));
     }
 }
@@ -5315,7 +5337,7 @@ fn mouse_forwarding_matches_tmux() {
                 "{tracking} {ext:4} {} mouse {mouse}",
                 if x10 { "x10" } else { "sgr" }
             );
-            got.push(format!("{what}: {}", recorded(&mut a, &file)));
+            got.push(format!("{what}: {}", recorded(&mut a, &file, &what)));
         }
         seen.push(got);
     }
@@ -5383,7 +5405,8 @@ fn mouse_forwarding_far_columns() {
             } else {
                 a.keys(b"\x1b[M\x20\xff\x22\x1b[M\x23\xff\x22");
             }
-            got.push(format!("{ext} {report}: {}", recorded(&mut a, &file)));
+            let what = format!("{ext} {report}");
+            got.push(format!("{what}: {}", recorded(&mut a, &file, &what)));
         }
         seen.push(got);
     }
@@ -5432,11 +5455,7 @@ fn wheel_up_pane_enters_copy_mode_or_forwards() {
                 &mouse_recorder(&file, modes),
             ]);
             a.wait(|a| pane_text(a).contains("[a]"));
-            let end = Instant::now() + Duration::from_secs(5);
-            while !file.exists() {
-                assert!(Instant::now() < end);
-                thread::sleep(Duration::from_millis(20));
-            }
+            recorder_ready(&a, &file);
             a.keys(b"\x1b[<64;5;3M");
             if modes.contains("1003") {
                 a.keys(b"\x02\x1b[<35;6;4Mx");
@@ -5452,7 +5471,7 @@ fn wheel_up_pane_enters_copy_mode_or_forwards() {
             } else {
                 String::new()
             };
-            let bytes = recorded(&mut a, &file);
+            let bytes = recorded(&mut a, &file, &format!("modes {modes:?}"));
             let mode = if mode.is_empty() {
                 display(&w, "#{pane_in_mode}")
             } else {
@@ -5837,11 +5856,14 @@ fn default_bindings_drag_or_forward() {
         let file = w.home.path().join("mouse");
         let text = format!("stty raw -echo; printf '{TEXT}'; exec cat");
         let recorder = mouse_recorder(&file, r"\033[?1000h");
+        // The text pane is made at its final width: printed at 40 columns
+        // and then split, its first line would wrap on the resize and (in
+        // tmux, keeping the cursor row) go to history, or not, by timing.
         for cmd in [
             &[
-                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", &text,
+                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", &recorder,
             ][..],
-            &["splitw", "-h", "-t", "a", "sh", "-c", &recorder],
+            &["splitw", "-hb", "-t", "a", "sh", "-c", &text],
             &["set", "-g", "status-right", ""],
             &["select-pane", "-t", "a:0.0", "-T", "t"],
             &["select-pane", "-t", "a:0.1", "-T", "t"],
@@ -5894,7 +5916,7 @@ fn default_bindings_drag_or_forward() {
         let mut c = click(30, 5);
         c.extend(click(30, 5));
         a.keys(&c);
-        got.push(format!("right {}", recorded(&mut a, &file)));
+        got.push(format!("right {}", recorded(&mut a, &file, "right pane")));
         got.push(format!(
             "right mode {}, buffer {:?}",
             display_t(&w, "a:0.1", "#{pane_in_mode}"),
@@ -5922,7 +5944,7 @@ fn default_bindings_drag_or_forward() {
                 r"\u{1b}[M )%\u{1b}[M#)%\u{1b}[M )%\u{1b}[M#)%"
             ),
             r#"right mode 0, buffer "beta""#,
-            "%0 0,0 14x9\n%1 15,0 25x9",
+            "%1 0,0 14x9\n%0 15,0 25x9",
         ]
     );
 }
