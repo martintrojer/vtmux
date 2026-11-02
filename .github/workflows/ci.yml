@@ -7,11 +7,12 @@ on:
   # Weekly perf-smoke only (the check job skips scheduled runs).
   schedule:
     - cron: "17 4 * * 1"
-# A newer push to a worker branch supersedes its running check; every
-# push to main is checked to the end.
+# A newer push to a worker branch supersedes its running check. main gets
+# a group per commit: a concurrency group holds one pending run and cancels
+# the rest even without cancel-in-progress, and every main commit is checked.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
 jobs:
   check:
     if: github.event_name != 'schedule'
