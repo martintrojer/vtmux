@@ -42,6 +42,14 @@ impl Normalizer {
             (socket.to_string(), "<SOCKET>".to_string()),
             (root.to_string(), "<TMP>".to_string()),
         ];
+        // A path the program resolved shows the root's real path: on macOS
+        // /tmp is a symlink to /private/tmp.
+        if let Ok(real) = std::fs::canonicalize(root) {
+            let real = real.to_string_lossy().into_owned();
+            if real != root {
+                literals.push((real, "<TMP>".to_string()));
+            }
+        }
         literals.sort_by_key(|(from, _)| std::cmp::Reverse(from.len()));
         Self { literals }
     }
