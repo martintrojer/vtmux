@@ -472,16 +472,6 @@ impl Model {
         self.number_option(tree, "status-position") == 0
     }
 
-    /// The modes of pane `p`'s program that change how a key is encoded.
-    #[must_use]
-    pub fn key_modes(&self, p: PaneId) -> Option<crate::keys::KeyModes> {
-        let term = &self.panes.get(&p)?.term;
-        Some(crate::keys::KeyModes {
-            app_cursor: term.app_cursor(),
-            app_keypad: term.app_keypad(),
-        })
-    }
-
     /// `synchronize-panes` of pane `p` (`wp->options`, so the window's
     /// value unless the pane sets its own).
     #[must_use]

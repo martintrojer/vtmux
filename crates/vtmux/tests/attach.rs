@@ -647,7 +647,7 @@ fn send_keys_k_delivers_keys_to_the_pane() {
     }
 }
 
-/// A typed `M-BSpace` (CSI-u or xterm-modified, so KEYC_IMPLIED_META) with
+/// A typed `M-BSpace` (CSI-u or xterm-modified, so `KEYC_IMPLIED_META`) with
 /// a named-key `backspace` option: input-keys.c:612 keeps the typed key's
 /// flags, so Meta is not an Escape before the option's key. An Escape
 /// before a plain DEL is (no implied Meta). Raw bytes through an attached
