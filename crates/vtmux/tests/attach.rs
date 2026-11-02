@@ -2629,7 +2629,9 @@ fn first_attach_after_split_waits_for_the_resize_timer() {
 /// (`screen_write_alternateon`, screen-write.c:3157-3166); leaving it does not.
 /// The pane resizes twice 50 ms apart, so the second size waits on the
 /// 250 ms resize timer, then switches screens. The script records whether
-/// the last SIGWINCH came within 60 ms of the switch. To test leaving,
+/// a SIGWINCH came within one `sleep 0.03` of the switch. (A loop of six
+/// `sleep 0.01` forks and execs each time: on macOS that took 100-185 ms,
+/// past the 250 ms timer's expiry, so leaving never looked SLOW.) To test leaving,
 /// the pane enters the alternate screen first, before the resizes.
 ///
 /// Both answers hang on wall-clock windows that a loaded host can miss, for
@@ -2643,7 +2645,7 @@ fn alternate_flush(bin: &std::path::Path, before: &'static str, seq: &'static st
     let script = format!(
         "w=0; trap 'w=$((w+1))' WINCH; printf '{before}P '; \
          while [ ! -e go ]; do sleep 0.01; done; printf '{seq}'; n=$w; \
-         i=0; while [ $i -lt 6 ]; do sleep 0.01; i=$((i+1)); done; \
+         sleep 0.03; \
          if [ $w -gt $n ]; then printf 'FAST.'; else printf 'SLOW.'; fi; \
          sleep 100000 & while :; do wait; done"
     );
@@ -2699,11 +2701,6 @@ fn entering_the_alternate_screen_flushes_resizes() {
     alternate_flush_shows("", "\\033[?1049h", "FAST.");
 }
 #[test]
-// Linux only: the 60 ms SIGWINCH window is not met by macOS CI runners (task macos_attach_parity).
-#[cfg_attr(
-    not(target_os = "linux"),
-    ignore = "Linux-only timing/ioctl; macos_attach_parity"
-)]
 fn leaving_the_alternate_screen_waits_for_the_timer() {
     alternate_flush_shows("\\033[?1049h", "\\033[?1049l", "SLOW.");
 }
