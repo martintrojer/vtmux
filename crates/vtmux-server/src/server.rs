@@ -599,7 +599,9 @@ impl Server {
             self.format_jobs_flush();
             self.model.redraw_panes.clear();
             self.send_pane_resizes();
-            self.compress_turn(Instant::now(), idle);
+            // Full turns process timers/queues/rendering too; only the
+            // early compression-only path above is a quiet turn.
+            self.compress_turn(Instant::now(), false);
             self.control_tick();
             if self.wants_flush() {
                 // server_loop / server_send_exit: release every waiter.
