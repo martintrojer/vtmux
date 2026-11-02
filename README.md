@@ -17,4 +17,4 @@ Compliance is checked against tmux's own regress suite and a behaviour oracle re
 
 **Memory:** with 100,000 lines of scrollback in a 120x40 pane, the server uses about 101 MB against tmux 3.8's 66 MB (it was 148 MB before retention was fixed); idle scrollback compression is next ([spec](docs/specs/2026-10-31-history-memory.md), [numbers](docs/test-health/2026-11-01-history-memory.md)). Full memory and CPU comparisons: [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
-Linux first, macOS second. ISC license.
+Linux first, macOS second: CI runs the full gate, including the tmux comparison suites, on both. ISC license.
