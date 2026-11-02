@@ -4742,6 +4742,63 @@ fn world_drop_reaps_the_server_on_panic() {
     );
 }
 
+/// The server's CPU time so far (utime + stime from `/proc/PID/stat`).
+#[cfg(target_os = "linux")]
+fn cpu_time(pid: rustix::process::Pid) -> Duration {
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid.as_raw_nonzero()))
+        .expect("read /proc stat");
+    // The command name may hold spaces; the fields after ") " are fixed.
+    let rest = stat.rsplit_once(") ").expect("stat format").1;
+    let fields: Vec<&str> = rest.split(' ').collect();
+    // utime and stime are fields 14 and 15; `rest` starts at field 3.
+    let ticks: u64 = fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap();
+    Duration::from_millis(ticks * 10)
+}
+
+/// Two M0-era servers spun at 99% CPU for 66 hours. One cause: a job's
+/// socket was registered for WRITABLE for good, and each wake called
+/// `shutdown(SHUT_WR)` again, which wakes the socket's pollers again (a
+/// `run-shell` job that outlived its output, a client killed mid-command).
+/// An orphaned server (no client, sleeping panes, a job still running) must
+/// be idle: under 0.1 s of CPU in 5 s.
+#[cfg(target_os = "linux")]
+#[test]
+fn orphaned_server_is_idle() {
+    let (_keep, as_tmux) = vtmux_as_tmux();
+    let w = World::new(&as_tmux);
+    assert_eq!(
+        w.run(&["new", "-d", "-x", "80", "-y", "24", "-s", "rt", "cat"])
+            .code,
+        0
+    );
+    let pid = common::parse_pid(&w.run(&["display", "-p", "#{pid}"]).stdout).expect("server pid");
+    // A client killed in the middle of a blocking command.
+    let mut blocked = w.spawn(&["run-shell", "sleep 30"]);
+    std::thread::sleep(Duration::from_millis(500));
+    blocked.kill().expect("kill client");
+    blocked.wait().expect("reap client");
+    // Jobs that outlive the window below, one still wanting its output.
+    assert_eq!(w.run(&["run-shell", "-b", "sleep 8"]).code, 0);
+    assert_eq!(
+        w.run(&["if-shell", "-b", "true", "run-shell -b 'sleep 8'"])
+            .code,
+        0
+    );
+    // A control client that goes away without detaching.
+    let mut control = w.spawn(&["-C", "attach", "-t", "rt"]);
+    std::thread::sleep(Duration::from_millis(500));
+    control.kill().expect("kill control client");
+    control.wait().expect("reap control client");
+    std::thread::sleep(Duration::from_millis(500));
+    let before = cpu_time(pid);
+    std::thread::sleep(Duration::from_secs(5));
+    let used = cpu_time(pid).saturating_sub(before);
+    assert!(
+        used < Duration::from_millis(100),
+        "an idle orphaned server used {used:?} of CPU in 5 s"
+    );
+}
+
 /// The message log without its volatile parts: the `HH:MM: ` prefix goes and
 /// `client-PID` becomes `client-N`.
 fn log_lines(run: &Run) -> Run {
