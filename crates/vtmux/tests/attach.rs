@@ -627,11 +627,6 @@ fn detach_after_stall_is_not_behind_a_backlog() {
 /// the terminal has not taken (reviewer-29 slow.py: reference exits within
 /// 0.7 s; vtmux counting only its own outbuf took 5.9 s / 12.4 s / 39.1 s).
 #[test]
-// Linux only: macOS CI runners miss its 2 s detach bound under a throttled terminal (task macos_attach_parity).
-#[cfg_attr(
-    not(target_os = "linux"),
-    ignore = "Linux-only timing/ioctl; macos_attach_parity"
-)]
 fn slow_terminal_detaches_promptly() {
     for bin in bins() {
         for rate in [500_000, 100_000, 30_000] {
@@ -646,8 +641,9 @@ fn slow_terminal_detaches_promptly() {
             a.keys(b"\x02d");
             a.exited(0);
             let took = start.elapsed();
-            // 3 s: CI's macOS runner takes up to 1.6 s for either binary;
-            // the bug this pins took 5.9 s and more.
+            // The reference takes under 0.1 s (tty_close frees what the
+            // terminal has not taken); 3 s leaves room for a loaded CI
+            // runner. The bug this pins took 5.9 s and more.
             assert!(
                 took < Duration::from_secs(3),
                 "{}: detach at {rate} B/s took {took:?}",

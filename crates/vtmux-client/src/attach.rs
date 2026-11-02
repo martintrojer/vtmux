@@ -145,10 +145,15 @@ struct Output {
     acked: u64,
     /// Stop reading the socket above this much unwritten output.
     high_water: usize,
+    /// Stream offset at which the last frame received starts.
+    last_frame: u64,
 }
 
 impl Output {
     fn push(&mut self, bytes: &[u8], frame: bool) -> io::Result<()> {
+        if frame {
+            self.last_frame = self.written + self.stdout.len() as u64;
+        }
         self.stdout.extend_from_slice(bytes);
         if frame {
             self.frame_ends
@@ -182,6 +187,20 @@ impl Output {
             self.frame_ends.pop_front();
             self.done += 1;
         }
+    }
+
+    /// Leaving: drop what the terminal has not taken from the frames
+    /// before the last one, which is the teardown (`Exit` and `Exec`
+    /// follow it). tmux's `tty_close` writes the teardown straight to the
+    /// terminal (`tty_stop_tty`, `tty_raw`) and frees the queued output
+    /// (tty.c:524-535), so a slow terminal does not hold up a detach.
+    fn discard_to_last_frame(&mut self) {
+        let unwritten = usize::try_from(self.last_frame.saturating_sub(self.written))
+            .unwrap_or(usize::MAX)
+            .min(self.stdout.len());
+        self.stdout.drain(..unwritten);
+        self.written += unwritten as u64;
+        self.frame_ends.clear();
     }
 
     fn full(&self) -> bool {
@@ -354,6 +373,7 @@ impl Socket {
                                 write_all_waiting(io::stderr().as_fd(), &b)?;
                             }
                             ServerMsg::Exit { code, message, hup } => {
+                                out.discard_to_last_frame();
                                 return Ok(Some(if let Some(reason) = self.signal_exit.take() {
                                     Leave::exit(1, &reason)
                                 } else {
@@ -361,6 +381,7 @@ impl Socket {
                                 }));
                             }
                             ServerMsg::Exec { command, shell } => {
+                                out.discard_to_last_frame();
                                 return Ok(Some(Leave::Exec { command, shell }));
                             }
                             // File requests go to command clients only: an
