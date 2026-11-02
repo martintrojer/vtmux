@@ -29,7 +29,7 @@ Run of 2026-11-01, commit `eea1a69`, Linux 7.2.11 (Fedora 44) on an AMD Ryzen 7 
 
 ### With the owner's config
 
-Run of 2026-11-02, commit `7d48b29` (same host and binaries as above), load 3.9 at start, median of 3 runs for `owner_idle` and 20 runs for `owner_startup`. The owner's real `~/.tmux.conf` (`tmux.conf` at dotfiles `6430744` with local edits, sha256 `c1ffe189d326`), the TPM plugins and mu-crew-dotfiles `d633e15` are copied into a hermetic `HOME`; the plugin revisions are in the raw run. Raw output: [`test-health/2026-11-02-perf-owner.md`](test-health/2026-11-02-perf-owner.md) and `.json`.
+Run of 2026-11-02 on the perf_owner branch (147e54b, before rebase onto main; same host as above, vtmux release build of that commit), load 3.9 at start, median of 3 runs for `owner_idle` and 20 runs for `owner_startup`. The owner's real `~/.tmux.conf` (`tmux.conf` at dotfiles `6430744` with local edits, sha256 `c1ffe189d326`), the TPM plugins and mu-crew-dotfiles `d633e15` are copied into a hermetic `HOME`; the plugin revisions are in the raw run. Raw output: [`test-health/2026-11-02-perf-owner.md`](test-health/2026-11-02-perf-owner.md) and `.json`.
 
 | scenario | metric | tmux 3.8 | vtmux | vtmux / tmux |
 |---|---|---|---|---|
