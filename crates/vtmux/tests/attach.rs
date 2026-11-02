@@ -4902,13 +4902,17 @@ fn outer_mouse_modes_follow_the_mouse_option_and_panes() {
             marks.push(a.bytes.lock().unwrap().len());
         }
         let bytes = a.bytes.lock().unwrap().clone();
-        let mut got = vec![
-            mouse_modes(&bytes[..marks[0]])
-                .into_iter()
-                .filter(|m| m.ends_with('h'))
-                .collect::<Vec<_>>()
-                .join(" "),
-        ];
+        // Attaching, the modes set; how often depends on how many full
+        // redraws the attach made (tmux usually two, vtmux one when the
+        // first waits for the startup output to be written,
+        // server_client_check_redraw), which leaves the terminal the same.
+        let mut on = Vec::new();
+        for m in mouse_modes(&bytes[..marks[0]]) {
+            if m.ends_with('h') && !on.contains(&m) {
+                on.push(m);
+            }
+        }
+        let mut got = vec![on.join(" ")];
         for pair in marks.windows(2) {
             got.push(mouse_modes(&bytes[pair[0]..pair[1]]).join(" "));
         }
