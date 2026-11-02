@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "date": "2026-11-02 09:55 UTC",
+    "commit": "7c0c19e",
+    "host": "Linux-7.0.0-1014-aws-x86_64-with-glibc2.39",
+    "cpu": "Intel(R) Xeon(R) 6975P-C",
+    "cpus": 4,
+    "kernel": "7.0.0-1014-aws",
+    "load_at_start": 3.20458984375,
+    "runs": 3,
+    "versions": {
+      "tmux": "tmux 3.8",
+      "vtmux": "vtmux 0.0.0 (tmux 3.8)"
+    }
+  },
+  "metrics": {
+    "idle_rss_mb": 7.95703125,
+    "scale_rss_mb": 13.60546875,
+    "history_spec_rss_mb": 105.7,
+    "cpu_ratio_plain": 0.4507042253521127,
+    "cpu_ratio_sgr": 0.6813186813186813
+  },
+  "info": {
+    "scale_rss_kb_per_pane": 15.458646616541353,
+    "history_spec_rss_mb_tmux": 65.8,
+    "cpu_s_plain_vtmux": 0.32,
+    "cpu_s_plain_tmux": 0.71,
+    "cpu_s_sgr_vtmux": 0.62,
+    "cpu_s_sgr_tmux": 0.91
+  }
+}
