@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "macmini",
   "name": "alerts_status",
   "inputs": {
     "name": "alerts_status",
@@ -126,6 +126,11 @@
         ]
       },
       {
+        "settle": {
+          "react": true
+        }
+      },
+      {
         "screen": {}
       },
       {
@@ -151,6 +156,11 @@
           "next-window",
           "-a"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "screen": {}
@@ -292,7 +302,7 @@
       }
     },
     {
-      "step": 14,
+      "step": 15,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -310,7 +320,7 @@
       }
     },
     {
-      "step": 15,
+      "step": 16,
       "observation": {
         "kind": "cli",
         "stdout": "0-\n1*\n2##!\n",
@@ -319,7 +329,7 @@
       }
     },
     {
-      "step": 16,
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -328,7 +338,7 @@
       }
     },
     {
-      "step": 17,
+      "step": 18,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -346,7 +356,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 19,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -355,7 +365,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 21,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -373,7 +383,7 @@
       }
     },
     {
-      "step": 20,
+      "step": 22,
       "observation": {
         "kind": "cli",
         "stdout": "0\n1-\n2*\n",
