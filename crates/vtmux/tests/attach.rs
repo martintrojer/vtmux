@@ -357,11 +357,6 @@ fn signal_exit_restores_terminal_modes() {
 /// fires, with no `window_update_focus` and so no pane-focus-out. Only
 /// `MSG_EXITING` (C-b d, detach-client, SIGHUP) takes the focus away first.
 #[test]
-// Linux only: tcsetwinsize on a fresh posix_openpt master fails with ENOTTY on macOS until the slave is opened (task macos_attach_parity).
-#[cfg_attr(
-    not(target_os = "linux"),
-    ignore = "Linux-only timing/ioctl; macos_attach_parity"
-)]
 fn closing_the_tty_fires_no_focus_out() {
     use rustix::fs::{Mode, OFlags, open};
     use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
@@ -389,13 +384,6 @@ fn closing_the_tty_fires_no_focus_out() {
         grantpt(&master).unwrap();
         unlockpt(&master).unwrap();
         let slave_path = ptsname(&master, Vec::new()).unwrap();
-        let size = Winsize {
-            ws_row: 10,
-            ws_col: 40,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        tcsetwinsize(&master, size).unwrap();
         let slave = || {
             open(
                 slave_path.as_c_str(),
@@ -404,14 +392,27 @@ fn closing_the_tty_fires_no_focus_out() {
             )
             .unwrap()
         };
+        // macOS refuses TIOCSWINSZ on a master whose slave was never
+        // opened (ENOTTY): open one first, then set the size.
+        let (stdin, stdout, stderr) = (slave(), slave(), slave());
+        tcsetwinsize(
+            &master,
+            Winsize {
+                ws_row: 10,
+                ws_col: 40,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            },
+        )
+        .unwrap();
         let mut child = Command::new(&w.bin)
             .args(w.args())
             .args(["attach", "-t", "a"])
             .env_clear()
             .envs(w.env())
-            .stdin(Stdio::from(slave()))
-            .stdout(Stdio::from(slave()))
-            .stderr(Stdio::from(slave()))
+            .stdin(Stdio::from(stdin))
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
             .spawn()
             .unwrap();
         let log = || {
@@ -936,8 +937,6 @@ fn display(w: &World, f: &str) -> String {
 /// switch to the prefix table, `C-b %` splits (the default binding), a
 /// root binding runs, an unbound key after the prefix is swallowed.
 #[test]
-// Linux only: on macOS CI `ESC x` did not reach the M-x binding (escape-time vs a slow runner?) (task macos_attach_parity).
-#[cfg_attr(not(target_os = "linux"), ignore = "macos_attach_parity")]
 fn prefix_root_and_prefix2_bindings() {
     for bin in bins() {
         let w = World::new(bin);
@@ -958,6 +957,19 @@ fn prefix_root_and_prefix2_bindings() {
                 .success()
         );
         assert!(w.cli(&["set", "-g", "prefix2", "C-a"]).status.success());
+        // The splits run `cat -v` too, not a login shell: its prompt comes
+        // from the host (macOS /etc/profile sets PS1 to host and user,
+        // which may hold a `j`).
+        assert!(
+            w.cli(&[
+                "set",
+                "-g",
+                "default-command",
+                "stty raw -echo; exec cat -v"
+            ])
+            .status
+            .success()
+        );
         a.keys(b"\x02%");
         a.wait(|_| display(&w, "#{window_panes}") == "2");
         a.keys(b"\x1bx");
