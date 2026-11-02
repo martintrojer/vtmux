@@ -5168,3 +5168,190 @@ fn format_jobs_in_commands() {
         ]
     });
 }
+
+/// `#{pane_key_mode}` (format.c `format_cb_pane_key_mode`) after the
+/// program's modifyOtherKeys requests (input.c:1527-1559), under each
+/// `extended-keys`: `off` ignores them, `always` keeps mode 1 at least. A
+/// pane made under `always` starts in mode 1 (`screen_reinit`), as does a
+/// respawned one; RIS goes back to the reset mode (`screen_write_reset`);
+/// a pane in a mode shows the mode screen's key mode, fixed when the mode
+/// began (`screen_init`).
+#[test]
+fn pane_key_mode_follows_requests_and_extended_keys() {
+    const KEY_MODE: &str = "#{pane_key_mode}";
+    compare("pane_key_mode_follows_requests_and_extended_keys", |w| {
+        let key_mode = |w: &World, target: &str| w.run(&["display", "-p", "-t", target, KEY_MODE]);
+        // `printf BYTES` in a fresh pane, then the mode once it printed.
+        // A fresh server each time, once the last one has gone.
+        let restart = |w: &World| {
+            w.run(&["kill-server"]);
+            w.wait_gone();
+        };
+        let after = |w: &World, ek: &str, bytes: &str| {
+            restart(w);
+            let script = format!("printf '{bytes}'; echo DONE; exec cat");
+            w.run(&[
+                "set",
+                "-g",
+                "extended-keys",
+                ek,
+                ";",
+                "new",
+                "-d",
+                "-s",
+                "a",
+                "sh",
+                "-c",
+                &script,
+            ]);
+            w.wait_for_text("a", "DONE\n");
+            let mut r = key_mode(w, "a");
+            r.stdout = format!("{ek} {bytes}: {}", r.stdout);
+            r
+        };
+        let mut runs = Vec::new();
+        for ek in ["off", "on", "always"] {
+            for bytes in [
+                "",
+                r"\033[>4;1m",
+                r"\033[>4;2m",
+                r"\033[>4m",
+                r"\033[>4;2m\033[>4n",
+                r"\033[>4;0m",
+                r"\033[>4;2m\033[>5n",
+                r"\033[>4;2m\033c",
+                r"\033[>4;3m",
+                r"\033[>4;2m\033[>4;1m",
+                r"\033[>4;2m\033[>m",
+                r"\033[>4;2m\033[?4m",
+                r"\033[>4;2;5m",
+                r"\033[>4:2m",
+                r"\033[>u\033[>1u",
+            ] {
+                runs.push(after(w, ek, bytes));
+            }
+        }
+        // Panes made before and after `extended-keys always`, a respawn.
+        restart(w);
+        runs.push(w.run(&["new", "-d", "-s", "a", "cat"]));
+        runs.push(w.run(&["set", "-g", "extended-keys", "always"]));
+        runs.push(w.run(&["neww", "-d", "-t", "a:1", "cat"]));
+        runs.push(key_mode(w, "a:0"));
+        runs.push(key_mode(w, "a:1"));
+        runs.push(w.run(&["respawn-pane", "-k", "-t", "a:0", "cat"]));
+        runs.push(key_mode(w, "a:0"));
+        // Mode screens: copy mode entered under `on` and `always`, clock
+        // mode, choose-tree.
+        runs.push(w.run(&["set", "-g", "extended-keys", "on"]));
+        runs.push(w.run(&[
+            "neww",
+            "-d",
+            "-t",
+            "a:2",
+            "sh",
+            "-c",
+            r"printf '\033[>4;2m'; echo DONE; exec cat",
+        ]));
+        w.wait_for_text("a:2", "DONE\n");
+        runs.push(key_mode(w, "a:2"));
+        runs.push(w.run(&["copy-mode", "-t", "a:2"]));
+        runs.push(key_mode(w, "a:2"));
+        runs.push(w.run(&["set", "-g", "extended-keys", "always"]));
+        runs.push(key_mode(w, "a:2"));
+        runs.push(w.run(&["send-keys", "-t", "a:2", "-X", "cancel"]));
+        runs.push(key_mode(w, "a:2"));
+        runs.push(w.run(&["copy-mode", "-t", "a:2"]));
+        runs.push(w.run(&["set", "-g", "extended-keys", "on"]));
+        runs.push(key_mode(w, "a:2"));
+        runs.push(w.run(&["send-keys", "-t", "a:2", "-X", "cancel"]));
+        runs.push(w.run(&["clock-mode", "-t", "a:2"]));
+        runs.push(key_mode(w, "a:2"));
+        runs.push(w.run(&["send-keys", "-t", "a:2", "q"]));
+        runs.push(w.run(&["set", "-g", "extended-keys", "always"]));
+        runs.push(w.run(&["choose-tree", "-t", "a:2"]));
+        runs.push(key_mode(w, "a:2"));
+        runs
+    });
+}
+
+/// What `send-keys` writes for modified keys after the program asked for
+/// modifyOtherKeys 1 or 2, in both `extended-keys-format`s
+/// (input-keys.c:424-473, 544-568, 674-707); the owner's config sets
+/// `extended-keys on` and `extended-keys-format csi-u`. The pane copies
+/// its raw input to a file; `|` (sent with -H) separates the keys.
+#[test]
+fn send_keys_bytes_follow_the_pane_key_mode() {
+    const KEYS: [&str; 18] = [
+        "C-a", "S-a", "C-S-a", "M-a", "S-Enter", "C-Enter", "C-Tab", "BTab", "S-Tab", "C-1", "C-é",
+        "C-BSpace", "C-Escape", "C-i", "C-[", "C-M-S-x", "S-Up", "M-BTab",
+    ];
+    compare("send_keys_bytes_follow_the_pane_key_mode", |w| {
+        let mut runs = Vec::new();
+        for mode in ["", r"\033[>4;1m", r"\033[>4;2m"] {
+            for format in ["csi-u", "xterm"] {
+                w.run(&["kill-server"]);
+                w.wait_gone();
+                let out = w.dir().join("out");
+                let script = format!(
+                    "stty raw -echo; printf '{mode}'; exec cat > {}",
+                    out.display()
+                );
+                runs.push(w.run(&[
+                    "set",
+                    "-g",
+                    "extended-keys",
+                    "on",
+                    ";",
+                    "set",
+                    "-g",
+                    "extended-keys-format",
+                    format,
+                    ";",
+                    "new",
+                    "-d",
+                    "-s",
+                    "a",
+                    "sh",
+                    "-c",
+                    &script,
+                ]));
+                // The mode request has been read once the mode shows.
+                let want = match mode {
+                    "" => "VT10x",
+                    r"\033[>4;1m" => "Ext 1",
+                    _ => "Ext 2",
+                };
+                let start = Instant::now();
+                while w
+                    .run(&["display", "-p", "-t", "a", "#{pane_key_mode}"])
+                    .stdout
+                    .trim()
+                    != want
+                {
+                    assert!(start.elapsed() < Duration::from_secs(5), "{mode}");
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                for key in KEYS {
+                    w.run(&["send-keys", "-t", "a", key]);
+                    w.run(&["send-keys", "-t", "a", "-H", "7c"]);
+                }
+                w.run(&["send-keys", "-t", "a", "-H", "2e"]);
+                let start = Instant::now();
+                loop {
+                    std::thread::sleep(Duration::from_millis(20));
+                    let bytes = std::fs::read(&out).unwrap_or_default();
+                    if bytes.ends_with(b".") {
+                        let keys: Vec<String> = bytes[..bytes.len() - 1]
+                            .split(|b| *b == b'|')
+                            .map(|k| String::from_utf8_lossy(k).escape_debug().to_string())
+                            .collect();
+                        runs.push(Run::seen(format!("{mode} {format}: {}", keys.join(" "))));
+                        break;
+                    }
+                    assert!(start.elapsed() < Duration::from_secs(5), "{mode} {format}");
+                }
+            }
+        }
+        runs
+    });
+}

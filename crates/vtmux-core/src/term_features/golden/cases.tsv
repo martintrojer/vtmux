@@ -137,7 +137,7 @@ xterm-256color	-	-	-	xterm*:Sync=x~xterm*:Sync@~xterm*:Sync=y	bpaste,ccolour,cli
 xterm-256color	-	-	-	*:Tc	bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|Tc setrgbf setrgbb Ss Se Ms tsl fsl
 xterm-256color	-	-	-	*:Tc~*:Tc@	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se Ms tsl fsl
 xterm-256color	-	-	xterm*:mouse:RGB~*256*:sync	-	bpaste,ccolour,clipboard,cstyle,focus,mouse,RGB,sync,title|16777216|setrgbf setrgbb Sync Ss Se Ms tsl fsl
-xterm-256color	-	-	xterm*:extkeys:margins:rectfill:sixel:osc7:overline:hyperlinks:progressbar:ignorefkeys:appesc:strikethrough:utf8	-	appesc,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,ignorefkeys,margins,osc7,overline,progressbar,rectfill,sixel,strikethrough,title,utf8|16|Ss Se Ms tsl fsl
+xterm-256color	-	-	xterm*:extkeys:margins:rectfill:sixel:osc7:overline:hyperlinks:progressbar:ignorefkeys:appesc:strikethrough:utf8	-	appesc,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,ignorefkeys,margins,osc7,overline,progressbar,rectfill,sixel,strikethrough,title,utf8|16|Ss Se Ms tsl fsl Eneks Dseks
 xterm-256color	-	-	xterm*:256:RGB	-	256,bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|setrgbf setrgbb Ss Se Ms tsl fsl
 xterm-256color	-	-	[xt]term*:RGB	-	bpaste,ccolour,clipboard,cstyle,focus,RGB,title|16777216|setrgbf setrgbb Ss Se Ms tsl fsl
 xterm-256color	-	-	xterm*:ccolour@:RGB	-	bpaste,clipboard,cstyle,focus,RGB,title|16777216|setrgbf setrgbb Ss Se Ms tsl fsl
@@ -176,3 +176,12 @@ xterm-256color	-	-	-	xterm*:Ms=%p1%s%p2%s%	bpaste,ccolour,clipboard,cstyle,focus
 xterm-256color	-	-	-	xterm*:Ms=%p1%s%p2%s%p	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se Ms tsl fsl
 xterm-256color	-	-	-	xterm*:Ms=%p1%s%p	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se tsl fsl
 xterm-256color	-	-	-	xterm*:Ms=%p1%x%p2%s	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se tsl fsl
+xterm-256color	-	-	xterm*:extkeys	-	bpaste,ccolour,clipboard,cstyle,extkeys,focus,title|16|Ss Se Ms tsl fsl Eneks Dseks
+xterm-256color	-	extkeys	-	-	bpaste,ccolour,clipboard,cstyle,extkeys,focus,title|16|Ss Se Ms tsl fsl Eneks Dseks
+xterm-ghostty	-	-	xterm*:extkeys	-	bpaste,ccolour,clipboard,cstyle,extkeys,focus,title|16777216|Tc setrgbf setrgbb Sync Smulx Setulc Ss Se Ms tsl fsl Eneks Dseks
+tmux-256color	-	extkeys	-	-	bpaste,extkeys,focus,title|16|Smulx Ss Se Ms tsl fsl Eneks Dseks
+screen	-	-	screen*:extkeys	-	bpaste,extkeys,focus,title|8|tsl fsl Eneks Dseks
+xterm-256color	-	-	xterm*:extkeys	xterm*:Eneks@	bpaste,ccolour,clipboard,cstyle,extkeys,focus,title|16|Ss Se Ms tsl fsl Dseks
+xterm-256color	-	-	xterm*:extkeys	xterm*:Dseks@	bpaste,ccolour,clipboard,cstyle,extkeys,focus,title|16|Ss Se Ms tsl fsl Eneks
+xterm-256color	-	-	xterm*:extkeys@	-	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se Ms tsl fsl
+xterm-256color	-	-	xterm*:RGB:usstyle:hyperlinks~xterm*:extkeys	-	bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,RGB,title,usstyle|16777216|setrgbf setrgbb Smulx Setulc Ss Se Ms tsl fsl Eneks Dseks

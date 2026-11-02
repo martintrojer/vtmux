@@ -25,7 +25,7 @@ use vtmux_vt::{Color, Snapshot, Style, Underline};
     clippy::struct_excessive_bools,
     reason = "independent terminal capabilities"
 )]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Caps {
     pub rgb: bool,
     /// `Term::palette_size`: what `tty_check_fg` believes the terminal has.
@@ -84,15 +84,20 @@ impl Caps {
             overlay: false,
         }
     }
+    /// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424) for a
+    /// VT100-like terminal, which every terminal vtmux knows is: DA, DA2,
+    /// XTVERSION and the synchronised-update DECRQM.
     #[must_use]
     pub fn startup(self) -> Vec<u8> {
         let title = if self.xterm { "\x1b[22;0;0t" } else { "" };
-        format!("\x1b[?1049h{title}\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h\x1b[?2026$p").into_bytes()
+        format!("\x1b[?1049h{title}\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p").into_bytes()
     }
+    /// `tty_stop_tty` (tty.c:470-520); `dseks` is the terminal's `Dseks`
+    /// (empty without it).
     #[must_use]
-    pub fn teardown(self) -> Vec<u8> {
+    pub fn teardown(self, dseks: &str) -> Vec<u8> {
         let title = if self.xterm { "\x1b[23;0;0t" } else { "" };
-        format!("\x1b[r\x1b[0m\x1b[?1l\x1b>\x1b[H\x1b[2J\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l\x1b[?1049l{title}\x1b[?2031l").into_bytes()
+        format!("\x1b[r\x1b[0m\x1b[?1l\x1b>\x1b[H\x1b[2J\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l{dseks}\x1b[?1049l{title}\x1b[?2031l").into_bytes()
     }
 }
 

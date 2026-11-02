@@ -1,8 +1,10 @@
 //! Key names to pane bytes for `send-keys`: the lookup of key-string.c
 //! (`key_string_lookup_string`, 243-323) and the encoding of input-keys.c
-//! (`input_key`, 574-708, in the standard, non-extended mode).
+//! (`input_key`, 574-708), in the pane's key mode (standard, or xterm's
+//! modifyOtherKeys 1 or 2) and `extended-keys-format`.
 
 use vtmux_core::keys::Key as CoreKey;
+use vtmux_vt::KeyMode;
 
 /// A named key without modifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,6 +145,25 @@ pub struct KeyModes {
     pub app_cursor: bool,
     /// DECKPAM (`MODE_KKEYPAD`): keypad keys send `ESC O x`.
     pub app_keypad: bool,
+    /// The extended key mode the program asked for (`#{pane_key_mode}`).
+    pub key_mode: KeyMode,
+    /// `extended-keys-format csi-u`: extended keys are `CSI key ; mod u`,
+    /// not xterm's `CSI 27 ; mod ; key ~`.
+    pub csi_u: bool,
+}
+
+impl KeyModes {
+    /// The modes of a pane's terminal, with the server's
+    /// `extended-keys-format` (`csi_u`).
+    #[must_use]
+    pub fn of(term: &vtmux_vt::PaneTerm, csi_u: bool) -> Self {
+        Self {
+            app_cursor: term.app_cursor(),
+            app_keypad: term.app_keypad(),
+            key_mode: term.key_mode(),
+            csi_u,
+        }
+    }
 }
 
 /// `key_string_table` (key-string.c:33-110), the non-mouse, non-keypad part.
@@ -270,27 +291,55 @@ fn csi_modifier(key: &Key) -> Option<u8> {
     (m != 0).then_some(m + 1)
 }
 
-/// `input_key` for a looked-up key.
+/// `input_key` for a looked-up key: the bytes for the pane, written even
+/// when tmux gives up on the key part way (an Escape for Meta may already
+/// be out).
 #[must_use]
 pub fn encode(key: &Key, modes: KeyModes) -> Vec<u8> {
-    // input-keys.c:658-671: no entry for a non-implied meta key, so write
-    // Escape and then the key without meta. BTab drops its modifiers
-    // first (input-keys.c:617-625).
-    if key.esc_prefix && key.base != Base::Named(Named::BackTab) {
-        let mut out = vec![0x1b];
-        out.extend(encode(
-            &Key {
-                meta: false,
-                esc_prefix: false,
-                ..*key
-            },
-            modes,
-        ));
-        return out;
+    let mut out = Vec::new();
+    encode_into(key, modes, &mut out);
+    out
+}
+
+/// `input_key` into `out`; `false` where it returns -1: a key with no
+/// sequence in the pane's mode (`C-BSpace` in standard mode, a control
+/// character in an extended mode). What was written by then stays.
+pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
+    let mut key = *key;
+    // input-keys.c:592-614: an unmodified Backspace is the `backspace`
+    // option (default \177); a modified one is that character modified.
+    if key.base == Base::Named(Named::Backspace) {
+        if !key.ctrl && !key.meta && !key.shift {
+            out.push(0x7f);
+            return true;
+        }
+        key.base = Base::Char('\x7f');
+    }
+    // input-keys.c:617-625: BTab is S-Tab in mode 2, and otherwise loses
+    // its modifiers.
+    if key.base == Base::Named(Named::BackTab) {
+        if modes.key_mode == KeyMode::Extended2 {
+            key.base = Base::Char('\t');
+            key.shift = true;
+        } else {
+            key.ctrl = false;
+            key.meta = false;
+            key.shift = false;
+            key.esc_prefix = false;
+        }
     }
     match key.base {
-        Base::Named(n) => encode_named(n, key, modes),
-        Base::Char(c) => encode_char(c, key),
+        Base::Char(c) => encode_char(c, &key, modes, out),
+        Base::Named(n) => {
+            // input-keys.c:658-671: no entry for a non-implied meta key, so
+            // write Escape and then the key without meta.
+            if key.esc_prefix {
+                out.push(0x1b);
+                key.meta = false;
+            }
+            out.extend(encode_named(n, &key, modes));
+            true
+        }
     }
 }
 
@@ -316,15 +365,6 @@ fn encode_named(n: Named, key: &Key, modes: KeyModes) -> Vec<u8> {
         } else {
             out.push(KEYPAD_NUMERIC[usize::from(i)]);
         }
-        return out;
-    }
-    if n == Backspace {
-        // The `backspace` option, default \177 (input-keys.c:592-614).
-        let mut out = Vec::new();
-        if key.meta {
-            out.push(0x1b);
-        }
-        out.push(0x7f);
         return out;
     }
     if n == BackTab {
@@ -383,16 +423,63 @@ fn encode_named(n: Named, key: &Key, modes: KeyModes) -> Vec<u8> {
     }
 }
 
-/// `input_key_vt10x` (input-keys.c:482-541) and the trivial case before it.
-fn encode_char(c: char, key: &Key) -> Vec<u8> {
-    let mut out = Vec::new();
+/// `input_key` for a character (input-keys.c:627-708): unmodified text is
+/// itself, the rest goes by the pane's key mode.
+fn encode_char(c: char, key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
+    if !key.ctrl
+        && !key.meta
+        && !key.shift
+        && (matches!(c, '\t' | '\r' | '\x1b') || ('\x20'..='\x7f').contains(&c) || !c.is_ascii())
+    {
+        let mut buf = [0u8; 4];
+        out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+        return true;
+    }
+    match modes.key_mode {
+        KeyMode::Extended2 => encode_extended(c, key, modes.csi_u, out),
+        KeyMode::Extended1 if !mode1_is_standard(c, key) => {
+            encode_extended(c, key, modes.csi_u, out)
+        }
+        KeyMode::Extended1 | KeyMode::Standard => encode_vt10x(c, key, out),
+    }
+}
+
+/// `input_key_mode1` (input-keys.c:544-568): the keys modifyOtherKeys 1
+/// still sends as standard keys, per xterm's modified-keys table.
+fn mode1_is_standard(c: char, key: &Key) -> bool {
+    if key.meta && !key.ctrl {
+        return true;
+    }
+    key.ctrl && matches!(c, ' ' | '/' | '^' | '2'..='8' | '@'..='~')
+}
+
+/// `input_key_extended` (input-keys.c:424-473): `CSI 27 ; mod ; key ~`, or
+/// `CSI key ; mod u` under `extended-keys-format csi-u`; nothing for an
+/// unmodified key.
+fn encode_extended(c: char, key: &Key, csi_u: bool, out: &mut Vec<u8>) -> bool {
+    let Some(m) = csi_modifier(key) else {
+        return false;
+    };
+    let n = u32::from(c);
+    let seq = if csi_u {
+        format!("\x1b[{n};{m}u")
+    } else {
+        format!("\x1b[27;{m};{n}~")
+    };
+    out.extend_from_slice(seq.as_bytes());
+    true
+}
+
+/// `input_key_vt10x` (input-keys.c:482-541).
+fn encode_vt10x(c: char, key: &Key, out: &mut Vec<u8>) -> bool {
     if key.meta {
         out.push(0x1b);
     }
+    // No way to send a modified non-ASCII character: the modifiers go.
     if !c.is_ascii() {
         let mut buf = [0u8; 4];
         out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-        return out;
+        return true;
     }
     let mut b = c as u8;
     if key.ctrl && !matches!(b, b'\r' | b'\n' | b'\t') {
@@ -405,27 +492,56 @@ fn encode_char(c: char, key: &Key) -> Vec<u8> {
         } else if (b'@'..=b'~').contains(&b) {
             b &= 0x1f;
         } else {
-            return Vec::new();
+            return false;
         }
     }
     out.push(b & 0x7f);
-    out
+    true
+}
+
+/// Text sent as characters (`cmd_send_keys_inject_string`'s literal
+/// path): each character is a key of its own, and a byte that is not
+/// UTF-8 goes as it is.
+fn literal_bytes(arg: &str, modes: KeyModes, out: &mut Vec<u8>) {
+    for unit in vtmux_core::rawstr::units(arg) {
+        match unit {
+            vtmux_core::rawstr::Unit::Byte(b) => out.push(b),
+            vtmux_core::rawstr::Unit::Char(c) => {
+                let key = Key {
+                    base: Base::Char(c),
+                    ctrl: false,
+                    meta: false,
+                    shift: false,
+                    esc_prefix: false,
+                };
+                encode_into(&key, modes, out);
+            }
+        }
+    }
 }
 
 /// The bytes `send-keys` writes for one argument: a key name if it is one,
 /// otherwise the text itself, character by character
 /// (cmd-send-keys.c `cmd_send_keys_inject_string`).
+/// A key `input_key` gives up on is sent as text after all
+/// (cmd-send-keys.c:131-141), after whatever it wrote first.
 #[must_use]
 pub fn send_keys_bytes(arg: &str, literal: bool, modes: KeyModes) -> Vec<u8> {
-    if !literal && let Some(key) = lookup(arg) {
-        return encode(&key, modes);
+    let mut out = Vec::new();
+    if !literal
+        && let Some(key) = lookup(arg)
+        && encode_into(&key, modes, &mut out)
+    {
+        return out;
     }
-    vtmux_core::rawstr::to_bytes(arg).into_owned()
+    literal_bytes(arg, modes, &mut out);
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vtmux_vt::KeyMode;
 
     fn b(arg: &str) -> Vec<u8> {
         send_keys_bytes(arg, false, KeyModes::default())
@@ -461,7 +577,7 @@ mod tests {
                 false,
                 KeyModes {
                     app_cursor: true,
-                    app_keypad: false
+                    ..KeyModes::default()
                 }
             ),
             b"\x1bOA"
@@ -520,7 +636,7 @@ mod tests {
                 &up,
                 KeyModes {
                     app_cursor: true,
-                    app_keypad: false
+                    ..KeyModes::default()
                 }
             ),
             b"\x1b\x1bOA"
@@ -535,5 +651,128 @@ mod tests {
             ..up
         };
         assert_eq!(encode(&btab, KeyModes::default()), b"\x1b[Z");
+    }
+
+    /// The bytes a pane gets from `send-keys KEY` in each key mode and
+    /// `extended-keys-format`. From tmux 3.8, isolated (`-L`, `-f
+    /// /dev/null`): `set -g extended-keys on; set -g extended-keys-format
+    /// F; new -d "stty raw -echo; printf MODE; exec cat > OUT"`, then
+    /// `send-keys KEY; send-keys -H 7c` per key, OUT read with `od` (tmp
+    /// probe.sh). Standard mode is the same in both formats. Columns:
+    /// standard, mode 1 csi-u, mode 1 xterm, mode 2 csi-u, mode 2 xterm.
+    #[test]
+    fn send_keys_in_each_key_mode_and_format() {
+        #[rustfmt::skip]
+        let table: [(&str, [&str; 5]); 51] = [
+            ("C-a", ["\x01", "\x01", "\x01", "\\e[97;5u", "\\e[27;5;97~"]),
+            ("C-S-a", ["\x01", "\x01", "\x01", "\\e[97;6u", "\\e[27;6;97~"]),
+            ("M-a", ["\\ea", "\\ea", "\\ea", "\\e[97;3u", "\\e[27;3;97~"]),
+            ("C-M-a", ["\\e\x01", "\\e\x01", "\\e\x01", "\\e[97;7u", "\\e[27;7;97~"]),
+            ("S-a", ["a", "\\e[97;2u", "\\e[27;2;97~", "\\e[97;2u", "\\e[27;2;97~"]),
+            ("A", ["A", "A", "A", "A", "A"]),
+            ("Enter", ["\x0d", "\x0d", "\x0d", "\x0d", "\x0d"]),
+            ("S-Enter", ["\x0d", "\\e[13;2u", "\\e[27;2;13~", "\\e[13;2u", "\\e[27;2;13~"]),
+            ("C-Enter", ["\x0d", "\\e[13;5u", "\\e[27;5;13~", "\\e[13;5u", "\\e[27;5;13~"]),
+            ("M-Enter", ["\\e\x0d", "\\e\x0d", "\\e\x0d", "\\e[13;3u", "\\e[27;3;13~"]),
+            ("Tab", ["\x09", "\x09", "\x09", "\x09", "\x09"]),
+            ("C-Tab", ["\x09", "\\e[9;5u", "\\e[27;5;9~", "\\e[9;5u", "\\e[27;5;9~"]),
+            ("BTab", ["\\e[Z", "\\e[Z", "\\e[Z", "\\e[9;2u", "\\e[27;2;9~"]),
+            ("S-Tab", ["\x09", "\\e[9;2u", "\\e[27;2;9~", "\\e[9;2u", "\\e[27;2;9~"]),
+            ("C-1", ["1", "\\e[49;5u", "\\e[27;5;49~", "\\e[49;5u", "\\e[27;5;49~"]),
+            ("C-/", ["\x1f", "\x1f", "\x1f", "\\e[47;5u", "\\e[27;5;47~"]),
+            ("C-Space", ["\x00", "\x00", "\x00", "\\e[32;5u", "\\e[27;5;32~"]),
+            ("C-@", ["\x00", "\x00", "\x00", "\\e[64;5u", "\\e[27;5;64~"]),
+            ("C-é", ["é", "\\e[233;5u", "\\e[27;5;233~", "\\e[233;5u", "\\e[27;5;233~"]),
+            ("M-é", ["\\eé", "\\eé", "\\eé", "\\e[233;3u", "\\e[27;3;233~"]),
+            ("é", ["é", "é", "é", "é", "é"]),
+            ("S-Up", ["\\e[1;2A", "\\e[1;2A", "\\e[1;2A", "\\e[1;2A", "\\e[1;2A"]),
+            ("C-Left", ["\\e[1;5D", "\\e[1;5D", "\\e[1;5D", "\\e[1;5D", "\\e[1;5D"]),
+            ("F5", ["\\e[15~", "\\e[15~", "\\e[15~", "\\e[15~", "\\e[15~"]),
+            ("C-F5", ["\\e[15;5~", "\\e[15;5~", "\\e[15;5~", "\\e[15;5~", "\\e[15;5~"]),
+            ("BSpace", ["\x7f", "\x7f", "\x7f", "\x7f", "\x7f"]),
+            ("C-BSpace", ["C-BSpace", "\\e[127;5u", "\\e[27;5;127~", "\\e[127;5u", "\\e[27;5;127~"]),
+            ("M-BSpace", ["\\e\x7f", "\\e\x7f", "\\e\x7f", "\\e[127;3u", "\\e[27;3;127~"]),
+            ("S-BSpace", ["\x7f", "\\e[127;2u", "\\e[27;2;127~", "\\e[127;2u", "\\e[27;2;127~"]),
+            ("C-M-BSpace", ["\\eC-M-BSpace", "\\e[127;7u", "\\e[27;7;127~", "\\e[127;7u", "\\e[27;7;127~"]),
+            ("Escape", ["\\e", "\\e", "\\e", "\\e", "\\e"]),
+            ("M-Escape", ["\\e\\e", "\\e\\e", "\\e\\e", "\\e[27;3u", "\\e[27;3;27~"]),
+            ("C-Escape", ["C-Escape", "\\e[27;5u", "\\e[27;5;27~", "\\e[27;5u", "\\e[27;5;27~"]),
+            ("C-M-Escape", ["\\eC-M-Escape", "\\e[27;7u", "\\e[27;7;27~", "\\e[27;7u", "\\e[27;7;27~"]),
+            ("C-i", ["\x09", "\x09", "\x09", "\\e[105;5u", "\\e[27;5;105~"]),
+            ("KP1", ["1", "1", "1", "1", "1"]),
+            ("C-KP1", ["", "", "", "", ""]),
+            ("M-KP1", ["\\e1", "\\e1", "\\e1", "\\e1", "\\e1"]),
+            ("C-[", ["\\e", "\\e", "\\e", "\\e[91;5u", "\\e[27;5;91~"]),
+            ("C-?", ["\x7f", "\\e[63;5u", "\\e[27;5;63~", "\\e[63;5u", "\\e[27;5;63~"]),
+            ("C-3", ["\\e", "\\e", "\\e", "\\e[51;5u", "\\e[27;5;51~"]),
+            ("C-8", ["\x7f", "\x7f", "\x7f", "\\e[56;5u", "\\e[27;5;56~"]),
+            ("C-~", ["\x1e", "\x1e", "\x1e", "\\e[126;5u", "\\e[27;5;126~"]),
+            ("C-M-S-x", ["\\e\x18", "\\e\x18", "\\e\x18", "\\e[120;8u", "\\e[27;8;120~"]),
+            ("Space", [" ", " ", " ", " ", " "]),
+            ("S-Space", [" ", "\\e[32;2u", "\\e[27;2;32~", "\\e[32;2u", "\\e[27;2;32~"]),
+            ("M-Space", ["\\e ", "\\e ", "\\e ", "\\e[32;3u", "\\e[27;3;32~"]),
+            ("M-BTab", ["\\e[Z", "\\e[Z", "\\e[Z", "\\e[9;4u", "\\e[27;4;9~"]),
+            ("C-BTab", ["\\e[Z", "\\e[Z", "\\e[Z", "\\e[9;6u", "\\e[27;6;9~"]),
+            ("M-S-Tab", ["\\e\x09", "\\e\x09", "\\e\x09", "\\e[9;4u", "\\e[27;4;9~"]),
+            ("M-Up", ["\\e[1;3A", "\\e[1;3A", "\\e[1;3A", "\\e[1;3A", "\\e[1;3A"]),
+        ];
+        let column = [
+            (KeyMode::Standard, true),
+            (KeyMode::Extended1, true),
+            (KeyMode::Extended1, false),
+            (KeyMode::Extended2, true),
+            (KeyMode::Extended2, false),
+        ];
+        for (key, want) in table {
+            for ((key_mode, csi_u), want) in column.into_iter().zip(want) {
+                let modes = KeyModes {
+                    key_mode,
+                    csi_u,
+                    ..KeyModes::default()
+                };
+                let got = send_keys_bytes(key, false, modes);
+                assert_eq!(
+                    String::from_utf8_lossy(&got),
+                    want.replace("\\e", "\x1b"),
+                    "{key} {key_mode:?} csi-u={csi_u}"
+                );
+                // Standard mode is the same in either format.
+                if key_mode == KeyMode::Standard {
+                    let xterm = KeyModes {
+                        csi_u: false,
+                        ..modes
+                    };
+                    assert_eq!(send_keys_bytes(key, false, xterm), got, "{key}");
+                }
+            }
+        }
+    }
+
+    /// Text is sent a character at a time, each a key: in modes 1 and 2
+    /// control characters have no sequence and are dropped; a byte that is not
+    /// UTF-8 goes as it is. tmux 3.8 as above with `send-keys -l
+    /// 'a<LF>b<SOH>c<DEL>'` and `send-keys 'x<SOH>'`; a lone 0xff with
+    /// `printf '\377'`.
+    #[test]
+    fn text_is_sent_as_keys() {
+        let mode = |key_mode| KeyModes {
+            key_mode,
+            csi_u: true,
+            ..KeyModes::default()
+        };
+        for (key_mode, want) in [
+            (KeyMode::Standard, &b"a\nb\x01c\x7fx\x01"[..]),
+            (KeyMode::Extended1, b"abc\x7fx"),
+            (KeyMode::Extended2, b"abc\x7fx"),
+        ] {
+            let mut got = send_keys_bytes("a\nb\x01c\x7f", true, mode(key_mode));
+            got.extend(send_keys_bytes("x\x01", false, mode(key_mode)));
+            assert_eq!(got, want, "{key_mode:?}");
+        }
+        let raw = vtmux_core::rawstr::from_bytes(b"a\xffb");
+        assert_eq!(
+            send_keys_bytes(&raw, true, mode(KeyMode::Extended2)),
+            b"a\xffb"
+        );
     }
 }

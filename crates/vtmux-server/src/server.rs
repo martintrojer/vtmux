@@ -547,6 +547,7 @@ impl Server {
                 self.pane_readable(p);
             }
             self.expire_repeat(Instant::now());
+            self.start_timers(Instant::now());
             self.status_timers(Instant::now());
             self.model.alerts_timers(Instant::now());
             self.run_alerts();
@@ -630,6 +631,7 @@ impl Server {
             .flat_map(|c| {
                 [
                     c.decoder.deadline(),
+                    c.decoder.start_deadline(),
                     c.keys.repeat_deadline,
                     c.status.deadline(),
                 ]
@@ -1205,6 +1207,66 @@ impl Server {
 
     // ------------------------------------------------------- attach hooks
 
+    /// `tty_update_features` (tty.c:552-575) once the client's terminal
+    /// changed (a reply to the startup queries, or the start timer):
+    /// the capabilities are taken again, `Eneks` asks for extended keys
+    /// when `extended-keys` is on, `Enfcs` for focus reports when
+    /// `focus-events` is. tmux then redraws the client in full; vtmux's
+    /// frames are diffs of finished screens (D14), so it redraws only when
+    /// the capabilities it draws with changed.
+    pub(crate) fn update_features(&mut self, id: ClientId) {
+        let extended_keys = self.model.extended_keys() != vtmux_vt::ExtendedKeys::Off;
+        let focus = self.model.number_option(TreeId::Server, "focus-events") != 0;
+        let Some(c) = self.clients.get_mut(&id) else {
+            return;
+        };
+        let Some(term) = c.term.as_ref() else {
+            return;
+        };
+        let mut out = Vec::new();
+        if extended_keys && let Some(eneks) = term.enable_extended_keys() {
+            out.extend_from_slice(eneks.as_bytes());
+        }
+        // `Enfcs` comes with the `focus` feature, which every terminal
+        // vtmux knows has.
+        if focus {
+            out.extend_from_slice(b"\x1b[?1004h");
+        }
+        let caps = crate::render::Caps::from_term(term);
+        let changed = c.caps != Some(caps);
+        c.caps = Some(caps);
+        if !out.is_empty() {
+            self.send(id, &ServerMsg::Frame(out));
+        }
+        if changed {
+            if let Some(c) = self.clients.get_mut(&id) {
+                c.compositor.invalidate();
+            }
+            self.redraw_client(id);
+        }
+    }
+
+    /// `tty_start_timer_callback` (tty.c:311-322): `TTY_QUERY_TIMEOUT`
+    /// after the queries, a terminal that answered none of DA, DA2 and
+    /// XTVERSION gets `tty_update_features` anyway; later replies are not
+    /// taken as answers.
+    fn start_timers(&mut self, now: Instant) {
+        let due: Vec<ClientId> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.decoder.start_deadline().is_some_and(|t| t <= now))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in due {
+            let Some(c) = self.clients.get_mut(&id) else {
+                continue;
+            };
+            if c.decoder.queries_expired() && c.attached.is_some() {
+                self.update_features(id);
+            }
+        }
+    }
+
     /// `cmd_attach_session`: Ready precedes encoded terminal output.
     pub fn attach_client(&mut self, id: ClientId, s: SessionId) -> Result<(), EdgeError> {
         self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
@@ -1230,7 +1292,8 @@ impl Server {
         client.term = Some(term);
         client.compositor.invalidate();
         client.attached = Some(s);
-        // Caps::startup ends with a DECRQM query (tty.c tty_send_requests).
+        // Caps::startup ends with the terminal queries (tty.c
+        // tty_send_requests); tty_start_start_timer.
         client.decoder.query_sent(Instant::now());
         // server_client_set_session: the current window's latest client
         // (server-client.c:465), then session_update_activity (468).
@@ -1238,14 +1301,10 @@ impl Server {
         self.model.touch_session(s);
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
-        // set of modes, not their ordering.
-        let mut startup = caps.startup();
-        // tty_start_tty (tty.c:563-564): ENFCS asks the terminal for focus
-        // reports when `focus-events` is on.
-        if self.model.number_option(TreeId::Server, "focus-events") != 0 {
-            startup.extend_from_slice(b"\x1b[?1004h");
-        }
-        self.send(id, &ServerMsg::Frame(startup));
+        // set of modes, not their ordering. Focus reports and extended
+        // keys are asked for once the terminal answers or the start timer
+        // fires ([`Server::update_features`]).
+        self.send(id, &ServerMsg::Frame(caps.startup()));
         if let Some(tty) = self
             .clients
             .get(&id)
@@ -1498,8 +1557,16 @@ impl Server {
     }
 
     fn exit_attached_with(&mut self, id: ClientId, last: &ServerMsg) {
-        if let Some(caps) = self.clients.get(&id).and_then(|c| c.caps) {
-            self.send(id, &ServerMsg::Frame(caps.teardown()));
+        if let Some(c) = self.clients.get(&id)
+            && let Some(caps) = c.caps
+        {
+            let dseks = c
+                .term
+                .as_ref()
+                .and_then(vtmux_core::term_features::Term::disable_extended_keys)
+                .unwrap_or_default();
+            let bytes = caps.teardown(dseks);
+            self.send(id, &ServerMsg::Frame(bytes));
         }
         self.send(id, last);
         let left = self.client_window(id);
@@ -1563,8 +1630,26 @@ impl Server {
                     // tty_keys_sync: only a supported reply changes anything.
                     if let (true, Some(term)) = (sync, &mut c.term) {
                         term.sync_supported();
-                        c.caps = Some(crate::render::Caps::from_term(term));
+                        self.update_features(id);
                     }
+                }
+                crate::input::Event::DeviceAttributes(params) => {
+                    if let Some(term) = &mut c.term {
+                        term.device_attributes(&params);
+                    }
+                    self.update_features(id);
+                }
+                crate::input::Event::DeviceAttributes2(first) => {
+                    if let Some(term) = &mut c.term {
+                        term.secondary_device_attributes(first);
+                    }
+                    self.update_features(id);
+                }
+                crate::input::Event::ExtendedDeviceAttributes(text) => {
+                    if let Some(term) = &mut c.term {
+                        term.extended_device_attributes(&text);
+                    }
+                    self.update_features(id);
                 }
                 crate::input::Event::Paste(start) => {
                     self.handle_key0(id, crate::key_dispatch::KeyKind::Paste(start), None);
@@ -1730,9 +1815,8 @@ impl Server {
             self.mode_key(p, c, key.to_core(), true);
             return;
         }
-        let modes = crate::keys::KeyModes {
-            app_cursor: pane.term.app_cursor(),
-            app_keypad: pane.term.app_keypad(),
+        let Some(modes) = self.model.key_modes(p) else {
+            return;
         };
         self.write_pane(p, &crate::keys::encode(key, modes));
     }
@@ -2318,6 +2402,11 @@ impl Server {
                 },
                 |t| t.features().list(),
             ),
+            termtype: c
+                .term
+                .as_ref()
+                .map(|t| t.term_type().to_owned())
+                .unwrap_or_default(),
             colours: c.caps.map(|caps| caps.colours),
             flags: c.flags.clone(),
         }
@@ -2848,6 +2937,9 @@ impl Server {
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
         let mut term = PaneTerm::new(cols, rows, history_limit);
         term.set_colour_names(vtmux_core::colour::is_x11_name);
+        // screen_init: the new screen's key mode follows `extended-keys`.
+        term.set_extended_keys(self.model.extended_keys());
+        term.reset_key_mode();
         let host = &self.info.host;
         if !host.chars().any(char::is_control) {
             term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
@@ -2944,6 +3036,7 @@ impl Server {
             return Ok(());
         }
         let fresh = self.spawn_pane(ps)?;
+        let extended_keys = self.model.extended_keys();
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return Ok(());
         };
@@ -2955,6 +3048,9 @@ impl Server {
             b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l",
         );
         let _ = pane.term.take_replies();
+        // screen_reinit (spawn.c:329) under the current `extended-keys`.
+        pane.term.set_extended_keys(extended_keys);
+        pane.term.reset_key_mode();
         pane.io = fresh.io;
         pane.pid = fresh.pid;
         pane.argv = fresh.argv;
@@ -3031,6 +3127,7 @@ impl Server {
             let input_buffer = self
                 .model
                 .number_option(TreeId::Server, "input-buffer-size");
+            let extended_keys = self.model.extended_keys();
             let redraw_pending = self.model.redraw_panes.contains(&p);
             let Some(pane) = self.model.panes.get_mut(&p) else {
                 return;
@@ -3043,6 +3140,7 @@ impl Server {
                     let alternate = pane.term.alternate_on();
                     pane.term
                         .set_input_buffer_size(usize::try_from(input_buffer).unwrap_or(0));
+                    pane.term.set_extended_keys(extended_keys);
                     pane.term.feed(&bytes);
                     let passthrough = pane.term.take_passthrough();
                     let entered_alternate = !alternate && pane.term.alternate_on();

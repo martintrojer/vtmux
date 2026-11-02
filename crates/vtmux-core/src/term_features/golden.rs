@@ -86,3 +86,106 @@ fn a_late_sync_reply_adds_the_feature_and_capability() {
         "bpaste,ccolour,clipboard,cstyle,focus,sync,title|16|Sync Ss Se Ms tsl fsl"
     );
 }
+
+/// tty-keys.c's DA, DA2 and XTVERSION parsers: what a reply to the startup
+/// queries adds to an `xterm-256color` client (tty-features.c
+/// `tty_default_features`). From tmux 3.8, isolated: `new -d cat; set -g
+/// extended-keys on`, attach under a PTY that answers the queries with
+/// REPLY, then `lsc -F '#{client_termfeatures}|#{client_termtype}'` and
+/// whether `\e[>4;2m` (Eneks) was written (tmp da.py).
+#[test]
+fn device_attribute_replies_add_features() {
+    enum Reply {
+        Da(&'static [u32]),
+        Da2(u32),
+        Xda(&'static str),
+    }
+    let cases = [
+        (
+            Reply::Xda("ghostty 1.2.3"),
+            "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,margins,mouse,osc7,overline,progressbar,RGB,strikethrough,sync,title,usstyle|ghostty 1.2.3",
+            true,
+        ),
+        (
+            Reply::Xda("XTerm(390)"),
+            "256,bpaste,ccolour,clipboard,cstyle,extkeys,focus,mouse,RGB,strikethrough,title|XTerm(390)",
+            true,
+        ),
+        (
+            Reply::Xda("foot(1.2)"),
+            "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,osc7,RGB,strikethrough,sync,title,usstyle|foot(1.2)",
+            true,
+        ),
+        (
+            Reply::Xda("Rio 0.2"),
+            "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,focus,mouse,osc7,overline,progressbar,RGB,strikethrough,sync,title,usstyle|Rio 0.2",
+            false,
+        ),
+        (
+            Reply::Xda("kitty(0.3)"),
+            "bpaste,ccolour,clipboard,cstyle,focus,title|kitty(0.3)",
+            false,
+        ),
+        (
+            Reply::Da(&[62, 4, 21, 28, 52]),
+            "bpaste,ccolour,clipboard,cstyle,focus,margins,rectfill,sixel,title|",
+            false,
+        ),
+        (
+            Reply::Da(&[64, 52]),
+            "bpaste,ccolour,clipboard,cstyle,focus,title|",
+            false,
+        ),
+        (
+            Reply::Da(&[1, 2]),
+            "bpaste,ccolour,clipboard,cstyle,focus,title|",
+            false,
+        ),
+        (
+            Reply::Da(&[62, 308]),
+            "bpaste,ccolour,clipboard,cstyle,focus,title|",
+            false,
+        ),
+        (
+            Reply::Da2(84),
+            "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,title,usstyle|",
+            true,
+        ),
+        (
+            Reply::Da2(77),
+            "256,appesc,bpaste,ccolour,clipboard,cstyle,extkeys,focus,margins,mouse,overline,RGB,strikethrough,title,usstyle|",
+            true,
+        ),
+        (
+            Reply::Da2(85),
+            "256,bpaste,ccolour,clipboard,cstyle,focus,ignorefkeys,mouse,title|",
+            false,
+        ),
+        (
+            Reply::Da2(1),
+            "bpaste,ccolour,clipboard,cstyle,focus,title|",
+            false,
+        ),
+    ];
+    for (reply, want, eneks) in cases {
+        let mut term = Term::open(
+            "xterm-256color",
+            &[],
+            None,
+            &items(&DEFAULT_FEATURES, "-"),
+            &items(&DEFAULT_OVERRIDES, "-"),
+        )
+        .unwrap();
+        match reply {
+            Reply::Da(p) => term.device_attributes(p),
+            Reply::Da2(p) => term.secondary_device_attributes(p),
+            Reply::Xda(t) => term.extended_device_attributes(t),
+        }
+        assert_eq!(
+            format!("{}|{}", term.features().list(), term.term_type()),
+            want
+        );
+        assert_eq!(term.enable_extended_keys().is_some(), eneks, "{want}");
+        assert_eq!(term.disable_extended_keys().is_some(), eneks, "{want}");
+    }
+}

@@ -391,6 +391,37 @@ impl Model {
         }
     }
 
+    /// The server's `extended-keys` option.
+    #[must_use]
+    pub fn extended_keys(&self) -> vtmux_vt::ExtendedKeys {
+        match self.number_option(TreeId::Server, "extended-keys") {
+            1 => vtmux_vt::ExtendedKeys::On,
+            2 => vtmux_vt::ExtendedKeys::Always,
+            _ => vtmux_vt::ExtendedKeys::Off,
+        }
+    }
+
+    /// The key encoding modes of pane `p`'s program, with the server's
+    /// `extended-keys-format` (0 is `csi-u`).
+    #[must_use]
+    pub fn key_modes(&self, p: PaneId) -> Option<crate::keys::KeyModes> {
+        let csi_u = self.number_option(TreeId::Server, "extended-keys-format") == 0;
+        Some(crate::keys::KeyModes::of(&self.panes.get(&p)?.term, csi_u))
+    }
+
+    /// `#{pane_key_mode}` (format.c `format_cb_pane_key_mode`): the mode of
+    /// the screen shown, which for a pane in a mode is the mode's own
+    /// screen. That screen was made under the `extended-keys` of the time
+    /// (`screen_init`), and nothing changes its mode afterwards.
+    #[must_use]
+    pub fn pane_key_mode(&self, p: PaneId) -> Option<vtmux_vt::KeyMode> {
+        let pane = self.panes.get(&p)?;
+        Some(match pane.modes.first() {
+            Some(m) => m.key_mode(),
+            None => pane.term.key_mode(),
+        })
+    }
+
     /// A number-valued option as seen from `tree`.
     #[must_use]
     pub fn number_option(&self, tree: TreeId, name: &str) -> i64 {

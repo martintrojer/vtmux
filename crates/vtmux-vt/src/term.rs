@@ -90,6 +90,47 @@ const CELLS_ALIGN: usize = 128;
 /// tmux's ground timer (input.c `input_start_ground_timer`).
 const DCS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How the pane wants modified keys reported (`#{pane_key_mode}`): tmux's
+/// `MODE_KEYS_EXTENDED` and `MODE_KEYS_EXTENDED_2`, which the program sets
+/// with xterm's modifyOtherKeys request `CSI > 4 ; Pv m`. Ghostty keeps
+/// its own modifyOtherKeys state with other semantics, so this is tracked
+/// here.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KeyMode {
+    /// Standard keys (`VT10x`).
+    #[default]
+    Standard,
+    /// modifyOtherKeys 1 (`Ext 1`): keys standard mode can send stay so.
+    Extended1,
+    /// modifyOtherKeys 2 (`Ext 2`): every modified key is extended.
+    Extended2,
+}
+
+/// The server's `extended-keys` option, which decides what the program's
+/// key mode requests do (input.c:1527-1559).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ExtendedKeys {
+    /// Requests are ignored.
+    #[default]
+    Off,
+    /// Requests are honoured.
+    On,
+    /// The pane is always at least in [`KeyMode::Extended1`].
+    Always,
+}
+
+impl ExtendedKeys {
+    /// The mode a reset screen starts in (`screen_reinit`,
+    /// `screen_write_reset`).
+    fn reset_mode(self) -> KeyMode {
+        if self == Self::Always {
+            KeyMode::Extended1
+        } else {
+            KeyMode::Standard
+        }
+    }
+}
+
 /// One pane's terminal. Owns the libghostty terminal; `'static` for callers.
 #[derive(Debug)]
 pub struct PaneTerm {
@@ -478,6 +519,23 @@ impl PaneTerm {
             }
         }
         i
+    }
+
+    /// The `extended-keys` option the next input is read under.
+    pub fn set_extended_keys(&mut self, option: ExtendedKeys) {
+        self.scan.extended_keys = option;
+    }
+
+    /// The key mode a new or reinitialised screen has (`screen_reinit`):
+    /// [`KeyMode::Extended1`] under `extended-keys always`, else standard.
+    pub fn reset_key_mode(&mut self) {
+        self.scan.key_mode = self.scan.extended_keys.reset_mode();
+    }
+
+    /// How the program wants modified keys sent.
+    #[must_use]
+    pub fn key_mode(&self) -> KeyMode {
+        self.scan.key_mode
     }
 
     /// Start from the ground state, as a fresh pane process does: nothing
@@ -1150,6 +1208,10 @@ struct AltModeScanner {
     csi_ignored: bool,
     /// The cursor style tmux would hold, shared with the reply handler.
     cursor: Rc<StdCell<CursorState>>,
+    /// The CSI began `CSI >` (tmux's `>` intermediate, input.c:577).
+    gt: bool,
+    key_mode: KeyMode,
+    extended_keys: ExtendedKeys,
 }
 
 /// tmux's cursor style state: `s->cstyle`, `MODE_CURSOR_BLINKING`,
@@ -1367,6 +1429,7 @@ impl AltModeScanner {
             (ScanState::Esc, b'[') => {
                 self.state = ScanState::Csi;
                 self.private = false;
+                self.gt = false;
                 self.other = false;
                 self.intermediate = None;
                 self.interm_count = 0;
@@ -1391,8 +1454,10 @@ impl AltModeScanner {
                     b'7' => self.charset_op(CharsetOp::Save),
                     b'8' => self.charset_op(CharsetOp::Restore),
                     b'c' => {
-                        // RIS: `colour_palette_clear` (input.c:1408).
+                        // RIS: `colour_palette_clear` (input.c:1408), and
+                        // `screen_write_reset` resets the key mode.
                         self.palette.clear();
+                        self.key_mode = self.extended_keys.reset_mode();
                         self.charset_op(CharsetOp::Reset);
                         return Some(ScanEvent::Reset);
                     }
@@ -1409,9 +1474,23 @@ impl AltModeScanner {
                 }
             }
             (ScanState::Csi, b'?')
-                if self.params.is_empty() && !self.private && self.interm_count == 0 =>
+                if self.params.is_empty()
+                    && !self.private
+                    && !self.gt
+                    && self.interm_count == 0 =>
             {
                 self.private = true;
+            }
+            // `CSI >` sequences are none of the others this scanner reads
+            // (`other`); a second prefix byte is csi_ignore.
+            (ScanState::Csi, b'>')
+                if self.params.is_empty()
+                    && !self.private
+                    && !self.gt
+                    && self.interm_count == 0 =>
+            {
+                self.gt = true;
+                self.other = true;
             }
             (ScanState::Csi, b'0'..=b'9' | b';' | b':') => {
                 // `param_buf[64]` keeps 63 bytes, then discards; a parameter
@@ -1464,7 +1543,46 @@ impl AltModeScanner {
         self.state == ScanState::Ground && std::mem::take(&mut self.resync)
     }
 
+    /// `INPUT_CSI_MODSET` and `INPUT_CSI_MODOFF` (input.c:1527-1559):
+    /// `CSI > 4 ; Pv m` and `CSI > 4 n`; other resources are ignored.
+    fn key_mode_request(&mut self, set: bool) {
+        let Some(params) = parse_params(&self.params) else {
+            return;
+        };
+        // input_get(ictx, i, 0, 0): missing is 0, a string is -1.
+        let get = |i: usize| match params.get(i) {
+            None | Some(Param::Missing) => Some(0),
+            Some(Param::Num(n)) => Some(*n),
+            Some(Param::Text) => None,
+        };
+        if get(0) != Some(4) {
+            return;
+        }
+        let always = self.extended_keys == ExtendedKeys::Always;
+        self.key_mode = if set {
+            if self.extended_keys == ExtendedKeys::Off {
+                return;
+            }
+            match get(1) {
+                Some(2) => KeyMode::Extended2,
+                Some(1) => KeyMode::Extended1,
+                _ if always => KeyMode::Extended1,
+                _ => KeyMode::Standard,
+            }
+        } else if always {
+            KeyMode::Extended1
+        } else {
+            KeyMode::Standard
+        };
+    }
+
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
+        if self.gt {
+            if self.intermediate.is_none() && !self.csi_ignored && matches!(b, b'm' | b'n') {
+                self.key_mode_request(b == b'm');
+            }
+            return self.resync.then_some(ScanEvent::Resync);
+        }
         let op = match (self.private, self.intermediate, b) {
             (false, Some(b'"'), b'q') | (false, Some(b'!'), b'p') => {
                 self.resync = true;
@@ -2056,6 +2174,54 @@ mod tests {
             find(b"\x1b[3J\x1b[3;0J\x1b[J\x1b[2J\x1b[?3J\x1b[3;1J"),
             b"JJ"
         );
+    }
+
+    /// `#{pane_key_mode}` after each request, under each `extended-keys`
+    /// value. Probed on tmux 3.8 (isolated): `set -g extended-keys E`, a
+    /// fresh `sh` pane prints the bytes, then `display -p
+    /// '#{pane_key_mode}'`.
+    #[test]
+    fn key_mode_requests_follow_tmux() {
+        use KeyMode::{Extended1 as E1, Extended2 as E2, Standard as S};
+        let cases: [(&[u8], [KeyMode; 3]); 14] = [
+            (b"", [S, S, S]),
+            (b"\x1b[>4;1m", [S, E1, E1]),
+            (b"\x1b[>4;2m", [S, E2, E2]),
+            (b"\x1b[>4m", [S, S, E1]),
+            (b"\x1b[>4;2m\x1b[>4n", [S, S, E1]),
+            (b"\x1b[>4;0m", [S, S, E1]),
+            (b"\x1b[>4;2m\x1b[>5n", [S, E2, E2]),
+            (b"\x1b[>4;2m\x1bc", [S, S, E1]),
+            (b"\x1b[>4;3m", [S, S, E1]),
+            (b"\x1b[>4;2m\x1b[>4;1m", [S, E1, E1]),
+            (b"\x1b[>4;2m\x1b[>m", [S, E2, E2]),
+            (b"\x1b[>4;2m\x1b[?4m", [S, E2, E2]),
+            (b"\x1b[>4;2;5m", [S, E2, E2]),
+            (b"\x1b[>4:2m", [S, S, S]),
+        ];
+        for (bytes, want) in cases {
+            for (option, want) in [ExtendedKeys::Off, ExtendedKeys::On, ExtendedKeys::Always]
+                .into_iter()
+                .zip(want)
+            {
+                let mut t = PaneTerm::new(10, 2, 0);
+                t.set_extended_keys(option);
+                for b in bytes {
+                    t.feed(&[*b]);
+                }
+                assert_eq!(t.key_mode(), want, "{option:?} {bytes:?}");
+            }
+        }
+        // The requests reach Ghostty too, and leave the screen alone.
+        let mut t = PaneTerm::new(10, 2, 0);
+        t.set_extended_keys(ExtendedKeys::On);
+        t.feed(b"a\x1b[>4;2mb");
+        assert_eq!(t.key_mode(), E2);
+        assert_eq!(t.cursor(), (2, 0));
+        // A new screen under `always` starts in mode 1 (screen_reinit).
+        t.set_extended_keys(ExtendedKeys::Always);
+        t.reset_key_mode();
+        assert_eq!(t.key_mode(), E1);
     }
 
     /// tmux's charset state reaches the cell's protection bit, which a

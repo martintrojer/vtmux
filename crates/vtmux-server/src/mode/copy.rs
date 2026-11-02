@@ -230,6 +230,8 @@ impl ScreenSel {
 #[allow(clippy::struct_excessive_bools)] // tmux's independent mode flags
 #[derive(Clone, Debug)]
 pub struct CopyMode {
+    /// The key mode of the mode's screen (`#{pane_key_mode}`).
+    pub key_mode: vtmux_vt::KeyMode,
     backing: Grid,
     sx: usize,
     sy: usize,
@@ -640,6 +642,7 @@ impl CopyMode {
             (cursor_row - hsize, 0)
         };
         Self {
+            key_mode: vtmux_vt::KeyMode::Standard,
             backing,
             sx,
             sy,

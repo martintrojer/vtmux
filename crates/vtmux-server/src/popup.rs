@@ -218,7 +218,10 @@ impl Server {
             return false;
         }
         // screen_set_default_cursor and no history: a popup keeps none.
-        let term = PaneTerm::new(jx.max(1), jy.max(1), 0);
+        let mut term = PaneTerm::new(jx.max(1), jy.max(1), 0);
+        // screen_init: the popup's key mode follows `extended-keys` too.
+        term.set_extended_keys(self.model.extended_keys());
+        term.reset_key_mode();
         let popup = Popup {
             preferred: (open.px, open.py, open.sx, open.sy),
             px: open.px,
@@ -356,13 +359,17 @@ impl Server {
     /// The popup PTY of client `c` is readable: feed the terminal
     /// (`popup_job_update_cb`); at EOF the output is closed.
     pub(crate) fn popup_readable(&mut self, c: ClientId) {
+        let extended_keys = self.model.extended_keys();
         let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
             return;
         };
         let mut closed = false;
         while let Some(io) = p.io.as_mut() {
             match io.read() {
-                ReadResult::Data(bytes) => p.term.feed(&bytes),
+                ReadResult::Data(bytes) => {
+                    p.term.set_extended_keys(extended_keys);
+                    p.term.feed(&bytes);
+                }
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
                     closed = true;
@@ -455,6 +462,10 @@ impl Server {
     /// `popup_key_cb` (popup.c:430-460) for a key from client `c`: `true`
     /// when the popup took it (it always does while up).
     pub(crate) fn popup_key(&mut self, c: ClientId, key: Key) -> bool {
+        let csi_u = self
+            .model
+            .number_option(TreeId::Server, "extended-keys-format")
+            == 0;
         let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
             return false;
         };
@@ -470,10 +481,7 @@ impl Server {
             && let Some(io) = p.io.as_mut()
         {
             // input_key: in the popup terminal's own modes.
-            let modes = crate::keys::KeyModes {
-                app_cursor: p.term.app_cursor(),
-                app_keypad: p.term.app_keypad(),
-            };
+            let modes = crate::keys::KeyModes::of(&p.term, csi_u);
             io.write(&crate::keys::encode(&k, modes));
             self.popup_reregister(c);
         }

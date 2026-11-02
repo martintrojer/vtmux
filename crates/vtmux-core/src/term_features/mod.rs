@@ -78,6 +78,7 @@ impl Feature {
             Self::Sync => &[Cap::Sync],
             Self::Title => &[Cap::Tsl, Cap::Fsl],
             Self::Osc7 => &[Cap::Fsl],
+            Self::ExtendedKeys => &[Cap::Eneks, Cap::Dseks],
             Self::UnderlineStyles => &[Cap::Smulx, Cap::Setulc],
             _ => &[],
         }
@@ -170,11 +171,14 @@ pub enum Cap {
     /// Start and end of a title (`tsl`, `fsl`).
     Tsl,
     Fsl,
+    /// Ask the terminal for extended keys, and stop (`extkeys`).
+    Eneks,
+    Dseks,
 }
 
 impl Cap {
     /// Every capability, in the order the goldens list them.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Tc,
         Self::Rgb,
         Self::SetRgbF,
@@ -187,6 +191,8 @@ impl Cap {
         Self::Ms,
         Self::Tsl,
         Self::Fsl,
+        Self::Eneks,
+        Self::Dseks,
     ];
 
     /// The terminfo name.
@@ -205,6 +211,8 @@ impl Cap {
             Self::Ms => "Ms",
             Self::Tsl => "tsl",
             Self::Fsl => "fsl",
+            Self::Eneks => "Eneks",
+            Self::Dseks => "Dseks",
         }
     }
 
@@ -215,6 +223,9 @@ impl Cap {
             Self::Ms => Some(MS),
             Self::Tsl => Some("\x1b]0;"),
             Self::Fsl => Some("\x07"),
+            // tty-features.c:251-254.
+            Self::Eneks => Some("\x1b[>4;2m"),
+            Self::Dseks => Some("\x1b[>4m"),
             _ => None,
         }
     }
@@ -320,6 +331,10 @@ pub struct Term {
     ms: Option<String>,
     tsl: Option<String>,
     fsl: Option<String>,
+    eneks: Option<String>,
+    dseks: Option<String>,
+    /// `c->term_type`: what the terminal named itself in its XDA reply.
+    version: Option<String>,
     /// `TERM_256COLOURS`.
     colours256: bool,
     /// `TERM_RGBCOLOURS`.
@@ -350,6 +365,9 @@ impl Term {
             ms: (base.caps & Cap::Ms.bit() != 0).then(|| MS.to_owned()),
             tsl: base.tsl.map(str::to_owned),
             fsl: base.tsl.map(|_| "\x07".to_owned()),
+            eneks: None,
+            dseks: None,
+            version: None,
             colours256: false,
             rgb: false,
             overrides: overrides.to_vec(),
@@ -385,9 +403,119 @@ impl Term {
     /// The terminal answered the synchronised-update query: `tty_keys_sync`.
     pub fn sync_supported(&mut self) {
         self.features.parse("sync", &[','], true);
+        self.update_features();
+    }
+
+    /// The terminal's primary device attributes (`CSI ? Ps ; ... c`), as
+    /// `tty_keys_device_attributes` (tty-keys.c:1467-1544) reads them: a
+    /// VT level 1-5 adds a feature for each attribute it names. tmux keeps
+    /// each parameter in a `char`, so only its low byte counts.
+    pub fn device_attributes(&mut self, params: &[u32]) {
+        let p = |i: usize| params.get(i).map_or(0, |n| n.to_le_bytes()[0]);
+        if (61..=65).contains(&p(0)) {
+            for i in 1..params.len().min(32) {
+                let name = match p(i) {
+                    4 => "sixel",
+                    21 => "margins",
+                    28 => "rectfill",
+                    52 => "clipboard",
+                    _ => continue,
+                };
+                self.features.parse(name, &[','], true);
+            }
+        }
+        self.update_features();
+    }
+
+    /// The terminal's secondary device attributes (`CSI > Pp ; ... c`):
+    /// `tty_keys_device_attributes2` (tty-keys.c:1596-1670) knows mintty,
+    /// tmux and rxvt-unicode by their first parameter.
+    pub fn secondary_device_attributes(&mut self, first: u32) {
+        match first.to_le_bytes()[0] {
+            b'M' => self.default_features("mintty"),
+            b'T' => self.default_features("tmux"),
+            b'U' => self.default_features("rxvt-unicode"),
+            _ => {}
+        }
+        self.update_features();
+    }
+
+    /// The terminal's XTVERSION reply (`DCS > | text ST`):
+    /// `tty_keys_extended_device_attributes` (tty-keys.c:1676-1747) knows
+    /// some terminals by name, and keeps the text as `#{client_termtype}`.
+    pub fn extended_device_attributes(&mut self, text: &str) {
+        let known = [
+            ("iTerm2 ", "iTerm2"),
+            ("tmux ", "tmux"),
+            ("XTerm(", "XTerm"),
+            ("mintty ", "mintty"),
+            ("foot(", "foot"),
+            ("WezTerm ", "WezTerm"),
+            ("ghostty ", "ghostty"),
+            ("Rio ", "Rio"),
+        ];
+        if let Some((_, name)) = known.iter().find(|(prefix, _)| text.starts_with(prefix)) {
+            self.default_features(name);
+        }
+        self.version = Some(text.to_owned());
+        self.update_features();
+    }
+
+    /// `#{client_termtype}`: empty until the terminal answered XTVERSION.
+    #[must_use]
+    pub fn term_type(&self) -> &str {
+        self.version.as_deref().unwrap_or_default()
+    }
+
+    /// `tty_default_features` (tty-features.c:572-693) for a terminal
+    /// that named itself; the version checks there never apply (tmux
+    /// passes 0).
+    fn default_features(&mut self, name: &str) {
+        const MODERN: &str = "256,RGB,bpaste,clipboard,mouse,strikethrough,title";
+        let extra = match name {
+            "mintty" => "appesc,ccolour,cstyle,extkeys,margins,overline,usstyle",
+            "tmux" => "ccolour,cstyle,extkeys,focus,overline,usstyle,hyperlinks,progressbar",
+            "rxvt-unicode" => {
+                self.features.parse(
+                    "256,bpaste,ccolour,cstyle,mouse,title,ignorefkeys",
+                    &[','],
+                    true,
+                );
+                return;
+            }
+            "iTerm2" => "cstyle,extkeys,margins,usstyle,sync,osc7,hyperlinks,progressbar",
+            "foot" => "ccolour,cstyle,extkeys,usstyle,sync,osc7,hyperlinks",
+            "WezTerm" => "ccolour,cstyle,extkeys,focus,hyperlinks,margins,usstyle",
+            "ghostty" => {
+                "ccolour,cstyle,extkeys,focus,margins,overline,hyperlinks,osc7,sync,usstyle,progressbar"
+            }
+            "Rio" => "ccolour,cstyle,focus,overline,hyperlinks,osc7,sync,usstyle,progressbar",
+            "XTerm" => "ccolour,cstyle,extkeys,focus",
+            _ => return,
+        };
+        self.features
+            .parse(&format!("{MODERN},{extra}"), &[','], true);
+    }
+
+    /// The feature half of `tty_update_features` (tty.c:552-555).
+    fn update_features(&mut self) {
         if self.apply_features() {
             self.apply_overrides();
         }
+    }
+
+    /// `Eneks`: what asks the terminal for extended keys
+    /// (`tty_update_features`, tty.c:561-562); `None` without it.
+    #[must_use]
+    pub fn enable_extended_keys(&self) -> Option<&str> {
+        self.eneks.as_deref().filter(|_| self.has(Cap::Eneks))
+    }
+
+    /// `Dseks`: what turns extended keys off again (`tty_stop_tty`,
+    /// tty.c:508); `None` without it.
+    #[must_use]
+    pub fn disable_extended_keys(&self) -> Option<&str> {
+        self.dseks.as_deref().filter(|_| self.has(Cap::Dseks))
     }
 
     #[must_use]
@@ -533,6 +661,8 @@ impl Term {
             Cap::Ms => self.ms = value(),
             Cap::Tsl => self.tsl = value(),
             Cap::Fsl => self.fsl = value(),
+            Cap::Eneks => self.eneks = value(),
+            Cap::Dseks => self.dseks = value(),
             _ => {}
         }
     }
@@ -543,6 +673,8 @@ impl Term {
             Cap::Ms => self.ms = None,
             Cap::Tsl => self.tsl = None,
             Cap::Fsl => self.fsl = None,
+            Cap::Eneks => self.eneks = None,
+            Cap::Dseks => self.dseks = None,
             _ => {}
         }
     }

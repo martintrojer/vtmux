@@ -4328,3 +4328,171 @@ fn palette_oscs_drop_the_next_passthrough_payload_under_on() {
         }
     }
 }
+
+/// tty.c `tty_update_features` writes `Eneks` (`\e[>4;2m`, the `extkeys`
+/// feature) when `extended-keys` is not off, after a reply to the startup
+/// queries or the 5 s start timer (tty.c:311-322, 552-575); `tty_stop_tty`
+/// writes `Dseks` (`\e[>4m`) on the way out whatever `extended-keys` says
+/// (tty.c:508). The owner's config sets `terminal-features[10]
+/// "xterm*:RGB:usstyle:hyperlinks"` and `extended-keys on`: inside Ghostty
+/// the XTVERSION reply brings `extkeys`. Each case: (terminal-features,
+/// extended-keys, the terminal's reply, Eneks written, Dseks written).
+#[test]
+fn extended_keys_are_asked_of_a_terminal_with_extkeys() {
+    const ENEKS: &[u8] = b"\x1b[>4;2m";
+    const DSEKS: &[u8] = b"\x1b[>4m";
+    let cases: [(&str, &str, &[u8], bool, bool); 6] = [
+        (
+            "xterm*:RGB:usstyle:hyperlinks",
+            "on",
+            b"\x1bP>|ghostty 1.2.3\x1b\\",
+            true,
+            true,
+        ),
+        (
+            "xterm*:RGB:usstyle:hyperlinks",
+            "on",
+            b"\x1b[?62;22c",
+            false,
+            false,
+        ),
+        ("xterm*:extkeys", "on", b"\x1b[>0;10;1c", true, true),
+        ("xterm*:extkeys", "off", b"\x1b[>0;10;1c", false, true),
+        ("xterm*:extkeys", "always", b"", true, true),
+        ("", "on", b"", false, false),
+    ];
+    for bin in bins() {
+        for (features, ek, reply, eneks, dseks) in cases {
+            let w = World::new(bin.clone());
+            let mut v = vec!["new", "-d", "-s", "a"];
+            v.extend(CAT);
+            assert!(w.cli(&v).status.success());
+            if !features.is_empty() {
+                w.cli(&["set", "-s", "terminal-features[10]", features]);
+            }
+            w.cli(&["set", "-s", "extended-keys", ek]);
+            let mut a = w.attach(&["attach", "-t", "a"]);
+            a.wait(|a| a.text().contains("\x1b[?2026$p"));
+            let what = format!("{} {features} {ek} {reply:?}", bin.display());
+            let has = |a: &Attached, needle: &[u8]| {
+                a.bytes
+                    .lock()
+                    .unwrap()
+                    .windows(needle.len())
+                    .any(|x| x == needle)
+            };
+            if reply.is_empty() {
+                // No reply: the start timer.
+                thread::sleep(Duration::from_secs(3));
+                assert!(!has(&a, ENEKS), "{what}: Eneks before the start timer");
+                a.wait_for(Duration::from_secs(5), |a| !eneks || has(a, ENEKS));
+            } else {
+                a.keys(reply);
+                a.wait(|a| !eneks || has(a, ENEKS));
+            }
+            // The redraw that follows, and no Eneks where none is due.
+            thread::sleep(Duration::from_millis(300));
+            assert_eq!(has(&a, ENEKS), eneks, "{what}: Eneks");
+            let before = a.bytes.lock().unwrap().len();
+            a.keys(b"\x02d");
+            a.exited(0);
+            let tail = a.bytes.lock().unwrap()[before..].to_vec();
+            let found = tail.windows(DSEKS.len()).any(|x| x == DSEKS);
+            assert_eq!(found, dseks, "{what}: Dseks in {tail:?}");
+        }
+    }
+}
+
+/// `#{client_termtype}` is the XTVERSION text (tty-keys.c:1676-1747), and
+/// the features its terminal is known for are added. (tmux hands a second
+/// reply to the pane as keys once `TTY_HAVEXDA` is set; vtmux swallows
+/// it, as it did every `ESC P > |` string before.)
+#[test]
+fn xtversion_reply_names_the_terminal() {
+    const F: &str = "#{client_termtype}|#{client_termfeatures}";
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut v = vec!["new", "-d", "-s", "a"];
+        v.extend(CAT);
+        assert!(w.cli(&v).status.success());
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| a.text().contains("\x1b[?2026$p"));
+        let lsc =
+            |w: &World| String::from_utf8_lossy(&w.cli(&["lsc", "-F", F]).stdout).into_owned();
+        let mut out = lsc(&w);
+        a.keys(b"\x1bP>|foot(1.2)\x1b\\");
+        let end = Instant::now() + Duration::from_secs(5);
+        while !lsc(&w).starts_with("foot") {
+            assert!(Instant::now() < end);
+            thread::sleep(Duration::from_millis(20));
+        }
+        out.push_str(&lsc(&w));
+        a.keys(b"x");
+        a.wait(|_| pane_line(&w) == "x");
+        outputs.push(out);
+    }
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+}
+
+/// Keys typed on the attached terminal reach a pane in modifyOtherKeys 1
+/// or 2 extended, in `extended-keys-format csi-u` as the owner's config
+/// sets it: C-S-a, S-Enter, C-Tab, M-C-Left and an Escape-prefixed key
+/// (input-keys.c `input_key`). The pane copies its input to a file.
+#[test]
+fn attached_keys_reach_the_pane_in_its_key_mode() {
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let mut out = Vec::new();
+        for mode in ["", r"\033[>4;1m", r"\033[>4;2m"] {
+            let w = World::new(bin.clone());
+            let file = w.home.path().join("keys");
+            let script = format!(
+                "stty raw -echo; printf '{mode}'; printf R; exec cat > {}",
+                file.display()
+            );
+            let mut a = w.attach(&[
+                "set",
+                "-s",
+                "extended-keys",
+                "on",
+                ";",
+                "set",
+                "-s",
+                "extended-keys-format",
+                "csi-u",
+                ";",
+                "new",
+                "-s",
+                "a",
+                "sh",
+                "-c",
+                &script,
+            ]);
+            a.wait(|a| pane_text(a).contains('R'));
+            // C-S-a and S-Enter as CSI u, C-Tab, M-C-Left as xterm, then
+            // Escape + a and a plain `.` to end.
+            a.keys(b"\x1b[97;6u\x1b[13;2u\x1b[9;5u\x1b[1;7D\x1b[1;5D\x1ba.");
+            let end = Instant::now() + Duration::from_secs(5);
+            let bytes = loop {
+                let bytes = std::fs::read(&file).unwrap_or_default();
+                if bytes.ends_with(b".") {
+                    break bytes;
+                }
+                assert!(Instant::now() < end, "{mode}: {bytes:?}");
+                thread::sleep(Duration::from_millis(20));
+            };
+            out.push(format!(
+                "{mode}: {}",
+                String::from_utf8_lossy(&bytes).escape_debug()
+            ));
+        }
+        outputs.push(out);
+    }
+    assert_eq!(
+        outputs[1][2],
+        r"\033[>4;2m: \u{1b}[97;6u\u{1b}[13;2u\u{1b}[9;5u\u{1b}[1;7D\u{1b}[1;5D\u{1b}[97;3u.",
+        "tmux 3.8"
+    );
+    assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
+}

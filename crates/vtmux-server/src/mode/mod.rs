@@ -83,6 +83,16 @@ impl PaneMode for CopyMode {
     }
 }
 
+/// The key mode a mode's new screen starts with (`screen_init` ->
+/// `screen_reinit`): mode 1 under `extended-keys always`.
+pub(crate) fn screen_key_mode(model: &Model) -> vtmux_vt::KeyMode {
+    if model.extended_keys() == vtmux_vt::ExtendedKeys::Always {
+        vtmux_vt::KeyMode::Extended1
+    } else {
+        vtmux_vt::KeyMode::Standard
+    }
+}
+
 /// One mode on a pane's stack (`struct window_mode_entry`).
 #[derive(Clone, Debug)]
 pub enum Mode {
@@ -155,6 +165,18 @@ impl PaneMode for Mode {
 }
 
 impl Mode {
+    /// The key mode of the mode's own screen (`#{pane_key_mode}`).
+    #[must_use]
+    pub fn key_mode(&self) -> vtmux_vt::KeyMode {
+        match self {
+            Self::Copy(m) => m.key_mode,
+            Self::Clock(m) => m.key_mode,
+            Self::Tree(m) => m.key_mode,
+            #[cfg(test)]
+            Self::Probe => vtmux_vt::KeyMode::Standard,
+        }
+    }
+
     #[must_use]
     pub fn as_copy(&self) -> Option<&CopyMode> {
         match self {
@@ -261,9 +283,12 @@ impl Model {
             return false;
         }
         let existing = pane.modes.iter().position(|m| matches!(m, Mode::Copy(_)));
-        let mut entry = match existing {
-            Some(i) => self.panes.get_mut(&p).expect("pane").modes.remove(i),
-            None => Mode::Copy(Box::new(mode(self))),
+        let mut entry = if let Some(i) = existing {
+            self.panes.get_mut(&p).expect("pane").modes.remove(i)
+        } else {
+            let mut m = mode(self);
+            m.key_mode = screen_key_mode(self);
+            Mode::Copy(Box::new(m))
         };
         if let Some(m) = entry.as_copy_mut() {
             m.kill = kill;
@@ -296,7 +321,10 @@ impl Model {
         let mut entry = match existing {
             Some(i) => self.panes.get_mut(&p).expect("pane").modes.remove(i),
             None => match mode(self) {
-                Some(t) => Mode::Tree(Box::new(t)),
+                Some(mut t) => {
+                    t.key_mode = screen_key_mode(self);
+                    Mode::Tree(Box::new(t))
+                }
                 None => return false,
             },
         };

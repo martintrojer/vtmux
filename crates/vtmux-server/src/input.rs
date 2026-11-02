@@ -14,8 +14,23 @@ pub enum Event {
     /// An OSC 52 clipboard reply (`tty_keys_clipboard`), decoded; what a
     /// `refresh-client -l` asked for.
     Clipboard(Vec<u8>),
+    /// The terminal's replies to the startup queries, each only while it
+    /// is awaited: primary device attributes (`CSI ? Ps ; ... c`) with
+    /// their parameters, secondary ones (`CSI > Pp ; ... c`) with the
+    /// first, and XTVERSION (`DCS > | text ST`).
+    DeviceAttributes(Vec<u32>),
+    DeviceAttributes2(u32),
+    ExtendedDeviceAttributes(String),
     Ignore,
 }
+
+/// The startup queries a reply can answer (`TTY_HAVEDA`, `TTY_HAVEDA2`,
+/// `TTY_HAVEXDA`, `TTY_HAVESYNC`).
+const QUERY_DA: u8 = 1;
+const QUERY_DA2: u8 = 2;
+const QUERY_XDA: u8 = 4;
+const QUERY_SYNC: u8 = 8;
+const ALL_QUERIES: u8 = QUERY_DA | QUERY_DA2 | QUERY_XDA | QUERY_SYNC;
 /// `escape-time` default (options-table.c).
 const ESCAPE_TIME: Duration = Duration::from_millis(10);
 /// The partial-key floor while a reply may still be in flight
@@ -31,17 +46,36 @@ pub struct Decoder {
     /// The terminal was queried and has not answered before this instant
     /// (`TTY_ALL_REQUEST_FLAGS` not all set, tty.c `tty_start_timer_callback`).
     queries_until: Option<Instant>,
+    /// The startup queries answered, or given up on (`QUERY_*` bits, the
+    /// `TTY_HAVE*` flags).
+    answered: u8,
     /// Inside a bracketed paste (`TTY_BRACKETPASTE`).
     pasting: bool,
     /// The terminal's `khome`/`kend` are `ESC [1~`/`ESC [4~`.
     tilde_home_end: bool,
 }
 impl Decoder {
-    /// A query went to the terminal (the startup `DECRQM 2026`); its reply
-    /// may arrive split, so partial sequences wait longer until it is
-    /// answered or `QUERY_TIMEOUT` passes.
+    /// The startup queries went to the terminal (DA, DA2, XTVERSION and
+    /// `DECRQM 2026`, tty.c `tty_send_requests`); their replies may arrive
+    /// split, so partial sequences wait longer until all are answered or
+    /// `QUERY_TIMEOUT` passes.
     pub fn query_sent(&mut self, now: Instant) {
         self.queries_until = Some(now + QUERY_TIMEOUT);
+        self.answered = 0;
+    }
+    /// When the start timer fires, while queries are unanswered.
+    #[must_use]
+    pub fn start_deadline(&self) -> Option<Instant> {
+        self.queries_until.filter(|_| self.answered != ALL_QUERIES)
+    }
+    /// The start timer fired (`tty_start_timer_callback`): later replies
+    /// are no longer taken as answers. Whether none of DA, DA2 and
+    /// XTVERSION had been answered.
+    pub fn queries_expired(&mut self) -> bool {
+        let none = self.answered & (QUERY_DA | QUERY_DA2 | QUERY_XDA) == 0;
+        self.queries_until = None;
+        self.answered = ALL_QUERIES;
+        none
     }
     /// The client's terminal is known (`tty_keys_build` with its terminfo).
     pub fn set_terminal(&mut self, term: &vtmux_core::term_features::Term) {
@@ -61,16 +95,34 @@ impl Decoder {
         let mut events = Vec::new();
         while !self.bytes.is_empty() {
             let expired = self.deadline().is_some_and(|t| now >= t);
-            let Some((event, used)) = decode(&self.bytes, expired, self.tilde_home_end) else {
+            let Some((mut event, used)) = decode(&self.bytes, expired, self.tilde_home_end) else {
                 self.pending.get_or_insert(now);
                 break;
             };
             self.bytes.drain(..used);
             self.pending = None;
-            match event {
-                Event::Sync(_) => self.queries_until = None,
-                Event::Paste(start) => self.pasting = start,
-                _ => {}
+            let answers = match event {
+                Event::Sync(_) => QUERY_SYNC,
+                Event::DeviceAttributes(_) => QUERY_DA,
+                Event::DeviceAttributes2(_) => QUERY_DA2,
+                Event::ExtendedDeviceAttributes(_) => QUERY_XDA,
+                Event::Paste(start) => {
+                    self.pasting = start;
+                    0
+                }
+                _ => 0,
+            };
+            if answers != 0 {
+                // A second reply is swallowed and changes nothing (each
+                // tty_keys_* parser returns -1 once its TTY_HAVE* flag is
+                // set); partial keys wait until all four are in.
+                if self.answered & answers != 0 {
+                    event = Event::Ignore;
+                }
+                self.answered |= answers;
+                if self.answered == ALL_QUERIES {
+                    self.queries_until = None;
+                }
             }
             events.push(event);
         }
@@ -157,10 +209,16 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
             let end = bytes[i] == 7 || (bytes[i] == b'\\' && bytes[i - 1] == 0x1b);
             if end {
                 let body_end = if bytes[i] == 7 { i } else { i - 1 };
-                let event = if prefix == b"\x1b]52;" {
-                    clipboard(&bytes[prefix.len()..body_end])
-                } else {
-                    Event::Ignore
+                let body = &bytes[prefix.len()..body_end];
+                let event = match prefix {
+                    b"\x1b]52;" => clipboard(body),
+                    // tty_keys_extended_device_attributes: the text up to
+                    // ST (tmp[128]); BEL does not end it there, but no
+                    // terminal sends one.
+                    b"\x1bP>|" if bytes[i] == b'\\' && body.len() < 127 => {
+                        Event::ExtendedDeviceAttributes(String::from_utf8_lossy(body).into_owned())
+                    }
+                    _ => Event::Ignore,
                 };
                 return Some((event, i + 1));
             }
@@ -218,7 +276,7 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
                         end + 1,
                     ));
                 }
-                return Some((Event::Ignore, end + 1));
+                return Some((device_attributes(body, final_byte), end + 1));
             }
             if let Some(k) = extended_key(body, final_byte) {
                 return Some((Event::Key(k), end + 1));
@@ -245,6 +303,28 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
     };
     Some((event, n + 1))
 }
+/// `tty_keys_device_attributes` and `tty_keys_device_attributes2`
+/// (tty-keys.c:1467-1670): the parameters of `CSI ? ... c` or `CSI > ...
+/// c`, each `strtoul`'d (0 if not all digits), at most 32.
+fn device_attributes(body: &str, final_byte: u8) -> Event {
+    if final_byte != b'c' {
+        return Event::Ignore;
+    }
+    let params = |rest: &str| -> Vec<u32> {
+        rest.split(';')
+            .take(32)
+            .map(|p| p.parse().unwrap_or(0))
+            .collect()
+    };
+    if let Some(rest) = body.strip_prefix('?') {
+        Event::DeviceAttributes(params(rest))
+    } else if let Some(rest) = body.strip_prefix('>') {
+        Event::DeviceAttributes2(params(rest).first().copied().unwrap_or(0))
+    } else {
+        Event::Ignore
+    }
+}
+
 /// A table row: the key with its modifiers.
 fn row(base: Base, ctrl: bool, meta: bool, shift: bool) -> Key {
     Key {
@@ -489,8 +569,8 @@ mod tests {
         assert_eq!(
             d.drain(now),
             vec![
-                Event::Ignore,
-                Event::Ignore,
+                Event::DeviceAttributes(vec![62, 4]),
+                Event::DeviceAttributes2(84),
                 Event::Ignore,
                 Event::Sync(true),
                 Event::Paste(true),
@@ -551,18 +631,47 @@ mod tests {
             assert_eq!(events.len(), 1);
             assert!(!matches!(events[0], Event::Key(_)), "{events:?}");
         }
-        // Answered: back to escape-time.
+        // All four answered: back to escape-time (TTY_ALL_REQUEST_FLAGS).
         let mut d = Decoder::default();
         d.query_sent(now);
         d.feed(b"\x1b[?2026;2$y\x1b");
         assert_eq!(d.drain(now), vec![Event::Sync(true)]);
+        assert_eq!(d.deadline(), Some(now + ms(500)));
+        d.feed(b"[?62;4c\x1b[>1;2c\x1bP>|xterm\x1b\\\x1b");
+        assert_eq!(
+            d.drain(now),
+            vec![
+                Event::DeviceAttributes(vec![62, 4]),
+                Event::DeviceAttributes2(1),
+                Event::ExtendedDeviceAttributes("xterm".into()),
+            ]
+        );
         assert_eq!(d.deadline(), Some(now + ms(10)));
+        assert_eq!(d.start_deadline(), None);
+        // A second reply changes nothing.
+        d.feed(b"[?62;52c");
+        assert_eq!(d.drain(now), vec![Event::Ignore]);
         // Unanswered queries time out after TTY_QUERY_TIMEOUT.
         let mut d = Decoder::default();
         d.query_sent(now);
         d.feed(b"\x1b");
         assert_eq!(d.drain(now + ms(5000)), Vec::new());
         assert_eq!(d.deadline(), Some(now + ms(5010)));
+        // The start timer (tty_start_timer_callback): due at the same time,
+        // it says whether none of DA, DA2 and XTVERSION was answered, and
+        // later replies are swallowed.
+        let mut d = Decoder::default();
+        d.query_sent(now);
+        assert_eq!(d.start_deadline(), Some(now + ms(5000)));
+        assert!(d.queries_expired());
+        assert_eq!(d.start_deadline(), None);
+        d.feed(b"\x1b[?62c");
+        assert_eq!(d.drain(now), vec![Event::Ignore]);
+        let mut d = Decoder::default();
+        d.query_sent(now);
+        d.feed(b"\x1b[>0c");
+        assert_eq!(d.drain(now), vec![Event::DeviceAttributes2(0)]);
+        assert!(!d.queries_expired());
         // A partial paste end inside a paste waits too.
         let mut d = Decoder::default();
         d.feed(b"\x1b[200~ab\x1b[20");

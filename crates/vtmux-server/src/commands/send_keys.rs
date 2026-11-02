@@ -12,7 +12,7 @@ use vtmux_core::ids::PaneId;
 use super::Item;
 use crate::cmdq::{End, NewBatch};
 use crate::jobs::JobSpec;
-use crate::keys::{KeyModes, send_keys_bytes};
+use crate::keys::send_keys_bytes;
 use crate::mode::PaneMode;
 use crate::mode::copy::{Action, CommandError, Copied, Pipe};
 use crate::server::{ClientId, Server};
@@ -81,12 +81,11 @@ pub fn exec(
     }
     let literal = args.flag('l');
     let hex = args.flag('H');
-    let Some(pane) = server.model.panes.get_mut(&p) else {
+    let Some(modes) = server.model.key_modes(p) else {
         return Ok(());
     };
-    let modes = KeyModes {
-        app_cursor: pane.term.app_cursor(),
-        app_keypad: pane.term.app_keypad(),
+    let Some(pane) = server.model.panes.get_mut(&p) else {
+        return Ok(());
     };
     let mut bytes = Vec::new();
     for _ in 0..repeat {
