@@ -110,6 +110,9 @@ pub struct WindowTree {
     offset: i64,
     /// `data->preview_is_info`: `i` shows the item's information.
     info: bool,
+    /// The screen as last drawn (`mtd->screen`); `None` when the mode is
+    /// to be drawn again (`mode_tree_draw`) before the pane is next shown.
+    pub frame: Option<crate::render::tree::Frame>,
 }
 
 /// A session's windows or a window's panes laid out side by side in the
@@ -499,6 +502,7 @@ impl WindowTree {
             unzoom: None,
             offset: 0,
             info: false,
+            frame: None,
         }
     }
 
@@ -663,7 +667,9 @@ impl crate::mode::prompt::ModePromptOwner for TreePrompt {
 
 impl Server {
     /// Run `f` with pane `p`'s tree mode out of the pane, then put it back
-    /// (unless the pane or the mode went meanwhile) and redraw the pane.
+    /// (unless the pane or the mode went meanwhile) and redraw the pane:
+    /// every path here is one where tmux calls `mode_tree_draw` (a key,
+    /// a build, a prompt and its callbacks), so the frame is drawn again.
     fn with_tree<R>(
         &mut self,
         p: PaneId,
@@ -678,6 +684,7 @@ impl Server {
             unreachable!("matched above");
         };
         let result = f(self, &mut mode);
+        mode.frame = None;
         if let Some(pane) = self.model.panes.get_mut(&p) {
             let at = at.min(pane.modes.len());
             pane.modes.insert(at, crate::mode::Mode::Tree(mode));
@@ -741,6 +748,42 @@ impl Server {
                 .is_some_and(|x| matches!(x.modes.first(), Some(crate::mode::Mode::Tree(_))))
             {
                 self.tree_update(p);
+            }
+        }
+    }
+
+    /// `mode_tree_draw` for every tree mode whose frame is due: the
+    /// screen the pane shows until the mode draws again. Pane output and
+    /// model changes alone do not draw it (tmux draws only from the
+    /// mode's key, update, resize and prompt paths).
+    pub(crate) fn tree_draws(&mut self) {
+        let due: Vec<PaneId> = self
+            .model
+            .panes
+            .iter()
+            .filter(|(_, x)| {
+                x.modes
+                    .iter()
+                    .any(|m| matches!(m, crate::mode::Mode::Tree(t) if t.frame.is_none()))
+            })
+            .map(|(&p, _)| p)
+            .collect();
+        for p in due {
+            let frame = {
+                let source = self.render_source();
+                let pane = &self.model.panes[&p];
+                pane.modes.iter().find_map(|m| match m {
+                    crate::mode::Mode::Tree(t) => Some(source.tree_frame(pane, t)),
+                    _ => None,
+                })
+            };
+            if let Some(pane) = self.model.panes.get_mut(&p)
+                && let Some(crate::mode::Mode::Tree(t)) = pane
+                    .modes
+                    .iter_mut()
+                    .find(|m| matches!(m, crate::mode::Mode::Tree(_)))
+            {
+                t.frame = frame;
             }
         }
     }
