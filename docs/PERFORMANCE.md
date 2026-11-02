@@ -2,7 +2,7 @@
 
 vtmux's goal is to be fast and lean, and that is only claimed where it is measured. This page has the numbers against tmux 3.8, what each scenario measures, and how to reproduce them. Raw runs live in [`docs/test-health/`](test-health/).
 
-These scenarios have no attached client. Rendering, many clients and throughput with a client are not measured yet.
+The first five scenarios have no attached client; `throughput_attached`, `render` and `many_clients` attach real clients (see *Attached clients* below).
 
 ## Numbers
 
@@ -39,6 +39,24 @@ Run of 2026-11-02 on the perf_owner branch (147e54b, before rebase onto main; sa
 | | poller CPU over 60 s (not the server) | 180 ms | 220 ms | 1.2x |
 | owner_startup, `start-server` until `display -p ok` answers, 20x | median (min - max) | 62.9 ms (58.9 - 74.1) | 61.8 ms (58.3 - 80.5) | 0.98x |
 
+Attached-client run of 2026-11-02, commit `96dc4ad`, same host, load 4.0 at start but 7-9 during the run (other workers), median of 3. Raw output: [`test-health/2026-11-02-perf-attached.md`](test-health/2026-11-02-perf-attached.md) and `.json`. Server CPU only; the client's CPU is in the raw run (at most 3% of vtmux's server CPU, about 0 for tmux).
+
+| scenario | metric | tmux 3.8 | vtmux | vtmux / tmux |
+|---|---|---|---|---|
+| throughput_attached, 100 MB plain log, 200x50 client, sync off | wall / server CPU | 2.84 s / 2.66 s | 16.15 s / 15.99 s | 6.0x CPU |
+| | terminal bytes per input byte | 1.03 | 2.15 | 2.1x |
+| throughput_attached, plain, sync on | wall / server CPU | 2.85 s / 2.77 s | 18.88 s / 18.57 s | 6.7x |
+| throughput_attached, 19% SGR, sync off | wall / server CPU | 4.07 s / 3.91 s | 38.56 s / 38.20 s | 9.8x |
+| | terminal bytes per input byte | 1.04 | 5.72 | 5.5x |
+| throughput_attached, 19% SGR, sync on | wall / server CPU | 6.34 s / 5.92 s | 42.05 s / 41.49 s | 7.0x |
+| render, 4 panes x 3000 cursor-addressed frames (22 MB), sync off | wall / server CPU | 0.89 s / 0.84 s | 2.05 s / 1.98 s | 2.4x CPU |
+| | terminal bytes | 10.1 MB | 4.9 MB | 0.49x |
+| render, sync on | wall / server CPU | 0.88 s / 0.79 s | 2.03 s / 1.85 s | 2.3x |
+| | peak RSS | 5.4 MB | 11.9 MB | 2.2x |
+| many_clients, 8 clients, 20 MB flood in one pane, sync off | wall / server CPU | 1.43 s / 1.36 s | 15.09 s / 15.04 s | 11x |
+| many_clients, sync on | wall / server CPU | 5.59 s / 5.53 s | 15.55 s / 15.46 s | 2.8x |
+| | RSS attached idle / after flood | 6.5 / 7.3 MB | 14.9 / 16.5 MB | 2.3x / 2.3x |
+
 The history rows come from `scripts/bench-history-memory.sh` (details in [`test-health/2026-11-01-history-memory.md`](test-health/2026-11-01-history-memory.md); the output-time column is in the raw run).
 
 ## Reading the numbers
@@ -47,6 +65,9 @@ The history rows come from `scripts/bench-history-memory.sh` (details in [`test-
 - **Throughput wall time is coarse.** The done marker is polled with `capture-pane` every 0.2 s, so each wall time is accurate to about 0.2 s (up to 17% of vtmux's 1.2 s plain run). The error adds about the same to both binaries, which pulls the ratio toward 1, so the speed-up is if anything understated. Server CPU is not affected by the polling beyond the cost of the `capture-pane` calls themselves.
 - **Memory is the cost.** vtmux runs one libghostty terminal per pane, so every pane pays for Ghostty's page allocation up front: 33 KB per idle pane against tmux's 5.4 KB, and 3 MB more for a bare server. Both are small in absolute terms, but at 400 panes the ratio is 3x. Filed as `perf_scale_rss` (the only ratio above 2x).
 - **Scrollback.** Ghostty stores 8 bytes for every cell of every retained row, where tmux stores only the used cells, so wide and mostly-empty rows cost more (1.6x on plain logs and on 500-column rows). `hist_retain` already fixed the retention count (the line limit follows `history-limit`; 148 MB before it, 105 MB now). Compressing idle scrollback is `hist_compress`, not yet merged, so these rows will move.
+- **Attached, vtmux is slower under a flood.** With a client attached, a pane cat'ing 100 MB costs vtmux 6x to 10x tmux's server CPU (16 s against 2.7 s plain), where without a client it was 0.46x. The cost is the render path: vtmux sends 2.1x (plain) to 5.5x (SGR) as many terminal bytes per input byte as tmux, which sends about one byte per input byte, so it is composing and sending far more frames while output streams. With 8 clients and sync off the server CPU is 11x tmux's (15.0 s against 1.4 s). Filed as `perf_attached_throughput` and `perf_attached_many_clients`; the render cadence under output is the first suspect, not measured here.
+- **Attached, diffed frames do show in the bytes.** In `render`, where each pane repaints full screens with cursor addressing, vtmux sends half of tmux's terminal bytes (4.9 MB against 10.1 MB, and half the sync frames), the D14 diff doing its job, at 2.4x the server CPU (`perf_attached_render_cpu`). Sync on or off changes the byte counts and CPU of both binaries little in `render`. In `throughput_attached` the SGR rows are noisier: tmux's sync-on CPU (5.9 s) is 1.5x its sync-off CPU (3.9 s).
+- **Attached numbers were taken under load.** The host load rose from 4.0 to 7-9 during the attached run. The ratios (2x to 11x) are much larger than that noise, but treat single digits of a ratio as approximate.
 - **Peak RSS in throughput** is about 5 MB above tmux's: the per-pane terminal plus the history it keeps for the 100 MB of output, capped by the default `history-limit` of 2000.
 
 - **With the owner's config the idle server is not idle, and the cause is outside it.** The mu-crew poller wakes about once a second and runs `tmux show-options -g` (and `set-option` when a value changes) as clients of the server, so the server's 187 ms (tmux) and 48 ms (vtmux) over 60 s are the cost of answering those clients: about 3 ms against 0.8 ms per wake-up round. vtmux does less server work per request here (0.26x); the RSS gap is the same 3 MB as for a bare server (1.7x). The poller's own CPU (a Python process plus the `tmux` client processes it starts, counted from `/proc/<pid>/stat` with children) is 180 ms and 220 ms: it is outside the server. The 40 ms difference between the two was not investigated (3 runs, shared host). Only the cheapest probe (`uptime`, a `/proc` read every 60 s) is on; the owner's real list adds `murmur_remote memory cpu uptime muzzle`, which starts `murmur status` and `muzzle status` every 5 to 10 s and is not measured here because it needs a network and the owner's state.
@@ -65,6 +86,9 @@ The history rows come from `scripts/bench-history-memory.sh` (details in [`test-
 | `owner_idle` | the owner's config in a hermetic `HOME`, one session running `cat`, 10 s to settle, then `IDLE_SECS` (60) of nothing. Reports server RSS, CPU and wakeups, and the poller's CPU separately | What the owner's server costs at rest with the config, TPM plugins and the mu-crew poller running. |
 | `owner_startup` | `start-server` followed by `display -p ok` in one invocation, with the config in the hermetic `HOME`; `OWNER_STARTUP_N` (20) times | How long the config takes to source: the `display` is not run until the config has been. |
 | `throughput` | a pane `cat`s 100 MB of pre-generated log text (about 100-character lines), plain and with about 20% of the bytes SGR, then prints a done marker; no client attached | Parser and grid cost for heavy output with fixed work. Wall time and server CPU are for the same work for both binaries. |
+| `throughput_attached` | the `throughput` file, in a new window while a 200x50 client is attached: wall, server and client CPU, terminal bytes per input byte, sync frames, peak RSS; plain and SGR, sync on and off | What a flood costs when somebody is watching: parse plus render. |
+| `render` | 4 tiled panes in a 200x50 client, each `cat`ing a pre-generated file of 3000 cursor-addressed 95x22 frames (about 5.5 MB per pane, fixed work, done marker): server and client CPU, terminal bytes | Where D14 diffed frames should show against tmux's redraw. |
+| `many_clients` | 1 session, 2 panes, 8 clients of different sizes (80x24 to 240x60), `window-size smallest` for both, a 20 MB log in one pane: server CPU and RSS, terminal bytes (sum) | Per-client fan-out cost. |
 
 Owner scenarios (`owner_idle`, `owner_startup`; Linux only, skipped elsewhere with the reason): `HOME` is `<tmp>/<run>/home`, holding a copy of `~/.tmux.conf` (symlinks followed), `~/.tmux/plugins` and `~/.local/share/mu-crew-dotfiles` (without `.git`, `target` or `node_modules`); their git revisions and the config's sha256 go into the output. Two changes to the copy: `@fingers-skip-wizard 1` first (no install wizard) and `@mu_crew_probes` set to `uptime`, the cheapest probe. `<tmp>/<run>/bin/tmux` is a symlink to the binary under test and first on `PATH` for both binaries (the config, TPM and the poller all run `tmux` from `PATH`; vtmux is run as `tmux`, D20). After each run the bench waits up to 5 s for every process whose environment has the hermetic `HOME` (the poller leaves when its server is gone), kills what is left and prints how many it had to kill; processes are matched by environment, never by name, so neither the bench's shell nor the owner's real poller can match. The poller's CPU is `utime+stime+cutime+cstime` of its pid from the pidfile, which includes the `tmux` clients it ran; it is outside the server and reported next to it, not added to it.
 
@@ -75,16 +99,20 @@ How it measures: the server pid comes from `display -p '#{pid}'` on a private so
 - **Wakeups:** deltas of `voluntary_ctxt_switches` over all threads.
 - **macOS:** `ps -o rss=,time=` sampled every 100 ms (peak RSS is the largest sample; wakeups are not reported). `scale` raises `ulimit -n` to 4096, or is skipped with the reason if it can't. The macOS numbers have not been collected yet.
 
+### Attached clients
+
+The client is the binary's own `attach` on a PTY the bench drains with a Python thread (`Client` in `scripts/bench.py`; not `script(1)`, whose flags differ between Linux and macOS). The thread counts every byte the terminal would receive and every synchronized-update begin (`ESC[?2026h`); client CPU is read from `/proc/<client pid>` like the server's. For a fair comparison both binaries get the same `TERM` (xterm-256color), the same explicit `default-terminal`, `terminal-features`, `window-size`, `status-right` and `status-interval`. Both servers enable synchronized output only from the terminal's `DECRQM 2026` reply (vtmux: `input.rs:215`, `render.rs:79`; tmux 3.8: `tty_keys_sync`), so each scenario runs twice: the reader answers the query (`sync on`) or never does (`sync off`), and the bench checks that the query arrived before it trusts a sync-on row. Measurement starts after all clients have attached and the output went quiet, and ends when the done marker shows and the terminals have been quiet for 0.3 s.
+
 ## Running
 
 ```
 mise exec -- python3 scripts/bench.py                 # all scenarios; Markdown on stdout, JSON and Markdown under target/bench/
 mise exec -- python3 scripts/bench.py idle scale      # chosen scenarios
-IDLE_SECS=5 RUNS=1 STARTUP_N=5 THROUGHPUT_MB=10 mise exec -- python3 scripts/bench.py   # quick development run (about 1 min)
+IDLE_SECS=5 RUNS=1 STARTUP_N=5 THROUGHPUT_MB=10 RENDER_FRAMES=200 MANY_MB=5 mise exec -- python3 scripts/bench.py   # quick development run (about 1 min)
 BASE=/path/to/older/vtmux mise exec -- python3 scripts/bench.py
 ```
 
-A full run takes about 20 minutes. The host is shared: run it when `uptime` load is under 4, under `flock /tmp/vtmux-stress.lock`, and one bench at a time. Other env: `RUNS`, `OUT`, `NO_BUILD=1`, `VTMUX`, `VTMUX_REFERENCE_TMUX`, `HISTORY_SCENARIOS` (documented at the top of the script). Put the result in `docs/test-health/<date>-perf.md` and update the table above.
+A full run takes about 20 minutes. The host is shared: run it when `uptime` load is under 4, under `flock /tmp/vtmux-stress.lock`, and one bench at a time. Other env: `RUNS`, `OUT`, `NO_BUILD=1`, `VTMUX`, `RENDER_FRAMES` (3000), `MANY_MB` (20), `VTMUX_REFERENCE_TMUX`, `HISTORY_SCENARIOS` (documented at the top of the script). Put the result in `docs/test-health/<date>-perf.md` and update the table above.
 
 ## Regression guard
 
