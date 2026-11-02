@@ -528,44 +528,7 @@ impl Server {
                 continue;
             }
             full_turn = now;
-            for event in &events {
-                match event.token() {
-                    LISTENER => self.accept(),
-                    SIGNALS => self.on_signals(),
-                    Token(t) if (crate::popup::POPUP_BASE..CLIENT_BASE).contains(&t) => {
-                        let id = ClientId(t - crate::popup::POPUP_BASE);
-                        if event.is_writable() {
-                            self.popup_writable(id);
-                        }
-                        if event.is_readable() || event.is_read_closed() {
-                            self.popup_readable(id);
-                        }
-                    }
-                    Token(t) if (crate::jobs::JOB_BASE..CLIENT_BASE).contains(&t) => {
-                        let id = crate::jobs::JobId(t - crate::jobs::JOB_BASE);
-                        self.job_writable(id);
-                        self.job_readable(id);
-                    }
-                    Token(t) if t >= CLIENT_BASE => {
-                        let id = ClientId(t - CLIENT_BASE);
-                        if event.is_readable() || event.is_read_closed() {
-                            self.client_readable(id);
-                        }
-                        if event.is_writable() {
-                            self.flush_client(id);
-                        }
-                    }
-                    Token(t) => {
-                        let p = PaneId(u32::try_from(t - PANE_BASE).unwrap_or(u32::MAX));
-                        if event.is_writable() {
-                            self.pane_writable(p);
-                        }
-                        if event.is_readable() || event.is_read_closed() {
-                            self.pane_readable(p);
-                        }
-                    }
-                }
-            }
+            self.dispatch(&events);
             for p in std::mem::take(&mut self.backlog) {
                 self.pane_readable(p);
             }
@@ -581,6 +544,7 @@ impl Server {
             }
             self.jobs_timers(Instant::now());
             self.copy_refresh_timers(Instant::now());
+            self.copy_drag_timers(Instant::now());
             self.clock_timers(Instant::now());
             self.panes_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
@@ -620,6 +584,48 @@ impl Server {
         }
     }
 
+    /// One poll's events, each to what owns its token.
+    fn dispatch(&mut self, events: &Events) {
+        for event in events {
+            match event.token() {
+                LISTENER => self.accept(),
+                SIGNALS => self.on_signals(),
+                Token(t) if (crate::popup::POPUP_BASE..CLIENT_BASE).contains(&t) => {
+                    let id = ClientId(t - crate::popup::POPUP_BASE);
+                    if event.is_writable() {
+                        self.popup_writable(id);
+                    }
+                    if event.is_readable() || event.is_read_closed() {
+                        self.popup_readable(id);
+                    }
+                }
+                Token(t) if (crate::jobs::JOB_BASE..CLIENT_BASE).contains(&t) => {
+                    let id = crate::jobs::JobId(t - crate::jobs::JOB_BASE);
+                    self.job_writable(id);
+                    self.job_readable(id);
+                }
+                Token(t) if t >= CLIENT_BASE => {
+                    let id = ClientId(t - CLIENT_BASE);
+                    if event.is_readable() || event.is_read_closed() {
+                        self.client_readable(id);
+                    }
+                    if event.is_writable() {
+                        self.flush_client(id);
+                    }
+                }
+                Token(t) => {
+                    let p = PaneId(u32::try_from(t - PANE_BASE).unwrap_or(u32::MAX));
+                    if event.is_writable() {
+                        self.pane_writable(p);
+                    }
+                    if event.is_readable() || event.is_read_closed() {
+                        self.pane_readable(p);
+                    }
+                }
+            }
+        }
+    }
+
     /// The poll timeout: the sooner of [`Self::timers_timeout`] and the
     /// next compression step.
     fn next_timeout(&self) -> Option<Duration> {
@@ -653,6 +659,8 @@ impl Server {
                 .deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.copy_refresh_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.copy_drag_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.clock_deadline()
                 .map(|d| d.saturating_duration_since(now)),

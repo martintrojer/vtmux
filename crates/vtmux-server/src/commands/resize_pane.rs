@@ -1,7 +1,8 @@
 //! `resize-pane` (cmd-resize-pane.c:52-189): `-Z` toggles zoom, `-x`/`-y`
 //! set a size (cells or a percentage of the window), `-U -D -L -R` adjust
-//! by a count. Mouse resizing (`-M`) and `-T` (trim history) are not done
-//! yet.
+//! by a count, `-M` resizes tiled panes by dragging their borders.
+//! Dragging a floating pane (out of M1) and `-T` (trim history) are not
+//! done yet.
 
 use vtmux_core::cmd::{Args, CmdError, strtonum};
 use vtmux_core::error::EdgeError;
@@ -13,7 +14,7 @@ use crate::target::Found;
 
 pub fn exec(
     server: &mut Server,
-    _item: &mut Item,
+    item: &mut Item,
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
@@ -24,8 +25,7 @@ pub fn exec(
         return Err(EdgeError::NotImplemented("resize-pane -T".into()).into());
     }
     if args.flag('M') {
-        // Without a mouse event there is nothing to do (cmd-resize-pane.c:204).
-        return Ok(());
+        return mouse_update(server, item);
     }
     if args.flag('Z') {
         if server.model.windows[&w].zoomed() {
@@ -84,5 +84,32 @@ pub fn exec(
     if let Some(cause) = bad {
         return Err(EdgeError::Message(format!("adjustment {cause}")).into());
     }
+    Ok(())
+}
+
+/// `cmd_resize_pane_mouse_update` (cmd-resize-pane.c:194-221): the
+/// mouse's pane, for a client on its session, gets the drag callback and
+/// its first call. Without a mouse event nothing happens.
+fn mouse_update(server: &mut Server, item: &Item) -> Result<(), CmdError> {
+    let Some(event) = item.mouse.as_ref() else {
+        return Ok(());
+    };
+    let Some(found) = event.target.pane_found(&server.model) else {
+        return Ok(());
+    };
+    let (Some(client), Some(w), Some(wp)) = (item.client, found.window, found.pane) else {
+        return Ok(());
+    };
+    if server.client_session(client) != found.session {
+        return Ok(());
+    }
+    if server.model.windows[&w].is_floating(wp) {
+        // cmd_resize_pane_mouse_resize_move_floating: floating panes are
+        // M2 (spec, Milestones).
+        return Err(EdgeError::NotImplemented("resize-pane -M on a floating pane".into()).into());
+    }
+    let event = event.clone();
+    server.set_drag_action(client, Some(crate::mouse::DragAction::ResizeTiled));
+    server.resize_drag(client, &event);
     Ok(())
 }

@@ -265,6 +265,7 @@ impl Model {
             line_numbers: self.number_option(w, "copy-mode-line-numbers"),
             separators,
             wrap_search: self.number_option(w, "wrap-search") != 0,
+            mouse: false,
         })
     }
 
@@ -597,6 +598,40 @@ impl Server {
                 _ => None,
             })
             .min()
+    }
+
+    /// The soonest drag scroll of a copy mode on top of a pane.
+    pub(crate) fn copy_drag_deadline(&self) -> Option<std::time::Instant> {
+        self.model
+            .panes
+            .values()
+            .filter_map(|p| match p.modes.first() {
+                Some(Mode::Copy(m)) => m.drag_due(),
+                _ => None,
+            })
+            .min()
+    }
+
+    /// `window_copy_scroll_timer` for every copy mode on top of a pane
+    /// whose drag timer is due.
+    pub(crate) fn copy_drag_timers(&mut self, now: std::time::Instant) {
+        let due: Vec<PaneId> = self
+            .model
+            .panes
+            .iter()
+            .filter(|(_, p)| match p.modes.first() {
+                Some(Mode::Copy(m)) => m.drag_due().is_some_and(|at| at <= now),
+                _ => false,
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for p in due {
+            self.with_mode(p, |m, env| {
+                if let Some(m) = m.as_copy_mut() {
+                    m.drag_timer(env, now);
+                }
+            });
+        }
     }
 
     /// `window_copy_refresh_timer` (window-copy.c:3116-3143) for every copy

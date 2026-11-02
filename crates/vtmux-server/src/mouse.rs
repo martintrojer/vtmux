@@ -17,8 +17,14 @@
 //! pointer (`window_pane_key`): its mode, or its program in the encoding it
 //! asked for ([`encode_mouse`], input-keys.c `input_key_get_mouse`).
 //!
-//! Not here: drag callbacks (`resize-pane -M`, `copy-mode -M`:
-//! `mouse_drag`), scrollbars (off by default), pane-border control ranges
+//! A command can install a drag callback (`mouse_drag_update`,
+//! [`DragAction`]): `resize-pane -M` for tiled borders, `copy-mode -M` and
+//! a mouse `begin-selection` for a copy mode selection. Later motion then
+//! calls it directly (`KEYC_DRAGGING`), and the drag's end calls its
+//! release.
+//!
+//! Not here: dragging floating panes and `split-window`/`join-pane` drags
+//! (M2), scrollbars (off by default), pane-border control ranges
 //! (`window_pane_status_get_range`) and menus.
 
 use std::time::{Duration, Instant};
@@ -33,6 +39,10 @@ use crate::input::{MOUSE_MASK_BUTTONS, MouseInput, mouse_wheel};
 use crate::model::Model;
 use crate::server::{ClientId, Server};
 use crate::target::Found;
+
+fn usize_pair((x, y): (u32, u32)) -> (usize, usize) {
+    (x as usize, y as usize)
+}
 
 /// `KEYC_CLICK_TIMEOUT` (tmux.h:234), in milliseconds.
 const CLICK_TIMEOUT: Duration = Duration::from_millis(300);
@@ -118,9 +128,34 @@ impl MouseEvent {
     /// is in it.
     #[must_use]
     pub fn at(&self, model: &Model, p: PaneId) -> Option<(u32, u32)> {
+        self.at_position(model, p, (self.input.x, self.input.y))
+    }
+
+    /// [`Self::at`] for the previous position (`cmd_mouse_at(..., 1)`).
+    #[must_use]
+    pub fn at_last(&self, model: &Model, p: PaneId) -> Option<(u32, u32)> {
+        self.at_position(model, p, (self.input.lx, self.input.ly))
+    }
+
+    /// The window position of client position `(x, y)` as the drag
+    /// callbacks take it (cmd-resize-pane.c:376-385): below a top status
+    /// line, or clamped above a bottom one; under the focus ring, one cell
+    /// in.
+    #[must_use]
+    pub fn window_position(&self, (x, y): (u32, u32)) -> (i64, i64) {
+        let y = match self.status_at {
+            Some(0) if y >= self.status_lines => y - self.status_lines,
+            Some(at) if at > 0 && y >= at => at - 1,
+            _ => y,
+        };
+        let off = i64::from(self.offset);
+        (i64::from(x) - off, i64::from(y) - off)
+    }
+
+    fn at_position(&self, model: &Model, p: PaneId, (x, y): (u32, u32)) -> Option<(u32, u32)> {
         let pane = model.panes.get(&p)?;
-        let x = i64::from(self.input.x);
-        let mut y = i64::from(self.input.y);
+        let x = i64::from(x);
+        let mut y = i64::from(y);
         if self.status_at == Some(0) && y >= i64::from(self.status_lines) {
             y -= i64::from(self.status_lines);
         }
@@ -191,6 +226,16 @@ impl MouseEvent {
     }
 }
 
+/// What a drag in progress does with each motion (`mouse_drag_update`)
+/// and its release (`mouse_drag_release`), once a command installed it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragAction {
+    /// `cmd_resize_pane_mouse_resize_tiled`: the borders under the drag.
+    ResizeTiled,
+    /// `window_copy_drag_update` and `window_copy_drag_release`.
+    CopySelection,
+}
+
 /// A client's mouse state (`c->tty.mouse_*`, `c->click_*`, the
 /// `CLIENT_DOUBLECLICK` and `CLIENT_TRIPLECLICK` flags).
 #[derive(Clone, Debug, Default)]
@@ -203,6 +248,8 @@ pub struct ClientMouse {
     drag_y: u32,
     /// `mouse_last_pane`.
     last_pane: Option<PaneId>,
+    /// `mouse_drag_update` and `mouse_drag_release`.
+    pub(crate) drag_action: Option<DragAction>,
     /// `CLIENT_DOUBLECLICK` / `CLIENT_TRIPLECLICK`.
     double: bool,
     triple: bool,
@@ -237,6 +284,8 @@ pub enum Located {
     Nothing,
     /// A key with its event.
     Key(MouseEvent),
+    /// `KEYC_DRAGGING`: the drag's callback runs with the event, no binding.
+    Dragging(DragAction, MouseEvent),
 }
 
 impl Server {
@@ -300,14 +349,23 @@ impl Server {
             return Located::Nothing;
         };
         let mut st = std::mem::take(&mut self.clients.get_mut(&id).expect("client").mouse);
-        let located = self.check_mouse_with(&mut st, id, s, w, m, double);
+        let mut released = None;
+        let located = self.check_mouse_with(&mut st, id, s, w, m, double, &mut released);
         if let Some(c) = self.clients.get_mut(&id) {
             c.mouse = st;
+        }
+        // mouse_drag_release, with the event that ended the drag.
+        if let Some((action, ev)) = released {
+            self.drag_release(id, action, &ev);
         }
         located
     }
 
-    #[allow(clippy::too_many_lines, reason = "one function, as tmux's")]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::too_many_arguments,
+        reason = "one function, as tmux's"
+    )]
     fn check_mouse_with(
         &self,
         st: &mut ClientMouse,
@@ -316,8 +374,18 @@ impl Server {
         window: WindowId,
         report: MouseInput,
         double: bool,
+        released: &mut Option<(DragAction, MouseEvent)>,
     ) -> Located {
-        let lwp = st.last_pane.filter(|p| self.model.panes.contains_key(p));
+        // server_client_remove_pane: a drag whose pane has gone stops
+        // calling back.
+        if st
+            .last_pane
+            .is_some_and(|p| !self.model.panes.contains_key(&p))
+        {
+            st.last_pane = None;
+            st.drag_action = None;
+        }
+        let lwp = st.last_pane;
         let sgr_drag_motion = report.sgr.is_some_and(|g| drag(g.b) && release(g.b));
         let x10_motion =
             report.sgr.is_none() && drag(report.b) && release(report.b) && release(report.lb);
@@ -511,11 +579,9 @@ impl Server {
                 st.click_deadline = Some(Instant::now() + CLICK_TIMEOUT);
             }
         }
-        let Some(loc) = loc else {
-            return Located::Nothing;
-        };
-
-        // Stop dragging if needed: the drag's button ends it.
+        // Stop dragging if needed: the drag's button ends it. Outside every
+        // location (tmux's KEYC_MOUSE_LOCATION_NOWHERE, which no key binds)
+        // a drag still ends or goes on.
         let mut b = b;
         if !matches!(
             kind,
@@ -526,7 +592,7 @@ impl Server {
                 | MouseKind::TripleClick
         ) && st.drag_flag != 0
         {
-            // TODO(mouse_drag): mouse_drag_release.
+            *released = st.drag_action.take().map(|a| (a, ev.clone()));
             kind = MouseKind::DragEnd;
             b = st.drag_flag - 1;
             st.drag_flag = 0;
@@ -534,14 +600,17 @@ impl Server {
         }
 
         let mut key = None;
-        if kind == MouseKind::Move && loc == MouseLocation::Pane {
+        if kind == MouseKind::Move && loc == Some(MouseLocation::Pane) {
             // focus-follows-mouse (off by default) needs all-motion mode,
             // which is only on when a pane asks for it.
             key = Some(Key::mouse(MouseKind::Move, 0, MouseLocation::Pane));
         }
+        let dragging = if kind == MouseKind::Drag {
+            st.drag_action
+        } else {
+            None
+        };
         if kind == MouseKind::Drag {
-            // TODO(mouse_drag): KEYC_DRAGGING once a command installs
-            // mouse_drag_update.
             if st.drag_flag == 0 {
                 (st.drag_x, st.drag_y) = if st.drag_status { (x, y) } else { (px, py) };
             }
@@ -567,7 +636,7 @@ impl Server {
                 131 => 11,
                 _ => 0,
             };
-            Key::mouse(kind, button, loc)
+            Key::mouse(kind, button, loc.unwrap_or(MouseLocation::Pane))
         });
         if b & MASK_META != 0 {
             key = key.meta();
@@ -579,6 +648,13 @@ impl Server {
             key = key.shift();
         }
         // ox/oy are 0: vtmux does not pan a window larger than the client.
+        if let Some(action) = dragging {
+            ev.key = Key::DRAGGING;
+            return Located::Dragging(action, ev);
+        }
+        if loc.is_none() {
+            return Located::Nothing;
+        }
         ev.key = key;
         Located::Key(ev)
     }
@@ -705,6 +781,133 @@ impl Server {
         if let Some(bytes) = encode_mouse(modes, &ev.input, x, y) {
             self.write_pane(p, &bytes);
         }
+    }
+
+    /// Install drag callback `action` for client `id` (`c->tty.
+    /// mouse_drag_update`, `mouse_drag_release`).
+    pub(crate) fn set_drag_action(&mut self, id: ClientId, action: Option<DragAction>) {
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.mouse.drag_action = action;
+        }
+    }
+
+    /// `mouse_drag_update` for a `KEYC_DRAGGING` event (server-client.c:
+    /// 1487-1490): the callback, no binding.
+    pub(crate) fn drag_update(&mut self, id: ClientId, action: DragAction, ev: &MouseEvent) {
+        match action {
+            DragAction::ResizeTiled => self.resize_drag(id, ev),
+            DragAction::CopySelection => {
+                let Some(p) = ev.target.pane_found(&self.model).and_then(|f| f.pane) else {
+                    return;
+                };
+                let at = ev.at(&self.model, p).map(usize_pair);
+                let now = Instant::now();
+                self.with_mode(p, |m, env| {
+                    if let Some(m) = m.as_copy_mut() {
+                        m.drag_update(env, at, now);
+                    }
+                });
+            }
+        }
+    }
+
+    /// `mouse_drag_release` with the event that ended the drag.
+    fn drag_release(&mut self, _id: ClientId, action: DragAction, ev: &MouseEvent) {
+        if action != DragAction::CopySelection {
+            return;
+        }
+        let Some(p) = ev.target.pane_found(&self.model).and_then(|f| f.pane) else {
+            return;
+        };
+        let at = ev.at(&self.model, p).map(usize_pair);
+        let now = Instant::now();
+        self.with_mode(p, |m, env| {
+            if let Some(m) = m.as_copy_mut() {
+                m.drag_release(env, at, now);
+            }
+        });
+    }
+
+    /// `cmd_resize_pane_mouse_resize_tiled` (cmd-resize-pane.c:357-420):
+    /// the borders at the drag's last position follow it to the current
+    /// one. No window: the callback is removed.
+    pub(crate) fn resize_drag(&mut self, id: ClientId, ev: &MouseEvent) {
+        let Some(w) = ev.target.window_found(&self.model).and_then(|f| f.window) else {
+            self.set_drag_action(id, None);
+            return;
+        };
+        let to = ev.window_position((ev.input.x, ev.input.y));
+        let from = ev.window_position((ev.input.lx, ev.input.ly));
+        let Some(window) = self.model.windows.get_mut(&w) else {
+            return;
+        };
+        let resized = window.layout.drag_border(from, to);
+        if resized == 0 {
+            return;
+        }
+        self.model.fix_panes(w);
+        for _ in 0..resized {
+            self.model.layout_changed(w);
+        }
+    }
+
+    /// `window_copy_start_drag` (window-copy.c:7084-7151) for client `id`:
+    /// with the mouse's pane in copy mode and the drag's start in it, the
+    /// copy callbacks are installed and the selection starts there.
+    pub(crate) fn copy_start_drag(&mut self, id: Option<ClientId>, ev: &MouseEvent) {
+        let Some(id) = id else {
+            return;
+        };
+        let Some(p) = ev.target.pane_found(&self.model).and_then(|f| f.pane) else {
+            return;
+        };
+        if !self
+            .model
+            .panes
+            .get(&p)
+            .is_some_and(|x| matches!(x.modes.first(), Some(crate::mode::Mode::Copy(_))))
+        {
+            return;
+        }
+        let Some(start) = ev.at_last(&self.model, p).map(usize_pair) else {
+            return;
+        };
+        self.set_drag_action(id, Some(DragAction::CopySelection));
+        let current = ev.at(&self.model, p).map(usize_pair);
+        let now = Instant::now();
+        self.with_mode(p, |m, env| {
+            if let Some(m) = m.as_copy_mut() {
+                m.start_drag(env, start, current, now);
+            }
+        });
+    }
+
+    /// `window_copy_move_mouse` (window-copy.c:7059-7082): before a copy
+    /// mode command with a mouse event that is not the wheel, the cursor of
+    /// the mouse's pane goes to the mouse, if that pane is in copy mode.
+    pub(crate) fn copy_move_mouse(&mut self, ev: &MouseEvent) {
+        if crate::input::mouse_wheel(ev.input.b) {
+            return;
+        }
+        let Some(p) = ev.target.pane_found(&self.model).and_then(|f| f.pane) else {
+            return;
+        };
+        let Some(at) = ev.at(&self.model, p).map(usize_pair) else {
+            return;
+        };
+        if !self
+            .model
+            .panes
+            .get(&p)
+            .is_some_and(|x| matches!(x.modes.first(), Some(crate::mode::Mode::Copy(_))))
+        {
+            return;
+        }
+        self.with_mode(p, |m, env| {
+            if let Some(m) = m.as_copy_mut() {
+                m.move_mouse(env, at);
+            }
+        });
     }
 
     /// `server_client_click_timer`: the click timers that are due fire a

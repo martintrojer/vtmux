@@ -1,0 +1,20 @@
+name = "attach_mouse_drag"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "stty raw -echo; printf 'alpha beta-gamma\\r\\nsecond line here\\r\\n'; exec cat"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # MouseDrag1Border { resize-pane -M }: the border at column 20 to 26.
+  { keys = "\u001b[<0;21;3M\u001b[<32;23;3M\u001b[<32;27;3M\u001b[<0;27;3m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  # MouseDrag1Pane { copy-mode -M } from the shell, then MouseDragEnd1Pane.
+  { keys = "\u001b[<0;7;1M\u001b[<32;8;1M\u001b[<32;10;2M\u001b[<0;10;2m" },
+  { screen = {} },
+  { run = ["show-buffer"] },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_in_mode}"] },
+]

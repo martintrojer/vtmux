@@ -5477,3 +5477,254 @@ fn wheel_up_pane_enters_copy_mode_or_forwards() {
         ]
     );
 }
+
+/// The layout and pane sizes of session `a`'s current window.
+fn geometry(w: &World) -> String {
+    String::from_utf8_lossy(
+        &w.cli(&[
+            "list-panes",
+            "-t",
+            "a",
+            "-F",
+            "#{pane_id} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}",
+        ])
+        .stdout,
+    )
+    .trim()
+    .to_owned()
+}
+
+/// Wait (at most 5 s) for `read` to stop changing and differ from
+/// `before`; what it was last.
+fn changed(before: &str, read: impl Fn() -> String) -> String {
+    let end = Instant::now() + Duration::from_secs(5);
+    let mut last = read();
+    while last == before && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+        last = read();
+    }
+    stable(Duration::from_millis(300), read)
+}
+
+/// `MouseDrag1Border { resize-pane -M }` (cmd-resize-pane.c:194-221,
+/// 357-420): dragging the vertical border moves it with the mouse, and so
+/// does the horizontal one in a nested split; the drag keeps resizing
+/// (`KEYC_DRAGGING`) until the release.
+#[test]
+fn border_drag_resizes_panes() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = mouse_world(bin, &[&["splitw", "-v", "-t", "a:0.1", "cat"]]);
+        let mut got = vec![geometry(&w)];
+        // The vertical border is column 20 (1-based 21); drag it to 15,
+        // then 12, then release.
+        a.keys(b"\x1b[<0;21;3M\x1b[<32;18;3M\x1b[<32;15;3M\x1b[<32;12;3M\x1b[<0;12;3m");
+        got.push(changed(&got[0], || geometry(&w)));
+        // The horizontal border of the right column is row 4 (1-based 5):
+        // up two rows.
+        let before = got[1].clone();
+        a.keys(b"\x1b[<0;30;5M\x1b[<32;30;4M\x1b[<32;30;3M\x1b[<0;30;3m");
+        got.push(changed(&before, || geometry(&w)));
+        // Back to the right, past where it started.
+        let before = got[2].clone();
+        a.keys(b"\x1b[<0;13;3M\x1b[<32;15;3M\x1b[<32;19;3M\x1b[<32;25;3M\x1b[<0;25;3m");
+        got.push(changed(&before, || geometry(&w)));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(seen[1][1], "%0 0,0 11x9\n%1 12,0 28x4\n%3 12,5 28x4");
+    assert_eq!(seen[1][2], "%0 0,0 11x9\n%1 12,0 28x2\n%3 12,3 28x6");
+    assert_eq!(seen[1][3], "%0 0,0 23x9\n%1 24,0 16x2\n%3 24,3 16x6");
+}
+
+/// A 40x10 client on session `a`, one pane printing `lines` then reading
+/// raw (so the screen is the lines), status-right and the pane title
+/// pinned, then `cmds`.
+fn text_world(bin: PathBuf, lines: &str, cmds: &[&[&str]]) -> (World, Attached) {
+    let w = World::new(bin);
+    let script = format!("stty raw -echo; printf '{lines}'; exec cat");
+    for cmd in [
+        &[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", &script,
+        ][..],
+        &["set", "-g", "status-right", ""],
+        &["select-pane", "-t", "a", "-T", "t"],
+    ]
+    .iter()
+    .chain(cmds)
+    {
+        assert!(w.cli(cmd).status.success(), "{cmd:?}");
+    }
+    let a = w.attach(&["attach", "-t", "a"]);
+    a.wait(|a| pane_text(a).contains("[a]"));
+    a.wait(|a| pane_text(a).contains("gamma"));
+    (w, a)
+}
+
+/// The top paste buffer, or "" with none.
+fn top_buffer(w: &World) -> String {
+    String::from_utf8_lossy(&w.cli(&["show-buffer"]).stdout).into_owned()
+}
+
+/// Wait (at most 5 s) for a paste buffer; the top one.
+fn buffer_settles(w: &World) -> String {
+    let end = Instant::now() + Duration::from_secs(5);
+    while top_buffer(w).is_empty() && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+    }
+    top_buffer(w)
+}
+
+const TEXT: &str = "alpha beta-gamma delta\\r\\nsecond line here\\r\\ngamma\\r\\n";
+
+/// The default `DoubleClick1Pane` and `TripleClick1Pane` from a shell:
+/// `copy-mode -H; send -X select-word` (or `select-line`) at the pointer,
+/// not at the cursor (`window_copy_move_mouse`, window-copy.c:3911), then
+/// `copy-pipe-and-cancel` 0.3 s later.
+#[test]
+fn double_and_triple_click_copy_under_the_pointer() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let mut got = Vec::new();
+        for clicks in [2, 3] {
+            let (w, mut a) = text_world(bin.clone(), TEXT, &[]);
+            // "beta" on the first row, column 8 (1-based 9).
+            let mut c = Vec::new();
+            for _ in 0..clicks {
+                c.extend(click(9, 1));
+            }
+            a.keys(&c);
+            got.push(buffer_settles(&w));
+            got.push(settles(&w, "#{pane_in_mode}", "0"));
+        }
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(seen[1], ["beta", "0", "alpha beta-gamma delta", "0"]);
+}
+
+/// `MouseDrag1Pane { ... copy-mode -M }` from a shell enters copy mode and
+/// starts a selection at the press (`window_copy_start_drag`); the drag
+/// extends it and `MouseDragEnd1Pane { send -X copy-pipe-and-cancel }`
+/// copies it and leaves.
+#[test]
+fn drag_from_a_shell_selects_and_copies() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let mut got = Vec::new();
+        for vi in ["emacs", "vi"] {
+            let (w, mut a) = text_world(bin.clone(), TEXT, &[&["set", "-g", "mode-keys", vi]]);
+            // From "beta" (column 6, row 0) to "line" (column 9, row 1).
+            a.keys(b"\x1b[<0;7;1M\x1b[<32;8;1M\x1b[<32;4;2M\x1b[<32;10;2M\x1b[<0;10;2m");
+            got.push(format!("{vi}: {:?}", buffer_settles(&w)));
+            got.push(settles(&w, "#{pane_in_mode}", "0"));
+        }
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(
+        seen[1],
+        [
+            r#"emacs: "beta-gamma delta\nsecond li""#,
+            "0",
+            r#"vi: "beta-gamma delta\nsecond lin""#,
+            "0"
+        ]
+    );
+}
+
+/// In copy mode, `MouseDrag1Pane { select-pane; send -X begin-selection }`
+/// starts a drag at the press; double and triple click there select the
+/// word and line under the pointer; the wheel scrolls five lines
+/// (`send -N5 -X scroll-up`/`scroll-down`).
+#[test]
+fn copy_mode_mouse_bindings() {
+    let mut lines = String::new();
+    for i in 0..30 {
+        let _ = write!(lines, "line {i:02}\\r\\n");
+    }
+    lines.push_str("gamma\\r\\n");
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = text_world(bin, &lines, &[]);
+        let mut got = Vec::new();
+        assert!(w.cli(&["copy-mode", "-t", "a"]).status.success());
+        let pos = "#{scroll_position} #{copy_cursor_x},#{copy_cursor_y}";
+        got.push(display(&w, pos));
+        a.keys(b"\x1b[<64;5;4M");
+        got.push(settles(&w, "#{scroll_position}", "5"));
+        a.keys(b"\x1b[<64;5;4M\x1b[<65;5;4M\x1b[<64;5;4M");
+        thread::sleep(Duration::from_millis(400));
+        got.push(display(&w, pos));
+        // A drag in copy mode: from row 1 column 2 to row 3 column 4.
+        a.keys(b"\x1b[<0;3;2M\x1b[<32;3;3M\x1b[<32;5;4M\x1b[<0;5;4m");
+        got.push(buffer_settles(&w));
+        got.push(settles(&w, "#{pane_in_mode}", "0"));
+        // Double click on a word in copy mode.
+        assert!(w.cli(&["delete-buffer"]).status.success());
+        assert!(w.cli(&["copy-mode", "-t", "a"]).status.success());
+        a.keys(b"\x1b[<64;5;4M");
+        thread::sleep(Duration::from_millis(400));
+        let mut c = click(7, 3);
+        c.extend(click(7, 3));
+        a.keys(&c);
+        got.push(buffer_settles(&w));
+        // Triple click: the whole line.
+        assert!(w.cli(&["delete-buffer"]).status.success());
+        thread::sleep(Duration::from_millis(400));
+        assert!(w.cli(&["copy-mode", "-t", "a"]).status.success());
+        let mut c = click(2, 6);
+        c.extend(click(2, 6));
+        c.extend(click(2, 6));
+        a.keys(&c);
+        got.push(buffer_settles(&w));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(
+        seen[1],
+        [
+            "0 0,8",
+            "5",
+            "10 7,8",
+            "ne 14\nline 15\nline",
+            "0",
+            "20",
+            "line 28"
+        ]
+    );
+}
+
+/// D23 (vtmux only): under the focus ring a border drag and a double click
+/// use window coordinates, one cell in, so they act on what is drawn: the
+/// drag from the drawn border moves it as far as the mouse moved, and the
+/// word copied is the one drawn under the pointer.
+#[test]
+fn focus_ring_border_drag_and_double_click() {
+    let (w, mut a) = ring_world_sized(
+        &[
+            &["set", "-g", "status-right", ""],
+            &["splitw", "-h", "-t", "a", "cat"],
+        ],
+        40,
+        10,
+    );
+    a.wait(|_| display(&w, "#{window_panes}") == "2");
+    // The window is 38x8 at (1,1): the border at window column 19 is
+    // client column 20 (1-based 21). Drag it 6 columns left.
+    let before = geometry(&w);
+    assert_eq!(before, "%0 0,0 19x8\n%1 20,0 18x8");
+    a.keys(b"\x1b[<0;21;3M\x1b[<32;18;3M\x1b[<32;15;3M\x1b[<0;15;3m");
+    assert_eq!(
+        changed(&before, || geometry(&w)),
+        "%0 0,0 13x8\n%1 14,0 24x8"
+    );
+    // A word in the left pane, drawn from client column 1 of row 1.
+    w.cli(&["send", "-t", "a:0.0", "-l", "alpha beta gamma"]);
+    a.wait(|a| pane_text(a).contains("beta"));
+    thread::sleep(Duration::from_millis(400));
+    let mut c = click(9, 2);
+    c.extend(click(9, 2));
+    a.keys(&c);
+    assert_eq!(buffer_settles(&w), "beta");
+}

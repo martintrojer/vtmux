@@ -542,9 +542,18 @@ impl Server {
             self.update_latest(id);
             return;
         }
-        let crate::mouse::Located::Key(ev) = self.check_mouse(id, input, double) else {
-            self.update_latest(id);
-            return;
+        let ev = match self.check_mouse(id, input, double) {
+            crate::mouse::Located::Key(ev) => ev,
+            crate::mouse::Located::Dragging(action, ev) => {
+                // server-client.c:1487-1490: the drag's callback, then out.
+                self.drag_update(id, action, &ev);
+                self.update_latest(id);
+                return;
+            }
+            crate::mouse::Located::Nothing => {
+                self.update_latest(id);
+                return;
+            }
         };
         let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
             return;

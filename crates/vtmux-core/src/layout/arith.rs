@@ -887,6 +887,83 @@ impl Layout {
         fix_offsets(&mut self.root);
     }
 
+    /// `layout_search_by_border`: the path of the cell whose right or bottom
+    /// border is at window position `(x, y)` (the cell before the gap `(x,
+    /// y)` is in), searching into the cell that contains it.
+    #[must_use]
+    pub fn search_by_border(&self, x: i64, y: i64) -> Option<super::Path> {
+        let mut path = Vec::new();
+        let mut cell = &self.root;
+        'down: loop {
+            let Cell::Node(n) = cell else {
+                return None;
+            };
+            let mut last: Option<(usize, &Geometry)> = None;
+            for (i, child) in n.children.iter().enumerate() {
+                let g = child.g();
+                let (xoff, yoff) = (i64::from(g.xoff), i64::from(g.yoff));
+                if x >= xoff
+                    && x < xoff + i64::from(g.sx)
+                    && y >= yoff
+                    && y < yoff + i64::from(g.sy)
+                {
+                    path.push(i);
+                    cell = child;
+                    continue 'down;
+                }
+                if let Some((li, lg)) = last {
+                    let gap = match n.dir {
+                        Dir::LeftRight => x < xoff && x >= i64::from(lg.xoff) + i64::from(lg.sx),
+                        Dir::TopBottom => y < yoff && y >= i64::from(lg.yoff) + i64::from(lg.sy),
+                    };
+                    if gap {
+                        path.push(li);
+                        return Some(path);
+                    }
+                }
+                last = Some((i, g));
+            }
+            return None;
+        }
+    }
+
+    /// `cmd_resize_pane_mouse_resize_tiled` (cmd-resize-pane.c:357-420) on
+    /// the layout: a drag from window position `from` to `to` moves the
+    /// borders found at `from` and around it (`layout_search_by_border`)
+    /// with `layout_resize_layout`. Returns how many cells it resized, each
+    /// a window-layout-changed event in tmux (layout.c:1002).
+    pub fn drag_border(&mut self, from: (i64, i64), to: (i64, i64)) -> u32 {
+        const OFFSETS: [(i64, i64); 5] = [(0, 0), (0, 1), (1, 0), (0, -1), (-1, 0)];
+        let ((lx, ly), (x, y)) = (from, to);
+        let mut cells: Vec<super::Path> = Vec::new();
+        for (dx, dy) in OFFSETS {
+            if let Some(p) = self.search_by_border(lx + dx, ly + dy)
+                && !cells.contains(&p)
+            {
+                cells.push(p);
+            }
+        }
+        let mut resizes = 0;
+        for path in cells {
+            let Some((&idx, parent)) = path.split_last() else {
+                continue;
+            };
+            let Cell::Node(n) = self.root.get(parent) else {
+                continue;
+            };
+            let change = match n.dir {
+                Dir::TopBottom if y != ly => y - ly,
+                Dir::LeftRight if x != lx => x - lx,
+                _ => continue,
+            };
+            let change = i32::try_from(change).unwrap_or(0);
+            let dir = n.dir;
+            self.resize_layout(parent, idx, dir, change, false);
+            resizes += 1;
+        }
+        resizes
+    }
+
     /// `layout_spread_out` (`select-layout -E`): spread the cells around
     /// `pane`, walking up until something changes.
     pub fn spread_out(&mut self, pane: PaneId) {
