@@ -3,7 +3,8 @@
 
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
-Scenarios: idle scale history startup throughput owner_idle owner_startup (default: all).
+Scenarios: idle scale history startup throughput owner_idle owner_startup throughput_attached render many_clients
+           (default: all).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
@@ -22,19 +23,23 @@ THROUGHPUT_MB (100), OWNER_STARTUP_N (20), OWNER_TMUX_CONF / OWNER_PLUGINS / OWN
 owner's config, plugin and mu-crew dirs that owner_* copy; default ~/.tmux.conf, ~/.tmux/plugins,
 ~/.local/share/mu-crew-dotfiles), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s). Run cargo through `mise exec --`.
 """
+import fcntl
 import hashlib
 import json
 import os
 import platform
+import pty
 import random
 import re
 import resource
 import signal
 import shutil
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import threading
 import time
 from datetime import datetime, timezone
@@ -585,6 +590,309 @@ OWNER_RENDER = {"owner_idle": render_owner_idle, "owner_startup": render_owner_s
 ALL += list(OWNER_FUNCS)
 
 
+# ---- attached-client scenarios (perf_attached) -------------------------------
+# A real client on a PTY whose master side is drained by a Python thread (never script(1)):
+# it counts the bytes the terminal would receive and counts the synchronized-update begin
+# sequences (ESC[?2026h). Both binaries get the same TERM, the same explicit
+# default-terminal/terminal-features, and the reader answers the DECRQM 2026 query the same
+# way for both (sync on) or not at all (sync off); vtmux and tmux 3.8 both enable
+# synchronized output only from that reply (render.rs:79, input.rs:215; tmux tty-keys.c
+# tty_keys_sync), so the two modes are separate rows.
+
+CLIENT_COLS, CLIENT_ROWS = 200, 50
+RENDER_FRAMES = int(os.environ.get("RENDER_FRAMES", "3000"))
+MANY_MB = int(os.environ.get("MANY_MB", "20"))
+MANY_SIZES = [(80, 24), (100, 30), (120, 40), (132, 43), (160, 50), (200, 50), (90, 35), (240, 60)]
+PANE_W, PANE_H = 95, 22  # render frames fit the smallest tiled pane of a 200x49 window
+QUERY = b"\x1b[?2026$p"
+BSU = b"\x1b[?2026h"
+
+
+def pin_terminal(s, **opts):
+    """Identical terminal-related options for both binaries, set before any client attaches."""
+    s.run("set", "-s", "default-terminal", "tmux-256color")
+    s.run("set", "-s", "terminal-features", "xterm*:clipboard:ccolour:cstyle:focus:title")
+    s.run("set", "-g", "window-size", opts.get("window_size", "latest"))
+
+
+class Client:
+    """`attach` on a fresh PTY of the given size, drained by a thread."""
+
+    def __init__(self, server, session, cols, rows, sync):
+        self.master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        self.reply = sync
+        self.replied = False
+        self.bytes = 0
+        self.bsu = 0
+        self.proc = subprocess.Popen(
+            [server.bin, "-L", server.label, "-f", "/dev/null", "attach", "-t", session],
+            stdin=slave, stdout=slave, stderr=slave, env=server.env, start_new_session=True, close_fds=True)
+        os.close(slave)
+        self.pid = self.proc.pid
+        self.thread = threading.Thread(target=self._drain, daemon=True)
+        self.thread.start()
+
+    def _drain(self):
+        tail = b""
+        while True:
+            try:
+                b = os.read(self.master, 65536)
+            except OSError:
+                break
+            if not b:
+                break
+            self.bytes += len(b)
+            data = tail + b
+            self.bsu += data.count(BSU)
+            tail = data[-8:]
+            if self.reply and not self.replied and QUERY in data:
+                self.replied = True
+                os.write(self.master, b"\x1b[?2026;2$y")
+
+    def close(self):
+        """After kill-server the client exits on its own; this reaps it and the reader."""
+        try:
+            self.proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait()
+        self.thread.join(5)
+        os.close(self.master)
+
+
+def quiet(clients, secs=0.3, limit=10):
+    """Wait until no client received a byte for `secs`."""
+    end = time.monotonic() + limit
+    last, since = [c.bytes for c in clients], time.monotonic()
+    while time.monotonic() < end:
+        time.sleep(0.05)
+        now = [c.bytes for c in clients]
+        if now != last:
+            last, since = now, time.monotonic()
+        elif time.monotonic() - since >= secs:
+            return
+    raise RuntimeError("clients never went quiet")
+
+
+def attach_all(s, session, sizes, sync):
+    clients = [Client(s, session, c, r, sync) for c, r in sizes]
+    deadline = time.monotonic() + 15
+    while len(s.run("list-clients", "-F", "x").split()) < len(clients):
+        if time.monotonic() > deadline:
+            raise RuntimeError("clients did not attach")
+        time.sleep(0.05)
+    quiet(clients)
+    if sync and not all(c.replied for c in clients):
+        raise RuntimeError("the DECRQM 2026 query never arrived (sync-on row would not be sync-on)")
+    return clients
+
+
+class Attached:
+    """Server CPU/RSS plus summed client CPU and terminal bytes over a with-block."""
+
+    def __init__(self, s, clients):
+        self.s, self.clients = s, clients
+
+    def __enter__(self):
+        self.b0 = sum(c.bytes for c in self.clients)
+        self.f0 = sum(c.bsu for c in self.clients)
+        self.cc0 = sum(cpu_ms(c.pid, fine=True) for c in self.clients)
+        self.p = Phase(self.s.pid, fine=True).__enter__()
+        return self
+
+    def finish(self):
+        """Call at the end of the measured work, before the with-block exits."""
+        quiet(self.clients)
+        self.client_cpu = sum(cpu_ms(c.pid, fine=True) for c in self.clients) - self.cc0
+        self.term_bytes = sum(c.bytes for c in self.clients) - self.b0
+        self.bsu = sum(c.bsu for c in self.clients) - self.f0
+
+    def __exit__(self, *exc):
+        self.p.__exit__(*exc)
+        return False
+
+
+def _logfile(env, kind, mb):
+    cache = env.__dict__.setdefault("logs", {})
+    if (kind, mb) not in cache:
+        path = os.path.join(env.work, f"alog-{kind}-{mb}.txt")
+        gen_log(path, mb, kind == "sgr")
+        cache[(kind, mb)] = path
+    return cache[(kind, mb)]
+
+
+def _wait_markers(s, targets, what):
+    deadline = time.monotonic() + 600
+    pending = list(targets)
+    while pending:
+        pending = [t for t in pending if "\nBENCH-DONE\n" not in "\n" + s.run("capture-pane", "-p", "-J", "-t", t)]
+        if pending:
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"{what}: done marker not seen in 600 s")
+            time.sleep(0.2)
+
+
+def _trigger(path, wait=True):
+    """A pane command that (optionally) waits for Enter, then does the fixed work, prints the marker and idles."""
+    return f"{'read x; ' if wait else ''}cat '{path}'; printf 'BENCH-%s\\n' DONE; exec cat"
+
+
+def scenario_throughput_attached(env):
+    out = {}
+    for kind in ("plain", "sgr"):
+        path = _logfile(env, kind, THROUGHPUT_MB)
+        size = os.path.getsize(path) / 1e6
+        for sync in (False, True):
+            def one(which, path=path, size=size, sync=sync):
+                s = env.server(which)
+                s.run("new", "-d", "-s", "t", "-x", str(CLIENT_COLS), "-y", str(CLIENT_ROWS), "cat")
+                s.find_pid()
+                clients = []
+                try:
+                    pin_terminal(s)
+                    clients = attach_all(s, "t", [(CLIENT_COLS, CLIENT_ROWS)], sync)
+                    time.sleep(1)
+                    with Attached(s, clients) as a:
+                        t0 = time.monotonic()
+                        s.run("neww", "-t", "t:", "-n", "w", _trigger(path, wait=False))
+                        _wait_markers(s, ["t:w"], "throughput_attached")
+                        wall = time.monotonic() - t0
+                        a.finish()
+                    return {"wall_s": wall, "server_cpu_s": a.p.cpu / 1000, "client_cpu_s": a.client_cpu / 1000,
+                            "term_bytes_per_mb": a.term_bytes / size, "sync_frames": a.bsu, "peak_rss_mb": a.p.peak / 1024}
+                finally:
+                    s.kill()
+                    for c in clients:
+                        c.close()
+            out[(kind, sync)] = env.per_binary(one)
+    return {"title": f"throughput_attached ({THROUGHPUT_MB} MB log, one {CLIENT_COLS}x{CLIENT_ROWS} client, window-size latest)",
+            "rows": {f"{k} / sync {'on' if y else 'off'}": v for (k, y), v in out.items()}}
+
+
+def gen_frames(path, n, w, h, seed):
+    """n full repaints of a w x h screen as cursor-addressed rows, ending in a screen clear:
+    a static label, a changing value and a coloured bar per row (a top/htop-like redraw)."""
+    rnd = random.Random(seed)
+    words = ["cpu", "mem", "net", "disk", "proc", "load", "swap", "irq", "tasks", "temp"]
+    labels = [f"{rnd.choice(words)}{r:02d} {rnd.choice(words)}-{rnd.randrange(1000):03d} {rnd.choice(words)}" for r in range(h)]
+    rows = []
+    with open(path, "w", newline="") as f:
+        for k in range(n):
+            for r in range(h):
+                val = (k * (r + 3) + seed * 7) % 1000
+                col = 32 if val < 500 else 33 if val < 800 else 31
+                rows.append(f"\x1b[{r + 1};1H{labels[r]} {val:4d} \x1b[{col}m{'#' * (val * 40 // 1000):<40}\x1b[0m\x1b[K")
+            if len(rows) > 20000:
+                f.write("".join(rows))
+                rows = []
+        f.write("".join(rows) + "\x1b[2J\x1b[H")
+
+
+def scenario_render(env):
+    paths = []
+    for i in range(4):
+        p = os.path.join(env.work, f"frames{i}.txt")
+        gen_frames(p, RENDER_FRAMES, PANE_W, PANE_H, i + 1)
+        paths.append(p)
+    mb = sum(os.path.getsize(p) for p in paths) / 1e6
+    out = {}
+    for sync in (False, True):
+        def one(which, sync=sync):
+            s = env.server(which)
+            s.run("new", "-d", "-s", "r", "-x", str(CLIENT_COLS), "-y", str(CLIENT_ROWS), _trigger(paths[0]))
+            s.find_pid()
+            clients = []
+            try:
+                pin_terminal(s)
+                for p in paths[1:]:
+                    s.run("splitw", "-d", "-t", "r:0", _trigger(p))
+                s.run("select-layout", "-t", "r:0", "tiled")
+                dims = [tuple(map(int, d.split("x"))) for d in s.run("list-panes", "-t", "r:0", "-F", "#{pane_width}x#{pane_height}").split()]
+                if len(dims) != 4 or min(w for w, _ in dims) < PANE_W or min(h for _, h in dims) < PANE_H:
+                    raise RuntimeError(f"render: pane sizes {dims} are smaller than {PANE_W}x{PANE_H}")
+                ids = s.run("list-panes", "-t", "r:0", "-F", "#{pane_id}").split()
+                clients = attach_all(s, "r", [(CLIENT_COLS, CLIENT_ROWS)], sync)
+                time.sleep(1)
+                with Attached(s, clients) as a:
+                    t0 = time.monotonic()
+                    cmd = []
+                    for i in ids:
+                        cmd += ["send-keys", "-t", i, "Enter", ";"]
+                    s.run(*cmd[:-1])
+                    _wait_markers(s, ids, "render")
+                    wall = time.monotonic() - t0
+                    a.finish()
+                return {"wall_s": wall, "server_cpu_s": a.p.cpu / 1000, "client_cpu_s": a.client_cpu / 1000,
+                        "term_mb": a.term_bytes / 1e6, "sync_frames": a.bsu, "peak_rss_mb": a.p.peak / 1024}
+            finally:
+                s.kill()
+                for c in clients:
+                    c.close()
+        out[sync] = env.per_binary(one)
+    return {"title": f"render (4 panes in a {CLIENT_COLS}x{CLIENT_ROWS} client, each cat'ing {RENDER_FRAMES} cursor-addressed {PANE_W}x{PANE_H} frames; {mb:.0f} MB of input)",
+            "input_mb": mb, "rows": {f"sync {'on' if y else 'off'}": v for y, v in out.items()}}
+
+
+def scenario_many_clients(env):
+    path = _logfile(env, "plain", MANY_MB)
+    out = {}
+    for sync in (False, True):
+        def one(which, sync=sync):
+            s = env.server(which)
+            s.run("new", "-d", "-s", "m", "-x", "200", "-y", "60", _trigger(path))
+            s.find_pid()
+            clients = []
+            try:
+                pin_terminal(s, window_size="smallest")
+                s.run("splitw", "-d", "-t", "m:0", "cat")
+                clients = attach_all(s, "m", MANY_SIZES, sync)
+                size = s.run("display", "-p", "-t", "m:0", "#{window_width}x#{window_height}").strip()
+                want = f"{min(c for c, _ in MANY_SIZES)}x{min(r for _, r in MANY_SIZES) - 1}"  # smallest client, minus the status line
+                if size != want:
+                    raise RuntimeError(f"many_clients: window is {size}, expected {want} from window-size smallest")
+                time.sleep(1)
+                rss_attached = rss_kb(s.pid)
+                pane = s.run("list-panes", "-t", "m:0", "-F", "#{pane_id}").split()[0]
+                with Attached(s, clients) as a:
+                    t0 = time.monotonic()
+                    s.run("send-keys", "-t", pane, "Enter")
+                    _wait_markers(s, [pane], "many_clients")
+                    wall = time.monotonic() - t0
+                    a.finish()
+                return {"wall_s": wall, "server_cpu_s": a.p.cpu / 1000, "client_cpu_s": a.client_cpu / 1000,
+                        "term_mb": a.term_bytes / 1e6, "rss_attached_mb": rss_attached / 1024,
+                        "rss_mb": rss_kb(s.pid) / 1024, "peak_rss_mb": a.p.peak / 1024}
+            finally:
+                s.kill()
+                for c in clients:
+                    c.close()
+        out[sync] = env.per_binary(one)
+    return {"title": f"many_clients (1 session, {len(MANY_SIZES)} clients {', '.join(f'{c}x{r}' for c, r in MANY_SIZES)}, window-size smallest, {MANY_MB} MB flood in one of 2 panes)",
+            "rows": {f"sync {'on' if y else 'off'}": v for y, v in out.items()}}
+
+
+ATTACHED = {"throughput_attached": scenario_throughput_attached, "render": scenario_render, "many_clients": scenario_many_clients}
+ALL += list(ATTACHED)
+
+
+def render_attached(name, res):
+    cols = {
+        "throughput_attached": [("wall s", "wall_s", 2), ("server CPU s", "server_cpu_s", 2), ("client CPU s", "client_cpu_s", 2), ("total CPU s", "total_cpu_s", 2),
+                                ("term bytes / MB in", "term_bytes_per_mb", 0), ("sync frames", "sync_frames", 0), ("peak RSS MB", "peak_rss_mb", 1)],
+        "render": [("wall s", "wall_s", 2), ("server CPU s", "server_cpu_s", 2), ("client CPU s", "client_cpu_s", 2), ("total CPU s", "total_cpu_s", 2),
+                   ("terminal MB", "term_mb", 2), ("sync frames", "sync_frames", 0), ("peak RSS MB", "peak_rss_mb", 1)],
+        "many_clients": [("wall s", "wall_s", 2), ("server CPU s", "server_cpu_s", 2), ("clients CPU s (sum)", "client_cpu_s", 2), ("total CPU s", "total_cpu_s", 2),
+                         ("terminal MB (sum)", "term_mb", 1), ("RSS MB (idle, attached)", "rss_attached_mb", 1),
+                         ("RSS MB (after)", "rss_mb", 1), ("peak RSS MB", "peak_rss_mb", 1)],
+    }[name]
+    for per in res["rows"].values():
+        for m in per.values():
+            m["total_cpu_s"] = m["server_cpu_s"] + m["client_cpu_s"]
+    rows = [[k, b, *[fmt(m[key], nd) for _, key, nd in cols]] for k, per in res["rows"].items() for b, m in per.items()]
+    return f"### {res['title']}\n\n" + table(["case", "binary", *[c[0] for c in cols]], rows) + "\n"
+
+
 # ---- output -----------------------------------------------------------------
 
 def fmt(v, nd=1):
@@ -600,6 +908,8 @@ def table(header, rows):
 def render(name, res):
     if name in OWNER_RENDER:
         return OWNER_RENDER[name](res)
+    if name in ATTACHED:
+        return render_attached(name, res)
     out = [f"### {res['title']}", ""]
     if name == "idle":
         rows = [[b, fmt(m["rss_mb"]), fmt(m["cpu_ms"], 2), fmt(m["wakeups_per_s"], 2)] for b, m in res["results"].items()]
@@ -670,6 +980,7 @@ def main():
     funcs = {"idle": scenario_idle, "scale": scenario_scale, "history": scenario_history,
              "startup": scenario_startup, "throughput": scenario_throughput}
     funcs.update(OWNER_FUNCS)
+    funcs.update(ATTACHED)
     results, md = {}, []
     try:
         for name in scenarios:
