@@ -2640,8 +2640,6 @@ fn windows_base_index_and_renumber() {
 /// with setw (options.c `options_push_changes`); -x/-y as the session's
 /// default-size, which later windows take (resize.c `default_window_size`).
 #[test]
-// Linux only on CI: macOS runners miss its naming deadline (task macos_attach_parity).
-#[cfg_attr(not(target_os = "linux"), ignore = "macos_attach_parity")]
 fn windows_spawn_and_names() {
     compare("windows_spawn_and_names", |w| {
         std::fs::create_dir_all(w.dir().join("sub")).expect("mkdir");
