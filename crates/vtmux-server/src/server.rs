@@ -283,6 +283,12 @@ pub struct Server {
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
     backlog: std::collections::BTreeSet<PaneId>,
+    /// Command clients whose commands are done, with their exit codes:
+    /// told after this turn's frames, as `server_client_loop` runs
+    /// `server_client_check_exit` for a client after the redraws of the
+    /// clients before it (server-client.c:1920-1927), and a command
+    /// client is newer than the attached clients it changes.
+    pending_exits: Vec<(ClientId, i32)>,
     /// Windows a lost client was looking at. tmux never looks at their
     /// focus again until something changes them (`server_client_lost` runs
     /// no `window_update_focus`), so [`Server::update_focus_all`] skips them.
@@ -487,6 +493,7 @@ impl Server {
             key_after: None,
             jobs: crate::jobs::Jobs::default(),
             backlog: std::collections::BTreeSet::new(),
+            pending_exits: Vec::new(),
             waits: WaitChannels::default(),
             files: BTreeMap::new(),
             key_bindings: vtmux_core::keys::KeyBindings::with_defaults(),
@@ -559,9 +566,7 @@ impl Server {
             self.apply_redraws();
             self.tree_updates();
             self.tree_draws();
-            self.render_clients();
-            self.format_jobs_flush();
-            self.model.redraw_panes.clear();
+            self.render_and_exit();
             self.send_pane_resizes();
             // Full turns process timers/queues/rendering too; only the
             // early compression-only path above is a quiet turn.
@@ -680,6 +685,7 @@ impl Server {
 
     fn own_timeout(&self) -> Option<Duration> {
         if !self.backlog.is_empty()
+            || !self.pending_exits.is_empty()
             || self.cmdq.runnable()
             || !self.format_jobs.borrow().actions.is_empty()
         {
@@ -1265,7 +1271,7 @@ impl Server {
     pub(crate) fn deliver(&mut self, id: ClientId, mut item: Item) {
         self.send_output(id, &mut item);
         if item.after == After::Exit || self.shutdown {
-            self.finish_client(id, item.status);
+            self.pending_exits.push((id, item.status));
         }
     }
 
@@ -1949,6 +1955,18 @@ impl Server {
             io.write(bytes);
         }
         self.pane_output_queued(p);
+    }
+
+    /// This turn's frames, then the command clients whose commands are
+    /// done ([`Self::pending_exits`]) and the format jobs; the turn's pane
+    /// redraws are used up.
+    fn render_and_exit(&mut self) {
+        self.render_clients();
+        for (id, code) in std::mem::take(&mut self.pending_exits) {
+            self.finish_client(id, code);
+        }
+        self.format_jobs_flush();
+        self.model.redraw_panes.clear();
     }
 
     fn render_clients(&mut self) {
