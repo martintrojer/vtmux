@@ -18,6 +18,7 @@ pub mod key_dispatch;
 pub mod keys;
 pub mod mode;
 pub mod model;
+pub mod mouse;
 pub mod names;
 pub mod open_prompt;
 pub mod pane_io;

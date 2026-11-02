@@ -10,7 +10,12 @@
 //! A read-only client's keys reach no pane and only bindings made of
 //! `CMD_READONLY` commands run (server-client.c:1693-1702).
 //!
-//! Not here yet: mouse keys and `assume-paste-time` (every terminal vtmux attaches to has
+//! Mouse keys are located first ([`crate::mouse`]); their binding's
+//! commands start from the mouse's target and carry the event. Mouse keys
+//! with no binding go to the pane under the pointer's mode (a pane's own
+//! program does not get them yet: `mouse_forward`).
+//!
+//! Not here yet: `assume-paste-time` (every terminal vtmux attaches to has
 //! bracketed paste, which turns it off: server-client.c:1352).
 
 use std::time::{Duration, Instant};
@@ -41,6 +46,13 @@ pub enum KeyKind {
     /// `KEYC_PASTE_START` / `KEYC_PASTE_END`
     /// (`server_client_is_bracket_paste`).
     Paste(bool),
+    /// `KEYC_MOUSE` (or the click timer's `KEYC_DOUBLECLICK`, `double`)
+    /// with its report and bytes, located when the callback runs.
+    Mouse {
+        input: crate::input::MouseInput,
+        bytes: Vec<u8>,
+        double: bool,
+    },
 }
 
 /// A client's key state: `c->keytable`, `CLIENT_REPEAT`, `c->last_key`,
@@ -166,20 +178,27 @@ impl Server {
     /// activity update. `true` when the key was taken by the tables (a
     /// binding ran, or the prefix or a table switch swallowed it); `false`
     /// when it goes to the pane.
-    pub(crate) fn handle_key(&mut self, id: ClientId, key: Key) -> bool {
+    pub(crate) fn handle_key(
+        &mut self,
+        id: ClientId,
+        key: Key,
+        mouse: Option<&crate::mouse::MouseEvent>,
+    ) -> bool {
         let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
             return true;
         };
         if key == Key::FOCUS_IN || key == Key::FOCUS_OUT {
             return false;
         }
+        // server-client.c:1500-1502: the affected pane is the mouse's, or
+        // the client's.
+        let mouse_found = mouse.and_then(|m| m.target.pane_found(&self.model));
+        let wp = mouse_found.map_or_else(|| self.client_pane(id), |f| f.pane);
         // server-client.c:1531-1537: a pane in a mode uses the mode's table
         // instead of the default one.
         let mut table = self.clients[&id].keys.table.clone();
         if table == self.default_key_table(id)
-            && let Some(mode_table) = self
-                .client_pane(id)
-                .and_then(|p| self.model.mode_key_table(p))
+            && let Some(mode_table) = wp.and_then(|p| self.model.mode_key_table(p))
         {
             self.key_bindings.ensure_table(mode_table);
             mode_table.clone_into(&mut table);
@@ -242,13 +261,18 @@ impl Server {
                     }
                     // server-client.c:1635: server_status_client.
                     self.status_redraw_client(id);
-                    self.run_binding(id, &commands, repeat, key);
+                    self.run_binding(id, &commands, repeat, key, mouse, mouse_found);
                     return true;
                 }
                 if lookup == Key::ANY {
                     break;
                 }
                 lookup = Key::ANY;
+            }
+            // server-client.c:1653-1665: motion keys never leave the
+            // prefix table.
+            if key.mouse_kind() == Some(vtmux_core::keys::MouseKind::Move) {
+                return false;
             }
 
             // Not in this table: if it is not the default table, or a
@@ -279,7 +303,15 @@ impl Server {
     /// handed over (`send-keys -K`), right after that command. A control
     /// client sees them in guards with flags 0; an attached terminal client
     /// gets a failure as its status-line message (`cmdq::End::Quiet`).
-    fn run_binding(&mut self, id: ClientId, commands: &CommandList, repeat: bool, key: Key) {
+    fn run_binding(
+        &mut self,
+        id: ClientId,
+        commands: &CommandList,
+        repeat: bool,
+        key: Key,
+        mouse: Option<&crate::mouse::MouseEvent>,
+        current: Option<crate::target::Found>,
+    ) {
         let Some(c) = self.clients.get(&id) else {
             return;
         };
@@ -292,11 +324,16 @@ impl Server {
         item.utf8 = hello.flags.utf8;
         item.repeat = repeat;
         item.key = Some(key);
+        // key_bindings_dispatch(..., event, &fs): a mouse key's commands
+        // start from the mouse's target (cmdq_new_state's current) and see
+        // its event.
         item.origin = Origin {
             attached: c.attached,
             inside_pane: None,
-            current: None,
+            current: current.filter(|f| f.still_valid(&self.model)),
+            mouse: mouse.map(|m| m.target),
         };
+        item.mouse = mouse.cloned();
         if control {
             item.control = Some(0);
         }
@@ -385,10 +422,24 @@ impl Server {
             KeyKind::Key(k) => k.to_core(),
             KeyKind::Paste(true) => Key::PASTE_START,
             KeyKind::Paste(false) => Key::PASTE_END,
+            KeyKind::Mouse { .. } => Key::MOUSE,
         };
         // server-client.c:1792-1802: the overlay takes every key at once
-        // (the queue may be waiting on the popup's command).
-        if !read_only && (self.popup_key(id, core) || self.prompts_key(id, core)) {
+        // (the queue may be waiting on the popup's command). A popup takes
+        // every mouse event too (popup_key_cb; dragging and forwarding
+        // into it are not here yet).
+        if !read_only && self.popup_key(id, core) {
+            return None;
+        }
+        if core == Key::MOUSE {
+            // status_prompt_key and window_pane_prompt_key: only a press
+            // on the prompt's line, to move its cursor (not here yet); a
+            // visible pane prompt uses every mouse event up
+            // (server-client.c:1855-1857).
+            if !read_only && self.client_has_pane_prompt(id) {
+                return None;
+            }
+        } else if !read_only && self.prompts_key(id, core) {
             return None;
         }
         let mut batch = NewBatch::new(
@@ -415,8 +466,17 @@ impl Server {
         let Some(c) = self.clients.get_mut(&id).filter(|c| c.attached.is_some()) else {
             return;
         };
-        match event.kind {
-            KeyKind::Paste(start) => {
+        match &event.kind {
+            KeyKind::Mouse {
+                input,
+                bytes,
+                double,
+            } => {
+                let (input, double) = (*input, *double);
+                let bytes = bytes.clone();
+                self.fire_mouse(step, id, input, &bytes, double);
+            }
+            &KeyKind::Paste(start) => {
                 c.pasting = start;
                 // server_client_is_bracket_paste returns 0 for the markers,
                 // so they are keys: window_pane_key writes one to a pane
@@ -440,7 +500,7 @@ impl Server {
                     });
                 }
             }
-            KeyKind::Key(key) => {
+            &KeyKind::Key(key) => {
                 let pasting = c.pasting;
                 self.touch_client(id);
                 // server_client_update_latest (server-client.c:1708-1709)
@@ -448,7 +508,7 @@ impl Server {
                 // this step.
                 self.update_latest(id);
                 let outer = self.key_after.replace(step);
-                let taken = !pasting && self.handle_key(id, key.to_core());
+                let taken = !pasting && self.handle_key(id, key.to_core(), None);
                 self.key_after = outer;
                 if !taken
                     && !self.clients[&id].flags.read_only
@@ -458,6 +518,82 @@ impl Server {
                 }
             }
         }
+    }
+
+    /// `server_client_key_callback` for a mouse report: located into a
+    /// key (`server_client_check_mouse`), which a read-only client drops;
+    /// while pasting its bytes go to the pane; with `mouse` off, or with
+    /// no binding, it goes to the pane under the pointer
+    /// (`forward_key`).
+    fn fire_mouse(
+        &mut self,
+        step: StepId,
+        id: ClientId,
+        input: crate::input::MouseInput,
+        bytes: &[u8],
+        double: bool,
+    ) {
+        let Some(c) = self.clients.get(&id) else {
+            return;
+        };
+        let (pasting, read_only) = (c.pasting, c.flags.read_only);
+        self.touch_client(id);
+        if read_only {
+            self.update_latest(id);
+            return;
+        }
+        let crate::mouse::Located::Key(ev) = self.check_mouse(id, input, double) else {
+            self.update_latest(id);
+            return;
+        };
+        let Some(s) = self.clients.get(&id).and_then(|c| c.attached) else {
+            return;
+        };
+        let found = ev.target.pane_found(&self.model);
+        let wp = found.map_or_else(|| self.client_pane(id), |f| f.pane);
+        self.update_latest(id);
+        let forward = if self.model.number_option(TreeId::Session(s), "mouse") == 0 {
+            true
+        } else if pasting {
+            // paste_key (window_pane_paste): the report's bytes to the pane
+            // as they came, and to its synchronized panes.
+            if let Some(p) = wp
+                && self.model.panes.get(&p).is_some_and(|x| x.modes.is_empty())
+            {
+                self.write_pane(p, bytes);
+                self.copy_to_synchronized(p, |_, _| bytes.to_vec());
+            }
+            false
+        } else {
+            let outer = self.key_after.replace(step);
+            let taken = self.handle_key(id, ev.key, Some(&ev));
+            self.key_after = outer;
+            !taken
+        };
+        if forward && let Some(p) = wp {
+            self.forward_mouse(p, id, &ev);
+        }
+    }
+
+    /// `server_client_handle_key0` for a mouse report from client `id`:
+    /// a message and an overlay see it at once, otherwise it is queued as
+    /// a key.
+    pub(crate) fn handle_mouse_input(
+        &mut self,
+        id: ClientId,
+        input: crate::input::MouseInput,
+        bytes: Vec<u8>,
+        double: bool,
+    ) {
+        self.handle_key0(
+            id,
+            KeyKind::Mouse {
+                input,
+                bytes,
+                double,
+            },
+            None,
+        );
     }
 
     /// Keys `send-keys -K` gave a client: handled as typed, each queued

@@ -28,7 +28,7 @@ fn items(defaults: &[&str], column: &str) -> Vec<String> {
 fn describe(term: &Term) -> String {
     let caps: Vec<&str> = Cap::ALL
         .into_iter()
-        .filter(|c| term.has(*c))
+        .filter(|c| *c != Cap::Kmous && term.has(*c))
         .map(Cap::name)
         .collect();
     format!(

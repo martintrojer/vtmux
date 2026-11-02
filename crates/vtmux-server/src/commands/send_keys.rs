@@ -37,10 +37,25 @@ pub fn exec(
         inject(server, args, tc);
         return Ok(());
     }
-    for flag in ['M', 'R'] {
-        if args.flag(flag) {
-            return Err(EdgeError::NotImplemented(format!("send-keys -{flag}")).into());
+    // cmd-send-keys.c:211-219: -M is the batch's mouse event to the pane
+    // under it; "no mouse target" without one.
+    if args.flag('M') {
+        let Some(m) = item.mouse.as_ref() else {
+            return Err(EdgeError::Message("no mouse target".into()).into());
+        };
+        let Some(p) = m.target.pane_found(&server.model).and_then(|f| f.pane) else {
+            return Err(EdgeError::Message("no mouse target".into()).into());
+        };
+        if let Some(c) = tc {
+            let m = m.clone();
+            // TODO(mouse_forward): window_pane_key to a pane's program in
+            // its mouse encoding; modes get it now.
+            server.forward_mouse(p, c, &m);
         }
+        return Ok(());
+    }
+    if args.flag('R') {
+        return Err(EdgeError::NotImplemented("send-keys -R".into()).into());
     }
     let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
     let repeat = if args.flag('N') {

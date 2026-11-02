@@ -197,7 +197,7 @@ impl<K: Copy + PartialEq, D> Build<K, D> {
 
 /// What a key leaves for the mode to do (`mode_tree_key`'s result and the
 /// key it hands back).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     /// The mode is finished (`q`, Escape, ...).
     Finished,
@@ -863,6 +863,42 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
         }
         // A key mode-tree handled is the mode's too, as tmux hands it on.
         Action::Key(Some(key))
+    }
+
+    /// `mode_tree_key`'s mouse branch (mode-tree.c:1582-1617) after the
+    /// prompt: `at` is the event's position in the pane (`cmd_mouse_at`),
+    /// `None` outside it. A press or double click on a row selects it;
+    /// the double click is then Enter. Everything else is used up (the
+    /// menu of `MouseDown3Pane` is not here). The help screen takes the
+    /// key too.
+    pub fn mouse_key(&mut self, key: Key, at: Option<(u32, u32)>) -> Action {
+        use vtmux_core::keys::{MouseKind, MouseLocation};
+        if self.lines.is_empty() {
+            return Action::Finished;
+        }
+        if self.help {
+            return Action::Key(None);
+        }
+        let Some((x, y)) = at else {
+            return Action::Key(None);
+        };
+        let (x, y) = (x as usize, y as usize);
+        if x > self.width || y > self.height {
+            return Action::Key(None);
+        }
+        let k = key.key_and_modifiers();
+        let down1 = Key::mouse(MouseKind::Down, 1, MouseLocation::Pane);
+        let down3 = Key::mouse(MouseKind::Down, 3, MouseLocation::Pane);
+        let double1 = Key::mouse(MouseKind::DoubleClick, 1, MouseLocation::Pane);
+        if self.offset + y < self.lines.len() {
+            if k == down1 || k == down3 || k == double1 {
+                self.current = self.offset + y;
+            }
+            if k == double1 {
+                return Action::Key(Some(Key::ascii(b'\r')));
+            }
+        }
+        Action::Key(None)
     }
 
     /// `mode_tree_clear_tagged` on `id`'s children.

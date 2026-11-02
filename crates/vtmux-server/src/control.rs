@@ -346,6 +346,7 @@ impl Server {
             attached: client.attached,
             inside_pane: None,
             current: None,
+            mouse: None,
         };
         match cmd::parse_config_with(
             line,

@@ -45,7 +45,7 @@ mod string;
 mod width;
 
 pub use bindings::{Binding, CmdFailed, KeyBindings, KeyTable};
-pub use code::Key;
+pub use code::{Key, MouseKind, MouseLocation};
 pub use list::{ListKeys, display_width};
 
 #[cfg(test)]
