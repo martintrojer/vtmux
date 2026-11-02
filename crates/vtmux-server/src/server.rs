@@ -1986,6 +1986,12 @@ impl Server {
                 continue;
             }
             if self.defer_frame(id, s, queued) {
+                // tty_cmd_rawstring writes the payloads to `tty->out` as they
+                // come, whether a redraw is deferred or not; they count
+                // towards the block threshold like any output, so a client
+                // that stops reading blocks and the rest is dropped
+                // (tty_add) instead of piling up here.
+                self.send_passthrough(id, caps);
                 continue;
             }
             let mut screen = vtmux_vt::Snapshot {
@@ -2047,16 +2053,22 @@ impl Server {
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
             }
-            // The frame's write may have dropped the client.
-            let Some(client) = self.clients.get_mut(&id) else {
-                continue;
-            };
-            let mut raw = std::mem::take(&mut client.passthrough);
-            if !raw.is_empty() {
-                // The program may have moved the terminal's cursor.
-                raw.extend(client.compositor.cursor_bytes(caps));
-                self.send(id, &ServerMsg::Frame(raw));
-            }
+            self.send_passthrough(id, caps);
+        }
+    }
+
+    /// The `DCS tmux;` payloads queued for client `id` since its last
+    /// frame, written raw (`tty_cmd_rawstring`), then the cursor put back.
+    fn send_passthrough(&mut self, id: ClientId, caps: crate::render::Caps) {
+        // The frame's write may have dropped the client.
+        let Some(client) = self.clients.get_mut(&id) else {
+            return;
+        };
+        let mut raw = std::mem::take(&mut client.passthrough);
+        if !raw.is_empty() {
+            // The program may have moved the terminal's cursor.
+            raw.extend(client.compositor.cursor_bytes(caps));
+            self.send(id, &ServerMsg::Frame(raw));
         }
     }
 

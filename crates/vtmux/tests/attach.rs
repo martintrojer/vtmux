@@ -789,6 +789,36 @@ fn stalled_terminal_keeps_server_memory_bounded() {
     a.exited(0);
 }
 
+/// tty.c `tty_cmd_rawstring` / `tty_block_maybe`: passthrough goes into the
+/// client's output like any other, so a client that stops reading blocks and
+/// the rest is dropped (`tty_add`). A redraw deferred while the client has a
+/// frame unwritten must not hold the payloads back in the server, where
+/// they grew without bound (reviewer stall3.py: 9 -> 157 MB in 8 s). Three
+/// full screens of text first (~36 KB of frames, more than the PTY buffer
+/// takes, less than the 113 KB block threshold) leave one frame unwritten.
+#[test]
+fn stalled_terminal_bounds_passthrough() {
+    let payload = format!("\\033Ptmux;\\033\\033]0;{}\\007\\033\\\\", "x".repeat(200));
+    let script = format!(
+        "printf READY; read x; for r in 1 2 3; do i=0; while [ $i -lt 59 ]; do printf '%0200d\\n' $((r*100+i)); i=$((i+1)); done; sleep 0.2; done; while :; do printf '{payload}'; done"
+    );
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let mut a = w.attach_sized(&["new", "-s", "a", "sh", "-c", &script], 240, 59);
+    a.wait(|a| pane_text(a).contains("READY"));
+    w.cli(&["set", "-g", "allow-passthrough", "all"]);
+    a.paused.store(true, Ordering::Relaxed);
+    a.keys(b"\r");
+    for _ in 0..4 {
+        thread::sleep(Duration::from_secs(3));
+        let rss = rss_kb(&w);
+        assert!(rss < 100 * 1024, "server RSS {rss} kB while stalled");
+    }
+    assert!(a.alive());
+    a.paused.store(false, Ordering::Relaxed);
+    a.keys(b"\x02d");
+    a.exited(0);
+}
+
 /// After a stall, detach is not queued behind stale frames: the client
 /// exits promptly and drains about one terminal's worth, not the backlog
 /// (reviewer-28 lag.py: reference 0.1 s / 16 KB; unblocked vtmux 15 s / 330 MB).
