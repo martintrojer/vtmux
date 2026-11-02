@@ -78,6 +78,20 @@ Recorded per commit in git history; the list is kept current:
   or removed, and struct layouts only grew at the end (`ClipboardWrite`,
   `TerminalScrollViewportValue`).
 
+- `patches/0003-resize-without-faulting-blank-memory.patch`
+  (`PageList.zig` `trimTrailingBlankRows`, `keepWarm`): idle panes stay
+  small after a resize. A height shrink trims trailing blank rows with
+  `resetRow`, which memsets cells that are already zero and faults them
+  in (200x50 to 200x25: +40 KB); an all-zero row without managed memory
+  now only gets its header reset. `keepWarm` (patch 0001) now keeps a
+  freed page resident only when every row of it was in use (the line
+  limit's pruned page). The page a width reflow replaces used only a few
+  rows, and zeroing it faulted the whole 400 KB pool item in.
+  `scripts/bench.py scale` (400 idle panes): 33.2 to 15.3 KB/pane; a
+  width change of an 80x24 pane: 400 KB to 8.5 KB. The 1M-line flood
+  keeps its 0.72 s. ghostty's `zig build test-lib-vt
+  -Dtest-filter=PageList` passes with it.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
