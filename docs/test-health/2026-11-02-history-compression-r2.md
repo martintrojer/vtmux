@@ -1,4 +1,4 @@
-# History compression round 2 — gate unresolved
+# History compression round 2 — measured gates
 
 Base: `1459bf40`; round-1 compression rebased as `d80bab2`.
 Host: Fedora x86_64, pinned Rust/Zig, warm cache. Measurements below use
@@ -34,10 +34,13 @@ Every completed run reported byte-identical `capture -S - -E - -e`.
 | random base64 | 120x40 / 100000 | 292 | 0.729 / 0.590 |
 | CJK | 60x24 / 10000 | 16 | 0.810 / not run |
 
-Measured step budget passes (<5 ms); the repetitions are incomplete.
+Measured step budget passes (<5 ms). Three repetitions subsequently completed
+at load 1.3–1.8; their maxima were spec 0.208, narrow 1.306, fg+bg80 1.241,
+link80 1.354, halfblock 1.214, fg+bg200 1.131, wide 0.099, base64 0.636 and
+CJK 0.551 ms. All captures were identical. Worst across all runs: 1.619 ms.
 Spec in-process RSS: 146.3 -> 58.3–58.4 MB (includes captured strings).
 
-## Latency — NOT PASS
+## Latency — initial failure and final measurements
 
 Exact reviewer command:
 `python3 scripts/bench-compress-latency.py BIN spec 2 16`, three complete
@@ -56,8 +59,28 @@ existed in all five runs, mean 11.07 s:
 | same build before compression | 318 | 1.564 | 1.827 |
 | no compression | 898 | 1.267 | 1.643 |
 
-**+10.5% p95: FAIL** against <10% gate. Small sample set and unequal first two
-orders are limitations, not grounds to call the result a pass.
+**Initial +10.5% p95: FAIL** against <10% gate. Small sample set and unequal
+first two orders are limitations, not grounds to call this result a pass.
+
+### Final artifact after eliminating a discarded grid clone
+
+`draw_window` built a snapshot with `cells: vec![...]` and `..screen.clone()`.
+The latter cloned `screen.cells` only to discard that vector immediately. The
+initializer now copies the four remaining metadata fields explicitly. A fresh
+read-only refuter confirmed field-by-field equivalence; no speedup is claimed
+from noisy latency samples.
+
+Six alternating pairs per scenario, `GAP_MS=60`, same command and 16 s duration,
+flock, host load 1.2–2.1. All twelve candidate runs had compression windows:
+
+| scenario | compressing p50 / p95 ms | no-compression p50 / p95 ms | p95 rise |
+|---|---|---|---|
+| spec | 1.406 / 1.625 | 1.271 / 1.543 | +5.4% |
+| narrow | 0.715 / 0.837 | 0.798 / 0.922 | -9.2% |
+
+**Concurrent probes pass the <10% p95 threshold.** Exact GAP2 remains deferred
+(no compression window), not graded as a concurrent pass. These measurements
+support the threshold, not a general speedup claim. No thread fallback built.
 
 Rejected experiments (reverted): quiet=1 ms let compression overlap the exact
 reviewer workload, but p95 rose 28.9% in one pair; persistent RenderState reuse
@@ -70,7 +93,9 @@ Detached spec pane, 25 s after fill, one line every 6 s for 36 s:
 `flock /tmp/vtmux-stress.lock timeout 120 python3 /tmp/hc2/trickle-final.py BIN 6`.
 Load 1.3–1.5. New schedule 0.167 context switches/s, RSS 17.4 -> 17.5 MB;
 no-compression baseline 0.167/s, RSS 105 MB. This reproduces the reviewer's
-6 s probe without restarting a pass. The 10 s variant is not yet measured.
+6 s probe without restarting a pass. The 10 s / 40 s variant subsequently
+measured 0.100/s on both builds at load 1.1–1.4; candidate RSS 17.1 MB steady,
+baseline 105.3–105.4 MB.
 
 ## Verification
 
@@ -91,8 +116,15 @@ executable checks. Earlier delegate timeouts had no verdict and are not passes.
 Two full `mise exec -- bash scripts/check.sh` attempts timed out at 600 s during
 oracle replay. fmt, clippy, workspace tests and regress completed. Regress:
 61/174 pass, 105 xfail, 6 skip, 2 flaky (menus and terminal-feature-utf8).
-**No full-gate PASS, no CI result yet.** Oracle gate runtime needs upkeep or a
-recorded extended run; a timeout is not a pass.
+Those timed-out attempts remain failures/incomplete. An extended full run
+(`muzzle run --rule vtmux-check --run-timeout 1200 -- bash -c
+'mise exec -- bash scripts/check.sh'`) subsequently exited 0 in 691 s:
+fmt, clippy, cross-platform check, workspace tests, regress 61/174 pass,
+105 xfail, 6 skip, 2 flaky, oracle replay 130 scenarios / 0 failures.
+Host load rose during gates; warm cache. Over the 10-minute budget, recorded
+rather than silently treating a timeout as success. Runtime upkeep is needed.
+CI checkpoint run 41406557488 passed Linux and macOS; final follow-up CI is
+recorded in the task close evidence.
 
 ## Discarded structural split prototype
 
@@ -105,7 +137,9 @@ prototype is in the patch. All subsequent runs have time and output bounds.
 
 ## Remaining
 
-Latency gate remains unresolved. Findings remain open; no thread-fallback
-claim, no completion claim. The owner requested fallback only after the
-single-threaded gate cannot be met; the numbers above are evidence for that
-next decision, not evidence to close round 2.
+The measured single-threaded step and concurrent p95 gates pass after the
+follow-up allocation removal. Continuous busy output defers reclamation;
+that is intentional, not a compression-work measurement. No thread fallback
+is required by the measured gates. Full upstream Zig suite and arbitrary
+pages larger than 4 MiB remain untested beyond the documented skip policy.
+Follow-up branch CI and final rebase status are in task close evidence.

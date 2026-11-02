@@ -2137,7 +2137,10 @@ impl Server {
         let mut window = vtmux_vt::Snapshot {
             rows,
             cells: vec![vtmux_vt::Cell::default(); cols * usize::from(rows)],
-            ..screen.clone()
+            cols: screen.cols,
+            wrapped: screen.wrapped.clone(),
+            cursor: screen.cursor,
+            cursor_visible: screen.cursor_visible,
         };
         crate::render::compose::compose(&scene, &draw, &theme, &mut window);
         crate::render::window::cursor(&mut window, &draw, &self.model, rows);
