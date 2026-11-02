@@ -2,6 +2,7 @@
 """Memory and CPU of the vtmux server against tmux 3.8 (docs/PERFORMANCE.md).
 
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
+       mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
 Scenarios: idle scale history startup throughput (default: all).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
@@ -409,6 +410,10 @@ def meta(bins):
 
 
 def main():
+    if sys.argv[1:] == ["--smoke"]:
+        import bench_smoke  # the regression guard lives in scripts/bench_smoke.py
+
+        sys.exit(bench_smoke.main())
     scenarios = sys.argv[1:] or ALL
     for s in scenarios:
         if s not in ALL:
