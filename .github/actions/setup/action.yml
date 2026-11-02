@@ -1,0 +1,30 @@
+name: setup
+description: Zig, Rust, the reference tmux 3.8 build and its cache (shared by the ci.yml jobs)
+runs:
+  using: composite
+  steps:
+    - uses: mlugg/setup-zig@v2
+      with:
+        version: 0.17.0
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: 1.99.1
+        components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2
+    - name: Reference tmux 3.8 build dependencies
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = Linux ]; then
+          sudo apt-get update
+          sudo apt-get install -y libevent-dev libncurses-dev bison
+        else
+          brew install libevent ncurses pkg-config utf8proc jemalloc
+        fi
+    - name: Reference tmux 3.8 cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/vtmux/tmux-3.8
+        # Keyed on the pinned tarball sha256 (xtask/src/ref_tmux.rs) and the runner.
+        key: ref-tmux-${{ runner.os }}-${{ runner.arch }}-e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e
+    - run: cargo xtask ref-tmux
+      shell: bash

@@ -4,6 +4,9 @@ on:
     # m1 always points at a commit main already has: don't build it twice.
     branches-ignore: [m1]
   pull_request:
+  # Weekly perf-smoke only (the check job skips scheduled runs).
+  schedule:
+    - cron: "17 4 * * 1"
 # A newer push to a worker branch supersedes its running check; every
 # push to main is checked to the end.
 concurrency:
@@ -11,6 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   check:
+    if: github.event_name != 'schedule'
     strategy:
       matrix:
         # macos-15: Zig 0.17 (needed by the ghostty pin in third_party/libghostty-rs)
@@ -22,28 +26,28 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.17.0
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.99.1
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Reference tmux 3.8 build dependencies
-        run: |
-          if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update
-            sudo apt-get install -y libevent-dev libncurses-dev bison
-          else
-            brew install libevent ncurses pkg-config utf8proc jemalloc
-          fi
-      - name: Reference tmux 3.8 cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/vtmux/tmux-3.8
-          # Keyed on the pinned tarball sha256 (xtask/src/ref_tmux.rs) and the runner.
-          key: ref-tmux-${{ runner.os }}-${{ runner.arch }}-e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e
-      - run: cargo xtask ref-tmux
+      - uses: ./.github/actions/setup
       - name: Gate (full check.sh)
         run: bash scripts/check.sh
+
+  # Performance regression guard (docs/PERFORMANCE.md, "Regression guard"): never blocks, not
+  # part of check.sh. The table goes to the job summary; the result JSON is the artifact to
+  # copy to perf/baseline.json when a change is intentional.
+  perf-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the staleness check walks git history
+      - uses: ./.github/actions/setup
+      - name: Smoke run
+        run: python3 scripts/bench.py --smoke
+        env:
+          OUT: ${{ github.workspace }}/target/bench/smoke.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-smoke
+          path: target/bench/smoke.json

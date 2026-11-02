@@ -66,3 +66,38 @@ BASE=/path/to/older/vtmux mise exec -- python3 scripts/bench.py
 ```
 
 A full run takes about 20 minutes. The host is shared: run it when `uptime` load is under 4, under `flock /tmp/vtmux-stress.lock`, and one bench at a time. Other env: `RUNS`, `OUT`, `NO_BUILD=1`, `VTMUX`, `VTMUX_REFERENCE_TMUX`, `HISTORY_SCENARIOS` (documented at the top of the script). Put the result in `docs/test-health/<date>-perf.md` and update the table above.
+
+## Regression guard
+
+`python3 scripts/bench.py --smoke` (`scripts/bench_smoke.py`) is a short run (about 1 minute on an idle host, under 3 minutes anywhere) that fails when vtmux got worse. It is not part of `check.sh`. In CI it is the `perf-smoke` job in `ci.yml`: Linux only, `continue-on-error` (it never blocks a merge), also run weekly (`schedule:`, Mondays 04:17 UTC), sharing the zig/rust/ref-tmux setup with the `check` job through `.github/actions/setup`. It writes its table to `$GITHUB_STEP_SUMMARY` and uploads `smoke.json` as the `perf-smoke` artifact.
+
+| metric | scenario | limit |
+|---|---|---|
+| `idle_rss_mb` | idle server, one session | baseline + max(25%, 8 MB) |
+| `scale_rss_mb` | 400 idle panes | baseline + max(25%, 8 MB) |
+| `history_spec_rss_mb` | `bench-history-memory.sh spec` | baseline + max(25%, 8 MB) |
+| `cpu_ratio_plain`, `cpu_ratio_sgr` | throughput without a client (30 MB, median of 3): server CPU of vtmux / tmux 3.8 | baseline ratio x 1.5 |
+
+- **RSS** is compared with `perf/baseline.json`, recorded on the CI runner (RSS depends on the allocator and libc, so numbers from a developer machine don't carry over). For one binary and one input it is nearly deterministic; the 8 MB floor keeps the small idle numbers from tripping on noise.
+- **CPU** is never compared with a checked-in absolute time: runner speed varies between runs and SKUs. It is gated as the vtmux/tmux 3.8 CPU ratio measured in the same run, which cancels the machine's speed, against the ratio in the baseline. The alternative, `valgrind --tool=cachegrind` instruction counts of a foreground server (tighter, +10%), was not chosen: it needs a valgrind install, runs the server on one traced thread rather than as deployed, and doesn't exist on macOS. The ratio's coarse +50% threshold only catches a real slowdown, not drift.
+- **Local runs** work on any Linux host (`BASELINE=<file>` points at another baseline; without `perf/baseline.json` the run only records). A loaded host (load >= 4) makes the ratios noisy; the script warns.
+
+### Refreshing the baseline
+
+After an intentional change that moves a metric (a feature that costs memory, a compression that saves it): take `smoke.json` from the `perf-smoke` artifact of a CI run on the commit, and commit its `metrics` as `perf/baseline.json` (`{"metrics": {...}}`; the whole file works too). Put the reason in the commit message ("perf baseline: idle RSS +1.2 MB, the per-pane foo table"). Never refresh to make a red run green without a reason; a regression is fixed or explained. The first baseline is whatever the first run on `main` produced.
+
+### Staleness
+
+The numbers above and in the README come from a full run at the commit recorded in "Numbers". When that commit is older than the last change to `perf/baseline.json` (a refresh means the metrics moved), the numbers are stale: the smoke run prints a `STALE:` line, and the next full run replaces them.
+
+### Checked with injected regressions
+
+Scratch builds (not committed): a 50 MB `vec![0u8; N]` per pane (for the first three panes, one byte written in every 4 KiB page so the pages are resident) and a 20-million-iteration busy loop per output chunk, run against a baseline recorded from the same host and the good build:
+
+| metric | baseline | regressed | result |
+|---|---|---|---|
+| `idle_rss_mb` | 7.4 MB | 57.5 MB | fail |
+| `scale_rss_mb` | 13.4 MB | 163.4 MB | fail |
+| `history_spec_rss_mb` | 105.5 MB | 205.4 MB | fail |
+| `cpu_ratio_plain` | 0.32 | 109 | fail |
+| `cpu_ratio_sgr` | 0.89 | 84 | fail |
