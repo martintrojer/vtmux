@@ -82,6 +82,9 @@ pub struct Env {
     pub separators: String,
     /// `wrap-search`.
     pub wrap_search: bool,
+    /// The command came with a valid mouse event (`cs->m`): `begin-selection`
+    /// starts a mouse drag instead.
+    pub mouse: bool,
 }
 
 /// How a cell in view is painted (`window_copy_update_style`,
@@ -287,7 +290,14 @@ pub struct CopyMode {
     /// When the automatic refresh runs next, while it is on
     /// (`refresh_active`, `refresh_timer`).
     refresh_due: Option<Instant>,
+    /// When a mouse drag held at the top or bottom row scrolls again
+    /// (`dragtimer`).
+    drag_due: Option<Instant>,
 }
+
+/// How often a drag held at the top or bottom row scrolls
+/// (`WINDOW_COPY_DRAG_REPEAT_TIME`, 50 ms).
+pub const DRAG_REPEAT: Duration = Duration::from_millis(50);
 
 /// How often the automatic refresh looks for new output
 /// (`WINDOW_COPY_REFRESH_INTERVAL`, 50 ms).
@@ -502,6 +512,9 @@ pub struct Outcome {
     pub pipe: Option<Pipe>,
     /// `refresh-now`: the server copies the pane's screen again.
     pub refresh: bool,
+    /// `begin-selection` with a mouse event: the server starts a drag
+    /// (`window_copy_start_drag`) on the mouse's pane.
+    pub start_drag: bool,
 }
 
 impl From<Action> for Outcome {
@@ -511,6 +524,7 @@ impl From<Action> for Outcome {
             copied: None,
             pipe: None,
             refresh: false,
+            start_drag: false,
         }
     }
 }
@@ -690,6 +704,7 @@ impl CopyMode {
             show_mark: false,
             foreign: trim,
             refresh_due: None,
+            drag_due: None,
         }
     }
 
@@ -718,6 +733,7 @@ impl CopyMode {
             line_numbers: 0,
             separators: String::new(),
             wrap_search: false,
+            mouse: false,
         };
         self.size_changed(&env);
     }
@@ -1314,6 +1330,12 @@ impl CopyMode {
             }
 
             // Selections.
+            "begin-selection" if env.mouse => {
+                return Some(Outcome {
+                    start_drag: true,
+                    ..Outcome::from(Action::Stay)
+                });
+            }
             "begin-selection" => {
                 self.lineflag = LineSel::None;
                 self.selflag = SelectionMode::Char;
@@ -1377,6 +1399,7 @@ impl CopyMode {
                     copied,
                     pipe: None,
                     refresh: false,
+                    start_drag: false,
                 });
             }
             "copy-pipe-no-clear" | "copy-pipe" | "copy-pipe-and-cancel" => {
@@ -1414,6 +1437,7 @@ impl CopyMode {
                     copied,
                     pipe: None,
                     refresh: false,
+                    start_drag: false,
                 });
             }
             "copy-line"
@@ -1848,6 +1872,202 @@ impl CopyMode {
         }
     }
 
+    // --- the mouse --------------------------------------------------------
+
+    /// `window_copy_line_number_width`: the columns line numbers take.
+    fn line_number_width(&self, env: &Env) -> usize {
+        if !self.line_numbers_active(env.line_numbers) {
+            return 0;
+        }
+        let mut lines = self.hsize() + self.sy + 1;
+        let mut digits = 1;
+        while lines >= 10 {
+            lines /= 10;
+            digits += 1;
+        }
+        digits.max(3) + 1
+    }
+
+    /// `window_copy_cursor_unoffset`: screen column `vx` as a column of the
+    /// text, past the line numbers.
+    fn cursor_unoffset(&self, env: &Env, vx: usize) -> usize {
+        let width = self.line_number_width(env);
+        if width == 0 {
+            return vx;
+        }
+        let content = if width >= self.sx { 1 } else { self.sx - width };
+        if vx < width {
+            0
+        } else {
+            (vx - width).min(content - 1)
+        }
+    }
+
+    /// `window_copy_cursor_offset`: text column `cx` on screen.
+    fn cursor_offset(&self, env: &Env, cx: usize) -> usize {
+        let width = self.line_number_width(env);
+        if width == 0 {
+            return cx;
+        }
+        let content = if width >= self.sx { 1 } else { self.sx - width };
+        if cx >= content {
+            self.sx - 1
+        } else {
+            width + cx
+        }
+    }
+
+    /// `window_copy_move_mouse` (window-copy.c:7059-7082): the cursor goes
+    /// to the mouse, at `(x, y)` in the pane, before a command runs.
+    pub fn move_mouse(&mut self, env: &Env, (x, y): (usize, usize)) {
+        let x = self.cursor_unoffset(env, x);
+        self.update_cursor(env, x, y);
+    }
+
+    /// `window_copy_mouse_in_selection` (window-copy.c:5763-5826): whether
+    /// screen cell `(x, y)` is in the selection, and whether it is nearer
+    /// its start or its end.
+    #[allow(clippy::similar_names)] // tmux's names for the two ends
+    fn mouse_in_selection(&self, env: &Env, x: usize, y: usize) -> (bool, bool, bool) {
+        let Some(sel) = self.sel else {
+            return (false, false, false);
+        };
+        let screeny = self.hsize() - self.oy;
+        let selx = self.cursor_offset(env, self.selpos.0);
+        if self.selpos.1 >= screeny && self.selpos.1 - screeny < self.sy {
+            let sely = self.selpos.1 - screeny;
+            if x == selx && y == sely {
+                return (true, true, false);
+            }
+        }
+        let endselx = self.cursor_offset(env, self.endpos.0);
+        if self.endpos.1 >= screeny && self.endpos.1 - screeny < self.sy {
+            let endsely = self.endpos.1 - screeny;
+            if x == endselx && y == endsely {
+                return (true, false, true);
+            }
+        }
+        let cursorx = self.cursor_offset(env, self.cx);
+        if (x != cursorx || y != self.cy) && !sel.contains(x, y) {
+            return (false, false, false);
+        }
+        let width = i128::try_from(self.sx).unwrap_or(0) + 1;
+        let at = |(px, py): Pos| {
+            i128::try_from(py).unwrap_or(0) * width + i128::try_from(px).unwrap_or(0)
+        };
+        let mpos = at((self.cursor_unoffset(env, x), screeny + y));
+        let dstart = (mpos - at(self.selpos)).abs();
+        let dend = (mpos - at(self.endpos)).abs();
+        (true, dstart <= dend, dstart > dend)
+    }
+
+    /// `window_copy_start_drag` (window-copy.c:7084-7151) once the mouse is
+    /// at `(x, y)` in the pane (its last position, `cmd_mouse_at(..., 1)`):
+    /// a selection starts there, or an end of the one there is taken, in
+    /// the selection's mode; then the first [`Self::drag_update`] at `now`
+    /// (`current`, the position now).
+    pub fn start_drag(
+        &mut self,
+        env: &Env,
+        (x, y): (usize, usize),
+        current: Option<(usize, usize)>,
+        now: Instant,
+    ) {
+        let (inside, on_start, on_end) = self.mouse_in_selection(env, x, y);
+        let x = self.cursor_unoffset(env, x);
+        let yg = self.hsize() + y - self.oy;
+        if on_start
+            || on_end
+            || !inside
+            || x < self.selr.0
+            || x > self.endselr.0
+            || yg != self.selr.1
+        {
+            self.lineflag = LineSel::None;
+            self.selflag = SelectionMode::Char;
+        }
+        match self.selflag {
+            SelectionMode::Word => {
+                let (mut x, mut y) = (x, y);
+                if !self.separators.is_empty() {
+                    self.update_cursor(env, x, y);
+                    let (px, py) = self.previous_word_pos(&self.separators.clone());
+                    x = px;
+                    // A word starting above the view: its top row (tmux's
+                    // unsigned arithmetic wraps here).
+                    y = (py + self.oy).saturating_sub(self.hsize());
+                }
+                self.update_cursor(env, x, y);
+            }
+            SelectionMode::Line => self.update_cursor(env, 0, y),
+            SelectionMode::Char => {
+                self.update_cursor(env, x, y);
+                if inside {
+                    if on_start {
+                        self.drag = Drag::Start;
+                    } else if on_end {
+                        self.drag = Drag::End;
+                    }
+                    self.update_selection(env, false);
+                } else {
+                    self.start_selection(env);
+                }
+            }
+        }
+        self.drag_update(env, current, now);
+    }
+
+    /// `window_copy_drag_update` (window-copy.c:7153-7197): the cursor and
+    /// the selection follow the mouse at `at` (`None`: not in the pane); at
+    /// the top or bottom row the view scrolls, and again on a timer.
+    pub fn drag_update(&mut self, env: &Env, at: Option<(usize, usize)>, now: Instant) {
+        self.drag_due = None;
+        let Some((x, y)) = at else {
+            return;
+        };
+        let x = self.cursor_unoffset(env, x);
+        let old = (self.cx, self.cy);
+        self.update_cursor(env, x, y);
+        self.update_selection(env, false);
+        if old.1 != self.cy || old.0 == self.cx {
+            self.drag_scroll(env, y, now);
+        }
+    }
+
+    /// The top or bottom row of a drag scrolls a line and arms the timer.
+    fn drag_scroll(&mut self, env: &Env, y: usize, now: Instant) {
+        if y == 0 {
+            self.drag_due = Some(now + DRAG_REPEAT);
+            self.cursor_up(env, false);
+        } else if y == self.sy - 1 {
+            self.drag_due = Some(now + DRAG_REPEAT);
+            self.cursor_down(env, false);
+        }
+    }
+
+    /// `window_copy_drag_release` (window-copy.c:7199-7219): with line
+    /// numbers on the last position counts; the drag ends.
+    pub fn drag_release(&mut self, env: &Env, at: Option<(usize, usize)>, now: Instant) {
+        if self.line_numbers_active(env.line_numbers) {
+            self.drag_update(env, at, now);
+        }
+        self.drag_due = None;
+    }
+
+    /// When the drag timer fires, while a drag waits at an edge.
+    #[must_use]
+    pub fn drag_due(&self) -> Option<Instant> {
+        self.drag_due
+    }
+
+    /// `window_copy_scroll_timer` (window-copy.c:368-388): the cursor still
+    /// at the top or bottom row scrolls another line.
+    pub fn drag_timer(&mut self, env: &Env, now: Instant) {
+        self.drag_due = None;
+        let y = self.cy;
+        self.drag_scroll(env, y, now);
+    }
+
     /// `window_copy_get_selection` (window-copy.c:5974-6094): the selected
     /// text, `None` when there is none or it is empty.
     #[allow(clippy::similar_names)] // tmux's names for the four edges
@@ -1953,6 +2173,7 @@ impl CopyMode {
             copied,
             pipe: Some(pipe),
             refresh: false,
+            start_drag: false,
         }
     }
 
@@ -1987,6 +2208,7 @@ impl CopyMode {
                 copied,
                 pipe,
                 refresh: false,
+                start_drag: false,
             };
         }
         self.clear_selection(env);
@@ -1996,6 +2218,7 @@ impl CopyMode {
             copied,
             pipe,
             refresh: false,
+            start_drag: false,
         }
     }
 
@@ -2761,6 +2984,7 @@ mod tests {
             line_numbers: 0,
             separators: String::new(),
             wrap_search: true,
+            mouse: false,
         }
     }
 
@@ -3010,6 +3234,7 @@ mod selection_tests {
             line_numbers: 0,
             separators: "-".into(),
             wrap_search: true,
+            mouse: false,
         }
     }
 

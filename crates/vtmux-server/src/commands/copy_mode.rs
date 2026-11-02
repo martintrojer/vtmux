@@ -17,7 +17,7 @@ pub fn exec(
     source: Found,
     found: Found,
 ) -> Result<(), CmdError> {
-    let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
+    let mut p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
     if args.flag('q') {
         server.reset_mode_all(p);
         return Ok(());
@@ -31,12 +31,13 @@ pub fn exec(
         let Some(f) = m.target.pane_found(&server.model) else {
             return Ok(());
         };
-        if item.client.and_then(|c| server.client_session(c)) != f.session {
+        let Some(c) = item.client else {
+            return Ok(());
+        };
+        if server.client_session(c) != f.session {
             return Ok(());
         }
-        // TODO(mouse_drag): enter copy mode on f.pane and start a
-        // selection drag (window_copy_start_drag).
-        return Ok(());
+        p = f.pane.ok_or(EdgeError::NoCurrentTarget)?;
     }
     let swp = if args.flag('s') {
         source.pane.unwrap_or(p)
@@ -45,7 +46,7 @@ pub fn exec(
     };
     let flags = (args.flag('e'), args.flag('H'));
     let vi = server.model.mode_keys_vi(p);
-    server.enter_copy_mode(p, args.flag('k'), |model| {
+    let entered = server.enter_copy_mode(p, args.flag('k'), |model| {
         let size = (
             usize::from(model.panes[&p].term.cols()),
             usize::from(model.panes[&p].term.rows()),
@@ -54,8 +55,17 @@ pub fn exec(
         let search = model.panes[&p].search.clone();
         CopyMode::new(source, size, swp != p, flags, vi, search)
     });
-    // window_copy_set_line_numbers(wp, 1): keys and commands, not the mouse.
-    with_copy(server, p, |m, env| m.set_line_numbers(env, true, false));
+    // window_copy_set_line_numbers: keys and commands, not the mouse.
+    let line_numbers = !item.key.is_some_and(vtmux_core::keys::Key::is_mouse);
+    with_copy(server, p, |m, env| {
+        m.set_line_numbers(env, line_numbers, false);
+    });
+    if entered
+        && args.flag('M')
+        && let Some(m) = item.mouse.clone()
+    {
+        server.copy_start_drag(item.client, &m);
+    }
     if args.flag('u') {
         with_copy(server, p, |m, env| m.pageup(env, false));
     }

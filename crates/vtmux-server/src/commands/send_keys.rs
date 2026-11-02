@@ -86,7 +86,8 @@ pub fn exec(
         if !takes_commands {
             return Err(EdgeError::Message("not in a mode".into()).into());
         }
-        return mode_command(server, args, found, p, tc);
+        let mouse = item.mouse.clone();
+        return mode_command(server, args, found, p, tc, mouse.as_ref());
     }
     if in_mode {
         mode_keys(server, item, args, found, p, repeat, tc);
@@ -139,6 +140,7 @@ fn mode_command(
     found: Found,
     p: PaneId,
     tc: Option<ClientId>,
+    mouse: Option<&crate::mouse::MouseEvent>,
 ) -> Result<(), CmdError> {
     let mut words: Vec<String> = args
         .positionals
@@ -185,11 +187,22 @@ fn mode_command(
         // window_copy_command: no command, nothing to do.
         return Ok(());
     };
+    // window_copy_command (window-copy.c:3911-3912): a valid mouse event
+    // that is not the wheel moves the mouse's pane's cursor first.
+    if let Some(m) = mouse {
+        server.copy_move_mouse(m);
+    }
     // `c` of `wme->mode->command`: the target client, whose read-only
     // flag a mode command checks itself (window-copy.c:3925-3933).
     let read_only = tc.is_some_and(|c| server.clients.get(&c).is_some_and(|c| c.flags.read_only));
     let result = server
-        .with_mode(p, |m, env| m.command(env, name, rest, read_only))
+        .with_mode(p, |m, env| {
+            let env = crate::mode::copy::Env {
+                mouse: mouse.is_some(),
+                ..env.clone()
+            };
+            m.command(&env, name, rest, read_only)
+        })
         .ok_or_else(|| CmdError::from(EdgeError::Message("not in a mode".into())))?;
     let outcome = match result {
         Ok(o) => o,
@@ -214,6 +227,11 @@ fn mode_command(
     }
     if outcome.refresh {
         server.copy_refresh(p, true);
+    }
+    if outcome.start_drag
+        && let Some(m) = mouse
+    {
+        server.copy_start_drag(tc, m);
     }
     if outcome.action == Action::Cancel {
         server.reset_mode(p);
