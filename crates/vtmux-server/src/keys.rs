@@ -301,6 +301,9 @@ pub fn lookup(s: &str) -> Option<Key> {
         }
         _ => {
             key.base = table(rest)?;
+            // `BSpace` is in the table without KEYC_IMPLIED_META
+            // (key-string.c:30-110): a typed `M-BSpace` has Meta alone.
+            key.esc_prefix = key.meta && key.base == Base::Named(Named::Backspace);
             Some(key)
         }
     }
@@ -345,10 +348,14 @@ pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
         new.ctrl |= key.ctrl;
         new.meta |= key.meta;
         new.shift |= key.shift;
-        // BSpace has no implied Meta (key-string.c:30-110); the option's
-        // key keeps its own, so an unimplied Meta is an Escape before a
-        // named key (input-keys.c:658-671).
-        new.esc_prefix = new.meta && option.code() & KEYC_IMPLIED_META == 0;
+        // BSpace has no implied Meta (key-string.c:30-110), but the
+        // result is `newkey|(key & KEYC_MASK_FLAGS)` (input-keys.c:612):
+        // either side's KEYC_IMPLIED_META survives. The typed key has it
+        // unless its Meta was an Escape prefix; without it, Meta is an
+        // Escape before a named key (input-keys.c:658-671).
+        let typed_implied = key.meta && !key.esc_prefix;
+        new.esc_prefix =
+            new.meta && !typed_implied && option.code() & KEYC_IMPLIED_META == 0;
         if new.base == Base::Named(Named::Backspace) {
             // `backspace BSpace`: no table entry for it, so it is ignored.
             return true;

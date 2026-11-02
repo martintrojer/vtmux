@@ -647,6 +647,106 @@ fn send_keys_k_delivers_keys_to_the_pane() {
     }
 }
 
+/// A typed `M-BSpace` (CSI-u or xterm-modified, so KEYC_IMPLIED_META) with
+/// a named-key `backspace` option: input-keys.c:612 keeps the typed key's
+/// flags, so Meta is not an Escape before the option's key. An Escape
+/// before a plain DEL is (no implied Meta). Raw bytes through an attached
+/// client, in every key mode and format, against tmux 3.8.
+#[test]
+fn typed_meta_bspace_follows_the_backspace_option() {
+    const INPUTS: [&[u8]; 12] = [
+        b"\x7f",
+        b"\x1b\x7f",
+        b"\x1b[127;3u",
+        b"\x1b[127;4u",
+        b"\x1b[127;7u",
+        b"\x1b[127;8u",
+        b"\x1b[127;5u",
+        b"\x1b[27;3;127~",
+        b"\x1b[27;4;127~",
+        b"\x1b[27;7;127~",
+        b"\x1b[27;8;127~",
+        b"\x1b[27;2;127~",
+    ];
+    let mut seen: Vec<Vec<String>> = Vec::new();
+    for bin in bins() {
+        let mut rows = Vec::new();
+        for option in ["C-h", "Up", "F1", "Home"] {
+            for mode in ["", r"\033[>4;1m", r"\033[>4;2m"] {
+                for format in ["csi-u", "xterm"] {
+                    let w = World::new(bin.clone());
+                    let out = w.home.path().join("out");
+                    let script = format!(
+                        "stty raw -echo; printf '{mode}'; printf R; exec cat > {}",
+                        out.display()
+                    );
+                    let mut a = w.attach(&[
+                        "new",
+                        "-s",
+                        "a",
+                        "sh",
+                        "-c",
+                        &script,
+                        ";",
+                        "set",
+                        "-g",
+                        "extended-keys",
+                        "on",
+                        ";",
+                        "set",
+                        "-g",
+                        "extended-keys-format",
+                        format,
+                        ";",
+                        "set",
+                        "-g",
+                        "backspace",
+                        option,
+                    ]);
+                    // The pane's own text: the status line may hold an `R`.
+                    a.wait(|_| pane_line(&w) == "R");
+                    let want_mode = match mode {
+                        "" => "VT10x",
+                        r"\033[>4;1m" => "Ext 1",
+                        _ => "Ext 2",
+                    };
+                    a.wait(|_| {
+                        let shown = w.cli(&["display", "-p", "-t", "a", "#{pane_key_mode}"]);
+                        String::from_utf8_lossy(&shown.stdout).trim() == want_mode
+                    });
+                    thread::sleep(Duration::from_millis(100));
+                    for input in INPUTS {
+                        a.keys(input);
+                        // Apart, so an Escape is not read as a prefix.
+                        thread::sleep(Duration::from_millis(60));
+                        a.keys(b"|");
+                        thread::sleep(Duration::from_millis(30));
+                    }
+                    a.keys(b".");
+                    let start = Instant::now();
+                    let bytes = loop {
+                        let bytes = std::fs::read(&out).unwrap_or_default();
+                        if bytes.ends_with(b".") {
+                            break bytes;
+                        }
+                        assert!(
+                            start.elapsed() < Duration::from_secs(5),
+                            "{option} {want_mode} {format}: {bytes:?}"
+                        );
+                        thread::sleep(Duration::from_millis(20));
+                    };
+                    rows.push(format!(
+                        "{option} {want_mode} {format}: {}",
+                        String::from_utf8_lossy(&bytes).escape_debug()
+                    ));
+                }
+            }
+        }
+        seen.push(rows);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) against tmux 3.8 (right)");
+}
+
 /// An endless flood at 80x24, started after READY + Enter.
 const FLOOD: &str = "printf READY; read x; i=0; while :; do printf '\\033[3%dm%d %060d\\n' $((i%8)) $i $i; i=$((i+1)); done";
 
