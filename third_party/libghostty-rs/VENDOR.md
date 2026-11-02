@@ -97,17 +97,26 @@ Recorded per commit in git history; the list is kept current:
   -Dtest-filter=PageList` passes with it.
 
 - `patches/0004-work-bounded-compression.patch` (`PageList.zig`,
-  `compress/Page.zig`): oversized resident pages are encoded from an owned
-  snapshot in 128 KiB LZ4 blocks per incremental call. Snapshot work is capped
-  at 4 MiB; bigger pages remain resident. Publication validates node generation,
-  activity, metadata and source bytes; every failed/no-op attempt advances.
-  Grid page layout and pruning are unchanged. Encoded storage uses the page
-  allocator and an in-place shrink rather than changing malloc's thresholds.
-  Standard pages and full mode retain the original block encoding. New chunked
-  storage decodes transparently through restore and cloneBuf. Tests:
-  `zig build test-lib-vt -Dtest-filter="chunked Page" -Doptimize=ReleaseSafe`
-  and `-Dtest-filter="PageList incremental compression"` passed in the prototype;
-  full upstream suite not yet run (see task hist_compress_r2 gate record).
+  `compress/Page.zig`): oversized resident pages (`compression.Page.chunked`)
+  are encoded from an owned snapshot in 128 KiB LZ4 blocks per incremental
+  call. Snapshot work is capped at 4 MiB; bigger pages remain resident.
+  Publication validates node generation, activity, metadata and source bytes;
+  every failed or no-op attempt advances. Grid page layout and pruning are
+  unchanged. Full mode and prepend compress an oversized page as one chunked
+  job (`compressPage` sends it to `compressPageChunked`); smaller pages keep
+  the original block encoding. Encoded storage uses the page allocator and
+  shrinks in place with `remap`, falling back to dupe and free when the
+  allocator can't remap. The chunked format decodes through restore and
+  `cloneBuf` (chunk by chunk).
+  Constraint: `compression.Page` must stay at its upstream size (a comptime
+  assert): the chunked bookkeeping lives outside the struct. Growing it
+  (the round-2 version added two fields, so a PageList node went from 488 to
+  512 bytes) made every frame's cell copy fault in more pages and slowed a
+  busy pane by 16-20% p50/p95 with no compression running (task
+  hist_compress_r3).
+  Tests: `zig build test-lib-vt -Dtest-filter="chunked Page" -Doptimize=ReleaseSafe`
+  and `-Dtest-filter="PageList incremental compression"`; the full upstream
+  suite is not yet run.
 
 ## Bumping ghostty
 
