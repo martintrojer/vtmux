@@ -28,3 +28,4 @@ Record each gate run in the task note (`GATE: commit command scope`, `RESULT: ex
 - Compliance is at the edge only; the core is idiomatic Rust (spec, *Rust at the core, tmux at the edge*). Don't copy tmux's structures, flag ints or names into the core. When tmux ordering or ID behaviour is visible at the edge, reproduce it explicitly and pin it with an oracle scenario.
 - Never edit `compat/tmux-3.8/regress/`. Divergences go in `compat/patches/` and `compat/DIVERGENCES.md` (spec, *Divergence process*).
 - Every behaviour fix lands with an oracle scenario or a regress flip that proves it.
+- Tests and scenarios must not depend on the host: pin `status-right` (it shows the host name, and a long one hides the window list on a narrow client) and pane titles before waiting on the status line, and don't assume Linux paths, `sh`, `cat` or glibc (CI gates macOS too; see `oracle/README.md`, *Host names on screen* and *Races under load*).
