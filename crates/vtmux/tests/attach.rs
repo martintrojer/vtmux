@@ -4211,9 +4211,11 @@ fn allow_passthrough_delivers_dcs_tmux_payloads_raw() {
             std::fs::write(&file, payload).unwrap();
             let script = format!("read x; cat {}; exec cat", file.display());
             let a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+            // status-right off first: a long host name in the default
+            // fills a 40-column status line and hides the window list.
+            w.cli(&["set", "-g", "status-right", ""]);
             a.wait(|a| status_row(a).contains("0:w"));
             w.cli(&["set", "-g", "allow-passthrough", mode]);
-            w.cli(&["set", "-g", "status-right", ""]);
             let target = "a:0";
             if background {
                 w.cli(&["neww", "-d", "-n", "other", "cat"]);
@@ -4302,9 +4304,10 @@ fn palette_oscs_drop_the_next_passthrough_payload_under_on() {
             }
             script.push_str("exec cat");
             let a = w.attach(&["new", "-s", "a", "-n", "w", "sh", "-c", &script]);
+            // status-right off first: a long host name hides the window list.
+            w.cli(&["set", "-g", "status-right", ""]);
             a.wait(|a| status_row(a).contains("0:w"));
             w.cli(&["set", "-g", "allow-passthrough", "on"]);
-            w.cli(&["set", "-g", "status-right", ""]);
             let mut start = 0;
             for _ in 0..steps.len() {
                 start = a.bytes.lock().unwrap().len();
@@ -4352,6 +4355,8 @@ fn status_jobs_refresh_on_interval_and_refresh_client() {
     for bin in bins() {
         let w = World::new(bin.clone());
         let a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
+        // status-right off first: a long host name hides the window list.
+        w.cli(&["set", "-g", "status-right", ""]);
         a.wait(|a| status_row(a).contains("0:w"));
         let counter = w.home.path().join("n");
         let script = w.home.path().join("count.sh");
