@@ -462,10 +462,6 @@ impl Server {
     /// `popup_key_cb` (popup.c:430-460) for a key from client `c`: `true`
     /// when the popup took it (it always does while up).
     pub(crate) fn popup_key(&mut self, c: ClientId, key: Key) -> bool {
-        let csi_u = self
-            .model
-            .number_option(TreeId::Server, "extended-keys-format")
-            == 0;
         let Some(p) = self.clients.get_mut(&c).and_then(|x| x.popup.as_mut()) else {
             return false;
         };
@@ -481,7 +477,7 @@ impl Server {
             && let Some(io) = p.io.as_mut()
         {
             // input_key: in the popup terminal's own modes.
-            let modes = crate::keys::KeyModes::of(&p.term, csi_u);
+            let modes = self.model.key_modes_of(&p.term);
             io.write(&crate::keys::encode(&k, modes));
             self.popup_reregister(c);
         }

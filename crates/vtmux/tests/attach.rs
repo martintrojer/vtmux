@@ -558,6 +558,94 @@ fn escape_escape_arrow_is_escape_then_arrow() {
     }
 }
 
+/// D-020 (not copied from tmux): `send-keys -K` keys reach the pane. tmux
+/// 3.8 leaves `KEYC_SENT` on them (cmd-send-keys.c:79) and `input_key` then
+/// drops most (mode 1 drops even `a`); vtmux encodes them as for a typed key
+/// (the `send_keys_in_each_key_mode_and_format` unit test pins that table
+/// against tmux). Standard mode, modifyOtherKeys 1 and 2, default
+/// `extended-keys-format`. vtmux only: the reference gives `||||||` there.
+#[test]
+fn send_keys_k_delivers_keys_to_the_pane() {
+    const KEYS: [&str; 7] = ["C-F3", "BTab", "Escape", "F3", "C-Up", "a", "Tab"];
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
+    for (mode, want_mode, want) in [
+        ("", "VT10x", "\x1b[1;5R|\x1b[Z|\x1b|\x1bOR|\x1b[1;5A|a|\t"),
+        (
+            r"\033[>4;1m",
+            "Ext 1",
+            "\x1b[1;5R|\x1b[Z|\x1b|\x1bOR|\x1b[1;5A|a|\t",
+        ),
+        (
+            r"\033[>4;2m",
+            "Ext 2",
+            "\x1b[1;5R|\x1b[27;2;9~|\x1b|\x1bOR|\x1b[1;5A|a|\t",
+        ),
+    ] {
+        let w = World::new(bin.clone());
+        let out = w.home.path().join("out");
+        let script = format!(
+            "stty raw -echo; printf '{mode}'; printf R; exec cat > {}",
+            out.display()
+        );
+        let a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "sh",
+            "-c",
+            &script,
+            ";",
+            "set",
+            "-g",
+            "extended-keys",
+            "on",
+        ]);
+        a.wait(|a| pane_text(a).contains('R'));
+        a.wait(|_| {
+            let shown = w.cli(&["display", "-p", "-t", "a", "#{pane_key_mode}"]);
+            String::from_utf8_lossy(&shown.stdout).trim() == want_mode
+        });
+        let client = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_name}"]).stdout)
+            .trim()
+            .to_owned();
+        for key in KEYS {
+            assert!(
+                w.cli(&["send-keys", "-K", "-c", &client, key])
+                    .status
+                    .success()
+            );
+            // The key is handled as a queue item after the command.
+            thread::sleep(Duration::from_millis(100));
+            assert!(
+                w.cli(&["send-keys", "-t", "a", "-H", "7c"])
+                    .status
+                    .success()
+            );
+        }
+        assert!(
+            w.cli(&["send-keys", "-t", "a", "-H", "2e"])
+                .status
+                .success()
+        );
+        let start = Instant::now();
+        let bytes = loop {
+            let bytes = std::fs::read(&out).unwrap_or_default();
+            if bytes.ends_with(b".") {
+                break bytes;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "{want_mode}: {bytes:?}"
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        let keys: Vec<u8> = bytes[..bytes.len() - 1].to_vec();
+        // Each key is followed by the `|` mark, so the last one is too.
+        let got = String::from_utf8_lossy(&keys);
+        assert_eq!(got, format!("{want}|"), "{want_mode}");
+    }
+}
+
 /// An endless flood at 80x24, started after READY + Enter.
 const FLOOD: &str = "printf READY; read x; i=0; while :; do printf '\\033[3%dm%d %060d\\n' $((i%8)) $i $i; i=$((i+1)); done";
 

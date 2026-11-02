@@ -416,8 +416,23 @@ impl Model {
     /// `extended-keys-format` (0 is `csi-u`).
     #[must_use]
     pub fn key_modes(&self, p: PaneId) -> Option<crate::keys::KeyModes> {
+        Some(self.key_modes_of(&self.panes.get(&p)?.term))
+    }
+
+    /// The key encoding modes of a terminal (a pane's, or a popup's) under
+    /// the server's `extended-keys-format` and `backspace`.
+    #[must_use]
+    pub fn key_modes_of(&self, term: &vtmux_vt::PaneTerm) -> crate::keys::KeyModes {
         let csi_u = self.number_option(TreeId::Server, "extended-keys-format") == 0;
-        Some(crate::keys::KeyModes::of(&self.panes.get(&p)?.term, csi_u))
+        let backspace = match self
+            .options
+            .get(TreeId::Server, "backspace")
+            .map(|e| &e.value)
+        {
+            Some(OptionValue::Single(Value::Key(k))) => *k,
+            _ => vtmux_core::keys::Key::from_code(0x7f),
+        };
+        crate::keys::KeyModes::of(term, csi_u, backspace)
     }
 
     /// `#{pane_key_mode}` (format.c `format_cb_pane_key_mode`): the mode of

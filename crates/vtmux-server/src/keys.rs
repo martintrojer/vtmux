@@ -27,6 +27,9 @@ pub enum Named {
     Keypad(u8),
 }
 
+/// `KEYC_IMPLIED_META` (tmux.h:153).
+const KEYC_IMPLIED_META: u64 = 0x0008_0000_0000_0000;
+
 /// The keypad keys in [`Named::Keypad`] order: the final byte of their
 /// application-mode `ESC O x` sequence (tty-keys.c:87-102) and what
 /// they send in numeric mode (input-keys.c:200-247).
@@ -138,8 +141,9 @@ impl Key {
     }
 }
 
-/// The pane modes that change key encoding.
-#[derive(Clone, Copy, Debug, Default)]
+/// The pane modes that change key encoding, and the server options that
+/// go with them.
+#[derive(Clone, Copy, Debug)]
 pub struct KeyModes {
     /// DECCKM (`MODE_KCURSOR`): cursor keys send `ESC O x`.
     pub app_cursor: bool,
@@ -150,18 +154,34 @@ pub struct KeyModes {
     /// `extended-keys-format csi-u`: extended keys are `CSI key ; mod u`,
     /// not xterm's `CSI 27 ; mod ; key ~`.
     pub csi_u: bool,
+    /// The server's `backspace` option: what `BSpace` is sent as
+    /// (input-keys.c:592-614).
+    pub backspace: CoreKey,
+}
+
+impl Default for KeyModes {
+    fn default() -> Self {
+        Self {
+            app_cursor: false,
+            app_keypad: false,
+            key_mode: KeyMode::default(),
+            csi_u: false,
+            backspace: CoreKey::from_code(0x7f),
+        }
+    }
 }
 
 impl KeyModes {
     /// The modes of a pane's terminal, with the server's
-    /// `extended-keys-format` (`csi_u`).
+    /// `extended-keys-format` (`csi_u`) and `backspace`.
     #[must_use]
-    pub fn of(term: &vtmux_vt::PaneTerm, csi_u: bool) -> Self {
+    pub fn of(term: &vtmux_vt::PaneTerm, csi_u: bool, backspace: CoreKey) -> Self {
         Self {
             app_cursor: term.app_cursor(),
             app_keypad: term.app_keypad(),
             key_mode: term.key_mode(),
             csi_u,
+            backspace,
         }
     }
 }
@@ -307,13 +327,33 @@ pub fn encode(key: &Key, modes: KeyModes) -> Vec<u8> {
 pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
     let mut key = *key;
     // input-keys.c:592-614: an unmodified Backspace is the `backspace`
-    // option (default \177); a modified one is that character modified.
+    // option's byte (default \177); a modified one is that key with the
+    // modifiers added.
     if key.base == Base::Named(Named::Backspace) {
+        let option = modes.backspace;
         if !key.ctrl && !key.meta && !key.shift {
-            out.push(0x7f);
+            if let Some(b) = backspace_byte(option) {
+                out.push(b);
+            }
             return true;
         }
-        key.base = Base::Char('\x7f');
+        let Some(mut new) = Key::from_core(option) else {
+            // A user or mouse key: input_key ignores it (input-keys.c:
+            // 735-739).
+            return true;
+        };
+        new.ctrl |= key.ctrl;
+        new.meta |= key.meta;
+        new.shift |= key.shift;
+        // BSpace has no implied Meta (key-string.c:30-110); the option's
+        // key keeps its own, so an unimplied Meta is an Escape before a
+        // named key (input-keys.c:658-671).
+        new.esc_prefix = new.meta && option.code() & KEYC_IMPLIED_META == 0;
+        if new.base == Base::Named(Named::Backspace) {
+            // `backspace BSpace`: no table entry for it, so it is ignored.
+            return true;
+        }
+        key = new;
     }
     // input-keys.c:617-625: BTab is S-Tab in mode 2, and otherwise loses
     // its modifiers.
@@ -333,7 +373,10 @@ pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
         Base::Named(n) => {
             // input-keys.c:658-671: no entry for a non-implied meta key, so
             // write Escape and then the key without meta.
-            if key.esc_prefix {
+            // The Escape goes with a found entry only: a keypad key with
+            // Ctrl or Shift has none (input-keys.c:647-671).
+            let no_entry = matches!(n, Named::Keypad(_)) && (key.ctrl || key.shift);
+            if key.esc_prefix && !no_entry {
                 out.push(0x1b);
                 key.meta = false;
             }
@@ -341,6 +384,25 @@ pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
             true
         }
     }
+}
+
+/// The byte of an unmodified `BSpace` (input-keys.c:595-612): the
+/// option's key as a byte (the C store truncates to `u_char`), a Ctrl key
+/// as its control character, `None` where tmux writes nothing.
+fn backspace_byte(option: CoreKey) -> Option<u8> {
+    let b = if option.modifiers() == 0 {
+        option.code().to_le_bytes()[0]
+    } else if option.has_ctrl() && !option.has_meta() && !option.has_shift() {
+        match u8::try_from(option.base().code()).ok()? {
+            b'?' => 0x7f,
+            b @ b'@'..=b'_' => b - 0x40,
+            b @ b'a'..=b'z' => b - 0x60,
+            _ => return None,
+        }
+    } else {
+        return None;
+    };
+    (b != 255).then_some(b)
 }
 
 fn encode_named(n: Named, key: &Key, modes: KeyModes) -> Vec<u8> {
@@ -773,6 +835,68 @@ mod tests {
                     };
                     assert_eq!(send_keys_bytes(key, false, xterm), got, "{key}");
                 }
+            }
+        }
+    }
+
+    /// The bytes for `BSpace` keys under a non-default `backspace` option,
+    /// in each key mode and format (columns as above). From tmux 3.8,
+    /// isolated, as above with `set -g backspace OPT` and
+    /// `send-keys KEY; send-keys -H 7c`; the 352-key matrix (all modifiers on 44
+    /// bases) matched the reference for C-h, M-x, C-?, a, C-S-x, F1, M-F1,
+    /// M-Up, C-Up, KP1, Tab, M-BSpace, `BSpace`, User0 and é.
+    #[test]
+    fn backspace_option_changes_every_key_mode() {
+        #[rustfmt::skip]
+        let table: [(&str, &str, [&str; 5]); 25] = [
+            ("C-h", "BSpace", ["\x08", "\x08", "\x08", "\x08", "\x08"]),
+            ("C-h", "S-BSpace", ["\x08", "\x08", "\x08", "\x1b[104;6u", "\x1b[27;6;104~"]),
+            ("C-h", "M-BSpace", ["\x1b\x08", "\x1b\x08", "\x1b\x08", "\x1b[104;7u", "\x1b[27;7;104~"]),
+            ("C-h", "C-BSpace", ["\x08", "\x08", "\x08", "\x1b[104;5u", "\x1b[27;5;104~"]),
+            ("C-h", "C-M-BSpace", ["\x1b\x08", "\x1b\x08", "\x1b\x08", "\x1b[104;7u", "\x1b[27;7;104~"]),
+            ("M-x", "BSpace", ["", "", "", "", ""]),
+            ("M-x", "S-BSpace", ["\x1bx", "\x1bx", "\x1bx", "\x1b[120;4u", "\x1b[27;4;120~"]),
+            ("M-x", "M-BSpace", ["\x1bx", "\x1bx", "\x1bx", "\x1b[120;3u", "\x1b[27;3;120~"]),
+            ("M-x", "C-BSpace", ["\x1b\x18", "\x1b\x18", "\x1b\x18", "\x1b[120;7u", "\x1b[27;7;120~"]),
+            ("M-x", "C-M-BSpace", ["\x1b\x18", "\x1b\x18", "\x1b\x18", "\x1b[120;7u", "\x1b[27;7;120~"]),
+            ("F1", "BSpace", ["\x08", "\x08", "\x08", "\x08", "\x08"]),
+            ("F1", "S-BSpace", ["\x1b[1;2P", "\x1b[1;2P", "\x1b[1;2P", "\x1b[1;2P", "\x1b[1;2P"]),
+            ("F1", "M-BSpace", ["\x1b\x1bOP", "\x1b\x1bOP", "\x1b\x1bOP", "\x1b\x1bOP", "\x1b\x1bOP"]),
+            ("F1", "C-BSpace", ["\x1b[1;5P", "\x1b[1;5P", "\x1b[1;5P", "\x1b[1;5P", "\x1b[1;5P"]),
+            ("F1", "C-M-BSpace", ["\x1b\x1b[1;5P", "\x1b\x1b[1;5P", "\x1b\x1b[1;5P", "\x1b\x1b[1;5P", "\x1b\x1b[1;5P"]),
+            ("KP1", "BSpace", [")", ")", ")", ")", ")"]),
+            ("KP1", "S-BSpace", ["", "", "", "", ""]),
+            ("KP1", "M-BSpace", ["\x1b1", "\x1b1", "\x1b1", "\x1b1", "\x1b1"]),
+            ("KP1", "C-BSpace", ["", "", "", "", ""]),
+            ("KP1", "C-M-BSpace", ["", "", "", "", ""]),
+            ("a", "BSpace", ["a", "a", "a", "a", "a"]),
+            ("a", "S-BSpace", ["a", "\x1b[97;2u", "\x1b[27;2;97~", "\x1b[97;2u", "\x1b[27;2;97~"]),
+            ("a", "M-BSpace", ["\x1ba", "\x1ba", "\x1ba", "\x1b[97;3u", "\x1b[27;3;97~"]),
+            ("a", "C-BSpace", ["\x01", "\x01", "\x01", "\x1b[97;5u", "\x1b[27;5;97~"]),
+            ("a", "C-M-BSpace", ["\x1b\x01", "\x1b\x01", "\x1b\x01", "\x1b[97;7u", "\x1b[27;7;97~"]),
+        ];
+        let column = [
+            (KeyMode::Standard, true),
+            (KeyMode::Extended1, true),
+            (KeyMode::Extended1, false),
+            (KeyMode::Extended2, true),
+            (KeyMode::Extended2, false),
+        ];
+        for (option, key, want) in table {
+            let backspace = CoreKey::from_name(option).expect(option);
+            for ((key_mode, csi_u), want) in column.into_iter().zip(want) {
+                let modes = KeyModes {
+                    key_mode,
+                    csi_u,
+                    backspace,
+                    ..KeyModes::default()
+                };
+                let got = send_keys_bytes(key, false, modes);
+                assert_eq!(
+                    String::from_utf8_lossy(&got),
+                    want,
+                    "backspace {option}: {key} {key_mode:?} csi-u={csi_u}"
+                );
             }
         }
     }
