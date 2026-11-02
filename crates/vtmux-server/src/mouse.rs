@@ -452,19 +452,21 @@ impl Server {
                 i64::from(px) - i64::from(ev.offset),
                 i64::from(py) - i64::from(ev.offset),
             );
+            // The ring's frame (the cells just outside the window, corners
+            // included) is the border of the pane it frames: the pane at
+            // the nearest window cell.
+            let (wsx, wsy) = (i64::from(win.sx()), i64::from(win.sy()));
+            let frame = ring
+                && (-1..=wsx).contains(&wx)
+                && (-1..=wsy).contains(&wy)
+                && (wx < 0 || wy < 0 || wx >= wsx || wy >= wsy);
             let found = if kind == MouseKind::Drag && lwp.is_some() {
                 lwp
+            } else if frame {
+                self.model
+                    .pane_at(window, wx.clamp(0, wsx - 1), wy.clamp(0, wsy - 1))
             } else {
-                self.model.pane_at(window, wx, wy).or_else(|| {
-                    // A click on the ring's frame (outside the window):
-                    // the pane it frames.
-                    ring.then(|| {
-                        let cx = wx.clamp(0, i64::from(win.sx()) - 1);
-                        let cy = wy.clamp(0, i64::from(win.sy()) - 1);
-                        self.model.pane_at(window, cx, cy)
-                    })
-                    .flatten()
-                })
+                self.model.pane_at(window, wx, wy)
             };
             match found {
                 None => {
@@ -472,8 +474,11 @@ impl Server {
                     ev.target.window = Some(window);
                 }
                 Some(p) => {
-                    let in_pane = self.mouse_in_pane(window, p, wx, wy);
-                    loc = in_pane;
+                    loc = if frame {
+                        Some(MouseLocation::Border)
+                    } else {
+                        self.mouse_in_pane(window, p, wx, wy)
+                    };
                     ev.target.pane = Some(p);
                     ev.target.window = Some(window);
                     wp = Some(p);

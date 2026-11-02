@@ -5109,29 +5109,90 @@ fn read_only_client_drops_mouse_events() {
 }
 
 /// D23 (vtmux only): under the focus ring the window is one cell in, so a
-/// click maps to the pane drawn under it, and a click on the ring's frame
-/// is the border of the pane it frames (`MouseDown1Border` selects it).
+/// click maps to the pane drawn under it, and a click on any edge of the
+/// ring's frame (corners too) is a `Border` click on the pane it frames, with
+/// the status line off, at the bottom and at the top. A drag that starts on
+/// the frame is `MouseDrag1Border` on that pane.
 #[test]
 fn focus_ring_clicks_land_on_the_drawn_pane() {
     let f = "#{mouse_x},#{mouse_y},#{mouse_pane}";
-    let (w, mut a) = ring_world_sized(
-        &[
-            &["splitw", "-h", "-t", "a"],
-            &["bind", "-n", "MouseDown1Pane", "set", "-gF", "@m", f],
-        ],
-        20,
-        8,
-    );
-    a.wait(|_| display(&w, "#{window_panes}") == "2");
-    // Column 2, row 2 is the left pane's first cell (0,0) inside the ring.
-    a.keys(&click(2, 2));
-    a.wait(|_| !user_option(&w, "@m").is_empty());
-    assert_eq!(user_option(&w, "@m"), "0,0,%0");
-    assert_eq!(display(&w, "#{pane_index}"), "1");
-    // The ring's left edge frames pane 0: a border click selects it.
-    a.keys(&click(1, 4));
-    assert_eq!(settles(&w, "#{pane_index}", "0"), "0");
-    // The right edge frames pane 1.
-    a.keys(&click(20, 4));
-    assert_eq!(settles(&w, "#{pane_index}", "1"), "1");
+    // (status, status-position): the window area's first row and height.
+    for (status, position, top, height) in [
+        ("off", "bottom", 1_u16, 8_u16),
+        ("on", "bottom", 1, 7),
+        ("on", "top", 2, 7),
+    ] {
+        let (w, mut a) = ring_world_sized(
+            &[
+                &["splitw", "-h", "-t", "a"],
+                &["set", "-g", "status", status],
+                &["set", "-g", "status-position", position],
+                &["set", "-g", "status-right", ""],
+                &["bind", "-n", "MouseDown1Pane", "set", "-gF", "@m", f],
+                &[
+                    "bind",
+                    "-n",
+                    "MouseDown1Border",
+                    "set",
+                    "-gF",
+                    "@b",
+                    "#{mouse_pane}",
+                ],
+                &["bind", "-n", "MouseDrag1Pane", "set", "-g", "@d", "pane"],
+                &[
+                    "bind",
+                    "-n",
+                    "MouseDrag1Border",
+                    "set",
+                    "-gF",
+                    "@d",
+                    "#{mouse_pane}",
+                ],
+            ],
+            20,
+            8,
+        );
+        let what = format!("status {status} {position}");
+        a.wait(|_| display(&w, "#{window_panes}") == "2");
+        // Column 2, first row inside the ring is the left pane's cell (0,0).
+        a.keys(&click(2, top + 1));
+        a.wait(|_| !user_option(&w, "@m").is_empty());
+        assert_eq!(user_option(&w, "@m"), "0,0,%0", "{what}");
+        assert_eq!(display(&w, "#{pane_index}"), "1", "{what}");
+        let (bottom, mid) = (top + height - 1, top + height / 2);
+        // The panes are columns 2-10 (%0) and 12-19 (%1) of the client.
+        let edges = [
+            ("left", 1, mid, "%0"),
+            ("top", 4, top, "%0"),
+            ("top, right pane", 17, top, "%1"),
+            ("right", 20, mid, "%1"),
+            ("bottom", 4, bottom, "%0"),
+            ("bottom, right pane", 17, bottom, "%1"),
+            ("top left corner", 1, top, "%0"),
+            ("top right corner", 20, top, "%1"),
+            ("bottom left corner", 1, bottom, "%0"),
+            ("bottom right corner", 20, bottom, "%1"),
+        ];
+        for (edge, x, y, pane) in edges {
+            // Clicks more than 300 ms apart are not a double click.
+            thread::sleep(Duration::from_millis(350));
+            w.cli(&["set", "-gu", "@b"]);
+            w.cli(&["set", "-gu", "@d"]);
+            w.cli(&["set", "-g", "@m", ""]);
+            a.keys(&click(x, y));
+            let got = settles(&w, "#{@b}", pane);
+            assert_eq!(got, pane, "{what}: {edge} click ({x},{y}) is Border");
+            assert_eq!(user_option(&w, "@m"), "", "{what}: {edge} is not Pane");
+            // A drag from the same cell: press, one motion, release.
+            thread::sleep(Duration::from_millis(350));
+            let drag = format!(
+                "\x1b[<0;{x};{y}M\x1b[<32;9;{}M\x1b[<0;9;{}m",
+                top + 2,
+                top + 2
+            );
+            a.keys(drag.as_bytes());
+            let got = settles(&w, "#{@d}", pane);
+            assert_eq!(got, pane, "{what}: {edge} drag from ({x},{y}) is Border");
+        }
+    }
 }
