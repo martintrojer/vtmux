@@ -4762,3 +4762,376 @@ fn attached_keys_reach_the_pane_in_its_key_mode() {
     );
     assert_eq!(outputs[0], outputs[1], "vtmux (left) vs tmux 3.8 (right)");
 }
+
+/// A 40x10 client on session `a`: window 0 split left/right (`cat` panes,
+/// pane 1 active), window 1 behind it, then `cmds`.
+fn mouse_world(bin: PathBuf, cmds: &[&[&str]]) -> (World, Attached) {
+    let w = World::new(bin);
+    for cmd in [
+        &[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
+        ][..],
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["neww", "-d", "-t", "a", "-n", "x", "cat"],
+        // The host name in the default status-right would move nothing
+        // here, but a long one hides the window list on 40 columns.
+        &["set", "-g", "status-right", ""],
+    ]
+    .iter()
+    .chain(cmds)
+    {
+        assert!(w.cli(cmd).status.success(), "{cmd:?}");
+    }
+    let a = w.attach(&["attach", "-t", "a"]);
+    a.wait(|a| a.text().contains("\x1b[?1049h"));
+    a.wait(|a| pane_text(a).contains("[a]"));
+    (w, a)
+}
+
+/// SGR press and release of button 1 at 1-based `x`, `y`.
+fn click(x: u16, y: u16) -> Vec<u8> {
+    format!("\x1b[<0;{x};{y}M\x1b[<0;{x};{y}m").into_bytes()
+}
+
+/// Wait (at most 5 s) for `f` to be `want`; what it was last.
+fn settles(w: &World, f: &str, want: &str) -> String {
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        let got = display(w, f);
+        if got == want || Instant::now() >= end {
+            return got;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A global user option's value (`show -gv`), empty if unset.
+fn user_option(w: &World, name: &str) -> String {
+    String::from_utf8_lossy(&w.cli(&["show", "-gv", name]).stdout)
+        .trim()
+        .to_owned()
+}
+
+/// The mouse-mode sequences in `bytes`.
+fn mouse_modes(bytes: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = Vec::new();
+    let mut rest = &*text;
+    while let Some(at) = rest.find("\x1b[?100") {
+        let seq = &rest[at + 2..];
+        let end = seq.find(['h', 'l']).map_or(seq.len(), |e| e + 1);
+        if end <= 6 {
+            out.push(seq[..end].to_owned());
+        }
+        rest = &rest[at + 2..];
+    }
+    out
+}
+
+/// `tty_update_mode` via `server_client_reset_state` (tty.c:904-920,
+/// server-client.c:2294-2308): with `mouse` on (the default) the terminal
+/// gets button mode, and all-motion while a pane of the window has 1003;
+/// with it off the active pane's own mode. Each change clears all and sets
+/// again.
+#[test]
+fn outer_mouse_modes_follow_the_mouse_option_and_panes() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        // The pane prints what it reads, raw: its input is its modes.
+        let a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "sh",
+            "-c",
+            "stty raw -echo; exec cat",
+        ]);
+        a.wait(|a| mouse_modes(&a.bytes.lock().unwrap()).contains(&"?1002h".to_owned()));
+        thread::sleep(Duration::from_millis(300));
+        let mut marks = vec![a.bytes.lock().unwrap().len()];
+        let steps: [&[&str]; 5] = [
+            &["set", "-g", "mouse", "off"],
+            &["send", "-t", "a", "-l", "\x1b[?1000h"],
+            &["set", "-g", "mouse", "on"],
+            &["send", "-t", "a", "-l", "\x1b[?1003h"],
+            &["send", "-t", "a", "-l", "\x1b[?1000l"],
+        ];
+        for step in steps {
+            assert!(w.cli(step).status.success());
+            thread::sleep(Duration::from_millis(400));
+            marks.push(a.bytes.lock().unwrap().len());
+        }
+        let bytes = a.bytes.lock().unwrap().clone();
+        let mut got = vec![
+            mouse_modes(&bytes[..marks[0]])
+                .into_iter()
+                .filter(|m| m.ends_with('h'))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ];
+        for pair in marks.windows(2) {
+            got.push(mouse_modes(&bytes[pair[0]..pair[1]]).join(" "));
+        }
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[1][1], "?1006l ?1000l ?1002l ?1003l");
+    assert_eq!(seen[1][2], "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h");
+}
+
+/// `server_client_check_mouse` and the default bindings: a click selects the
+/// pane under it (`MouseDown1Pane`), a click on a window in the status line
+/// switches to it (`MouseDown1Status`), the wheel over the status line
+/// moves between windows (`WheelUpStatus`, `WheelDownStatus`).
+#[test]
+fn clicks_select_panes_and_windows() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = mouse_world(bin, &[]);
+        let mut got = vec![display(&w, "#{pane_index}")];
+        a.keys(&click(3, 3));
+        got.push(settles(&w, "#{pane_index}", "0"));
+        a.keys(&click(30, 3));
+        got.push(settles(&w, "#{pane_index}", "1"));
+        // "[a] 0:w* 1:x": window 1 is at columns 10-12.
+        a.keys(&click(11, 10));
+        got.push(settles(&w, "#{window_index}", "1"));
+        // The wheel over a window in the list.
+        a.keys(b"\x1b[<64;6;10M");
+        got.push(settles(&w, "#{window_index}", "0"));
+        a.keys(b"\x1b[<65;6;10M");
+        got.push(settles(&w, "#{window_index}", "1"));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[1], ["1", "0", "1", "1", "0", "1"]);
+}
+
+/// The legacy X10 report (`ESC [ M` and three bytes from 32/33,
+/// tty-keys.c:1246-1271) clicks too, positions past 0x7f included.
+#[test]
+fn x10_reports_click() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = mouse_world(bin, &[&["resize-window", "-t", "a", "-x", "140"]]);
+        let mut got = vec![display(&w, "#{pane_index}")];
+        // Press at 3,3 (bytes 0x20+0, 0x20+3, 0x20+3), release.
+        a.keys(b"\x1b[M\x20\x23\x23\x1b[M\x23\x23\x23");
+        got.push(settles(&w, "#{pane_index}", "0"));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[1], ["1", "0"]);
+}
+
+/// A binding's commands run with the mouse event: `=` is the pane under
+/// the pointer and the mouse formats describe it (format.c:2032-2125,
+/// cmd-find.c:1027-1056); on the status line, the status formats.
+#[test]
+fn mouse_formats_and_target_in_a_binding() {
+    let f =
+        "#{mouse_x},#{mouse_y},#{mouse_pane},#{mouse_status_line},#{mouse_status_range}|#{pane_id}";
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = mouse_world(
+            bin,
+            &[
+                &["bind", "-n", "MouseDown1Pane", "set", "-gF", "@m", f],
+                &["bind", "-n", "MouseDown1Status", "set", "-gF", "@m", f],
+                &["bind", "-n", "MouseDown1StatusLeft", "set", "-gF", "@m", f],
+                &[
+                    "bind",
+                    "-n",
+                    "MouseDown3Pane",
+                    "set",
+                    "-gF",
+                    "@m",
+                    "#{pane_id}",
+                ],
+            ],
+        );
+        let mut got = Vec::new();
+        for (x, y) in [(5, 4), (25, 2), (11, 10), (2, 10)] {
+            w.cli(&["set", "-gu", "@m"]);
+            a.keys(&click(x, y));
+            a.wait(|_| !user_option(&w, "@m").is_empty());
+            got.push(user_option(&w, "@m"));
+        }
+        // The binding's current target is the pane under the pointer.
+        w.cli(&["set", "-gu", "@m"]);
+        a.keys(b"\x1b[<2;5;4M\x1b[<2;5;4m");
+        a.wait(|_| !user_option(&w, "@m").is_empty());
+        got.push(user_option(&w, "@m"));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(
+        seen[1],
+        [
+            "4,3,%0,,|%0",
+            "3,1,%1,,|%1",
+            "10,0,%2,0,window|%2",
+            "1,0,%1,0,left|%1",
+            "%0"
+        ]
+    );
+}
+
+/// `server_client_click_timer`: a second click is `SecondClick` at once and
+/// `DoubleClick` only once the 300 ms timeout passes without a third; a
+/// third click is `TripleClick` at once and no `DoubleClick` follows.
+#[test]
+fn double_click_waits_for_the_timeout_triple_click_does_not() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = mouse_world(
+            bin,
+            &[
+                &["bind", "-n", "SecondClick1Pane", "set", "-g", "@s", "1"],
+                &["bind", "-n", "DoubleClick1Pane", "set", "-g", "@d", "1"],
+                &["bind", "-n", "TripleClick1Pane", "set", "-g", "@t", "1"],
+            ],
+        );
+        let mut c = click(5, 4);
+        c.extend(click(5, 4));
+        a.keys(&c);
+        a.wait(|_| user_option(&w, "@s") == "1");
+        let early = user_option(&w, "@d");
+        a.wait(|_| user_option(&w, "@d") == "1");
+        let mut got = vec![format!("double: early {early:?}")];
+        w.cli(&["set", "-gu", "@d"]);
+        w.cli(&["set", "-gu", "@s"]);
+        thread::sleep(Duration::from_millis(400));
+        let mut c = click(5, 4);
+        c.extend(click(5, 4));
+        c.extend(click(5, 4));
+        a.keys(&c);
+        a.wait(|_| user_option(&w, "@t") == "1");
+        thread::sleep(Duration::from_millis(500));
+        got.push(format!(
+            "triple: s {:?} d {:?}",
+            user_option(&w, "@s"),
+            user_option(&w, "@d")
+        ));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[1], ["double: early \"\"", "triple: s \"1\" d \"\""]);
+}
+
+/// The owner's `bind -n MouseDown1StatusLeft choose-tree -s`: a click on
+/// the session name opens the tree; in the tree a click selects a row and
+/// a double click chooses it (mode-tree.c:1582-1617).
+#[test]
+fn status_left_click_opens_choose_tree_and_rows_click() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = mouse_world(
+            bin,
+            &[
+                &["new", "-d", "-s", "b", "-n", "bw", "cat"],
+                &["bind", "-n", "MouseDown1StatusLeft", "choose-tree", "-s"],
+            ],
+        );
+        let mut got = Vec::new();
+        a.keys(&click(2, 10));
+        got.push(settles(&w, "#{pane_mode}", "tree-mode"));
+        // The tree is in the active (right) pane, rows "(0) + a: ..." and
+        // "(1) + b: ...". A click on the second selects it, a double click
+        // chooses session b.
+        a.keys(&click(26, 2));
+        thread::sleep(Duration::from_millis(400));
+        got.push(pane_text(&a).lines().nth(1).unwrap_or("").to_owned());
+        let mut c = click(26, 2);
+        c.extend(click(26, 2));
+        a.keys(&c);
+        let end = Instant::now() + Duration::from_secs(5);
+        let session = || {
+            String::from_utf8_lossy(&w.cli(&["display", "-p", "#{client_session}"]).stdout)
+                .trim()
+                .to_owned()
+        };
+        while session() != "b" && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        got.push(session());
+        got.push(display(&w, "#{pane_mode}"));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[1][2..], ["b", ""]);
+}
+
+/// With `status-position top` the status line is row 1 and the panes start
+/// below it (server-client.c:1029-1035).
+#[test]
+fn status_position_top_moves_the_window_down() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let (w, mut a) = mouse_world(bin, &[&["set", "-g", "status-position", "top"]]);
+        let mut got = vec![];
+        a.keys(&click(3, 2));
+        got.push(settles(&w, "#{pane_index}", "0"));
+        a.keys(&click(11, 1));
+        got.push(settles(&w, "#{window_index}", "1"));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[1], ["0", "1"]);
+}
+
+/// A read-only client's mouse events do nothing (server-client.c:1477).
+#[test]
+fn read_only_client_drops_mouse_events() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        for cmd in [
+            &[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
+            ][..],
+            &["splitw", "-h", "-t", "a", "cat"],
+            &["set", "-g", "status-right", ""],
+        ] {
+            assert!(w.cli(cmd).status.success());
+        }
+        let mut a = w.attach(&["attach", "-r", "-t", "a"]);
+        a.wait(|a| pane_text(a).contains("[a]"));
+        a.keys(&click(3, 3));
+        thread::sleep(Duration::from_millis(400));
+        seen.push(display(&w, "#{pane_index}"));
+    }
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[1], "1");
+}
+
+/// D23 (vtmux only): under the focus ring the window is one cell in, so a
+/// click maps to the pane drawn under it, and a click on the ring's frame
+/// is the border of the pane it frames (`MouseDown1Border` selects it).
+#[test]
+fn focus_ring_clicks_land_on_the_drawn_pane() {
+    let f = "#{mouse_x},#{mouse_y},#{mouse_pane}";
+    let (w, mut a) = ring_world_sized(
+        &[
+            &["splitw", "-h", "-t", "a"],
+            &["bind", "-n", "MouseDown1Pane", "set", "-gF", "@m", f],
+        ],
+        20,
+        8,
+    );
+    a.wait(|_| display(&w, "#{window_panes}") == "2");
+    // Column 2, row 2 is the left pane's first cell (0,0) inside the ring.
+    a.keys(&click(2, 2));
+    a.wait(|_| !user_option(&w, "@m").is_empty());
+    assert_eq!(user_option(&w, "@m"), "0,0,%0");
+    assert_eq!(display(&w, "#{pane_index}"), "1");
+    // The ring's left edge frames pane 0: a border click selects it.
+    a.keys(&click(1, 4));
+    assert_eq!(settles(&w, "#{pane_index}", "0"), "0");
+    // The right edge frames pane 1.
+    a.keys(&click(20, 4));
+    assert_eq!(settles(&w, "#{pane_index}", "1"), "1");
+}

@@ -174,11 +174,16 @@ pub enum Cap {
     /// Ask the terminal for extended keys, and stop (`extkeys`).
     Eneks,
     Dseks,
+    /// `kmous`: the terminal sends mouse reports, so `tty_update_mode`
+    /// may turn mouse modes on (tty.c:904). Every terminal vtmux knows has
+    /// it (xterm's `\E[<`, screen's and tmux's `\E[M`).
+    Kmous,
 }
 
 impl Cap {
-    /// Every capability, in the order the goldens list them.
-    pub const ALL: [Self; 14] = [
+    /// Every capability, in the order the goldens list them (`kmous`,
+    /// which they do not list, last).
+    pub const ALL: [Self; 15] = [
         Self::Tc,
         Self::Rgb,
         Self::SetRgbF,
@@ -193,6 +198,7 @@ impl Cap {
         Self::Fsl,
         Self::Eneks,
         Self::Dseks,
+        Self::Kmous,
     ];
 
     /// The terminfo name.
@@ -213,6 +219,7 @@ impl Cap {
             Self::Fsl => "fsl",
             Self::Eneks => "Eneks",
             Self::Dseks => "Dseks",
+            Self::Kmous => "kmous",
         }
     }
 
@@ -255,7 +262,7 @@ struct Base {
 
 impl Base {
     fn of(name: &str) -> Option<Self> {
-        let caps = |list: &[Cap]| list.iter().fold(0, |bits, c| bits | c.bit());
+        let caps = |list: &[Cap]| list.iter().fold(Cap::Kmous.bit(), |bits, c| bits | c.bit());
         let xterm_caps = [Cap::Ss, Cap::Se, Cap::Ms];
         if name == "xterm-ghostty" {
             // Ghostty 1.4's terminfo.
@@ -306,8 +313,8 @@ impl Base {
                 caps(&[Cap::Smulx, Cap::Ss, Cap::Se, Cap::Ms, Cap::Tsl, Cap::Fsl]),
                 Some("\x1b]0;"),
             ),
-            "screen" => (8, 0, None),
-            "screen-256color" => (256, 0, None),
+            "screen" => (8, caps(&[]), None),
+            "screen-256color" => (256, caps(&[]), None),
             _ => return None,
         };
         Some(Self {

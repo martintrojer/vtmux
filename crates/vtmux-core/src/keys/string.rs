@@ -469,6 +469,7 @@ mod tests {
 
     #[test]
     fn code_layout_matches_tmux() {
+        use super::super::code::{MouseKind, MouseLocation};
         // tmux.h: KEYC_NONE is type FUNCTION << 32, F1 is 8 after it.
         assert_eq!(Key::NONE.0, 0x2_0000_0000);
         assert_eq!(Key::F1.0, 0x2_0000_0008);
@@ -486,6 +487,36 @@ mod tests {
             4 << 32 | 1 << 8
         );
         assert_eq!(Key::from_name("WheelUpStatus").unwrap().0, 9 << 32 | 1);
+        for (kind, b, loc, name) in [
+            (MouseKind::Down, 1, MouseLocation::Pane, "MouseDown1Pane"),
+            (
+                MouseKind::DragEnd,
+                3,
+                MouseLocation::Border,
+                "MouseDragEnd3Border",
+            ),
+            (
+                MouseKind::WheelDown,
+                0,
+                MouseLocation::StatusLeft,
+                "WheelDownStatusLeft",
+            ),
+            (
+                MouseKind::DoubleClick,
+                1,
+                MouseLocation::control(7),
+                "DoubleClick1Control7",
+            ),
+            (MouseKind::Move, 0, MouseLocation::Pane, "MouseMovePane"),
+        ] {
+            let k = Key::mouse(kind, b, loc);
+            assert_eq!(k.name(false), name);
+            assert!(k.is_mouse());
+            assert_eq!(k.mouse_kind(), Some(kind));
+        }
+        assert!(Key::MOUSE.is_mouse());
+        assert!(!Key::DRAGGING.is_mouse());
+        assert!(!Key::from_name("a").unwrap().is_mouse());
         assert_eq!(Key::from_name("User5").unwrap().0, 1 << 32 | 5);
         // A character: size, width+1 and the bytes.
         assert_eq!(Key::from_name("é").unwrap().0, 2 << 24 | 2 << 29 | 0xa9c3);

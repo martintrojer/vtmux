@@ -590,6 +590,39 @@ impl Server {
         }) else {
             return;
         };
+        self.tree_action(p, c, action, item);
+    }
+
+    /// `window_tree_key` for a mouse key at `at` in the pane: the tree's
+    /// mouse branch (`mode_tree_key`), then the mode's (a double click is
+    /// Enter). The mode's own mouse handling of the window row in session
+    /// previews (`window_tree_mouse`) is not here yet. A mode prompt takes
+    /// no mouse events yet.
+    pub(crate) fn tree_mouse_key(
+        &mut self,
+        p: PaneId,
+        c: ClientId,
+        key: Key,
+        at: Option<(u32, u32)>,
+    ) {
+        let prompt = self
+            .model
+            .panes
+            .get(&p)
+            .is_some_and(|x| x.mode_prompt.as_ref().is_some_and(|m| m.shown(x)));
+        if prompt {
+            return;
+        }
+        let Some((action, item)) = self.with_tree(p, |_, t| {
+            let action = t.tree.mouse_key(key, at);
+            (action, t.tree.current_item().map(|i| i.data))
+        }) else {
+            return;
+        };
+        self.tree_action(p, Some(c), action, item);
+    }
+
+    fn tree_action(&mut self, p: PaneId, c: Option<ClientId>, action: Action, item: Option<Item>) {
         let finished = match action {
             Action::Finished => true,
             Action::Search => {
@@ -928,6 +961,7 @@ impl Server {
             attached: c.and_then(|c| self.client_session(c)),
             inside_pane: None,
             current: fs,
+            mouse: None,
         };
         let value = vtmux_core::cmd::ArgValue::Str(command);
         match crate::commands::make_commands(self, c, origin, None, &value) {

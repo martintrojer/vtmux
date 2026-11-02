@@ -85,7 +85,7 @@ The acknowledgements are the backpressure. When a client's terminal is slow or s
 ### Input: you press a key
 
 1. The outer terminal sends the key's bytes through PTY #1 to the client, which forwards them over the socket.
-2. The server decodes them into keys, the way tmux's `tty-keys.c` does. It also swallows the terminal's replies to vtmux's own queries, so they never reach a pane as keystrokes.
+2. The server decodes them into keys, the way tmux's `tty-keys.c` does. It also swallows the terminal's replies to vtmux's own queries, so they never reach a pane as keystrokes. A mouse report is located (`mouse.rs`, after `server_client_check_mouse`: pane, border, status range) and becomes a key such as `MouseDown1Pane`; its binding's commands start from the pane under the pointer and carry the event, which `=` targets and the `mouse_*` formats read.
 3. The key is looked up in the key tables. If the prefix is active, or the key has a root binding, the bound command runs (`C-b %` splits the pane). Otherwise the key is re-encoded for the active pane's current modes (normal or application cursor keys, bracketed paste) and written to that pane's PTY.
 
 ### Commands: `vtmux ls`, scripts, plugins, murmur and mu

@@ -1,0 +1,22 @@
+name = "attach_mouse_click"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat"] },
+  { run = ["select-pane", "-t", "a:1.0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { keys = "\u001b[<0;3;3M\u001b[<0;3;3m" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_index}"] },
+  { keys = "\u001b[<0;11;10M\u001b[<0;11;10m" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_index}"] },
+  { keys = "\u001b[<64;6;10M" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{window_index}"] },
+]

@@ -214,6 +214,93 @@ impl Key {
     pub const fn modifiers(self) -> u64 {
         self.0 & MASK_MODIFIERS
     }
+
+    /// `KEYC_MAKE_MOUSE_KEY(type, button, location)` (tmux.h:273): the key
+    /// a located mouse event is bound as. `button` is tmux's key button
+    /// number (1-3, 6-11, 0 for wheel and motion).
+    #[must_use]
+    pub const fn mouse(kind: MouseKind, button: u8, location: MouseLocation) -> Self {
+        Self((kind as u64) << SHIFT_TYPE | (button as u64) << 8 | location as u64)
+    }
+
+    /// The type of a located mouse key.
+    #[must_use]
+    pub const fn mouse_kind(self) -> Option<MouseKind> {
+        Some(match (self.0 & MASK_KEY) >> SHIFT_TYPE {
+            ty::MOUSEMOVE => MouseKind::Move,
+            ty::MOUSEDOWN => MouseKind::Down,
+            ty::MOUSEUP => MouseKind::Up,
+            ty::MOUSEDRAG => MouseKind::Drag,
+            ty::MOUSEDRAGEND => MouseKind::DragEnd,
+            ty::WHEELDOWN => MouseKind::WheelDown,
+            ty::WHEELUP => MouseKind::WheelUp,
+            ty::SECONDCLICK => MouseKind::SecondClick,
+            ty::DOUBLECLICK => MouseKind::DoubleClick,
+            ty::TRIPLECLICK => MouseKind::TripleClick,
+            _ => return None,
+        })
+    }
+}
+
+/// `enum key_code_type`'s mouse types, numbered as tmux numbers them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseKind {
+    Move = 3,
+    Down = 4,
+    Up = 5,
+    Drag = 6,
+    DragEnd = 7,
+    WheelDown = 8,
+    WheelUp = 9,
+    SecondClick = 10,
+    DoubleClick = 11,
+    TripleClick = 12,
+}
+
+/// `enum key_code_mouse_location` (tmux.h:184-205), numbered as tmux
+/// numbers them; [`LOCATIONS`] names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseLocation {
+    Pane = 0,
+    Status = 1,
+    StatusLeft = 2,
+    StatusRight = 3,
+    StatusDefault = 4,
+    Border = 5,
+    ScrollbarUp = 6,
+    ScrollbarSlider = 7,
+    ScrollbarDown = 8,
+    Empty = 9,
+    /// `Control0`; `Control0 + n` is [`MouseLocation::control`].
+    Control0 = 10,
+    Control1 = 11,
+    Control2 = 12,
+    Control3 = 13,
+    Control4 = 14,
+    Control5 = 15,
+    Control6 = 16,
+    Control7 = 17,
+    Control8 = 18,
+    Control9 = 19,
+}
+
+impl MouseLocation {
+    /// `KEYC_MOUSE_LOCATION_CONTROL0 + n`, `n` below 10.
+    #[must_use]
+    pub const fn control(n: u8) -> Self {
+        match n {
+            0 => Self::Control0,
+            1 => Self::Control1,
+            2 => Self::Control2,
+            3 => Self::Control3,
+            4 => Self::Control4,
+            5 => Self::Control5,
+            6 => Self::Control6,
+            7 => Self::Control7,
+            8 => Self::Control8,
+            _ => Self::Control9,
+        }
+    }
 }
 
 impl fmt::Debug for Key {

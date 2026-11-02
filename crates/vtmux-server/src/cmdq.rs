@@ -592,6 +592,18 @@ impl Server {
                     self.cmd_formats
                         .push(("command".to_owned(), call.entry.name.to_owned()));
                 }
+                // format_create_add_item: every format tree of the item
+                // gets its mouse event (format.c:4271-4278); the client's
+                // terminal has started (TTY_STARTED) for the status ones.
+                if let Some(m) = &item.mouse {
+                    let started = item
+                        .client
+                        .and_then(|c| self.clients.get(&c))
+                        .is_some_and(|c| c.control.is_none() && c.attached.is_some());
+                    let vars = m.formats(&self.model, started);
+                    self.cmd_formats
+                        .extend(vars.into_iter().map(|(k, v)| (k.to_owned(), v)));
+                }
                 if self.cfg_finished {
                     self.cmdq_add_message(&item, &call);
                 }

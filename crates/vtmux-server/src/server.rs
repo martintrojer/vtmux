@@ -115,11 +115,13 @@ pub(crate) struct Client {
     /// Frame bytes sent to the client (`c->written`).
     pub(crate) written: usize,
     pub(crate) pasting: bool,
+    /// Mouse drag, click and outer-mode state (`c->tty.mouse_*`).
+    pub(crate) mouse: crate::mouse::ClientMouse,
     decoder: crate::input::Decoder,
     caps: Option<crate::render::Caps>,
     /// The client's terminal once attached (`tty_open`): its features and
     /// capabilities after `terminal-features` and `terminal-overrides`.
-    term: Option<vtmux_core::term_features::Term>,
+    pub(crate) term: Option<vtmux_core::term_features::Term>,
     pub(crate) compositor: crate::render::Compositor,
     /// `DCS tmux;` payloads for the terminal, written after this tick's
     /// frame (`tty_cmd_rawstring`).
@@ -310,6 +312,8 @@ pub struct Server {
     /// `cmdq_get_client(item)` of the command running now: the client whose
     /// jobs its formats use.
     pub(crate) cmd_client: Option<ClientId>,
+    /// The running command's mouse event (`state->event.m`).
+    pub(crate) cmd_mouse: Option<crate::mouse::MouseEvent>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -491,6 +495,7 @@ impl Server {
             orphans: Vec::new(),
             format_jobs: std::rc::Rc::default(),
             cmd_client: None,
+            cmd_mouse: None,
         };
         // server_start: the hourly tidy (server.c:157-172, `evtimer_add`).
         server.format_jobs_start_tidy();
@@ -550,6 +555,7 @@ impl Server {
             }
             self.expire_repeat(Instant::now());
             self.start_timers(Instant::now());
+            self.click_timers(Instant::now());
             self.status_timers(Instant::now());
             self.model.alerts_timers(Instant::now());
             self.run_alerts();
@@ -638,6 +644,7 @@ impl Server {
                     c.decoder.deadline(),
                     c.decoder.start_deadline(),
                     c.keys.repeat_deadline,
+                    c.mouse.deadline(),
                     c.status.deadline(),
                 ]
             })
@@ -783,6 +790,7 @@ impl Server {
                             title: None,
                             written: 0,
                             pasting: false,
+                            mouse: crate::mouse::ClientMouse::default(),
                             decoder: crate::input::Decoder::default(),
                             caps: None,
                             term: None,
@@ -1121,6 +1129,7 @@ impl Server {
                 .find(|(k, _)| k == "TMUX_PANE")
                 .and_then(|(_, v)| v.parse().ok()),
             current: None,
+            mouse: None,
         };
         let mut item = Item::new(Some(id), hello.cwd.clone());
         item.env.clone_from(&hello.env);
@@ -1439,6 +1448,8 @@ impl Server {
             return;
         };
         client.compositor.invalidate();
+        // tty_resize -> tty_invalidate: the terminal modes are written again.
+        client.mouse.invalidate();
         // server-client.c:2729: server_redraw_client.
         client.status.request_full_redraw();
         self.recalculate_sizes();
@@ -1620,6 +1631,9 @@ impl Server {
             };
             match event {
                 crate::input::Event::Ignore => {}
+                crate::input::Event::Mouse(m, bytes) => {
+                    self.handle_mouse_input(id, m, bytes, false);
+                }
                 crate::input::Event::Clipboard(data) => {
                     // tty_keys_clipboard: with a query out, the reply
                     // becomes a paste buffer.
@@ -1980,6 +1994,7 @@ impl Server {
                 .expect("client")
                 .compositor
                 .frame(screen, caps);
+            self.add_outer_mouse_modes(id, &mut frame);
             if redrawing && let Some(title) = self.client_title(id, s) {
                 frame.splice(0..0, title);
             }
@@ -2017,6 +2032,22 @@ impl Server {
         let border = self.job_handle(Some(id)).status(false);
         let border = if redrawing { border } else { border.peek() };
         (self.job_handle(Some(id)).status(force), border)
+    }
+
+    /// `server_client_reset_state`: the terminal's mouse modes follow `mouse`
+    /// and the panes (`tty_update_mode`), written after the drawing and
+    /// inside the frame's synchronized update when there is one.
+    fn add_outer_mouse_modes(&mut self, id: ClientId, frame: &mut Vec<u8>) {
+        let modes = self.outer_mouse_bytes(id);
+        if modes.is_empty() {
+            return;
+        }
+        let at = if frame.ends_with(b"\x1b[?2026l") {
+            frame.len() - 8
+        } else {
+            frame.len()
+        };
+        frame.splice(at..at, modes);
     }
 
     /// `server_client_set_title` (server-client.c:2588-2610), run on a

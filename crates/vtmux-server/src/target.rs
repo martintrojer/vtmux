@@ -172,6 +172,10 @@ pub struct Origin {
     /// while it is valid (cmd-find.c:995-997): a hook's commands start
     /// from the event's target.
     pub current: Option<Found>,
+    /// What the batch's mouse event names, when a mouse key started it
+    /// (`cmdq_get_event(item)->m` while valid): the `=` and `{mouse}`
+    /// targets.
+    pub mouse: Option<crate::mouse::MouseTarget>,
 }
 
 #[must_use]
@@ -561,7 +565,7 @@ fn resolve_inner(
             let s = origin.attached.ok_or(EdgeError::NoCurrentClient)?;
             return Ok(Found::from_session(model, s));
         }
-        Resolved::Mouse => return Err(EdgeError::NotImplemented("mouse target".into())),
+        Resolved::Mouse => return mouse_target(model, origin, kind),
         Resolved::Marked => return Err(EdgeError::NotImplemented("marked target".into())),
         Resolved::Parts(p) => p,
     };
@@ -569,6 +573,25 @@ fn resolve_inner(
         return find_index_parts(model, current, &parts, prefer);
     }
     find_parts(model, current, &parts, prefer)
+}
+
+/// `=` or `{mouse}` (cmd-find.c:1027-1056): the pane the mouse event names
+/// for a pane target (else its window's active pane), the window it names
+/// or the session's current one for the others.
+fn mouse_target(model: &Model, origin: Origin, kind: TargetKind) -> Result<Found, EdgeError> {
+    let none = || EdgeError::Message("no mouse target".into());
+    let m = origin.mouse.ok_or_else(none)?;
+    if kind == TargetKind::Pane
+        && let Some(f) = m.pane_found(model)
+    {
+        return Ok(f);
+    }
+    let f = m
+        .window_found(model)
+        .or_else(|| m.session.map(|s| Found::from_session(model, s)))
+        .filter(|f| f.window.is_some() && f.pane.is_some())
+        .ok_or_else(none)?;
+    Ok(f)
 }
 
 /// `cmd_find_target` with `CMD_FIND_WINDOW_INDEX` (cmd-find.c:1157-1222):

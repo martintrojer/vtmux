@@ -22,8 +22,21 @@ pub fn exec(
         server.reset_mode_all(p);
         return Ok(());
     }
+    // cmd-copy-mode.c:74-79: -M is the mouse's pane, for the client on
+    // its session only; without a mouse event nothing happens.
     if args.flag('M') {
-        return Err(EdgeError::NotImplemented("copy-mode -M".into()).into());
+        let Some(m) = item.mouse.as_ref() else {
+            return Ok(());
+        };
+        let Some(f) = m.target.pane_found(&server.model) else {
+            return Ok(());
+        };
+        if item.client.and_then(|c| server.client_session(c)) != f.session {
+            return Ok(());
+        }
+        // TODO(mouse_drag): enter copy mode on f.pane and start a
+        // selection drag (window_copy_start_drag).
+        return Ok(());
     }
     let swp = if args.flag('s') {
         source.pane.unwrap_or(p)

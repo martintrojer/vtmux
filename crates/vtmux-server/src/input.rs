@@ -1,6 +1,7 @@
 //! Streaming basics from tty-keys.c (`tty_keys_next`/`tty_keys_next1`).
-//! Unknown terminal reports never become pane keys. Extended keys and mouse
-//! are deferred to M1; the decoder bounds incomplete control strings.
+//! Unknown terminal reports never become pane keys; the decoder bounds
+//! incomplete control strings. Mouse reports (`tty_keys_mouse`) are decoded
+//! into [`MouseInput`]: X10 (`ESC [ M` and three bytes) and SGR (`ESC [ <`).
 use crate::keys::{Base, Key, Named};
 use std::time::{Duration, Instant};
 
@@ -21,6 +22,9 @@ pub enum Event {
     DeviceAttributes(Vec<u32>),
     DeviceAttributes2(u32),
     ExtendedDeviceAttributes(String),
+    /// A mouse report (`KEYC_MOUSE` with its `struct mouse_event`), and the
+    /// bytes it came in (`event->buf`, written to a pane while pasting).
+    Mouse(MouseInput, Vec<u8>),
     Ignore,
 }
 
@@ -31,6 +35,135 @@ const QUERY_DA2: u8 = 2;
 const QUERY_XDA: u8 = 4;
 const QUERY_SYNC: u8 = 8;
 const ALL_QUERIES: u8 = QUERY_DA | QUERY_DA2 | QUERY_XDA | QUERY_SYNC;
+
+/// A decoded mouse report as `tty_keys_mouse` (tty-keys.c:1210-1347) fills
+/// `struct mouse_event`: 0-based cell position and button byte, with the
+/// previous report's (`tty->mouse_last_*`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MouseInput {
+    pub x: u32,
+    pub y: u32,
+    /// The button byte: buttons, modifiers, drag and wheel bits; 3 is a
+    /// release.
+    pub b: u32,
+    pub lx: u32,
+    pub ly: u32,
+    pub lb: u32,
+    /// An SGR report (`sgr_type` not `' '`): its own button number and
+    /// whether it was a release (`m`). `None` for X10.
+    pub sgr: Option<Sgr>,
+}
+
+/// The SGR part of a report (`sgr_b`, `sgr_type`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sgr {
+    pub b: u32,
+    pub release: bool,
+}
+
+/// `MOUSE_PARAM_BTN_OFF` and `MOUSE_PARAM_POS_OFF` (tmux.h:710-711).
+const X10_BUTTON_OFFSET: u32 = 0x20;
+const X10_POSITION_OFFSET: u32 = 0x21;
+
+/// What `tty_keys_mouse` makes of the start of the buffer.
+#[derive(Debug, PartialEq, Eq)]
+enum MouseParse {
+    /// Not a mouse report.
+    No,
+    /// Could still become one.
+    Partial,
+    /// A report of `usize` bytes that is dropped (`-2`).
+    Discard(usize),
+    /// A report: position, button, SGR part, and its length. The previous
+    /// position is filled in by the [`Decoder`].
+    Report(MouseInput, usize),
+}
+
+/// `tty_keys_mouse` (tty-keys.c:1210-1347). There is no UTF-8 (1005)
+/// decoding: tmux reads the three X10 bytes as they are.
+fn mouse(bytes: &[u8]) -> MouseParse {
+    let Some(rest) = bytes.strip_prefix(b"\x1b[") else {
+        return if bytes == b"\x1b" {
+            MouseParse::Partial
+        } else {
+            MouseParse::No
+        };
+    };
+    match rest.first() {
+        None => MouseParse::Partial,
+        Some(b'M') => {
+            let [b, x, y] = match rest.get(1..4) {
+                Some(&[b, x, y]) => [b, x, y].map(u32::from),
+                _ => return MouseParse::Partial,
+            };
+            if b < X10_BUTTON_OFFSET || x < X10_POSITION_OFFSET || y < X10_POSITION_OFFSET {
+                return MouseParse::Discard(6);
+            }
+            let input = MouseInput {
+                x: x - X10_POSITION_OFFSET,
+                y: y - X10_POSITION_OFFSET,
+                b: b - X10_BUTTON_OFFSET,
+                ..MouseInput::default()
+            };
+            MouseParse::Report(input, 6)
+        }
+        Some(b'<') => {
+            // Three decimal numbers, `;`, `;`, then `M` or `m`; anything
+            // else is not a mouse report.
+            let mut at = 3;
+            let mut numbers = [0u32; 3];
+            let mut end = 0;
+            for (i, n) in numbers.iter_mut().enumerate() {
+                loop {
+                    let Some(&c) = bytes.get(at) else {
+                        return MouseParse::Partial;
+                    };
+                    at += 1;
+                    let ends = if i == 2 {
+                        c == b'M' || c == b'm'
+                    } else {
+                        c == b';'
+                    };
+                    if ends {
+                        end = c;
+                        break;
+                    }
+                    if !c.is_ascii_digit() {
+                        return MouseParse::No;
+                    }
+                    *n = n.wrapping_mul(10).wrapping_add(u32::from(c - b'0'));
+                }
+            }
+            let [sgr_b, x, y] = numbers;
+            if x < 1 || y < 1 {
+                return MouseParse::Discard(at);
+            }
+            let release = end == b'm';
+            // Some terminals (PuTTY 0.63) send a release for a wheel press.
+            if release && mouse_wheel(sgr_b) {
+                return MouseParse::Discard(at);
+            }
+            let input = MouseInput {
+                x: x - 1,
+                y: y - 1,
+                b: if release { 3 } else { sgr_b },
+                sgr: Some(Sgr { b: sgr_b, release }),
+                ..MouseInput::default()
+            };
+            MouseParse::Report(input, at)
+        }
+        Some(_) => MouseParse::No,
+    }
+}
+
+/// `MOUSE_WHEEL` (tmux.h:1679).
+#[must_use]
+pub fn mouse_wheel(b: u32) -> bool {
+    matches!(b & MOUSE_MASK_BUTTONS, 64 | 65)
+}
+
+/// `MOUSE_MASK_BUTTONS` (tmux.h:1655).
+pub const MOUSE_MASK_BUTTONS: u32 = 195;
 /// `escape-time` default (options-table.c).
 const ESCAPE_TIME: Duration = Duration::from_millis(10);
 /// The partial-key floor while a reply may still be in flight
@@ -53,6 +186,8 @@ pub struct Decoder {
     pasting: bool,
     /// The terminal's `khome`/`kend` are `ESC [1~`/`ESC [4~`.
     tilde_home_end: bool,
+    /// `tty->mouse_last_x`, `_y`, `_b`: the previous mouse report.
+    mouse_last: (u32, u32, u32),
 }
 impl Decoder {
     /// The startup queries went to the terminal (DA, DA2, XTVERSION and
@@ -95,7 +230,31 @@ impl Decoder {
         let mut events = Vec::new();
         while !self.bytes.is_empty() {
             let expired = self.deadline().is_some_and(|t| now >= t);
-            let Some((mut event, used)) = decode(&self.bytes, expired, self.tilde_home_end) else {
+            // tty_keys_next: mouse reports come before the key tree; once
+            // the key timer has expired the buffer goes straight to the key
+            // tree (`goto first_key`).
+            let parsed = if expired {
+                MouseParse::No
+            } else {
+                mouse(&self.bytes)
+            };
+            let decoded = match parsed {
+                MouseParse::Partial if self.bytes.len() > 2 => {
+                    self.pending.get_or_insert(now);
+                    break;
+                }
+                MouseParse::Discard(n) => Some((Event::Ignore, n)),
+                MouseParse::Report(mut input, n) => {
+                    (input.lx, input.ly, input.lb) = self.mouse_last;
+                    self.mouse_last = (input.x, input.y, input.b);
+                    Some((Event::Mouse(input, self.bytes[..n].to_vec()), n))
+                }
+                // `ESC` and `ESC [` are partial keys as well.
+                MouseParse::Partial | MouseParse::No => {
+                    decode(&self.bytes, expired, self.tilde_home_end)
+                }
+            };
+            let Some((mut event, used)) = decoded else {
                 self.pending.get_or_insert(now);
                 break;
             };
@@ -599,6 +758,88 @@ mod tests {
                 Event::Clipboard(b"foo".to_vec())
             ]
         );
+    }
+
+    /// tty-keys.c:1210-1347: SGR and X10 reports, the previous position,
+    /// and the reports tmux drops.
+    #[test]
+    fn mouse_reports() {
+        let now = Instant::now();
+        let mut d = Decoder::default();
+        d.feed(b"\x1b[<0;5;3M\x1b[<0;5;3m\x1b[M\x20\x2a\x22\x1b[<64;1;1m\x1b[<0;0;1M");
+        let events = d.drain(now);
+        let inputs: Vec<MouseInput> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Mouse(m, _) => Some(*m),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 5);
+        assert_eq!(events[3], Event::Ignore);
+        assert_eq!(events[4], Event::Ignore);
+        let sgr = |b, release| Some(Sgr { b, release });
+        assert_eq!(
+            inputs,
+            vec![
+                MouseInput {
+                    x: 4,
+                    y: 2,
+                    b: 0,
+                    sgr: sgr(0, false),
+                    ..MouseInput::default()
+                },
+                MouseInput {
+                    x: 4,
+                    y: 2,
+                    b: 3,
+                    lx: 4,
+                    ly: 2,
+                    lb: 0,
+                    sgr: sgr(0, true)
+                },
+                MouseInput {
+                    x: 9,
+                    y: 1,
+                    b: 0,
+                    lx: 4,
+                    ly: 2,
+                    lb: 3,
+                    sgr: None
+                },
+            ]
+        );
+        // X10 bytes past 0x7f are positions, not UTF-8; below the offsets
+        // the report is dropped.
+        d.feed(b"\x1b[M\x23\xc0\x80\x1b[M\x1f\x30\x30");
+        let events = d.drain(now);
+        assert!(matches!(
+            events[0],
+            Event::Mouse(
+                MouseInput {
+                    x: 159,
+                    y: 95,
+                    b: 3,
+                    ..
+                },
+                _
+            )
+        ));
+        assert_eq!(events[1], Event::Ignore);
+        assert_eq!(events.len(), 2);
+        // A split report waits; one that stays partial past escape-time is
+        // keys.
+        d.feed(b"\x1b[<0;1");
+        assert_eq!(d.drain(now), Vec::new());
+        d.feed(b"2;3M");
+        assert!(matches!(
+            d.drain(now)[..],
+            [Event::Mouse(MouseInput { x: 11, y: 2, .. }, _)]
+        ));
+        d.feed(b"\x1b[<0;1");
+        assert_eq!(d.drain(now), Vec::new());
+        let keys = d.drain(now + Duration::from_millis(20));
+        assert!(keys.iter().all(|e| matches!(e, Event::Key(_))), "{keys:?}");
     }
 
     #[test]

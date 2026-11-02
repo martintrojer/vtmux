@@ -150,6 +150,10 @@ pub struct Item {
     /// The key whose binding this batch runs (`state->event.key`); the
     /// message log names it.
     pub key: Option<vtmux_core::keys::Key>,
+    /// The mouse event of that key, when it is a mouse key
+    /// (`state->event.m` while valid): `send -M` and the `mouse_*`
+    /// formats read it.
+    pub mouse: Option<crate::mouse::MouseEvent>,
 }
 
 /// The client's stdout can be used once (`file_write_open` dups it and
@@ -191,6 +195,7 @@ impl Item {
             hook_target: None,
             borrow_client: false,
             key: None,
+            mouse: None,
         }
     }
 
@@ -298,8 +303,10 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
         item.control = item.client.filter(|&c| server.is_control(c)).map(|_| 0);
     }
     server.cmd_client = item.client;
+    server.cmd_mouse.clone_from(&item.mouse);
     let result = run_one(server, item, call);
     server.cmd_client = None;
+    server.cmd_mouse = None;
     // The events the command fired go to their sinks inside its guard
     // (control notifications are deferred until it closes), then its
     // after- or command-error hook (cmd-queue.c:625-653).

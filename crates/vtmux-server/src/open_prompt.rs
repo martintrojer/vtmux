@@ -337,6 +337,11 @@ impl Server {
         !matches!(self.prompt_key(Place::Pane(p), c, key), Taken::No)
     }
 
+    /// Client `c`'s window shows a pane prompt (server-client.c:1837-1847).
+    pub(crate) fn client_has_pane_prompt(&self, c: ClientId) -> bool {
+        self.client_pane_prompt(c).is_some()
+    }
+
     /// The pane prompt client `c`'s keys go to (server-client.c:1837-1847).
     fn client_pane_prompt(&self, c: ClientId) -> Option<PaneId> {
         let s = self.clients.get(&c)?.attached?;

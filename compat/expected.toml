@@ -603,8 +603,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."targets.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."terminal-feature-utf8.sh"]
 status = "xfail"

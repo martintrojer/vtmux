@@ -467,7 +467,8 @@ impl Server {
         };
         let cancel = key == Key::ascii(0x1b) || key == Key::ascii(b'c').ctrl();
         let closes_on_exit = p.rules.on_exit || p.rules.on_exit_zero;
-        let paste = key == Key::PASTE_START || key == Key::PASTE_END;
+        // popup_key_cb: neither a paste marker nor a mouse event is "any key".
+        let paste = key == Key::PASTE_START || key == Key::PASTE_END || key.is_mouse();
         if (!closes_on_exit || !p.running) && cancel || !p.running && p.rules.any_key && !paste {
             self.popup_close(c);
             return true;
