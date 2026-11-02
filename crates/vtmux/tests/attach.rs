@@ -600,7 +600,8 @@ fn send_keys_k_delivers_keys_to_the_pane() {
             "extended-keys",
             "on",
         ]);
-        a.wait(|a| pane_text(a).contains('R'));
+        // The pane's own text: the status line may hold an `R` (host name).
+        a.wait(|_| pane_line(&w) == "R");
         a.wait(|_| {
             let shown = w.cli(&["display", "-p", "-t", "a", "#{pane_key_mode}"]);
             String::from_utf8_lossy(&shown.stdout).trim() == want_mode
