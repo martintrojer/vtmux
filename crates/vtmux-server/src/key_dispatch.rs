@@ -547,6 +547,10 @@ impl Server {
             crate::mouse::Located::Dragging(action, ev) => {
                 // server-client.c:1487-1490: the drag's callback, then out.
                 self.drag_update(id, action, &ev);
+                // Each motion is its own queue item in tmux: the layout
+                // events of a step fire with the layout of that step, not
+                // coalesced with the rest of a burst read in one go.
+                self.drain_events();
                 self.update_latest(id);
                 return;
             }
