@@ -80,7 +80,7 @@ The design decisions behind this (D1–D23) are in the [spec](specs/2026-10-29-v
 
 Steps 3 and 4 fix two of tmux's [paper cuts](PAPERCUTS.md) by construction: the cursor no longer flickers under heavy output, and popup borders don't flicker over scrolling panes. tmux forwards each pane update to the terminal as it happens; vtmux only ever sends finished pictures.
 
-The acknowledgements are the backpressure. When a client's terminal is slow or stalled, the server stops composing frames for it, and sends one fresh full frame once it catches up. tmux does the same thing in `tty_block_maybe`.
+The acknowledgements are the backpressure. While a client still has a frame it has not written, the server composes no new one for it (tmux defers its redraw the same way in `server_client_check_redraw`); the acknowledgement brings the next frame, with everything that changed meanwhile. While a pane is flooding (it still has unread output after its read budget), frames to a client are also at most 10 ms apart, so a flood costs a frame per interval rather than one per read. When a client's terminal is slow or stalled, the server stops composing frames for it, and sends one fresh full frame once it catches up. tmux does the same thing in `tty_block_maybe`.
 
 ### Input: you press a key
 
