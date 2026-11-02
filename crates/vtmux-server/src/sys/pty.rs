@@ -381,8 +381,9 @@ fn last_errno() -> libc::c_int {
     io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
 
-/// `closefrom(first)`: `close_range` where the kernel has it, else a loop
-/// up to the descriptor limit.
+/// `closefrom(first)`: `close_range` where the kernel has it, the open
+/// descriptors from `proc_pidinfo(PROC_PIDLISTFDS)` on macOS (tmux's
+/// compat/closefrom.c), else a loop up to the descriptor limit.
 ///
 /// # Safety
 /// Closes descriptors; only call in a forked child that owns none it needs.
@@ -391,6 +392,41 @@ pub(super) unsafe fn close_from(first: libc::c_int, limit: libc::c_int) {
     // SAFETY: close_range on a range of descriptors the child does not use.
     unsafe {
         if libc::close_range(first.cast_unsigned(), libc::c_uint::MAX, 0) == 0 {
+            return;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Closing 65536 descriptors one by one takes 10-15 ms there, which
+        // delays every pane's and job's exec (and so its exit). The list
+        // goes in a fixed buffer: no allocation after fork. A full buffer
+        // may be truncated, so it falls back to the loop.
+        const MAX: usize = 1024;
+        let mut fds = [libc::proc_fdinfo {
+            proc_fd: 0,
+            proc_fdtype: 0,
+        }; MAX];
+        let size = libc::c_int::try_from(size_of_val(&fds)).unwrap_or(0);
+        // SAFETY: the buffer holds `size` bytes of proc_fdinfo.
+        let got = unsafe {
+            libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDLISTFDS,
+                0,
+                fds.as_mut_ptr().cast(),
+                size,
+            )
+        };
+        if got > 0 && got < size {
+            let n = usize::try_from(got).unwrap_or(0) / size_of::<libc::proc_fdinfo>();
+            for info in &fds[..n] {
+                if info.proc_fd >= first {
+                    // SAFETY: close on a descriptor the child does not use.
+                    unsafe {
+                        libc::close(info.proc_fd);
+                    }
+                }
+            }
             return;
         }
     }
