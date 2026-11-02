@@ -5534,7 +5534,33 @@ fn send_keys_bytes_follow_the_pane_key_mode() {
         "C-a", "S-a", "C-S-a", "M-a", "S-Enter", "C-Enter", "C-Tab", "BTab", "S-Tab", "C-1", "C-é",
         "C-BSpace", "C-Escape", "C-i", "C-[", "C-M-S-x", "S-Up", "M-BTab",
     ];
-    compare("send_keys_bytes_follow_the_pane_key_mode", |w| {
+    send_keys_in_key_modes("send_keys_bytes_follow_the_pane_key_mode", &KEYS, None);
+}
+
+/// `BSpace` under a non-default `backspace` option (input-keys.c:592-614):
+/// an unmodified one is the option's byte, a modified one is the option's
+/// key with the modifiers added, in every key mode and format.
+#[test]
+fn send_keys_bspace_follows_the_backspace_option() {
+    const KEYS: [&str; 6] = [
+        "BSpace",
+        "S-BSpace",
+        "M-BSpace",
+        "C-BSpace",
+        "C-M-BSpace",
+        "C-S-BSpace",
+    ];
+    for option in ["C-h", "M-x", "F1", "KP1", "C-S-x"] {
+        send_keys_in_key_modes(
+            &format!("send_keys_bspace_follows_the_backspace_option_{option}"),
+            &KEYS,
+            Some(option),
+        );
+    }
+}
+
+fn send_keys_in_key_modes(name: &str, keys: &[&str], backspace: Option<&str>) {
+    compare(name, |w| {
         let mut runs = Vec::new();
         for mode in ["", r"\033[>4;1m", r"\033[>4;2m"] {
             for format in ["csi-u", "xterm"] {
@@ -5545,12 +5571,11 @@ fn send_keys_bytes_follow_the_pane_key_mode() {
                     "stty raw -echo; printf '{mode}'; exec cat > {}",
                     out.display()
                 );
-                runs.push(w.run(&[
-                    "set",
-                    "-g",
-                    "extended-keys",
-                    "on",
-                    ";",
+                let mut setup = vec!["set", "-g", "extended-keys", "on", ";"];
+                if let Some(option) = backspace {
+                    setup.extend(["set", "-g", "backspace", option, ";"]);
+                }
+                setup.extend([
                     "set",
                     "-g",
                     "extended-keys-format",
@@ -5563,7 +5588,8 @@ fn send_keys_bytes_follow_the_pane_key_mode() {
                     "sh",
                     "-c",
                     &script,
-                ]));
+                ]);
+                runs.push(w.run(&setup));
                 // The mode request has been read once the mode shows.
                 let want = match mode {
                     "" => "VT10x",
@@ -5580,7 +5606,7 @@ fn send_keys_bytes_follow_the_pane_key_mode() {
                     assert!(start.elapsed() < Duration::from_secs(5), "{mode}");
                     std::thread::sleep(Duration::from_millis(20));
                 }
-                for key in KEYS {
+                for key in keys {
                     w.run(&["send-keys", "-t", "a", key]);
                     w.run(&["send-keys", "-t", "a", "-H", "7c"]);
                 }

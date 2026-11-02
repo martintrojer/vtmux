@@ -182,3 +182,11 @@ product reasons" category.
 - vtmux behaviour: the core implements glibc's answers on every system (D-013 lists where glibc itself differs): the rest of the text is matched around the byte, `\U00110000` gives the old four-byte form, and a non-ASCII flag byte is `invalid flag`.
 - Evidence: C probes on macOS 15 (`setlocale(LC_CTYPE, "en_US.UTF-8")` as tmux.c does): `regexec("b", "a\377b")` = 17 (`REG_ILLSEQ`), `regcomp("a\377")` = 17; `wctomb(0x110000)` = -1; `isalnum(0xe9)` true. The reference tmux 3.8 on the same host gives the outputs above.
 - Category: Deferred (a per-platform libc model in the core; only text that is not valid UTF-8, or code points past U+10FFFF, is affected).
+
+### D-020: `send-keys -K` delivers keys to the pane
+
+- Test / assertion: `crates/vtmux/tests/attach.rs` `send_keys_k_delivers_keys_to_the_pane` (vtmux only; the reference drops the keys). The bytes themselves are pinned against tmux by `keys.rs` `send_keys_in_each_key_mode_and_format`.
+- tmux behaviour: `cmd_send_keys_inject_key` (cmd-send-keys.c:79) hands the key to the client as `key|KEYC_SENT`. Nothing strips the flag when the key reaches a pane (`server_client_key_callback` -> `window_pane_key` -> `input_key`), so `input_key` misses the trivial case (input-keys.c:628-646) and the tree lookup (655-662); named keys then hit the `KEYC_IS_SPECIAL` ignore (input-keys.c:681-685), and in modes 1 and 2 `input_key_extended`'s modifier switch hits `default` and returns -1. Most keys sent with `-K` to a pane are lost: in mode 1 even `a` and `Tab`.
+- vtmux behaviour: the key is handled like a typed one, and the pane gets the same bytes as from `send-keys` without `-K` (and as from the attached client's own keystroke). Bindings and prompts see the key as in tmux.
+- Evidence: reference tmux 3.8, attached client under a PTY, `send-keys -K -c <client> KEY` for `C-F3 BTab Escape F3 C-Up a Tab`, each followed by `send-keys -H 7c`, the pane copying its input to a file: standard mode `||\e|||a|\t` (keys 1, 2, 4, 5 lost), mode 1 nothing at all, mode 2 only `\e[27;2;9~` (BTab) arrives. vtmux gives every key (review_extkeys, `skk2.py`).
+- Category: Do not copy tmux bug (keys are lost).
