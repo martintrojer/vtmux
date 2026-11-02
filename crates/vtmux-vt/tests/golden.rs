@@ -244,13 +244,13 @@ golden! {
     cap_scroll_on_clear_ctrl_l,
     #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
     fmt_scroll_on_clear_ctrl_l,
-    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     cap_ris,
-    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     fmt_ris,
-    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     cap_ris_alt,
-    #[ignore = "D-pending: P7 tmux RIS keeps history (screen.c:109-130 screen_reinit); Ghostty full reset drops scrollback"]
+    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     fmt_ris_alt,
     reply_da1,
     reply_da2,
