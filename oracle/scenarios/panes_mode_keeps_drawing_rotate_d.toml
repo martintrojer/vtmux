@@ -1,0 +1,19 @@
+name = "panes_mode_keeps_drawing_rotate_d"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-v", "-t", "%1", "cat"] },
+  { attach = { session = "a" } },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-mode-changed", "set -agF @log '[#{hook_pane}:#{pane_mode}]'"] },
+  { run = ["display-panes", "-d", "0", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["rotate-window", "-D", "-t", "a"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "q" },
+  { settle = { react = true } },
+  { screen = {} },
+]

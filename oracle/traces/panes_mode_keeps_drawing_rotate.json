@@ -1,0 +1,254 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "panes_mode_keeps_drawing_rotate",
+  "inputs": {
+    "name": "panes_mode_keeps_drawing_rotate",
+    "size": [
+      60,
+      20
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "19",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-v",
+          "-t",
+          "%1",
+          "cat"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-mode-changed",
+          "set -agF @log '[#{hook_pane}:#{pane_mode}]'"
+        ]
+      },
+      {
+        "run": [
+          "display-panes",
+          "-d",
+          "0",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "rotate-window",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m├\\e[37m─────────────────────────────",
+          "\\e[39m                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m          \\e[34m29x9",
+          "\\e[39m                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m      \\e[34m0\\e[39m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m├──────────────",
+          "\\e[39m\\e[49m                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m      \\e[31m2\\e[39m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "q                             \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m│\\e[39m",
+          "                              \\e[32m├\\e[37m─────────────────────────────",
+          "\\e[39m                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m          \\e[34m29x9",
+          "\\e[39m                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m      \\e[34m0\\e[39m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m├──────────────",
+          "\\e[39m\\e[49m                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m      \\e[31m2\\e[39m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[32m│\\e[39m              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          1,
+          0
+        ]
+      }
+    }
+  ]
+}

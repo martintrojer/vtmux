@@ -1,0 +1,28 @@
+name = "panes_mode_keeps_drawing_swap_active_i"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-v", "-t", "%1", "cat"] },
+  { attach = { session = "a" } },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-mode-changed", "set -agF @log '[#{hook_pane}:#{pane_mode}]'"] },
+  { run = ["display-panes", "-d", "0", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["list-panes","-t","a","-F","#{pane_id} #{pane_active} #{pane_index} #{pane_width}x#{pane_height}"] },
+  { run = ["swap-pane", "-s", "%0", "-t", "%2"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes","-t","a","-F","#{pane_id} #{pane_active} #{pane_index} #{pane_width}x#{pane_height}"] },
+  { keys = "q" },
+  { settle = { react = true } },
+  { screen = {} },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id} [#{pane_mode}] z=#{window_zoomed_flag} #{pane_in_mode}"] },
+  { run = ["show", "-gv", "@log"] },
+  { screen = {} },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { run = ["capture-pane", "-p", "-t", "%1"] },
+  { run = ["capture-pane", "-p", "-t", "%2"] },
+]

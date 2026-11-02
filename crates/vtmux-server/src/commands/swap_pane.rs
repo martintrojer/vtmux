@@ -122,6 +122,13 @@ fn swap(
         }
     }
 
+    // window_pane_resize of each pane, in the swap and before the active
+    // pane changes (cmd-swap-pane.c:158-164, 171): a pane in panes mode
+    // that changes size draws the window with the old active pane.
+    m.fix_panes(dst_w);
+    if !same {
+        m.fix_panes(src_w);
+    }
     // window_set_active_pane: a cross-window swap pushes a pane that has
     // left the window onto its last-used stack; that is cleaned below.
     if detached {

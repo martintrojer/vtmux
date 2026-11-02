@@ -202,19 +202,24 @@ impl Borders {
 
     /// `window_panes_mark_pane_status_borders`: the line a pane's status
     /// takes at the window's top or bottom edge.
-    fn status_lines(&mut self, layout: &Layout, panes: &[PaneId]) {
+    fn status_lines(
+        &mut self,
+        layout: &Layout,
+        cells: &BTreeMap<PaneId, Vec<usize>>,
+        panes: &[PaneId],
+    ) {
         let status = layout.opts.status;
         if status == PaneStatus::Off {
             return;
         }
         for &p in panes {
-            let Some(path) = layout.root.find_pane(p) else {
+            let Some(path) = cells.get(&p) else {
                 continue;
             };
-            if !layout.pane_needs_border(p) {
+            if !layout.cell_needs_border(path) {
                 continue;
             }
-            let g = layout.root.get(&path).g();
+            let g = layout.root.get(path).g();
             let x = self.map_x(i64::from(g.xoff));
             let x2 = self.map_x(i64::from(g.xoff) + i64::from(g.sx));
             let y = if status == PaneStatus::Top {
@@ -468,7 +473,7 @@ impl Source<'_> {
             osy: os.1,
         };
         borders.cells(&layout.root);
-        borders.status_lines(layout, &tiled);
+        borders.status_lines(layout, &drawn.cells, &tiled);
         borders.joins(&layout.root);
         let found = self.panes_found(m, window.id, pane.id);
         let ctx = self.ctx(found, caps);
@@ -524,11 +529,11 @@ impl Source<'_> {
         let Some(drawn) = m.drawn.as_ref() else {
             return;
         };
-        let Some(path) = layout.root.find_pane(q) else {
+        let Some(path) = drawn.cells.get(&q) else {
             return;
         };
-        let border = layout.pane_needs_border(q).then_some(layout.opts.status);
-        let Some(a) = geometry(layout.root.get(&path).g(), os, ds, border) else {
+        let border = layout.cell_needs_border(path).then_some(layout.opts.status);
+        let Some(a) = geometry(layout.root.get(path).g(), os, ds, border) else {
             return;
         };
         let src = match (q == mode_pane.id, m.preview.as_ref(), drawn.screens.get(&q)) {

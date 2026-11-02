@@ -34,7 +34,7 @@ use vtmux_core::cmd::{ArgValue, Args, CmdError, CommandList};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::keys::Key;
-use vtmux_core::layout::Layout;
+use vtmux_core::layout::{Layout, Path};
 use vtmux_core::options::TreeId;
 use vtmux_vt::Snapshot;
 
@@ -58,6 +58,10 @@ enum Template {
 #[derive(Clone, Debug)]
 pub struct Drawn {
     pub layout: Layout,
+    /// The cell each pane had (`wp->layout_cell`): the pane's own in the
+    /// layout, except while a command is moving panes between cells and a
+    /// pane not yet reached still has its old one.
+    pub cells: BTreeMap<PaneId, Path>,
     pub tiled: Vec<(PaneId, u32)>,
     pub active: PaneId,
     pub screens: BTreeMap<PaneId, Snapshot>,
@@ -238,6 +242,13 @@ impl crate::model::Model {
             .iter()
             .filter_map(|q| Some((*q, vtmux_vt::snapshot(&self.panes.get(q)?.term))))
             .collect();
+        let layout = window.full_layout();
+        let cells: BTreeMap<PaneId, Path> = window
+            .panes
+            .panes
+            .iter()
+            .filter_map(|q| Some((*q, self.pane_cell(window, *q)?)))
+            .collect();
         let format = self
             .options
             .get(
@@ -265,7 +276,8 @@ impl crate::model::Model {
         };
         let term = &self.panes[&p].term;
         let drawn = Drawn {
-            layout: window.full_layout().clone(),
+            layout: layout.clone(),
+            cells,
             tiled,
             active: window.active(),
             screens,

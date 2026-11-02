@@ -624,10 +624,16 @@ impl Layout {
     /// as `layout_fix_panes` sets them, scrollbars aside).
     #[must_use]
     pub fn pane_rect(&self, pane: PaneId) -> Option<Geometry> {
-        let path = self.root.find_pane(pane)?;
-        let cell = self.root.get(&path);
+        Some(self.cell_rect(&self.root.find_pane(pane)?))
+    }
+
+    /// [`Self::pane_rect`] for the pane whose cell is at `path`: what a
+    /// pane given that cell (`wp->layout_cell`) is resized to.
+    #[must_use]
+    pub fn cell_rect(&self, path: &[usize]) -> Geometry {
+        let cell = self.root.get(path);
         let mut g = *cell.g();
-        if !cell.is_floating() && pos_at(&self.root, &path).border(self.env()) {
+        if !cell.is_floating() && pos_at(&self.root, path).border(self.env()) {
             if self.opts.status == PaneStatus::Top {
                 g.yoff += 1;
             }
@@ -635,16 +641,22 @@ impl Layout {
                 g.sy -= 1;
             }
         }
-        Some(g)
+        g
     }
 
     /// `layout_add_horizontal_border(root, lc, status)` for a tiled
     /// pane's cell: it needs a row for the pane status line.
     #[must_use]
     pub fn pane_needs_border(&self, pane: PaneId) -> bool {
-        self.root.find_pane(pane).is_some_and(|path| {
-            !self.root.get(&path).is_floating() && pos_at(&self.root, &path).border(self.env())
-        })
+        self.root
+            .find_pane(pane)
+            .is_some_and(|path| self.cell_needs_border(&path))
+    }
+
+    /// [`Self::pane_needs_border`] for the cell at `path`.
+    #[must_use]
+    pub fn cell_needs_border(&self, path: &[usize]) -> bool {
+        !self.root.get(path).is_floating() && pos_at(&self.root, path).border(self.env())
     }
 
     /// `layout_split_pane` for a new pane `new` next to `target`

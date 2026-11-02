@@ -475,12 +475,13 @@ impl<'a> Ctx<'a> {
             // line not counted, scrollbars aside.
             "pane_unzoomed_width" => {
                 let root = &w.full_layout().root;
-                root.get(&root.find_pane(p.id)?).g().sx.to_string()
+                root.get(&self.model.pane_cell(w, p.id)?).g().sx.to_string()
             }
             "pane_unzoomed_height" => {
                 let layout = w.full_layout();
-                let g = layout.root.get(&layout.root.find_pane(p.id)?).g();
-                let border = layout.pane_needs_border(p.id) && g.sy > 1;
+                let path = self.model.pane_cell(w, p.id)?;
+                let g = layout.root.get(&path).g();
+                let border = layout.cell_needs_border(&path) && g.sy > 1;
                 (g.sy - u32::from(border)).to_string()
             }
             "pane_height" => r.sy.to_string(),
