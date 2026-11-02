@@ -16,6 +16,7 @@ use crate::names::parse_window_name;
 use crate::server::ClientId;
 use crate::sys;
 use crate::target::Found;
+use vtmux_vt::MouseTracking;
 
 /// Server-wide values formats can read.
 #[derive(Clone, Debug)]
@@ -556,6 +557,14 @@ impl<'a> Ctx<'a> {
             "cursor_x" => p.term.cursor().0.to_string(),
             "cursor_y" => p.term.cursor().1.to_string(),
             "alternate_on" => flag(p.term.alternate_on()),
+            // format_cb_mouse_*_flag (format.c:1995-2080), from tmux's own
+            // mode bits.
+            "mouse_any_flag" => flag(p.term.mouse_modes().any()),
+            "mouse_standard_flag" => flag(p.term.mouse_modes().tracking == MouseTracking::Standard),
+            "mouse_button_flag" => flag(p.term.mouse_modes().tracking == MouseTracking::Button),
+            "mouse_all_flag" => flag(p.term.mouse_modes().tracking == MouseTracking::All),
+            "mouse_sgr_flag" => flag(p.term.mouse_modes().sgr),
+            "mouse_utf8_flag" => flag(p.term.mouse_modes().utf8),
             "history_size" => p.term.history_size().to_string(),
             "history_limit" => p.history_limit.to_string(),
             "pane_in_mode" => p.modes.len().to_string(),

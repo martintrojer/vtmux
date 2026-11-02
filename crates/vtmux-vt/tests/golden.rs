@@ -279,4 +279,11 @@ golden! {
     reply_decrqm_blink_option,
     reply_decrqm_blink_set,
     reply_decrqm_blink_reset,
+    reply_decrqm_mouse_exclusive,
+    reply_decrqm_mouse_button,
+    reply_decrqm_mouse_reset_clears,
+    reply_decrqm_mouse_sgr,
+    reply_decrqm_mouse_utf8,
+    reply_decrqm_mouse_ris,
+    reply_decrqm_mouse_alt,
 }
