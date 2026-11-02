@@ -49,6 +49,9 @@ steps = [
   { settle = { react = true } },
   { run = ["choose-tree", "-t", "aaa:0.0", "-N", "-O", "bogus"] },
   { run = ["splitw", "-d", "-t", "aaa:0", "exec cat"] },
+  # Pin the new pane's title: it starts as the host name, which the tree
+  # hides only when it equals #{host_short} (no dots in the name).
+  { run = ["select-pane", "-t", "%6", "-T", "t6"] },
   { run = ["choose-tree", "-t", "aaa:0.0", "-NZ"] },
   { settle = { react = true } },
   { run = ["display", "-p", "#{window_zoomed_flag}"] },

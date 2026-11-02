@@ -334,6 +334,15 @@
       },
       {
         "run": [
+          "select-pane",
+          "-t",
+          "%6",
+          "-T",
+          "t6"
+        ]
+      },
+      {
+        "run": [
           "choose-tree",
           "-t",
           "aaa:0.0",
@@ -815,7 +824,16 @@
       }
     },
     {
-      "step": 49,
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
       "observation": {
         "kind": "cli",
         "stdout": "1\n",
@@ -824,14 +842,14 @@
       }
     },
     {
-      "step": 50,
+      "step": 51,
       "observation": {
         "kind": "screen",
         "rows": [
           "\\e[37m(0)   \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
           "\\e[37m(1)   ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*Z\\e[39m",
           "\\e[30m\\e[43m(2)   │   ├─→ 0: cat*Z: \"t0\"\\e[39m",
-          "\\e[37m\\e[49m(3)   │   └─→ \\e[39m1\\e[37m: \\e[39mcat",
+          "\\e[37m\\e[49m(3)   │   └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t6\"\\e[39m",
           "\\e[37m(4)   └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
           "\\e[37m(5)       ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
           "\\e[37m(6)       └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
@@ -852,7 +870,7 @@
       }
     },
     {
-      "step": 53,
+      "step": 54,
       "observation": {
         "kind": "cli",
         "stdout": "0\n",
@@ -861,19 +879,10 @@
       }
     },
     {
-      "step": 54,
+      "step": 55,
       "observation": {
         "kind": "cli",
         "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 56,
-      "observation": {
-        "kind": "cli",
-        "stdout": "tree-mode\n",
         "stderr": "",
         "exit": 0
       }
@@ -882,13 +891,22 @@
       "step": 57,
       "observation": {
         "kind": "cli",
+        "stdout": "tree-mode\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
         "stdout": "",
         "stderr": "",
         "exit": 0
       }
     },
     {
-      "step": 59,
+      "step": 60,
       "observation": {
         "kind": "cli",
         "stdout": "%0\n",
@@ -897,7 +915,7 @@
       }
     },
     {
-      "step": 60,
+      "step": 61,
       "observation": {
         "kind": "screen",
         "rows": [
