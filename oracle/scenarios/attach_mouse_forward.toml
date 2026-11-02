@@ -1,0 +1,25 @@
+name = "attach_mouse_forward"
+size = [40, 10]
+# input-keys.c input_key_get_mouse through the default bindings: the right
+# pane asks for button motion in SGR (?1002h ?1006h) and gets a click, a
+# drag, its release and the wheel at its own positions (MouseDown1Pane and
+# MouseDrag1Pane send -M, the release unbound); the left pane (no mouse
+# modes) shows nothing, and the wheel over it enters copy mode
+# (WheelUpPane's copy-mode -e).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["splitw", "-h", "-t", "a", "sh", "-c", "stty -echo; printf '\\033[?1002h\\033[?1006h'; tmux wait-for -S ready; while read -r l; do printf 'got:%s\\n' \"$(printf %s \"$l\" | tr '\\033' '@')\"; done; exec cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { wait_for = "ready" },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { keys = "\u001b[<0;25;3M\u001b[<32;27;4M\u001b[<0;27;4m\u001b[<64;30;5M\r" },
+  { screen = {} },
+  { keys = "\u001b[<0;5;3M\u001b[<0;5;3m\r" },
+  { screen = {} },
+  { keys = "\u001b[<64;5;3M" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_in_mode}"] },
+]

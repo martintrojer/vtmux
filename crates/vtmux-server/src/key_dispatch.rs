@@ -12,8 +12,8 @@
 //!
 //! Mouse keys are located first ([`crate::mouse`]); their binding's
 //! commands start from the mouse's target and carry the event. Mouse keys
-//! with no binding go to the pane under the pointer's mode (a pane's own
-//! program does not get them yet: `mouse_forward`).
+//! with no binding go to the pane under the pointer: its mode, or its
+//! program in the mouse encoding it asked for.
 //!
 //! Not here yet: `assume-paste-time` (every terminal vtmux attaches to has
 //! bracketed paste, which turns it off: server-client.c:1352).
@@ -571,7 +571,7 @@ impl Server {
             !taken
         };
         if forward && let Some(p) = wp {
-            self.forward_mouse(p, id, &ev);
+            self.forward_mouse(p, Some(id), &ev);
         }
     }
 

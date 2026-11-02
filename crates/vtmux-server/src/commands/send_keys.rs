@@ -1,7 +1,7 @@
 //! `send-keys` (cmd-send-keys.c:155-268) for keys and literal text, `-K`,
 //! and `-N`, `-X` and keys for a pane in any mode ([`PaneMode`]); `-c`
-//! names the client whose read-only flag and `-K` keys count. `-M` and
-//! `-R` are later.
+//! names the client whose read-only flag and `-K` keys count; `-M` gives
+//! the binding's mouse event to the pane under it. `-R` is later.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -46,12 +46,10 @@ pub fn exec(
         let Some(p) = m.target.pane_found(&server.model).and_then(|f| f.pane) else {
             return Err(EdgeError::Message("no mouse target".into()).into());
         };
-        if let Some(c) = tc {
-            let m = m.clone();
-            // TODO(mouse_forward): window_pane_key to a pane's program in
-            // its mouse encoding; modes get it now.
-            server.forward_mouse(p, c, &m);
-        }
+        // window_pane_key(wp, tc, ...): a mode's key callback needs the
+        // client; a program gets it either way.
+        let m = m.clone();
+        server.forward_mouse(p, tc, &m);
         return Ok(());
     }
     if args.flag('R') {

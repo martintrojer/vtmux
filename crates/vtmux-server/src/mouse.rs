@@ -13,8 +13,11 @@
 //! located, and a click on the ring's frame is the border of the pane it
 //! frames.
 //!
-//! Not here: forwarding to panes (`send -M`, the unbound path:
-//! `mouse_forward`), drag callbacks (`resize-pane -M`, `copy-mode -M`:
+//! A mouse key with no binding, and `send -M`, reach the pane under the
+//! pointer (`window_pane_key`): its mode, or its program in the encoding it
+//! asked for ([`encode_mouse`], input-keys.c `input_key_get_mouse`).
+//!
+//! Not here: drag callbacks (`resize-pane -M`, `copy-mode -M`:
 //! `mouse_drag`), scrollbars (off by default), pane-border control ranges
 //! (`window_pane_status_get_range`) and menus.
 
@@ -24,7 +27,7 @@ use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::keys::{Key, MouseKind, MouseLocation};
 use vtmux_core::options::TreeId;
 use vtmux_core::style::RangeKind;
-use vtmux_vt::MouseTracking;
+use vtmux_vt::{MouseModes, MouseTracking};
 
 use crate::input::{MOUSE_MASK_BUTTONS, MouseInput, mouse_wheel};
 use crate::model::Model;
@@ -106,6 +109,8 @@ pub struct MouseEvent {
     /// The status line's `range=` under the event, when it is on the
     /// status line (`status_get_range`, for `mouse_status_range`).
     pub status_range: Option<RangeKind>,
+    /// `m->ignore`: the click timer's double click, which no program gets.
+    pub ignore: bool,
 }
 
 impl MouseEvent {
@@ -372,6 +377,7 @@ impl Server {
             },
             offset: 0,
             status_range: None,
+            ignore: double,
         };
         let mut loc = None;
         let (mut px, mut py) = (0, 0);
@@ -643,26 +649,61 @@ impl Server {
 
     /// `window_pane_key` for mouse key `ev` from client `c` (window.c:
     /// 2072-2106): a pane in a mode gives it to the mode (motion is
-    /// dropped); clock mode ends on it, tree modes select a row with it.
-    /// A pane's own program does not get it yet.
-    pub(crate) fn forward_mouse(&mut self, p: PaneId, c: ClientId, ev: &MouseEvent) {
+    /// dropped; a mode's key callback needs a client): clock mode ends on
+    /// it, tree modes select a row with it. A pane with no mode gives it to
+    /// its program (`input_key_pane`): only the event's own pane, only if
+    /// the program asked for mouse events, never to a synchronized pane.
+    pub(crate) fn forward_mouse(&mut self, p: PaneId, c: Option<ClientId>, ev: &MouseEvent) {
         let Some(pane) = self.model.panes.get(&p) else {
             return;
         };
-        // TODO(mouse_forward): with no mode, input_key_pane for a pane
-        // that asked for mouse events, when m->wp is this pane. Copy mode
-        // takes keys only through its table.
-        match pane.modes.first() {
-            Some(_) if ev.key.mouse_kind() == Some(MouseKind::Move) => {}
-            Some(crate::mode::Mode::Clock(_)) => self.reset_mode(p),
-            Some(crate::mode::Mode::Tree(_)) => {
+        let is_move = ev.key.mouse_kind() == Some(MouseKind::Move);
+        // Copy mode takes keys only through its table (no key callback).
+        match (pane.modes.first(), c) {
+            (None, _) => self.mouse_to_program(p, ev),
+            (Some(_), _) if is_move => {}
+            (Some(crate::mode::Mode::Clock(_)), Some(_)) => self.reset_mode(p),
+            (Some(crate::mode::Mode::Tree(_)), Some(c)) => {
                 let at = ev.at(&self.model, p);
                 self.tree_mouse_key(p, c, ev.key, at);
             }
             // window_panes_key: a mouse key keeps the mode. Choosing the
             // pane box clicked (window_panes_find_pane) is not here yet.
-            Some(crate::mode::Mode::Panes(_)) => self.panes_key(p, c, ev.key),
+            (Some(crate::mode::Mode::Panes(_)), Some(c)) => self.panes_key(p, c, ev.key),
             _ => {}
+        }
+    }
+
+    /// `input_key_pane` and `input_key_mouse` (input-keys.c:398-411,
+    /// 840-860) for pane `p` with no mode: the event in the program's
+    /// encoding, at its position in the pane, if the event names this pane
+    /// (`m->wp`), the pane is visible and takes input, and the program
+    /// asked for it.
+    fn mouse_to_program(&mut self, p: PaneId, ev: &MouseEvent) {
+        let Some(pane) = self.model.panes.get(&p) else {
+            return;
+        };
+        // window.c:2095: no program, or input off.
+        if pane.io.is_none() || pane.input_off {
+            return;
+        }
+        let modes = pane.term.mouse_modes();
+        if ev.ignore || !modes.any() || ev.target.pane != Some(p) {
+            return;
+        }
+        let Some((x, y)) = ev.at(&self.model, p) else {
+            return;
+        };
+        let visible = self
+            .model
+            .windows
+            .get(&pane.window)
+            .is_some_and(|w| w.is_visible(p));
+        if !visible {
+            return;
+        }
+        if let Some(bytes) = encode_mouse(modes, &ev.input, x, y) {
+            self.write_pane(p, &bytes);
         }
     }
 
@@ -764,5 +805,160 @@ impl Server {
             MouseTracking::None => b"",
         });
         out
+    }
+}
+
+/// `MOUSE_PARAM_MAX`, `MOUSE_PARAM_UTF8_MAX`, `MOUSE_PARAM_BTN_OFF` and
+/// `MOUSE_PARAM_POS_OFF` (tmux.h:708-711).
+const PARAM_MAX: u32 = 0xff;
+const PARAM_UTF8_MAX: u32 = 0x7ff;
+const PARAM_BUTTON_OFFSET: u32 = 0x20;
+const PARAM_POSITION_OFFSET: u32 = 0x21;
+
+/// `input_key_get_mouse` (input-keys.c:712-795): report `m` at `x`, `y` in
+/// the pane for a program whose mouse modes are `modes`, or `None` when it
+/// gets nothing. Motion needs button or all mode, a motion with no button
+/// all mode. SGR (1006) only when the program asked for it and the outer
+/// terminal sent SGR (an X10 release does not say which button); else
+/// UTF-8 (1005) if asked, else X10 with the position clamped to 0xff.
+/// There is no urxvt (1015) encoding.
+#[must_use]
+pub fn encode_mouse(modes: MouseModes, m: &MouseInput, x: u32, y: u32) -> Option<Vec<u8>> {
+    let motion = matches!(modes.tracking, MouseTracking::Button | MouseTracking::All);
+    if drag(m.b) && !motion {
+        return None;
+    }
+    if !modes.any() {
+        return None;
+    }
+    let all = modes.tracking == MouseTracking::All;
+    let moved = match m.sgr {
+        Some(g) => drag(g.b) && release(g.b),
+        None => drag(m.b) && release(m.b) && release(m.lb),
+    };
+    if moved && !all {
+        return None;
+    }
+    if let Some(g) = m.sgr.filter(|_| modes.sgr) {
+        let end = if g.release { 'm' } else { 'M' };
+        return Some(format!("\x1b[<{};{};{}{end}", g.b, x + 1, y + 1).into_bytes());
+    }
+    let mut out = b"\x1b[M".to_vec();
+    if modes.utf8 {
+        let max = PARAM_UTF8_MAX - PARAM_POSITION_OFFSET;
+        if m.b > PARAM_UTF8_MAX - PARAM_BUTTON_OFFSET || x > max || y > max {
+            return None;
+        }
+        for v in [
+            m.b + PARAM_BUTTON_OFFSET,
+            x + PARAM_POSITION_OFFSET,
+            y + PARAM_POSITION_OFFSET,
+        ] {
+            push_split2(&mut out, v);
+        }
+        return Some(out);
+    }
+    if m.b + PARAM_BUTTON_OFFSET > PARAM_MAX {
+        return None;
+    }
+    for v in [
+        m.b + PARAM_BUTTON_OFFSET,
+        (x + PARAM_POSITION_OFFSET).min(PARAM_MAX),
+        (y + PARAM_POSITION_OFFSET).min(PARAM_MAX),
+    ] {
+        out.push(u8::try_from(v).unwrap_or(u8::MAX));
+    }
+    Some(out)
+}
+
+/// `input_key_split2` (input-keys.c:351-360): one value as one byte, or
+/// two in UTF-8's shape past 0x7f.
+fn push_split2(out: &mut Vec<u8>, v: u32) {
+    let byte = |v: u32| u8::try_from(v & 0xff).unwrap_or(u8::MAX);
+    if v > 0x7f {
+        out.push(byte((v >> 6) | 0xc0));
+        out.push(byte((v & 0x3f) | 0x80));
+    } else {
+        out.push(byte(v));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::Sgr;
+
+    fn modes(tracking: MouseTracking, utf8: bool, sgr: bool) -> MouseModes {
+        MouseModes {
+            tracking,
+            utf8,
+            sgr,
+        }
+    }
+
+    fn sgr(b: u32, release: bool) -> MouseInput {
+        MouseInput {
+            b: if release { 3 } else { b },
+            sgr: Some(Sgr { b, release }),
+            ..MouseInput::default()
+        }
+    }
+
+    fn x10(b: u32, lb: u32) -> MouseInput {
+        MouseInput {
+            b,
+            lb,
+            ..MouseInput::default()
+        }
+    }
+
+    #[test]
+    fn no_mode_gets_nothing() {
+        let m = modes(MouseTracking::None, true, true);
+        assert_eq!(encode_mouse(m, &sgr(0, false), 1, 2), None);
+    }
+
+    #[test]
+    fn sgr_needs_both_sides() {
+        let m = modes(MouseTracking::Standard, false, true);
+        assert_eq!(
+            encode_mouse(m, &sgr(0, true), 4, 2).unwrap(),
+            b"\x1b[<0;5;3m"
+        );
+        // An X10 report to an SGR program: X10.
+        assert_eq!(encode_mouse(m, &x10(0, 3), 4, 2).unwrap(), b"\x1b[M %#");
+    }
+
+    #[test]
+    fn motion_needs_button_or_all_mode() {
+        let drag = sgr(32, false);
+        let standard = modes(MouseTracking::Standard, false, true);
+        assert_eq!(encode_mouse(standard, &drag, 0, 0), None);
+        let button = modes(MouseTracking::Button, false, true);
+        assert_eq!(encode_mouse(button, &drag, 0, 0).unwrap(), b"\x1b[<32;1;1M");
+        // Motion with no button: all mode only.
+        let moved = sgr(35, false);
+        assert_eq!(encode_mouse(button, &moved, 0, 0), None);
+        let all = modes(MouseTracking::All, false, true);
+        assert_eq!(encode_mouse(all, &moved, 0, 0).unwrap(), b"\x1b[<35;1;1M");
+        let x10_moved = x10(35, 3);
+        assert_eq!(encode_mouse(button, &x10_moved, 0, 0), None);
+        assert_eq!(encode_mouse(all, &x10_moved, 0, 0).unwrap(), b"\x1b[MC!!");
+    }
+
+    #[test]
+    fn x10_clamps_and_utf8_splits() {
+        let x10_mode = modes(MouseTracking::Standard, false, false);
+        assert_eq!(
+            encode_mouse(x10_mode, &sgr(0, false), 300, 0).unwrap(),
+            b"\x1b[M \xff!"
+        );
+        let utf8 = modes(MouseTracking::Standard, true, false);
+        // 300 + 0x21 = 0x14d: 0xc5 0x8d.
+        assert_eq!(
+            encode_mouse(utf8, &sgr(0, false), 300, 0).unwrap(),
+            b"\x1b[M \xc5\x8d!"
+        );
+        assert_eq!(encode_mouse(utf8, &sgr(0, false), 2100, 0), None);
     }
 }
