@@ -50,8 +50,7 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."choose-tree.sh"]
-status = "xfail"
-reason = "choose-tree list view passes up to the i info view (window-tree preview, choose_tree part c); then J/K, : and X"
+status = "pass"
 
 [tests."clear-on-attach.sh"]
 status = "xfail"

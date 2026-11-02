@@ -456,7 +456,7 @@ impl Server {
         // client-session-changed, which control mode writes as
         // %session-changed to the client itself.
         self.set_latest(s, id);
-        self.model.touch_session(s);
+        self.model.session_attached_now(s);
         self.session_attached_alerts(s);
         self.fire_session_changed(id, old);
         self.control_flush(id);

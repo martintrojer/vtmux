@@ -171,6 +171,7 @@ fn move_to_new_window(
             id: new_w,
             name: default_name,
             activity,
+            activity_secs: crate::model::now_epoch(),
             layout,
             panes: WindowPanes::new(wp),
             zoom: None,

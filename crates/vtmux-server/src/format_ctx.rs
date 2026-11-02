@@ -272,7 +272,9 @@ impl<'a> Ctx<'a> {
             "session_windows" => s.windows.len().to_string(),
             "session_created" => s.created.to_string(),
             "session_activity" => s.activity_secs.to_string(),
-            "session_grouped" => "0".to_owned(),
+            "session_last_attached" => s.last_attached.map(|t| t.to_string()).unwrap_or_default(),
+            // No marked pane yet (server_check_marked), no session groups.
+            "session_marked" | "session_grouped" => "0".to_owned(),
             "session_group" => String::new(),
             // s->attached: the clients attached to it (format.c
             // format_cb_session_attached, recalculate_sizes).
@@ -346,6 +348,8 @@ impl<'a> Ctx<'a> {
             "window_id" => w.id.to_string(),
             "window_index" => wl?.1.to_string(),
             "window_name" => w.name.clone(),
+            "window_activity" => w.activity_secs.to_string(),
+            "window_marked_flag" => "0".to_owned(),
             // window_count_panes(w, 1).
             "window_panes" => w.panes.panes.len().to_string(),
             "window_width" => w.sx().to_string(),
@@ -513,6 +517,14 @@ impl<'a> Ctx<'a> {
             "pane_floating_flag" => flag(w.is_floating(p.id)),
             "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),
             "pane_input_off" => flag(p.input_off),
+            // format_cb_pane_synchronized: the window's option.
+            "pane_synchronized" => flag(
+                self.model
+                    .number_option(TreeId::Window(w.id), "synchronize-panes")
+                    != 0,
+            ),
+            // No marked pane and no pipe-pane yet.
+            "pane_marked" | "pane_pipe" => "0".to_owned(),
             "pane_unseen_changes" => flag(p.unseen_changes),
             "pane_dead" => flag(p.exited && io.is_none()),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),
@@ -698,6 +710,8 @@ impl FormatContext for Ctx<'_> {
         match name {
             "session_created" => self.session().map(|s| s.created),
             "session_activity" => self.session().map(|s| s.activity_secs),
+            "session_last_attached" => self.session().and_then(|s| s.last_attached),
+            "window_activity" => self.window().map(|w| w.activity_secs),
             "client_activity" => self.client.as_ref().map(|c| c.activity_secs),
             "client_created" => self.client.as_ref().map(|c| c.created_secs),
             "buffer_created" => {

@@ -57,6 +57,10 @@ pub struct Session {
     /// root first (session.c:221-224), which the hooks and control mode
     /// show.
     pub link_tree: rb::Tree,
+    /// `s->last_attached_time` in epoch seconds
+    /// (`#{session_last_attached}`): set when a client attaches or
+    /// switches to it (server-client.c:470); `None` until then.
+    pub last_attached: Option<i64>,
 }
 
 impl Session {
@@ -92,6 +96,8 @@ pub struct Window {
     /// `w->activity_time` as an ordering stamp (window.c
     /// `window_update_activity`): creation, selection and pane output.
     pub activity: u64,
+    /// `w->activity_time` in epoch seconds (`#{window_activity}`).
+    pub activity_secs: i64,
     /// The visible layout (`w->layout_root`); one cell while zoomed.
     pub layout: Layout,
     /// Pane order, active pane, last-used stack, z-order.
@@ -302,6 +308,15 @@ impl Model {
     pub fn touch(&mut self) -> u64 {
         self.activity += 1;
         self.activity
+    }
+
+    /// `server_client_set_session` (server-client.c:468-470):
+    /// `session_update_activity`, then the last-attached time.
+    pub fn session_attached_now(&mut self, s: SessionId) {
+        self.touch_session(s);
+        if let Some(session) = self.sessions.get_mut(&s) {
+            session.last_attached = Some(now_epoch());
+        }
     }
 
     /// `session_update_activity(s, NULL)`: the session is active now.
@@ -776,6 +791,7 @@ impl Model {
         session.current = index;
         if let Some(window) = self.windows.get_mut(&w) {
             window.activity = stamp;
+            window.activity_secs = now_epoch();
         }
         // session_set_current: winlink_clear_flags, then
         // window_update_activity.

@@ -3,11 +3,13 @@
 //! for its item; Enter runs the template for the chosen item, `x` and `X`
 //! kill after a prompt on the mode screen, `:` runs a command for each
 //! tagged item, `J`/`K` swap windows, `H` goes back to the starting pane.
+//! The preview under the list shows the current item: a session's windows
+//! or a window's panes side by side ([`Strip`], scrolled with `<` and
+//! `>`), a pane's screen, or with `i` the item's information; the drawing
+//! is `render::tree`.
 //!
-//! Not here yet: the preview (`-N` is assumed: the list fills the
-//! screen; with the preview on, the box and its title are not drawn),
-//! the `i` info view, `<`/`>`, session groups (`-G`) and the marked pane
-//! (`m`/`M` do nothing), and the mouse.
+//! Not here yet: session groups (`-G`) and the marked pane (`m`/`M` do
+//! nothing), and the mouse.
 
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::keys::Key;
@@ -78,6 +80,10 @@ pub enum Tag {
 
 /// `struct window_tree_modedata`.
 #[derive(Clone, Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "window_tree_modedata's flags"
+)]
 pub struct WindowTree {
     pub tree: ModeTree<Tag, Item>,
     format: String,
@@ -97,6 +103,80 @@ pub struct WindowTree {
     pub kill: bool,
     /// `-Z` zoomed the window (`mtd->zoomed == 0`): unzoom on exit.
     pub unzoom: Option<WindowId>,
+    /// `data->offset`: how far `<` and `>` scrolled the preview's strip,
+    /// clamped when it is laid out ([`WindowTree::strip`]).
+    offset: i64,
+    /// `data->preview_is_info`: `i` shows the item's information.
+    info: bool,
+}
+
+/// A session's windows or a window's panes laid out side by side in the
+/// preview (`window_tree_draw_session`, `window_tree_draw_window`,
+/// window-tree.c:517-806): the ones from `start` to `end` are shown, each
+/// `each` columns with the last `remaining` wider, after a `<` column
+/// (`left`) and before a `>` one (`right`) when more are off that side.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Strip {
+    /// Every window (its active pane) or pane, in order.
+    pub items: Vec<Found>,
+    /// The items are panes (`#{pane_format}`), not windows.
+    pub panes: bool,
+    pub start: usize,
+    pub end: usize,
+    pub left: bool,
+    pub right: bool,
+    pub each: usize,
+    pub remaining: usize,
+}
+
+impl Strip {
+    /// The layout of `total` items `sx` columns wide around the
+    /// `current`th, `offset` clamped to what can scroll; `None` when
+    /// nothing fits.
+    #[must_use]
+    pub fn layout(total: usize, current: usize, sx: usize, offset: &mut i64) -> Option<Self> {
+        if total == 0 {
+            return None;
+        }
+        let visible = if sx / total < 24 {
+            (sx / 24).max(1)
+        } else {
+            total
+        };
+        let (mut start, mut end) = if current < visible {
+            (0, visible)
+        } else if current >= total - visible {
+            (total - visible, total)
+        } else {
+            let start = current - visible / 2;
+            (start, start + visible)
+        };
+        let lo = -i64::try_from(start).unwrap_or(0);
+        let hi = i64::try_from(total - end).unwrap_or(0);
+        *offset = (*offset).max(lo).min(hi);
+        start = start.saturating_add_signed(isize::try_from(*offset).unwrap_or(0));
+        end = end.saturating_add_signed(isize::try_from(*offset).unwrap_or(0));
+        let (mut left, mut right) = (start != 0, end != total);
+        if (left && right && sx <= 6) || ((left || right) && sx <= 3) {
+            left = false;
+            right = false;
+        }
+        let room = sx - 3 * (usize::from(left) + usize::from(right));
+        let each = room / visible;
+        if each == 0 {
+            return None;
+        }
+        Some(Self {
+            items: Vec::new(),
+            panes: false,
+            start,
+            end,
+            left,
+            right,
+            each,
+            remaining: room - visible * each,
+        })
+    }
 }
 
 /// The `choose-tree` arguments the mode reads.
@@ -414,7 +494,92 @@ impl WindowTree {
             pane,
             kill: false,
             unzoom: None,
+            offset: 0,
+            info: false,
         }
+    }
+
+    /// The pane the mode is on.
+    #[must_use]
+    pub fn pane(&self) -> PaneId {
+        self.pane
+    }
+
+    /// `data->preview_is_info`.
+    #[must_use]
+    pub fn info(&self) -> bool {
+        self.info
+    }
+
+    /// The pane `-h` keeps out of the previews.
+    #[must_use]
+    pub fn hidden_pane(&self) -> Option<PaneId> {
+        self.hide_this_pane.then_some(self.pane)
+    }
+
+    /// The strip the preview of `item` shows in `sx` columns, with the
+    /// offset clamped as drawing it does; `None` for a pane or an item
+    /// that is gone.
+    #[must_use]
+    pub fn strip(&self, model: &Model, item: Item, sx: usize, offset: &mut i64) -> Option<Strip> {
+        let (items, current, panes) = match item {
+            Item::Session(s) => {
+                let session = model.sessions.get(&s)?;
+                let items: Vec<Found> = session
+                    .windows
+                    .keys()
+                    .map(|&i| Found::from_winlink(model, s, i))
+                    .collect();
+                let current = session
+                    .windows
+                    .keys()
+                    .position(|&i| i == session.current)
+                    .unwrap_or(items.len());
+                (items, current, false)
+            }
+            Item::Window(s, i) => {
+                let link = Found::from_winlink(model, s, i);
+                let w = model.windows.get(&link.window?)?;
+                let shown: Vec<PaneId> = w
+                    .panes
+                    .panes
+                    .iter()
+                    .copied()
+                    .filter(|p| self.hidden_pane() != Some(*p))
+                    .collect();
+                let current = shown
+                    .iter()
+                    .position(|p| Some(*p) == w.panes.active)
+                    .unwrap_or(shown.len());
+                let items = shown
+                    .into_iter()
+                    .map(|p| Found {
+                        pane: Some(p),
+                        ..link
+                    })
+                    .collect();
+                (items, current, true)
+            }
+            Item::Pane(..) => return None,
+        };
+        let mut strip = Strip::layout(items.len(), current, sx, offset)?;
+        strip.items = items;
+        strip.panes = panes;
+        Some(strip)
+    }
+
+    /// The offset as drawn now: clamped by the strip the preview shows,
+    /// if it shows one (tmux clamps `data->offset` while drawing).
+    #[must_use]
+    pub fn offset(&self, model: &Model) -> i64 {
+        let mut offset = self.offset;
+        if !self.info
+            && let Some((sx, _)) = self.tree.preview_size()
+            && let Some(item) = self.tree.current_item()
+        {
+            let _ = self.strip(model, item.data, sx, &mut offset);
+        }
+        offset
     }
 
     /// `mode_tree_build` over `server`'s model, the start type used up
@@ -581,8 +746,14 @@ impl Server {
     pub(crate) fn tree_key(&mut self, p: PaneId, c: Option<ClientId>, key: Key, typed: bool) {
         let Some((action, item)) = self.with_tree(p, |server, t| {
             let mut tree = std::mem::take(&mut t.tree);
+            let before = (tree.current_item().map(|i| i.tag), tree.builds());
             let action = tree.key(&mut KeyEnv { server, mode: t }, key, typed);
             t.tree = tree;
+            // window_tree_key: another current item scrolls the preview
+            // back (a build makes new items, so it counts).
+            if before != (t.tree.current_item().map(|i| i.tag), t.tree.builds()) {
+                t.offset = 0;
+            }
             (action, t.tree.current_item().map(|i| i.data))
         }) else {
             return;
@@ -652,31 +823,8 @@ impl Server {
             .as_char()
             .filter(|_| !k.has_ctrl() && !k.has_meta());
         match ch {
-            Some('H') => {
-                self.with_tree(p, |server, t| {
-                    let st = t.start;
-                    let mut tree = std::mem::take(&mut t.tree);
-                    {
-                        let mut env = KeyEnv { server, mode: t };
-                        if let Some(s) = st.session {
-                            tree.expand(&mut env, Tag::Session(s));
-                        }
-                        let wl = st
-                            .session
-                            .zip(st.index)
-                            .map(|(s, index)| Tag::Window(s, index));
-                        if let Some(wl) = wl {
-                            tree.expand(&mut env, wl);
-                        }
-                        if !tree.set_current(Tag::Pane(t.pane))
-                            && let Some(wl) = wl
-                        {
-                            tree.set_current(wl);
-                        }
-                    }
-                    t.tree = tree;
-                });
-            }
+            Some(c @ ('<' | '>' | 'i')) => self.tree_preview_key(p, c),
+            Some('H') => self.tree_home(p),
             Some('x') => {
                 let model = &self.model;
                 let label = match item {
@@ -746,6 +894,47 @@ impl Server {
             _ => {}
         }
         false
+    }
+
+    /// `H`: the starting session and window expanded, the starting pane
+    /// selected, else its window.
+    fn tree_home(&mut self, p: PaneId) {
+        self.with_tree(p, |server, t| {
+            let st = t.start;
+            let mut tree = std::mem::take(&mut t.tree);
+            {
+                let mut env = KeyEnv { server, mode: t };
+                if let Some(s) = st.session {
+                    tree.expand(&mut env, Tag::Session(s));
+                }
+                let wl = st
+                    .session
+                    .zip(st.index)
+                    .map(|(s, index)| Tag::Window(s, index));
+                if let Some(wl) = wl {
+                    tree.expand(&mut env, wl);
+                }
+                if !tree.set_current(Tag::Pane(t.pane))
+                    && let Some(wl) = wl
+                {
+                    tree.set_current(wl);
+                }
+            }
+            t.tree = tree;
+        });
+    }
+
+    /// The preview's keys: `<` and `>` scroll its strip from where it is
+    /// drawn, `i` toggles the information view.
+    fn tree_preview_key(&mut self, p: PaneId, c: char) {
+        self.with_tree(p, |server, t| {
+            if c == 'i' {
+                t.info = !t.info;
+                t.tree.view_name = Some(if t.info { "info" } else { "preview" });
+            } else {
+                t.offset = t.offset(&server.model) + if c == '<' { -1 } else { 1 };
+            }
+        });
     }
 
     /// `mode_tree_set_prompt` for the tree mode on pane `p`; `-y` accepts
@@ -1023,5 +1212,45 @@ pub fn sort_option(s: Option<&str>) -> Result<Option<SortOrder>, vtmux_core::err
         Some(s) => SortOrder::parse(s)
             .map(Some)
             .ok_or(vtmux_core::error::EdgeError::InvalidSortOrder),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Strip;
+
+    /// (start, end, left, right, each, remaining, offset after clamping).
+    fn layout(
+        total: usize,
+        current: usize,
+        sx: usize,
+        offset: i64,
+    ) -> (usize, usize, bool, bool, usize, usize, i64) {
+        let mut offset = offset;
+        let s = Strip::layout(total, current, sx, &mut offset).expect("fits");
+        (s.start, s.end, s.left, s.right, s.each, s.remaining, offset)
+    }
+
+    /// `window_tree_draw_session`/`_window` (window-tree.c:534-585), with
+    /// the numbers the reference drew in `tree_preview_layouts` and
+    /// `tree_preview_narrow`: as many 24-column items as fit around the
+    /// current one, `<`/`>` columns for those off a side, the offset
+    /// clamped to what can scroll.
+    #[test]
+    fn strip_layout() {
+        // 4 windows in 76 columns: 3 visible, the first current.
+        assert_eq!(layout(4, 0, 76, 0), (0, 3, false, true, 24, 1, 0));
+        // > scrolls one; a second > is clamped.
+        assert_eq!(layout(4, 0, 76, 1), (1, 4, true, false, 24, 1, 1));
+        assert_eq!(layout(4, 0, 76, 2), (1, 4, true, false, 24, 1, 1));
+        assert_eq!(layout(4, 0, 76, -3), (0, 3, false, true, 24, 1, 0));
+        // Everything fits: no arrows, the last one wider.
+        assert_eq!(layout(3, 2, 76, 0), (0, 3, false, false, 25, 1, 0));
+        // 5 windows in 46 columns, the middle current: one visible.
+        assert_eq!(layout(5, 2, 46, 0), (2, 3, true, true, 40, 0, 0));
+        assert_eq!(layout(5, 4, 46, 0), (4, 5, true, false, 43, 0, 0));
+        // Too narrow for arrows.
+        assert_eq!(layout(3, 1, 6, 0), (1, 2, false, false, 6, 0, 0));
+        assert!(Strip::layout(0, 0, 76, &mut 0).is_none());
     }
 }

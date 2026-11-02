@@ -1235,7 +1235,7 @@ impl Server {
         // server_client_set_session: the current window's latest client
         // (server-client.c:465), then session_update_activity (468).
         self.set_latest(s, id);
-        self.model.touch_session(s);
+        self.model.session_attached_now(s);
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
         // set of modes, not their ordering.
@@ -1890,11 +1890,7 @@ impl Server {
         rows: u16,
         held: Option<&[vtmux_vt::Cell]>,
     ) {
-        let source = crate::render::window::Source {
-            model: &self.model,
-            info: &self.info,
-            env: &self.global_env,
-        };
+        let source = self.render_source();
         let Some((scene, draw)) = source.window(s, screen.cols, rows, caps) else {
             return;
         };
@@ -1935,11 +1931,7 @@ impl Server {
         let Some(p) = self.clients.get(&id).and_then(|c| c.popup.as_ref()) else {
             return;
         };
-        let source = crate::render::window::Source {
-            model: &self.model,
-            info: &self.info,
-            env: &self.global_env,
-        };
+        let source = self.render_source();
         let Some((defaults, border)) = self.popup_styles(id, &source) else {
             return;
         };
@@ -2085,11 +2077,7 @@ impl Server {
             return;
         };
         {
-            let source = crate::render::window::Source {
-                model: &self.model,
-                info: &self.info,
-                env: &self.global_env,
-            };
+            let source = self.render_source();
             let mut ctx =
                 self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
             // status_redraw (status.c:244): the format tree is the client's.
@@ -2259,6 +2247,16 @@ impl Server {
 
     /// The attached clients in connection order, as formats see them
     /// (`sort_get_clients`, sort.c:461-480).
+    /// What drawing a window reads from the server.
+    pub(crate) fn render_source(&self) -> crate::render::window::Source<'_> {
+        crate::render::window::Source {
+            model: &self.model,
+            info: &self.info,
+            env: &self.global_env,
+            clients: self.client_views(),
+        }
+    }
+
     pub fn client_views(&self) -> std::rc::Rc<[ClientView]> {
         self.clients
             .iter()
@@ -2561,6 +2559,7 @@ impl Server {
                 t.insert(index);
                 t
             },
+            last_attached: None,
         });
         if let Some((x, y)) = spec.default_size {
             // cmd-new-session.c:274-280: -x/-y become the session's
@@ -2675,6 +2674,7 @@ impl Server {
                 id: window_id,
                 name,
                 activity,
+                activity_secs: now_epoch(),
                 layout: CoreLayout::new(cols, rows, pane_id),
                 panes: WindowPanes::new(pane_id),
                 zoom: None,
@@ -3068,6 +3068,7 @@ impl Server {
                     let stamp = self.model.touch();
                     if let Some(w) = self.model.windows.get_mut(&window) {
                         w.activity = stamp;
+                        w.activity_secs = crate::model::now_epoch();
                     }
                     self.model.alerts_queue(window, alerts::ACTIVITY);
                     if redraw {

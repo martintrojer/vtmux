@@ -330,7 +330,7 @@ impl Server {
             c.compositor.invalidate();
             // server-client.c:465.
             self.set_latest(s, id);
-            self.model.touch_session(s);
+            self.model.session_attached_now(s);
             if let Some(tty) = self
                 .clients
                 .get(&id)
