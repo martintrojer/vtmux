@@ -81,12 +81,8 @@ pub fn exec(
     }
     let literal = args.flag('l');
     let hex = args.flag('H');
-    let Some(pane) = server.model.panes.get(&p) else {
+    let Some(modes) = server.model.key_modes(p) else {
         return Ok(());
-    };
-    let modes_of = |pane: &crate::model::Pane| KeyModes {
-        app_cursor: pane.term.app_cursor(),
-        app_keypad: pane.term.app_keypad(),
     };
     let mut sent = Vec::new();
     for _ in 0..repeat {
@@ -106,10 +102,9 @@ pub fn exec(
             sent.push(send_keys_item(arg, literal));
         }
     }
-    let bytes_for = |modes: KeyModes| -> Vec<u8> {
-        sent.iter().flat_map(|s| s.bytes(modes)).collect()
-    };
-    let bytes = bytes_for(modes_of(pane));
+    let bytes_for =
+        |modes: KeyModes| -> Vec<u8> { sent.iter().flat_map(|s| s.bytes(modes)).collect() };
+    let bytes = bytes_for(modes);
     // window_pane_key (window.c:2095): nothing reaches an input-off pane.
     server.write_pane(p, &bytes);
     // window_pane_copy_key: each key again for the synchronized panes, in
@@ -117,9 +112,8 @@ pub fn exec(
     server.copy_to_synchronized(p, |server, other| {
         server
             .model
-            .panes
-            .get(&other)
-            .map(|o| bytes_for(modes_of(o)))
+            .key_modes(other)
+            .map(bytes_for)
             .unwrap_or_default()
     });
     Ok(())

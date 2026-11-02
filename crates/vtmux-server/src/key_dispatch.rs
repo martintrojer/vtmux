@@ -418,20 +418,26 @@ impl Server {
         match event.kind {
             KeyKind::Paste(start) => {
                 c.pasting = start;
-                // server_client_is_bracket_paste: the markers reach a pane
-                // that asked for bracketed paste.
+                // server_client_is_bracket_paste returns 0 for the markers,
+                // so they are keys: window_pane_key writes one to a pane
+                // that asked for bracketed paste (input_key), and
+                // window_pane_copy_key does the same for each synchronized
+                // pane by its own mode, whatever the typing pane asked.
                 if let Some(p) = self.client_pane(id)
                     && !self.clients[&id].flags.read_only
-                    && self.model.panes[&p].term.bracketed_paste()
                     && self.model.panes[&p].modes.is_empty()
-                    && self.model.panes[&p].io.is_some()
-                    && !self.model.panes[&p].input_off
                 {
-                    // window_pane_paste (window.c:2053-2069): the marker,
-                    // then a copy of its bytes to the synchronized panes.
                     let marker: &[u8] = if start { b"\x1b[200~" } else { b"\x1b[201~" };
-                    self.write_pane(p, marker);
-                    self.copy_to_synchronized(p, |_, _| marker.to_vec());
+                    if self.model.panes[&p].term.bracketed_paste() {
+                        self.write_pane(p, marker);
+                    }
+                    self.copy_to_synchronized(p, |server, other| {
+                        if server.model.panes[&other].term.bracketed_paste() {
+                            marker.to_vec()
+                        } else {
+                            Vec::new()
+                        }
+                    });
                 }
             }
             KeyKind::Key(key) => {

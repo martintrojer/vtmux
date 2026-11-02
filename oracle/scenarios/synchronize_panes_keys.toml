@@ -1,0 +1,23 @@
+# synchronize-panes with typed keys (window.c:2019-2108): each key goes to
+# the other synchronized panes encoded for their own screen (%1 is in
+# application cursor mode, %0 is not), and bracketed paste text is copied
+# as typed, but the markers are keys (server_client_is_bracket_paste is 0
+# for them) that each pane gets by its own ?2004: %1 never asked for it.
+name = "synchronize_panes_keys"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "stty raw -echo; printf '\\033[?2004h'; tmux wait-for -S ready; exec cat -v"] },
+  { run = ["splitw", "-d", "-t", "a", "sh", "-c", "stty raw -echo; printf '\\033[?1h'; tmux wait-for -S ready1; exec cat -v"] },
+  { wait_for = "ready" },
+  { wait_for = "ready1" },
+  { run = ["setw", "-t", "a", "synchronize-panes", "on"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u001b[Aq\u0003" },
+  { settle = {} },
+  { keys = "\u001b[200~xy\u001b[201~z" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "%1", "#{pane_synchronized}"] },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { run = ["capture-pane", "-p", "-t", "%1"] },
+]

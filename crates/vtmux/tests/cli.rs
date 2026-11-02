@@ -5328,3 +5328,92 @@ fn pane_mouse_modes() {
         runs
     });
 }
+
+/// `synchronize-panes` (window.c:2019-2050, 2053-2108 `window_pane_key`,
+/// `window_pane_copy_key`): a key sent to a pane goes to the window's other
+/// synchronized panes too, encoded for each pane's own screen (pane 1 is in
+/// application cursor mode), but not to a pane that has the option off
+/// (`set -p`), has input off, is in a mode, or is hidden by a zoom; the
+/// sender needs the option as well; `paste-buffer` is not copied. Pane
+/// programs are `cat -v` in raw mode, so the bytes show.
+/// Panes are addressed by id. `#{pane_synchronized}` follows the pane's option.
+#[test]
+fn synchronize_panes() {
+    compare("synchronize_panes", |w| {
+        let prog =
+            "stty raw -echo; [ $0 = p1 ] && printf '\\033[?1h'; printf '%s\\r\\n' $0; exec cat -v";
+        let mut runs = vec![w.run(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "60", "sh", "-c", prog, "p0",
+        ])];
+        for name in ["p1", "p2", "p3", "p4"] {
+            runs.push(w.run(&["splitw", "-d", "-t", "a", "sh", "-c", prog, name]));
+        }
+        runs.push(w.run(&["select-layout", "-t", "a", "tiled"]));
+        // Only %1 is in application cursor mode.
+        for i in 0..5 {
+            w.wait_for_text(&format!("%{i}"), &format!("p{i}"));
+        }
+        runs.push(w.run(&["setw", "-t", "a", "synchronize-panes", "on"]));
+        runs.push(w.run(&["set", "-p", "-t", "%2", "synchronize-panes", "off"]));
+        runs.push(w.run(&["select-pane", "-d", "-t", "%3"]));
+        runs.push(w.run(&["copy-mode", "-t", "%4"]));
+        for i in 0..5 {
+            let t = format!("%{i}");
+            runs.push(w.run(&["display", "-p", "-t", &t, "#{pane_synchronized}"]));
+        }
+        runs.push(w.run(&[
+            "send-keys",
+            "-t",
+            "%0",
+            "Up",
+            "C-a",
+            "M-x",
+            "Enter",
+            "-l",
+            "hi",
+        ]));
+        runs.push(w.run(&[
+            "send-keys",
+            "-t",
+            "%1",
+            "Down",
+            "C-S-a",
+            "S-Enter",
+            "-H",
+            "41",
+        ]));
+        w.wait_for_text("%1", "hi");
+        w.wait_for_text("%0", "A");
+        std::thread::sleep(Duration::from_millis(300));
+        for i in 0..5 {
+            runs.push(w.run(&["capture-pane", "-p", "-t", &format!("%{i}")]));
+        }
+        // The sender needs the option: pane 2 sends to nobody, and nobody
+        // sends to pane 2.
+        runs.push(w.run(&["send-keys", "-t", "%2", "-l", "from2"]));
+        // paste-buffer goes to its target only.
+        runs.push(w.run(&["set-buffer", "-b", "p", "pasted"]));
+        runs.push(w.run(&["paste-buffer", "-b", "p", "-t", "%0"]));
+        w.wait_for_text("%0", "pasted");
+        w.wait_for_text("%2", "from2");
+        // A zoomed window: the hidden panes get nothing.
+        runs.push(w.run(&["resize-pane", "-Z", "-t", "%0"]));
+        runs.push(w.run(&["send-keys", "-t", "%0", "-l", "zoomed"]));
+        w.wait_for_text("%0", "zoomed");
+        std::thread::sleep(Duration::from_millis(300));
+        runs.push(w.run(&["resize-pane", "-Z", "-t", "%0"]));
+        for i in 0..5 {
+            runs.push(w.run(&["capture-pane", "-p", "-t", &format!("%{i}")]));
+        }
+        // Back in normal mode: a pane in a mode does not copy to the rest.
+        runs.push(w.run(&["copy-mode", "-t", "%0"]));
+        runs.push(w.run(&["send-keys", "-t", "%0", "-l", "inmode"]));
+        runs.push(w.run(&["copy-mode", "-q", "-t", "%0"]));
+        runs.push(w.run(&["copy-mode", "-q", "-t", "%4"]));
+        std::thread::sleep(Duration::from_millis(300));
+        for i in 0..5 {
+            runs.push(w.run(&["capture-pane", "-p", "-t", &format!("%{i}")]));
+        }
+        runs
+    });
+}

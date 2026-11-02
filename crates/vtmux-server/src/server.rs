@@ -1728,8 +1728,8 @@ impl Server {
     /// `synchronize-panes` to the window's other panes
     /// (`window_pane_copy_key`, each encoded for its own screen).
     /// `pasting` is a key inside a bracketed paste, which tmux writes as
-    /// the bytes the terminal sent (`window_pane_paste`, which copies
-    /// them to the other panes as they are).
+    /// the bytes the terminal sent (`window_pane_paste`), and copies to
+    /// the other panes as they are.
     pub(crate) fn forward_key(
         &mut self,
         p: PaneId,
@@ -1746,9 +1746,8 @@ impl Server {
             self.mode_key(p, c, key.to_core(), true);
             return;
         }
-        let modes = crate::keys::KeyModes {
-            app_cursor: pane.term.app_cursor(),
-            app_keypad: pane.term.app_keypad(),
+        let Some(modes) = self.model.key_modes(p) else {
+            return;
         };
         let bytes = crate::keys::encode(key, modes);
         self.write_pane(p, &bytes);
@@ -1758,17 +1757,8 @@ impl Server {
             }
             server
                 .model
-                .panes
-                .get(&other)
-                .map(|o| {
-                    crate::keys::encode(
-                        key,
-                        crate::keys::KeyModes {
-                            app_cursor: o.term.app_cursor(),
-                            app_keypad: o.term.app_keypad(),
-                        },
-                    )
-                })
+                .key_modes(other)
+                .map(|m| crate::keys::encode(key, m))
                 .unwrap_or_default()
         });
     }
@@ -1792,12 +1782,7 @@ impl Server {
         }
         for other in self.model.synchronized_peers(p) {
             let bytes = bytes_for(self, other);
-            if let Some(io) = self
-                .model
-                .panes
-                .get_mut(&other)
-                .and_then(|o| o.io.as_mut())
-            {
+            if let Some(io) = self.model.panes.get_mut(&other).and_then(|o| o.io.as_mut()) {
                 io.write(&bytes);
             }
             self.pane_output_queued(other);
