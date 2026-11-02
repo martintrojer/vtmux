@@ -5537,6 +5537,99 @@ fn border_drag_resizes_panes() {
     assert_eq!(seen[1][3], "%0 0,0 23x9\n%1 24,0 16x2\n%3 24,3 16x6");
 }
 
+/// One write holding a whole border drag (a terminal under load batches
+/// motion reports into one read): every motion still fires
+/// `window-layout-changed` and a control `%layout-change` with the layout
+/// at that step, the clamped ones too (cmd-resize-pane.c:357-420 runs per
+/// `KEYC_DRAGGING` event). Hook count and control sequence match tmux 3.8.
+#[test]
+fn border_drag_in_one_read_fires_each_step() {
+    // Press, motions, release; SGR 1-based.
+    let drags: [(&str, &[&str], &str); 3] = [
+        (
+            "horizontal",
+            &[],
+            "\x1b[<0;21;3M\x1b[<32;18;3M\x1b[<32;15;3M\x1b[<32;12;3M\x1b[<32;9;3M\x1b[<0;9;3m",
+        ),
+        // 21>10>1>30: the 1-column step is clamped and still reported.
+        (
+            "clamped",
+            &[],
+            "\x1b[<0;21;3M\x1b[<32;10;3M\x1b[<32;1;3M\x1b[<32;30;3M\x1b[<0;30;3m",
+        ),
+        (
+            "vertical",
+            &["splitw", "-v", "-t", "a:0.1", "cat"],
+            "\x1b[<0;30;5M\x1b[<32;30;7M\x1b[<32;30;9M\x1b[<32;30;3M\x1b[<0;30;3m",
+        ),
+    ];
+    for (what, split, bytes) in drags {
+        let mut seen = Vec::new();
+        for bin in bins() {
+            let mut cmds: Vec<&[&str]> = Vec::new();
+            if !split.is_empty() {
+                cmds.push(split);
+            }
+            cmds.push(&["set", "-g", "@n", ""]);
+            cmds.push(&[
+                "set-hook",
+                "-g",
+                "window-layout-changed",
+                "set -gaF @n ' L'",
+            ]);
+            let (w, mut a) = mouse_world(bin, &cmds);
+            let mut control = Command::new(&w.bin)
+                .args(w.args())
+                .args(["-C", "attach", "-t", "a"])
+                .env_clear()
+                .envs(w.env())
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut out = control.stdout.take().unwrap();
+            let reader = thread::spawn(move || {
+                let mut s = String::new();
+                let _ = std::io::Read::read_to_string(&mut out, &mut s);
+                s
+            });
+            // The control client is attached once it is listed.
+            let start = Instant::now();
+            while String::from_utf8_lossy(&w.cli(&["lsc"]).stdout)
+                .lines()
+                .count()
+                < 2
+            {
+                assert!(start.elapsed() < Duration::from_secs(5), "{what}");
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert!(w.cli(&["set", "-g", "@n", ""]).status.success());
+            a.keys(bytes.as_bytes());
+            let hooks = stable(Duration::from_millis(500), || {
+                String::from_utf8_lossy(&w.cli(&["show", "-gv", "@n"]).stdout).into_owned()
+            });
+            drop(control.stdin.take());
+            let _ = control.wait();
+            let layouts: Vec<String> = reader
+                .join()
+                .unwrap()
+                .lines()
+                .filter(|l| l.starts_with("%layout-change"))
+                .map(|l| l.split(' ').nth(2).unwrap_or_default().to_owned())
+                .collect();
+            seen.push((hooks, layouts, geometry(&w)));
+        }
+        assert_eq!(seen[0], seen[1], "{what}: vtmux (left) vs tmux 3.8 (right)");
+        let (hooks, layouts, _) = &seen[1];
+        assert_eq!(
+            hooks.trim().split(' ').count(),
+            layouts.len(),
+            "{what}: one hook per %layout-change: {hooks:?} {layouts:?}"
+        );
+        assert!(layouts.len() >= 3, "{what}: {layouts:?}");
+    }
+}
+
 /// A 40x10 client on session `a`, one pane printing `lines` then reading
 /// raw (so the screen is the lines), status-right and the pane title
 /// pinned, then `cmds`.
