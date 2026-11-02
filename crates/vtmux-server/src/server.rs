@@ -666,6 +666,12 @@ impl Server {
                 .map(|d| d.saturating_duration_since(now)),
             self.panes_deadline()
                 .map(|d| d.saturating_duration_since(now)),
+            self.clients
+                .values()
+                .filter(|c| c.attached.is_some() && c.control.is_none())
+                .filter_map(|c| c.compositor.due())
+                .min()
+                .map(|d| d.saturating_duration_since(now)),
         ]
         .into_iter()
         .flatten()
@@ -1973,19 +1979,13 @@ impl Server {
             let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
             let queued = client.unacked.bytes;
             let lines = u16::try_from(self.status_line_size(client)).unwrap_or(u16::MAX);
-            if !self
-                .clients
-                .get_mut(&id)
-                .expect("client")
-                .compositor
-                .ready(queued, cols, rows)
-            {
+            let client = self.clients.get_mut(&id).expect("client");
+            if !client.compositor.ready(queued, cols, rows) {
                 // tty_add drops what comes while the client is blocked.
-                self.clients
-                    .get_mut(&id)
-                    .expect("client")
-                    .passthrough
-                    .clear();
+                client.passthrough.clear();
+                continue;
+            }
+            if self.defer_frame(id, s, queued) {
                 continue;
             }
             let mut screen = vtmux_vt::Snapshot {
@@ -2058,6 +2058,34 @@ impl Server {
                 self.send(id, &ServerMsg::Frame(raw));
             }
         }
+    }
+
+    /// `server_client_check_redraw` (server-client.c:2532-2558): while the
+    /// client's terminal still has output to write (`queued`), defer the
+    /// frame; the client's `FrameAck` turns the loop and lands here again. A
+    /// flood is then drawn at the rate the terminal takes it, and while a
+    /// pane still has output waiting (the backlog) at most once per
+    /// [`crate::render::FRAME_INTERVAL`], not once per pane read. A pane's
+    /// `PANE_REDRAW` (cleared at the end of this turn) becomes
+    /// `CLIENT_REDRAWWINDOW`, as tmux's deferred redraw does.
+    fn defer_frame(&mut self, id: ClientId, s: SessionId, queued: usize) -> bool {
+        let flood = !self.backlog.is_empty();
+        let Some(client) = self.clients.get_mut(&id) else {
+            return true;
+        };
+        if queued == 0 && client.compositor.paced(Instant::now(), flood) {
+            return false;
+        }
+        let pane_redraw = self.model.current_of(s).is_some_and(|(_, w, _)| {
+            self.model
+                .redraw_panes
+                .iter()
+                .any(|p| self.model.panes.get(p).is_some_and(|x| x.window == w))
+        });
+        if pane_redraw {
+            client.status.request_window_redraw();
+        }
+        true
     }
 
     /// The job handles for one frame: the status line's, and the pane
