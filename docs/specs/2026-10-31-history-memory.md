@@ -61,7 +61,7 @@ All measured by a pinned benchmark script in the repo (`scripts/bench-history-me
 3. **No visible delay:** `copy-mode` entry on fully compressed 100k-line history takes no more than 2× entry on the same history uncompressed (one pane, release build). `capture-pane -S - -E -` output is byte-identical before and after compression.
 4. **Idle CPU:** with nothing to compress, the server does no compression work (no wakeups for it).
 5. **Compliance:** check.sh green; no oracle or regress change except new scenarios pinning `history-limit` applied to existing panes (a compliance fix).
-6. **Threading gate:** the benchmark records the longest single compression step on the main loop and the output latency of a busy pane while another pane compresses. If a step exceeds 2 ms, or the busy pane's latency rises measurably, switch to the fallback: `PaneTerm` behind a per-pane `Mutex`, full-mode compression on a worker thread, and the event loop uses `try_lock` so a pane being compressed drains its output one turn later instead of blocking the loop.
+6. **Threading gate (BRIEF v2, hist_compress_r2):** every measured main-loop compression step must be at most 5 ms, and busy-pane PTY-to-client-frame latency must rise less than 10% at p95 against a build without compression. Measure alternating release builds under `/tmp/vtmux-stress.lock` at host load below 4. Rework single-threaded scheduling and work bounds first; if those cannot meet the gate, switch to the fallback: `PaneTerm` behind a per-pane `Mutex`, full-mode compression on a worker thread, and the event loop uses `try_lock` so a pane being compressed drains its output one turn later instead of blocking the loop.
 
 ## Builder check (2026-10-31) — facts that reshape the plan
 
@@ -87,6 +87,25 @@ All measured by a pinned benchmark script in the repo (`scripts/bench-history-me
 ## Retention as built (hist_retain, 2026-11-01)
 
 The byte-budget resolution above was refuted (scratch `delegate_refute-hist-retain`): a byte budget holds far fewer rows of styled output, so `#{history_size}` fell below tmux's (5620 rows for tmux's 9978 at 80 columns, 70 truecolour cells per line). Ghostty 3bd54e025 has a line limit (`OPT_SCROLLBACK_MAX_LINES`), now exposed by the vendored wrapper. `PaneTerm` sets it to `max(history-limit, hsize)` plus one page of rows at the current width, re-sets it after every resize, and turns the byte limit off. Ghostty prunes whole pages, so it keeps every row tmux has and at most one page more, whatever the styling. `history-limit 0` keeps the byte limit at 0, since the line limit can't go below a page. Applying `history-limit` changes to existing panes moved to task `hist_limit_live`. Numbers: `docs/test-health/2026-11-01-history-memory.md`.
+
+## Compression round 2 schedule and work bounds
+
+The round-1 gate record was refuted: spec busy-pane p95 rose 18–22%, styled
+pages took 5–7 ms, and a single new line restarted a traversal of compressed
+history. The new schedule requires 50 ms of whole-loop quiet, with no starvation
+override; input always wins. A completed pane pass is rearmed only after a
+standard page of new scrollback, or a history read/resize. Continuous activity
+may therefore defer memory reclamation indefinitely.
+
+Grid pages are not split. Standard pages still use a single LZ4 step; larger
+pages encode an owned immutable snapshot in 128 KiB blocks. Snapshot allocation,
+comparison and publication are capped at 4 MiB; larger pages stay resident.
+Publication requires unchanged generation, activity, metadata and bytes. Failed,
+skipped or no-op work advances the traversal; it never counts as progress.
+Encoded allocations use Ghostty's page allocator, not the general malloc heap,
+so retaining compressed history does not perturb transient render allocations.
+No process-wide allocator tuning or worker thread is introduced. Measurements
+and any unmet criteria are recorded in `docs/test-health/` and task notes.
 
 ## Implementation checklist
 

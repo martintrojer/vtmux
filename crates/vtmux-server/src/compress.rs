@@ -12,8 +12,8 @@
 //! A step runs only in a loop turn that woke for nothing else (poll timed
 //! out) at least [`QUIET`] after the last turn that had work, so it never
 //! follows straight on from a pane's output (before its frame is even
-//! flushed, or when its next output is likeliest); after [`STARVED`]
-//! without such a turn it runs anyway. A turn woken for a step alone runs only the step
+//! flushed, or when its next output is likeliest). There is no starvation
+//! override: continuously busy loops defer compression. A turn woken for a step alone runs only the step
 //! and polls again: the rest of a turn costs more than a step (a full
 //! render pass, about 1.2 ms for one attached client, against 0.3 ms). After each step the loop rests [`REST_FACTOR`]
 //! times as long as the step took (and at least [`STEP_GAP`]), blocked in
@@ -41,10 +41,7 @@ pub const IDLE: Duration = Duration::from_secs(5);
 pub const REST_FACTOR: u32 = 100;
 
 /// How long the loop must have had nothing to do before a step runs.
-pub const QUIET: Duration = Duration::from_millis(5);
-
-/// How long a due step waits for a quiet turn before it runs anyway.
-pub const STARVED: Duration = Duration::from_millis(250);
+pub const QUIET: Duration = Duration::from_millis(50);
 
 /// The least rest between two steps: Ghostty's own renderer waits 1 ms
 /// before a pending pass's next step (renderer/Thread.zig `step_interval`).
@@ -59,19 +56,36 @@ pub struct PaneCompress {
     due: Option<Instant>,
     /// Ghostty can't compress on this target: never due again.
     unsupported: bool,
+    /// Scroll progress at the last completed pass (including pruning).
+    completed_scroll: Option<u64>,
+    /// A resize restores history even without a full page of new output.
+    size: Option<(u16, u16)>,
 }
 
 impl PaneCompress {
     /// Look at `term` after something that may have changed its history:
-    /// a new activity restarts the idle delay from `now`. With no history
-    /// to compress the pane is not due at all.
+    /// a new activity postpones a pending pass. A completed pass waits
+    /// for one page of new scrollback, or an explicit history read/resize.
+    /// With no history to compress the pane is not due at all.
     pub fn observe(&mut self, term: &PaneTerm, now: Instant) {
         let activity = term.compression_activity();
-        if self.unsupported || self.activity == Some(activity) {
+        let size = (term.cols(), term.rows());
+        let resized = self.size != Some(size);
+        self.size = Some(size);
+        if self.unsupported || (self.activity == Some(activity) && !resized) {
             return;
         }
+        let read = self
+            .activity
+            .is_some_and(|old| activity.history_was_read(old));
         self.activity = Some(activity);
-        self.due = term.has_history().then(|| now + IDLE);
+        let (scroll, page_rows) = term.compression_progress();
+        let new_page = self
+            .completed_scroll
+            .is_none_or(|last| scroll < last || scroll.saturating_sub(last) >= page_rows as u64);
+        if self.due.is_some() || read || resized || new_page {
+            self.due = term.has_history().then(|| now + IDLE);
+        }
     }
 
     /// When the pane next wants a step.
@@ -95,6 +109,7 @@ impl PaneCompress {
             self.due = None;
             self.activity = Some(term.compression_activity());
             self.unsupported = result == Compression::Unsupported;
+            self.completed_scroll = Some(term.compression_progress().0);
         }
         Some(result)
     }
@@ -149,8 +164,7 @@ impl Server {
     /// One loop turn's compression: panes whose history vtmux read since
     /// the last turn (capture-pane, copy mode) are looked at again, then,
     /// if the turn was `idle` (woke for nothing else) and the loop has been
-    /// [`QUIET`], or the step is [`STARVED`], the next due pane after the
-    /// last one stepped runs one step.
+    /// [`QUIET`], the next due pane after the last one stepped runs one step.
     pub(crate) fn compress_turn(&mut self, now: Instant, idle: bool) {
         let reads = vtmux_vt::history_reads();
         if reads != self.compress.reads {
@@ -159,15 +173,15 @@ impl Server {
                 p.compress.observe(&p.term, now);
             }
         }
-        let starved = self.compress_due().is_some_and(|due| now >= due + STARVED);
         if !idle {
             self.compress.busy_at = Some(now);
-        }
-        if self.compress.rest_until.is_some_and(|r| r > now) && !starved {
             return;
         }
-        let quiet = idle && self.compress.busy_at.is_none_or(|b| now >= b + QUIET);
-        if !quiet && !starved {
+        if self.compress.rest_until.is_some_and(|r| r > now) {
+            return;
+        }
+        let quiet = self.compress.busy_at.is_none_or(|b| now >= b + QUIET);
+        if !quiet {
             return;
         }
         let panes = self
@@ -279,6 +293,24 @@ mod tests {
     /// Nothing to compress, nothing due: a pane without history, or
     /// without a full page of it.
     #[test]
+    fn trickle_does_not_restart_a_pass() {
+        let now = Instant::now();
+        let mut t = PaneTerm::new(120, 40, 100_000);
+        let mut c = PaneCompress::default();
+        fill(&mut t, 8000);
+        c.observe(&t, now);
+        drain(&mut c, &mut t, now + IDLE);
+        for i in 1..20 {
+            fill(&mut t, 1);
+            c.observe(&t, now + Duration::from_secs(i * 6));
+            assert_eq!(c.due(), None, "one new line is not a page");
+        }
+        fill(&mut t, 1000);
+        c.observe(&t, now + Duration::from_secs(120));
+        assert!(c.due().is_some(), "new full pages do arm compression");
+    }
+
+    #[test]
     fn no_history_no_deadline() {
         let now = Instant::now();
         let mut none = PaneTerm::new(80, 24, 0);
@@ -372,10 +404,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// A busy turn (one that handled events) doesn't step, nor does an
-    /// idle one less than QUIET after it, unless the step waited STARVED.
+    /// A busy turn never steps, even after long starvation; a quiet turn
+    /// later resumes the pass.
     #[test]
-    fn busy_turns_step_only_when_starved() {
+    fn busy_turns_never_force_compression() {
         let (mut server, p, _, _, dir) = crate::mode::prompt::tests::setup();
         server.reset_mode_all(p);
         let t0 = Instant::now();
@@ -387,16 +419,19 @@ mod tests {
         // Idle, but not QUIET since the busy turn.
         server.compress_turn(due + Duration::from_millis(1), true);
         assert_eq!(server.compress_deadline(), Some(due + QUIET));
-        server.compress_turn(
-            due + STARVED.checked_sub(Duration::from_millis(1)).unwrap(),
-            false,
-        );
+        server.compress_turn(due + Duration::from_millis(249), false);
         assert_eq!(server.model.panes[&p].term.compressed_pages(), 0);
-        server.compress_turn(due + STARVED, false);
+        server.compress_turn(due + Duration::from_millis(250), false);
+        assert_eq!(server.model.panes[&p].term.compressed_pages(), 0);
+        // Even long starvation must not put compression on the input path.
+        let busy = due + Duration::from_secs(60);
+        server.compress_turn(busy, false);
+        assert_eq!(server.model.panes[&p].term.compressed_pages(), 0);
+        server.compress_turn(busy + QUIET, true);
         assert_eq!(server.model.panes[&p].term.compressed_pages(), 1);
         // Read again: due IDLE later; a busy turn then holds the step off
         // until the loop has been QUIET.
-        let t1 = due + Duration::from_secs(60);
+        let t1 = busy + Duration::from_secs(60);
         let _ = capture(&server.model.panes[&p].term, all());
         server.compress_turn(t1, true);
         assert_eq!(server.compress_due(), Some(t1 + IDLE));

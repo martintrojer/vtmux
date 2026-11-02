@@ -52,6 +52,7 @@ fn main() {
     let rss_before = rss_mb();
     let (mut steps, mut max, mut total) = (0, Duration::ZERO, Duration::ZERO);
     loop {
+        assert!(steps < 10_000, "compression did not make progress");
         let start = Instant::now();
         let r = t.compress_step();
         let took = start.elapsed();

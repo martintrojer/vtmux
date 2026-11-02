@@ -1,0 +1,322 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 3d78596ed..07b33ebb5 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -445,6 +445,7 @@ page_size: usize,
+ /// compress(.incremental) to work. More details on all that there and
+ /// in the state struct.
+ page_compression: IncrementalCompressionState = .{},
++compression_job: ?struct { serial: u64, activity: u48, job: compression.Page.Job } = null,
+ 
+ /// A node available for immediate reuse by createPage, bypassing the
+ /// memory pool round trip. This is only set during column reflow
+@@ -969,6 +970,7 @@ fn releasePoolPage(pool: *MemoryPool, page: *const Page) void {
+ 
+ /// Deinit the pagelist, freeing all page memory and the memory pool.
+ pub fn deinit(self: *PageList) void {
++    self.cancelCompressionJob();
+     // Verify integrity before cleanup
+     self.assertIntegrity();
+ 
+@@ -990,6 +992,7 @@ pub fn deinit(self: *PageList) void {
+ pub fn reset(self: *PageList) void {
+     defer self.assertIntegrity();
+ 
++    self.cancelCompressionJob();
+     // Reset discards all scrollback, so there is nothing left to compress.
+     self.page_compression.reset();
+ 
+@@ -4901,6 +4904,7 @@ pub fn compress(
+             .unsupported => break .unsupported,
+         },
+         .full => full: {
++            self.cancelCompressionJob();
+             // Match incremental mode's unsupported result. Full compression
+             // has no useful work to perform without strict reclamation.
+             if (!terminal_mem.canReclaim(.strict)) {
+@@ -4923,6 +4927,25 @@ pub fn compress(
+ fn compressIncremental(self: *PageList) IncrementalCompressionResult {
+     const state = &self.page_compression;
+ 
++    if (self.compression_job) |*pending| {
++        // Resolve the generation before dereferencing any saved page data.
++        var it: CompressionIterator = .init(self);
++        var found: ?*List.Node = null;
++        while (it.next()) |node| {
++            if (node.serial == pending.serial) {
++                found = node;
++                break;
++            }
++        }
++        if (found) |node| {
++            if (!node.isCompressed() and pending.activity == state.activity_serial) {
++                if (self.stepCompressionJob(node)) state.flags.did_compress = true;
++                return .pending;
++            }
++        }
++        self.cancelCompressionJob();
++    }
++
+     // If we can't reclaim virtual memory, compression is unsupported.
+     if (!terminal_mem.canReclaim(.strict)) {
+         state.reset();
+@@ -4966,12 +4989,18 @@ fn compressIncremental(self: *PageList) IncrementalCompressionResult {
+         // If this page is already compressed, ignore it.
+         if (node.isCompressed()) continue;
+ 
+-        // Compression is substantially more expensive even if it fails.
+-        // So we just try it.
+-        if (self.compressPage(node)) state.flags.did_compress = true;
++        // Chunk the codec input, never the grid. The job owns its snapshot
++        // and output; an oversized or failed attempt still advances.
++        if (node.metadata().memory.len > std_size) {
++            if (compression.Page.Job.init(self.pool.pages.allocator, node.page()) catch null) |job| {
++                self.compression_job = .{ .serial = node.serial, .activity = state.activity_serial, .job = job };
++            }
++        } else if (self.compressPage(node)) state.flags.did_compress = true;
+         break;
+     }
+ 
++    if (self.compression_job != null) return .pending;
++
+     // If we didn't reach our active node, then we still have work to do.
+     if (!it.done()) return .pending;
+ 
+@@ -4993,6 +5022,42 @@ fn compressIncremental(self: *PageList) IncrementalCompressionResult {
+     return .complete;
+ }
+ 
++fn cancelCompressionJob(self: *PageList) void {
++    if (self.compression_job) |*pending| pending.job.deinit();
++    self.compression_job = null;
++}
++
++/// True only after publication. A failed/no-op job leaves the traversal
++/// marker at its attempted node, so the following call advances.
++fn stepCompressionJob(self: *PageList, node: *List.Node) bool {
++    const pending = &self.compression_job.?;
++    if (!(pending.job.step() catch false)) {
++        self.cancelCompressionJob();
++        return false;
++    }
++    if (!pending.job.complete()) return false;
++    if (!pending.job.matches(node.page())) {
++        self.cancelCompressionJob();
++        return false;
++    }
++    const compressed = pending.job.finish() orelse {
++        self.cancelCompressionJob();
++        return false;
++    };
++    const allowed: bool = allowed: {
++        compressPage_tw.check(.decommit) catch break :allowed false;
++        break :allowed true;
++    };
++    if (!allowed or !terminal_mem.decommit(.strict, node.page().memory, node.page().memory.len)) {
++        self.cancelCompressionJob();
++        return false;
++    }
++    pending.job.output = &.{};
++    node.data = .{ .compressed = compressed };
++    self.cancelCompressionJob();
++    return true;
++}
++
+ /// Compress every fully historical resident page which is currently cold.
+ fn compressFull(self: *PageList) void {
+     var it: CompressionIterator = .init(self);
+@@ -5050,7 +5115,7 @@ fn compressPage(self: *PageList, node: *List.Node) bool {
+ 
+         var table: compression.lz4.HashTable = undefined;
+         const result = compression.Page.init(
+-            self.pool.alloc,
++            if (builtin.is_test) self.pool.alloc else self.pool.pages.allocator,
+             page,
+             scratch.bytes()[0..required],
+             &table,
+@@ -8729,7 +8794,11 @@ test "PageList incremental compression restarts after replacement" {
+     // restarts at the first page and considers the oversized replacement.
+     const restarted = s.compress(.incremental);
+     try testing.expectEqual(IncrementalCompressionResult.pending, restarted);
+-    try testing.expect(replacement.isCompressed());
++    var steps: usize = 0;
++    while (!replacement.isCompressed()) : (steps += 1) {
++        try testing.expect(steps < 100);
++        _ = s.compress(.incremental);
++    }
+ }
+ 
+ test "PageList incremental compression restarts after reset" {
+@@ -9012,7 +9081,11 @@ test "PageList incremental compression restarts after earlier replacement" {
+     try testing.expect(!replacement.isCompressed());
+ 
+     _ = s.compress(.incremental);
+-    try testing.expect(replacement.isCompressed());
++    var steps: usize = 0;
++    while (!replacement.isCompressed()) : (steps += 1) {
++        try testing.expect(steps < 100);
++        _ = s.compress(.incremental);
++    }
+ }
+ 
+ test "PageList incremental compression keeps progress after tail growth" {
+diff --git a/src/terminal/compress/Page.zig b/src/terminal/compress/Page.zig
+index 8eb9caabc..103baaf92 100644
+--- a/src/terminal/compress/Page.zig
++++ b/src/terminal/compress/Page.zig
+@@ -48,6 +48,8 @@ page: TerminalPage,
+ 
+ /// Exact raw LZ4 block for `page.memory`.
+ encoded: []u8,
++allocation: ?[]u8 = null,
++chunked: bool = false,
+ 
+ /// Allocator which owns `encoded`.
+ ///
+@@ -145,7 +147,7 @@ pub fn init(
+ /// This intentionally does not free `page.memory`. The PageList node which
+ /// supplied the source page continues to own that pool or heap allocation.
+ pub fn deinit(self: *Page) void {
+-    self.alloc.free(self.encoded);
++    self.alloc.free(self.allocation orelse self.encoded);
+     self.* = undefined;
+ }
+ 
+@@ -158,7 +160,7 @@ pub fn deinit(self: *Page) void {
+ /// it does not own a new allocation.
+ pub fn restore(self: *const Page) lz4.DecompressError!TerminalPage {
+     const result = self.page;
+-    _ = try lz4.decompress(self.encoded, result.memory);
++    try self.decode(result.memory);
+     return result;
+ }
+ 
+@@ -410,3 +412,128 @@ test "compressed Page can retry after malformed encoded data" {
+     const restored = try compressed.restore();
+     try testing.expectEqualSlices(u8, expected, restored.memory);
+ }
++
++/// Incremental block encoding of a page snapshot. Raw grid pages are never
++/// split: only the codec input is chunked. A job owns all intermediate bytes.
++pub const Job = struct {
++    pub const block_bytes = 128 * 1024;
++    /// Copy/publish are bounded too. Larger pages remain resident.
++    pub const max_bytes = 4 * 1024 * 1024;
++    source: TerminalPage,
++    raw: []u8,
++    output: []u8,
++    pos: usize = 0,
++    used: usize = 0,
++    alloc: Allocator,
++
++    pub fn init(alloc: Allocator, source: *const TerminalPage) Allocator.Error!?Job {
++        if (source.memory.len > max_bytes) return null;
++        if (std.valgrind.runningOnValgrind() > 0)
++            std.valgrind.memcheck.makeMemDefined(source.memory);
++        const raw = try alloc.dupe(u8, source.memory);
++        errdefer alloc.free(raw);
++        const output = try alloc.alloc(u8, source.memory.len);
++        return .{ .source = source.*, .raw = raw, .output = output, .alloc = alloc };
++    }
++
++    pub fn deinit(self: *Job) void {
++        self.alloc.free(self.raw);
++        self.alloc.free(self.output);
++        self.* = undefined;
++    }
++
++    /// One independent raw LZ4 block; its four-byte length precedes it.
++    /// Return false if the complete representation cannot save memory.
++    pub fn step(self: *Job) lz4.CompressError!bool {
++        if (self.pos == self.raw.len) return true;
++        const end = @min(self.raw.len, self.pos + block_bytes);
++        if (self.output.len - self.used < 4) return false;
++        var table: lz4.HashTable = undefined;
++        const n = lz4.compress(self.raw[self.pos..end], self.output[self.used + 4 ..], &table) catch |err| switch (err) {
++            error.OutputTooSmall => return false,
++            else => return err,
++        };
++        std.mem.writeInt(u32, self.output[self.used..][0..4], @intCast(n), .little);
++        self.used += n + 4;
++        self.pos = end;
++        return true;
++    }
++
++    pub fn complete(self: *const Job) bool {
++        return self.pos == self.raw.len;
++    }
++
++    /// Validate both page metadata and every byte before publishing. In-place
++    /// writes need not bump PageList's activity token (e.g. row dirty flags).
++    pub fn matches(self: *const Job, source: *const TerminalPage) bool {
++        return std.meta.eql(self.source, source.*) and
++            std.mem.eql(u8, self.raw, source.memory);
++    }
++
++    /// Transfer encoded ownership; no full-size copy on the final step.
++    pub fn finish(self: *Job) ?Page {
++        assert(self.complete());
++        if (self.used + (@sizeOf(Page) - @sizeOf(TerminalPage)) >= self.raw.len)
++            return null;
++        // Shrink in place only: publication must not copy a whole large
++        // page's encoding on the event loop. Failure leaves it resident.
++        self.output = self.alloc.remap(self.output, self.used) orelse return null;
++        return .{
++            .page = self.source,
++            .encoded = self.output[0..self.used],
++            .allocation = self.output,
++            .chunked = true,
++            .alloc = self.alloc,
++        };
++    }
++};
++
++/// Decode independent blocks into the original contiguous page mapping.
++fn decode(self: *const Page, memory: []u8) lz4.DecompressError!void {
++    if (!self.chunked) {
++        _ = try lz4.decompress(self.encoded, memory);
++        return;
++    }
++    var ip: usize = 0;
++    var op: usize = 0;
++    while (op < memory.len) {
++        if (self.encoded.len - ip < 4) return error.TruncatedInput;
++        const n = std.mem.readInt(u32, self.encoded[ip..][0..4], .little);
++        ip += 4;
++        if (n > self.encoded.len - ip) return error.TruncatedInput;
++        const end = @min(memory.len, op + Job.block_bytes);
++        _ = try lz4.decompress(self.encoded[ip..][0..n], memory[op..end]);
++        ip += n;
++        op = end;
++    }
++    if (ip != self.encoded.len) return error.OutputSizeMismatch;
++}
++
++test "chunked Page completes with bounded codec work and exact identity" {
++    const testing = std.testing;
++    var source = try TerminalPage.init(.{ .cols = 80, .rows = 600, .styles = 50000 });
++    defer source.deinit();
++    var job = (try Job.init(testing.allocator, &source)).?;
++    defer job.deinit();
++    var steps: usize = 0;
++    while (!job.complete()) {
++        const pos = job.pos;
++        try testing.expect(try job.step());
++        try testing.expect(job.pos > pos);
++        try testing.expect(job.pos - pos <= Job.block_bytes);
++        steps += 1;
++        try testing.expect(steps < 100);
++    }
++    try testing.expect(steps > 1);
++    try testing.expect(job.matches(&source));
++    source.memory[0] ^= 1;
++    try testing.expect(!job.matches(&source));
++    source.memory[0] ^= 1;
++    var compressed = job.finish().?;
++    // finish transfers output, while the snapshot remains owned by the job.
++    job.output = &.{};
++    defer compressed.deinit();
++    @memset(source.memory, 0);
++    const restored = try compressed.restore();
++    try testing.expectEqualSlices(u8, job.raw, restored.memory);
++}

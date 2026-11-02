@@ -56,6 +56,14 @@ pub struct CompressionActivity {
     reads: u64,
 }
 
+impl CompressionActivity {
+    /// Explicit history reads restore pages even without new scrollback.
+    #[must_use]
+    pub fn history_was_read(self, previous: Self) -> bool {
+        self.reads != previous.reads
+    }
+}
+
 /// What one [`PaneTerm::compress_step`] left to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Compression {
@@ -1181,6 +1189,12 @@ impl PaneTerm {
         }
     }
 
+    /// Scroll progress and the minimum batch before starting another pass.
+    #[must_use]
+    pub fn compression_progress(&self) -> (u64, usize) {
+        (self.scrolled, self.page_rows)
+    }
+
     /// Whether Ghostty may hold history to compress. It compresses only
     /// the primary screen's pages before the one holding the active area's
     /// top row (PageList.zig `CompressionIterator`), so under a page of
@@ -1191,10 +1205,10 @@ impl PaneTerm {
         self.alternate_on() || self.retained_rows() >= self.page_rows
     }
 
-    /// One bounded step of scrollback compression
-    /// (`ghostty_terminal_compress`, incremental): at most one page
-    /// compressed out of at most eight inspected. Compressed pages read
-    /// back the same; reading one restores it.
+    /// One bounded step of scrollback compression. Standard pages use
+    /// one LZ4 call; oversized pages use 128 KiB snapshot blocks (vendored
+    /// patch 0004). Skips and failed attempts advance the pass. Reading a
+    /// compressed page restores exactly the original bytes.
     pub fn compress_step(&mut self) -> Compression {
         match self.term.compress(CompressionMode::Incremental) {
             Ok(CompressionResult::Pending) => Compression::Pending,
