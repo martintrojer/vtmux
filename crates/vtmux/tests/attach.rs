@@ -4585,10 +4585,21 @@ fn status_jobs_refresh_on_interval_and_refresh_client() {
         w.cli(&["set", "-g", "status-interval", "1"]);
         a.wait(|a| status_count(a) >= Some(4));
         let seen = status_count(&a).unwrap();
-        // Back to none: it settles at the last run.
+        // Back to none: it settles at the last run. A job started by the
+        // last tick may still finish and redraw after the option changes,
+        // so wait until the count holds still for a full second (tmux on
+        // a slow runner took over 1.5 s).
         w.cli(&["set", "-g", "status-interval", "0"]);
-        thread::sleep(Duration::from_millis(1500));
-        let settled = status_count(&a).unwrap();
+        let mut settled = status_count(&a).unwrap();
+        let end = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            thread::sleep(Duration::from_millis(1000));
+            let now = status_count(&a).unwrap();
+            if now == settled || std::time::Instant::now() > end {
+                break;
+            }
+            settled = now;
+        }
         assert!(settled >= seen, "{what}: went back");
         thread::sleep(Duration::from_millis(2200));
         assert_eq!(status_count(&a), Some(settled), "{what}: kept running");
