@@ -54,7 +54,9 @@ struct World {
 
 impl World {
     fn new(bin: &Path) -> Self {
-        let tmpdir = tempfile::tempdir().expect("tempdir");
+        // Under /tmp, not $TMPDIR: macOS's /var/folders/... path is long
+        // enough to wrap a 60-column pane's `pwd` line (panes_respawn).
+        let tmpdir = tempfile::tempdir_in("/tmp").expect("tempdir");
         Self {
             bin: bin.to_owned(),
             label: format!("cli{}", std::process::id()),
