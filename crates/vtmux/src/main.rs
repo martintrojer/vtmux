@@ -194,6 +194,7 @@ fn connect_or_start(
         Ok(Forked::Daemon) => {
             // server_start closes the lock descriptor (server.c:223-227).
             drop(lock);
+            let listener = daemon::close_inherited(listener);
             let code = vtmux_server::run_server(listener, path.to_owned(), config);
             std::process::exit(code);
         }
