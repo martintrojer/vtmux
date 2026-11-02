@@ -76,7 +76,7 @@ pub fn exec(
         return mode_command(server, args, found, p, tc);
     }
     if in_mode {
-        mode_keys(server, item, args, p, repeat, tc);
+        mode_keys(server, item, args, found, p, repeat, tc);
         return Ok(());
     }
     let literal = args.flag('l');
@@ -280,12 +280,14 @@ fn run_pipe(server: &mut Server, found: Found, pipe: Pipe) {
 /// Keys for a pane in a mode go through the mode's key table, not to the
 /// program (`cmd_send_keys_inject_key`, cmd-send-keys.c:93-104): a bound
 /// key runs its commands after this command, any other key does nothing.
-/// The commands run with the command's own current target, where tmux
-/// gives them the send-keys target.
+/// The commands run with the send-keys target as their current target
+/// (`key_bindings_dispatch(bd, item, tc, &event, target)`), so a bound
+/// `send -X cancel` reaches the target pane even when it is not active.
 fn mode_keys(
     server: &mut Server,
     item: &mut Item,
     args: &Args,
+    found: Found,
     p: PaneId,
     repeat: i64,
     tc: Option<ClientId>,
@@ -344,6 +346,7 @@ fn mode_keys(
             // right after this command, each key's after the last.
             let mut batch = Item::new(item.client, item.cwd.clone());
             batch.origin = item.origin;
+            batch.origin.current = Some(found);
             batch.env.clone_from(&item.env);
             batch.utf8 = item.utf8;
             let batch = NewBatch::new(batch, commands.calls, End::Quiet);
