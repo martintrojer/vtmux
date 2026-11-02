@@ -1,0 +1,198 @@
+{
+  "meta": {
+    "date": "2026-11-02 21:31 UTC",
+    "commit": "4a1bcf4",
+    "host": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "AMD Ryzen 7 5700X3D 8-Core Processor",
+    "cpus": 16,
+    "kernel": "7.2.11-200.fc44.x86_64",
+    "load_at_start": 1.9736328125,
+    "runs": 3,
+    "versions": {
+      "tmux": "tmux 3.8",
+      "vtmux": "vtmux 0.0.0 (tmux 3.8)"
+    }
+  },
+  "scenarios": {
+    "throughput_attached": {
+      "title": "throughput_attached (100 MB log, one 200x50 client, window-size latest)",
+      "rows": {
+        "plain / sync off": {
+          "tmux": {
+            "wall_s": 2.8407976099988446,
+            "server_cpu_s": 2.7163481570000005,
+            "client_cpu_s": 0.0,
+            "term_bytes_per_mb": 1034350.4775745923,
+            "sync_frames": 0,
+            "peak_rss_mb": 7.515625,
+            "total_cpu_s": 2.7163481570000005
+          },
+          "vtmux": {
+            "wall_s": 1.4447431240114383,
+            "server_cpu_s": 1.436440028,
+            "client_cpu_s": 0.010251309,
+            "term_bytes_per_mb": 53591.15495235697,
+            "sync_frames": 0,
+            "peak_rss_mb": 15.55078125,
+            "total_cpu_s": 1.446691337
+          }
+        },
+        "plain / sync on": {
+          "tmux": {
+            "wall_s": 2.841262091998942,
+            "server_cpu_s": 2.763802036,
+            "client_cpu_s": 0.0,
+            "term_bytes_per_mb": 1038289.3236140037,
+            "sync_frames": 25815,
+            "peak_rss_mb": 7.4921875,
+            "total_cpu_s": 2.763802036
+          },
+          "vtmux": {
+            "wall_s": 1.4466017280356027,
+            "server_cpu_s": 1.4159625219999998,
+            "client_cpu_s": 0.010175145,
+            "term_bytes_per_mb": 55085.5495540857,
+            "sync_frames": 133,
+            "peak_rss_mb": 15.6875,
+            "total_cpu_s": 1.4261376669999999
+          }
+        },
+        "sgr / sync off": {
+          "tmux": {
+            "wall_s": 4.0600897609838285,
+            "server_cpu_s": 3.850773553,
+            "client_cpu_s": 0.0,
+            "term_bytes_per_mb": 1043259.6589196962,
+            "sync_frames": 0,
+            "peak_rss_mb": 7.48828125,
+            "total_cpu_s": 3.850773553
+          },
+          "vtmux": {
+            "wall_s": 3.6899959199945442,
+            "server_cpu_s": 3.4846134469999996,
+            "client_cpu_s": 0.023496379999999997,
+            "term_bytes_per_mb": 127552.0469776898,
+            "sync_frames": 0,
+            "peak_rss_mb": 15.22265625,
+            "total_cpu_s": 3.5081098269999997
+          }
+        },
+        "sgr / sync on": {
+          "tmux": {
+            "wall_s": 4.060888721025549,
+            "server_cpu_s": 3.83398222,
+            "client_cpu_s": 0.0,
+            "term_bytes_per_mb": 1047184.0468098578,
+            "sync_frames": 25776,
+            "peak_rss_mb": 7.53515625,
+            "total_cpu_s": 3.83398222
+          },
+          "vtmux": {
+            "wall_s": 3.6838598549948074,
+            "server_cpu_s": 3.509197111,
+            "client_cpu_s": 0.023558664,
+            "term_bytes_per_mb": 124851.84062067309,
+            "sync_frames": 271,
+            "peak_rss_mb": 15.46484375,
+            "total_cpu_s": 3.532755775
+          }
+        }
+      }
+    },
+    "render": {
+      "title": "render (4 panes in a 200x50 client, each cat'ing 3000 cursor-addressed 95x22 frames; 22 MB of input)",
+      "input_mb": 22.143028,
+      "rows": {
+        "sync off": {
+          "tmux": {
+            "wall_s": 0.6586782850208692,
+            "server_cpu_s": 0.6265229400000001,
+            "client_cpu_s": 0.0,
+            "term_mb": 10.090753,
+            "sync_frames": 0,
+            "peak_rss_mb": 5.41015625,
+            "total_cpu_s": 0.6265229400000001
+          },
+          "vtmux": {
+            "wall_s": 0.45247443800326437,
+            "server_cpu_s": 0.402861675,
+            "client_cpu_s": 0.00137529,
+            "term_mb": 0.492945,
+            "sync_frames": 0,
+            "peak_rss_mb": 11.4453125,
+            "total_cpu_s": 0.40423696499999995
+          }
+        },
+        "sync on": {
+          "tmux": {
+            "wall_s": 0.6608473510132171,
+            "server_cpu_s": 0.6433519150000001,
+            "client_cpu_s": 0.0,
+            "term_mb": 10.112487,
+            "sync_frames": 1357,
+            "peak_rss_mb": 5.41015625,
+            "total_cpu_s": 0.6433519150000001
+          },
+          "vtmux": {
+            "wall_s": 0.4557092959876172,
+            "server_cpu_s": 0.411412648,
+            "client_cpu_s": 0.001461342,
+            "term_mb": 0.513419,
+            "sync_frames": 34,
+            "peak_rss_mb": 11.37890625,
+            "total_cpu_s": 0.41287398999999997
+          }
+        }
+      }
+    },
+    "many_clients": {
+      "title": "many_clients (1 session, 8 clients 80x24, 100x30, 120x40, 132x43, 160x50, 200x50, 90x35, 240x60, window-size smallest, 20 MB flood in one of 2 panes)",
+      "rows": {
+        "sync off": {
+          "tmux": {
+            "wall_s": 1.4269018130144104,
+            "server_cpu_s": 1.2821347119999997,
+            "client_cpu_s": 0.0,
+            "term_mb": 29.090817,
+            "rss_attached_mb": 6.5,
+            "rss_mb": 7.3359375,
+            "peak_rss_mb": 7.3359375,
+            "total_cpu_s": 1.2821347119999997
+          },
+          "vtmux": {
+            "wall_s": 0.8709747759858146,
+            "server_cpu_s": 0.756800606,
+            "client_cpu_s": 0.012272930000000001,
+            "term_mb": 2.177913,
+            "rss_attached_mb": 13.96875,
+            "rss_mb": 17.70703125,
+            "peak_rss_mb": 19.796875,
+            "total_cpu_s": 0.769073536
+          }
+        },
+        "sync on": {
+          "tmux": {
+            "wall_s": 5.170713952975348,
+            "server_cpu_s": 5.102244016,
+            "client_cpu_s": 0.0,
+            "term_mb": 189.31255,
+            "rss_attached_mb": 6.32421875,
+            "rss_mb": 7.26171875,
+            "peak_rss_mb": 7.26171875,
+            "total_cpu_s": 5.102244016
+          },
+          "vtmux": {
+            "wall_s": 0.8691648420062847,
+            "server_cpu_s": 0.8349226609999999,
+            "client_cpu_s": 0.013545504000000002,
+            "term_mb": 2.472679,
+            "rss_attached_mb": 14.44921875,
+            "rss_mb": 17.41796875,
+            "peak_rss_mb": 19.8046875,
+            "total_cpu_s": 0.8484681649999999
+          }
+        }
+      }
+    }
+  }
+}
