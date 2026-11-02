@@ -5265,3 +5265,59 @@ fn format_jobs_in_commands() {
         ]
     });
 }
+
+/// Pane mouse modes (input.c:1957-1972, 2054-2073): 1000/1002/1003 are
+/// mutually exclusive and any reset of 1000-1003 clears all, 1005/1006 are
+/// independent, RIS clears them, the alternate screen leaves them. DECRQM
+/// 1000-1006 and the six `mouse_*_flag` formats come from those bits.
+/// Recorded with: `new-window 'stty raw -echo min 1 time 20; printf SEQ;
+/// <DECRQM 1000 1002 1003 1005 1006, replies through cat -v>; echo DONE;
+/// exec cat'` then `display -p -t w '#{mouse_any_flag}...'`.
+#[test]
+fn pane_mouse_modes() {
+    compare("pane_mouse_modes", |w| {
+        let seqs: &[&str] = &[
+            "",
+            "\\033[?1000h",
+            "\\033[?1000h\\033[?1002h",
+            "\\033[?1000h\\033[?1002h\\033[?1002l",
+            "\\033[?1003h",
+            "\\033[?1003h\\033[?1000l",
+            "\\033[?1002h\\033[?1001l",
+            "\\033[?1000;1002h",
+            "\\033[?1002h\\033[?1006h",
+            "\\033[?1006h\\033[?1005h",
+            "\\033[?1006h\\033[?1005h\\033[?1000h\\033[?1000l",
+            "\\033[?1005h\\033[?1006h\\033[?1006l",
+            "\\033[?1003h\\033[?1006h\\033[?1049h",
+            "\\033[?1002h\\033[?1005h\\033[?1049h\\033[?1049l",
+            "\\033[?1003h\\033[?1005h\\033[?1006h\\033c",
+            "\\033[?1001h",
+            "\\033[?1000$h",
+            "\\033[?1000:1h",
+            "\\033[1000h",
+            "\\033[?7;1003;2004h",
+        ];
+        let mut runs = vec![w.run(&["new", "-d", "-s", "a", "-x", "60", "-y", "12", "cat"])];
+        for (i, seq) in seqs.iter().enumerate() {
+            let name = format!("m{i}");
+            let prog = format!(
+                "stty raw -echo min 1 time 20; printf '{seq}'; for m in 1000 1002 1003 1005 1006; do \
+                 printf \"\\033[?$m\\$p\"; dd bs=1 count=11 2>/dev/null | cat -v; printf '\\r\\n'; done; \
+                 echo DONE; exec cat"
+            );
+            runs.push(w.run(&["neww", "-d", "-n", &name, &prog]));
+            w.wait_for_text(&name, "DONE");
+            runs.push(w.run(&["capture-pane", "-p", "-t", &name]));
+            runs.push(w.run(&[
+                "display",
+                "-p",
+                "-t",
+                &name,
+                "#{mouse_any_flag}#{mouse_standard_flag}#{mouse_button_flag}#{mouse_all_flag}\
+                 #{mouse_sgr_flag}#{mouse_utf8_flag} #{alternate_on}",
+            ]));
+        }
+        runs
+    });
+}

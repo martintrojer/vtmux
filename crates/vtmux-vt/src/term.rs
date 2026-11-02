@@ -133,6 +133,8 @@ pub struct PaneTerm {
     scan: AltModeScanner,
     /// tmux's cursor style state, shared with the scanner and the reply hook.
     cursor: Rc<StdCell<CursorState>>,
+    /// tmux's `MODE_MOUSE_*` bits, shared with the scanner and the reply hook.
+    mouse: Rc<StdCell<MouseModes>>,
     /// The newest `hsize` history rows, copied when the alternate screen was
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
@@ -206,6 +208,9 @@ impl PaneTerm {
         let cursor = Rc::new(StdCell::new(CursorState::default()));
         let cursor_seen = Rc::clone(&cursor);
         let cursor_scan = Rc::clone(&cursor);
+        let mouse = Rc::new(StdCell::new(MouseModes::default()));
+        let mouse_seen = Rc::clone(&mouse);
+        let mouse_scan = Rc::clone(&mouse);
         let bells = Rc::new(std::cell::Cell::new(0u32));
         let belled = Rc::clone(&bells);
         let title_override = Rc::new(RefCell::new(None));
@@ -213,7 +218,7 @@ impl PaneTerm {
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
-                if let Some(reply) = tmux_reply(term, cursor_seen.get(), data) {
+                if let Some(reply) = tmux_reply(term, cursor_seen.get(), mouse_seen.get(), data) {
                     sink.borrow_mut().extend_from_slice(&reply);
                 }
             })
@@ -277,8 +282,10 @@ impl PaneTerm {
             times_base: 0,
             pin: None,
             cursor,
+            mouse,
             scan: AltModeScanner {
                 cursor: cursor_scan,
+                mouse: mouse_scan,
                 osc_cap: dcs::capacity(dcs::DEFAULT_BUFFER_SIZE),
                 ..AltModeScanner::default()
             },
@@ -889,6 +896,17 @@ impl PaneTerm {
         self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false)
     }
 
+    /// The mouse modes the program asked for, as tmux holds them: what
+    /// `#{mouse_any_flag}` and the other `mouse_*_flag` formats read, what
+    /// DECRQM `?1000`-`?1006` report, and what decides forwarding of
+    /// mouse events to the pane and the outer terminal's mouse mode.
+    /// Not Ghostty's bits (see [`MouseModes`]). Alternate screen switches
+    /// leave it alone, RIS clears it.
+    #[must_use]
+    pub fn mouse_modes(&self) -> MouseModes {
+        self.mouse.get()
+    }
+
     /// True while the alternate screen is active (`#{alternate_on}`).
     #[must_use]
     pub fn alternate_on(&self) -> bool {
@@ -1150,6 +1168,69 @@ struct AltModeScanner {
     csi_ignored: bool,
     /// The cursor style tmux would hold, shared with the reply handler.
     cursor: Rc<StdCell<CursorState>>,
+    /// The mouse modes tmux would hold, shared with the reply handler.
+    mouse: Rc<StdCell<MouseModes>>,
+}
+
+/// Which mouse events the pane program asked for: tmux's mutually exclusive
+/// `MODE_MOUSE_STANDARD`, `MODE_MOUSE_BUTTON` and `MODE_MOUSE_ALL`
+/// (`?1000`, `?1002`, `?1003`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MouseTracking {
+    /// No mouse mode: the pane did not ask for mouse events.
+    #[default]
+    None,
+    /// `?1000`: button press and release.
+    Standard,
+    /// `?1002`: also motion while a button is down.
+    Button,
+    /// `?1003`: all motion.
+    All,
+}
+
+/// The pane's mouse modes as tmux keeps them (`s->mode`, input.c:1960-1972,
+/// 2054-2073), tracked from the byte stream by [`AltModeScanner`] and
+/// independent of Ghostty's mode bits, which are not mutually exclusive and
+/// answer DECRQM differently. Read it with [`PaneTerm::mouse_modes`].
+///
+/// The server uses it three ways: forwarding mouse events to the pane
+/// (`tracking` says whether and how much, `utf8` and `sgr` pick the
+/// encoding), the outer terminal's mode (`tty_update_mode`, tty.c:904-920),
+/// and the `mouse_*_flag` formats.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MouseModes {
+    /// `?1000`, `?1002` or `?1003`: setting one clears the others, and
+    /// resetting any of `?1000`-`?1003` clears all.
+    pub tracking: MouseTracking,
+    /// `?1005` (`MODE_MOUSE_UTF8`), set and reset on its own.
+    pub utf8: bool,
+    /// `?1006` (`MODE_MOUSE_SGR`), set and reset on its own.
+    pub sgr: bool,
+}
+
+impl MouseModes {
+    /// `ALL_MOUSE_MODES`: any of the three tracking modes is set
+    /// (`#{mouse_any_flag}`).
+    #[must_use]
+    pub fn any(self) -> bool {
+        self.tracking != MouseTracking::None
+    }
+
+    /// `CSI ? n h|l` for one mode number; other numbers change nothing.
+    fn apply(&mut self, n: u64, set: bool) {
+        let tracking = match n {
+            1000 => MouseTracking::Standard,
+            1002 => MouseTracking::Button,
+            1003 => MouseTracking::All,
+            // `case 1001` resets only (input.c:1957-1960); setting it is
+            // not in the set switch.
+            1001 if !set => MouseTracking::None,
+            1005 => return self.utf8 = set,
+            1006 => return self.sgr = set,
+            _ => return,
+        };
+        self.tracking = if set { tracking } else { MouseTracking::None };
+    }
 }
 
 /// tmux's cursor style state: `s->cstyle`, `MODE_CURSOR_BLINKING`,
@@ -1393,6 +1474,9 @@ impl AltModeScanner {
                     b'c' => {
                         // RIS: `colour_palette_clear` (input.c:1408).
                         self.palette.clear();
+                        // `screen_write_reset` leaves only cursor and wrap
+                        // in `s->mode` (screen-write.c:430).
+                        self.mouse.set(MouseModes::default());
                         self.charset_op(CharsetOp::Reset);
                         return Some(ScanEvent::Reset);
                     }
@@ -1489,14 +1573,21 @@ impl AltModeScanner {
                 }
                 None
             }
-            // Private SM/RM: only the blink mode (12) touches our state.
+            // Private SM/RM: the blink mode (12) and the mouse modes touch
+            // our state, in parameter order.
             (true, None, b'h' | b'l') if !self.csi_ignored => {
                 if let Some(params) = parse_params(&self.params) {
                     let mut c = self.cursor.get();
-                    for _ in params.into_iter().filter(|p| *p == Param::Num(12)) {
-                        c.set_blinking(b == b'h');
+                    let mut m = self.mouse.get();
+                    for p in params {
+                        match p {
+                            Param::Num(12) => c.set_blinking(b == b'h'),
+                            Param::Num(n) => m.apply(n, b == b'h'),
+                            _ => {}
+                        }
                     }
                     self.cursor.set(c);
+                    self.mouse.set(m);
                 }
                 None
             }
@@ -1578,10 +1669,15 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 /// 21 t (input.c:2143-2149), every OSC query (colours, clipboard, OSC 5522,
 /// 7501; tmux answers colours only from client state), XTGETTCAP, Kitty
 /// graphics and Glyph Protocol APC.
-fn tmux_reply(term: &Terminal<'_, '_>, cursor: CursorState, data: &[u8]) -> Option<Vec<u8>> {
+fn tmux_reply(
+    term: &Terminal<'_, '_>,
+    cursor: CursorState,
+    mouse: MouseModes,
+    data: &[u8],
+) -> Option<Vec<u8>> {
     if let Some(body) = data.strip_prefix(b"\x1b[") {
         if let Some(params) = body.strip_suffix(b"$y") {
-            return decrqm_reply(term, cursor, params);
+            return decrqm_reply(term, cursor, mouse, params);
         }
         return match body.last()? {
             b'c' if body.starts_with(b"?") => Some(b"\x1b[?1;2c".to_vec()),
@@ -1607,7 +1703,12 @@ fn tmux_reply(term: &Terminal<'_, '_>, cursor: CursorState, data: &[u8]) -> Opti
 
 /// DECRQM reply from tmux's table. `params` is the Ghostty reply between
 /// `ESC[` and `$y`: `[?]mode;state`.
-fn decrqm_reply(term: &Terminal<'_, '_>, cursor: CursorState, params: &[u8]) -> Option<Vec<u8>> {
+fn decrqm_reply(
+    term: &Terminal<'_, '_>,
+    cursor: CursorState,
+    mouse: MouseModes,
+    params: &[u8],
+) -> Option<Vec<u8>> {
     let (private, rest) = match params.strip_prefix(b"?") {
         Some(rest) => (true, rest),
         None => (false, params),
@@ -1619,7 +1720,8 @@ fn decrqm_reply(term: &Terminal<'_, '_>, cursor: CursorState, params: &[u8]) -> 
     if mode == 0 {
         return None; // `if (m > 0)`, input.c:1649, 1721
     }
-    let on = |m: Mode| if term.mode(m).unwrap_or(false) { 1 } else { 2 }; // 1 set, 2 reset
+    let reported = |set: bool| if set { 1 } else { 2 }; // 1 set, 2 reset
+    let on = |m: Mode| reported(term.mode(m).unwrap_or(false));
     let state: u8 = if private {
         match mode {
             1 => on(Mode::DECCKM),
@@ -1635,12 +1737,13 @@ fn decrqm_reply(term: &Terminal<'_, '_>, cursor: CursorState, params: &[u8]) -> 
                     2
                 }
             }
-            1000 => on(Mode::NORMAL_MOUSE),
-            1002 => on(Mode::BUTTON_MOUSE),
-            1003 => on(Mode::ANY_MOUSE),
+            // tmux's own bits, not Ghostty's (input.c:1689-1706).
+            1000 => reported(mouse.tracking == MouseTracking::Standard),
+            1002 => reported(mouse.tracking == MouseTracking::Button),
+            1003 => reported(mouse.tracking == MouseTracking::All),
             1004 => on(Mode::FOCUS_EVENT),
-            1005 => on(Mode::UTF8_MOUSE),
-            1006 => on(Mode::SGR_MOUSE),
+            1005 => reported(mouse.utf8),
+            1006 => reported(mouse.sgr),
             2004 => on(Mode::BRACKETED_PASTE),
             2026 => on(Mode::SYNC_OUTPUT),
             2031 => on(Mode::COLOR_SCHEME_REPORT),
@@ -1695,6 +1798,97 @@ mod tests {
         let mut t = PaneTerm::new(cols, rows, 100);
         t.feed(bytes);
         t.take_replies()
+    }
+
+    fn mouse_after(bytes: &[u8]) -> MouseModes {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(bytes);
+        t.mouse_modes()
+    }
+
+    fn decrqm(bytes: &[u8], mode: u16) -> String {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(bytes);
+        t.feed(format!("\x1b[?{mode}$p").as_bytes());
+        String::from_utf8(t.take_replies()).unwrap()
+    }
+
+    #[test]
+    fn mouse_tracking_modes_are_exclusive() {
+        use MouseTracking::{All, Button, None, Standard};
+        for (seq, want) in [
+            (&b"\x1b[?1000h"[..], Standard),
+            (b"\x1b[?1002h", Button),
+            (b"\x1b[?1003h", All),
+            (b"\x1b[?1000h\x1b[?1002h", Button),
+            (b"\x1b[?1002h\x1b[?1003h", All),
+            (b"\x1b[?1003h\x1b[?1000h", Standard),
+            (b"\x1b[?1000;1002h", Button),
+            // Any reset of 1000-1003 clears all of them.
+            (b"\x1b[?1000h\x1b[?1002h\x1b[?1002l", None),
+            (b"\x1b[?1003h\x1b[?1000l", None),
+            (b"\x1b[?1002h\x1b[?1001l", None),
+            (b"\x1b[?1002h\x1b[?1003l", None),
+            // 1001 is not a set mode.
+            (b"\x1b[?1001h", None),
+        ] {
+            assert_eq!(mouse_after(seq).tracking, want, "{seq:?}");
+        }
+    }
+
+    #[test]
+    fn mouse_format_modes_are_independent() {
+        let m = mouse_after(b"\x1b[?1006h");
+        assert!(m.sgr && !m.utf8 && !m.any());
+        let m = mouse_after(b"\x1b[?1005h\x1b[?1006h\x1b[?1000h");
+        assert!(m.sgr && m.utf8 && m.any());
+        // Resetting tracking leaves the format bits.
+        let m = mouse_after(b"\x1b[?1005h\x1b[?1006h\x1b[?1000h\x1b[?1000l");
+        assert!(m.sgr && m.utf8 && !m.any());
+        let m = mouse_after(b"\x1b[?1005h\x1b[?1006h\x1b[?1005l");
+        assert!(m.sgr && !m.utf8);
+        let m = mouse_after(b"\x1b[?1005h\x1b[?1006h\x1b[?1006l");
+        assert!(!m.sgr && m.utf8);
+    }
+
+    #[test]
+    fn mouse_modes_survive_alternate_screen_and_reset_on_ris() {
+        let m = mouse_after(b"\x1b[?1002h\x1b[?1006h\x1b[?1049h");
+        assert_eq!((m.tracking, m.sgr), (MouseTracking::Button, true));
+        let m = mouse_after(b"\x1b[?1002h\x1b[?1049h\x1b[?1049l");
+        assert_eq!(m.tracking, MouseTracking::Button);
+        assert_eq!(
+            mouse_after(b"\x1b[?1003h\x1b[?1005h\x1b[?1006h\x1bc"),
+            MouseModes::default()
+        );
+    }
+
+    #[test]
+    fn mouse_sequences_tmux_ignores_change_nothing() {
+        // Intermediate byte, or a sub-parameter: not tmux's private SM.
+        assert!(!mouse_after(b"\x1b[?1000$h").any());
+        assert!(!mouse_after(b"\x1b[?1000:1h").any());
+        assert!(!mouse_after(b"\x1b[1000h").any());
+        // Unknown modes beside a mouse mode do not stop it.
+        assert_eq!(
+            mouse_after(b"\x1b[?7;1003;2004h").tracking,
+            MouseTracking::All
+        );
+    }
+
+    #[test]
+    fn decrqm_mouse_follows_tmux_bits() {
+        // tmux answers 2 for 1000 after ?1000h?1002h (Ghostty: 1).
+        let seq = b"\x1b[?1000h\x1b[?1002h";
+        assert_eq!(decrqm(seq, 1000), "\x1b[?1000;2$y");
+        assert_eq!(decrqm(seq, 1002), "\x1b[?1002;1$y");
+        assert_eq!(decrqm(seq, 1003), "\x1b[?1003;2$y");
+        let seq = b"\x1b[?1000h\x1b[?1002h\x1b[?1002l";
+        assert_eq!(decrqm(seq, 1000), "\x1b[?1000;2$y");
+        assert_eq!(decrqm(seq, 1002), "\x1b[?1002;2$y");
+        assert_eq!(decrqm(b"\x1b[?1006h", 1006), "\x1b[?1006;1$y");
+        assert_eq!(decrqm(b"\x1b[?1005h", 1005), "\x1b[?1005;1$y");
+        assert_eq!(decrqm(b"\x1b[?1003h\x1bc", 1003), "\x1b[?1003;2$y");
     }
 
     /// A DCS is tmux's, not Ghostty's: a `tmux;` payload comes out for the
