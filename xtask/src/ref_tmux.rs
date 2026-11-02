@@ -126,10 +126,18 @@ fn cache_root() -> Result<PathBuf> {
 }
 
 fn check_version(bin: &Path) -> Result<()> {
-    let out = Command::new(bin)
-        .arg("-V")
-        .output()
-        .or_else(|e| err(format!("{}: {e}", bin.display())))?;
+    // ETXTBSY: a freshly written binary is briefly open for writing in a
+    // child forked by a parallel thread (between its fork and exec).
+    let mut tries = 0;
+    let out = loop {
+        match Command::new(bin).arg("-V").output() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 50 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            r => break r.or_else(|e| err(format!("{}: {e}", bin.display())))?,
+        }
+    };
     let got = String::from_utf8_lossy(&out.stdout);
     if out.status.success() && got.trim_end_matches('\n') == VERSION_LINE {
         Ok(())
