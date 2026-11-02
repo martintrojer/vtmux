@@ -418,6 +418,7 @@ pub fn resize(master: impl std::os::fd::AsFd, cols: u16, rows: u16) -> io::Resul
 
 /// `osdep_get_name` (osdep-linux.c:30-61): argv[0] of the PTY's foreground
 /// process group, from /proc.
+#[cfg(not(target_os = "macos"))]
 #[must_use]
 pub fn foreground_name(master: &OwnedFd) -> Option<String> {
     let pgrp = rustix::termios::tcgetpgrp(master).ok()?;
@@ -426,12 +427,80 @@ pub fn foreground_name(master: &OwnedFd) -> Option<String> {
     Some(vtmux_core::rawstr::from_bytes(first))
 }
 
+/// `osdep_get_name` (osdep-darwin.c:37-69): the foreground process group's
+/// `p_comm` (the executable's name, at most 16 bytes, so `/bin/sh` is
+/// `bash`), from `proc_pidinfo(PROC_PIDT_SHORTBSDINFO)`.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn foreground_name(master: &OwnedFd) -> Option<String> {
+    let pgrp = rustix::termios::tcgetpgrp(master).ok()?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdshortinfo>::zeroed();
+    let size = libc::c_int::try_from(size_of::<libc::proc_bsdshortinfo>()).ok()?;
+    // SAFETY: the buffer is a zeroed proc_bsdshortinfo of the size passed.
+    let got = unsafe {
+        libc::proc_pidinfo(
+            pgrp.as_raw_nonzero().get(),
+            libc::PROC_PIDT_SHORTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if got != size {
+        return None;
+    }
+    // SAFETY: proc_pidinfo filled all `size` bytes.
+    let info = unsafe { info.assume_init() };
+    let comm: Vec<u8> = info
+        .pbsi_comm
+        .iter()
+        .map(|&c| c.cast_unsigned())
+        .take_while(|&b| b != 0)
+        .collect();
+    (!comm.is_empty()).then(|| vtmux_core::rawstr::from_bytes(&comm))
+}
+
 /// `osdep_get_cwd` (osdep-linux.c:64-89): the foreground process group's
 /// working directory.
+#[cfg(not(target_os = "macos"))]
 #[must_use]
 pub fn foreground_cwd(master: &OwnedFd) -> Option<PathBuf> {
     let pgrp = rustix::termios::tcgetpgrp(master).ok()?;
     std::fs::read_link(format!("/proc/{}/cwd", pgrp.as_raw_nonzero())).ok()
+}
+
+/// `osdep_get_cwd` (osdep-darwin.c:71-91): the foreground process group's
+/// working directory, from `proc_pidinfo(PROC_PIDVNODEPATHINFO)`.
+#[cfg(target_os = "macos")]
+#[must_use]
+pub fn foreground_cwd(master: &OwnedFd) -> Option<PathBuf> {
+    let pgrp = rustix::termios::tcgetpgrp(master).ok()?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+    let size = libc::c_int::try_from(size_of::<libc::proc_vnodepathinfo>()).ok()?;
+    // SAFETY: the buffer is a zeroed proc_vnodepathinfo of the size passed.
+    let got = unsafe {
+        libc::proc_pidinfo(
+            pgrp.as_raw_nonzero().get(),
+            libc::PROC_PIDVNODEPATHINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if got != size {
+        return None;
+    }
+    // SAFETY: proc_pidinfo filled all `size` bytes.
+    let info = unsafe { info.assume_init() };
+    let path: Vec<u8> = info
+        .pvi_cdir
+        .vip_path
+        .iter()
+        .flatten()
+        .map(|&c| c.cast_unsigned())
+        .take_while(|&b| b != 0)
+        .collect();
+    Some(PathBuf::from(OsStr::from_bytes(&path)))
 }
 
 /// `ttyname` of the PTY's slave side (`#{pane_tty}`).
