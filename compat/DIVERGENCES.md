@@ -174,3 +174,11 @@ product reasons" category.
 - vtmux behaviour: `-H` is accepted and changes nothing. libghostty-vt keeps links with the pages that hold the rows and vtmux exposes no table (`capture-pane -H` and `#{mouse_hyperlink}` are not implemented), so nothing observable depends on it.
 - Evidence: `clear-history -H` and `clear-history` give the same `history_size` and capture output on the reference and on vtmux (`cli.rs` `clear_history_keeps_the_screen`).
 - Category: Deferred
+
+### D-019: bytes that are not UTF-8 follow glibc on macOS too
+
+- Test / assertion: cli.rs `non_utf8_bytes_in_command_strings`, `non_utf8_bytes_through_options_and_formats`, `plane16_characters_are_ordinary_text`: the rows gated on `GLIBC_REFERENCE` are compared on Linux only.
+- tmux behaviour: tmux calls the host libc. On macOS (Darwin libc, tmux 3.8 built with utf8proc as configure requires there): (1) `regexec` returns `REG_ILLSEQ` for any text holding a byte that is not UTF-8, so `#{s/b/Z/:@o}` on `a\377b\303\251c` copies the text unchanged and `#{s/x*/-/:@p}`, whose empty-match step lands inside a character (D-003 (4)), stops there; (2) `wctomb` fails past U+10FFFF, so `\U00110000` in a config file is `invalid \U argument`; (3) `isalnum(0xe9)` is true in a UTF-8 locale, so `display -\351` says `unknown flag` instead of `invalid flag`.
+- vtmux behaviour: the core implements glibc's answers on every system (D-013 lists where glibc itself differs): the rest of the text is matched around the byte, `\U00110000` gives the old four-byte form, and a non-ASCII flag byte is `invalid flag`.
+- Evidence: C probes on macOS 15 (`setlocale(LC_CTYPE, "en_US.UTF-8")` as tmux.c does): `regexec("b", "a\377b")` = 17 (`REG_ILLSEQ`), `regcomp("a\377")` = 17; `wctomb(0x110000)` = -1; `isalnum(0xe9)` true. The reference tmux 3.8 on the same host gives the outputs above.
+- Category: Deferred (a per-platform libc model in the core; only text that is not valid UTF-8, or code points past U+10FFFF, is affected).
