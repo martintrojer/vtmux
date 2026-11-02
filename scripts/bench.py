@@ -613,6 +613,9 @@ def pin_terminal(s, **opts):
     s.run("set", "-s", "default-terminal", "tmux-256color")
     s.run("set", "-s", "terminal-features", "xterm*:clipboard:ccolour:cstyle:focus:title")
     s.run("set", "-g", "window-size", opts.get("window_size", "latest"))
+    # status-right defaults to the host name and a clock: host-dependent, time-varying bytes
+    s.run("set", "-g", "status-right", "bench")
+    s.run("set", "-g", "status-interval", "0")
 
 
 class Client:
