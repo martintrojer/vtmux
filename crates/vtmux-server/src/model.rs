@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use vtmux_core::ids::{IdAllocator, PaneId, SessionId, WindowId};
-use vtmux_core::layout::{Cell, Geometry, Layout, NamedLayout, PaneStatus, WindowPanes};
+use vtmux_core::layout::{Cell, Geometry, Layout, NamedLayout, PaneStatus, Path, WindowPanes};
 use vtmux_core::options::{Defaults, OptionValue, OptionsStore, TreeId, Value};
 use vtmux_vt::PaneTerm;
 
@@ -266,6 +266,10 @@ pub struct Model {
     /// The server's own info and environment, which a drawing made inside
     /// the model (`display-panes-format`) expands formats with. Set by
     /// the server; `#{current_file}` is empty there.
+    /// The cell each pane has while `rotate-window` is still giving the
+    /// panes theirs (`wp->layout_cell`, which the layout's leaves do not
+    /// say yet); `pane_unzoomed_*` read it.
+    pub(crate) moving_cells: Option<BTreeMap<PaneId, Path>>,
     pub(crate) format_base:
         Option<std::rc::Rc<(crate::format_ctx::ServerInfo, crate::environ::Environ)>>,
     /// Events fired since the sinks last heard ([`crate::events`]).
@@ -290,6 +294,7 @@ impl Default for Model {
             alerts_list: Vec::new(),
             redraws: Vec::new(),
             redraw_panes: std::collections::BTreeSet::new(),
+            moving_cells: None,
             format_base: None,
             events: Vec::new(),
         }
@@ -1173,13 +1178,13 @@ impl Model {
             new.rotate_left(1);
         }
         // Cell k keeps its place and goes to the pane now at position k.
-        let paths: Vec<_> = old
+        let paths: Vec<Option<Path>> = old
             .iter()
             .map(|p| window.layout.root.find_pane(*p))
             .collect();
-        for (path, pane) in paths.into_iter().zip(&new) {
+        for (path, pane) in paths.iter().zip(&new) {
             if let Some(path) = path
-                && let Cell::Pane(leaf) | Cell::Floating(leaf) = window.layout.root.get_mut(&path)
+                && let Cell::Pane(leaf) | Cell::Floating(leaf) = window.layout.root.get_mut(path)
             {
                 leaf.pane = *pane;
             }
@@ -1193,8 +1198,60 @@ impl Model {
             new.get(at + 1).or(new.first())
         };
         let pick = pick.copied().unwrap_or(active);
+        // The loops of cmd-rotate-window.c:65-78 and 90-103 give each pane
+        // its cell and `window_pane_resize` it in turn, `-D` from the first
+        // and the default from the last: a pane in panes mode that changes
+        // size draws the window then, while the panes not yet reached
+        // still have their old cells and the active pane is the old one.
+        let mut cells: BTreeMap<PaneId, Path> = old
+            .iter()
+            .zip(&paths)
+            .filter_map(|(p, path)| Some((*p, path.clone()?)))
+            .collect();
+        let order: Vec<usize> = if down {
+            (0..new.len()).collect()
+        } else {
+            (0..new.len()).rev().collect()
+        };
+        for k in order {
+            let Some(path) = &paths[k] else {
+                continue;
+            };
+            cells.insert(new[k], path.clone());
+            self.resize_to_cell(new[k], path, &cells);
+        }
         self.fix_panes(w);
         self.set_active(w, pick);
+    }
+
+    /// The path of pane `p`'s cell in window `w`'s full layout
+    /// (`wp->layout_cell`).
+    pub(crate) fn pane_cell(&self, w: &Window, p: PaneId) -> Option<Path> {
+        self.moving_cells
+            .as_ref()
+            .and_then(|c| c.get(&p).cloned())
+            .or_else(|| w.full_layout().root.find_pane(p))
+    }
+
+    /// `window_pane_resize` of `p` to the rectangle of its cell at `path`,
+    /// where `cells` are the cells every pane has now.
+    fn resize_to_cell(&mut self, p: PaneId, path: &[usize], cells: &BTreeMap<PaneId, Path>) {
+        let Some(w) = self.panes.get(&p).map(|x| x.window) else {
+            return;
+        };
+        let Some(rect) = self.windows.get(&w).map(|x| x.layout.cell_rect(path)) else {
+            return;
+        };
+        let Some(pane) = self.panes.get_mut(&p) else {
+            return;
+        };
+        let changed = (pane.rect.sx, pane.rect.sy) != (rect.sx, rect.sy);
+        pane.set_rect(rect);
+        if changed && matches!(pane.modes.first(), Some(crate::mode::Mode::Panes(_))) {
+            self.moving_cells = Some(cells.clone());
+            self.panes_redrawn(p);
+            self.moving_cells = None;
+        }
     }
 
     /// The window half of `spawn_window` with `SPAWN_RESPAWN`

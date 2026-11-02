@@ -290,22 +290,29 @@ fn mode_keys(
     repeat: i64,
     tc: Option<ClientId>,
 ) {
-    let mut keys = Vec::new();
+    // Each key, and for `-H` the byte it stands for (`KEYC_LITERAL|n`,
+    // cmd-send-keys.c:121-128); a bad hex byte is skipped.
+    let mut keys: Vec<(CoreKey, Option<u8>)> = Vec::new();
     for arg in &args.positionals {
         let arg = &*arg.text();
-        let key = (!args.flag('l') && !args.flag('H'))
+        if args.flag('H') {
+            if let Ok(b) = u8::from_str_radix(arg, 16) {
+                keys.push((CoreKey::from_char(char::from(b)), Some(b)));
+            }
+            continue;
+        }
+        let key = (!args.flag('l'))
             .then(|| CoreKey::from_name(arg))
             .flatten()
             .filter(|k| *k != CoreKey::NONE);
         match key {
-            Some(k) => keys.push(k),
-            None if args.flag('H') => {}
-            None => keys.extend(arg.chars().map(CoreKey::from_char)),
+            Some(k) => keys.push((k, None)),
+            None => keys.extend(arg.chars().map(|c| (CoreKey::from_char(c), None))),
         }
     }
     let mut after = item.step;
     for _ in 0..repeat {
-        for &key in &keys {
+        for &(key, literal) in &keys {
             // Each key looks at the pane's mode again: one that a key left
             // (panes or clock mode) lets the rest go to the program, as
             // `cmd_send_keys_inject_key` takes `TAILQ_FIRST(&wp->modes)`
@@ -316,7 +323,7 @@ fn mode_keys(
                 .get(&p)
                 .is_none_or(|pane| pane.modes.is_empty())
             {
-                pane_key(server, p, key);
+                pane_key(server, p, key, literal);
                 continue;
             }
             let table = server.model.mode_key_table(p);
@@ -348,20 +355,29 @@ fn mode_keys(
     }
 }
 
-/// `window_pane_key` for a pane in no mode: the key's bytes to the program.
-fn pane_key(server: &mut Server, p: PaneId, key: CoreKey) {
+/// `window_pane_key` for a pane in no mode: the key's bytes to the program,
+/// or for a literal key (`-H`) the byte as it is (`input_key_pane`,
+/// input-keys.c:585-589).
+fn pane_key(server: &mut Server, p: PaneId, key: CoreKey, literal: Option<u8>) {
     let Some(pane) = server.model.panes.get_mut(&p) else {
         return;
     };
-    let Some(key) = crate::keys::Key::from_core(key) else {
-        return;
-    };
-    let modes = KeyModes {
-        app_cursor: pane.term.app_cursor(),
-        app_keypad: pane.term.app_keypad(),
+    let bytes = if let Some(b) = literal {
+        vec![b]
+    } else {
+        let Some(key) = crate::keys::Key::from_core(key) else {
+            return;
+        };
+        crate::keys::encode(
+            &key,
+            KeyModes {
+                app_cursor: pane.term.app_cursor(),
+                app_keypad: pane.term.app_keypad(),
+            },
+        )
     };
     if let Some(io) = pane.io.as_mut().filter(|_| !pane.input_off) {
-        io.write(&crate::keys::encode(&key, modes));
+        io.write(&bytes);
     }
     server.pane_output_queued(p);
 }
