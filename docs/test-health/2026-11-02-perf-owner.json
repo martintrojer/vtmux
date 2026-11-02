@@ -1,0 +1,74 @@
+{
+  "meta": {
+    "date": "2026-11-02 09:57 UTC",
+    "commit": "7d48b29",
+    "host": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "cpu": "AMD Ryzen 7 5700X3D 8-Core Processor",
+    "cpus": 16,
+    "kernel": "7.2.11-200.fc44.x86_64",
+    "load_at_start": 3.85498046875,
+    "runs": 3,
+    "versions": {
+      "tmux": "tmux 3.8",
+      "vtmux": "vtmux 0.0.0 (tmux 3.8)"
+    }
+  },
+  "scenarios": {
+    "owner_idle": {
+      "title": "owner_idle (owner config, 1 session, 60 s)",
+      "results": {
+        "tmux": {
+          "rss_mb": 4.60546875,
+          "cpu_ms": 187.289734,
+          "wakeups_per_s": 4.116647391564503,
+          "poller_cpu_ms": 180.0
+        },
+        "vtmux": {
+          "rss_mb": 7.96484375,
+          "cpu_ms": 48.060703,
+          "wakeups_per_s": 1.0499946106395646,
+          "poller_cpu_ms": 220.0
+        }
+      },
+      "config": {
+        "tmux.conf": "6430744+dirty sha256:c1ffe189d326",
+        "mu-crew-dotfiles": "d633e15",
+        "plugin tmux-fingers-rs": "5759d08",
+        "plugin tmux-fzf": "05af76d",
+        "plugin tmux-session-picker": "1158ce2",
+        "plugin tmux-yank": "acfd36e",
+        "plugin tpm": "7bdb7ca",
+        "plugin vim-tmux-navigator": "e41c431"
+      },
+      "leftovers": []
+    },
+    "owner_startup": {
+      "title": "owner_startup (start-server with the owner config until `display -p ok` answers, 20x)",
+      "results": {
+        "tmux": {
+          "median_ms": 62.91698451968841,
+          "min_ms": 58.887632039841264,
+          "max_ms": 74.08574200235307,
+          "n": 20
+        },
+        "vtmux": {
+          "median_ms": 61.81899950024672,
+          "min_ms": 58.30406898166984,
+          "max_ms": 80.47140802955255,
+          "n": 20
+        }
+      },
+      "config": {
+        "tmux.conf": "6430744+dirty sha256:c1ffe189d326",
+        "mu-crew-dotfiles": "d633e15",
+        "plugin tmux-fingers-rs": "5759d08",
+        "plugin tmux-fzf": "05af76d",
+        "plugin tmux-session-picker": "1158ce2",
+        "plugin tmux-yank": "acfd36e",
+        "plugin tpm": "7bdb7ca",
+        "plugin vim-tmux-navigator": "e41c431"
+      },
+      "leftovers": []
+    }
+  }
+}

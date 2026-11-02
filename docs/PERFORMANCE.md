@@ -27,6 +27,18 @@ Run of 2026-11-01, commit `eea1a69`, Linux 7.2.11 (Fedora 44) on an AMD Ryzen 7 
 | throughput, 100 MB log, 19% SGR bytes | wall / server CPU | 3.25 s / 3.18 s | 2.64 s / 2.49 s | 0.81x |
 | | peak RSS | 5.4 MB | 10.2 MB | 1.9x |
 
+### With the owner's config
+
+Run of 2026-11-02, commit `7d48b29` (same host and binaries as above), load 3.9 at start, median of 3 runs for `owner_idle` and 20 runs for `owner_startup`. The owner's real `~/.tmux.conf` (`tmux.conf` at dotfiles `6430744` with local edits, sha256 `c1ffe189d326`), the TPM plugins and mu-crew-dotfiles `d633e15` are copied into a hermetic `HOME`; the plugin revisions are in the raw run. Raw output: [`test-health/2026-11-02-perf-owner.md`](test-health/2026-11-02-perf-owner.md) and `.json`.
+
+| scenario | metric | tmux 3.8 | vtmux | vtmux / tmux |
+|---|---|---|---|---|
+| owner_idle, 1 session, 60 s | RSS | 4.6 MB | 8.0 MB | 1.7x |
+| | server CPU over 60 s | 187 ms | 48 ms | 0.26x |
+| | server wakeups | 4.1 / s | 1.0 / s | 0.26x |
+| | poller CPU over 60 s (not the server) | 180 ms | 220 ms | 1.2x |
+| owner_startup, `start-server` until `display -p ok` answers, 20x | median (min - max) | 62.9 ms (58.9 - 74.1) | 61.8 ms (58.3 - 80.5) | 0.98x |
+
 The history rows come from `scripts/bench-history-memory.sh` (details in [`test-health/2026-11-01-history-memory.md`](test-health/2026-11-01-history-memory.md); the output-time column is in the raw run).
 
 ## Reading the numbers
@@ -36,6 +48,9 @@ The history rows come from `scripts/bench-history-memory.sh` (details in [`test-
 - **Memory is the cost.** vtmux runs one libghostty terminal per pane, so every pane pays for Ghostty's page allocation up front: 33 KB per idle pane against tmux's 5.4 KB, and 3 MB more for a bare server. Both are small in absolute terms, but at 400 panes the ratio is 3x. Filed as `perf_scale_rss` (the only ratio above 2x).
 - **Scrollback.** Ghostty stores 8 bytes for every cell of every retained row, where tmux stores only the used cells, so wide and mostly-empty rows cost more (1.6x on plain logs and on 500-column rows). `hist_retain` already fixed the retention count (the line limit follows `history-limit`; 148 MB before it, 105 MB now). Compressing idle scrollback is `hist_compress`, not yet merged, so these rows will move.
 - **Peak RSS in throughput** is about 5 MB above tmux's: the per-pane terminal plus the history it keeps for the 100 MB of output, capped by the default `history-limit` of 2000.
+
+- **With the owner's config the idle server is not idle, and the cause is outside it.** The mu-crew poller wakes about once a second and runs `tmux show-options -g` (and `set-option` when a value changes) as clients of the server, so the server's 187 ms (tmux) and 48 ms (vtmux) over 60 s are the cost of answering those clients: about 3 ms against 0.8 ms per wake-up round. vtmux does less server work per request here (0.26x); the RSS gap is the same 3 MB as for a bare server (1.7x). The poller's own CPU (a Python process plus the `tmux` client processes it starts, counted from `/proc/<pid>/stat` with children) is 180 ms and 220 ms: it is outside the server. The 40 ms difference between the two was not investigated (3 runs, shared host). Only the cheapest probe (`uptime`, a `/proc` read every 60 s) is on; the owner's real list adds `murmur_remote memory cpu uptime muzzle`, which starts `murmur status` and `muzzle status` every 5 to 10 s and is not measured here because it needs a network and the owner's state.
+- **Sourcing the owner's config takes 62 ms for both.** A bare `new -d` takes 7 to 9 ms (table above), so the rest is the config; where it goes (the config's synchronous `run-shell` calls, such as `mu-crew-bind`, each start a shell and several `tmux` clients) was not profiled. The 20 runs overlap for the two binaries (58 to 74 ms and 58 to 80 ms).
 
 ## Scenarios
 
@@ -47,7 +62,11 @@ The history rows come from `scripts/bench-history-memory.sh` (details in [`test-
 | `scale` | 10 sessions x 10 windows x 4 panes (400 idle `cat` panes, 200x50 windows) | Per-pane cost, where the per-pane libghostty terminal shows up. RSS per pane is (RSS after - RSS before) / 399. |
 | `history` | calls `scripts/bench-history-memory.sh` (spec, narrow, wide) | Scrollback memory; see the history-memory spec. |
 | `startup` | `new -d` then `kill-server`, 100 times on a fresh socket each time | How fast a script's first command and its cleanup are. |
+| `owner_idle` | the owner's config in a hermetic `HOME`, one session running `cat`, 10 s to settle, then `IDLE_SECS` (60) of nothing. Reports server RSS, CPU and wakeups, and the poller's CPU separately | What the owner's server costs at rest with the config, TPM plugins and the mu-crew poller running. |
+| `owner_startup` | `start-server` followed by `display -p ok` in one invocation, with the config in the hermetic `HOME`; `OWNER_STARTUP_N` (20) times | How long the config takes to source: the `display` is not run until the config has been. |
 | `throughput` | a pane `cat`s 100 MB of pre-generated log text (about 100-character lines), plain and with about 20% of the bytes SGR, then prints a done marker; no client attached | Parser and grid cost for heavy output with fixed work. Wall time and server CPU are for the same work for both binaries. |
+
+Owner scenarios (`owner_idle`, `owner_startup`; Linux only, skipped elsewhere with the reason): `HOME` is `<tmp>/<run>/home`, holding a copy of `~/.tmux.conf` (symlinks followed), `~/.tmux/plugins` and `~/.local/share/mu-crew-dotfiles` (without `.git`, `target` or `node_modules`); their git revisions and the config's sha256 go into the output. Two changes to the copy: `@fingers-skip-wizard 1` first (no install wizard) and `@mu_crew_probes` set to `uptime`, the cheapest probe. `<tmp>/<run>/bin/tmux` is a symlink to the binary under test and first on `PATH` for both binaries (the config, TPM and the poller all run `tmux` from `PATH`; vtmux is run as `tmux`, D20). After each run the bench waits up to 5 s for every process whose environment has the hermetic `HOME` (the poller leaves when its server is gone), kills what is left and prints how many it had to kill; processes are matched by environment, never by name, so neither the bench's shell nor the owner's real poller can match. The poller's CPU is `utime+stime+cutime+cstime` of its pid from the pidfile, which includes the `tmux` clients it ran; it is outside the server and reported next to it, not added to it.
 
 How it measures: the server pid comes from `display -p '#{pid}'` on a private socket (`-L` and `TMUX_TMPDIR`), and is checked gone after `kill-server`; pids are never found by name. Only the server process is measured, never its pane children.
 
