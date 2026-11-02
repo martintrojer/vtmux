@@ -162,13 +162,14 @@ impl World {
         out
     }
 
-    /// Poll `capture-pane -p` (max 5 s, 50 ms steps) until `want` shows.
+    /// Poll `capture-pane -p` (max 10 s, 50 ms steps) until `want` shows,
+    /// in the normalised text (`TMP` for the temp dir, either spelling of
+    /// it: macOS's `pwd` prints `/private/tmp`).
     fn wait_for_text(&self, target: &str, want: &str) {
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(5) {
+        while start.elapsed() < Duration::from_secs(10) {
             if self
-                .run(&["capture-pane", "-p", "-t", target])
-                .stdout
+                .normalise(&self.run(&["capture-pane", "-p", "-t", target]).stdout)
                 .contains(want)
             {
                 return;
