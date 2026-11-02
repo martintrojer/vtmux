@@ -17,7 +17,7 @@ Medians over RUNS runs. A Markdown table goes to stdout, a JSON file to $OUT.jso
 Env: RUNS (3), IDLE_SECS (60), VTMUX (target/release/vtmux), VTMUX_REFERENCE_TMUX (the
 `cargo xtask ref-tmux` cache), BASE (another vtmux binary, shown as `base`), OUT
 (default target/bench/bench-<utc>), NO_BUILD=1 (skip cargo build), STARTUP_N (100),
-THROUGHPUT_MB (100), HISTORY_SCENARIOS ("spec narrow wide"). Run cargo through `mise exec --`.
+THROUGHPUT_MB (100), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s). Run cargo through `mise exec --`.
 """
 import json
 import os
@@ -162,16 +162,21 @@ class Server:
         return self.pid
 
     def kill(self):
+        """kill-server, then wait for the pid to go; returns (ms until kill-server
+        returned, ms from then until the pid was gone), the pid polled every 0.5 ms."""
+        t0 = time.monotonic()
         self.run("kill-server", check=False)
-        deadline = time.monotonic() + 10
+        t1 = time.monotonic()
+        deadline = t1 + 10
         while self.pid and time.monotonic() < deadline:
             try:
                 os.kill(self.pid, 0)
             except ProcessLookupError:
-                return
-            time.sleep(0.02)
+                return (t1 - t0) * 1000, (time.monotonic() - t1) * 1000
+            time.sleep(0.0005)
         if self.pid:
             raise RuntimeError(f"server pid {self.pid} still alive after kill-server ({self.bin})")
+        return (t1 - t0) * 1000, 0.0
 
 
 class Env:
@@ -256,7 +261,11 @@ def scenario_history(env):
     e["VTMUX"], e["VTMUX_REFERENCE_TMUX"] = env.bins["vtmux"], env.bins["tmux"]
     if "base" in env.bins:
         e["BASE"] = env.bins["base"]
-    r = subprocess.run(["bash", script, *scen], env=e, capture_output=True, text=True, cwd=ROOT)
+    try:  # the script has its own per-run deadline; this bounds the whole scenario
+        r = subprocess.run(["bash", script, *scen], env=e, capture_output=True, text=True, cwd=ROOT,
+                           timeout=float(os.environ.get("HISTORY_TIMEOUT", "3600")))
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("bench-history-memory.sh: no result within HISTORY_TIMEOUT s")
     if r.returncode:
         raise RuntimeError(f"bench-history-memory.sh: {r.stderr.strip()}")
     lines = r.stdout.strip().splitlines()
@@ -270,7 +279,7 @@ def scenario_history(env):
 
 def scenario_startup(env):
     def one(which):
-        new, kill, rss = [], [], []
+        new, kill, gone, rss = [], [], [], []
         for _ in range(STARTUP_N):
             s = env.server(which)
             t0 = time.monotonic()
@@ -278,12 +287,11 @@ def scenario_startup(env):
             t1 = time.monotonic()
             s.find_pid()
             rss.append(rss_kb(s.pid))
-            t2 = time.monotonic()
-            s.kill()
-            t3 = time.monotonic()
+            ret_ms, gone_ms = s.kill()
             new.append((t1 - t0) * 1000)
-            kill.append((t3 - t2) * 1000)
-        return {"new_ms": med(new), "kill_ms": med(kill), "rss_mb": med(rss) / 1024}
+            kill.append(ret_ms)
+            gone.append(ret_ms + gone_ms)
+        return {"new_ms": med(new), "kill_ms": med(kill), "gone_ms": med(gone), "rss_mb": med(rss) / 1024}
     return {"title": f"startup (new -d + kill-server, {STARTUP_N}x, -f /dev/null)", "results": env.per_binary(one)}
 
 
@@ -369,8 +377,8 @@ def render(name, res):
     elif name == "history":
         out.append("```\n" + res["raw"].rstrip() + "\n```")
     elif name == "startup":
-        rows = [[b, fmt(m["new_ms"]), fmt(m["kill_ms"]), fmt(m["rss_mb"])] for b, m in res["results"].items()]
-        out.append(table(["binary", "new -d ms", "kill-server ms", "RSS MB"], rows))
+        rows = [[b, fmt(m["new_ms"]), fmt(m["kill_ms"]), fmt(m["gone_ms"]), fmt(m["rss_mb"])] for b, m in res["results"].items()]
+        out.append(table(["binary", "new -d ms", "kill-server returns ms", "pid gone ms", "RSS MB"], rows))
     elif name == "throughput":
         rows = [[k, b, fmt(m["wall_s"], 2), fmt(m["cpu_s"], 2), fmt(m["mb_per_s"]), fmt(m["peak_rss_mb"])]
                 for k, per in res["throughput"].items() for b, m in per.items()]

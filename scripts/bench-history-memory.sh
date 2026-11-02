@@ -20,7 +20,8 @@
 # Env: VTMUX (default target/release/vtmux), VTMUX_REFERENCE_TMUX (default
 # the `cargo xtask ref-tmux` cache), IDLE (default 10), RUNS (default 1:
 # runs per binary, the fastest is shown), BASE (another vtmux binary to
-# compare, e.g. a build of the previous commit; shown as `base`). Run cargo through
+# compare, e.g. a build of the previous commit; shown as `base`), DEADLINE (default 600:
+# seconds to wait for one run's DONE marker before failing). Run cargo through
 # `mise exec --`: the script builds the release binaries first.
 #
 # The script can be sourced (it then only defines functions); scripts/bench.sh's
@@ -65,7 +66,15 @@ run() {
   start=$(now)
   "${t[@]}" new -d -s keep cat \; set -g history-limit "$limit" \; \
     new -d -s b -x "$cols" -y "$rows" "cat '$file'; echo DONE; exec cat"
-  until "${t[@]}" capture-pane -p -t b | grep -q '^DONE$'; do sleep 0.05; done
+  # A dead server makes capture-pane fail forever: give up loudly after DEADLINE s.
+  local give_up=$((SECONDS + ${DEADLINE:-600}))
+  until "${t[@]}" capture-pane -p -t b 2>/dev/null | grep -q '^DONE$'; do
+    if [ "$SECONDS" -ge "$give_up" ]; then
+      echo "bench-history-memory.sh: $label: no DONE marker within ${DEADLINE:-600} s (server dead?)" >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
   end=$(now)
   sleep "$IDLE"
   pid=$("${t[@]}" display -p -t b '#{pid}')

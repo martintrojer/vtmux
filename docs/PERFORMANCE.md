@@ -6,7 +6,7 @@ These scenarios have no attached client. Rendering, many clients and throughput 
 
 ## Numbers
 
-Run of 2026-11-01, commit `eea1a69`, Linux 7.2.11 (Fedora 44) on an AMD Ryzen 7 5700X3D (16 cpus), load 3.7, release build, median of 3 runs. Versions: tmux 3.8 (`cargo xtask ref-tmux`), vtmux 0.0.0. Raw output: [`test-health/2026-11-01-perf.md`](test-health/2026-11-01-perf.md) and `.json`.
+Run of 2026-11-01, commit `eea1a69`, Linux 7.2.11 (Fedora 44) on an AMD Ryzen 7 5700X3D (16 cpus), load 3.7, release build, median of 3 runs. Versions: tmux 3.8 (`cargo xtask ref-tmux`), vtmux 0.0.0. The startup rows were re-run on 2026-11-02 (load 3.6) after the first run's `kill-server` timing was found to measure its 20 ms poll interval; the pid is now polled every 0.5 ms. Raw output: [`test-health/2026-11-01-perf.md`](test-health/2026-11-01-perf.md) and `.json`.
 
 | scenario | metric | tmux 3.8 | vtmux | vtmux / tmux |
 |---|---|---|---|---|
@@ -19,8 +19,9 @@ Run of 2026-11-01, commit `eea1a69`, Linux 7.2.11 (Fedora 44) on an AMD Ryzen 7 
 | history, 150k lines, limit 100000, 120x40 | RSS | 66.2 MB | 105.3 MB | 1.6x |
 | history, 12k lines, 80x24 truecolour cells | RSS | 25.4 MB | 27.7 MB | 1.1x |
 | history, 12k lines of 450 chars, 500x24 | RSS | 29.1 MB | 47.0 MB | 1.6x |
-| startup (`new -d` + `kill-server`, 100x) | `new -d` | 9.5 ms | 7.4 ms | 0.8x |
-| | `kill-server` | 21.9 ms | 21.4 ms | 1.0x |
+| startup (`new -d` + `kill-server`, 100x) | `new -d` | 9.1 ms | 7.0 ms | 0.8x |
+| | `kill-server` returns | 1.9 ms | 1.3 ms | 0.7x |
+| | server pid gone (from the start of `kill-server`) | 2.4 ms | 2.4 ms | 1.0x |
 | throughput, 100 MB plain log, no client | wall / server CPU | 2.64 s / 2.53 s | 1.22 s / 1.17 s | 0.46x |
 | | peak RSS | 5.4 MB | 10.3 MB | 1.9x |
 | throughput, 100 MB log, 19% SGR bytes | wall / server CPU | 3.25 s / 3.18 s | 2.64 s / 2.49 s | 0.81x |
@@ -30,7 +31,8 @@ The history rows come from `scripts/bench-history-memory.sh` (details in [`test-
 
 ## Reading the numbers
 
-- **CPU is a win so far.** With no client, vtmux consumes the pane's output 1.2x to 2.2x faster than tmux. The idle server uses no CPU and takes no wakeups, same as tmux.
+- **CPU: a win when consuming output, a loss when creating panes.** With no client, vtmux consumes 100 MB of pane output with 0.46x (plain) and 0.78x (19% SGR) of tmux's server CPU, and in 1.2x to 2.2x less wall time. The idle server uses no CPU and takes no wakeups, same as tmux. Creating 400 panes costs 1.6x more CPU (430 ms against 270 ms). Startup is a wash: `new -d` is 7.0 ms against 9.1 ms, and the server pid is gone 2.4 ms after `kill-server` starts for both.
+- **Throughput wall time is coarse.** The done marker is polled with `capture-pane` every 0.2 s, so each wall time is accurate to about 0.2 s (up to 17% of vtmux's 1.2 s plain run). The error adds about the same to both binaries, which pulls the ratio toward 1, so the speed-up is if anything understated. Server CPU is not affected by the polling beyond the cost of the `capture-pane` calls themselves.
 - **Memory is the cost.** vtmux runs one libghostty terminal per pane, so every pane pays for Ghostty's page allocation up front: 33 KB per idle pane against tmux's 5.4 KB, and 3 MB more for a bare server. Both are small in absolute terms, but at 400 panes the ratio is 3x. Filed as `perf_scale_rss` (the only ratio above 2x).
 - **Scrollback.** Ghostty stores 8 bytes for every cell of every retained row, where tmux stores only the used cells, so wide and mostly-empty rows cost more (1.6x on plain logs and on 500-column rows). `hist_retain` already fixed the retention count (the line limit follows `history-limit`; 148 MB before it, 105 MB now). Compressing idle scrollback is `hist_compress`, not yet merged, so these rows will move.
 - **Peak RSS in throughput** is about 5 MB above tmux's: the per-pane terminal plus the history it keeps for the 100 MB of output, capped by the default `history-limit` of 2000.
