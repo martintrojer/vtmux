@@ -1,0 +1,22 @@
+name = "copy_cancel_redraw"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "sh", "-c", "seq 1 30; tmux wait-for -S ready; tmux wait-for go; seq 1 50; printf TAIL; tmux wait-for -S done; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", "SR"] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{scroll_position}]"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { run = ["copy-mode", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "done" },
+  { screen = {} },
+  { run = ["send-keys", "-t", "%0", "-X", "cancel"] },
+  { screen = {} },
+  { run = ["copy-mode", "-t", "%0"] },
+  { run = ["send-keys", "-t", "%0", "-X", "page-up"] },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+]
