@@ -67,6 +67,10 @@ struct Job {
     /// Bytes still to write to the job's stdin; its write side is shut
     /// once they are gone (`job_write_callback`).
     input: Vec<u8>,
+    /// The write side has been shut. Done once: `shutdown(2)` wakes the
+    /// socket's pollers, so shutting again on each (edge) event re-raises
+    /// it and the loop spins.
+    input_done: bool,
     status: Option<JobStatus>,
     /// `JOB_NOWAIT`: the server may exit with it running.
     nowait: bool,
@@ -181,6 +185,7 @@ impl Server {
                 pid: Some(spawned.pid.as_raw_nonzero().get()),
                 output: Vec::new(),
                 input: spec.input.clone(),
+                input_done: false,
                 status: None,
                 nowait: spec.nowait,
                 update: spec.update.clone(),
@@ -228,6 +233,9 @@ impl Server {
         let Some(fd) = job.fd.as_ref() else {
             return;
         };
+        if job.input_done {
+            return;
+        }
         while !job.input.is_empty() {
             match rustix::io::write(fd, &job.input) {
                 Ok(n) => {
@@ -240,6 +248,13 @@ impl Server {
             }
         }
         let _ = rustix::net::shutdown(fd, rustix::net::Shutdown::Write);
+        job.input_done = true;
+        // Nothing more to write: stop asking for writable events.
+        let _ = self.poll.registry().reregister(
+            &mut SourceFd(&fd.as_raw_fd()),
+            Token(JOB_BASE + id.0),
+            Interest::READABLE,
+        );
     }
 
     /// The job's output is readable: take all of it; at EOF the output is
