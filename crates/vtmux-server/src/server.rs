@@ -617,6 +617,7 @@ impl Server {
             self.copy_drag_timers(Instant::now());
             self.clock_timers(Instant::now());
             self.panes_timers(Instant::now());
+            self.sync_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -734,6 +735,8 @@ impl Server {
             self.clock_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.panes_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.sync_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.clients
                 .values()
@@ -2045,6 +2048,7 @@ impl Server {
                 self.send_passthrough(id, caps);
                 continue;
             }
+            self.redraw_stops_sync(id, s);
             // screen-redraw.c redraw_set_context: the scene sits below a
             // top status (REDRAW_STATUS_TOP) and above a bottom one.
             let area = rows.saturating_sub(lines);
@@ -2177,6 +2181,55 @@ impl Server {
             area,
             cursor: (None, false),
         })
+    }
+
+    /// `redraw_draw` with `REDRAW_PANE` (screen-redraw.c:1757-1770): a pane
+    /// drawn whole ends its synchronized output (`screen_write_stop_sync`)
+    /// — every visible pane of the window under a window redraw
+    /// (`CLIENT_REDRAWWINDOW`), else each pane with `PANE_REDRAW`.
+    fn redraw_stops_sync(&mut self, id: ClientId, s: SessionId) {
+        let Some((_, w, _)) = self.model.current_of(s) else {
+            return;
+        };
+        let all = self
+            .clients
+            .get(&id)
+            .is_some_and(|c| c.status.redraw_window_pending());
+        let Some(window) = self.model.windows.get(&w) else {
+            return;
+        };
+        let panes: Vec<PaneId> = window
+            .panes
+            .panes
+            .iter()
+            .copied()
+            .filter(|&p| window.is_visible(p) && (all || self.model.redraw_panes.contains(&p)))
+            .collect();
+        for p in panes {
+            if let Some(pane) = self.model.panes.get_mut(&p) {
+                pane.term.stop_sync();
+            }
+        }
+    }
+
+    /// When the soonest sync timer expires (`screen_write_sync_callback`).
+    fn sync_deadline(&self) -> Option<Instant> {
+        self.model
+            .panes
+            .values()
+            .filter_map(|p| p.term.sync_deadline())
+            .min()
+    }
+
+    /// `screen_write_sync_callback` (screen-write.c:1017-1029): a pane still
+    /// in synchronized output a second after it began is drawn as it is;
+    /// a hung program must not freeze it.
+    fn sync_timers(&mut self, now: Instant) {
+        for pane in self.model.panes.values_mut() {
+            if pane.term.sync_deadline().is_some_and(|d| d <= now) {
+                pane.term.stop_sync();
+            }
+        }
     }
 
     /// The `DCS tmux;` payloads queued for client `id` since its last
@@ -3476,8 +3529,10 @@ impl Server {
         };
         // screen_reinit and a fresh input parser: alternate screen off,
         // scroll region, cursor home, visible lines cleared, modes back to
-        // cursor+wrap, default attributes, default tabs.
+        // cursor+wrap, default attributes, default tabs. input_free ends
+        // synchronized output (input.c:922).
         pane.term.reset_input();
+        pane.term.stop_sync();
         pane.term.feed(
             b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
         );
