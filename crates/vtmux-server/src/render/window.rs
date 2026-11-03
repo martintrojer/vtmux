@@ -300,6 +300,12 @@ impl Source<'_> {
             );
         }
         if pane.modes.is_empty() && !pane.mode_prompt.as_ref().is_some_and(|m| m.shown(pane)) {
+            // MODE_SYNC (screen-write.c:211-240): while the program has
+            // synchronized output on, nothing new of it is drawn. No row
+            // stamps: the held copy is not the live view they describe.
+            if let Some(held) = pane.term.sync_held() {
+                return (Rc::new(held.clone()), Vec::new(), Vec::new());
+            }
             let view = pane.term.screen();
             return (view.shared(), view.row_stamps().to_vec(), Vec::new());
         }
@@ -312,12 +318,14 @@ impl Source<'_> {
                 (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
             }
             Some(crate::mode::Mode::Tree(t)) => (self.tree_screen(pane, t, caps), Vec::new()),
-            // MODE_SYNC (screen-write.c:211-240): while the program has
-            // synchronized output on, nothing new of it is drawn.
-            _ => match pane.term.sync_held() {
-                Some(held) => (held.clone(), Vec::new()),
-                None => (vtmux_vt::snapshot(&pane.term), Vec::new()),
-            },
+            // A mode prompt over a plain pane (a held pane drew above).
+            _ => (
+                pane.term
+                    .sync_held()
+                    .cloned()
+                    .unwrap_or_else(|| vtmux_vt::snapshot(&pane.term)),
+                Vec::new(),
+            ),
         };
         if let Some(prompt) = pane.mode_prompt.as_ref().filter(|m| m.shown(pane)) {
             self.mode_prompt(&mut screen, prompt, tree, caps);
