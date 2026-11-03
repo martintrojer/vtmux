@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Kill test servers (and their pane programs) that finished probe scripts left
+# behind: test-labelled, parented to init, over an hour old. Never fails the gate.
+cargo xtask reap || true
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 # Type-check the other platform too, so a Linux-only API (SOCK_CLOEXEC,
