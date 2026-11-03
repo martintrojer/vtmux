@@ -385,9 +385,11 @@ mod tests {
             turns += 1;
             assert!(turns < 10_000);
         }
-        assert!(server.model.panes[&p].term.compressed_pages() >= pages);
+        let compressed = server.model.panes[&p].term.compressed_pages();
+        assert!(compressed >= pages);
 
-        // copy-mode copies the history out, restoring every page.
+        // copy-mode reads the history (from its own copy of the pages, so
+        // the pane's stay compressed), which re-arms the deadline.
         server.model.set_copy_mode(p, false, |m| {
             crate::mode::CopyMode::new(
                 &m.panes[&p].term,
@@ -398,6 +400,7 @@ mod tests {
                 None,
             )
         });
+        assert_eq!(server.model.panes[&p].term.compressed_pages(), compressed);
         let t1 = now + Duration::from_secs(60);
         server.compress_turn(t1, true);
         assert_eq!(server.compress_deadline(), Some(t1 + IDLE));

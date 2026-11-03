@@ -11,7 +11,7 @@ mod palette;
 pub mod snapshot;
 pub mod term;
 
-pub use capture::{CaptureOpts, LineRef, Row, capture};
+pub use capture::{CaptureOpts, LineRef, Row, ScreenCopy, capture};
 pub use snapshot::{Cell, Color, Snapshot, Style, Underline, snapshot};
 pub use term::{
     Compression, CompressionActivity, ExtendedKeys, KeyMode, LineMark, MouseModes, MouseTracking,

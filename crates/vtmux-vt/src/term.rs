@@ -226,7 +226,7 @@ pub struct PaneTerm {
     /// The newest `hsize` history rows, copied when the alternate screen was
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
-    frozen: Option<Vec<FrozenRow>>,
+    frozen: Option<Rc<Vec<FrozenRow>>>,
     /// The oldest row of tmux's primary history (the active top when it
     /// has none), pinned as the alternate screen came up, and the history
     /// rows Ghostty kept then. Ghostty reflows the primary screen at every
@@ -486,14 +486,14 @@ impl PaneTerm {
                     // The alternate screen is about to switch: last chance to
                     // read the primary history.
                     ScanEvent::AltMode(b'h') if !self.alternate_on() => {
-                        self.frozen = Some(self.freeze_history());
+                        self.frozen = Some(Rc::new(self.freeze_history()));
                         self.frozen_marks = self.line_marks();
                         self.alt_entry = self.pin_oldest().map(|pin| (pin, self.retained_rows()));
                     }
                     // tmux's ED3 clears the grid's history, which under the
                     // alternate screen is the primary one (input.c:1758).
                     ScanEvent::ClearHistory if self.alternate_on() => {
-                        self.frozen = Some(Vec::new());
+                        self.frozen = Some(Rc::default());
                         self.hsize = 0;
                         self.clear_primary_history = true;
                     }
@@ -865,6 +865,11 @@ impl PaneTerm {
         self.frozen.as_ref()?.get(y)
     }
 
+    /// The history copied when the alternate screen came up, while it is.
+    pub(crate) fn frozen_rows(&self) -> Option<Rc<Vec<FrozenRow>>> {
+        self.frozen.clone()
+    }
+
     /// Resize the pane. Primary-screen content reflows (Ghostty).
     ///
     /// # Panics
@@ -1080,7 +1085,7 @@ impl PaneTerm {
     pub fn clear_history(&mut self) {
         self.generation += 1;
         if self.alternate_on() {
-            self.frozen = Some(Vec::new());
+            self.frozen = Some(Rc::default());
             self.hsize = 0;
             self.clear_primary_history = true;
             return;
@@ -1122,6 +1127,8 @@ impl PaneTerm {
                 self.times_base += 1;
             }
             if let Some(frozen) = &mut self.frozen {
+                // A copy mode may share the rows: it keeps its own.
+                let frozen = Rc::make_mut(frozen);
                 frozen.drain(..ny.min(frozen.len()));
                 self.frozen_marks = std::mem::take(&mut self.frozen_marks)
                     .into_iter()
