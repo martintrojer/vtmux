@@ -74,8 +74,8 @@ The design decisions behind this (D1–D23) are in the [spec](specs/2026-10-29-v
 
 1. nvim writes bytes to its PTY (PTY #2).
 2. The server's event loop reads them and feeds them into pane %0's libghostty-vt terminal, which updates the pane's grid. If the bytes contain a query (DA, cursor position), the pane terminal answers it in tmux's words, not Ghostty's, and the reply goes back down PTY #2.
-3. Once per loop tick, the compositor builds the complete picture each attached client should see: every visible pane at its layout cell, the borders, the status line and any popup.
-4. It diffs that picture against the last frame it sent the client, encodes only the changed cells for that client's terminal, and wraps the result in synchronized output (`?2026h`/`?2026l`) with the cursor placed once at the end.
+3. Once per loop tick, the compositor builds the complete picture each attached client should see: every visible pane at its layout cell, the borders, the status line and any popup. Each pane keeps one Ghostty render state that re-reads only the rows Ghostty marked dirty, and each client caches its window layout and composed rows, so a one-cell change recomposes one row; a tick where no row or the cursor changed builds no frame.
+4. It diffs that picture against the last frame it sent the client (rows equal to the last frame are skipped whole), encodes only the changed cells for that client's terminal, and wraps the result in synchronized output (`?2026h`/`?2026l`) with the cursor placed once at the end.
 5. The client writes the frame to PTY #1 and acknowledges it. The outer terminal draws it.
 
 Steps 3 and 4 fix two of tmux's [paper cuts](PAPERCUTS.md) by construction: the cursor no longer flickers under heavy output, and popup borders don't flicker over scrolling panes. tmux forwards each pane update to the terminal as it happens; vtmux only ever sends finished pictures.
