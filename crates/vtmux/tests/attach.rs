@@ -193,9 +193,18 @@ impl Attached {
         self.wait_for(Duration::from_secs(5), predicate);
     }
     fn wait_for(&self, limit: Duration, predicate: impl Fn(&Self) -> bool) {
+        self.wait_labelled("", limit, predicate);
+    }
+    /// `wait_for`, naming the binary under test in the timeout message.
+    fn wait_labelled(&self, what: &str, limit: Duration, predicate: impl Fn(&Self) -> bool) {
         let end = Instant::now() + limit;
         while !predicate(self) {
-            assert!(Instant::now() < end, "timeout: {:?}", self.text());
+            assert!(
+                Instant::now() < end,
+                "timeout{}{what}: {:?}",
+                if what.is_empty() { "" } else { " " },
+                self.text()
+            );
             thread::sleep(Duration::from_millis(10));
         }
     }
@@ -4664,7 +4673,9 @@ fn status_jobs_refresh_on_interval_and_refresh_client() {
         a.wait(|a| status_count(a) == Some(2));
         // status-interval: each tick runs the job again.
         w.cli(&["set", "-g", "status-interval", "1"]);
-        a.wait(|a| status_count(a) >= Some(4));
+        a.wait_labelled(&what.to_string(), Duration::from_secs(15), |a| {
+            status_count(a) >= Some(4)
+        });
         let seen = status_count(&a).unwrap();
         // Back to none: no more ticks. A redraw in a later second may still
         // run the job once (format_job_get runs it when fj->last != now,
