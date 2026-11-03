@@ -1,0 +1,294 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "attach_from_binding",
+  "inputs": {
+    "name": "attach_from_binding",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "s1",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "s2",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "s1",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "s2",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "a",
+          "attach -t s2 ; set -g @e after"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "n",
+          "new -s s3 -n w 'exec cat' ; set -g @n after"
+        ]
+      },
+      {
+        "attach": {
+          "session": "s1"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002a"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002n"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-clients",
+          "-F",
+          "#{client_session}"
+        ]
+      },
+      {
+        "run": [
+          "list-sessions",
+          "-F",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@e"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@n"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[s1] \\e[4m0:w*\\e[0m\\e[42m                              \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[s2] \\e[4m0:w*\\e[0m\\e[42m                              \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[s3] \\e[4m0:w*\\e[0m\\e[42m                              \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "s3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "s1\ns2\ns3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

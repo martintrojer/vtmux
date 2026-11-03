@@ -4831,6 +4831,159 @@ fn click(x: u16, y: u16) -> Vec<u8> {
 }
 
 /// Wait (at most 5 s) for `f` to be `want`; what it was last.
+/// The sessions the attached clients are on, and every session.
+fn client_sessions(w: &World) -> String {
+    let lsc = w.cli(&["lsc", "-F", "#{client_session}"]);
+    let ls = w.cli(&["ls", "-F", "#{session_name}"]);
+    format!(
+        "clients {:?} sessions {:?}",
+        String::from_utf8_lossy(&lsc.stdout)
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        String::from_utf8_lossy(&ls.stdout)
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// cmd-attach-session.c:118-139 and cmd-new-session.c:335-344 (finding
+/// `low_attach_session_new_session_from_a`): `attach` and `new` run from a key binding of
+/// an attached client switch that client (no new terminal), and the commands
+/// after them run. Also `attach -d` from a second terminal, whose first
+/// client goes, and `attach -t a:1` selecting the window.
+#[test]
+fn attach_and_new_session_from_a_key_binding_switch_the_client() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        for cmd in [
+            &["new", "-d", "-s", "s1", "-n", "w"][..],
+            &["new", "-d", "-s", "s2", "-n", "w"],
+            &["neww", "-d", "-t", "s2:", "-n", "two"],
+            &["set", "-g", "status-right", ""],
+            &["bind", "a", "attach -t s2:1 ; set -g @e after"],
+            &["bind", "n", "new -s s3 ; set -g @n after"],
+            &["bind", "A", "new -A -s s1 ; set -g @A after"],
+        ] {
+            assert!(w.cli(cmd).status.success(), "{cmd:?}");
+        }
+        let mut got = Vec::new();
+        let mut a = w.attach(&["attach", "-t", "s1"]);
+        a.wait(|a| pane_text(a).contains("[s1]"));
+        got.push(client_sessions(&w));
+        for (key, session) in [(b"\x02a", "s2"), (b"\x02n", "s3"), (b"\x02A", "s1")] {
+            a.keys(key);
+            a.wait(|a| pane_text(a).contains(&format!("[{session}]")));
+            got.push(client_sessions(&w));
+        }
+        got.push(format!(
+            "{} {} {} {}",
+            user_option(&w, "@e"),
+            user_option(&w, "@n"),
+            user_option(&w, "@A"),
+            display_t(&w, "s2", "#{window_index}")
+        ));
+        // A second terminal with -d takes the session and the first goes.
+        let mut b = w.attach(&["attach", "-d", "-t", "s1"]);
+        a.exited(0);
+        b.wait(|b| pane_text(b).contains("[s1]"));
+        got.push(client_sessions(&w));
+        b.keys(b"\x02d");
+        b.exited(0);
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    assert_eq!(
+        seen[1],
+        [
+            r#"clients ["s1"] sessions ["s1", "s2"]"#,
+            r#"clients ["s2"] sessions ["s1", "s2"]"#,
+            r#"clients ["s3"] sessions ["s1", "s2", "s3"]"#,
+            r#"clients ["s1"] sessions ["s1", "s2", "s3"]"#,
+            "after after after 1",
+            r#"clients ["s1"] sessions ["s1", "s2", "s3"]"#,
+        ]
+    );
+}
+
+/// server-client.c:211-226 and cmd-attach-session.c:75-79, cmd-new-session.c:
+/// 195-198: a client run in one of the server's panes (its `$TMUX` set, its
+/// terminal a pane) that would attach is refused; `new -d` and a
+/// `switch-client` from a popup (the owner's session picker) work.
+#[test]
+fn nested_attach_is_refused_and_popup_switch_client_works() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let t = format!("{} -L {}", w.bin.display(), w.label);
+        let script = w.home.path().join("nest.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "for c in 'attach -t b' 'new -s c' 'new -A -s b' 'attach -d -t b' 'new -d -s d'; do\n\
+                 echo \"[$c]\"; {t} $c 2>&1; echo rc=$?; done\n\
+                 echo END; exec cat\n"
+            ),
+        )
+        .unwrap();
+        for cmd in [
+            &[
+                "new",
+                "-d",
+                "-s",
+                "a",
+                "-n",
+                "w",
+                "sh",
+                script.to_str().unwrap(),
+            ][..],
+            &["new", "-d", "-s", "b", "-n", "w"],
+            &["set", "-g", "status-right", ""],
+            &["select-pane", "-t", "a", "-T", "t"],
+        ] {
+            assert!(w.cli(cmd).status.success(), "{cmd:?}");
+        }
+        let end = Instant::now() + Duration::from_secs(5);
+        let mut text;
+        loop {
+            text = String::from_utf8_lossy(&w.cli(&["capture-pane", "-p", "-J", "-t", "a"]).stdout)
+                .into_owned();
+            if text.contains("END") || Instant::now() > end {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let mut got = vec![text.trim().to_owned(), client_sessions(&w)];
+        // The popup's command is a client of the popup's terminal.
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| pane_text(a).contains("[a]"));
+        assert!(
+            w.cli(&[
+                "bind",
+                "s",
+                "display-popup",
+                "-E",
+                &format!("{t} switch-client -t =b")
+            ])
+            .status
+            .success()
+        );
+        a.keys(b"\x02s");
+        a.wait(|a| pane_text(a).contains("[b]"));
+        got.push(client_sessions(&w));
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1], "vtmux (left) vs tmux 3.8 (right)");
+    let nested = "sessions should be nested with care, unset $TMUX to force";
+    assert_eq!(seen[1][0].matches(nested).count(), 4, "{}", seen[1][0]);
+    assert!(
+        seen[1][1].ends_with(r#"sessions ["a", "b", "d"]"#),
+        "{}",
+        seen[1][1]
+    );
+    assert_eq!(seen[1][2], r#"clients ["b"] sessions ["a", "b", "d"]"#);
+}
+
 fn settles(w: &World, f: &str, want: &str) -> String {
     let end = Instant::now() + Duration::from_secs(5);
     loop {

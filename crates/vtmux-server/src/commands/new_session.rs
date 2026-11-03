@@ -73,7 +73,23 @@ pub fn exec(
             None => found.session,
         };
         if let Some(s) = existing {
-            return super::attach(server, item, s, !args.flag('E'), true);
+            // cmd-new-session.c:116-123: attach-session's checks and flags
+            // (-c, -D, -X, -E, -f) over the session found.
+            if super::check_nested(server, item) {
+                return Err(super::nested_error().into());
+            }
+            let found = Found::from_session(&server.model, s);
+            if let Some(cwd) = args.value('c') {
+                let cwd = expand(server, found, cwd);
+                if let Some(x) = server.model.sessions.get_mut(&s) {
+                    x.cwd = cwd.into();
+                }
+            }
+            if let (Some(c), Some(flags)) = (item.client, args.value('f')) {
+                server.set_client_flags(c, flags);
+            }
+            let detach = (args.flag('D') || args.flag('X')).then(|| args.flag('X'));
+            return super::attach(server, item, s, !args.flag('E'), true, detach);
         }
     }
     if let Some(n) = &session_name
@@ -106,10 +122,24 @@ pub fn exec(
     // A control client is attached without a terminal and sized like a
     // detached session (cmd-new-session.c:165-168, 250-266).
     let control = item.control.is_some();
-    if !detached && !control && item.tty.is_none() {
+    // A client that has a session already has its terminal open and is
+    // not checked for nesting (cmd-new-session.c:178-197).
+    let already_attached = item
+        .client
+        .is_some_and(|c| server.client_session(c).is_some());
+    let tty = super::client_tty(server, item);
+    if !detached
+        && !control
+        && !already_attached
+        && tty.is_some()
+        && super::check_nested(server, item)
+    {
+        return Err(super::nested_error().into());
+    }
+    if !detached && !control && tty.is_none() {
         return Err(EdgeError::OpenTerminalFailed("not a terminal".into()).into());
     }
-    let client_size = item.tty.as_ref().map(|t| (t.cols, t.rows));
+    let client_size = tty.as_ref().map(|t| (t.cols, t.rows));
     let x = size(args.value('x'), "width", client_size.map(|c| c.0), 80)?;
     let y = size(args.value('y'), "height", client_size.map(|c| c.1), 24)?;
     // Attached: the client's terminal less one row when the global
@@ -154,7 +184,7 @@ pub fn exec(
         if let (Some(c), Some(flags)) = (item.client, args.value('f')) {
             server.set_client_flags(c, flags);
         }
-        super::attach(server, item, s, false, false)?;
+        super::attach(server, item, s, false, false, None)?;
     }
     // cmd-new-session.c:361-362.
     item.hook_target = Some(Some(Found::from_session(&server.model, s)));
