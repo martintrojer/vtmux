@@ -3718,6 +3718,22 @@ unsafe extern "C" {
     pub fn ghostty_terminal_free(terminal: Terminal);
 }
 unsafe extern "C" {
+    #[doc = " Copy the active screen into a new terminal of the same size (vtmux patch\n 0005-clone-screen.patch). Free the copy with ghostty_terminal_free().\n"]
+    pub fn ghostty_terminal_clone_screen(
+        terminal: Terminal,
+        out_terminal: *mut Terminal,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Copy every cell of the grid reference's row (vtmux patch\n 0005-clone-screen.patch); out_len gets the row's cell count.\n"]
+    pub fn ghostty_grid_ref_row_cells(
+        ref_: *const GridRef,
+        buf: *mut Cell,
+        buf_len: usize,
+        out_len: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Perform a full reset of the terminal (RIS).\n\n Resets all terminal state back to its initial configuration, including\n modes, scrollback, scrolling region, and screen contents. The terminal\n dimensions are preserved.\n\n If synchronized output was enabled, the GHOSTTY_TERMINAL_OPT_RENDER_HOLD\n callback is invoked to report that the hold ended.\n\n"]
     pub fn ghostty_terminal_reset(terminal: Terminal);
 }

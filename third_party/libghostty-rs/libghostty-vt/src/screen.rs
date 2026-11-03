@@ -71,6 +71,45 @@ impl GridRef<'_> {
         from_result(result)?;
         Ok(Cell(v))
     }
+    /// The same row at column `x`: no page-list walk, unlike
+    /// [`Terminal::grid_ref`]. `x` must be below the row's cell count
+    /// ([`GridRef::row_cells`]). (vtmux.)
+    #[must_use]
+    pub fn with_x(&self, x: u16) -> Self {
+        let mut inner = self.inner;
+        inner.x = x;
+        Self {
+            inner,
+            _phan: PhantomData,
+        }
+    }
+
+    /// Every cell of this reference's row, in one call (the reference's x
+    /// is ignored). (vtmux: `ghostty_grid_ref_row_cells`, patch 0005.)
+    pub fn row_cells(&self, out: &mut Vec<Cell>) -> Result<()> {
+        out.clear();
+        let mut buf: Vec<ffi::Cell> = vec![0; 256];
+        loop {
+            let mut len = 0;
+            let result = unsafe {
+                ffi::ghostty_grid_ref_row_cells(
+                    std::ptr::from_ref(&self.inner),
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &raw mut len,
+                )
+            };
+            match result {
+                ffi::Result::SUCCESS => {
+                    out.extend(buf[..len].iter().map(|&c| Cell(c)));
+                    return Ok(());
+                }
+                ffi::Result::OUT_OF_SPACE if len > buf.len() => buf.resize(len, 0),
+                other => return from_result(other),
+            }
+        }
+    }
+
     /// Get the style of the cell at the grid reference's position.
     pub fn style(&self) -> Result<Style> {
         let mut v = ffi::Style::default();

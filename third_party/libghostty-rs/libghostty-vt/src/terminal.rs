@@ -294,6 +294,22 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(term)
     }
 
+    /// A frozen copy of the active screen (grid, scrollback, cursor) in a new
+    /// terminal of the same size, with no effect handlers. Later changes to
+    /// `self` do not show in it. A compressed page is copied compressed and
+    /// decoded on first read, in the copy only. (vtmux:
+    /// `ghostty_terminal_clone_screen`, patch 0005.)
+    pub fn clone_screen(&self) -> Result<Terminal<'static, 'static>> {
+        let mut raw: ffi::Terminal = std::ptr::null_mut();
+        let result =
+            unsafe { ffi::ghostty_terminal_clone_screen(self.inner.as_raw(), &raw mut raw) };
+        from_result(result)?;
+        Ok(Terminal {
+            inner: Object::new(raw)?,
+            vtable: Box::new(VTable::default()),
+        })
+    }
+
     /// Write VT-encoded data to the terminal for processing.
     ///
     /// Feeds raw bytes through the terminal's VT stream parser, updating

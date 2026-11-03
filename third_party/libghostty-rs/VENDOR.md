@@ -118,6 +118,34 @@ Recorded per commit in git history; the list is kept current:
   and `-Dtest-filter="PageList incremental compression"`; the full upstream
   suite is not yet run.
 
+- `patches/0005-clone-screen.patch` (`c/terminal.zig`, `c/grid_ref.zig`,
+  `lib_vt.zig`, `c/main.zig`, `include/ghostty/vt/{terminal,grid_ref}.h`,
+  `PageList.zig` `clone`/`cloneCompressedNode`): copy-mode entry takes a
+  frozen copy of the pane's screen instead of reading every row through
+  per-cell `grid_ref` calls (4.3 s on 100k lines; each call walked the
+  page list from the top).
+  - `ghostty_terminal_clone_screen`: `Screen.clone` of the active screen
+    (history included) into a new terminal of the same size. Only the
+    grid, cursor and selection are copied.
+  - `ghostty_grid_ref_row_cells`: all cells of a grid ref's row in one
+    call, so a row read walks the page list once.
+  - `PageList.clone` copies a whole compressed page compressed: the copy
+    gets the encoding (duplicated) over fresh backing memory of the same
+    kind (pool item or heap) and decodes on first access, and the source
+    is not restored. Upstream restored every compressed page to clone it,
+    which cost about 60 ms on 100k lines and left the source pane's
+    history uncompressed. The upstream test "PageList compression restores
+    through page access" now expects the clone to stay compressed; a new
+    test, "PageList clone keeps compressed history compressed", checks
+    every row reads back the same.
+  Wrapper: `Terminal::clone_screen`, `GridRef::row_cells`,
+  `GridRef::with_x` (`libghostty-vt/src`), bindings added by hand to
+  `bindings.rs`. Clone of 100k history lines at 120x40 (release, in
+  process, `crates/vtmux-server/examples/copy_entry.rs`): 46 ms resident,
+  5.6 ms compressed. Tests: `zig build test-lib-vt -Dtest-filter=PageList
+  -Doptimize=ReleaseSafe` (697 pass), `-Dtest-filter=Screen` (553 pass),
+  `-Dtest-filter=compress` (191 pass, 6 skip).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
