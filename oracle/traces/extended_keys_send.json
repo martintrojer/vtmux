@@ -1,0 +1,2471 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "extended_keys_send",
+  "inputs": {
+    "name": "extended_keys_send",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys",
+          "on",
+          ";",
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "200",
+          "-y",
+          "8",
+          "sh",
+          "-c",
+          "stty raw -echo opost onlcr; printf '\\033[5n'; dd bs=1 count=4 of=/dev/null 2>/dev/null; tmux wait-for -S rdy; while IFS= read -r l; do printf '%s\\n' \"$l\" | LC_ALL=C cat -v; tmux wait-for -S got; done"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "w1",
+          "sh",
+          "-c",
+          "stty raw -echo opost onlcr; printf '\\033[>4;1m\\033[5n'; dd bs=1 count=4 of=/dev/null 2>/dev/null; tmux wait-for -S rdy; while IFS= read -r l; do printf '%s\\n' \"$l\" | LC_ALL=C cat -v; tmux wait-for -S got; done"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "w2",
+          "sh",
+          "-c",
+          "stty raw -echo opost onlcr; printf '\\033[>4;2m\\033[5n'; dd bs=1 count=4 of=/dev/null 2>/dev/null; tmux wait-for -S rdy; while IFS= read -r l; do printf '%s\\n' \"$l\" | LC_ALL=C cat -v; tmux wait-for -S got; done"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w0"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w0",
+          "off #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w1"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w1",
+          "off #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w2"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w2",
+          "off #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys-format",
+          "xterm"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-l",
+          "off/xterm/vt: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-l",
+          "off/xterm/m1: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-l",
+          "off/xterm/m2: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys-format",
+          "csi-u"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-l",
+          "off/csi-u/vt: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-l",
+          "off/csi-u/m1: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-l",
+          "off/csi-u/m2: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w0"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w1"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w2"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w0"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w0",
+          "on #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w1"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w1",
+          "on #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w2"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w2",
+          "on #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys-format",
+          "xterm"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-l",
+          "on/xterm/vt: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-l",
+          "on/xterm/m1: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-l",
+          "on/xterm/m2: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys-format",
+          "csi-u"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-l",
+          "on/csi-u/vt: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-l",
+          "on/csi-u/m1: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-l",
+          "on/csi-u/m2: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w0"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w1"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w2"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys",
+          "always"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w0"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w0",
+          "always #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w1"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w1",
+          "always #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w2"
+        ]
+      },
+      {
+        "wait_for": "rdy"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w2",
+          "always #{pane_key_mode}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys-format",
+          "xterm"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-l",
+          "always/xterm/vt: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-l",
+          "always/xterm/m1: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-l",
+          "always/xterm/m2: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "extended-keys-format",
+          "csi-u"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-l",
+          "always/csi-u/vt: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w0",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w0",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-l",
+          "always/csi-u/m1: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-l",
+          "always/csi-u/m2: "
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w2",
+          "C-a",
+          "Space",
+          "S-a",
+          "Space",
+          "C-S-a",
+          "Space",
+          "M-a",
+          "Space",
+          "S-Enter",
+          "Space",
+          "C-Enter",
+          "Space",
+          "C-Tab",
+          "Space",
+          "BTab",
+          "Space",
+          "S-Tab",
+          "Space",
+          "C-1",
+          "Space",
+          "C-é",
+          "Space",
+          "C-BSpace",
+          "Space",
+          "C-Escape",
+          "Space",
+          "C-i",
+          "Space",
+          "C-[",
+          "Space",
+          "C-M-S-x",
+          "Space",
+          "S-Up",
+          "Space",
+          "M-BTab",
+          "Space",
+          ";",
+          "send-keys",
+          "-t",
+          "a:w2",
+          "-H",
+          "0a"
+        ]
+      },
+      {
+        "wait_for": "got"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w0"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w1"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-S",
+          "-",
+          "-t",
+          "a:w2"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off VT10x\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off VT10x\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off VT10x\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off/xterm/vt: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\noff/csi-u/vt: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off/xterm/m1: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\noff/csi-u/m1: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off/xterm/m2: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\noff/csi-u/m2: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "on VT10x\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "on Ext 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "on Ext 2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 59,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 61,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 62,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 63,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 64,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 65,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 66,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 67,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 68,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 69,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 70,
+      "observation": {
+        "kind": "cli",
+        "stdout": "on/xterm/vt: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\non/csi-u/vt: ^A a ^A ^[a ^M ^M \t ^[[Z \t 1 M-CM-) C-BSpace C-Escape \t ^[ ^[^X ^[[1;2A ^[[Z\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 71,
+      "observation": {
+        "kind": "cli",
+        "stdout": "on/xterm/m1: ^A ^[[27;2;97~ ^A ^[a ^[[27;2;13~ ^[[27;5;13~ ^[[27;5;9~ ^[[Z ^[[27;2;9~ ^[[27;5;49~ ^[[27;5;233~ ^[[27;5;127~ ^[[27;5;27~ \t ^[ ^[^X ^[[1;2A ^[[Z\non/csi-u/m1: ^A ^[[97;2u ^A ^[a ^[[13;2u ^[[13;5u ^[[9;5u ^[[Z ^[[9;2u ^[[49;5u ^[[233;5u ^[[127;5u ^[[27;5u \t ^[ ^[^X ^[[1;2A ^[[Z\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 72,
+      "observation": {
+        "kind": "cli",
+        "stdout": "on/xterm/m2: ^[[27;5;97~ ^[[27;2;97~ ^[[27;6;97~ ^[[27;3;97~ ^[[27;2;13~ ^[[27;5;13~ ^[[27;5;9~ ^[[27;2;9~ ^[[27;2;9~ ^[[27;5;49~ ^[[27;5;233~ ^[[27;5;127~ ^[[27;5;27~ ^[[27;5;105~ ^[[27;5;91~ ^[[27;8\n;120~ ^[[1;2A ^[[27;4;9~\non/csi-u/m2: ^[[97;5u ^[[97;2u ^[[97;6u ^[[97;3u ^[[13;2u ^[[13;5u ^[[9;5u ^[[9;2u ^[[9;2u ^[[49;5u ^[[233;5u ^[[127;5u ^[[27;5u ^[[105;5u ^[[91;5u ^[[120;8u ^[[1;2A ^[[9;4u\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 73,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 74,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 75,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 76,
+      "observation": {
+        "kind": "cli",
+        "stdout": "always Ext 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 77,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 78,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 79,
+      "observation": {
+        "kind": "cli",
+        "stdout": "always Ext 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 80,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 81,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 82,
+      "observation": {
+        "kind": "cli",
+        "stdout": "always Ext 2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 83,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 84,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 85,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 86,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 87,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 88,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 89,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 90,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 91,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 92,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 93,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 94,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 95,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 96,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 97,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 98,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 99,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 100,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 101,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 102,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 103,
+      "observation": {
+        "kind": "cli",
+        "stdout": "always/xterm/vt: ^A ^[[27;2;97~ ^A ^[a ^[[27;2;13~ ^[[27;5;13~ ^[[27;5;9~ ^[[Z ^[[27;2;9~ ^[[27;5;49~ ^[[27;5;233~ ^[[27;5;127~ ^[[27;5;27~ \t ^[ ^[^X ^[[1;2A ^[[Z\nalways/csi-u/vt: ^A ^[[97;2u ^A ^[a ^[[13;2u ^[[13;5u ^[[9;5u ^[[Z ^[[9;2u ^[[49;5u ^[[233;5u ^[[127;5u ^[[27;5u \t ^[ ^[^X ^[[1;2A ^[[Z\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 104,
+      "observation": {
+        "kind": "cli",
+        "stdout": "always/xterm/m1: ^A ^[[27;2;97~ ^A ^[a ^[[27;2;13~ ^[[27;5;13~ ^[[27;5;9~ ^[[Z ^[[27;2;9~ ^[[27;5;49~ ^[[27;5;233~ ^[[27;5;127~ ^[[27;5;27~ \t ^[ ^[^X ^[[1;2A ^[[Z\nalways/csi-u/m1: ^A ^[[97;2u ^A ^[a ^[[13;2u ^[[13;5u ^[[9;5u ^[[Z ^[[9;2u ^[[49;5u ^[[233;5u ^[[127;5u ^[[27;5u \t ^[ ^[^X ^[[1;2A ^[[Z\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 105,
+      "observation": {
+        "kind": "cli",
+        "stdout": "always/xterm/m2: ^[[27;5;97~ ^[[27;2;97~ ^[[27;6;97~ ^[[27;3;97~ ^[[27;2;13~ ^[[27;5;13~ ^[[27;5;9~ ^[[27;2;9~ ^[[27;2;9~ ^[[27;5;49~ ^[[27;5;233~ ^[[27;5;127~ ^[[27;5;27~ ^[[27;5;105~ ^[[27;5;91~ ^[[\n27;8;120~ ^[[1;2A ^[[27;4;9~\nalways/csi-u/m2: ^[[97;5u ^[[97;2u ^[[97;6u ^[[97;3u ^[[13;2u ^[[13;5u ^[[9;5u ^[[9;2u ^[[9;2u ^[[49;5u ^[[233;5u ^[[127;5u ^[[27;5u ^[[105;5u ^[[91;5u ^[[120;8u ^[[1;2A ^[[9;4u\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

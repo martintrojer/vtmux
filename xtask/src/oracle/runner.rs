@@ -438,19 +438,8 @@ impl<'a> Runner<'a> {
                     let argv = vec!["wait-for".to_string(), chan.clone()];
                     self.cli(i, &argv, &format!("wait_for {chan}"))?;
                 }
-                Step::Screen(_) => {
-                    if self.settle(DEFAULT_QUIET) {
-                        let obs = self.screen()?;
-                        self.push(i, obs);
-                    } else {
-                        self.push(
-                            i,
-                            Observation::Timeout {
-                                what: "settle before screen".into(),
-                            },
-                        );
-                    }
-                }
+                Step::Screen(_) => self.observe_client(i, "screen", false)?,
+                Step::Title(_) => self.observe_client(i, "title", true)?,
                 Step::Divergence(d) => self.pending_div = Some(d.clone()),
             }
         }
@@ -649,8 +638,9 @@ impl<'a> Runner<'a> {
 
     /// The attached client's output fed to an observer terminal; grids are
     /// compared, never the raw bytes (spec, *Behaviour oracle*).
-    fn screen(&self) -> Result<Observation> {
-        let a = self.attach.as_ref().ok_or("screen: no attached client")?;
+    /// The attached client's output so far, fed into a terminal of its size.
+    fn client_term(&self) -> Result<PaneTerm> {
+        let a = self.attach.as_ref().ok_or("no attached client")?;
         let mut term = PaneTerm::new(self.sc.size[0], self.sc.size[1], HISTORY_LIMIT);
         for e in a.events.lock().unwrap().iter() {
             match e {
@@ -658,6 +648,34 @@ impl<'a> Runner<'a> {
                 Event::Resize(c, r) => term.resize(*c, *r),
             }
         }
+        Ok(term)
+    }
+
+    /// Settle, then observe the attached client's screen, or its terminal
+    /// title as a `cli` observation.
+    fn observe_client(&mut self, step: usize, what: &str, title: bool) -> Result<()> {
+        let obs = if self.settle(DEFAULT_QUIET) {
+            if title {
+                let title = self.client_term()?.title();
+                Observation::Cli {
+                    stdout: self.norm.text(&format!("{title}\n")),
+                    stderr: String::new(),
+                    exit: 0,
+                }
+            } else {
+                self.screen()?
+            }
+        } else {
+            Observation::Timeout {
+                what: format!("settle before {what}"),
+            }
+        };
+        self.push(step, obs);
+        Ok(())
+    }
+
+    fn screen(&self) -> Result<Observation> {
+        let term = self.client_term()?;
         let bytes = capture(
             &term,
             CaptureOpts {

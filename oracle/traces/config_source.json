@@ -1,0 +1,609 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "config_source",
+  "inputs": {
+    "name": "config_source",
+    "size": [
+      60,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "7",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "",
+          ";",
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "t",
+          ";",
+          "split-window",
+          "-d",
+          "-T",
+          "t2",
+          "-t",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "c",
+          "# comment line\nset -g @a 1\n%hidden X=hello\n%if \"#{==:#{@a},1}\"\nset -g @b \"yes-#{X}\"\n%elif \"1\"\nset -g @b elif\n%else\nset -g @b no\n%endif\nbind -n F7 set -g @k f7\nbind -N \"my note\" -T mytab x display-message \"hi\"\nbind -r -T mytab y send-keys -X cancel\nunbind -n F5\nset-hook -g after-select-pane 'set -g @hook fired'\nset-hook -ga after-select-pane 'set -ga @hook +'\nrun-shell 'echo ran-from-run'\nif-shell 'true' 'set -g @c ifyes' 'set -g @c ifno'\nif-shell -F '0' 'set -g @d yes' 'set -g @d no'\nset -g @e \"5 6 7\"\nset -ag @e \" 8\"\nset -g terminal-features[3] 'xterm*:RGB'\nset -g status-left '[#S] '\nbind -n F9 { display-message \"braced\" ; set -g @br 1 }\nbind -T mytab z run-shell 'true' ; bind -n F6 switch-client -T mytab\nset -g @multi 'one \\\ntwo'\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "c",
+          "good.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-n",
+          "good.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@a"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "good.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@a"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@b"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@c"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@d"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@e"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@multi"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@br"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "terminal-features"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "status-left"
+        ]
+      },
+      {
+        "run": [
+          "list-keys",
+          "-T",
+          "mytab"
+        ]
+      },
+      {
+        "run": [
+          "list-keys",
+          "-1",
+          "-T",
+          "root",
+          "F7"
+        ]
+      },
+      {
+        "run": [
+          "list-keys",
+          "-1",
+          "-T",
+          "root",
+          "F9"
+        ]
+      },
+      {
+        "run": [
+          "list-keys",
+          "-N",
+          "-T",
+          "mytab"
+        ]
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-g",
+          "after-select-pane"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a.1"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@hook"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux show-messages | sed -e 's/^[^ ]* //' -e 's/client-[0-9]* //' | grep -v 'show-messages'"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-v",
+          "good.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-nv",
+          "good.conf"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux show-messages | sed -e 's/^[^ ]* //' -e 's/client-[0-9]* //' | grep -v 'show-messages'"
+        ]
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-g"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u001b[18~"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001b[20~"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[17~x"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@k"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@br"
+        ]
+      },
+      {
+        "run": [
+          "display-message",
+          "-p",
+          "-t",
+          "a",
+          "#{config_files}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @a\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ran-from-run\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@a 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@b elif\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@c ifyes\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@d no\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@e \"5 6 7 8\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@multi \"one two\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @br\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "terminal-features[0] xterm*:clipboard:ccolour:cstyle:focus:title\nterminal-features[1] screen*:title\nterminal-features[2] rxvt*:ignorefkeys\nterminal-features[3] xterm*:RGB\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "status-left \"[#S] \"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key    -T mytab x display-message hi\nbind-key -r -T mytab y send-keys -X cancel\nbind-key    -T mytab z run-shell true\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key  -T root F7 set-option -g @k f7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key  -T root F9 display-message braced \\; set-option -g @br 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "C-b x my note\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after-select-pane[0] set-option -g @hook fired\nafter-select-pane[1] set-option -ag @hook +\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "fired+\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "command: show-options -gv @hook\ncommand: set-option -ag @hook +\ncommand: set-option -g @hook fired\ncommand: select-pane -t a.1\ncommand: show-hooks -g after-select-pane\ncommand: list-keys -N -T mytab\ncommand: list-keys -1 -T root F9\ncommand: list-keys -1 -T root F7\ncommand: list-keys -T mytab\ncommand: show-options -g status-left\ncommand: show-options -g terminal-features\nmessage: invalid option: @br\ncommand: show-options -g @br\ncommand: show-options -g @multi\ncommand: show-options -g @e\ncommand: show-options -g @d\ncommand: show-options -g @c\ncommand: show-options -g @b\ncommand: show-options -g @a\ncommand: set-option -g @multi \"one two\"\ncommand: bind-key -n F6 switch-client -T mytab\ncommand: bind-key -T mytab z run-shell true\ncommand: bind-key -n F9 { display-message braced ; set-option -g @br 1 }\ncommand: set-option -g status-left \"[#S] \"\ncommand: set-option -g terminal-features[3] xterm*:RGB\ncommand: set-option -ag @e \" 8\"\ncommand: set-option -g @e \"5 6 7\"\ncommand: set-option -g @d no\ncommand: if-shell -F 0 \"set -g @d yes\" \"set -g @d no\"\ncommand: set-option -g @c ifyes\ncommand: if-shell true \"set -g @c ifyes\" \"set -g @c ifno\"\ncommand: run-shell \"echo ran-from-run\"\ncommand: set-hook -ag after-select-pane \"set -ga @hook +\"\ncommand: set-hook -g after-select-pane \"set -g @hook fired\"\ncommand: unbind-key -n F5\ncommand: bind-key -r -T mytab y send-keys -X cancel\ncommand: bind-key -N \"my note\" -T mytab x display-message hi\ncommand: bind-key -n F7 set -g @k f7\ncommand: set-option -g @b elif\ncommand: set-option -g @a 1\ncommand: source-file good.conf\nmessage: invalid option: @a\ncommand: show-options -gv @a\ncommand: source-file -n good.conf\ncommand: save-buffer -b c good.conf\ncommand: set-buffer -b c \"# comment line\\nset -g @a 1\\n%hidden X=hello\\n%if \\\"#{==:#{@a},1}\\\"\\nset -g @b \\\"yes-#{X}\\\"\\n%elif \\\"1\\\"\\nset -g @b elif\\n%else\\nset -g @b no\\n%endif\\nbind -n F7 set -g @k f7\\nbind -N \\\"my note\\\" -T mytab x display-message \\\"hi\\\"\\nbind -r -T mytab y send-keys -X cancel\\nunbind -n F5\\nset-hook -g after-select-pane 'set -g @hook fired'\\nset-hook -ga after-select-pane 'set -ga @hook +'\\nrun-shell 'echo ran-from-run'\\nif-shell 'true' 'set -g @c ifyes' 'set -g @c ifno'\\nif-shell -F '0' 'set -g @d yes' 'set -g @d no'\\nset -g @e \\\"5 6 7\\\"\\nset -ag @e \\\" 8\\\"\\nset -g terminal-features[3] 'xterm*:RGB'\\nset -g status-left '[#S] '\\nbind -n F9 { display-message \\\"braced\\\" ; set -g @br 1 }\\nbind -T mytab z run-shell 'true' ; bind -n F6 switch-client -T mytab\\nset -g @multi 'one \\\\\\ntwo'\\n\"\ncommand: split-window -d -T t2 -t a cat\ncommand: select-pane -T t -t a\ncommand: set-option -g status-right ''\ncommand: new-session -d -n w -s a -x 60 -y 7 cat\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/good.conf:2: set-option -g @a 1\n<TMP>/home/good.conf:5: set-option -g @b \"yes-#{X}\"\n<TMP>/home/good.conf:11: bind-key -n F7 set -g @k f7\n<TMP>/home/good.conf:12: bind-key -N \"my note\" -T mytab x display-message hi\n<TMP>/home/good.conf:13: bind-key -r -T mytab y send-keys -X cancel\n<TMP>/home/good.conf:14: unbind-key -n F5\n<TMP>/home/good.conf:15: set-hook -g after-select-pane \"set -g @hook fired\"\n<TMP>/home/good.conf:16: set-hook -ag after-select-pane \"set -ga @hook +\"\n<TMP>/home/good.conf:17: run-shell \"echo ran-from-run\"\n<TMP>/home/good.conf:18: if-shell true \"set -g @c ifyes\" \"set -g @c ifno\"\n<TMP>/home/good.conf:19: if-shell -F 0 \"set -g @d yes\" \"set -g @d no\"\n<TMP>/home/good.conf:20: set-option -g @e \"5 6 7\"\n<TMP>/home/good.conf:21: set-option -ag @e \" 8\"\n<TMP>/home/good.conf:22: set-option -g terminal-features[3] xterm*:RGB\n<TMP>/home/good.conf:23: set-option -g status-left \"[#S] \"\n<TMP>/home/good.conf:24: display-message braced ; set-option -g @br 1\n<TMP>/home/good.conf:24: bind-key -n F9 { display-message braced ; set-option -g @br 1 }\n<TMP>/home/good.conf:25: bind-key -T mytab z run-shell true ; bind-key -n F6 switch-client -T mytab\n<TMP>/home/good.conf:27: set-option -g @multi \"one two\"\nran-from-run\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/good.conf:2: set-option -g @a 1\n<TMP>/home/good.conf:5: set-option -g @b \"yes-#{X}\"\n<TMP>/home/good.conf:11: bind-key -n F7 set -g @k f7\n<TMP>/home/good.conf:12: bind-key -N \"my note\" -T mytab x display-message hi\n<TMP>/home/good.conf:13: bind-key -r -T mytab y send-keys -X cancel\n<TMP>/home/good.conf:14: unbind-key -n F5\n<TMP>/home/good.conf:15: set-hook -g after-select-pane \"set -g @hook fired\"\n<TMP>/home/good.conf:16: set-hook -ag after-select-pane \"set -ga @hook +\"\n<TMP>/home/good.conf:17: run-shell \"echo ran-from-run\"\n<TMP>/home/good.conf:18: if-shell true \"set -g @c ifyes\" \"set -g @c ifno\"\n<TMP>/home/good.conf:19: if-shell -F 0 \"set -g @d yes\" \"set -g @d no\"\n<TMP>/home/good.conf:20: set-option -g @e \"5 6 7\"\n<TMP>/home/good.conf:21: set-option -ag @e \" 8\"\n<TMP>/home/good.conf:22: set-option -g terminal-features[3] xterm*:RGB\n<TMP>/home/good.conf:23: set-option -g status-left \"[#S] \"\n<TMP>/home/good.conf:24: display-message braced ; set-option -g @br 1\n<TMP>/home/good.conf:24: bind-key -n F9 { display-message braced ; set-option -g @br 1 }\n<TMP>/home/good.conf:25: bind-key -T mytab z run-shell true ; bind-key -n F6 switch-client -T mytab\n<TMP>/home/good.conf:27: set-option -g @multi \"one two\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "command: source-file -nv good.conf\ncommand: set-option -g @multi \"one two\"\ncommand: bind-key -n F6 switch-client -T mytab\ncommand: bind-key -T mytab z run-shell true\ncommand: bind-key -n F9 { display-message braced ; set-option -g @br 1 }\ncommand: set-option -g status-left \"[#S] \"\ncommand: set-option -g terminal-features[3] xterm*:RGB\ncommand: set-option -ag @e \" 8\"\ncommand: set-option -g @e \"5 6 7\"\ncommand: set-option -g @d no\ncommand: if-shell -F 0 \"set -g @d yes\" \"set -g @d no\"\ncommand: set-option -g @c ifyes\ncommand: if-shell true \"set -g @c ifyes\" \"set -g @c ifno\"\ncommand: run-shell \"echo ran-from-run\"\ncommand: set-hook -ag after-select-pane \"set -ga @hook +\"\ncommand: set-hook -g after-select-pane \"set -g @hook fired\"\ncommand: unbind-key -n F5\ncommand: bind-key -r -T mytab y send-keys -X cancel\ncommand: bind-key -N \"my note\" -T mytab x display-message hi\ncommand: bind-key -n F7 set -g @k f7\ncommand: set-option -g @b \"yes-#{X}\"\ncommand: set-option -g @a 1\ncommand: source-file -v good.conf\ncommand: show-options -gv @hook\ncommand: set-option -ag @hook +\ncommand: set-option -g @hook fired\ncommand: select-pane -t a.1\ncommand: show-hooks -g after-select-pane\ncommand: list-keys -N -T mytab\ncommand: list-keys -1 -T root F9\ncommand: list-keys -1 -T root F7\ncommand: list-keys -T mytab\ncommand: show-options -g status-left\ncommand: show-options -g terminal-features\nmessage: invalid option: @br\ncommand: show-options -g @br\ncommand: show-options -g @multi\ncommand: show-options -g @e\ncommand: show-options -g @d\ncommand: show-options -g @c\ncommand: show-options -g @b\ncommand: show-options -g @a\ncommand: set-option -g @multi \"one two\"\ncommand: bind-key -n F6 switch-client -T mytab\ncommand: bind-key -T mytab z run-shell true\ncommand: bind-key -n F9 { display-message braced ; set-option -g @br 1 }\ncommand: set-option -g status-left \"[#S] \"\ncommand: set-option -g terminal-features[3] xterm*:RGB\ncommand: set-option -ag @e \" 8\"\ncommand: set-option -g @e \"5 6 7\"\ncommand: set-option -g @d no\ncommand: if-shell -F 0 \"set -g @d yes\" \"set -g @d no\"\ncommand: set-option -g @c ifyes\ncommand: if-shell true \"set -g @c ifyes\" \"set -g @c ifno\"\ncommand: run-shell \"echo ran-from-run\"\ncommand: set-hook -ag after-select-pane \"set -ga @hook +\"\ncommand: set-hook -g after-select-pane \"set -g @hook fired\"\ncommand: unbind-key -n F5\ncommand: bind-key -r -T mytab y send-keys -X cancel\ncommand: bind-key -N \"my note\" -T mytab x display-message hi\ncommand: bind-key -n F7 set -g @k f7\ncommand: set-option -g @b elif\ncommand: set-option -g @a 1\ncommand: source-file good.conf\nmessage: invalid option: @a\ncommand: show-options -gv @a\ncommand: source-file -n good.conf\ncommand: save-buffer -b c good.conf\ncommand: set-buffer -b c \"# comment line\\nset -g @a 1\\n%hidden X=hello\\n%if \\\"#{==:#{@a},1}\\\"\\nset -g @b \\\"yes-#{X}\\\"\\n%elif \\\"1\\\"\\nset -g @b elif\\n%else\\nset -g @b no\\n%endif\\nbind -n F7 set -g @k f7\\nbind -N \\\"my note\\\" -T mytab x display-message \\\"hi\\\"\\nbind -r -T mytab y send-keys -X cancel\\nunbind -n F5\\nset-hook -g after-select-pane 'set -g @hook fired'\\nset-hook -ga after-select-pane 'set -ga @hook +'\\nrun-shell 'echo ran-from-run'\\nif-shell 'true' 'set -g @c ifyes' 'set -g @c ifno'\\nif-shell -F '0' 'set -g @d yes' 'set -g @d no'\\nset -g @e \\\"5 6 7\\\"\\nset -ag @e \\\" 8\\\"\\nset -g terminal-features[3] 'xterm*:RGB'\\nset -g status-left '[#S] '\\nbind -n F9 { display-message \\\"braced\\\" ; set -g @br 1 }\\nbind -T mytab z run-shell 'true' ; bind -n F6 switch-client -T mytab\\nset -g @multi 'one \\\\\\ntwo'\\n\"\ncommand: split-window -d -T t2 -t a cat\ncommand: select-pane -T t -t a\ncommand: set-option -g status-right ''\ncommand: new-session -d -n w -s a -x 60 -y 7 cat\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "after-bind-key\nafter-capture-pane\nafter-copy-mode\nafter-display-message\nafter-display-panes\nafter-kill-pane\nafter-list-buffers\nafter-list-clients\nafter-list-keys\nafter-list-panes\nafter-list-sessions\nafter-list-windows\nafter-load-buffer\nafter-lock-server\nafter-new-session\nafter-new-window\nafter-paste-buffer\nafter-pipe-pane\nafter-refresh-client\nafter-rename-session\nafter-rename-window\nafter-resize-pane\nafter-resize-window\nafter-save-buffer\nafter-select-layout\nafter-select-pane[0] set-option -g @hook fired\nafter-select-pane[1] set-option -ag @hook +\nafter-select-window\nafter-send-keys\nafter-set-buffer\nafter-set-environment\nafter-set-hook\nafter-set-option\nafter-show-environment\nafter-show-messages\nafter-show-options\nafter-split-window\nafter-swap-window\nafter-unbind-key\nalert-activity\nalert-bell\nalert-silence\nclient-active\nclient-attached\nclient-created\nclient-closed\nclient-detached\nclient-focus-in\nclient-focus-out\nclient-resized\nclient-session-changed\nclient-light-theme\nclient-dark-theme\ncommand-error\nmarked-pane-changed\nsession-closed\nsession-created\nsession-added-to-group\nsession-renamed\nsession-removed-from-group\nsession-window-changed\nwindow-linked\nwindow-unlinked\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[38;2;179;179;179m───────────────────────────────\\e[38;2;154;205;50m─────────────────────────────",
+          "",
+          "",
+          "",
+          "\\e[38;2;13;13;13m\\e[48;2;184;134;11mbraced\\e[39m"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[38;2;179;179;179m───────────────────────────────\\e[38;2;154;205;50m─────────────────────────────",
+          "",
+          "",
+          "",
+          "\\e[38;2;13;13;13m\\e[48;2;184;134;11mhi\\e[39m"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@k f7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@br 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "/dev/null\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

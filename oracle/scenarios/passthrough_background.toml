@@ -1,0 +1,49 @@
+name = "passthrough_background"
+size = [40, 8]
+# allow-passthrough for a pane in a background window (screen-write.c
+# screen_write_set_client_cb): `on` delivers only to clients whose current
+# window it is, `all` to every client of the session. The client terminal's
+# title (the inner OSC 2 of the payload, `title` steps) shows what arrived:
+# off and on leave it empty, all sets it. Nothing is drawn either way.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["select-pane", "-t", "a:w", "-T", "ptitle"] },
+  { run = ["neww", "-d", "-n", "bg", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },
+  { run = ["select-pane", "-t", "a:bg", "-T", "bgtitle"] },
+  { wait_for = "up" },
+  { attach = { session = "a" } },
+  { run = ["set", "-g", "allow-passthrough", "off"] },
+  { run = ["respawn-pane", "-k", "-t", "a:bg", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },
+  { run = ["select-pane", "-t", "a:bg", "-T", "bgtitle"] },
+  { wait_for = "up" },
+  { run = ["send-keys", "-t", "a:bg", "Enter"] },
+  { wait_for = "done" },
+  { settle = {} },
+  { screen = {} },
+  { title = {} },
+  { run = ["display", "-p", "-t", "a:bg", "#{pane_title}"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:bg"] },
+  { run = ["set", "-g", "allow-passthrough", "on"] },
+  { run = ["respawn-pane", "-k", "-t", "a:bg", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },
+  { run = ["select-pane", "-t", "a:bg", "-T", "bgtitle"] },
+  { wait_for = "up" },
+  { run = ["send-keys", "-t", "a:bg", "Enter"] },
+  { wait_for = "done" },
+  { settle = {} },
+  { screen = {} },
+  { title = {} },
+  { run = ["display", "-p", "-t", "a:bg", "#{pane_title}"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:bg"] },
+  { run = ["set", "-g", "allow-passthrough", "all"] },
+  { run = ["respawn-pane", "-k", "-t", "a:bg", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },
+  { run = ["select-pane", "-t", "a:bg", "-T", "bgtitle"] },
+  { wait_for = "up" },
+  { run = ["send-keys", "-t", "a:bg", "Enter"] },
+  { wait_for = "done" },
+  { settle = {} },
+  { screen = {} },
+  { title = {} },
+  { run = ["display", "-p", "-t", "a:bg", "#{pane_title}"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:bg"] },
+]
