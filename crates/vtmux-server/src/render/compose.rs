@@ -6,6 +6,7 @@
 //! client's [`Theme`] turns them into terminal colours.
 
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use vtmux_core::colour::Colour;
 use vtmux_core::ids::PaneId;
@@ -126,7 +127,13 @@ fn acs(c: char) -> char {
 /// How one visible pane draws.
 #[derive(Clone, Debug)]
 pub struct PaneDraw {
-    pub content: Snapshot,
+    /// Shared with the pane's [`vtmux_vt::ScreenView`] when it shows its
+    /// own grid, so a frame does not copy it.
+    pub content: Rc<Snapshot>,
+    /// Per content row, the stamp of the change that last touched it
+    /// ([`vtmux_vt::ScreenView::row_stamps`]); empty when unknown (a mode's
+    /// screen), and the pane's rows are then composed every frame.
+    pub stamps: Vec<u64>,
     /// `pane_index`, for `number` lines.
     pub index: Option<u32>,
     pub lines: Lines,
@@ -192,10 +199,159 @@ fn fill(base: &CellStyle, f: &styled::Cell) -> styled::Cell {
 
 /// Draw `scene` into the top `scene.rows` rows of `screen`.
 pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
-    let cols = usize::from(screen.cols);
     // The last row drawn left the terminal cursor past its last column.
     let mut ended_written = false;
     for y in 0..scene.rows.min(screen.rows) {
+        ended_written = compose_row(scene, d, theme, screen, y, ended_written);
+    }
+}
+
+/// [`compose`], reusing the rows `cache` composed last time whose inputs
+/// are unchanged: the same scene, styles and theme, and the same content
+/// rows of the panes on them ([`PaneDraw::stamps`]). A key's echo then
+/// composes one row, not the window.
+pub fn compose_cached(
+    cache: &mut ComposeCache,
+    scene: &Rc<Scene>,
+    d: &Draw,
+    theme: &Theme,
+    screen: &mut Snapshot,
+) {
+    let key = DrawKey::of(d, *theme, screen.cols, screen.rows);
+    let same = cache.scene.as_ref().is_some_and(|s| Rc::ptr_eq(s, scene))
+        && cache.key.as_ref() == Some(&key);
+    if !same {
+        cache.rows.clear();
+        cache.scene = Some(Rc::clone(scene));
+        cache.key = Some(key);
+    }
+    let cols = usize::from(screen.cols);
+    let mut ended_written = false;
+    for y in 0..scene.rows.min(screen.rows) {
+        let sig = row_signature(scene, d, y);
+        let at = usize::from(y) * cols;
+        if let Some(row) = cache.rows.get(usize::from(y))
+            && sig.is_some()
+            && row.sig == sig
+            && row.above == ended_written
+        {
+            screen.cells[at..at + cols].clone_from_slice(&row.cells);
+            ended_written = row.ended;
+            continue;
+        }
+        let above = ended_written;
+        ended_written = compose_row(scene, d, theme, screen, y, above);
+        let row = CachedRow {
+            sig,
+            above,
+            ended: ended_written,
+            cells: screen.cells[at..at + cols].to_vec(),
+        };
+        if let Some(slot) = cache.rows.get_mut(usize::from(y)) {
+            *slot = row;
+        } else {
+            cache.rows.push(row);
+        }
+    }
+}
+
+/// What [`compose_cached`] composed last, per client.
+#[derive(Debug, Default)]
+pub struct ComposeCache {
+    scene: Option<Rc<Scene>>,
+    key: Option<DrawKey>,
+    rows: Vec<CachedRow>,
+}
+
+#[derive(Debug)]
+struct CachedRow {
+    /// [`row_signature`] when composed.
+    sig: Option<Vec<(PaneId, u32, u64, u64)>>,
+    /// The row above ended written (see [`compose`]'s `wrapped`).
+    above: bool,
+    ended: bool,
+    cells: Vec<Cell>,
+}
+
+/// Everything in a [`Draw`] but the panes' content, and the theme.
+#[derive(Debug, PartialEq)]
+struct DrawKey {
+    panes: Vec<(PaneId, Option<u32>, Lines, CellStyle, Vec<styled::Cell>, Vec<bool>)>,
+    active: Option<PaneId>,
+    offset: u16,
+    border: CellStyle,
+    lines: Lines,
+    outside: styled::Cell,
+    inside: styled::Cell,
+    clear: Clear,
+    theme: Theme,
+    size: (u16, u16),
+}
+
+impl DrawKey {
+    fn of(d: &Draw, theme: Theme, cols: u16, rows: u16) -> Self {
+        Self {
+            panes: d
+                .panes
+                .iter()
+                .map(|(&id, p)| {
+                    (
+                        id,
+                        p.index,
+                        p.lines,
+                        p.border.clone(),
+                        p.status.clone(),
+                        p.selected.clone(),
+                    )
+                })
+                .collect(),
+            active: d.active,
+            offset: d.offset,
+            border: d.border.clone(),
+            lines: d.lines,
+            outside: d.outside.clone(),
+            inside: d.inside.clone(),
+            clear: d.clear,
+            theme,
+            size: (cols, rows),
+        }
+    }
+}
+
+/// The content rows row `y` of the scene shows, as (pane, content row,
+/// its stamp, the stamp of the row above it, which decides `wrapped`);
+/// `None` if a pane's stamps are unknown.
+fn row_signature(scene: &Scene, d: &Draw, y: u16) -> Option<Vec<(PaneId, u32, u64, u64)>> {
+    let mut sig: Vec<(PaneId, u32, u64, u64)> = Vec::new();
+    for x in 0..scene.cols {
+        let SceneCell::Pane { pane, py, .. } = scene.get(x, y) else {
+            continue;
+        };
+        if sig.last().is_some_and(|l| (l.0, l.1) == (*pane, *py)) {
+            continue;
+        }
+        let stamps = &d.panes.get(pane)?.stamps;
+        let at = usize::try_from(*py).ok()?;
+        let stamp = *stamps.get(at)?;
+        let above = at.checked_sub(1).map_or(Some(0), |a| stamps.get(a).copied())?;
+        sig.push((*pane, *py, stamp, above));
+    }
+    Some(sig)
+}
+
+/// Row `y` of [`compose`]; `above_ended_written` is what the row above
+/// returned. Returns whether this row ended written.
+fn compose_row(
+    scene: &Scene,
+    d: &Draw,
+    theme: &Theme,
+    screen: &mut Snapshot,
+    y: u16,
+    above_ended_written: bool,
+) -> bool {
+    let cols = usize::from(screen.cols);
+    let mut ended_written = false;
+    {
         for x in 0..scene.cols.min(screen.cols) {
             let cell = match scene.get(x, y) {
                 SceneCell::Pane { pane, px, py } => d
@@ -236,7 +392,6 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
         // fill are drawn cell by cell (`tty_cell`) and keep their text.
         let width = scene.cols.min(screen.cols);
         let mut x = 0;
-        let above_ended_written = std::mem::take(&mut ended_written);
         while x < width {
             let Some(key) = span_key(scene.get(x, y), x) else {
                 x += 1;
@@ -274,6 +429,7 @@ pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
             x = end;
         }
     }
+    ended_written
 }
 
 /// Which cells of the span `x..end` of row `y` are [`PaneDraw::selected`].

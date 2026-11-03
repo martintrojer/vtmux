@@ -3,6 +3,7 @@
 //! gathered into a [`Scene`] and a [`Draw`].
 
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use vtmux_core::colour::Colour;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
@@ -15,7 +16,7 @@ use vtmux_vt::{Color, Snapshot};
 
 use super::Caps;
 use super::compose::{Draw, PaneDraw, Theme, pane_status};
-use super::scene::{Indicators, Lines, Scene, ScenePane, WindowView};
+use super::scene::{Indicators, Lines, Scene, SceneCache, ScenePane, WindowView};
 use crate::environ::Environ;
 use crate::format_ctx::{Ctx, ServerInfo};
 use crate::format_jobs::{JobHandle, TAG_PANE};
@@ -126,7 +127,8 @@ impl Source<'_> {
         rows: u16,
         caps: Caps,
         jobs: Option<&JobHandle>,
-    ) -> Option<(Scene, Draw)> {
+        cache: Option<&SceneCache>,
+    ) -> Option<(Rc<Scene>, Draw)> {
         let found = Found::from_session(self.model, s);
         let w = found.window?;
         let window = self.model.windows.get(&w)?;
@@ -178,11 +180,13 @@ impl Source<'_> {
             } else {
                 "pane-border-style"
             };
-            let (content, selected) = self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
+            let (content, stamps, selected) =
+                self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
             draws.insert(
                 p,
                 PaneDraw {
                     content,
+                    stamps,
                     selected,
                     index: self.model.pane_index(p),
                     lines,
@@ -205,20 +209,24 @@ impl Source<'_> {
             two_pane: two_pane(self.model, w),
             ring: ring.then_some(active),
         };
-        let scene = Scene::build(&view, cols, rows);
+        let order: Vec<PaneId> = view.panes.iter().map(|p| p.id).collect();
+        let scene = match cache {
+            Some(cache) => Scene::cached(cache, view, cols, rows),
+            None => Rc::new(Scene::build(&view, cols, rows)),
+        };
         let ring_style = draws
             .get(&active)
             .map(|d| d.border.clone())
             .unwrap_or_default();
-        for p in &view.panes {
-            let under = scene.status_line(p.id);
+        for p in order {
+            let under = scene.status_line(p);
             if under.is_empty() {
                 continue;
             }
-            let ctx = self.border_ctx(found, p.id, caps, jobs);
-            let format = self.string(TreeId::Pane(p.id), "pane-border-format");
+            let ctx = self.border_ctx(found, p, caps, jobs);
+            let format = self.string(TreeId::Pane(p), "pane-border-format");
             let expanded = vtmux_core::format::expand_time(&format, &ctx);
-            let d = draws.get_mut(&p.id).expect("drawn pane");
+            let d = draws.get_mut(&p).expect("drawn pane");
             d.status = pane_status(&under, &d.border, &ring_style, d.lines, d.index, &expanded);
         }
         let ctx = self.ctx(found, caps);
@@ -235,21 +243,26 @@ impl Source<'_> {
         Some((scene, draw))
     }
 
-    /// What `pane` shows: its shown mode's screen, else its own, and which
-    /// cells are selected.
+    /// What `pane` shows: its shown mode's screen, else its own, its row
+    /// stamps ([`PaneDraw::stamps`], only for its own) and which cells are
+    /// selected.
     fn pane_screen(
         &self,
         pane: &crate::model::Pane,
         tree: TreeId,
         ctx: &Ctx<'_>,
         caps: Caps,
-    ) -> (Snapshot, Vec<bool>) {
+    ) -> (Rc<Snapshot>, Vec<u64>, Vec<bool>) {
         if let Some(crate::mode::Mode::Clock(m)) = pane.modes.first() {
             let screen = self.clock_screen(pane, m, ctx, caps);
-            return (screen, Vec::new());
+            return (Rc::new(screen), Vec::new(), Vec::new());
         }
         if let Some(crate::mode::Mode::Panes(m)) = pane.modes.first() {
-            return (self.panes_screen(pane, m, caps), Vec::new());
+            return (Rc::new(self.panes_screen(pane, m, caps)), Vec::new(), Vec::new());
+        }
+        if pane.modes.is_empty() && !pane.mode_prompt.as_ref().is_some_and(|m| m.shown(pane)) {
+            let view = pane.term.screen();
+            return (view.shared(), view.row_stamps().to_vec(), Vec::new());
         }
         let (mut screen, selected) = match pane.modes.first() {
             Some(crate::mode::Mode::Copy(m)) => {
@@ -265,7 +278,7 @@ impl Source<'_> {
         if let Some(prompt) = pane.mode_prompt.as_ref().filter(|m| m.shown(pane)) {
             self.mode_prompt(&mut screen, prompt, tree, caps);
         }
-        (screen, selected)
+        (Rc::new(screen), Vec::new(), selected)
     }
 
     /// Clock mode's screen (`window_clock_draw_screen`): the time now in

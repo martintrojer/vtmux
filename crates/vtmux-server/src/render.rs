@@ -113,6 +113,13 @@ impl Caps {
 /// at once.
 pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
 
+/// What a client's last window drawing can lend the next one.
+#[derive(Debug, Default)]
+pub struct WindowCache {
+    pub scene: scene::SceneCache,
+    pub compose: std::cell::RefCell<compose::ComposeCache>,
+}
+
 #[derive(Default)]
 pub struct Compositor {
     last: Option<Snapshot>,

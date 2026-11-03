@@ -260,6 +260,10 @@ pub struct PaneTerm {
     dcs_since: Option<std::time::Instant>,
     /// History rows read out of Ghostty (see [`history_reads`]).
     reads: StdCell<u64>,
+    /// The visible grid, kept up to date from Ghostty's dirty rows. It is
+    /// the only reader of Ghostty's render state, whose dirty flags one
+    /// reader consumes.
+    pub(crate) view: RefCell<crate::snapshot::ScreenView>,
 }
 
 /// A `DCS tmux;` payload (input.c `input_dcs_dispatch`), unescaped, for the
@@ -390,6 +394,7 @@ impl PaneTerm {
             passthrough: Vec::new(),
             dcs_since: None,
             reads: StdCell::new(0),
+            view: RefCell::default(),
         };
         pane.retain();
         pane
@@ -868,6 +873,17 @@ impl PaneTerm {
     /// The history copied when the alternate screen came up, while it is.
     pub(crate) fn frozen_rows(&self) -> Option<Rc<Vec<FrozenRow>>> {
         self.frozen.clone()
+    }
+
+    /// The visible grid, brought up to date (only the rows Ghostty marked
+    /// dirty are read again).
+    ///
+    /// # Panics
+    /// Only if libghostty fails to allocate, or while a returned view is
+    /// still held.
+    pub fn screen(&self) -> std::cell::Ref<'_, crate::snapshot::ScreenView> {
+        self.view.borrow_mut().update(self);
+        self.view.borrow()
     }
 
     /// Resize the pane. Primary-screen content reflows (Ghostty).

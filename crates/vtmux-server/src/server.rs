@@ -123,6 +123,9 @@ pub(crate) struct Client {
     /// capabilities after `terminal-features` and `terminal-overrides`.
     pub(crate) term: Option<vtmux_core::term_features::Term>,
     pub(crate) compositor: crate::render::Compositor,
+    /// The scene and composed rows of the client's last frame, reused
+    /// where nothing under them changed.
+    pub(crate) window_cache: crate::render::WindowCache,
     /// `DCS tmux;` payloads for the terminal, written after this tick's
     /// frame (`tty_cmd_rawstring`).
     pub(crate) passthrough: Vec<u8>,
@@ -872,6 +875,7 @@ impl Server {
                             caps: None,
                             term: None,
                             compositor: crate::render::Compositor::default(),
+                            window_cache: crate::render::WindowCache::default(),
                             passthrough: Vec::new(),
                         },
                     );
@@ -2069,6 +2073,7 @@ impl Server {
                 .flatten()
                 .map(<[vtmux_vt::Cell]>::to_vec);
             self.draw_window(
+                id,
                 s,
                 caps,
                 &mut screen,
@@ -2240,6 +2245,7 @@ impl Server {
     #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
     fn draw_window(
         &self,
+        id: ClientId,
         s: SessionId,
         caps: crate::render::Caps,
         screen: &mut vtmux_vt::Snapshot,
@@ -2249,7 +2255,15 @@ impl Server {
         jobs: &crate::format_jobs::JobHandle,
     ) {
         let source = self.render_source();
-        let Some((scene, draw)) = source.window(s, screen.cols, rows, caps, Some(jobs)) else {
+        let cache = self.clients.get(&id).map(|c| &c.window_cache);
+        let Some((scene, draw)) = source.window(
+            s,
+            screen.cols,
+            rows,
+            caps,
+            Some(jobs),
+            cache.map(|c| &c.scene),
+        ) else {
             return;
         };
         let theme = source.theme(caps);
@@ -2262,7 +2276,16 @@ impl Server {
             cursor: screen.cursor,
             cursor_visible: screen.cursor_visible,
         };
-        crate::render::compose::compose(&scene, &draw, &theme, &mut window);
+        match cache {
+            Some(c) => crate::render::compose::compose_cached(
+                &mut c.compose.borrow_mut(),
+                &scene,
+                &draw,
+                &theme,
+                &mut window,
+            ),
+            None => crate::render::compose::compose(&scene, &draw, &theme, &mut window),
+        }
         crate::render::window::cursor(&mut window, &draw, &self.model, rows);
         if let Some(held) = held {
             for (i, (cell, shown)) in window.cells.iter_mut().zip(held).enumerate() {

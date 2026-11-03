@@ -11,6 +11,9 @@
 //! when it lies on the active pane's rectangle. A 4-way junction has one
 //! owner slot per side for four panes, so the slots cannot say that.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use vtmux_core::ids::PaneId;
 use vtmux_core::layout::{Dir, Geometry, PaneStatus};
 
@@ -227,7 +230,7 @@ pub fn glyph(lines: Lines, junction: Junction, index: Option<u32>) -> String {
 }
 
 /// One visible pane as the scene needs it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScenePane {
     pub id: PaneId,
     /// `wp->xoff`, `wp->yoff`, `wp->sx`, `wp->sy`.
@@ -239,7 +242,7 @@ pub struct ScenePane {
 }
 
 /// The window being drawn.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowView {
     pub sx: u32,
     pub sy: u32,
@@ -351,6 +354,11 @@ pub enum SceneCell {
     },
 }
 
+/// The scene a client drew last and the view it came from
+/// ([`Scene::cached`]): the scene only changes with the layout.
+#[derive(Debug, Default)]
+pub struct SceneCache(RefCell<Option<(WindowView, Rc<Scene>)>>);
+
 #[derive(Clone, Debug)]
 pub struct Scene {
     pub cols: u16,
@@ -368,6 +376,21 @@ fn int(n: u32) -> i32 {
 impl Scene {
     /// `redraw_build_cells` for a `cols` x `rows` area at the window origin.
     #[must_use]
+    /// [`Self::build`], or the scene `cache` holds when it was built
+    /// from the same view at the same size.
+    pub fn cached(cache: &SceneCache, win: WindowView, cols: u16, rows: u16) -> Rc<Self> {
+        let mut slot = cache.0.borrow_mut();
+        if let Some((view, scene)) = slot.as_ref()
+            && *view == win
+            && (scene.cols, scene.rows) == (cols, rows)
+        {
+            return Rc::clone(scene);
+        }
+        let scene = Rc::new(Self::build(&win, cols, rows));
+        *slot = Some((win, Rc::clone(&scene)));
+        scene
+    }
+
     pub fn build(win: &WindowView, cols: u16, rows: u16) -> Self {
         let mut cells = Vec::with_capacity(usize::from(cols) * usize::from(rows));
         for y in 0..rows {
