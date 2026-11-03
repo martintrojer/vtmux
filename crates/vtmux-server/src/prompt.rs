@@ -12,8 +12,11 @@
 //! Where the prompt is drawn (status line or pane) is not the editor's
 //! business.
 //!
-//! Not here yet: Tab completion, mouse.
+//! Tab completes the first word of a command prompt (`prompt_complete`).
+//!
+//! Not here yet: mouse.
 
+use vtmux_core::cmd::TMUX_COMMANDS;
 use vtmux_core::keys::Key;
 use vtmux_core::width::char_width;
 
@@ -90,6 +93,9 @@ pub struct KeyEnv<'a> {
     pub history_limit: usize,
     /// The top automatic paste buffer (`paste_get_top(NULL)`).
     pub paste: Option<&'a [u8]>,
+    /// The `command-alias` items, `name=text`, which Tab completes along
+    /// with the command names (`prompt_complete_commands`).
+    pub aliases: &'a [String],
 }
 
 /// An editing command, from an emacs key or a translated vi one.
@@ -163,6 +169,9 @@ pub struct Prompt {
     /// `PROMPT_NOFORMAT`: the input is not a format (`prompt_create`,
     /// `prompt_update`); the label still is (`prompt_expand1`).
     pub no_format: bool,
+    /// `pr->complete_display`: the matches Tab found and could not narrow
+    /// down, a space before each, shown after the line until the next key.
+    complete_display: Option<String>,
 }
 
 impl Prompt {
@@ -192,6 +201,7 @@ impl Prompt {
             is_pane: false,
             is_mode: false,
             no_format: false,
+            complete_display: None,
         }
     }
 
@@ -218,6 +228,16 @@ impl Prompt {
         self.buffer = input.chars().collect();
         self.index = self.buffer.len();
         self.history_at = Position::default();
+        self.complete_display = None;
+    }
+
+    /// The matches to draw after the line (`prompt_draw_complete`): only
+    /// with the cursor at the end of it.
+    #[must_use]
+    pub fn complete_display(&self) -> Option<&str> {
+        self.complete_display
+            .as_deref()
+            .filter(|_| self.index == self.buffer.len())
     }
 
     /// The line typed so far.
@@ -305,6 +325,8 @@ impl Prompt {
 
     /// `prompt_key`.
     pub fn key(&mut self, key: Key, env: &mut KeyEnv<'_>) -> KeyOutcome {
+        // prompt.c:1229: Tab rebuilds the matches if they still apply.
+        self.complete_display = None;
         if self.kind == Kind::Key {
             return KeyOutcome::DoneClose {
                 value: key.to_string(),
@@ -393,8 +415,8 @@ impl Prompt {
             return Edit::Moved;
         }
         let changed = match action {
-            // prompt_replace_complete: completion is not here yet.
-            Action::Left | Action::Right | Action::Home | Action::End | Action::Complete => false,
+            Action::Left | Action::Right | Action::Home | Action::End => false,
+            Action::Complete => self.replace_complete(env.aliases),
             Action::Backspace if self.kind == Kind::BackspaceExit && size == 0 => {
                 return Edit::Out(KeyOutcome::Done(None));
             }
@@ -556,6 +578,101 @@ impl Prompt {
     fn set_line(&mut self, line: &str) {
         self.buffer = line.chars().collect();
         self.index = self.buffer.len();
+    }
+
+    /// `prompt_replace_complete` (prompt.c:996-1060) for Tab: complete the
+    /// word at the cursor. `true` when the line changed.
+    fn replace_complete(&mut self, aliases: &[String]) -> bool {
+        let size = self.buffer.len();
+        // The word the cursor is in; `buffer[size]` is the terminator.
+        let idx = self.index.saturating_sub(1);
+        let mut first = idx;
+        while first > 0 && !self.space(first) {
+            first -= 1;
+        }
+        while first < size && self.space(first) {
+            first += 1;
+        }
+        let mut last = idx;
+        while last < size && !self.space(last) {
+            last += 1;
+        }
+        while last > 0 && self.space(last) {
+            last -= 1;
+        }
+        if last < size {
+            last += 1;
+        }
+        if last < first {
+            return false;
+        }
+        let word: String = self.buffer[first..last].iter().collect();
+        // `char word[64]`: a longer word is left alone.
+        if word.len() >= 64 {
+            return false;
+        }
+        let Some(insert) = self.complete(&word, first, aliases) else {
+            return false;
+        };
+        self.buffer.splice(first..last, insert.chars());
+        self.index = first + insert.chars().count();
+        true
+    }
+
+    /// `prompt_complete` (prompt.c:1669-1706): what to insert for `word`
+    /// at `offset`; with several matches and nothing longer to insert, the
+    /// matches are kept for display instead. Only the first word of a
+    /// command prompt completes, and only to command names and aliases.
+    fn complete(&mut self, word: &str, offset: usize, aliases: &[String]) -> Option<String> {
+        if self.ty != PromptType::Command || offset != 0 || word.is_empty() {
+            return None;
+        }
+        let mut list: Vec<&str> = TMUX_COMMANDS
+            .iter()
+            .map(|c| c.name)
+            .filter(|n| n.starts_with(word))
+            .collect();
+        for alias in aliases {
+            // `prompt_complete_commands`: an alias is `name=text`, and the
+            // word must not be longer than its name.
+            if let Some((name, _)) = alias.split_once('=')
+                && word.len() <= name.len()
+                && name.starts_with(word)
+            {
+                list.push(name);
+            }
+        }
+        list.sort_unstable();
+        list.dedup();
+        let out = match list.as_slice() {
+            [] => return None,
+            [one] => format!("{one} "),
+            [first, rest @ ..] => {
+                let mut len = first.len();
+                for other in rest {
+                    len = len.min(
+                        first
+                            .bytes()
+                            .zip(other.bytes())
+                            .take_while(|(a, b)| a == b)
+                            .count(),
+                    );
+                }
+                // Every name here is ASCII (aliases are the user's: stay
+                // on a character boundary).
+                while !first.is_char_boundary(len) {
+                    len -= 1;
+                }
+                first[..len].to_owned()
+            }
+        };
+        if out != word {
+            return Some(out);
+        }
+        if list.len() > 1 {
+            self.complete_display = Some(list.iter().map(|n| format!(" {n}")).collect());
+        }
+        None
     }
 
     /// `prompt_paste`: what `C-w` cut, else the top buffer up to its first
@@ -873,6 +990,7 @@ mod tests {
             history: h,
             history_limit: 100,
             paste: Some(b"pa\nste"),
+            aliases: &[],
         }
     }
 
