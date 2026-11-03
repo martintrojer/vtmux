@@ -406,8 +406,7 @@ status = "xfail"
 reason = "needs customize-mode (its choose-tree, choose-buffer and choose-client sections pass)"
 
 [tests."mode-tree-scroll.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."new-pane-mouse-status.sh"]
 status = "xfail"
