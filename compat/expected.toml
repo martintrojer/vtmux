@@ -464,8 +464,7 @@ status = "xfail"
 reason = "a 24-row client of an 80x24 window (window-size manual) needs the pan offset to the mode prompt (tty_window_offset); with that, a status-prompt invalid-UTF-8 append"
 
 [tests."prompt-mechanics.sh"]
-status = "xfail"
-reason = "a 24-row client of an 80x24 window (window-size manual) needs the pan offset to the mode prompt (tty_window_offset); with that, its tree-mode sections pass up to command-prompt Tab completion"
+status = "pass"
 
 [tests."prompt-words-history.sh"]
 status = "skip"

@@ -802,8 +802,11 @@ impl Server {
         if let Some(mut l) = self.listener.take() {
             let _ = self.poll.registry().deregister(&mut l);
         }
-        // server_exit -> job_kill_all (server.c:260).
+        // server_exit -> job_kill_all (server.c:260), prompt_save_history.
         self.jobs_kill_all();
+        if let Some(path) = self.history_file() {
+            self.prompt_history.save(&path);
+        }
         let ids: Vec<_> = self.clients.keys().copied().collect();
         for id in ids {
             self.flush_client(id);
@@ -993,7 +996,7 @@ impl Server {
 
     /// The items of an array option (or the one value of a plain option)
     /// as seen from `tree`, in key order.
-    fn array_option(&self, tree: TreeId, name: &str) -> Vec<String> {
+    pub(crate) fn array_option(&self, tree: TreeId, name: &str) -> Vec<String> {
         match self.model.options.get(tree, name) {
             Some(e) => match &e.value {
                 OptionValue::Array(items) => {
@@ -2816,6 +2819,29 @@ impl Server {
         self.cmdq_append(None, batch);
     }
 
+    /// `prompt_find_history_file` for the `history-file` option.
+    fn history_file(&self) -> Option<PathBuf> {
+        let option = self
+            .model
+            .options
+            .get(TreeId::Server, "history-file")
+            .map(|e| e.value.to_text(e.def, None, false))?;
+        crate::prompt_history::history_path(&option, find_home(&self.global_env).as_deref())
+    }
+
+    /// `prompt_load_history` (prompt-history.c:79-106), once the config has
+    /// run.
+    fn prompt_load_history(&mut self) {
+        let limit = usize::try_from(
+            self.model
+                .number_option(TreeId::Server, "prompt-history-limit"),
+        )
+        .unwrap_or(0);
+        if let Some(path) = self.history_file() {
+            self.prompt_history.load(&path, limit);
+        }
+    }
+
     /// `cfg_done` (cfg.c:47-62): the config has run; the first client's
     /// command may go.
     pub(crate) fn cfg_done(&mut self) {
@@ -2823,6 +2849,7 @@ impl Server {
             return;
         }
         self.cfg_finished = true;
+        self.prompt_load_history();
         // cfg_show_causes(NULL) (cfg.c:239-280): the first client, if it
         // is a control client, gets them as `%config-error`. Otherwise they
         // wait for an attached session's view mode, which vtmux has not

@@ -572,7 +572,28 @@ fn draw_prompt(
     } else {
         (0, pwidth.min(avail))
     };
-    let content_width = (label_width + input_width).min(aw);
+    let mut content_width = label_width + input_width;
+    let cursor_col = if avail == 0 {
+        label_width
+    } else {
+        pcursor - offset + label_width
+    };
+    // The matches Tab listed (`prompt_draw_complete`) widen the content.
+    let complete = editor
+        .complete_display()
+        .filter(|_| cursor_col < aw)
+        .map(|d| {
+            let cells: Vec<(String, u8)> = d
+                .chars()
+                .map(|c| (c.to_string(), vtmux_core::width::char_width(c)))
+                .collect();
+            let width = cells.iter().map(|c| usize::from(c.1)).sum::<usize>();
+            (cells, width.min(aw - cursor_col))
+        });
+    if let Some((_, width)) = &complete {
+        content_width = content_width.max(cursor_col + width);
+    }
+    let content_width = content_width.min(aw);
     let content_x = match sy.align {
         Align::Centre | Align::AbsoluteCentre => ax + (aw - content_width) / 2,
         Align::Right => ax + aw - content_width,
@@ -605,6 +626,11 @@ fn draw_prompt(
             row.splice(content_x..content_x + label_width, drawn);
         }
         draw_input(row, input_x, &cells, offset, input_width, &sy.cell);
+        if let Some((cells, width)) = complete {
+            let mut style = sy.cell.clone();
+            style.attrs = style.attrs.union(vtmux_core::style::Attrs::UNDERSCORE);
+            draw_input(row, cursor_x, &cells, 0, width, &style);
+        }
     }
     cursor_x
 }

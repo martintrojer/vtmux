@@ -3412,6 +3412,57 @@ fn detach_client_e_runs_a_command_in_place_of_the_client() {
     assert_eq!(&r[0][1..], ["exit 4 \"ran\"", "exit 4 \"ran\"", "alive"]);
 }
 
+/// `history-file` (cfg.c:59, server.c:261, prompt-history.c): the server
+/// writes `type:line` lines when it exits and reads them once the config
+/// has run, on both servers.
+#[test]
+fn history_file_is_saved_at_exit_and_loaded_after_the_config() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let file = w.home.path().join("hist");
+        let conf = w.home.path().join("c.conf");
+        std::fs::write(&conf, format!("set -g history-file {}\n", file.display())).unwrap();
+        let conf = conf.to_str().unwrap();
+        let mut a = w.attach(&["-f", conf, "new", "-s", "a", "-n", "w", "cat"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        a.keys(b"\x02:");
+        a.wait(|a| status_row(a).starts_with(':'));
+        a.keys(b"set -g @h one\r");
+        a.wait(|_| w.cli(&["show", "-gv", "@h"]).stdout == b"one\n");
+        assert!(w.cli(&["kill-server"]).status.success());
+        a.exited(1);
+        // Written as the server exits: wait for the whole line.
+        let end = Instant::now() + Duration::from_secs(10);
+        while !std::fs::read_to_string(&file).is_ok_and(|t| t.ends_with('\n')) {
+            assert!(Instant::now() < end, "history file not written");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "command:set -g @h one\n",
+            "{}",
+            w.bin.display()
+        );
+        let out = w.cli(&[
+            "-f",
+            conf,
+            "new",
+            "-d",
+            "-s",
+            "b",
+            ";",
+            "show-prompt-history",
+        ]);
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "History for command:\n\n1: set -g @h one\n\nHistory for search:\n\n\n",
+            "{}",
+            w.bin.display()
+        );
+        assert!(w.cli(&["kill-server"]).status.success());
+    }
+}
+
 /// A command client running `confirm-before` waits for the answer on the
 /// attached client and exits 0 when it confirmed, 1 when not
 /// (cmd-confirm-before.c:143-149). `command-prompt` waits too, and the

@@ -412,6 +412,7 @@ impl Server {
         )
         .unwrap_or(0);
         let paste = self.model.paste.top().map(|b| b.data.clone());
+        let aliases = self.array_option(TreeId::Server, "command-alias");
         let history = &mut self.prompt_history;
         let editor = match place {
             Place::Status(c) => self
@@ -438,6 +439,7 @@ impl Server {
             history,
             history_limit: limit,
             paste: paste.as_deref(),
+            aliases: &aliases,
         };
         let outcome = prompt.editor.key(key, &mut env);
         let taken = match outcome {
