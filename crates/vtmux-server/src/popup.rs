@@ -190,6 +190,12 @@ impl Server {
                 env.push((k.to_owned(), v.to_owned()));
             }
         }
+        // `-e PATH=...` still gets the D5 shim first, as a pane's does.
+        if let Some(i) = env.iter().position(|(k, _)| k == "PATH")
+            && let Some(path) = self.shim_path(Some(&env[i].1))
+        {
+            env[i].1 = path;
+        }
         let program = match open.command {
             Command::Shell(cmd) => {
                 // job.c:204-205: JOB_DEFAULTSHELL sets SHELL for `-c`.

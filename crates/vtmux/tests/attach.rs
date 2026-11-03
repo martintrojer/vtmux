@@ -5982,3 +5982,98 @@ fn default_bindings_drag_or_forward() {
         ]
     );
 }
+
+/// D5: every child's `PATH` starts with a private shim dir holding `tmux`
+/// -> this server's executable, so scripts that call plain `tmux` reach
+/// this server even when it was started as `vtmux` and the `PATH` it was
+/// given has another `tmux` first (here one that prints FAKE and fails).
+/// The shim, invoked as `tmux`, finds the server through `$TMUX`, for a
+/// `-L` and a `-S` socket alike. vtmux only: tmux has no shim
+/// (compat/DIVERGENCES.md D-022).
+#[test]
+fn tmux_shim_reaches_this_server_from_children() {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_vtmux"));
+    let w = World::new(bin.clone());
+    let fake = w.home.path().join("fake");
+    std::fs::create_dir(&fake).unwrap();
+    let fake_tmux = fake.join("tmux");
+    std::fs::write(&fake_tmux, "#!/bin/sh\necho FAKE\nexit 1\n").unwrap();
+    std::fs::set_permissions(
+        &fake_tmux,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    let path = format!("{}:/usr/bin:/bin", fake.display());
+    let sock = w.home.path().join("s");
+    let sock = sock.to_str().unwrap();
+    for socket in [["-L", w.label.as_str()], ["-S", sock]] {
+        let cli = |args: &[&str]| {
+            let out = Command::new(&bin)
+                .args(socket)
+                .args(["-f", "/dev/null"])
+                .args(args)
+                .env_clear()
+                .envs(w.env())
+                .env("PATH", &path)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim_end().to_owned()
+        };
+        let mut cmd = CommandBuilder::new(&bin);
+        cmd.args(socket);
+        cmd.args(["-f", "/dev/null", "new", "-s", "a"]);
+        let a = w.spawn_attached(cmd, 60, 10, &[("PATH", &path)]);
+        a.wait(|a| pane_text(a).contains('$'));
+        let shim_dir = cli(&["display", "-p", "#{socket_path}"]);
+        let (dir, name) = shim_dir.rsplit_once('/').unwrap();
+        let shim_dir = format!("{dir}/.{name}.bin");
+        let ctx = format!("{socket:?}");
+
+        // run-shell (a job).
+        cli(&["run-shell", "tmux set -g @x 1"]);
+        assert_eq!(cli(&["show", "-gv", "@x"]), "1", "{ctx}: run-shell");
+
+        // A pane: the shim is first and says tmux 3.8.
+        cli(&["send-keys", "-t", "a", "command -v tmux; tmux -V", "Enter"]);
+        let want = format!("{shim_dir}/tmux");
+        a.wait(|a| {
+            let t = pane_text(a).replace('\n', "");
+            t.contains(&want.replace('\n', "")) && t.contains("tmux 3.8")
+        });
+        assert!(!pane_text(&a).contains("FAKE"), "{ctx}: pane");
+
+        // A respawned pane gets the shim once.
+        cli(&["respawn-pane", "-k", "-t", "a"]);
+        a.wait(|a| !pane_text(a).contains("tmux 3.8"));
+        cli(&["run-shell", "-t", "a", "true"]);
+        cli(&["send-keys", "-t", "a", "echo \"P=$PATH\"", "Enter"]);
+        let once = format!("P={shim_dir}:{path}");
+        a.wait(|a| pane_text(a).replace('\n', "").contains(&once));
+
+        // A hook's run-shell, with a command substitution.
+        cli(&[
+            "set-hook",
+            "-g",
+            "after-new-window",
+            "run-shell 'tmux set -g @hook \"$(tmux display -p ok)\"'",
+        ]);
+        cli(&["neww", "-d"]);
+        let end = Instant::now() + Duration::from_secs(5);
+        while cli(&["show", "-gv", "@hook"]) != "ok" {
+            assert!(Instant::now() < end, "{ctx}: hook");
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        // A #() job in the status line.
+        cli(&["set", "-g", "status-interval", "1"]);
+        cli(&["set", "-g", "status-right", "<#(tmux display -p fmtjob)>"]);
+        a.wait(|a| status_row(a).contains("<fmtjob>"));
+
+        cli(&["kill-server"]);
+        let end = Instant::now() + Duration::from_secs(5);
+        while std::path::Path::new(&shim_dir).exists() {
+            assert!(Instant::now() < end, "{ctx}: shim dir left behind");
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
