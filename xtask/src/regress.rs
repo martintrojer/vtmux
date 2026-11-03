@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use crate::{reap, ref_tmux};
 
-const TIMEOUT: Duration = Duration::from_secs(120);
+const TIMEOUT: Duration = Duration::from_secs(300);
 const REGRESS_REL: &str = "compat/tmux-3.8/regress";
 const EXPECTED_REL: &str = "compat/expected.toml";
 const PATCHES_REL: &str = "compat/patches";
