@@ -146,6 +146,46 @@ pub(crate) struct Client {
     title: Option<String>,
 }
 
+impl Client {
+    /// A client just accepted on `stream`, at model activity `activity`.
+    fn new(stream: UnixStream, activity: u64) -> Self {
+        Self {
+            stream,
+            inbuf: Vec::new(),
+            outbuf: Vec::new(),
+            unacked: Unacked::default(),
+            closing: false,
+            dead: false,
+            hello: None,
+            attached: None,
+            control: None,
+            activity,
+            activity_secs: now_epoch(),
+            created_secs: now_epoch(),
+            focused: true,
+            keys: crate::key_dispatch::ClientKeys::default(),
+            last_session: None,
+            was_attached: false,
+            left_session: None,
+            status: crate::render::status::StatusLine::default(),
+            prompt_owner: None,
+            popup: None,
+            flags: crate::client_flags::ClientFlags::default(),
+            clipboard_query: None,
+            title: None,
+            written: 0,
+            pasting: false,
+            mouse: crate::mouse::ClientMouse::default(),
+            decoder: crate::input::Decoder::default(),
+            caps: None,
+            term: None,
+            compositor: crate::render::Compositor::default(),
+            window_cache: crate::render::WindowCache::default(),
+            passthrough: Vec::new(),
+        }
+    }
+}
+
 /// Frame bytes the client has not yet written to its terminal: in
 /// `outbuf`, the socket, or the client's own buffer. This is the queue
 /// `tty_block_maybe` measures (tty.c:219-245, `tty->out`); `outbuf` alone
@@ -845,43 +885,7 @@ impl Server {
                     {
                         continue;
                     }
-                    self.clients.insert(
-                        id,
-                        Client {
-                            stream,
-                            inbuf: Vec::new(),
-                            outbuf: Vec::new(),
-                            unacked: Unacked::default(),
-                            closing: false,
-                            dead: false,
-                            hello: None,
-                            attached: None,
-                            control: None,
-                            activity,
-                            activity_secs: now_epoch(),
-                            created_secs: now_epoch(),
-                            focused: true,
-                            keys: crate::key_dispatch::ClientKeys::default(),
-                            last_session: None,
-                            was_attached: false,
-                            left_session: None,
-                            status: crate::render::status::StatusLine::default(),
-                            prompt_owner: None,
-                            popup: None,
-                            flags: crate::client_flags::ClientFlags::default(),
-                            clipboard_query: None,
-                            title: None,
-                            written: 0,
-                            pasting: false,
-                            mouse: crate::mouse::ClientMouse::default(),
-                            decoder: crate::input::Decoder::default(),
-                            caps: None,
-                            term: None,
-                            compositor: crate::render::Compositor::default(),
-                            window_cache: crate::render::WindowCache::default(),
-                            passthrough: Vec::new(),
-                        },
-                    );
+                    self.clients.insert(id, Client::new(stream, activity));
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
@@ -3925,6 +3929,100 @@ mod tests {
         let other = vtmux_core::ids::WindowId(w.0 + 1);
         server.burst_started.insert(p);
         assert!(!server.unpaced_change_in(other), "another window's pane");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The frame bytes the server wrote to the client end `peer` since the
+    /// last call; every frame is acked, so the client never blocks.
+    fn frames(
+        server: &mut super::Server,
+        id: super::ClientId,
+        peer: &mut mio::net::UnixStream,
+    ) -> Vec<u8> {
+        use std::io::Read as _;
+        use vtmux_core::protocol::{ServerMsg, decode};
+        let mut wire = Vec::new();
+        let mut buf = vec![0u8; 65536];
+        while let Ok(n @ 1..) = peer.read(&mut buf) {
+            wire.extend_from_slice(&buf[..n]);
+        }
+        let mut out = Vec::new();
+        let mut at = 0;
+        while at < wire.len() {
+            let (msg, len) = decode::<ServerMsg>(&wire[at..]).unwrap();
+            if let ServerMsg::Frame(b) = msg {
+                out.extend(b);
+            }
+            at += len;
+        }
+        server.clients.get_mut(&id).unwrap().unacked.ack(u64::MAX);
+        out
+    }
+
+    /// The plain-frame skip (a turn where no composed row or the cursor
+    /// changed sends nothing) does not swallow a change: a turn that only
+    /// moves the pane's cursor still sends a frame, and it is a cursor
+    /// move alone.
+    #[test]
+    fn plain_frame_skip_sends_nothing_unless_something_changed() {
+        use vtmux_core::options::{TreeId, Value};
+        use vtmux_core::protocol::{ClientFlags, Hello, TtyInfo};
+        let (mut server, p, s, _, dir) = setup();
+        server.reset_mode(p);
+        // No status line: its clock and host name would change the frame.
+        server
+            .model
+            .options
+            .set_table_value(TreeId::GlobalSession, "status", Value::Choice(0));
+        let (ours, mut peer) = mio::net::UnixStream::pair().unwrap();
+        let id = super::ClientId(server.next_client);
+        server.next_client += 1;
+        let mut client = super::Client::new(ours, 0);
+        client.hello = Some(Hello {
+            version: vtmux_core::protocol::PROTOCOL_VERSION,
+            invocation: vtmux_core::socket::Invocation::Vtmux,
+            pid: 1,
+            argv: Vec::new(),
+            cwd: dir.clone(),
+            env: Vec::new(),
+            tty: Some(TtyInfo {
+                name: "/dev/null".into(),
+                term: "xterm-256color".into(),
+                cols: 40,
+                rows: 10,
+                features: Vec::new(),
+            }),
+            flags: ClientFlags::default(),
+        });
+        server.clients.insert(id, client);
+        server.attach_client(id, s).unwrap();
+        // The attach frames: startup, the first drawing, the modes.
+        let sent: Vec<usize> = (0..4)
+            .map(|_| {
+                server.render_clients();
+                frames(&mut server, id, &mut peer).len()
+            })
+            .collect();
+        assert_eq!(sent.last(), Some(&0), "a turn with no change: {sent:?}");
+        let pane = server.model.panes.get_mut(&p).unwrap();
+        pane.term.feed(b"\x1b[3;5H");
+        server.render_clients();
+        let frame = String::from_utf8(frames(&mut server, id, &mut peer)).unwrap();
+        assert!(frame.contains("\x1b[3;5H"), "the cursor moves: {frame:?}");
+        // Nothing but control sequences: no cell is drawn again.
+        let mut text = String::new();
+        let mut chars = frame.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                chars.next();
+                chars.find(|c| ('@'..='~').contains(c));
+            } else {
+                text.push(c);
+            }
+        }
+        assert_eq!(text, "", "a cursor move only: {frame:?}");
+        server.render_clients();
+        assert_eq!(frames(&mut server, id, &mut peer), b"", "nothing after it");
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
