@@ -54,7 +54,7 @@ pub struct Style {
 }
 
 /// One grid cell.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Cell {
     /// Grapheme cluster; empty for a blank cell.
     pub text: String,
@@ -73,6 +73,30 @@ pub struct Cell {
     /// are width 0. [`Snapshot`] cells never have it (a tab draws as the
     /// blanks it covers).
     pub tab: bool,
+}
+
+/// `clone_from` reuses the text's buffer (a derived one allocates a new
+/// `String`): frames copy whole screens of cells.
+impl Clone for Cell {
+    fn clone(&self) -> Self {
+        Self {
+            text: self.text.clone(),
+            width: self.width,
+            style: self.style,
+            acs: self.acs,
+            link: self.link,
+            tab: self.tab,
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        self.text.clone_from(&source.text);
+        self.width = source.width;
+        self.style = source.style;
+        self.acs = source.acs;
+        self.link = source.link;
+        self.tab = source.tab;
+    }
 }
 
 /// The visible grid at one moment, row-major.

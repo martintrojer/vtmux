@@ -118,11 +118,45 @@ pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis
 pub struct WindowCache {
     pub scene: scene::SceneCache,
     pub compose: std::cell::RefCell<compose::ComposeCache>,
+    /// The window's drawing buffer, kept for the next frame.
+    pub buffer: std::cell::RefCell<Option<Snapshot>>,
+}
+
+/// `buffer` emptied for a `cols` x `rows` drawing, or a new one: reusing
+/// it spares a frame the allocation and the first touch of its cells.
+#[must_use]
+pub fn blank(buffer: Option<Snapshot>, cols: u16, rows: u16) -> Snapshot {
+    match buffer {
+        Some(mut b) if (b.cols, b.rows) == (cols, rows) => {
+            for c in &mut b.cells {
+                c.text.clear();
+                c.width = 0;
+                c.style = Style::default();
+                c.acs = false;
+                c.link = false;
+                c.tab = false;
+            }
+            b.wrapped.clear();
+            b.cursor = None;
+            b.cursor_visible = true;
+            b
+        }
+        _ => Snapshot {
+            cols,
+            rows,
+            cells: vec![vtmux_vt::Cell::default(); usize::from(cols) * usize::from(rows)],
+            wrapped: Vec::new(),
+            cursor: None,
+            cursor_visible: true,
+        },
+    }
 }
 
 #[derive(Default)]
 pub struct Compositor {
     last: Option<Snapshot>,
+    /// The frame before `last`, its buffer kept for the next one.
+    spare: Option<Snapshot>,
     /// The client is not keeping up: compose nothing until it drains.
     blocked: bool,
     /// When the last frame was sent.
@@ -159,7 +193,11 @@ impl Compositor {
         self.due
     }
     pub fn invalidate(&mut self) {
-        self.last = None;
+        self.spare = self.last.take();
+    }
+    /// An empty `cols` x `rows` screen for the next frame ([`blank`]).
+    pub fn buffer(&mut self, cols: u16, rows: u16) -> Snapshot {
+        blank(self.spare.take(), cols, rows)
     }
     /// Move the terminal's cursor back to where the last frame left it,
     /// after raw bytes (passthrough) may have moved it.
@@ -212,7 +250,29 @@ impl Compositor {
     /// One frame per tick. The caller supplies a fully composed screen;
     /// therefore changes behind opaque overlays cannot escape into a frame.
     pub fn frame(&mut self, screen: Snapshot, caps: Caps) -> Vec<u8> {
-        if self.last.as_ref() == Some(&screen) {
+        let same_size = self
+            .last
+            .as_ref()
+            .is_some_and(|s| (s.cols, s.rows) == (screen.cols, screen.rows));
+        // Rows equal to what the terminal shows are skipped whole.
+        let width = usize::from(screen.cols);
+        let changed_rows: Vec<bool> = match self.last.as_ref().filter(|_| same_size) {
+            Some(last) => screen
+                .cells
+                .chunks(width.max(1))
+                .zip(last.cells.chunks(width.max(1)))
+                .map(|(a, b)| a != b)
+                .collect(),
+            None => vec![true; usize::from(screen.rows)],
+        };
+        if same_size
+            && !changed_rows.contains(&true)
+            && self.last.as_ref().is_some_and(|l| {
+                (l.cursor, l.cursor_visible, &l.wrapped)
+                    == (screen.cursor, screen.cursor_visible, &screen.wrapped)
+            })
+        {
+            self.spare = Some(screen);
             return Vec::new();
         }
         let mut out = String::new();
@@ -220,13 +280,12 @@ impl Compositor {
             out.push_str("\x1b[?2026h");
         }
         out.push_str("\x1b[?25l");
-        let same_size = self
-            .last
-            .as_ref()
-            .is_some_and(|s| (s.cols, s.rows) == (screen.cols, screen.rows));
         let mut style = Style::default();
         out.push_str("\x1b[0m");
         for y in 0..screen.rows {
+            if !changed_rows[usize::from(y)] {
+                continue;
+            }
             let mut x = 0;
             while x < screen.cols {
                 let cell = screen.cell(x, y).expect("screen cell");
@@ -301,7 +360,7 @@ impl Compositor {
         if caps.sync {
             out.push_str("\x1b[?2026l");
         }
-        self.last = Some(screen);
+        self.spare = self.last.replace(screen);
         self.sent = Some(std::time::Instant::now());
         out.into_bytes()
     }
