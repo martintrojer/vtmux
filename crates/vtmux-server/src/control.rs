@@ -18,7 +18,7 @@ use vtmux_core::cmd::{self, ParseOpts};
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::protocol::ServerMsg;
 
-use crate::commands::{Item, Output};
+use crate::commands::Item;
 use crate::server::{ClientId, GlobalEnv, Server};
 use crate::target::Origin;
 
@@ -255,8 +255,7 @@ impl Server {
             return;
         };
         for out in item.output.drain(..) {
-            let (Output::Stdout(b) | Output::Stderr(b)) = out;
-            cs.out.extend_from_slice(&b);
+            cs.out.extend_from_slice(&out.into_bytes(item.utf8).0);
         }
     }
 

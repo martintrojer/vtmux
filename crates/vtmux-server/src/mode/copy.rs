@@ -231,7 +231,7 @@ impl ScreenSel {
 
 /// One copy mode (`struct window_copy_mode_data`).
 #[allow(clippy::struct_excessive_bools)] // tmux's independent mode flags
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct CopyMode {
     /// The key mode of the mode's screen (`#{pane_key_mode}`).
     pub key_mode: vtmux_vt::KeyMode,
@@ -706,6 +706,35 @@ impl CopyMode {
             refresh_due: None,
             drag_due: None,
         }
+    }
+
+    /// `window_copy_view_init` (window-copy.c:652-674): view mode's copy of
+    /// its own empty `backing`, the cursor at the top left, line numbers
+    /// off, never refreshed from a pane (`viewmode`).
+    #[must_use]
+    pub fn view(
+        backing: &PaneTerm,
+        size: (usize, usize),
+        vi: bool,
+        pane_search: Option<(String, bool)>,
+    ) -> Self {
+        let mut m = Self::new(backing, size, false, (false, false), vi, pane_search);
+        m.line_numbers = 0;
+        m.foreign = true;
+        m
+    }
+
+    /// The end of `window_copy_vadd` (window-copy.c:741-747): the lines
+    /// view mode wrote to `backing` from line `from` on are read into the
+    /// copy (all of it again for `None`), and history they pushed out is
+    /// added to the scroll offset, so the view stays where it was.
+    pub(super) fn view_added(&mut self, backing: &PaneTerm, from: Option<usize>) {
+        let old = self.hsize();
+        match from {
+            Some(from) => self.backing.extend_from(backing, from),
+            None => self.backing = Grid::clone_of(backing, self.sx, self.sy, false).0,
+        }
+        self.oy = (self.oy + self.hsize().saturating_sub(old)).min(self.hsize());
     }
 
     /// `window_copy_resize` (window-copy.c:1212-1243): the copy is resized

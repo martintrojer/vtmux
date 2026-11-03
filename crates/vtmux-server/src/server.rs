@@ -26,7 +26,7 @@ use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg};
 use vtmux_vt::PaneTerm;
 
 use crate::alerts;
-use crate::commands::{self, After, Item, Output};
+use crate::commands::{self, After, Item};
 use crate::environ::Environ;
 use crate::format_ctx::{ClientView, Ctx, ServerInfo};
 use crate::model::{Model, Pane, Session, Window};
@@ -1306,9 +1306,9 @@ impl Server {
 
     pub(crate) fn send_output(&mut self, id: ClientId, item: &mut Item) {
         for out in std::mem::take(&mut item.output) {
-            let msg = match out {
-                Output::Stdout(b) => ServerMsg::Stdout(b),
-                Output::Stderr(b) => ServerMsg::Stderr(b),
+            let msg = match out.into_bytes(item.utf8) {
+                (b, false) => ServerMsg::Stdout(b),
+                (b, true) => ServerMsg::Stderr(b),
             };
             self.send(id, &msg);
         }
@@ -3132,8 +3132,9 @@ impl Server {
         self.prompt_load_history();
         // cfg_show_causes(NULL) (cfg.c:239-280): the first client, if it
         // is a control client, gets them as `%config-error`. Otherwise they
-        // wait for an attached session's view mode, which vtmux has not
-        // got: they stay queued, and the next source-file prints them.
+        // wait for an attached session's view mode, written unparsed
+        // (`window_copy_add(wp, 0, ...)`), which vtmux does not do yet
+        // (D-009): they stay queued, and the next source-file prints them.
         if let Some(&first) = self.clients.keys().next()
             && self.is_control(first)
         {

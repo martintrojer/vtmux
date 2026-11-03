@@ -677,7 +677,10 @@ impl Server {
     /// Hand an item's output to its client now, as tmux writes each
     /// command's output as it runs (`cmdq_print`, `cmdq_error`): a control
     /// client's stream, or a command client's stdout and stderr. An
-    /// attached terminal client's output waits for the end of the batch.
+    /// attached terminal client's prints go to view mode on its session's
+    /// active pane now (`server_client_print`, server-client.c:3260-3278),
+    /// so the next command sees `#{pane_mode}`; its errors wait for the end
+    /// of the batch.
     pub(crate) fn flush_item(&mut self, item: &mut Item) {
         let Some(id) = item.client else {
             item.output.clear();
@@ -686,15 +689,27 @@ impl Server {
         if item.control.is_some() {
             self.control_take_output(id, item);
             self.control_flush(id);
-        } else if self.client_session(id).is_none() {
+        } else if let Some(s) = self.client_session(id).filter(|_| !self.is_control(id)) {
+            let (prints, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut item.output)
+                .into_iter()
+                .partition(|o| matches!(o, Output::Print(_)));
+            item.output = rest;
+            for out in prints {
+                if let Output::Print(text) = out {
+                    self.view_print(s, &text);
+                }
+            }
+        } else {
             self.send_output(id, item);
         }
     }
 
     /// The end of a batch with no one to report to (a key binding): an
     /// attached terminal client gets its errors as status messages
-    /// (`cmdq_error` -> `status_message_set`, cmd-queue.c:882); prints
-    /// would go to view mode, which vtmux has not got, so they are dropped.
+    /// (`cmdq_error` -> `status_message_set`, cmd-queue.c:882). Its prints
+    /// went to view mode as they came ([`Self::flush_item`]); raw output
+    /// (`capture-pane -p`, which tmux refuses for an attached client) is
+    /// dropped.
     fn end_quiet(&mut self, item: &mut Item) {
         self.flush_item(item);
         let Some(id) = item.client else { return };

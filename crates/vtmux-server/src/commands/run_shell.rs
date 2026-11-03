@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use vtmux_core::cmd::{ArgValue, Args, CmdError, CommandCall};
 use vtmux_core::error::EdgeError;
+use vtmux_core::ids::PaneId;
 
 use super::Item;
 use crate::cmdq::{End, NewBatch, Source, StepId};
@@ -98,6 +99,38 @@ impl Done {
         server.cmdq_append(self.client, NewBatch::new(item, calls, End::Quiet));
     }
 
+    /// `cmd_run_shell_print` (cmd-run-shell.c:79-105) for each of `lines`:
+    /// the `-t` pane while it lives, else the waiting item prints
+    /// (`cmdq_print`: view mode for an attached client, stdout for a
+    /// command client), else the active pane of the client's session or
+    /// `cmd_find_from_nothing`'s. A pane gets the lines in view mode.
+    fn print(&self, server: &mut Server, to_pane: Option<PaneId>, lines: &[Vec<u8>]) {
+        if lines.is_empty() {
+            return;
+        }
+        let mut p = to_pane.filter(|p| server.model.panes.contains_key(p));
+        if p.is_none() {
+            if let Some(step) = self.step {
+                server.cmdq_with_item(step, |_, item| {
+                    for line in lines {
+                        item.print_line(line);
+                    }
+                });
+                return;
+            }
+            p = self
+                .client
+                .and_then(|c| server.client_session(c))
+                .and_then(|s| Found::from_session(&server.model, s).pane)
+                .or_else(|| {
+                    crate::target::current(&server.model, Origin::default()).and_then(|f| f.pane)
+                });
+        }
+        if let Some(p) = p {
+            server.view_add(p, lines.iter().map(Vec::as_slice));
+        }
+    }
+
     /// `cmdq_continue(cdata->item)`.
     fn finish(&self, server: &mut Server) {
         if let Some(step) = self.step {
@@ -157,7 +190,7 @@ pub fn exec(
     };
     let done = Done::new(server, item, wait);
     // -t names the pane output goes to (cdata->wp_id).
-    let to_pane = args.target('t').is_some() && found.pane.is_some();
+    let to_pane = found.pane.filter(|_| args.target('t').is_some());
     let session = found.session;
     let cwd = match args.value('c') {
         Some(c) => std::path::PathBuf::from(super::expand(server, found, c)),
@@ -251,7 +284,7 @@ fn strtod(t: &str) -> Option<f64> {
 }
 
 /// `cmd_run_shell_timer` (cmd-run-shell.c:195-245).
-fn start_job(server: &mut Server, spec: Option<JobSpec>, done: &Done, to_pane: bool) {
+fn start_job(server: &mut Server, spec: Option<JobSpec>, done: &Done, to_pane: Option<PaneId>) {
     let Some(spec) = spec else {
         done.finish(server);
         return;
@@ -278,7 +311,7 @@ fn job_done(
     command: &str,
     output: &[u8],
     status: JobStatus,
-    to_pane: bool,
+    to_pane: Option<PaneId>,
 ) {
     let mut lines: Vec<Vec<u8>> = output.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect();
     // A final newline ends the last line; it does not start another.
@@ -296,16 +329,7 @@ fn job_done(
             sig + 128
         }
     };
-    // cmd_run_shell_print: with no pane, the waiting item's client prints
-    // (cmdq_print); otherwise the output would go to a pane's view mode,
-    // which vtmux has not got (D-006), so it is dropped.
-    if let Some(step) = done.step.filter(|_| !to_pane) {
-        server.cmdq_with_item(step, |_, item| {
-            for line in &lines {
-                item.print_line(line);
-            }
-        });
-    }
+    done.print(server, to_pane, &lines);
     if let Some(step) = done.step {
         server.cmdq_with_item(step, |server, item| {
             if let Some(c) = item.client

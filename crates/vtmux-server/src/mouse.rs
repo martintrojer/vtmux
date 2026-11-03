@@ -861,12 +861,9 @@ impl Server {
         let Some(p) = ev.target.pane_found(&self.model).and_then(|f| f.pane) else {
             return;
         };
-        if !self
-            .model
-            .panes
-            .get(&p)
-            .is_some_and(|x| matches!(x.modes.first(), Some(crate::mode::Mode::Copy(_))))
-        {
+        // window-copy.c:7072, 7101: copy or view mode.
+        let top = self.model.panes.get(&p).and_then(|x| x.modes.first());
+        if top.and_then(crate::mode::Mode::as_copy).is_none() {
             return;
         }
         let Some(start) = ev.at_last(&self.model, p).map(usize_pair) else {
@@ -895,12 +892,9 @@ impl Server {
         let Some(at) = ev.at(&self.model, p).map(usize_pair) else {
             return;
         };
-        if !self
-            .model
-            .panes
-            .get(&p)
-            .is_some_and(|x| matches!(x.modes.first(), Some(crate::mode::Mode::Copy(_))))
-        {
+        // window-copy.c:7072, 7101: copy or view mode.
+        let top = self.model.panes.get(&p).and_then(|x| x.modes.first());
+        if top.and_then(crate::mode::Mode::as_copy).is_none() {
             return;
         }
         self.with_mode(p, |m, env| {

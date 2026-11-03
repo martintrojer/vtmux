@@ -1,0 +1,26 @@
+# show-options -g from a key binding: every line cmdq_prints goes to view
+# mode on the attached client's active pane (server_client_print); the
+# view stays at the top while the lines scroll into history
+# (window_copy_vadd adds the growth to oy). Paging and history-bottom then
+# move over it as copy mode does.
+name = "view_show_options"
+size = [60, 15]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "14", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["bind", "O", "show-options", "-g"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002O" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { keys = "\u001b>" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"] },
+  { keys = "\u001bv" },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+]

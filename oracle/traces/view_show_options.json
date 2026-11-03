@@ -1,0 +1,285 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "view_show_options",
+  "inputs": {
+    "name": "view_show_options",
+    "size": [
+      60,
+      15
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "14",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "[#{copy_position}/#{copy_position_limit}]"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "O",
+          "show-options",
+          "-g"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0002O"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u001b>"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u001bv"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[102/102]\\e[39m\\e[49maction other",
+          "assume-paste-time 1",
+          "base-index 0",
+          "bell-action any",
+          "default-command ''",
+          "default-shell /bin/sh",
+          "default-size 80x24",
+          "destroy-unattached off",
+          "detach-on-destroy on",
+          "display-time 750",
+          "focus-follows-mouse off",
+          "history-limit 2000",
+          "initial-repeat-time 0",
+          "key-table root",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[view-mode] [102] [0,0] [102/102] [activity-action other]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/102]\\e[39m\\e[49menvironment[3] SSH_ASKPASS",
+          "update-environment[4] SSH_AUTH_SOCK",
+          "update-environment[5] SSH_AGENT_PID",
+          "update-environment[6] SSH_CONNECTION",
+          "update-environment[7] WAYLAND_DISPLAY",
+          "update-environment[8] WINDOWID",
+          "update-environment[9] XAUTHORITY",
+          "update-environment[10] XDG_CURRENT_DESKTOP",
+          "update-environment[11] XDG_SESSION_DESKTOP",
+          "update-environment[12] XDG_SESSION_TYPE",
+          "visual-activity off",
+          "visual-bell off",
+          "visual-silence off",
+          "word-separators \"!\\\"#$%&'()*+,-./:;<=>?@[\\\\]^`{|}~\"",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          51,
+          13
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[0] [51,13] [word-separators \"!\\\"#$%&'()*+,-./:;<=>?@[\\\\]^`{|}~\"]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[12/102]\\e[39m\\e[49mosition bottom",
+          "status-right R",
+          "status-right-length 40",
+          "status-right-style default",
+          "status-style bg=themegreen,fg=themeblack",
+          "prompt-cursor-colour ''",
+          "prompt-command-cursor-colour ''",
+          "prompt-cursor-style default",
+          "prompt-command-cursor-style default",
+          "update-environment[0] DISPLAY",
+          "update-environment[1] KRB5CCNAME",
+          "update-environment[2] MSYSTEM",
+          "update-environment[3] SSH_ASKPASS",
+          "update-environment[4] SSH_AUTH_SOCK",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          35,
+          13
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,753 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "view_help",
+  "inputs": {
+    "name": "view_help",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "[#{copy_position}/#{copy_position_limit}]"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0002?"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u000e\u000e\u000e"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0016"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u001bv"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mode-keys",
+          "vi"
+        ]
+      },
+      {
+        "keys": "\u0002?"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "jjjjk"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "/"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "Kill"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}] [#{search_present}]"
+        ]
+      },
+      {
+        "keys": "n"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u0006"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}]"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[70/70]\\e[39m\\e[49m     Switch to a window",
+          "C-b Space   Select next layout",
+          "C-b !       Break pane to a new window",
+          "C-b \"       Split window vertically",
+          "C-b #       List all paste buffers",
+          "C-b $       Rename current session",
+          "C-b %       Split window horizontally",
+          "C-b &       Kill current window",
+          "C-b '       Prompt for window index to select",
+          "C-b (       Switch to previous client",
+          "C-b )       Switch to next client",
+          "C-b *       New floating pane",
+          "C-b ,       Rename current window",
+          "C-b -       Delete the most recent paste buffer",
+          "C-b .       Move the current window",
+          "C-b /       Describe key binding",
+          "C-b 0       Select window 0",
+          "C-b 1       Select window 1",
+          "C-b 2       Select window 2",
+          "C-b 3       Select window 3",
+          "C-b 4       Select window 4",
+          "C-b 5       Select window 5",
+          "C-b 6       Select window 6",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[view-mode] [70] [0,0] [70/70] [C-b Tab     Switch to a window]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[70/70]\\e[39m\\e[49m     Switch to a window",
+          "C-b Space   Select next layout",
+          "C-b !       Break pane to a new window",
+          "C-b \"       Split window vertically",
+          "C-b #       List all paste buffers",
+          "C-b $       Rename current session",
+          "C-b %       Split window horizontally",
+          "C-b &       Kill current window",
+          "C-b '       Prompt for window index to select",
+          "C-b (       Switch to previous client",
+          "C-b )       Switch to next client",
+          "C-b *       New floating pane",
+          "C-b ,       Rename current window",
+          "C-b -       Delete the most recent paste buffer",
+          "C-b .       Move the current window",
+          "C-b /       Describe key binding",
+          "C-b 0       Select window 0",
+          "C-b 1       Select window 1",
+          "C-b 2       Select window 2",
+          "C-b 3       Select window 3",
+          "C-b 4       Select window 4",
+          "C-b 5       Select window 5",
+          "C-b 6       Select window 6",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[49/70]\\e[39m\\e[49m     Select window 5",
+          "C-b 6       Select window 6",
+          "C-b 7       Select window 7",
+          "C-b 8       Select window 8",
+          "C-b 9       Select window 9",
+          "C-b :       Prompt for a command",
+          "C-b ;       Move to the previously active pane",
+          "C-b <       Display window menu",
+          "C-b =       Choose a paste buffer from a list",
+          "C-b >       Display pane menu",
+          "C-b ?       List key bindings",
+          "C-b @       Toggle pane between floating and tiled",
+          "C-b C       Customize options",
+          "C-b D       Choose and detach a client from a list",
+          "C-b E       Spread panes out evenly",
+          "C-b L       Switch to the last client",
+          "C-b M       Clear the marked pane",
+          "C-b T       Change the pane title",
+          "C-b [       Enter copy mode",
+          "C-b ]       Paste the most recent paste buffer",
+          "C-b c       Create a new window",
+          "C-b d       Detach the current client",
+          "C-b f       Search for a pane",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[49] [0,3] [C-b 8       Select window 8]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[70/70]\\e[39m\\e[49m     Switch to a window",
+          "C-b Space   Select next layout",
+          "C-b !       Break pane to a new window",
+          "C-b \"       Split window vertically",
+          "C-b #       List all paste buffers",
+          "C-b $       Rename current session",
+          "C-b %       Split window horizontally",
+          "C-b &       Kill current window",
+          "C-b '       Prompt for window index to select",
+          "C-b (       Switch to previous client",
+          "C-b )       Switch to next client",
+          "C-b *       New floating pane",
+          "C-b ,       Rename current window",
+          "C-b -       Delete the most recent paste buffer",
+          "C-b .       Move the current window",
+          "C-b /       Describe key binding",
+          "C-b 0       Select window 0",
+          "C-b 1       Select window 1",
+          "C-b 2       Select window 2",
+          "C-b 3       Select window 3",
+          "C-b 4       Select window 4",
+          "C-b 5       Select window 5",
+          "C-b 6       Select window 6",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[70/70]\\e[39m\\e[49m     Switch to a window",
+          "C-b Space   Select next layout",
+          "C-b !       Break pane to a new window",
+          "C-b \"       Split window vertically",
+          "C-b #       List all paste buffers",
+          "C-b $       Rename current session",
+          "C-b %       Split window horizontally",
+          "C-b &       Kill current window",
+          "C-b '       Prompt for window index to select",
+          "C-b (       Switch to previous client",
+          "C-b )       Switch to next client",
+          "C-b *       New floating pane",
+          "C-b ,       Rename current window",
+          "C-b -       Delete the most recent paste buffer",
+          "C-b .       Move the current window",
+          "C-b /       Describe key binding",
+          "C-b 0       Select window 0",
+          "C-b 1       Select window 1",
+          "C-b 2       Select window 2",
+          "C-b 3       Select window 3",
+          "C-b 4       Select window 4",
+          "C-b 5       Select window 5",
+          "C-b 6       Select window 6",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[70/70]\\e[39m\\e[49m     Switch to a window",
+          "C-b Space   Select next layout",
+          "C-b !       Break pane to a new window",
+          "C-b \"       Split window vertically",
+          "C-b #       List all paste buffers",
+          "C-b $       Rename current session",
+          "C-b %       Split window horizontally",
+          "C-b &       Kill current window",
+          "C-b '       Prompt for window index to select",
+          "C-b (       Switch to previous client",
+          "C-b )       Switch to next client",
+          "C-b *       New floating pane",
+          "C-b ,       Rename current window",
+          "C-b -       Delete the most recent paste buffer",
+          "C-b .       Move the current window",
+          "C-b /       Describe key binding",
+          "C-b 0       Select window 0",
+          "C-b 1       Select window 1",
+          "C-b 2       Select window 2",
+          "C-b 3       Select window 3",
+          "C-b 4       Select window 4",
+          "C-b 5       Select window 5",
+          "C-b 6       Select window 6",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[view-mode] [70] [0,3] [C-b \"       Split window vertically]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[70/70]\\e[39m\\e[49m     Switch to a window",
+          "C-b Space   Select next layout",
+          "C-b !       Break pane to a new window",
+          "C-b \"       Split window vertically",
+          "C-b #       List all paste buffers",
+          "C-b $       Rename current session",
+          "C-b %       Split window horizontally",
+          "C-b &       Kill current window",
+          "C-b '       Prompt for window index to select",
+          "C-b (       Switch to previous client",
+          "C-b )       Switch to next client",
+          "C-b *       New floating pane",
+          "C-b ,       Rename current window",
+          "C-b -       Delete the most recent paste buffer",
+          "C-b .       Move the current window",
+          "C-b /       Describe key binding",
+          "C-b 0       Select window 0",
+          "C-b 1       Select window 1",
+          "C-b 2       Select window 2",
+          "C-b 3       Select window 3",
+          "C-b 4       Select window 4",
+          "C-b 5       Select window 5",
+          "\\e[30m\\e[43m(search down) Kill\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          18,
+          22
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[70/70]\\e[39m\\e[49m     Switch to a window",
+          "C-b Space   Select next layout",
+          "C-b !       Break pane to a new window",
+          "C-b \"       Split window vertically",
+          "C-b #       List all paste buffers",
+          "C-b $       Rename current session",
+          "C-b %       Split window horizontally",
+          "C-b &       \\e[30m\\e[45mKill\\e[39m\\e[49m current window",
+          "C-b '       Prompt for window index to select",
+          "C-b (       Switch to previous client",
+          "C-b )       Switch to next client",
+          "C-b *       New floating pane",
+          "C-b ,       Rename current window",
+          "C-b -       Delete the most recent paste buffer",
+          "C-b .       Move the current window",
+          "C-b /       Describe key binding",
+          "C-b 0       Select window 0",
+          "C-b 1       Select window 1",
+          "C-b 2       Select window 2",
+          "C-b 3       Select window 3",
+          "C-b 4       Select window 4",
+          "C-b 5       Select window 5",
+          "C-b 6       Select window 6",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          12,
+          7
+        ]
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[view-mode] [70] [12,7] [C-b &       Kill current window] [1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[32/70]\\e[39m\\e[49m     Change the pane title",
+          "C-b [       Enter copy mode",
+          "C-b ]       Paste the most recent paste buffer",
+          "C-b c       Create a new window",
+          "C-b d       Detach the current client",
+          "C-b f       Search for a pane",
+          "C-b g       Move a floating pane",
+          "C-b i       Display window information",
+          "C-b l       Select the previously current window",
+          "C-b m       Toggle the marked pane",
+          "C-b n       Select the next window",
+          "C-b o       Select the next pane",
+          "C-b p       Select the previous window",
+          "C-b q       Display pane numbers",
+          "C-b r       Redraw the current client",
+          "C-b s       Choose a session from a list",
+          "C-b t       Show a clock",
+          "C-b w       Choose a window from a list",
+          "C-b x       \\e[30m\\e[45mKill\\e[39m\\e[49m the active pane",
+          "C-b z       Zoom the active pane",
+          "C-b {       Swap the active pane with the pane above",
+          "C-b }       Swap the active pane with the pane below",
+          "C-b ~       Show messages",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          12,
+          18
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[32] [12,18] [C-b x       Kill the active pane]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[11/70]\\e[39m\\e[49m     Swap the active pane with the pane below",
+          "C-b ~       Show messages",
+          "C-b DC      Reset so the visible part of the window follows the cursor",
+          "C-b PPage   Enter copy mode and scroll up",
+          "C-b BTab    Switch to a session",
+          "C-b Up      Select the pane above the active pane",
+          "C-b Down    Select the pane below the active pane",
+          "C-b Left    Select the pane to the left of the active pane",
+          "C-b Right   Select the pane to the right of the active pane",
+          "C-b M-1     Set the even-horizontal layout",
+          "C-b M-2     Set the even-vertical layout",
+          "C-b M-3     Set the main-horizontal layout",
+          "C-b M-4     Set the main-vertical layout",
+          "C-b M-5     Select the tiled layout",
+          "C-b M-6     Set the main-horizontal-mirrored layout",
+          "C-b M-7     Set the main-vertical-mirrored layout",
+          "C-b M-n     Select the next window with an alert",
+          "C-b M-o     Rotate through the panes in reverse",
+          "C-b M-p     Select the previous window with an alert",
+          "C-b M-Up    Resize the pane up by 5",
+          "C-b M-Down  Resize the pane down by 5",
+          "C-b M-Left  Resize the pane left by 5",
+          "C-b M-Right Resize the pane right by 5",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          12,
+          18
+        ]
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

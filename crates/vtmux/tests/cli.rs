@@ -2209,7 +2209,7 @@ fn kill_server_with_running_job() {
 }
 
 /// `run-shell -b` returns at once and its output goes to a pane's view
-/// mode (D-009), not the client; `-b -C` commands run later on the global
+/// mode, not the client; `-b -C` commands run later on the global
 /// queue. `-t` sends output to the pane too.
 #[test]
 fn run_shell_background() {

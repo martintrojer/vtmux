@@ -88,8 +88,34 @@ use select_window::Which;
 /// Output of a batch, in order.
 #[derive(Debug)]
 pub enum Output {
+    /// `cmdq_print`'s text, as given: a command or control client gets it
+    /// as a line ([`Output::into_bytes`]), an attached terminal client's
+    /// active pane in view mode (`server_client_print`).
+    Print(Vec<u8>),
     Stdout(Vec<u8>),
     Stderr(Vec<u8>),
+}
+
+impl Output {
+    /// The bytes for a client's stdout or control stream, and whether they
+    /// are stderr: a print as a line, sanitised unless the client is UTF-8
+    /// (`server_client_print`, server-client.c:3243-3256).
+    #[must_use]
+    pub fn into_bytes(self, utf8: bool) -> (Vec<u8>, bool) {
+        match self {
+            Self::Print(text) => {
+                let mut line = if utf8 {
+                    text
+                } else {
+                    utf8_sanitize(&vtmux_core::rawstr::from_bytes(&text)).into_bytes()
+                };
+                line.push(b'\n');
+                (line, false)
+            }
+            Self::Stdout(b) => (b, false),
+            Self::Stderr(b) => (b, true),
+        }
+    }
 }
 
 /// What happens to the client after its commands ran.
@@ -205,20 +231,11 @@ impl Item {
         self.print_line(&vtmux_core::rawstr::to_bytes(text));
     }
 
-    /// `cmdq_print` of bytes that need not be UTF-8: a UTF-8 client gets
-    /// them as they are (`server_client_print`, server-client.c:3243-3256),
-    /// any other a sanitised line.
+    /// `cmdq_print` of bytes that need not be UTF-8 ([`Output::Print`]).
     pub fn print_line(&mut self, text: &[u8]) {
-        if !self.can_print() {
-            return;
+        if self.can_print() {
+            self.output.push(Output::Print(text.to_vec()));
         }
-        let mut line = if self.utf8 {
-            text.to_vec()
-        } else {
-            utf8_sanitize(&vtmux_core::rawstr::from_bytes(text)).into_bytes()
-        };
-        line.push(b'\n');
-        self.output.push(Output::Stdout(line));
     }
 
     /// Raw bytes on stdout (`file_print_buffer`).

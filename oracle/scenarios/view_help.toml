@@ -1,0 +1,49 @@
+# prefix ? (list-keys -N) from an attached client: cmdq_print with an
+# attached client goes to view mode on the session's active pane
+# (server_client_print), one window_copy_add per line, the view at the top.
+# The default emacs table scrolls with C-n/C-p; with mode-keys vi j/k move
+# and / searches. q leaves it in both tables.
+name = "view_help"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002?" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { keys = "\u000e\u000e\u000e" },
+  { screen = {} },
+  { keys = "\u0016" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"] },
+  { keys = "\u001bv" },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}]"] },
+  { run = ["set", "-g", "mode-keys", "vi"] },
+  { keys = "\u0002?" },
+  { screen = {} },
+  { keys = "jjjjk" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"] },
+  { keys = "/" },
+  { settle = {} },
+  { keys = "Kill" },
+  { screen = {} },
+  { keys = "\r" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}] [#{search_present}]"] },
+  { keys = "n" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"] },
+  { keys = "\u0006" },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}]"] },
+]
