@@ -14,32 +14,32 @@ status = "pass"
 
 [tests."am-terminal.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "terminal-overrides `*:am@` (no auto-margin) not honoured by the client tty: last status line is `LLLWWW           RRR`, expected `LLLWWW           RR` (the inner client still draws the last column)"
 
 [tests."border-arrows.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -C (outer capture of the inner client's escapes): `capturep -Cep` exits 1 with `not implemented in vtmux yet: capture-pane -C`, so the capture is empty and no arrow is found; then needs pane-border-indicators drawing"
 
 [tests."buffers.sh"]
 status = "pass"
 
 [tests."capture-pane-hyperlink.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "capture-pane -e drops OSC 8 hyperlinks: captured `test1`, expected the same text wrapped in OSC 8 (`id=1;https://github.com`) open and close sequences"
 
 [tests."capture-pane-sgr0.sh"]
 status = "pass"
 
 [tests."capture-pane-time.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flags capture-pane -L/-F/-I (time-range capture): `not implemented in vtmux yet: capture-pane -L`"
 
 [tests."cfg-client-lost.sh"]
 status = "pass"
 
 [tests."check-names.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "the screen-style window-name escape (ESC k name, string terminator) does not rename the window: got `format:.#(ok)`, expected `escape#:.ok`; every name/title check before it passes"
 
 [tests."choose-buffer.sh"]
 status = "pass"
@@ -67,15 +67,15 @@ status = "pass"
 
 [tests."codepoint-widths.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "option codepoint-widths is accepted but not applied: `#{w:@text}` with U+03B1-U+03B3=2 is 4, expected 7"
 
 [tests."combine-test.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "terminal-emulator diff (libghostty): line 7 (two emoji + skin-tone modifiers at columns 3/12) has the second cell 2 columns narrower than tmux; every other row matches (`👍🏻     👍🏻4` vs `👍🏻       👍🏻4`)"
 
 [tests."command-alias.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "command-alias set with `set -s command-alias[100] zoom=...` is not applied: `unknown command: zoom`"
 
 [tests."command-order.sh"]
 status = "pass"
@@ -89,7 +89,7 @@ reason = "needs lock-client, lock-session and lock-server (confirm-before is in)
 
 [tests."control-client-exit-stalled.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "server does not exit after kill-server while a control client is stalled: `server did not exit after kill-server; new clients see: server exited unexpectedly` (needs the bounded exit handshake, 10 s)"
 
 [tests."control-client-exit.sh"]
 status = "pass"
@@ -111,7 +111,7 @@ status = "pass"
 
 [tests."control-client-wait-exit.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "control client flag wait-exit is stored but not honoured: the client exits at %exit instead of waiting for an empty line (writer gets SIGPIPE, exit 141)"
 
 [tests."control-notify-events.sh"]
 status = "pass"
@@ -121,18 +121,18 @@ status = "pass"
 
 [tests."control-subscriptions.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag refresh-client -B (control subscriptions): `not implemented in vtmux yet: refresh-client -B`; no %subscription-changed is emitted"
 
 [tests."copy-mode-commands.sh"]
 status = "pass"
 
 [tests."copy-mode-no-client-scroll.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs remain-on-exit (dead panes): the script sets remain-on-exit, a pane-died hook `copy-mode -S`, then respawn-pane -k 'exit 0'; vtmux has no dead panes, the server exits with its only pane and the script fails `server died in copy-mode -S`"
 
 [tests."copy-mode-redraw.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag refresh-client -c (client pan/clear): `not implemented in vtmux yet: refresh-client -c`"
 
 [tests."copy-mode-scroll-exit.sh"]
 status = "pass"
@@ -155,27 +155,27 @@ reason = "D-011: Ghostty prints U+0085 as a cell of its own where tmux combines 
 
 [tests."cursor-test1.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
 
 [tests."cursor-test2.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
 
 [tests."cursor-test3.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
 
 [tests."cursor-test4.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
 
 [tests."customize-mode.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command customize-mode: `not implemented in vtmux yet: customize-mode`"
 
 [tests."decrqm-sync.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs remain-on-exit (dead panes): each query is `respawn-window -k` on a remain-on-exit window and vtmux exits after the first (`no server running on ...`); the DECRQM 2026 reply itself is not the blocker"
 
 [tests."display-panes.sh"]
 status = "xfail"
@@ -212,22 +212,22 @@ reason = "M2: floating panes"
 
 [tests."format-animation.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing format modifier A (format_cycle): `#{A/7:AAAA,BBBB,CCCC}` expands to empty, the status line stays blank (`status line is '', not a frame`)"
 
 [tests."format-fuzzy.sh"]
 status = "pass"
 
 [tests."format-modifiers.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "format modifier N/s is wrong: `#{N/s:main}` gives 0, expected 1 (session-exists test); later the script uses new-pane"
 
 [tests."format-mouse.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing format variable mouse_word/mouse_line: `x=2 y=0 word= line= pane=%0` (mouse_x, mouse_y and mouse_pane work)"
 
 [tests."format-no-current-window.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "session-level formats read empty without a current client: `#{active_window_index}` is `` (expected 0); also last_window_index, session_stack, window_active_clients(_list)"
 
 [tests."format-render-contexts.sh"]
 status = "xfail"
@@ -238,11 +238,11 @@ status = "pass"
 
 [tests."format-time-range.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "format modifier t/f with an out-of-range time: `#{t/f/zz:@huge}` gives `[]`, tmux prints the format literally `[zz]`; the in-range cases pass"
 
 [tests."format-variables.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
 
 [tests."has-session-return.sh"]
 status = "pass"
@@ -272,67 +272,67 @@ status = "pass"
 
 [tests."input-cursor.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-edit.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-keys.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag send-keys -R (reset terminal state): `not implemented in vtmux yet: send-keys -R`"
 
 [tests."input-malformed.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-modes.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-osc.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N` (also uses -H and respawn-pane on a remain-on-exit pane)"
 
 [tests."input-raw-controls.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-raw-cursor.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-raw-edit.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-raw-history.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
 
 [tests."input-raw-reflow.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
 
 [tests."input-raw-scroll.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
 
 [tests."input-raw-sgr.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
 
 [tests."input-raw-unicode.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-raw-wrap.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-reflow-stress.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flags capture-pane -N, -R and -M: `not implemented in vtmux yet: capture-pane -N` (first), then `capture-pane -R`"
 
 [tests."input-replies.sh"]
 status = "xfail"
@@ -340,27 +340,27 @@ reason = "needs remain-on-exit (dead panes): the script respawns a remain-on-exi
 
 [tests."input-requests.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "terminal requests from a pane are not seen on the client output: `did not see terminal request` for the OSC 4 colour query (ESC ] 4;99;?); the script also respawns a remain-on-exit window"
 
 [tests."input-scroll.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-sgr.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."input-unicode.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
 
 [tests."join-pane-modal.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."json.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag display-message -j (JSON output): `not implemented in vtmux yet: display-message -j`"
 
 [tests."kill-session-process-exit.sh"]
 status = "pass"
@@ -370,14 +370,14 @@ status = "pass"
 
 [tests."layout-custom.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "a control client that has not asked for new-layouts is dumped the v2 JSON layout: got `{\"V\":2,\"L\":{...}}`, expected the v1 string `020a,80x24,0,0{40x24,0,0,1,39x24,41,0,2}`"
 
 [tests."layout-nesting-limit.sh"]
 status = "pass"
 
 [tests."layout-set.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."lifecycle-deferred.sh"]
 status = "xfail"
@@ -394,7 +394,7 @@ status = "pass"
 
 [tests."modal-pane.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."mode-kill.sh"]
 status = "pass"
@@ -408,11 +408,11 @@ status = "pass"
 
 [tests."new-pane-mouse-status.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "Ctrl-drag from the status line: the `C-MouseDragEnd1Pane` binding is not dispatched, `got @drag-end '', expected 'done'` (no new-pane error; the script's new-pane use comes after)"
 
 [tests."new-pane-mouse.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."new-session-base-index.sh"]
 status = "pass"
@@ -443,15 +443,15 @@ status = "pass"
 
 [tests."osc-11colours.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "OSC 11 (set background) is not tracked: `#{pane_bg}` is empty after a pane prints OSC 11 `rgb:ff/ff/ff`, expected `#ffffff`"
 
 [tests."pane-ops.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing marked pane: `not implemented in vtmux yet: select-pane -m` (`Command failed (expected success): select-pane -m -t %3`); the script also uses new-pane"
 
 [tests."pipe-pane.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
 
 [tests."prompt-keys.sh"]
 status = "xfail"
@@ -478,23 +478,23 @@ status = "pass"
 
 [tests."screen-redraw-bidi.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "attach-session without -t switches to window 0 where tmux keeps the session's current window (the script's `new_scene` then `respawn-pane -k 'tmux attach'` shows BIDI-BASE not BIDI-LEFT); then needs the Bidi terminal override (isolates)"
 
 [tests."screen-redraw-cache.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "scene after `rotate-window` differs (`scene cache-rotate-after differs`: pane columns/stale cells differ from the golden); earlier scenes of the script pass"
 
 [tests."screen-redraw-fill-character.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."screen-redraw-floating.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."screen-redraw-indicators.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."screen-redraw-menus.sh"]
 status = "pass"
@@ -503,18 +503,18 @@ flaky = true
 
 [tests."screen-redraw-outside.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag refresh-client -U (pan the client view): `not implemented in vtmux yet: refresh-client -U`"
 
 [tests."screen-redraw-popups.sh"]
 status = "pass"
 
 [tests."screen-redraw-scrollbars-auto-hide.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "pane-scrollbars auto-hide not implemented (no scrollbar overlay): `scrollbar did not hide after timeout` (captures never differ)"
 
 [tests."screen-redraw-scrollbars.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "pane-scrollbars is accepted and ignored: first scene has no scrollbar column (`scene scrollbar-right-w1 differs`)"
 
 [tests."screen-redraw-status.sh"]
 status = "pass"
@@ -524,22 +524,22 @@ status = "pass"
 
 [tests."screen-redraw-window-style.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "window-style / window-active-style do not show: the outer `capturep -pe` has no SGR where tmux has a blue background (`scene window-style-single differs`)"
 
 [tests."server-access.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command server-access: `not implemented in vtmux yet: server-access`"
 
 [tests."server-socket-error.sh"]
 status = "pass"
 
 [tests."session-group-resize.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
 
 [tests."session-ops.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
 
 [tests."set-hook-B.sh"]
 status = "xfail"
@@ -553,35 +553,35 @@ status = "pass"
 
 [tests."show-options-output.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag set-hook -B (monitor hooks, monitor.c): `not supported in vtmux yet: set-hook -B`"
 
 [tests."split-window-wait-kill.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag split-window -W: `not implemented in vtmux yet: split-window -W`"
 
 [tests."style-trim.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag capture-pane -C: `not implemented in vtmux yet: capture-pane -C`"
 
 [tests."swap-pane-zoom-error.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."switch-mode.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command switch-mode: `not implemented in vtmux yet: switch-mode`"
 
 [tests."sync-output-atomic.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
 
 [tests."sync-output-copy-cursor.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
 
 [tests."sync-output-cursor.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
 
 [tests."sync-output-wrapped.sh"]
 status = "pass"
@@ -591,46 +591,46 @@ status = "pass"
 
 [tests."targets-panes.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing marked pane: the `~` target fails with `not implemented in vtmux yet: marked target` where tmux says `no marked target`"
 
 [tests."targets.sh"]
 status = "pass"
 
 [tests."terminal-feature-utf8.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "`-T utf8` (terminal feature) does not set client_utf8 for a client run with LC_ALL=C: `utf8 terminal feature did not set client_utf8` (flaky)"
 flaky = true
 
 [tests."theme-report.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "DSR 996 / mode 2031 theme report: a pane's DSR 996 query gets no answer (`expected ^[[?997;2n (light, from terminal), got ''`)"
 
 [tests."tty-clamp-area-status-top.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag refresh-client -U (pan the client view): `not implemented in vtmux yet: refresh-client -U`"
 
 [tests."tty-draw-line.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag refresh-client -c (client pan/clear): `not implemented in vtmux yet: refresh-client -c`"
 
 [tests."tty-keys.sh"]
 status = "pass"
 
 [tests."utf8-test.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "needs remain-on-exit (+ remain-on-exit-format) and capture-pane -C: the script runs `new -d -- cat UTF-8-test.txt` with remain-on-exit on; vtmux's pane exits and the server with it (`no server running on ...`)"
 
 [tests."wait-for-E.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing flag set-hook -B (monitor hooks, monitor.c): `not supported in vtmux yet: set-hook -B`"
 
 [tests."wait-for-client-lost.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "server log (`-vv` writes tmux-server-PID.log in cwd) is not written: `awk: cannot open .../tmux-server-*.log`; the test greps it for wait-channel debug lines"
 
 [tests."window-index-limit.sh"]
 status = "pass"
 
 [tests."window-ops.sh"]
 status = "xfail"
-reason = "not implemented (M0 baseline)"
+reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
