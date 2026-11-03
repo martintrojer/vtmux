@@ -121,6 +121,36 @@ pub fn send_prefix(
     Ok(())
 }
 
+/// The target's window and pane become the current ones of its session
+/// (cmd-switch-client.c:118-135, cmd-attach-session.c:93-106): the active
+/// pane (switch-client: without leaving or entering a zoom, `-Z` keeps it,
+/// `zoom` is `Some(-Z)`; attach-session: `window_set_active_pane` alone,
+/// `None`), then the window.
+pub(crate) fn select_target(server: &mut Server, found: Found, zoom: Option<bool>) {
+    let Some(s) = found.session else { return };
+    if let (Some(w), Some(p)) = (found.window, found.pane)
+        && server
+            .model
+            .windows
+            .get(&w)
+            .is_some_and(|x| x.active() != p)
+    {
+        if let Some(zflag) = zoom {
+            let visible = server.model.windows[&w].is_visible(p);
+            let was = !visible && server.model.push_zoom(w, false, zflag);
+            server.model.set_active(w, p);
+            if !visible {
+                server.model.pop_zoom(w, was);
+            }
+        } else {
+            server.model.set_active(w, p);
+        }
+    }
+    if let Some(index) = found.index {
+        server.model.set_current(s, index);
+    }
+}
+
 /// `switch-client` (cmd-switch-client.c:48-163): `-T` switches the key
 /// table, `-n`/`-p`/`-l` and `-t` the session, `-c` names the client and
 /// `-r` toggles its read-only flag. `-F` is in the usage but tmux 3.8
@@ -204,24 +234,7 @@ pub fn switch_client(server: &mut Server, item: &mut Item, args: &Args) -> Resul
             return Ok(());
         }
         let s = found.session.ok_or(EdgeError::NoCurrentTarget)?;
-        if let (Some(w), Some(p)) = (found.window, found.pane)
-            && server
-                .model
-                .windows
-                .get(&w)
-                .is_some_and(|x| x.active() != p)
-        {
-            let zflag = args.flag('Z');
-            let visible = server.model.windows[&w].is_visible(p);
-            let was = !visible && server.model.push_zoom(w, false, zflag);
-            server.model.set_active(w, p);
-            if !visible {
-                server.model.pop_zoom(w, was);
-            }
-        }
-        if let Some(index) = found.index {
-            server.model.set_current(s, index);
-        }
+        select_target(server, found, Some(args.flag('Z')));
         s
     };
     if !args.flag('E') {

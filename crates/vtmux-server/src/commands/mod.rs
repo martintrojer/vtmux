@@ -578,6 +578,14 @@ fn dispatch(
             if server.model.sessions.is_empty() {
                 return Err(EdgeError::NoSessions.into());
             }
+            // cmd-attach-session.c:71-73: no client, nothing more.
+            if item.client.is_none() {
+                return Ok(());
+            }
+            // cmd-attach-session.c:75-79.
+            if check_nested(server, item) {
+                return Err(nested_error().into());
+            }
             let spec = args.target('t');
             // cmd-attach-session.c:80-91: a pane-like target is a pane,
             // else a session, preferring one no client is attached to.
@@ -596,8 +604,18 @@ fn dispatch(
                 (!pane_like).then_some(&attached),
             )?;
             let session = found.session.ok_or(EdgeError::NoCurrentTarget)?;
-            // cmd-attach-session.c:108-121: -f, then -r, before the client
-            // takes the session (and with no client, nothing at all).
+            // cmd-attach-session.c:93-106: the target window and pane become
+            // the session's current ones.
+            keys::select_target(server, found, None);
+            // cmd-attach-session.c:108-111: -c is the session's directory.
+            if let Some(cwd) = args.value('c') {
+                let cwd = expand(server, found, cwd);
+                if let Some(s) = server.model.sessions.get_mut(&session) {
+                    s.cwd = cwd.into();
+                }
+            }
+            // cmd-attach-session.c:112-121: -f, then -r, before the client
+            // takes the session.
             if let Some(c) = item.client {
                 if let Some(flags) = args.value('f') {
                     server.set_client_flags(c, flags);
@@ -609,7 +627,10 @@ fn dispatch(
                     client.flags.ignore_size = true;
                 }
             }
-            attach(server, item, session, !args.flag('E'), true)
+            // -d / -x: the session's other clients go (MSG_DETACH, or
+            // MSG_DETACHKILL for -x).
+            let detach = (args.flag('d') || args.flag('x')).then(|| args.flag('x'));
+            attach(server, item, session, !args.flag('E'), true, detach)
         }
         "detach-client" => detach_client::exec(server, item, args),
         "command-prompt" => command_prompt::exec(server, item, args),
@@ -641,16 +662,70 @@ fn resolve_source(server: &Server, item: &Item, call: &CommandCall) -> Result<Fo
     }
 }
 
+/// `server_client_check_nested` (server-client.c:211-226): the client's
+/// `$TMUX` is set and its terminal is one of this server's panes.
+pub(crate) fn check_nested(server: &Server, item: &Item) -> bool {
+    let Some(hello) = item
+        .client
+        .and_then(|c| server.clients.get(&c))
+        .and_then(|c| c.hello.as_ref())
+    else {
+        return false;
+    };
+    if !hello.env.iter().any(|(k, v)| k == "TMUX" && !v.is_empty()) {
+        return false;
+    }
+    let Some(tty) = hello.tty.as_ref().map(|t| t.name.as_str()) else {
+        return false;
+    };
+    server.model.panes.values().any(|p| {
+        p.io.as_ref().is_some_and(|io| {
+            io.owned()
+                .try_clone_to_owned()
+                .ok()
+                .and_then(|fd| crate::sys::pty::tty_name(&fd))
+                .is_some_and(|name| name == tty)
+        })
+    })
+}
+
+/// What `check_nested` refuses with (cmd-attach-session.c:76-78).
+pub(crate) fn nested_error() -> EdgeError {
+    EdgeError::Message("sessions should be nested with care, unset $TMUX to force".into())
+}
+
+/// The calling client's terminal: the item's own, else the one the client
+/// attached with (a key binding or a prompt runs commands for a client that
+/// is already attached).
+pub(crate) fn client_tty(server: &Server, item: &Item) -> Option<vtmux_core::protocol::TtyInfo> {
+    item.tty.clone().or_else(|| {
+        server
+            .clients
+            .get(&item.client?)?
+            .hello
+            .as_ref()?
+            .tty
+            .clone()
+    })
+}
+
 /// Attach the item's client to `session` through the server hook.
 /// `update_env` is attach-session's missing `-E`: the client's
 /// `update-environment` variables go into the session first
 /// (cmd-attach-session.c:135,159); a session just created has had them.
+/// `detach` is `-d` / `-x` (`Some(kill)`): the session's other clients are
+/// detached.
+///
+/// A client that already has a session is switched to the new one
+/// (cmd-attach-session.c:118-139, cmd-new-session.c:335-344): no new
+/// terminal, no `client-attached`.
 pub fn attach(
     server: &mut Server,
     item: &mut Item,
     session: vtmux_core::ids::SessionId,
     update_env: bool,
     fire_attached: bool,
+    detach: Option<bool>,
 ) -> Result<(), CmdError> {
     let Some(client) = item.client else {
         return Ok(());
@@ -659,11 +734,37 @@ pub fn attach(
     // while the client still has its old session, as in tmux, where events
     // fire as they happen.
     server.drain_events();
+    let detach_others = |server: &mut Server| {
+        if let Some(kill) = detach {
+            for other in server.session_clients(session) {
+                if other != client {
+                    server.detach_client(other, kill);
+                }
+            }
+        }
+    };
+    if item.control.is_none() && server.client_session(client).is_some() {
+        // `c->last_session = c->session` first, even for the same session.
+        let old = server.client_session(client);
+        if let Some(c) = server.clients.get_mut(&client) {
+            c.last_session = old;
+        }
+        detach_others(server);
+        if update_env {
+            server.update_session_environ(client, session);
+        }
+        server.switch_session(client, session);
+        // The commands after this one start from the session taken.
+        item.origin.attached = Some(session);
+        reset_key_table(server, item, client);
+        return Ok(());
+    }
     if update_env && (item.control.is_some() || item.tty.is_some()) {
         server.update_session_environ(client, session);
     }
     if item.control.is_some() {
         // A control client needs no terminal and gets no Ready.
+        detach_others(server);
         server.control_attach(client, session);
         item.origin.attached = Some(session);
         reset_key_table(server, item, client);
@@ -672,6 +773,7 @@ pub fn attach(
             return Err(EdgeError::OpenTerminalFailed("not a terminal".into()).into());
         }
         server.attach_client(client, session)?;
+        detach_others(server);
         item.after = After::Stay;
         reset_key_table(server, item, client);
     }
