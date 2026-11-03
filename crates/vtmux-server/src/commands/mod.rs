@@ -489,6 +489,8 @@ fn dispatch(
         "clock-mode" => clock_mode::exec(server, found),
         "copy-mode" => copy_mode::exec(server, item, args, source, found),
         "choose-tree" => choose_tree::exec(server, item, args, found),
+        "choose-buffer" => choose_tree::exec_buffer(server, args, found),
+        "choose-client" => choose_tree::exec_client(server, args, found),
         "set-buffer" => set_buffer::exec(server, item, args),
         "delete-buffer" => delete_buffer::exec(server, args),
         "show-buffer" => save_buffer::exec(server, item, args, found, true),

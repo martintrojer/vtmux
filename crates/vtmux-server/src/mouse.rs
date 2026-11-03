@@ -739,7 +739,7 @@ impl Server {
             (None, _) => self.mouse_to_program(p, ev),
             (Some(_), _) if is_move => {}
             (Some(crate::mode::Mode::Clock(_)), Some(_)) => self.reset_mode(p),
-            (Some(crate::mode::Mode::Tree(_)), Some(c)) => {
+            (Some(m), Some(c)) if m.tree_kind().is_some() => {
                 let at = ev.at(&self.model, p);
                 self.tree_mouse_key(p, c, ev.key, at);
             }

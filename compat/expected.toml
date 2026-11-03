@@ -42,12 +42,10 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."choose-buffer.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."choose-client.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."choose-tree.sh"]
 status = "pass"
@@ -401,12 +399,11 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."mode-kill.sh"]
-status = "xfail"
-reason = "needs choose-buffer and display-panes (choose-tree -k passes)"
+status = "pass"
 
 [tests."mode-mutation.sh"]
 status = "xfail"
-reason = "needs choose-buffer and choose-client (its choose-tree section passes)"
+reason = "needs customize-mode (its choose-tree, choose-buffer and choose-client sections pass)"
 
 [tests."mode-tree-scroll.sh"]
 status = "xfail"

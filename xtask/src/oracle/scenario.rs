@@ -35,6 +35,8 @@ pub enum Step {
     Attach(AttachSpec),
     /// Raw bytes to the attached client.
     Keys(String),
+    /// Raw bytes to the attached client started with `id`.
+    KeysTo(KeysTo),
     /// Bytes into a pane through `send-keys -l`.
     Feed(Feed),
     Resize([u16; 2]),
@@ -43,8 +45,9 @@ pub enum Step {
     Settle(Settle),
     /// Run `wait-for <channel>`.
     WaitFor(String),
-    /// Observe the attached client's screen.
-    Screen(Empty),
+    /// Observe the attached client's screen (the one started with `id`,
+    /// if given).
+    Screen(ScreenSpec),
     /// Observe the title the attached client's terminal ends up with (after
     /// OSC 0/2 from `set-titles`), as a `cli` observation: stdout is the
     /// title and a newline.
@@ -92,6 +95,24 @@ pub struct ControlId {
 #[serde(deny_unknown_fields)]
 pub struct AttachSpec {
     pub session: String,
+    /// Names a further attached client; without it this is the default
+    /// one that `keys`, `resize` and `screen` use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeysTo {
+    pub id: String,
+    pub keys: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenSpec {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

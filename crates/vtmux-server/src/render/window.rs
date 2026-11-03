@@ -317,7 +317,7 @@ impl Source<'_> {
                     == 1;
                 (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
             }
-            Some(crate::mode::Mode::Tree(t)) => (self.tree_screen(pane, t, caps), Vec::new()),
+            Some(m) if m.tree_kind().is_some() => (self.tree_screen(pane, m, caps), Vec::new()),
             // A mode prompt over a plain pane (a held pane drew above).
             _ => (
                 pane.term

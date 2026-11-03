@@ -123,8 +123,8 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("bind-key", Some("bind"), "nrN:T:", 1, None, "[-nr] [-T key-table] [-N note] key [command [argument ...]]", None, None, false, true),
     cmd("break-pane", Some("breakp"), "abdPF:n:s:t:Wx:X:y:Y:", 0, Some(0), "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]", Some(slot('t', TargetKind::Window, FindFlags::WINDOW_INDEX)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, true),
     cmd("capture-pane", Some("capturep"), "ab:CeE:FHIJLMNpPqRS:Tt:", 0, Some(0), "[-aCeFHIJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
-    cmd("choose-buffer", None, "F:f:K:kNO:rt:yZ", 0, Some(1), "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
-    cmd("choose-client", None, "F:f:hiK:kNO:rt:yZ", 0, Some(1), "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("choose-buffer", None, "F:f:K:kNO:rt:yZ", 0, Some(1), "[-kNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
+    cmd("choose-client", None, "F:f:hiK:kNO:rt:yZ", 0, Some(1), "[-hikNrZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("choose-tree", None, "F:f:GhK:kNO:rst:wyZ", 0, Some(1), "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("clear-history", Some("clearhist"), "Ht:", 0, Some(0), "[-H] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("clear-prompt-history", Some("clearphist"), "T:", 0, Some(0), "[-T prompt-type]", None, None, false, true),
@@ -416,6 +416,8 @@ mod tests {
             ("join-pane", Some("joinp")),
             ("move-pane", Some("movep")),
             ("respawn-pane", Some("respawnp")),
+            ("choose-buffer", None),
+            ("choose-client", None),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);
@@ -426,7 +428,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 79);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 81);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

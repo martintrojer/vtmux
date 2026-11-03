@@ -156,7 +156,8 @@ pub struct Runner<'a> {
     norm: Normalizer,
     act: Arc<Activity>,
     controls: HashMap<String, Control>,
-    attach: Option<Attach>,
+    /// The attached clients by id; the default one's is empty.
+    attaches: HashMap<String, Attach>,
     size: [u16; 2],
     items: Vec<Item>,
     pending_div: Option<Divergence>,
@@ -175,7 +176,7 @@ impl Drop for Runner<'_> {
             let _ = c.child.kill();
             let _ = c.child.wait();
         }
-        if let Some(a) = self.attach.as_mut() {
+        for a in self.attaches.values_mut() {
             let _ = a.child.kill();
             let _ = a.child.wait();
         }
@@ -223,7 +224,7 @@ impl<'a> Runner<'a> {
                 total: AtomicUsize::new(0),
             }),
             controls: HashMap::new(),
-            attach: None,
+            attaches: HashMap::new(),
             size: sc.size,
             items: Vec::new(),
             pending_div: None,
@@ -386,16 +387,11 @@ impl<'a> Runner<'a> {
                     }
                 }
                 Step::ControlClose(c) => self.control_close(i, &c.id)?,
-                Step::Attach(a) => self.attach_start(&a.session)?,
-                Step::Keys(k) => {
-                    let total = self.act.total.load(Ordering::SeqCst);
-                    let a = self.attach.as_mut().ok_or("keys: no attached client")?;
-                    a.writer
-                        .write_all(k.as_bytes())
-                        .map_err(|e| e.to_string())?;
-                    a.writer.flush().map_err(|e| e.to_string())?;
-                    self.expect_after = Some(total);
+                Step::Attach(a) => {
+                    self.attach_start(&a.session, a.id.clone().unwrap_or_default())?;
                 }
+                Step::Keys(k) => self.keys("", k)?,
+                Step::KeysTo(k) => self.keys(&k.id, &k.keys)?,
                 Step::Feed(f) => {
                     let argv: Vec<String> = ["send-keys", "-t", &f.pane, "-l", &f.bytes]
                         .map(String::from)
@@ -408,7 +404,10 @@ impl<'a> Runner<'a> {
                 }
                 Step::Resize([c, r]) => {
                     let total = self.act.total.load(Ordering::SeqCst);
-                    let a = self.attach.as_mut().ok_or("resize: no attached client")?;
+                    let a = self
+                        .attaches
+                        .get_mut("")
+                        .ok_or("resize: no attached client")?;
                     a.events.lock().unwrap().push(Event::Resize(*c, *r));
                     a.master
                         .resize(PtySize {
@@ -438,8 +437,11 @@ impl<'a> Runner<'a> {
                     let argv = vec!["wait-for".to_string(), chan.clone()];
                     self.cli(i, &argv, &format!("wait_for {chan}"))?;
                 }
-                Step::Screen(_) => self.observe_client(i, "screen", false)?,
-                Step::Title(_) => self.observe_client(i, "title", true)?,
+                Step::Screen(s) => {
+                    let id = s.id.clone().unwrap_or_default();
+                    self.observe_client(i, &id, "screen", false)?;
+                }
+                Step::Title(_) => self.observe_client(i, "", "title", true)?,
                 Step::Divergence(d) => self.pending_div = Some(d.clone()),
             }
         }
@@ -569,7 +571,22 @@ impl<'a> Runner<'a> {
         Ok(())
     }
 
-    fn attach_start(&mut self, session: &str) -> Result<()> {
+    /// Raw bytes to the attached client `id`.
+    fn keys(&mut self, id: &str, k: &str) -> Result<()> {
+        let total = self.act.total.load(Ordering::SeqCst);
+        let a = self
+            .attaches
+            .get_mut(id)
+            .ok_or_else(|| format!("keys: no attached client {id:?}"))?;
+        a.writer
+            .write_all(k.as_bytes())
+            .map_err(|e| e.to_string())?;
+        a.writer.flush().map_err(|e| e.to_string())?;
+        self.expect_after = Some(total);
+        Ok(())
+    }
+
+    fn attach_start(&mut self, session: &str, id: String) -> Result<()> {
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -589,7 +606,13 @@ impl<'a> Runner<'a> {
         cmd.cwd(self.root.join("home"));
         let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
         drop(pair.slave);
-        let events = Arc::new(Mutex::new(Vec::new()));
+        // The observer terminal starts at the scenario size: a client
+        // started after a resize starts at the current one.
+        let mut start = Vec::new();
+        if self.size != self.sc.size {
+            start.push(Event::Resize(self.size[0], self.size[1]));
+        }
+        let events = Arc::new(Mutex::new(start));
         let ev = Arc::clone(&events);
         let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         spawn_reader(
@@ -602,19 +625,22 @@ impl<'a> Runner<'a> {
         );
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
         self.expect_after = Some(self.act.total.load(Ordering::SeqCst));
-        self.attach = Some(Attach {
-            master: pair.master,
-            writer,
-            child,
-            events,
-        });
+        self.attaches.insert(
+            id,
+            Attach {
+                master: pair.master,
+                writer,
+                child,
+                events,
+            },
+        );
         Ok(())
     }
 
     /// Quiescence: wait for the output an input provoked (if any), then for
     /// `quiet` without output from any client. False if it never settles.
     fn settle(&mut self, quiet: Duration) -> bool {
-        let has_client = self.attach.is_some() || !self.controls.is_empty();
+        let has_client = !self.attaches.is_empty() || !self.controls.is_empty();
         if let Some(before) = self.expect_after.take().filter(|_| has_client) {
             let start = Instant::now();
             while self.act.total.load(Ordering::SeqCst) == before
@@ -639,8 +665,11 @@ impl<'a> Runner<'a> {
     /// The attached client's output fed to an observer terminal; grids are
     /// compared, never the raw bytes (spec, *Behaviour oracle*).
     /// The attached client's output so far, fed into a terminal of its size.
-    fn client_term(&self) -> Result<PaneTerm> {
-        let a = self.attach.as_ref().ok_or("no attached client")?;
+    fn client_term(&self, id: &str) -> Result<PaneTerm> {
+        let a = self
+            .attaches
+            .get(id)
+            .ok_or_else(|| format!("no attached client {id:?}"))?;
         let mut term = PaneTerm::new(self.sc.size[0], self.sc.size[1], HISTORY_LIMIT);
         for e in a.events.lock().unwrap().iter() {
             match e {
@@ -653,17 +682,17 @@ impl<'a> Runner<'a> {
 
     /// Settle, then observe the attached client's screen, or its terminal
     /// title as a `cli` observation.
-    fn observe_client(&mut self, step: usize, what: &str, title: bool) -> Result<()> {
+    fn observe_client(&mut self, step: usize, id: &str, what: &str, title: bool) -> Result<()> {
         let obs = if self.settle(DEFAULT_QUIET) {
             if title {
-                let title = self.client_term()?.title();
+                let title = self.client_term(id)?.title();
                 Observation::Cli {
                     stdout: self.norm.text(&format!("{title}\n")),
                     stderr: String::new(),
                     exit: 0,
                 }
             } else {
-                self.screen()?
+                self.screen(id)?
             }
         } else {
             Observation::Timeout {
@@ -674,8 +703,8 @@ impl<'a> Runner<'a> {
         Ok(())
     }
 
-    fn screen(&self) -> Result<Observation> {
-        let term = self.client_term()?;
+    fn screen(&self, id: &str) -> Result<Observation> {
+        let term = self.client_term(id)?;
         let bytes = capture(
             &term,
             CaptureOpts {

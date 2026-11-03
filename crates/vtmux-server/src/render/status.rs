@@ -275,6 +275,12 @@ impl StatusLine {
         self.prompt.as_mut()
     }
 
+    /// `sl->screen`: the status lines as last drawn.
+    #[must_use]
+    pub fn screen_rows(&self) -> &[Vec<Cell>] {
+        &self.screen
+    }
+
     /// The message shown, if any (`c->message_string`).
     #[must_use]
     pub fn message(&self) -> Option<&str> {
