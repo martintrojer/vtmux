@@ -6,7 +6,9 @@
 //! tmux writes each line into the mode's backing screen through an input
 //! parser (`window_copy_vadd`, window-copy.c:715-760), so escapes in the
 //! text are interpreted. Here the mode keeps a private terminal the text
-//! is fed to, and the copy's grid is read again from it after each line.
+//! is fed to, and the rows it wrote are read into the copy's grid after
+//! each batch of lines (all of one command's prints, a `run-shell`'s
+//! whole output).
 //! Everything else (keys, movement, search, selection, drawing) is
 //! [`CopyMode`]'s.
 
@@ -55,14 +57,29 @@ impl ViewMode {
     /// before every line but the first), escapes interpreted. The view
     /// keeps its place: history the line pushed out is added to the
     /// scroll offset.
+    #[cfg(test)]
     pub fn add(&mut self, text: &[u8]) {
+        self.add_lines([text]);
+    }
+
+    /// [`Self::add`] for each of `lines`, read into the copy once at the
+    /// end: the lines above the first one's history are as they were, so
+    /// only the rows from there on are read, and a long output costs the
+    /// rows it wrote rather than a screen per line.
+    pub fn add_lines<'a>(&mut self, lines: impl IntoIterator<Item = &'a [u8]>) {
         let from = (!self.stale).then(|| self.term.history_size());
-        let mut bytes = Vec::with_capacity(text.len() + 2);
-        if self.written {
-            bytes.extend_from_slice(b"\r\n");
+        let mut bytes = Vec::new();
+        let mut any = false;
+        for text in lines {
+            if self.written {
+                bytes.extend_from_slice(b"\r\n");
+            }
+            (self.written, any) = (true, true);
+            bytes.extend_from_slice(text);
         }
-        self.written = true;
-        bytes.extend_from_slice(text);
+        if !any {
+            return;
+        }
         self.term.feed(&bytes);
         // window_copy_init_ctx_cb: nothing goes anywhere from the backing.
         drop(self.term.take_replies());
@@ -140,26 +157,47 @@ impl Server {
         else {
             return;
         };
-        for line in lines {
-            m.add(line);
-        }
+        m.add_lines(lines);
         self.model.redraw_panes.insert(p);
     }
 
+    /// The prints among `output` (one command's, for an attached terminal
+    /// client of session `s`) taken out and added to view mode in one go
+    /// ([`Self::view_print`]).
+    pub(crate) fn view_print_outputs(
+        &mut self,
+        s: vtmux_core::ids::SessionId,
+        output: &mut Vec<crate::commands::Output>,
+    ) {
+        let mut texts = Vec::new();
+        output.retain_mut(|o| match o {
+            crate::commands::Output::Print(text) => {
+                texts.push(std::mem::take(text));
+                false
+            }
+            _ => true,
+        });
+        if !texts.is_empty() {
+            self.view_print(s, &texts);
+        }
+    }
+
     /// `server_client_print` with `parse` set for an attached terminal
-    /// client (server-client.c:3260-3278): the text goes to the view mode
-    /// of its session's active pane, one line per LF-ended piece, then the
-    /// rest. tmux adds a NUL to non-empty text first, so the rest is never
-    /// empty: a text ending in LF adds an empty line after it, an empty
-    /// text adds nothing (view mode is still entered). Each line stops at a
-    /// NUL (`%s`).
-    pub(crate) fn view_print(&mut self, s: vtmux_core::ids::SessionId, text: &[u8]) {
+    /// client (server-client.c:3260-3278), for each of `texts`: the text
+    /// goes to the view mode of its session's active pane, one line per
+    /// LF-ended piece, then the rest. tmux adds a NUL to non-empty text
+    /// first, so the rest is never empty: a text ending in LF adds an empty
+    /// line after it, an empty text adds nothing (view mode is still
+    /// entered). Each line stops at a NUL (`%s`). The lines of all the
+    /// texts are added together.
+    pub(crate) fn view_print(&mut self, s: vtmux_core::ids::SessionId, texts: &[Vec<u8>]) {
         let Some(p) = crate::target::Found::from_session(&self.model, s).pane else {
             return;
         };
-        let lines = text
-            .split(|&b| b == b'\n')
-            .filter(|_| !text.is_empty())
+        let lines = texts
+            .iter()
+            .filter(|text| !text.is_empty())
+            .flat_map(|text| text.split(|&b| b == b'\n'))
             .map(|l| l.split(|&b| b == 0).next().unwrap_or_default());
         self.view_add(p, lines);
     }
@@ -206,6 +244,50 @@ mod tests {
         v.add(b"");
         v.add(b"x");
         assert_eq!(lines(&v), ["", "x", ""]);
+    }
+
+    /// Rows read into the copy while `f` runs.
+    fn rows_read(f: impl FnOnce()) -> usize {
+        let read = || super::super::grid::tests::ROWS_READ.with(std::cell::Cell::get);
+        let before = read();
+        f();
+        read() - before
+    }
+
+    /// A batch of lines costs the rows it wrote, not a screen per line:
+    /// 20 000 lines read into an 80x24 copy once (`run-shell 'seq 1
+    /// 50000'` blocked the server for 15 s re-reading the screen after
+    /// every line). One more line after them reads the screen it scrolled
+    /// and nothing of the history above it. The view stays at the top.
+    #[test]
+    fn a_batch_reads_each_new_row_once() {
+        let mut v = ViewMode::new((80, 24), false, None);
+        let text: Vec<Vec<u8>> = (1..=20_000).map(|i| i.to_string().into_bytes()).collect();
+        let read = rows_read(|| v.add_lines(text.iter().map(Vec::as_slice)));
+        assert_eq!(read, 20_000);
+        assert_eq!(rows_read(|| v.add(b"z")), 24 + 1);
+        assert_eq!(lines(&v)[..2], ["1", "2"]);
+        assert_eq!(v.copy.position(0), (20_000 - 24 + 1, 20_000 - 24 + 1));
+    }
+
+    /// A command's prints go to view mode together: 2 000 one-line
+    /// prints read 2 000 rows, and the output that is not a print stays.
+    #[test]
+    fn one_commands_prints_are_one_batch() {
+        use crate::commands::Output;
+        let (mut server, p, s, _, dir) = crate::mode::prompt::tests::setup();
+        let mut output: Vec<Output> = (1..=2_000)
+            .map(|i| Output::Print(i.to_string().into_bytes()))
+            .collect();
+        output.push(Output::Stderr(b"e".to_vec()));
+        let read = rows_read(|| server.view_print_outputs(s, &mut output));
+        assert!(matches!(output[..], [Output::Stderr(_)]));
+        let Some(Mode::View(v)) = server.model.panes[&p].modes.first() else {
+            panic!("not in view mode");
+        };
+        assert_eq!(lines(v)[..2], ["1", "2"]);
+        assert_eq!(read, 2_000);
+        std::fs::remove_dir_all(dir).ok();
     }
 
     /// After a resize the copy is reflowed; the next line reads the

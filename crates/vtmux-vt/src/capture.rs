@@ -415,7 +415,17 @@ fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCel
 /// walk for the row and one call for its cells; a cell's style and
 /// grapheme are looked up only when it has them.
 fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
-    let Ok(row_ref) = term.grid_ref(Point::Screen(PointCoordinate {
+    // Ghostty resolves a screen point by walking its pages from the oldest
+    // and an active point from the newest: a row of the active area is
+    // read as one, at a cost that does not grow with the history.
+    let (at, y): (fn(PointCoordinate) -> Point, usize) =
+        match y.checked_sub(term.scrollback_rows().unwrap_or(0)) {
+            Some(active) => (Point::Active, active),
+            None => (Point::Screen, y),
+        };
+    #[cfg(test)]
+    tests::LOOKUPS.with(|n| n.set(n.get() + 1));
+    let Ok(row_ref) = term.grid_ref(at(PointCoordinate {
         x: 0,
         y: u32::try_from(y).unwrap_or(u32::MAX),
     })) else {
@@ -761,6 +771,25 @@ fn sgr_code(out: &mut Vec<u8>, last: &Style, cur: &Style) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        /// Ghostty point lookups by [`read_screen_row`] on this thread.
+        pub(super) static LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// A row costs one point lookup, not one per cell: a lookup walks
+    /// Ghostty's page list, so per cell a long history made every row
+    /// (view mode's sync, a capture) cost its length times the width.
+    #[test]
+    fn a_row_is_one_lookup() {
+        let mut t = PaneTerm::new(80, 3, 100);
+        t.feed("\x1b[1mab\x1b[m\u{e9}\r\nc\r\nd\r\ne".as_bytes());
+        let before = LOOKUPS.with(std::cell::Cell::get);
+        let rows: Vec<String> = (0..t.history_size() + 3).map(|y| t.row(y).text()).collect();
+        assert_eq!(LOOKUPS.with(std::cell::Cell::get) - before, rows.len());
+        assert_eq!(rows[0].trim_end(), "ab\u{e9}");
+        assert_eq!(rows[3].trim_end(), "e");
+    }
 
     fn cap(cols: u16, rows: u16, bytes: &[u8], opts: CaptureOpts) -> String {
         let mut t = PaneTerm::new(cols, rows, 100);

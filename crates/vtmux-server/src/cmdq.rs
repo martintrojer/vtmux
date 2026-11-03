@@ -690,15 +690,7 @@ impl Server {
             self.control_take_output(id, item);
             self.control_flush(id);
         } else if let Some(s) = self.client_session(id).filter(|_| !self.is_control(id)) {
-            let (prints, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut item.output)
-                .into_iter()
-                .partition(|o| matches!(o, Output::Print(_)));
-            item.output = rest;
-            for out in prints {
-                if let Output::Print(text) = out {
-                    self.view_print(s, &text);
-                }
-            }
+            self.view_print_outputs(s, &mut item.output);
         } else {
             self.send_output(id, item);
         }
