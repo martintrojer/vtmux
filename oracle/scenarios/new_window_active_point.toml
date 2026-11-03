@@ -1,0 +1,15 @@
+# spawn_window (spawn.c:601-609) makes a new window's first pane active through window_set_active_pane (w->active is NULL, even with -d), which stamps its active_point (window.c:773); split-window -d does not. So `list-panes -O activity` orders the panes by when they last became active: the first pane of each window by creation, a pane split with -d (never active) after those, and titles break the tie only between unstamped panes.
+name = "new_window_active_point"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "80", "-y", "24", "exec cat"] },
+  { run = ["neww", "-d", "exec cat"] },
+  { run = ["splitw", "-d", "-t", "a:1", "exec cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0", ";", "select-pane", "-t", "%1", "-T", "t1", ";", "select-pane", "-t", "%2", "-T", "t2"] },
+  { run = ["list-panes", "-a", "-O", "activity", "-F", "#{pane_id}"] },
+  { run = ["list-panes", "-a", "-O", "activity", "-r", "-F", "#{pane_id}"] },
+  { run = ["neww", "-d", "exec cat"] },
+  { run = ["select-pane", "-t", "%3", "-T", "t3"] },
+  { run = ["list-panes", "-a", "-O", "activity", "-F", "#{pane_id}"] },
+  { run = ["select-pane", "-t", "%2"] },
+  { run = ["list-panes", "-a", "-O", "activity", "-F", "#{pane_id}"] },
+]

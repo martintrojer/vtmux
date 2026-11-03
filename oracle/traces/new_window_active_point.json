@@ -1,0 +1,229 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "new_window_active_point",
+  "inputs": {
+    "name": "new_window_active_point",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:1",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0",
+          ";",
+          "select-pane",
+          "-t",
+          "%1",
+          "-T",
+          "t1",
+          ";",
+          "select-pane",
+          "-t",
+          "%2",
+          "-T",
+          "t2"
+        ]
+      },
+      {
+        "run": [
+          "list-panes",
+          "-a",
+          "-O",
+          "activity",
+          "-F",
+          "#{pane_id}"
+        ]
+      },
+      {
+        "run": [
+          "list-panes",
+          "-a",
+          "-O",
+          "activity",
+          "-r",
+          "-F",
+          "#{pane_id}"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%3",
+          "-T",
+          "t3"
+        ]
+      },
+      {
+        "run": [
+          "list-panes",
+          "-a",
+          "-O",
+          "activity",
+          "-F",
+          "#{pane_id}"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%2"
+        ]
+      },
+      {
+        "run": [
+          "list-panes",
+          "-a",
+          "-O",
+          "activity",
+          "-F",
+          "#{pane_id}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0\n%2\n%1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0\n%1\n%2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0\n%2\n%1\n%3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0\n%1\n%2\n%3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

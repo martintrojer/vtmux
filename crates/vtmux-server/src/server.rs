@@ -3021,6 +3021,9 @@ impl Server {
         // check comes one NAME_INTERVAL later and sees the command (D-012).
         pane.last_rename = Some(Instant::now());
         self.model.panes.insert(pane_id, pane);
+        // spawn.c:601-609: the first pane goes through window_set_active_pane
+        // (w->active is NULL even with -d), which stamps its active_point.
+        self.model.stamp_active(pane_id);
         let activity = self.model.touch();
         self.model.windows.insert(
             window_id,
