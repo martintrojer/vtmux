@@ -1,0 +1,28 @@
+diff --git a/crates/vtmux-server/src/compress.rs b/crates/vtmux-server/src/compress.rs
+index ea2b8ea..97d99ea 100644
+--- a/crates/vtmux-server/src/compress.rs
++++ b/crates/vtmux-server/src/compress.rs
+@@ -68,6 +68,12 @@ impl PaneCompress {
+     /// for one page of new scrollback, or an explicit history read/resize.
+     /// With no history to compress the pane is not due at all.
+     pub fn observe(&mut self, term: &PaneTerm, now: Instant) {
++        if true {
++            // bench-nocompress.patch: the benchmark's build without
++            // compression. Nothing is ever due, so no step is scheduled.
++            let _ = (term, now);
++            return;
++        }
+         let activity = term.compression_activity();
+         let size = (term.cols(), term.rows());
+         let resized = self.size != Some(size);
+@@ -166,6 +172,10 @@ impl Server {
+     /// if the turn was `idle` (woke for nothing else) and the loop has been
+     /// [`QUIET`], the next due pane after the last one stepped runs one step.
+     pub(crate) fn compress_turn(&mut self, now: Instant, idle: bool) {
++        if true {
++            let _ = (now, idle);
++            return;
++        }
+         let reads = vtmux_vt::history_reads();
+         if reads != self.compress.reads {
+             self.compress.reads = reads;

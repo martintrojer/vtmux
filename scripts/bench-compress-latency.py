@@ -13,6 +13,7 @@ compare the p95 of the samples inside that window.
 
 Usage: [GAP_MS=2] bench-compress-latency.py BINARY SCENARIO PANES [SECONDS] > run.json
        bench-compress-latency.py compare WITH.json... -- WITHOUT.json...
+       bench-compress-latency.py pooled WITH.json... -- WITHOUT.json...
   SCENARIO: spec (120x40, limit 100000) or narrow (80x24, limit 10000,
   truecolour cells), the generators of scripts/bench-history-memory.sh.
   GAP_MS: the pause between one marker showing and the next written
@@ -23,6 +24,10 @@ window is where each WITH run's RSS fell by more than 1 MB from its
 level at the fill (10 ms polls) to where it stopped falling. Samples
 started inside it are compared with WITHOUT samples started in the same
 seconds after the fill, and with WITH samples from before it.
+`pooled` compares whole runs (samples from 0.5 s on, whether or not
+compression ran): the p50/p95 over all of each side's runs and, run by
+run, the p95 of each. With GAP_MS=2 a pane is never quiet, so nothing is
+compressed and this is the cost of the compression-capable build alone.
 """
 
 import json
@@ -85,9 +90,27 @@ def compare(args):
     print(f"p95 rise against no compression: {rise * 100:+.1f}%")
 
 
+def pooled(args):
+    split = args.index("--")
+    sides = [[json.load(open(f)) for f in args[:split]],
+             [json.load(open(f)) for f in args[split + 1:]]]
+    stats = []
+    for name, runs in zip(("with", "without"), sides):
+        per_run = [[lat for t, lat in r["samples"] if t >= 0.5] for r in runs]
+        xs = [lat for run in per_run for lat in run]
+        stats.append((p(xs, .5), p(xs, .95)))
+        print(f"{name:8} runs={len(runs)} n={len(xs):6} p50={stats[-1][0]:.3f} p95={stats[-1][1]:.3f} ms"
+              f"  per-run p95: {' '.join(f'{p(r, .95):.3f}' for r in per_run)}")
+    print(f"whole-run rise: p50 {(stats[0][0] / stats[1][0] - 1) * 100:+.1f}%"
+          f" p95 {(stats[0][1] / stats[1][1] - 1) * 100:+.1f}%")
+
+
 def main():
     if sys.argv[1] == "compare":
         compare(sys.argv[2:])
+        return
+    if sys.argv[1] == "pooled":
+        pooled(sys.argv[2:])
         return
     binary, scenario, panes = sys.argv[1], sys.argv[2], int(sys.argv[3])
     seconds = float(sys.argv[4]) if len(sys.argv) > 4 else 12.0
