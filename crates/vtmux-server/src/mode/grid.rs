@@ -7,14 +7,20 @@
 //! height moves the history boundary, a change of width reflows the lines
 //! (`grid_reflow`, grid.c:1318-1611).
 
-use vtmux_vt::{LineMark, PaneTerm, Row};
+use std::cell::OnceCell;
+use std::rc::Rc;
+
+use vtmux_vt::{LineMark, PaneTerm, Row, ScreenCopy};
 
 /// One line of the copy.
 #[derive(Clone, Debug, Default)]
 struct Line {
     /// The used cells (`cellused`): trailing blanks nothing wrote with a
     /// colour or a link are dropped, so `row.cells.len()` is the count.
-    row: Row,
+    /// Read from the source on first use.
+    row: OnceCell<Row>,
+    /// The source row `row` comes from while it is unread.
+    src: Option<usize>,
     /// When it scrolled into history, 0 if never (`grid_line_time`).
     time: i64,
     /// `GRID_LINE_START_PROMPT` and `GRID_LINE_START_OUTPUT`: OSC 133
@@ -24,8 +30,16 @@ struct Line {
 }
 
 impl Line {
-    fn used(&self) -> usize {
-        self.row.cells.len()
+    /// The row of a line already read (all of them once a reflow starts).
+    fn row(&self) -> &Row {
+        self.row.get().expect("line read")
+    }
+
+    fn row_mut(&mut self) -> &mut Row {
+        if self.row.get().is_none() {
+            let _ = self.row.set(Row::default());
+        }
+        self.row.get_mut().expect("line read")
     }
 }
 
@@ -42,6 +56,8 @@ pub struct WrapPos {
 pub struct Grid {
     /// `hsize + sy` lines.
     lines: Vec<Line>,
+    /// The pane's grid as it was on entry, which unread lines come from.
+    source: Option<Rc<ScreenCopy>>,
     hsize: usize,
     /// History lines that scrolled there and were not cleared
     /// (`hscrolled`): a taller screen pulls these back first.
@@ -77,26 +93,31 @@ impl Grid {
     /// lines (`copy-mode -s`).
     #[must_use]
     pub fn clone_of(src: &PaneTerm, sx: usize, sy: usize, trim: bool) -> (Self, usize, usize) {
-        let hsize = src.history_size();
+        let copy = src.copy_screen();
+        let hsize = copy.history_size();
         let mut n = hsize + usize::from(src.rows());
+        let mut tail = Vec::new();
         if trim {
-            while n > hsize + 1 && used_cells(src.row(n - 1)).cells.is_empty() {
+            loop {
+                let row = used_cells(copy.row(n - 1));
+                if n <= hsize + 1 || !row.cells.is_empty() {
+                    tail.push(row);
+                    break;
+                }
                 n -= 1;
             }
         }
         let mut lines: Vec<Line> = (0..n)
             .map(|y| Line {
-                row: used_cells(src.row(y)),
-                time: if y < hsize {
-                    src.history_time(src.history_id(y))
-                } else {
-                    0
-                },
-                prompt: false,
-                output: false,
+                src: Some(y),
+                time: copy.history_time(y),
+                ..Line::default()
             })
             .collect();
-        for (y, mark) in src.line_marks() {
+        if let (Some(row), Some(line)) = (tail.pop(), lines.last_mut()) {
+            line.row = OnceCell::from(row);
+        }
+        for &(y, mark) in copy.line_marks() {
             if let Some(line) = lines.get_mut(y) {
                 match mark {
                     LineMark::Prompt => line.prompt = true,
@@ -113,6 +134,7 @@ impl Grid {
         };
         let mut grid = Self {
             lines,
+            source: Some(Rc::new(copy)),
             hsize,
             hscrolled: hsize,
             sx: usize::from(src.cols()),
@@ -141,7 +163,32 @@ impl Grid {
     /// Line `y`, empty past the end.
     #[must_use]
     pub fn row(&self, y: usize) -> &Row {
-        self.lines.get(y).map_or(&EMPTY, |l| &l.row)
+        self.lines.get(y).map_or(&EMPTY, |l| self.line_row(l))
+    }
+
+    fn line_row<'a>(&self, line: &'a Line) -> &'a Row {
+        line.row.get_or_init(|| match (line.src, &self.source) {
+            (Some(y), Some(source)) => used_cells(source.row(y)),
+            _ => Row::default(),
+        })
+    }
+
+    fn used(&self, line: &Line) -> usize {
+        self.line_row(line).cells.len()
+    }
+
+    fn wrapped_line(&self, line: &Line) -> bool {
+        self.line_row(line).wrapped
+    }
+
+    /// Read every unread line: a reflow rewrites them all.
+    fn read_all(&mut self) {
+        let mut lines = std::mem::take(&mut self.lines);
+        for line in &mut lines {
+            self.line_row(line);
+            line.src = None;
+        }
+        self.lines = lines;
     }
 
     /// When line `y` scrolled into history (`grid_line_time`), 0 if never.
@@ -201,6 +248,7 @@ impl Grid {
 
     /// `grid_reflow` to the current `sx`.
     fn reflow(&mut self) {
+        self.read_all();
         let sx = self.sx;
         let mut source: Vec<Option<Line>> = std::mem::take(&mut self.lines)
             .into_iter()
@@ -213,14 +261,14 @@ impl Grid {
             };
             // `at`: the first cell past the width; `width`: the whole width.
             let (mut at, mut width) = (0, 0);
-            for (i, c) in line.row.cells.iter().enumerate() {
+            for (i, c) in line.row().cells.iter().enumerate() {
                 let w = usize::from(c.width);
                 if at == 0 && width + w > sx {
                     at = i;
                 }
                 width += w;
             }
-            let wrapped = line.row.wrapped;
+            let wrapped = line.row().wrapped;
             if width > sx {
                 self.reflow_split(&mut target, &mut source, yy, at);
             } else if width < sx && wrapped {
@@ -260,31 +308,31 @@ impl Grid {
                 break;
             }
             let next = source[line].as_ref().expect("lines below are live");
-            if !next.row.wrapped {
+            if !next.row().wrapped {
                 wrapped = false;
             }
-            if next.used() == 0 {
+            if next.row().cells.is_empty() {
                 if !wrapped {
                     break;
                 }
                 lines += 1;
                 continue;
             }
-            if width + usize::from(next.row.cells[0].width) > sx {
+            if width + usize::from(next.row().cells[0].width) > sx {
                 break;
             }
             want = 0;
-            for c in &next.row.cells {
+            for c in &next.row().cells {
                 if width + usize::from(c.width) > sx {
                     break;
                 }
                 width += usize::from(c.width);
-                target[to].row.cells.push(c.clone());
+                target[to].row_mut().cells.push(c.clone());
                 want += 1;
             }
             from = Some(line);
             lines += 1;
-            if !wrapped || want != next.used() || width == sx {
+            if !wrapped || want != next.row().cells.len() || width == sx {
                 break;
             }
         }
@@ -293,12 +341,12 @@ impl Grid {
             return;
         }
         let rest = source[from].as_mut().expect("live line");
-        if want == rest.used() {
+        if want == rest.row().cells.len() {
             if !wrapped {
-                target[to].row.wrapped = false;
+                target[to].row_mut().wrapped = false;
             }
         } else {
-            rest.row.cells.drain(..want);
+            rest.row_mut().cells.drain(..want);
             lines -= 1;
         }
         for dead in &mut source[yy + 1..yy + 1 + lines] {
@@ -322,10 +370,10 @@ impl Grid {
     ) {
         let sx = self.sx;
         let mut gl = source[yy].take().expect("live line");
-        let was_wrapped = gl.row.wrapped;
+        let was_wrapped = gl.row().wrapped;
         let mut lines = 2;
         let mut width = 0;
-        for c in &gl.row.cells[at..] {
+        for c in &gl.row().cells[at..] {
             let w = usize::from(c.width);
             if width + w > sx {
                 lines += 1;
@@ -337,20 +385,20 @@ impl Grid {
         target.resize_with(first + lines, Line::default);
         let mut line = first + 1;
         width = 0;
-        for c in gl.row.cells.drain(at..) {
+        for c in gl.row_mut().cells.drain(at..) {
             let w = usize::from(c.width);
             if width + w > sx {
-                target[line].row.wrapped = true;
+                target[line].row_mut().wrapped = true;
                 line += 1;
                 width = 0;
             }
             width += w;
-            target[line].row.cells.push(c);
+            target[line].row_mut().cells.push(c);
         }
         if was_wrapped {
-            target[line].row.wrapped = true;
+            target[line].row_mut().wrapped = true;
         }
-        gl.row.wrapped = true;
+        gl.row_mut().wrapped = true;
         target[first] = gl;
         if yy <= self.hscrolled {
             self.hscrolled += lines - 1;
@@ -367,14 +415,14 @@ impl Grid {
     pub fn wrap_position(&self, px: usize, py: usize) -> WrapPos {
         let (mut ax, mut ay) = (0, 0);
         for line in &self.lines[..py.min(self.lines.len())] {
-            if line.row.wrapped {
-                ax += line.used();
+            if self.wrapped_line(line) {
+                ax += self.used(line);
             } else {
                 ax = 0;
                 ay += 1;
             }
         }
-        let used = self.lines.get(py).map_or(0, Line::used);
+        let used = self.lines.get(py).map_or(0, |l| self.used(l));
         WrapPos {
             x: (px < used).then_some(ax + px),
             y: ay,
@@ -385,7 +433,7 @@ impl Grid {
     #[must_use]
     pub fn unwrap_position(&self, pos: WrapPos) -> (usize, usize) {
         let ey = self.lines.len() - 1;
-        let wrapped = |y: usize| self.lines[y].row.wrapped;
+        let wrapped = |y: usize| self.wrapped_line(&self.lines[y]);
         let mut yy = 0;
         let mut ay = 0;
         while yy < ey {
@@ -401,10 +449,10 @@ impl Grid {
             while yy < ey && wrapped(yy) {
                 yy += 1;
             }
-            return (self.lines[yy].used(), yy);
+            return (self.used(&self.lines[yy]), yy);
         };
         while yy < ey && wrapped(yy) {
-            let used = self.lines[yy].used();
+            let used = self.used(&self.lines[yy]);
             if wx < used {
                 break;
             }
@@ -423,32 +471,32 @@ mod tests {
     fn texts(g: &Grid) -> Vec<(String, bool)> {
         g.lines
             .iter()
-            .map(|l| (l.row.text(), l.row.wrapped))
+            .map(|l| (g.line_row(l).text(), g.line_row(l).wrapped))
             .collect()
     }
 
     fn line(s: &str, wrapped: bool) -> Line {
+        let row = Row {
+            cells: s
+                .chars()
+                .map(|c| Cell {
+                    text: c.to_string(),
+                    width: 1,
+                    ..Cell::default()
+                })
+                .collect(),
+            wrapped,
+        };
         Line {
-            row: Row {
-                cells: s
-                    .chars()
-                    .map(|c| Cell {
-                        text: c.to_string(),
-                        width: 1,
-                        ..Cell::default()
-                    })
-                    .collect(),
-                wrapped,
-            },
-            time: 0,
-            prompt: false,
-            output: false,
+            row: OnceCell::from(row),
+            ..Line::default()
         }
     }
 
     fn grid(sx: usize, sy: usize, hsize: usize, lines: Vec<Line>) -> Grid {
         Grid {
             lines,
+            source: None,
             hsize,
             hscrolled: hsize,
             sx,
@@ -516,5 +564,36 @@ mod tests {
         }
         assert_eq!(g.row(0).text(), top);
         assert!(g.time(0) > 0);
+    }
+
+    /// Rows are read on demand, from the copy taken on entry: a line first
+    /// read after the pane cleared, overwrote or compressed its history
+    /// still shows the entry's text, and the pane's compressed pages stay
+    /// compressed.
+    #[test]
+    fn unread_lines_come_from_the_entry_copy() {
+        let mut t = PaneTerm::new(40, 5, 5000);
+        for i in 0..3000 {
+            t.feed(format!("line {i} \x1b[31mred\x1b[m\r\n").as_bytes());
+        }
+        while t.compress_step() == vtmux_vt::Compression::Pending {}
+        let compressed = t.compressed_pages();
+        assert!(compressed > 0);
+        let want: Vec<Row> = (0..t.history_size() + 5)
+            .map(|y| used_cells(t.row(y)))
+            .collect();
+        // Reading the rows above restored the pane's pages: compress again.
+        while t.compress_step() == vtmux_vt::Compression::Pending {}
+        let compressed = t.compressed_pages().max(compressed);
+        let (g, _, _) = Grid::clone_of(&t, 40, 5, false);
+        assert_eq!(t.compressed_pages(), compressed, "entry decoded the pane");
+        t.feed(b"\x1b[3J\x1b[2J\x1b[Hgone");
+        for i in 0..100 {
+            t.feed(format!("new {i}\r\n").as_bytes());
+        }
+        assert_eq!(g.last() + 1, want.len());
+        for (y, row) in want.iter().enumerate() {
+            assert_eq!(g.row(y), row, "line {y}");
+        }
     }
 }

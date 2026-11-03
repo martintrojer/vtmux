@@ -9,7 +9,9 @@ use libghostty_vt::screen::{CellContentTag, CellWide, GridRef};
 use libghostty_vt::terminal::{Point, PointCoordinate};
 
 use crate::snapshot::{Cell, Color, Style, Underline};
-use crate::term::{HistoryRow, PaneTerm};
+use std::rc::Rc;
+
+use crate::term::{HistoryRow, LineMark, PaneTerm};
 
 /// One end of the captured range, as `-S` / `-E` give it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,6 +251,112 @@ impl PaneTerm {
     }
 }
 
+/// A copy of a pane's grid as it is now (tmux's `window_copy_clone_screen`
+/// copies the screen's grid), read a row at a time: Ghostty copies the
+/// screen's pages in one go, so taking it costs a memory copy, not a read
+/// of every row. Later output to the pane does not show in it and rows the
+/// pane drops from its history stay.
+pub struct ScreenCopy {
+    /// The pane's active screen, history included.
+    term: Option<Terminal<'static, 'static>>,
+    /// Ghostty's history rows in `term`: tmux's row `y` is screen row
+    /// `y + retained - hsize` (see [`read_row`]).
+    retained: usize,
+    /// The primary history copied when the alternate screen came up, which
+    /// is tmux's history while it is up (see [`read_row`]).
+    frozen: Option<Rc<Vec<FrozenRow>>>,
+    hsize: usize,
+    rows: usize,
+    cols: usize,
+    /// `grid_line_time` of each history row.
+    times: Vec<i64>,
+    marks: Vec<(usize, LineMark)>,
+}
+
+impl std::fmt::Debug for ScreenCopy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScreenCopy")
+            .field("hsize", &self.hsize)
+            .field("rows", &self.rows)
+            .field("cols", &self.cols)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ScreenCopy {
+    /// Row `y` as [`PaneTerm::row`] gave it when the copy was taken.
+    #[must_use]
+    pub fn row(&self, y: usize) -> Row {
+        if y >= self.hsize + self.rows {
+            return Row::default();
+        }
+        let (cells, wrapped) = match (&self.frozen, &self.term) {
+            (Some(frozen), _) if y < self.hsize => {
+                frozen.get(y).map(FrozenRow::thaw).unwrap_or_default()
+            }
+            (_, Some(term)) => read_screen_row(term, y + self.retained - self.hsize, self.cols),
+            (_, None) => return Row::default(),
+        };
+        Row {
+            cells: cells.iter().map(RowCell::to_cell).collect(),
+            wrapped,
+        }
+    }
+
+    /// `history_size` when the copy was taken.
+    #[must_use]
+    pub fn history_size(&self) -> usize {
+        self.hsize
+    }
+
+    /// When history row `y` scrolled in (see [`PaneTerm::history_time`]).
+    #[must_use]
+    pub fn history_time(&self, y: usize) -> i64 {
+        self.times.get(y).copied().unwrap_or(0)
+    }
+
+    /// See [`PaneTerm::line_marks`].
+    #[must_use]
+    pub fn line_marks(&self) -> &[(usize, LineMark)] {
+        &self.marks
+    }
+}
+
+impl PaneTerm {
+    /// Copy the grid (see [`ScreenCopy`]). Compressed history pages are
+    /// copied compressed: the pane's stay so, the copy decodes a page on
+    /// its first read.
+    #[must_use]
+    pub fn copy_screen(&self) -> ScreenCopy {
+        let hsize = self.history_size();
+        let frozen = if self.alternate_on() {
+            self.frozen_rows()
+        } else {
+            if hsize > 0 {
+                self.note_history_read();
+            }
+            None
+        };
+        let term = self.term.clone_screen().ok();
+        let retained = term
+            .as_ref()
+            .and_then(|t| t.scrollback_rows().ok())
+            .unwrap_or(0);
+        ScreenCopy {
+            term,
+            retained,
+            frozen,
+            hsize,
+            rows: usize::from(self.rows()),
+            cols: usize::from(self.cols()),
+            times: (0..hsize)
+                .map(|y| self.history_time(self.history_id(y)))
+                .collect(),
+            marks: self.line_marks(),
+        }
+    }
+}
+
 /// A history row copied out of Ghostty's primary screen before an alternate
 /// screen hid it. Trailing default blanks are not stored.
 #[derive(Clone, Debug)]
@@ -303,27 +411,33 @@ fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCel
     read_screen_row(&term.term, y + retained - hsize, cols)
 }
 
-/// Read one row of the active screen, spacer cells included.
+/// Read one row of the active screen, spacer cells included: one page-list
+/// walk for the row and one call for its cells; a cell's style and
+/// grapheme are looked up only when it has them.
 fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
-    let mut cells = Vec::with_capacity(cols);
-    let (mut wrapped, mut styled, mut linked) = (false, true, true);
-    let y = u32::try_from(y).unwrap_or(u32::MAX);
-    for x in 0..cols {
-        let Ok(gr) = term.grid_ref(Point::Screen(PointCoordinate {
-            x: u16::try_from(x).unwrap_or(u16::MAX),
-            y,
-        })) else {
-            break;
-        };
-        if x == 0
-            && let Ok(row) = gr.row()
-        {
-            wrapped = row.is_wrapped().unwrap_or(false);
+    let Ok(row_ref) = term.grid_ref(Point::Screen(PointCoordinate {
+        x: 0,
+        y: u32::try_from(y).unwrap_or(u32::MAX),
+    })) else {
+        return (Vec::new(), false);
+    };
+    let (wrapped, styled, linked) = row_ref.row().map_or((false, true, true), |row| {
+        (
+            row.is_wrapped().unwrap_or(false),
             // Per-row flags let most cells skip the style and link lookups.
-            styled = row.is_styled().unwrap_or(true);
-            linked = row.has_hyperlink().unwrap_or(true);
-        }
-        let Ok(cell) = gr.cell() else { continue };
+            row.is_styled().unwrap_or(true),
+            row.has_hyperlink().unwrap_or(true),
+        )
+    });
+    let mut raw = Vec::new();
+    if row_ref.row_cells(&mut raw).is_err() {
+        return (Vec::new(), wrapped);
+    }
+    // An incomplete reflow can leave the page narrower than the screen.
+    raw.truncate(cols);
+    let mut cells = Vec::with_capacity(raw.len());
+    for (x, &cell) in raw.iter().enumerate() {
+        let gr = row_ref.with_x(u16::try_from(x).unwrap_or(u16::MAX));
         let wide = match cell.wide() {
             Ok(CellWide::Wide) => Width::Double,
             Ok(CellWide::SpacerTail) => Width::SpacerTail,
