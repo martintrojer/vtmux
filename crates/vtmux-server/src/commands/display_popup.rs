@@ -165,10 +165,13 @@ fn position(
     }
     let (w, h, sx, sy) = (i64::from(w), i64::from(h), i64::from(sx), i64::from(sy));
     let mut vars: Vec<(&'static str, i64)> = Vec::new();
-    // No menu has been shown (menus are not implemented): menu_last_px/py
-    // are 0.
-    vars.push(("popup_last_x", 0));
-    vars.push(("popup_last_y", h));
+    // Where the target window's last menu opened.
+    let (last_x, last_y) = found
+        .window
+        .and_then(|w| server.model.windows.get(&w))
+        .map_or((0, 0), |x| x.menu_last);
+    vars.push(("popup_last_x", i64::from(last_x)));
+    vars.push(("popup_last_y", i64::from(last_y) + h));
     let client = server.clients.get(&tc)?;
     let lines = i64::from(server.status_line_size(client));
     let top = server.model.status_top(TreeId::Session(s));
@@ -264,7 +267,7 @@ fn position(
 
 /// `strtol(p, NULL, 10)`: leading blanks, a sign, the digits there are;
 /// 0 when there are none.
-fn strtol(s: &str) -> i64 {
+pub(super) fn strtol(s: &str) -> i64 {
     let s = s.trim_start();
     let (neg, rest) = match s.as_bytes().first() {
         Some(b'-') => (true, &s[1..]),

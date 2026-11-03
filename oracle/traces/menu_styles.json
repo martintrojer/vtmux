@@ -1,0 +1,1333 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "menu_styles",
+  "inputs": {
+    "name": "menu_styles",
+    "size": [
+      40,
+      14
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "13",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "escape-time",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "p0"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-g",
+          "menu-style",
+          "fg=colour250,bg=colour235"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-g",
+          "menu-selected-style",
+          "fg=colour16,bg=colour220,bold"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 500
+        }
+      },
+      {
+        "run": [
+          "display-menu",
+          "-T",
+          "#[fg=red]Menu",
+          "-x",
+          "2",
+          "-y",
+          "8",
+          "-C",
+          "1",
+          "Alpha item",
+          "a",
+          "",
+          "-Beta item",
+          "b",
+          "",
+          "",
+          "",
+          "",
+          "Gamma item",
+          "g",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "setw",
+          "menu-border-style",
+          "fg=colour45,bg=colour235"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "menu-style",
+          "fg=colour196,bg=colour22"
+        ]
+      },
+      {
+        "run": [
+          "refresh-client"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "setw",
+          "-u",
+          "menu-style"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-u",
+          "menu-border-style"
+        ]
+      },
+      {
+        "run": [
+          "display-menu",
+          "-s",
+          "fg=blue,bg=white,italics",
+          "-H",
+          "fg=white,bg=blue",
+          "-S",
+          "fg=green",
+          "-C",
+          "-",
+          "-x",
+          "2",
+          "-y",
+          "8",
+          "One",
+          "1",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[A"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-b",
+          "double",
+          "-x",
+          "0",
+          "-y",
+          "6",
+          "-C",
+          "9",
+          "One",
+          "1",
+          "",
+          "",
+          "",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-b",
+          "heavy",
+          "-x",
+          "14",
+          "-y",
+          "6",
+          "One",
+          "1",
+          "",
+          "",
+          "",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-b",
+          "rounded",
+          "-x",
+          "28",
+          "-y",
+          "6",
+          "One",
+          "1",
+          "",
+          "",
+          "",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-b",
+          "simple",
+          "-x",
+          "0",
+          "-y",
+          "12",
+          "One",
+          "1",
+          "",
+          "",
+          "",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-b",
+          "padded",
+          "-x",
+          "14",
+          "-y",
+          "12",
+          "One",
+          "1",
+          "",
+          "",
+          "",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-b",
+          "none",
+          "-T",
+          "Title",
+          "-x",
+          "28",
+          "-y",
+          "12",
+          "One",
+          "1",
+          "",
+          "",
+          "",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-b",
+          "bogus",
+          "One",
+          "1",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "menu-border-lines",
+          "heavy"
+        ]
+      },
+      {
+        "run": [
+          "display-menu",
+          "-x",
+          "2",
+          "-y",
+          "8",
+          "One",
+          "1",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "setw",
+          "-u",
+          "menu-border-lines"
+        ]
+      },
+      {
+        "run": [
+          "display-menu",
+          "-O",
+          "-x",
+          "2",
+          "-y",
+          "8",
+          "-C",
+          "0",
+          "One",
+          "1",
+          "set -g @c one",
+          "-Off",
+          "o",
+          "",
+          "Two",
+          "2",
+          "set -g @c two"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001b[B"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-O",
+          "-x",
+          "2",
+          "-y",
+          "8",
+          "-C",
+          "1",
+          "One",
+          "1",
+          "set -g @c one",
+          "",
+          "",
+          "",
+          "Two",
+          "2",
+          "set -g @c two"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-x",
+          "2",
+          "-y",
+          "8",
+          "This item is much wider than the window, much wider",
+          "t",
+          "",
+          "Short",
+          "s",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "window-size",
+          "manual"
+        ]
+      },
+      {
+        "run": [
+          "display-menu",
+          "-x",
+          "30",
+          "-y",
+          "12",
+          "One",
+          "1",
+          "",
+          "Two",
+          "2",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a",
+          "-x",
+          "20",
+          "-y",
+          "6"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display-menu",
+          "-C",
+          "x",
+          "One",
+          "1",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "display-menu",
+          "One",
+          "1"
+        ]
+      },
+      {
+        "run": [
+          "display-menu",
+          "-T",
+          "#{=3:session_name}x",
+          "-x",
+          "0",
+          "-y",
+          "3",
+          "#{?#{==:1,1},,-}Yes",
+          "y",
+          "",
+          "#{?#{==:1,0},No,}",
+          "n",
+          ""
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "  \\e[37m\\e[40m┌─\\e[31mMenu\\e[37m───────────┐\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m Alpha item (a) \\e[37m\\e[40m│",
+          "\\e[39m\\e[49m  \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m \\e[2mBeta item\\e[0m\\e[38;5;250m\\e[48;5;235m      \\e[37m\\e[40m│",
+          "\\e[39m\\e[49m  \\e[37m\\e[40m├────────────────┤\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m│\\e[1m\\e[38;5;16m\\e[48;5;220m Gamma item (g) \\e[0m\\e[37m\\e[40m│",
+          "\\e[39m\\e[49m  \\e[37m\\e[40m└────────────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "  \\e[38;5;45m\\e[48;5;235m┌─\\e[31mMenu\\e[38;5;45m───────────┐\\e[39m\\e[49m",
+          "  \\e[38;5;45m\\e[48;5;235m│\\e[38;5;196m\\e[48;5;22m Alpha item (a) \\e[38;5;45m\\e[48;5;235m│",
+          "\\e[39m\\e[49m  \\e[38;5;45m\\e[48;5;235m│\\e[38;5;196m\\e[48;5;22m \\e[2mBeta item\\e[0m\\e[38;5;196m\\e[48;5;22m      \\e[38;5;45m\\e[48;5;235m│",
+          "\\e[39m\\e[49m  \\e[38;5;45m\\e[48;5;235m├────────────────┤\\e[39m\\e[49m",
+          "  \\e[38;5;45m\\e[48;5;235m│\\e[1m\\e[38;5;16m\\e[48;5;220m Gamma item (g) \\e[0m\\e[38;5;45m\\e[48;5;235m│",
+          "\\e[39m\\e[49m  \\e[38;5;45m\\e[48;5;235m└────────────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "  \\e[32m┌─────────┐\\e[39m",
+          "  \\e[32m│\\e[34m\\e[47m One (1) \\e[32m\\e[49m│\\e[39m",
+          "  \\e[32m│\\e[34m\\e[47m Two (2) \\e[32m\\e[49m│\\e[39m",
+          "  \\e[32m└─────────┘\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "  \\e[32m┌─────────┐\\e[39m",
+          "  \\e[32m│\\e[34m\\e[47m One (1) \\e[32m\\e[49m│\\e[39m",
+          "  \\e[32m│\\e[1m\\e[37m\\e[44m Two (2) \\e[0m\\e[32m│\\e[39m",
+          "  \\e[32m└─────────┘\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "\\e[37m\\e[40m╔═════════╗\\e[39m\\e[49m",
+          "\\e[37m\\e[40m║\\e[38;5;250m\\e[48;5;235m One (1) \\e[37m\\e[40m║\\e[39m\\e[49m",
+          "\\e[37m\\e[40m╠═════════╣\\e[39m\\e[49m",
+          "\\e[37m\\e[40m║\\e[1m\\e[38;5;16m\\e[48;5;220m Two (2) \\e[0m\\e[37m\\e[40m║\\e[39m\\e[49m",
+          "\\e[37m\\e[40m╚═════════╝\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          4
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "              \\e[37m\\e[40m┏━━━━━━━━━┓\\e[39m\\e[49m",
+          "              \\e[37m\\e[40m┃\\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m┃\\e[39m\\e[49m",
+          "              \\e[37m\\e[40m┣━━━━━━━━━┫\\e[39m\\e[49m",
+          "              \\e[37m\\e[40m┃\\e[38;5;250m\\e[48;5;235m Two (2) \\e[37m\\e[40m┃\\e[39m\\e[49m",
+          "              \\e[37m\\e[40m┗━━━━━━━━━┛\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          16,
+          2
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "                            \\e[37m\\e[40m╭─────────╮\\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m│\\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m├─────────┤\\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m Two (2) \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m╰─────────╯\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          30,
+          2
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m+---------+\\e[39m\\e[49m",
+          "\\e[37m\\e[40m|\\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m|\\e[39m\\e[49m",
+          "\\e[37m\\e[40m+---------+\\e[39m\\e[49m",
+          "\\e[37m\\e[40m|\\e[38;5;250m\\e[48;5;235m Two (2) \\e[37m\\e[40m|\\e[39m\\e[49m",
+          "\\e[37m\\e[40m+---------+\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          8
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "              \\e[37m\\e[40m \\e[39m          \\e[49m",
+          "              \\e[37m\\e[40m \\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m \\e[39m\\e[49m",
+          "              \\e[37m\\e[40m \\e[39m          \\e[49m",
+          "              \\e[37m\\e[40m \\e[38;5;250m\\e[48;5;235m Two (2) \\e[37m\\e[40m \\e[39m\\e[49m",
+          "              \\e[37m\\e[40m \\e[39m          \\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          16,
+          8
+        ]
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "                            \\e[37m\\e[40m  Title    \\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m \\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m \\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m           \\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m \\e[38;5;250m\\e[48;5;235m Two (2) \\e[37m\\e[40m \\e[39m\\e[49m",
+          "                            \\e[37m\\e[40m           \\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          30,
+          8
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "menu-border-lines unknown value: bogus\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "  \\e[37m\\e[40m┏━━━━━━━━━┓\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m┃\\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m┃\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m┗━━━━━━━━━┛\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "  \\e[37m\\e[40m┌─────────┐\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m One (1) \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m \\e[2mOff\\e[0m\\e[38;5;250m\\e[48;5;235m     \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m│\\e[1m\\e[38;5;16m\\e[48;5;220m Two (2) \\e[0m\\e[37m\\e[40m│\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m└─────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "  \\e[37m\\e[40m┌─────────┐\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m One (1) \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m├─────────┤\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m│\\e[1m\\e[38;5;16m\\e[48;5;220m Two (2) \\e[0m\\e[37m\\e[40m│\\e[39m\\e[49m",
+          "  \\e[37m\\e[40m└─────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          4,
+          6
+        ]
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌──────────────────────────────────────┐",
+          "│\\e[1m\\e[38;5;16m\\e[48;5;220m der than the window, much wider> (t) \\e[0m\\e[37m\\e[40m│",
+          "│\\e[38;5;250m\\e[48;5;235m Short\\e[39m                            \\e[38;5;250m(s) \\e[37m\\e[40m│",
+          "└──────────────────────────────────────┘",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          5
+        ]
+      }
+    },
+    {
+      "step": 63,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 64,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 66,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "                             \\e[37m\\e[40m┌─────────┐",
+          "\\e[39m\\e[49m                             \\e[37m\\e[40m│\\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m│",
+          "\\e[39m\\e[49m                             \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m Two (2) \\e[37m\\e[40m│",
+          "\\e[39m\\e[49m                             \\e[37m\\e[40m└─────────┘",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          31,
+          9
+        ]
+      }
+    },
+    {
+      "step": 67,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 69,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[32m│\\e[37m···················",
+          "\\e[39m                    \\e[32m│\\e[37m···················",
+          "\\e[39m         \\e[37m\\e[40m┌─────────┐\\e[32m\\e[49m│\\e[37m···················",
+          "\\e[39m         \\e[37m\\e[40m│\\e[1m\\e[38;5;16m\\e[48;5;220m One (1) \\e[0m\\e[37m\\e[40m│\\e[32m\\e[49m│\\e[37m···················",
+          "\\e[39m         \\e[37m\\e[40m│\\e[38;5;250m\\e[48;5;235m Two (2) \\e[37m\\e[40m│\\e[32m\\e[49m│\\e[37m···················",
+          "\\e[39m         \\e[37m\\e[40m└─────────┘\\e[32m\\e[49m│\\e[37m···················",
+          "\\e[32m────────────────────┘\\e[37m···················",
+          "········································",
+          "········································",
+          "········································",
+          "········································",
+          "········································",
+          "········································",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          11,
+          3
+        ]
+      }
+    },
+    {
+      "step": 70,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "starting choice invalid\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 71,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "not enough arguments\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 72,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 74,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m\\e[40m┌─ax──────┐\\e[39m\\e[49m         \\e[32m│\\e[37m···················",
+          "\\e[40m│\\e[1m\\e[38;5;16m\\e[48;5;220m Yes (y) \\e[0m\\e[37m\\e[40m│\\e[39m\\e[49m         \\e[32m│\\e[37m···················",
+          "\\e[40m└─────────┘\\e[39m\\e[49m         \\e[32m│\\e[37m···················",
+          "\\e[39m                    \\e[32m│\\e[37m···················",
+          "\\e[39m                    \\e[32m│\\e[37m···················",
+          "\\e[39m                    \\e[32m│\\e[37m···················",
+          "\\e[32m────────────────────┘\\e[37m···················",
+          "········································",
+          "········································",
+          "········································",
+          "········································",
+          "········································",
+          "········································",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          1
+        ]
+      }
+    }
+  ]
+}

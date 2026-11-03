@@ -8,6 +8,7 @@
 use std::fmt::Write as _;
 
 pub mod compose;
+pub mod menu;
 pub mod panes;
 pub mod popup;
 pub mod scene;

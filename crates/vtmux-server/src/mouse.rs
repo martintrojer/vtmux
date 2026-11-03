@@ -23,9 +23,12 @@
 //! calls it directly (`KEYC_DRAGGING`), and the drag's end calls its
 //! release.
 //!
+//! A window's menu takes the raw event before any of this
+//! ([`crate::menu`], `server_client_handle_menu_key`).
+//!
 //! Not here: dragging floating panes and `split-window`/`join-pane` drags
-//! (M2), scrollbars (off by default), pane-border control ranges
-//! (`window_pane_status_get_range`) and menus.
+//! (M2), scrollbars (off by default) and pane-border control ranges
+//! (`window_pane_status_get_range`).
 
 use std::time::{Duration, Instant};
 
@@ -291,7 +294,7 @@ pub enum Located {
 impl Server {
     /// `status_at_line` and `status_line_size` for client `id`: the line
     /// the status starts at and how many lines it has.
-    fn status_place(&self, id: ClientId) -> (Option<u32>, u32) {
+    pub(crate) fn status_place(&self, id: ClientId) -> (Option<u32>, u32) {
         let Some(c) = self.clients.get(&id) else {
             return (None, 0);
         };
@@ -941,15 +944,23 @@ impl Server {
             .term
             .as_ref()
             .is_some_and(|t| t.has(vtmux_core::term_features::Cap::Kmous));
-        let popup = c.popup.is_some();
         let prompt = c.status.prompt().is_some();
         let Some((_, w, active)) = self.model.current_of(s) else {
             return Vec::new();
         };
-        // The screen whose modes count: the popup's, the active pane's, or
-        // the status line's (no mouse modes) under a prompt.
+        let menu = self.model.windows.get(&w).and_then(|x| x.menu.as_ref());
+        let overlay = c.popup.is_some() || menu.is_some();
+        // The screen whose modes count: the popup's, the menu's (all
+        // motion unless it was opened without a mouse), the active pane's,
+        // or the status line's (no mouse modes) under a prompt.
         let mut mode = if let Some(p) = c.popup.as_ref() {
             p.term.mouse_modes().tracking
+        } else if let Some(m) = menu {
+            if m.no_mouse {
+                MouseTracking::None
+            } else {
+                MouseTracking::All
+            }
         } else if prompt {
             MouseTracking::None
         } else {
@@ -960,7 +971,7 @@ impl Server {
         };
         let tree = TreeId::Session(s);
         if self.model.number_option(tree, "mouse") != 0 {
-            if !popup {
+            if !overlay {
                 mode = MouseTracking::None;
                 let any_all = self.model.windows.get(&w).is_some_and(|window| {
                     window.panes.panes.iter().any(|p| {

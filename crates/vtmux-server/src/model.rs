@@ -121,6 +121,12 @@ pub struct Window {
     /// The window's alert state (`w->flags`, `alerts_queued`,
     /// `alerts_timer`).
     pub alerts: crate::alerts::WindowAlerts,
+    /// The open menu (`w->menu`), over the window for every client that
+    /// shows it.
+    pub menu: Option<crate::menu::Menu>,
+    /// Where the last menu opened (`menu_last_px`, `menu_last_py`), for
+    /// `-x L` and `-y L`.
+    pub menu_last: (u32, u32),
 }
 
 impl Window {
@@ -1215,6 +1221,11 @@ impl Model {
         window.pending_size = None;
         let old = (window.sx(), window.sy());
         window.layout.resize_window(sx, sy);
+        // window_resize: menu_resize, inside the new size.
+        let (nx, ny) = (window.sx(), window.sy());
+        if let Some(menu) = window.menu.as_mut() {
+            menu.fit(nx, ny);
+        }
         self.fix_panes(w);
         // resize.c:80.
         self.redraw(Redraw::Window(w));

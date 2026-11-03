@@ -1,0 +1,60 @@
+# The default window and pane menus (key-bindings.c DEFAULT_WINDOW_MENU,
+# DEFAULT_PANE_MENU) from prefix < and prefix >: -xW -yW puts the window
+# menu at the window's status range above the status line, -xP -yP puts
+# the pane menu at the pane's left and bottom, kept inside the window
+# (cmd_display_menu_get_menu_pos, menu_display). Disabled items are dim;
+# items whose format expands empty are dropped. From the right-hand and
+# bottom panes the menus are pushed back on screen. Choosing an item runs
+# it (Swap Right, Zoom).
+name = "menu_default_binds"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "x", "cat"] },
+  { run = ["select-pane", "-t", "a:1.0", "-T", "p3"] },
+  { run = ["splitw", "-h", "-t", "a:0", "cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "p1"] },
+  { run = ["splitw", "-v", "-t", "a:0.1", "cat"] },
+  { run = ["select-pane", "-t", "a:0.2", "-T", "p2"] },
+  { attach = { session = "a" } },
+  { settle = { quiet_ms = 1000 } },
+  { keys = "\u0002<" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { settle = {} },
+  { keys = "\u0002>" },
+  { screen = {} },
+  { keys = "q" },
+  { settle = {} },
+  { run = ["select-pane", "-t", "a:0.0"] },
+  { settle = { react = true } },
+  { keys = "\u0002>" },
+  { screen = {} },
+  { keys = "z" },
+  { screen = {} },
+  { keys = "\u0002>" },
+  { screen = {} },
+  { keys = "z" },
+  { settle = {} },
+  { resize = [50, 14] },
+  { settle = { react = true, quiet_ms = 500 } },
+  { screen = {} },
+  { keys = "\u0002<" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { settle = {} },
+  { run = ["select-pane", "-t", "a:0.2"] },
+  { settle = { react = true } },
+  { keys = "\u0002>" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { settle = {} },
+  { keys = "\u0002<" },
+  { screen = {} },
+  { keys = "r" },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index}:#{window_name}"] },
+]

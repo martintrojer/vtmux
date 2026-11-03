@@ -1859,6 +1859,7 @@ impl Server {
                     };
                     let taken = self.clients.get_mut(&id).is_none_or(|c| c.status.key())
                         || self.popup_key(id, key)
+                        || self.menu_key(id, key, None)
                         || self.prompts_key(id, key);
                     if !taken {
                         self.touch_client(id);
@@ -1945,8 +1946,11 @@ impl Server {
         }
         let w = pane.window;
         self.focus_stale.remove(&w);
-        let active = self.model.windows.get(&w).map(Window::active) == Some(p);
+        let window = self.model.windows.get(&w);
+        let active = window.map(Window::active) == Some(p);
+        // window.c:731: not while the window has a menu up.
         let focused = active
+            && window.is_some_and(|x| x.menu.is_none())
             && self.clients.values().any(|c| {
                 c.focused
                     && c.popup.is_none()
@@ -2261,6 +2265,9 @@ impl Server {
         }
         let (_, w, _) = self.model.current_of(s)?;
         let window = self.model.windows.get(&w)?;
+        if window.menu.is_some() {
+            return None;
+        }
         let prompts = window
             .panes
             .panes
@@ -2542,6 +2549,7 @@ impl Server {
             }
         }
         self.draw_pane_prompts(s, &source, &theme, &draw, caps, &mut window);
+        self.draw_menu(s, &source, &theme, caps, draw.offset, &mut window);
         let at = usize::from(y) * cols;
         // A swap, not a copy: the window buffer is blanked before its next
         // use anyway.
@@ -2613,6 +2621,46 @@ impl Server {
             ));
         }
         screen.cursor_visible = content.cursor_visible;
+    }
+
+    /// The menu of session `s`'s window over its scene
+    /// (`redraw_draw_menu_lines`), and the cursor at its choice, hidden
+    /// (`menu_get_cursor`; the menu's screen has no `MODE_CURSOR`).
+    fn draw_menu(
+        &self,
+        s: SessionId,
+        source: &crate::render::window::Source<'_>,
+        theme: &crate::render::compose::Theme,
+        caps: crate::render::Caps,
+        offset: u16,
+        window: &mut vtmux_vt::Snapshot,
+    ) {
+        let Some((_, w, _)) = self.model.current_of(s) else {
+            return;
+        };
+        let Some(win) = self.model.windows.get(&w) else {
+            return;
+        };
+        let Some(menu) = win.menu.as_ref() else {
+            return;
+        };
+        let styles = self.menu_styles(w, menu, source);
+        crate::render::menu::draw(
+            menu,
+            &styles,
+            theme,
+            caps.clear(),
+            window,
+            offset,
+            (win.sx(), win.sy()),
+        );
+        let (cx, cy) = menu.cursor();
+        let off = u32::from(offset);
+        window.cursor = u16::try_from(cx + off)
+            .ok()
+            .zip(u16::try_from(cy + off).ok())
+            .filter(|&(x, y)| x < window.cols && y < window.rows);
+        window.cursor_visible = false;
     }
 
     /// `redraw_draw_pane_prompt` for every visible pane of session `s`'s
@@ -3361,6 +3409,8 @@ impl Server {
                 manual_size: (cols, rows),
                 latest,
                 alerts: crate::alerts::WindowAlerts::default(),
+                menu: None,
+                menu_last: (0, 0),
             },
         );
         // window_create -> window_update_activity.
