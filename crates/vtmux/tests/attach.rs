@@ -6021,7 +6021,9 @@ fn tmux_shim_reaches_this_server_from_children() {
         };
         let mut cmd = CommandBuilder::new(&bin);
         cmd.args(socket);
-        cmd.args(["-f", "/dev/null", "new", "-s", "a"]);
+        // `sh` as the command, not a login shell: macOS's /etc/profile
+        // (path_helper) would reorder PATH and push the shim back.
+        cmd.args(["-f", "/dev/null", "new", "-s", "a", "sh"]);
         let a = w.spawn_attached(cmd, 60, 10, &[("PATH", &path)]);
         a.wait(|a| pane_text(a).contains('$'));
         let shim_dir = cli(&["display", "-p", "#{socket_path}"]);
