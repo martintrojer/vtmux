@@ -316,6 +316,14 @@ fn strvis(data: &[u8], f: Vis) -> Vec<u8> {
     out
 }
 
+/// `utf8_strvis` with `VIS_OCTAL|VIS_CSTYLE|VIS_TAB` for one line of a
+/// buffer (no newline in it, so `VIS_NL` makes no difference): the
+/// buffer-mode preview's text.
+#[must_use]
+pub fn vis_line(data: &[u8]) -> String {
+    vtmux_core::rawstr::from_bytes(&strvis(data, Vis::Sample))
+}
+
 /// `cmd_paste_buffer_paste`: one line of a buffer as the pane's input.
 #[must_use]
 pub fn vis_paste(data: &[u8]) -> Vec<u8> {

@@ -1,0 +1,1455 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "choose_buffer",
+  "inputs": {
+    "name": "choose_buffer",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "aaa",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "aaa"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "aaa:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "one",
+          "first buffer"
+        ]
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "aaa:0.0",
+          "-F",
+          "#{buffer_name}=#{buffer_size}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "multi",
+          "line one\nline two\n\tthirdé中"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "long",
+          "0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "a",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "aaa:0.0",
+          "-F",
+          "#{buffer_name}=#{buffer_size}:#{buffer_sample}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "O"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "O"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "O"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "v"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "v"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "k"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "v"
+      },
+      {
+        "resize": [
+          80,
+          34
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001bOP"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "resize": [
+          80,
+          24
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "aaa:0.0",
+          "-O",
+          "name"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "j\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "aaa:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "aaa:0.0",
+          "-O",
+          "name",
+          "-F",
+          "#{buffer_name}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "d"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name}"
+        ]
+      },
+      {
+        "keys": "GD"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "ggtjt"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "D"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name}"
+        ]
+      },
+      {
+        "keys": "d"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "aaa:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name}"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "p1",
+          "AA"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "p2",
+          "BB"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "p3",
+          "CC"
+        ]
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "aaa:0.0",
+          "-O",
+          "name",
+          "-F",
+          "#{buffer_name}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "tjt"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "P"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "aaa:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "aaa:0.0",
+          "-O",
+          "name",
+          "-F",
+          "#{buffer_name}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "jp"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) one: one=12\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ one (sort: creation) ────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m first buffer                                                                 \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) a: a=1:x\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[39mlong\\e[37m: \\e[39mlong=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m(2) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[37m(3) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ a (sort: creation) ──────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m x                                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "\\e[30m\\e[43m(1) long: long=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m\\e[49m(2) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[37m(3) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ long (sort: creation) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "\\e[30m\\e[43m(1) long: long=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m\\e[49m(2) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[37m(3) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ long (sort: name) ───────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "\\e[37m(1) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[37m(2) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[30m\\e[43m(3) long: long=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ long (sort: size) ───────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) long: long=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m\\e[49m(1) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[37m(2) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[37m(3) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ long (sort: size, reversed) ─────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[37m(1) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[30m\\e[43m(2) long: long=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m\\e[49m(3) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ long (sort: creation, reversed) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[37m(1) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[30m\\e[43m(2) long: long=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m\\e[49m(3) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[37m(1) \\e[39mmulti\\e[37m: \\e[39mmulti=29:line one\\nline two\\n\\tthirdé中",
+          "\\e[30m\\e[43m(2) long: long=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m\\e[49m(3) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "\\e[37m\\e[40m┌ long (sort: creation, reversed) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[30m\\e[43m(1) multi: multi=29:line one\\nline two\\n\\tthirdé中\\e[39m",
+          "\\e[37m\\e[49m(2) \\e[39mlong\\e[37m: \\e[39mlong=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m(3) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "\\e[37m\\e[40m┌ multi (sort: creation, reversed) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m line one                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m line two                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\tthirdé中                                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[30m\\e[43m(1) multi: multi=29\\e[37m\\e[40m┌───────────────────────────────────────┐\\e[39m\\e[43m",
+          "\\e[37m\\e[49m(2) \\e[39mlong\\e[37m: \\e[39mlong=72:0\\e[37m\\e[40m│\\e[49m      Up, k \\e[40m│\\e[39m\\e[49m Move cursor up           \\e[37m\\e[40m│\\e[39m\\e[49m6789abcdefghijklmnop",
+          "\\e[37m(3) \\e[39ma\\e[37m: \\e[39ma=1:x       \\e[37m\\e[40m│\\e[49m    Down, j \\e[40m│\\e[39m\\e[49m Move cursor down         \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m          g \\e[40m│\\e[39m\\e[49m Go to top                \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m          G \\e[40m│\\e[39m\\e[49m Go to bottom             \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m PPage, C-b \\e[40m│\\e[39m\\e[49m Page up                  \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m NPage, C-f \\e[40m│\\e[39m\\e[49m Page down                \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m    Left, h \\e[40m│\\e[39m\\e[49m Collapse buffer          \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m   Right, l \\e[40m│\\e[39m\\e[49m Expand buffer            \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m        M-- \\e[40m│\\e[39m\\e[49m Collapse all buffers     \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m        M-+ \\e[40m│\\e[39m\\e[49m Expand all buffers       \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m          t \\e[40m│\\e[39m\\e[49m Toggle buffer tag        \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m          T \\e[40m│\\e[39m\\e[49m Untag all buffers        \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m        C-t \\e[40m│\\e[39m\\e[49m Tag all buffers          \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                   \\e[37m\\e[40m│\\e[49m        C-s \\e[40m│\\e[39m\\e[49m Search forward           \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m┌ multi (sort: crea│\\e[49m          n \\e[40m│\\e[39m\\e[49m Repeat search forward    \\e[37m\\e[40m│───────────────────┐",
+          "│\\e[39m\\e[49m line one         \\e[37m\\e[40m│\\e[49m          N \\e[40m│\\e[39m\\e[49m Repeat search backward   \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m line two         \\e[37m\\e[40m│\\e[49m          f \\e[40m│\\e[39m\\e[49m Filter buffers           \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\tthirdé中       \\e[37m\\e[40m│\\e[49m          O \\e[40m│\\e[39m\\e[49m Change sort order        \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          r \\e[40m│\\e[39m\\e[49m Reverse sort order       \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          v \\e[40m│\\e[39m\\e[49m Toggle preview           \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m      Enter \\e[40m│\\e[39m\\e[49m Paste selected buffer    \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          p \\e[40m│\\e[39m\\e[49m Paste selected buffer    \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          P \\e[40m│\\e[39m\\e[49m Paste tagged buffers     \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          d \\e[40m│\\e[39m\\e[49m Delete selected buffer   \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          D \\e[40m│\\e[39m\\e[49m Delete tagged buffers    \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          e \\e[40m│\\e[39m\\e[49m Open buffer in editor    \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m          f \\e[40m│\\e[39m\\e[49m Enter a filter           \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m│\\e[49m  q, Escape \\e[40m│\\e[39m\\e[49m Exit mode                \\e[37m\\e[40m│\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                  \\e[37m\\e[40m└───────────────────────────────────────┘\\e[39m\\e[49m                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mone\\e[37m: \\e[39mone=12:first buffer",
+          "\\e[30m\\e[43m(1) multi: multi=29:line one\\nline two\\n\\tthirdé中\\e[39m",
+          "\\e[37m\\e[49m(2) \\e[39mlong\\e[37m: \\e[39mlong=72:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+          "\\e[37m(3) \\e[39ma\\e[37m: \\e[39ma=1:x",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ multi (sort: creation, reversed) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m line one                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m line two                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\tthirdé中                                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          72,
+          0
+        ]
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) long: long\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[39mmulti\\e[37m: \\e[39mmulti",
+          "\\e[37m(2) \\e[39mone\\e[37m: \\e[39mone",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ long (sort: name) ───────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "cli",
+        "stdout": "long\nmulti\none\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mlong\\e[37m: \\e[39mlong",
+          "\\e[37m(1) \\e[39mmulti\\e[37m: \\e[39mmulti",
+          "\\e[30m\\e[43m(2) one: one\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ one (sort: name) ────────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m first buffer                                                                 \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[36mlong*\\e[37m: \\e[36mlong\\e[39m",
+          "\\e[37m(1) \\e[39mmulti\\e[37m: \\e[39mmulti",
+          "\\e[36m\\e[43m(2) one*: one\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ one (sort: name) ────────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m first buffer                                                                 \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) multi: multi\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ multi (sort: name) ──────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m line one                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m line two                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\tthirdé中                                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 61,
+      "observation": {
+        "kind": "cli",
+        "stdout": "multi\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 64,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 65,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 66,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          72,
+          0
+        ]
+      }
+    },
+    {
+      "step": 67,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 68,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 69,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 70,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 73,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[36mp1*\\e[37m: \\e[36mp1\\e[39m",
+          "\\e[37m(1) \\e[39mp2\\e[37m: \\e[39mp2",
+          "\\e[36m\\e[43m(2) p3*: p3\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ p3 (sort: name) ─────────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m CC                                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 75,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyzAACC",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          76,
+          0
+        ]
+      }
+    },
+    {
+      "step": 76,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 77,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 80,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyzAACCBB",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          78,
+          0
+        ]
+      }
+    }
+  ]
+}

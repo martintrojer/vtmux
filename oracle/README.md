@@ -44,12 +44,14 @@ steps = [ ... ]
 | `{ control_wait = { id, until = "%end" } }` | wait (max 5 s) for a line starting with that after the last send |
 | `{ control_close = { id } }` | EOF, read to exit; observes the whole stream |
 | `{ attach = { session = "a" } }` | `attach -t` under a PTY of the scenario size |
+| `{ attach = { session = "a", id = "b" } }` | a further attached client, named `b`; `keys`, `resize`, `screen` and `title` without an id use the first |
 | `{ keys = "echo hi\r" }` | raw bytes to the attached client |
+| `{ keys_to = { id = "b", keys = "q" } }` | raw bytes to attached client `b` |
 | `{ feed = { pane = "%0", bytes } }` | `send-keys -l` |
 | `{ resize = [c, r] }` | resize the attached client's PTY |
 | `{ settle = {} }` | wait for the output a preceding input provoked, then 150 ms without output from any client (`quiet_ms` overrides); `react = true` first waits for any output since the previous settle, for steps that provoke a reaction without keys (a CLI `resize-window` that sends a pane SIGWINCH after its 250 ms timer) |
 | `{ wait_for = "chan" }` | `wait-for chan`; observes like `run` |
-| `{ screen = {} }` | settle, then observe the attached client's screen |
+| `{ screen = {} }` | settle, then observe the attached client's screen (`{ id = "b" }`: client `b`'s) |
 | `{ title = {} }` | settle, then observe the attached client's terminal title (OSC 0/2 from `set-titles`) as a `cli` observation: the title and a newline |
 | `{ divergence = { id = "D-NNN", expect = {...} } }` | annotates the next observation: replay compares vtmux against `expect` (the documented behaviour from `compat/DIVERGENCES.md`), never skips it |
 

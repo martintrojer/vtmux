@@ -560,6 +560,18 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
             .count()
     }
 
+    /// `mode_tree_each_tagged` without `current`: the tagged lines' tags
+    /// and data, in line order.
+    #[must_use]
+    pub fn tagged(&self) -> Vec<(K, &D)> {
+        self.lines
+            .iter()
+            .map(|l| &self.items[l.item])
+            .filter(|i| i.tagged)
+            .map(|i| (i.tag, &i.data))
+            .collect()
+    }
+
     /// `mode_tree_each_tagged` with `current`: the tagged lines' data, or
     /// the current line's when none is tagged.
     #[must_use]
@@ -579,7 +591,7 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
     }
 
     /// `mode_tree_up`.
-    fn up(&mut self, wrap: bool) {
+    pub fn up(&mut self, wrap: bool) {
         if self.lines.is_empty() {
             return;
         }
@@ -598,22 +610,24 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
         }
     }
 
-    /// `mode_tree_down`.
-    fn down(&mut self, wrap: bool) {
+    /// `mode_tree_down`: whether it moved (or wrapped).
+    pub fn down(&mut self, wrap: bool) -> bool {
         if self.lines.is_empty() {
-            return;
+            return false;
         }
         if self.current == self.lines.len() - 1 {
-            if wrap {
-                self.current = 0;
-                self.offset = 0;
+            if !wrap {
+                return false;
             }
+            self.current = 0;
+            self.offset = 0;
         } else {
             self.current += 1;
             if self.current + 1 > self.offset + self.height {
                 self.offset += 1;
             }
         }
+        true
     }
 
     /// `mode_tree_swap`: the next line at the current one's depth with the
@@ -768,7 +782,9 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
             }
             _ if k == Key::F1 || k == c(b'h').ctrl() => self.help = true,
             _ if [Key::UP, c(b'k'), c(b'p').ctrl()].contains(&k) => self.up(true),
-            _ if [Key::DOWN, c(b'j'), c(b'n').ctrl()].contains(&k) => self.down(true),
+            _ if [Key::DOWN, c(b'j'), c(b'n').ctrl()].contains(&k) => {
+                self.down(true);
+            }
             _ if k == Key::UP.shift() || k == c(b'K') => return Action::Swap(-1),
             _ if k == Key::DOWN.shift() || k == c(b'J') => return Action::Swap(1),
             _ if k == Key::PPAGE || k == c(b'b').ctrl() => {
@@ -852,7 +868,7 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
             }
             _ if [Key::RIGHT, c(b'l'), c(b'+')].contains(&k) => {
                 if line.flat || self.items[current].expanded {
-                    self.down(false);
+                    let _ = self.down(false);
                 } else {
                     self.items[current].expanded = true;
                     env.rebuild(self);

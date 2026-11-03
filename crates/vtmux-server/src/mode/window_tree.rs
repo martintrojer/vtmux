@@ -14,9 +14,10 @@
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::keys::Key;
 
-use super::tree::{Action, Build, Env, ModeTree, Sort, SortOrder};
+use super::tree::{Build, ModeTree, Sort, SortOrder};
+use super::tree_mode::{Common, KeyEnv, TreeMode, rebuild};
 use crate::model::Model;
-use crate::open_prompt::{Line, Owner, Reply};
+use crate::open_prompt::{Line, Reply};
 use crate::prompt::Kind;
 use crate::prompt_history::PromptType;
 use crate::server::{ClientId, Server};
@@ -41,8 +42,7 @@ pub const DEFAULT_FORMAT: &str = "#{?pane_format,\
 }";
 
 /// `WINDOW_TREE_DEFAULT_KEY_FORMAT` (window-tree.c:60-65).
-pub const DEFAULT_KEY_FORMAT: &str =
-    "#{?#{e|<:#{line},10},#{line},#{e|<:#{line},36},M-#{a:#{e|+:97,#{e|-:#{line},10}}}}";
+pub use super::tree_mode::DEFAULT_KEY_FORMAT;
 
 /// `window_tree_order_seq` (window-tree.c:136-142).
 const ORDERS: &[SortOrder] = &[
@@ -85,8 +85,7 @@ pub enum Tag {
     reason = "window_tree_modedata's flags"
 )]
 pub struct WindowTree {
-    /// The key mode of the mode's screen (`#{pane_key_mode}`).
-    pub key_mode: vtmux_vt::KeyMode,
+    pub common: Common,
     pub tree: ModeTree<Tag, Item>,
     format: String,
     key_format: String,
@@ -99,20 +98,11 @@ pub struct WindowTree {
     start: Found,
     /// What to select on the first build; `None` after it.
     start_type: Option<Start>,
-    /// The pane the mode is on.
-    pane: PaneId,
-    /// `-k`.
-    pub kill: bool,
-    /// `-Z` zoomed the window (`mtd->zoomed == 0`): unzoom on exit.
-    pub unzoom: Option<WindowId>,
     /// `data->offset`: how far `<` and `>` scrolled the preview's strip,
     /// clamped when it is laid out ([`WindowTree::strip`]).
     offset: i64,
     /// `data->preview_is_info`: `i` shows the item's information.
     info: bool,
-    /// The screen as last drawn (`mtd->screen`); `None` when the mode is
-    /// to be drawn again (`mode_tree_draw`) before the pane is next shown.
-    pub frame: Option<crate::render::tree::Frame>,
 }
 
 /// A session's windows or a window's panes laid out side by side in the
@@ -339,14 +329,14 @@ impl View<'_> {
         );
         build.set_align(id, 1);
         let mut panes = window.panes.panes.clone();
-        sort_panes(m, &mut panes, sort, self.mode.pane);
+        sort_panes(m, &mut panes, sort, self.mode.common.pane);
         let mut found = 0;
         for p in panes {
             if !self.filter_pane(s, i, p, filter) {
                 continue;
             }
             found += 1;
-            if self.mode.hide_this_pane && p == self.mode.pane {
+            if self.mode.hide_this_pane && p == self.mode.common.pane {
                 continue;
             }
             let item = Item::Pane(s, i, p);
@@ -486,7 +476,7 @@ impl WindowTree {
         }
         tree.view_name = Some("preview");
         Self {
-            key_mode: vtmux_vt::KeyMode::Standard,
+            common: Common::new(pane),
             tree,
             format: o.format.unwrap_or_else(|| DEFAULT_FORMAT.to_owned()),
             key_format: o
@@ -497,19 +487,15 @@ impl WindowTree {
             accept: o.accept,
             start,
             start_type: Some(o.start),
-            pane,
-            kill: false,
-            unzoom: None,
             offset: 0,
             info: false,
-            frame: None,
         }
     }
 
     /// The pane the mode is on.
     #[must_use]
     pub fn pane(&self) -> PaneId {
-        self.pane
+        self.common.pane
     }
 
     /// `data->preview_is_info`.
@@ -521,7 +507,7 @@ impl WindowTree {
     /// The pane `-h` keeps out of the previews.
     #[must_use]
     pub fn hidden_pane(&self) -> Option<PaneId> {
-        self.hide_this_pane.then_some(self.pane)
+        self.hide_this_pane.then_some(self.common.pane)
     }
 
     /// The strip the preview of `item` shows in `sx` columns, with the
@@ -592,57 +578,133 @@ impl WindowTree {
     /// `mode_tree_build` over `server`'s model, the start type used up
     /// after the first.
     pub fn build(&mut self, server: &Server) {
-        let mut tree = std::mem::take(&mut self.tree);
-        {
-            let view = View {
-                model: &server.model,
-                server,
-                mode: self,
-            };
-            tree.build(
-                |b, sort, f| view.build(b, sort, f),
-                |d, line| view.key(d, line),
-            );
+        rebuild(self, server);
+    }
+}
+
+impl TreeMode for WindowTree {
+    type Tag = Tag;
+    type Data = Item;
+    const HELP: &'static [(&'static str, &'static str)] = &[
+        ("      Enter", "Choose selected item"),
+        ("       S-Up", "Swap current and previous window"),
+        ("     S-Down", "Swap current and next window"),
+        ("          x", "Kill selected item"),
+        ("          X", "Kill tagged items"),
+        ("          <", "Scroll previews left"),
+        ("          >", "Scroll previews right"),
+        ("          m", "Set the marked pane"),
+        ("          M", "Clear the marked pane"),
+        ("          i", "Toggle session, window and pane information"),
+        ("          :", "Run a command for each tagged item"),
+        ("          f", "Enter a format"),
+        ("          H", "Jump to the starting pane"),
+    ];
+    /// `window_tree_help`'s width.
+    const HELP_WIDTH: usize = 51;
+    const HELP_ITEM: &'static str = "item";
+
+    fn tree(&self) -> &ModeTree<Tag, Item> {
+        &self.tree
+    }
+    fn tree_mut(&mut self) -> &mut ModeTree<Tag, Item> {
+        &mut self.tree
+    }
+    fn common(&self) -> &Common {
+        &self.common
+    }
+    fn common_mut(&mut self) -> &mut Common {
+        &mut self.common
+    }
+    fn of(mode: &crate::mode::Mode) -> Option<&Self> {
+        match mode {
+            crate::mode::Mode::Tree(t) => Some(t),
+            _ => None,
         }
-        self.tree = tree;
-        self.start_type = None;
     }
-}
-
-/// [`Env`] for keys: builds over the server, with the mode out of it.
-struct KeyEnv<'a> {
-    server: &'a Server,
-    mode: &'a WindowTree,
-}
-
-impl Env<Tag, Item> for KeyEnv<'_> {
-    fn rebuild(&mut self, tree: &mut ModeTree<Tag, Item>) {
-        let view = View {
-            model: &self.server.model,
-            server: self.server,
-            mode: self.mode,
-        };
-        tree.build(
-            |b, sort, f| view.build(b, sort, f),
-            |d, line| view.key(d, line),
-        );
+    fn into_mode(self: Box<Self>) -> crate::mode::Mode {
+        crate::mode::Mode::Tree(self)
+    }
+    fn from_mode(mode: crate::mode::Mode) -> Option<Box<Self>> {
+        match mode {
+            crate::mode::Mode::Tree(t) => Some(t),
+            _ => None,
+        }
     }
 
-    fn matches(&self, data: &Item, search: &str, icase: bool) -> bool {
+    fn build_items(
+        &self,
+        server: &Server,
+        b: &mut Build<Tag, Item>,
+        sort: &Sort,
+        filter: Option<&str>,
+    ) -> Option<Tag> {
         View {
-            model: &self.server.model,
-            server: self.server,
-            mode: self.mode,
+            model: &server.model,
+            server,
+            mode: self,
+        }
+        .build(b, sort, filter)
+    }
+
+    fn item_key(&self, server: &Server, data: &Item, line: usize) -> Option<Key> {
+        View {
+            model: &server.model,
+            server,
+            mode: self,
+        }
+        .key(data, line)
+    }
+
+    fn matches(&self, server: &Server, data: &Item, search: &str, icase: bool) -> bool {
+        View {
+            model: &server.model,
+            server,
+            mode: self,
         }
         .matches(data, search, icase)
     }
+
+    /// The start type is used up by the first build.
+    fn built(&mut self) {
+        self.start_type = None;
+    }
+
+    /// `window_tree_key`: another current item scrolls the preview back (a
+    /// build makes new items, so it counts).
+    fn moved(&mut self) {
+        self.offset = 0;
+    }
+
+    fn swap(server: &mut Server, p: PaneId, direction: isize) {
+        server.tree_swap(p, direction);
+    }
+
+    fn mode_key(
+        server: &mut Server,
+        p: PaneId,
+        c: Option<ClientId>,
+        key: Key,
+        item: Option<Item>,
+    ) -> bool {
+        server.tree_mode_key(p, c, key, item)
+    }
+
+    fn draw_preview(
+        &self,
+        source: &crate::render::window::Source<'_>,
+        canvas: &mut crate::render::tree::Canvas,
+        data: &Item,
+        at: (usize, usize),
+        size: (usize, usize),
+    ) {
+        source.tree_preview(canvas, self, *data, at, size);
+    }
 }
 
-/// Which tree-mode prompt is open (`mode_tree_set_prompt`'s callbacks).
+/// Which window-tree prompt is open (`mode_tree_set_prompt`'s callbacks).
 #[derive(Debug, Clone, Copy)]
 enum Ask {
-    Search,
-    Filter,
     KillCurrent,
     KillTagged,
     Command,
@@ -659,237 +721,14 @@ impl crate::mode::prompt::ModePromptOwner for TreePrompt {
             Line::Move => return Reply::Continue,
         };
         server.tree_prompt_input(p, c, self.0, value.as_deref());
-        // mode_tree_search_callback and the filter's: an edit keeps the
-        // prompt; the others close it.
         if done { Reply::Close } else { Reply::Continue }
     }
 }
 
 impl Server {
-    /// Run `f` with pane `p`'s tree mode out of the pane, then put it back
-    /// (unless the pane or the mode went meanwhile) and redraw the pane:
-    /// every path here is one where tmux calls `mode_tree_draw` (a key,
-    /// a build, a prompt and its callbacks), so the frame is drawn again.
-    fn with_tree<R>(
-        &mut self,
-        p: PaneId,
-        f: impl FnOnce(&mut Self, &mut WindowTree) -> R,
-    ) -> Option<R> {
-        let pane = self.model.panes.get_mut(&p)?;
-        let at = pane
-            .modes
-            .iter()
-            .position(|m| matches!(m, crate::mode::Mode::Tree(_)))?;
-        let crate::mode::Mode::Tree(mut mode) = pane.modes.remove(at) else {
-            unreachable!("matched above");
-        };
-        let result = f(self, &mut mode);
-        mode.frame = None;
-        if let Some(pane) = self.model.panes.get_mut(&p) {
-            let at = at.min(pane.modes.len());
-            pane.modes.insert(at, crate::mode::Mode::Tree(mode));
-            self.model.redraw_panes.insert(p);
-        }
-        Some(result)
-    }
-
-    /// `window_tree_update` (and `window_tree_resize`): build again for
-    /// the pane's current size.
-    pub(crate) fn tree_update(&mut self, p: PaneId) {
-        let Some(size) = self
-            .model
-            .panes
-            .get(&p)
-            .map(|x| (usize::from(x.term.cols()), usize::from(x.term.rows())))
-        else {
-            return;
-        };
-        self.with_tree(p, |server, t| {
-            t.tree.size = size;
-            t.build(server);
-        });
-    }
-
-    /// `server_client_check_modes` (server-client.c:2462-2478): tree
-    /// modes in the current window of a client whose status is to be
-    /// redrawn are built again; and any whose pane changed size
-    /// (`window_tree_resize`).
-    pub(crate) fn tree_updates(&mut self) {
-        let mut due: Vec<PaneId> = self
-            .clients
-            .values()
-            .filter(|c| c.control.is_none() && c.status.status_redraw_pending())
-            .filter_map(|c| c.attached)
-            .filter_map(|s| self.model.current_of(s))
-            .filter_map(|(_, w, _)| self.model.windows.get(&w))
-            .flat_map(|w| w.panes.panes.iter().copied())
-            .collect();
-        due.extend(
-            self.model
-                .panes
-                .iter()
-                .filter_map(|(&p, x)| match x.modes.first() {
-                    Some(crate::mode::Mode::Tree(t))
-                        if t.tree.size
-                            != (usize::from(x.term.cols()), usize::from(x.term.rows())) =>
-                    {
-                        Some(p)
-                    }
-                    _ => None,
-                }),
-        );
-        due.sort_unstable();
-        due.dedup();
-        for p in due {
-            if self
-                .model
-                .panes
-                .get(&p)
-                .is_some_and(|x| matches!(x.modes.first(), Some(crate::mode::Mode::Tree(_))))
-            {
-                self.tree_update(p);
-            }
-        }
-    }
-
-    /// `mode_tree_draw` for every tree mode whose frame is due: the
-    /// screen the pane shows until the mode draws again. Pane output and
-    /// model changes alone do not draw it (tmux draws only from the
-    /// mode's key, update, resize and prompt paths).
-    pub(crate) fn tree_draws(&mut self) {
-        let due: Vec<PaneId> = self
-            .model
-            .panes
-            .iter()
-            .filter(|(_, x)| {
-                x.modes
-                    .iter()
-                    .any(|m| matches!(m, crate::mode::Mode::Tree(t) if t.frame.is_none()))
-            })
-            .map(|(&p, _)| p)
-            .collect();
-        for p in due {
-            let frame = {
-                let source = self.render_source();
-                let pane = &self.model.panes[&p];
-                pane.modes.iter().find_map(|m| match m {
-                    crate::mode::Mode::Tree(t) => Some(source.tree_frame(pane, t)),
-                    _ => None,
-                })
-            };
-            if let Some(pane) = self.model.panes.get_mut(&p)
-                && let Some(crate::mode::Mode::Tree(t)) = pane
-                    .modes
-                    .iter_mut()
-                    .find(|m| matches!(m, crate::mode::Mode::Tree(_)))
-            {
-                t.frame = frame;
-            }
-        }
-    }
-
-    /// `window_tree_key` for a key from client `c`.
-    pub(crate) fn tree_key(&mut self, p: PaneId, c: Option<ClientId>, key: Key, typed: bool) {
-        let Some((action, item)) = self.with_tree(p, |server, t| {
-            let mut tree = std::mem::take(&mut t.tree);
-            let before = (tree.current_item().map(|i| i.tag), tree.builds());
-            let action = tree.key(&mut KeyEnv { server, mode: t }, key, typed);
-            t.tree = tree;
-            // window_tree_key: another current item scrolls the preview
-            // back (a build makes new items, so it counts).
-            if before != (t.tree.current_item().map(|i| i.tag), t.tree.builds()) {
-                t.offset = 0;
-            }
-            (action, t.tree.current_item().map(|i| i.data))
-        }) else {
-            return;
-        };
-        self.tree_action(p, c, action, item);
-    }
-
-    /// `window_tree_key` for a mouse key at `at` in the pane: the tree's
-    /// mouse branch (`mode_tree_key`), then the mode's (a double click is
-    /// Enter). The mode's own mouse handling of the window row in session
-    /// previews (`window_tree_mouse`) is not here yet. A mode prompt takes
-    /// no mouse events yet.
-    pub(crate) fn tree_mouse_key(
-        &mut self,
-        p: PaneId,
-        c: ClientId,
-        key: Key,
-        at: Option<(u32, u32)>,
-    ) {
-        let prompt = self
-            .model
-            .panes
-            .get(&p)
-            .is_some_and(|x| x.mode_prompt.as_ref().is_some_and(|m| m.shown(x)));
-        if prompt {
-            return;
-        }
-        let Some((action, item)) = self.with_tree(p, |_, t| {
-            let action = t.tree.mouse_key(key, at);
-            (action, t.tree.current_item().map(|i| i.data))
-        }) else {
-            return;
-        };
-        self.tree_action(p, Some(c), action, item);
-    }
-
-    fn tree_action(&mut self, p: PaneId, c: Option<ClientId>, action: Action, item: Option<Item>) {
-        let finished = match action {
-            Action::Finished => true,
-            Action::Search => {
-                self.tree_prompt(
-                    p,
-                    c,
-                    "(search) ",
-                    "",
-                    PromptType::Search,
-                    Kind::Line,
-                    Ask::Search,
-                );
-                false
-            }
-            Action::Filter => {
-                let filter = self
-                    .with_tree(p, |_, t| t.tree.filter.clone())
-                    .flatten()
-                    .unwrap_or_default();
-                self.tree_prompt(
-                    p,
-                    c,
-                    "(filter) ",
-                    &filter,
-                    PromptType::Search,
-                    Kind::Line,
-                    Ask::Filter,
-                );
-                false
-            }
-            Action::ClearFilter => {
-                self.mode_prompt_clear(p);
-                self.with_tree(p, |server, t| {
-                    t.tree.filter = None;
-                    t.build(server);
-                });
-                false
-            }
-            Action::Swap(d) => {
-                self.tree_swap(p, d);
-                false
-            }
-            Action::Key(None) => false,
-            Action::Key(Some(k)) => self.tree_mode_key(p, c, k, item),
-        };
-        if finished {
-            self.reset_mode(p);
-        }
-    }
-
     /// The keys window-tree handles itself (window-tree.c:1471-1567);
     /// `true` when the mode is finished.
-    fn tree_mode_key(
+    pub(super) fn tree_mode_key(
         &mut self,
         p: PaneId,
         c: Option<ClientId>,
@@ -919,52 +758,33 @@ impl Server {
                     Item::Pane(_, _, q) => model.pane_index(q).map(|n| format!("Kill pane {n}? ")),
                 };
                 if let Some(label) = label {
-                    self.tree_prompt(
-                        p,
-                        c,
-                        &label,
-                        "",
-                        PromptType::Command,
-                        Kind::Single,
-                        Ask::KillCurrent,
-                    );
+                    self.window_tree_prompt(p, c, &label, Kind::Single, Ask::KillCurrent);
                 }
             }
             Some('X') => {
-                let n = self.with_tree(p, |_, t| t.tree.count_tagged()).unwrap_or(0);
+                let n = self
+                    .with_tree::<WindowTree, _>(p, |_, t| t.tree.count_tagged())
+                    .unwrap_or(0);
                 if n != 0 {
-                    self.tree_prompt(
-                        p,
-                        c,
-                        &format!("Kill {n} tagged? "),
-                        "",
-                        PromptType::Command,
-                        Kind::Single,
-                        Ask::KillTagged,
-                    );
+                    let label = format!("Kill {n} tagged? ");
+                    self.window_tree_prompt(p, c, &label, Kind::Single, Ask::KillTagged);
                 }
             }
             Some(':') => {
-                let n = self.with_tree(p, |_, t| t.tree.count_tagged()).unwrap_or(0);
+                let n = self
+                    .with_tree::<WindowTree, _>(p, |_, t| t.tree.count_tagged())
+                    .unwrap_or(0);
                 let label = if n == 0 {
                     "(current) ".to_owned()
                 } else {
                     format!("({n} tagged) ")
                 };
-                self.tree_prompt(
-                    p,
-                    c,
-                    &label,
-                    "",
-                    PromptType::Command,
-                    Kind::Line,
-                    Ask::Command,
-                );
+                self.window_tree_prompt(p, c, &label, Kind::Line, Ask::Command);
             }
             Some('\r') => {
                 if let Some(name) = self.tree_target(item) {
                     let command = self
-                        .with_tree(p, |_, t| t.command.clone())
+                        .with_tree::<WindowTree, _>(p, |_, t| t.command.clone())
                         .unwrap_or_default();
                     self.tree_run_command(c, None, &command, &name);
                 }
@@ -978,11 +798,11 @@ impl Server {
     /// `H`: the starting session and window expanded, the starting pane
     /// selected, else its window.
     fn tree_home(&mut self, p: PaneId) {
-        self.with_tree(p, |server, t| {
+        self.with_tree::<WindowTree, _>(p, |server, t| {
             let st = t.start;
             let mut tree = std::mem::take(&mut t.tree);
             {
-                let mut env = KeyEnv { server, mode: t };
+                let mut env = KeyEnv { server, mode: &*t };
                 if let Some(s) = st.session {
                     tree.expand(&mut env, Tag::Session(s));
                 }
@@ -993,7 +813,7 @@ impl Server {
                 if let Some(wl) = wl {
                     tree.expand(&mut env, wl);
                 }
-                if !tree.set_current(Tag::Pane(t.pane))
+                if !tree.set_current(Tag::Pane(t.common.pane))
                     && let Some(wl) = wl
                 {
                     tree.set_current(wl);
@@ -1006,7 +826,7 @@ impl Server {
     /// The preview's keys: `<` and `>` scroll its strip from where it is
     /// drawn, `i` toggles the information view.
     fn tree_preview_key(&mut self, p: PaneId, c: char) {
-        self.with_tree(p, |server, t| {
+        self.with_tree::<WindowTree, _>(p, |server, t| {
             if c == 'i' {
                 t.info = !t.info;
                 t.tree.view_name = Some(if t.info { "info" } else { "preview" });
@@ -1016,28 +836,28 @@ impl Server {
         });
     }
 
-    /// `mode_tree_set_prompt` for the tree mode on pane `p`; `-y` accepts
+    /// `mode_tree_set_prompt` for window tree's own prompts; `-y` accepts
     /// a single-key prompt at once with `y` (`PROMPT_ACCEPT`,
     /// `mode_tree_prompt_accept`).
-    #[allow(clippy::too_many_arguments)]
-    fn tree_prompt(
+    fn window_tree_prompt(
         &mut self,
         p: PaneId,
         c: Option<ClientId>,
         label: &str,
-        input: &str,
-        ty: PromptType,
         kind: Kind,
         ask: Ask,
     ) {
-        let mut editor = match c {
-            Some(c) => self.prompt_editor(c, label.to_owned(), input, kind, ty),
-            None => crate::prompt::Prompt::new(label.to_owned(), input, kind, ty),
-        };
-        editor.no_format = true;
-        let state = Found::from_pane(&self.model, p);
-        self.mode_prompt_set(p, c, editor, state, Owner::Mode(Box::new(TreePrompt(ask))));
-        let accept = self.with_tree(p, |_, t| t.accept).unwrap_or(false);
+        self.tree_prompt(
+            p,
+            c,
+            label,
+            "",
+            (PromptType::Command, kind),
+            Box::new(TreePrompt(ask)),
+        );
+        let accept = self
+            .with_tree::<WindowTree, _>(p, |_, t| t.accept)
+            .unwrap_or(false);
         if accept
             && matches!(kind, Kind::Single)
             && let Some(c) = c
@@ -1046,25 +866,10 @@ impl Server {
         }
     }
 
-    /// The prompts' callbacks (`mode_tree_search_callback`,
-    /// `mode_tree_filter_callback`, `window_tree_kill_*_callback`,
+    /// The prompts' callbacks (`window_tree_kill_*_callback`,
     /// `window_tree_command_callback`).
     fn tree_prompt_input(&mut self, p: PaneId, c: Option<ClientId>, ask: Ask, value: Option<&str>) {
         match ask {
-            Ask::Search | Ask::Filter => {
-                self.with_tree(p, |server, t| {
-                    let mut tree = std::mem::take(&mut t.tree);
-                    {
-                        let mut env = KeyEnv { server, mode: t };
-                        if matches!(ask, Ask::Search) {
-                            tree.search_for(&mut env, value);
-                        } else {
-                            tree.filter_for(&mut env, value);
-                        }
-                    }
-                    t.tree = tree;
-                });
-            }
             Ask::KillCurrent | Ask::KillTagged => {
                 let Some(v) = value.filter(|v| !v.is_empty()) else {
                     return;
@@ -1076,7 +881,7 @@ impl Server {
                     return;
                 }
                 let items: Vec<Item> = self
-                    .with_tree(p, |_, t| {
+                    .with_tree::<WindowTree, _>(p, |_, t| {
                         if matches!(ask, Ask::KillCurrent) {
                             t.tree.current_item().map(|i| i.data).into_iter().collect()
                         } else {
@@ -1100,7 +905,7 @@ impl Server {
                     return;
                 };
                 let items: Vec<Item> = self
-                    .with_tree(p, |_, t| {
+                    .with_tree::<WindowTree, _>(p, |_, t| {
                         t.tree.tagged_or_current().into_iter().copied().collect()
                     })
                     .unwrap_or_default();
@@ -1175,60 +980,10 @@ impl Server {
         })
     }
 
-    /// `mode_tree_run_command`: the template with `%%` the target, parsed
-    /// and appended to client `c`'s queue with `fs` as its current state;
-    /// a parse error is the client's message, capitalised.
-    fn tree_run_command(
-        &mut self,
-        c: Option<ClientId>,
-        fs: Option<Found>,
-        template: &str,
-        name: &str,
-    ) {
-        let command = vtmux_core::cmd::template::replace(template, name, 1);
-        if command.is_empty() {
-            return;
-        }
-        let origin = crate::target::Origin {
-            attached: c.and_then(|c| self.client_session(c)),
-            inside_pane: None,
-            current: fs,
-            mouse: None,
-        };
-        let value = vtmux_core::cmd::ArgValue::Str(command);
-        match crate::commands::make_commands(self, c, origin, None, &value) {
-            Ok(calls) => {
-                let mut item = crate::commands::Item::new(c, self.client_cwd(c, None));
-                if let Some(client) = c.and_then(|c| self.clients.get(&c)) {
-                    if let Some(hello) = client.hello.as_ref() {
-                        item.env.clone_from(&hello.env);
-                        item.utf8 = hello.flags.utf8;
-                    }
-                    item.origin.attached = client.attached;
-                }
-                item.origin.current = fs;
-                self.cmdq_append(
-                    c,
-                    crate::cmdq::NewBatch::new(item, calls, crate::cmdq::End::Quiet),
-                );
-            }
-            Err(msg) => {
-                if let Some(c) = c {
-                    let mut chars = msg.chars();
-                    let msg = chars
-                        .next()
-                        .map(|f| f.to_uppercase().chain(chars).collect())
-                        .unwrap_or_default();
-                    self.status_message_set(c, msg);
-                }
-            }
-        }
-    }
-
     /// `mode_tree_swap` with `window_tree_swap`: two windows of one
     /// session trade places, unless the sort would undo it.
-    fn tree_swap(&mut self, p: PaneId, direction: isize) {
-        let Some(Some((cur, other, sort))) = self.with_tree(p, |_, t| {
+    pub(super) fn tree_swap(&mut self, p: PaneId, direction: isize) {
+        let Some(Some((cur, other, sort))) = self.with_tree::<WindowTree, _>(p, |_, t| {
             let at = t.tree.swap_partner(direction)?;
             let cur = t.tree.current_item()?.data;
             let other = t.tree.item(t.tree.lines()[at].item).data;
@@ -1273,7 +1028,7 @@ impl Server {
         }
         m.redraw(crate::model::Redraw::Session(s1));
         self.recalculate_sizes();
-        self.with_tree(p, |server, t| {
+        self.with_tree::<WindowTree, _>(p, |server, t| {
             if let Some(at) = t.tree.swap_partner(direction) {
                 t.tree.current = at;
             }

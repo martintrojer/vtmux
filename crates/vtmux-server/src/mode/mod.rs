@@ -2,8 +2,9 @@
 //! a pane's stack of modes, the newest first, drawn instead of the pane's
 //! own screen and given its keys.
 //!
-//! Only copy mode exists so far; view mode, tree modes and clock mode are
-//! later work. What a mode offers the rest of the server is [`PaneMode`]
+//! Copy, clock, display-panes and the tree modes (`choose-tree`,
+//! `choose-buffer`, `choose-client`: [`tree_mode`]) exist so far. What a
+//! mode offers the rest of the server is [`PaneMode`]
 //! (`struct window_mode`: `name`, `key_table`, `command`), and a mode that
 //! asks the user a question keeps a [`prompt::ModePrompt`] on its pane
 //! (`mode_tree_set_prompt`).
@@ -15,6 +16,9 @@ pub mod panes;
 pub mod prompt;
 pub mod reader;
 pub mod tree;
+pub mod tree_mode;
+pub mod window_buffer;
+pub mod window_client;
 pub mod window_tree;
 
 use vtmux_core::ids::PaneId;
@@ -26,6 +30,8 @@ use crate::server::Server;
 pub use clock::ClockMode;
 pub use copy::CopyMode;
 pub use panes::PanesMode;
+pub use window_buffer::BufferMode;
+pub use window_client::ClientMode;
 pub use window_tree::WindowTree;
 
 /// What the server asks of a mode (`struct window_mode`). A mode without
@@ -104,6 +110,10 @@ pub enum Mode {
     Tree(Box<WindowTree>),
     /// `display-panes` ([`panes`]).
     Panes(Box<PanesMode>),
+    /// `choose-buffer` (window-buffer.c).
+    Buffer(Box<BufferMode>),
+    /// `choose-client` (window-client.c).
+    Client(Box<ClientMode>),
     /// A mode with no key table and no command callback, like tmux's tree
     /// and clock modes: only tests need one before those exist.
     #[cfg(test)]
@@ -117,6 +127,8 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.name(),
             Self::Tree(_) => "tree-mode",
             Self::Panes(m) => m.name(),
+            Self::Buffer(_) => "buffer-mode",
+            Self::Client(_) => "client-mode",
             #[cfg(test)]
             Self::Probe => "probe-mode",
         }
@@ -128,6 +140,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.key_table(vi),
             Self::Tree(_) => None,
             Self::Panes(m) => m.key_table(vi),
+            Self::Buffer(_) | Self::Client(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -139,6 +152,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.takes_commands(),
             Self::Tree(_) => false,
             Self::Panes(m) => m.takes_commands(),
+            Self::Buffer(_) | Self::Client(_) => false,
             #[cfg(test)]
             Self::Probe => false,
         }
@@ -150,6 +164,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.set_prefix(n),
             Self::Tree(_) => {}
             Self::Panes(m) => m.set_prefix(n),
+            Self::Buffer(_) | Self::Client(_) => {}
             #[cfg(test)]
             Self::Probe => {}
         }
@@ -167,6 +182,9 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.command(env, name, args, read_only_client),
             Self::Tree(_) => Err(copy::CommandError::NotImplemented(name.to_owned())),
             Self::Panes(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
+            Self::Buffer(_) | Self::Client(_) => {
+                Err(copy::CommandError::NotImplemented(name.to_owned()))
+            }
             #[cfg(test)]
             Self::Probe => Err(copy::CommandError::NotImplemented(name.to_owned())),
         }
@@ -180,8 +198,10 @@ impl Mode {
         match self {
             Self::Copy(m) => m.key_mode,
             Self::Clock(m) => m.key_mode,
-            Self::Tree(m) => m.key_mode,
+            Self::Tree(m) => m.common.key_mode,
             Self::Panes(m) => m.key_mode,
+            Self::Buffer(m) => m.common.key_mode,
+            Self::Client(m) => m.common.key_mode,
             #[cfg(test)]
             Self::Probe => vtmux_vt::KeyMode::Standard,
         }
@@ -194,6 +214,7 @@ impl Mode {
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
+            Self::Buffer(_) | Self::Client(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -217,6 +238,7 @@ impl Mode {
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
+            Self::Buffer(_) | Self::Client(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -226,8 +248,10 @@ impl Mode {
     fn kill(&self) -> bool {
         match self {
             Self::Copy(m) => m.kill,
-            Self::Tree(t) => t.kill,
+            Self::Tree(t) => t.common.kill,
             Self::Panes(m) => m.kill,
+            Self::Buffer(t) => t.common.kill,
+            Self::Client(t) => t.common.kill,
             // clock-mode has no -k.
             Self::Clock(_) => false,
             #[cfg(test)]
@@ -353,34 +377,34 @@ impl Model {
         true
     }
 
-    /// `window_pane_set_mode` for tree mode: like [`Self::set_copy_mode`],
-    /// `mode` built (it may refuse, `None`) only if the pane has no tree
-    /// mode on its stack.
-    pub fn set_tree_mode(
+    /// `window_pane_set_mode` for a tree mode `M`: like
+    /// [`Self::set_copy_mode`], `mode` built (it may refuse, `None`) only
+    /// if the pane has no `M` on its stack.
+    pub(crate) fn set_tree_mode<M: tree_mode::TreeMode>(
         &mut self,
         p: PaneId,
         kill: bool,
-        mode: impl FnOnce(&mut Model) -> Option<WindowTree>,
+        mode: impl FnOnce(&mut Model) -> Option<M>,
     ) -> bool {
         let Some(pane) = self.panes.get(&p) else {
             return false;
         };
-        if matches!(pane.modes.first(), Some(Mode::Tree(_))) {
+        if pane.modes.first().and_then(M::of).is_some() {
             return false;
         }
-        let existing = pane.modes.iter().position(|m| matches!(m, Mode::Tree(_)));
+        let existing = pane.modes.iter().position(|m| M::of(m).is_some());
         let mut entry = match existing {
             Some(i) => self.panes.get_mut(&p).expect("pane").modes.remove(i),
             None => match mode(self) {
                 Some(mut t) => {
-                    t.key_mode = screen_key_mode(self);
-                    Mode::Tree(Box::new(t))
+                    t.common_mut().key_mode = screen_key_mode(self);
+                    Box::new(t).into_mode()
                 }
                 None => return false,
             },
         };
-        if let Mode::Tree(t) = &mut entry {
-            t.kill = kill;
+        if let Some(c) = entry.tree_common_mut() {
+            c.kill = kill;
         }
         let Some(pane) = self.panes.get_mut(&p) else {
             return false;
@@ -454,7 +478,7 @@ impl Server {
             Some(Mode::Clock(next)) => next.resize(size.0, size.1),
             _ => {}
         }
-        let tree_next = matches!(pane.modes.first(), Some(Mode::Tree(_)));
+        let tree_next = pane.modes.first().and_then(Mode::tree_kind).is_some();
         let current = pane.modes.first().map(Mode::name);
         // A prompt of the mode that went goes with it.
         self.mode_prompt_gone(p);
@@ -462,12 +486,10 @@ impl Server {
         self.model
             .fire_mode_changed(p, Some(old.name()), current, false);
         // mode_tree_free: a window the mode zoomed is unzoomed.
-        if let Mode::Tree(t) = &old
-            && let Some(w) = t.unzoom
-        {
+        if let Some(w) = old.tree_common().and_then(|c| c.unzoom) {
             self.model.unzoom(w);
         }
-        // window_tree_resize for the mode now shown.
+        // mode_tree_resize for the tree mode now shown.
         if tree_next {
             self.tree_update(p);
         }
@@ -555,7 +577,7 @@ impl Server {
         // mouse yet).
         let top = self.model.panes.get(&p).and_then(|x| x.modes.first());
         let clock = matches!(top, Some(Mode::Clock(_)));
-        let tree = matches!(top, Some(Mode::Tree(_)));
+        let tree = top.and_then(Mode::tree_kind).is_some();
         if clock && c.is_some() {
             self.clock_key(p);
         }

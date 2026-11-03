@@ -3,8 +3,9 @@
 //! its tag and the item's text; the selected line in
 //! `tree-mode-selection-style`, tagged ones cyan. With the preview on,
 //! the box under the list with its title and inside it the current item's
-//! preview (`window_tree_draw`, window-tree.c:885-915) or information
-//! (`window_tree_draw_info`); the help screen over everything.
+//! preview (the mode's `drawcb`: for window tree `window_tree_draw`,
+//! window-tree.c:885-915, or its information, `window_tree_draw_info`);
+//! the help screen over everything.
 
 use vtmux_core::colour::Colour;
 use vtmux_core::options::TreeId;
@@ -14,7 +15,9 @@ use vtmux_vt::Snapshot;
 
 use super::Caps;
 use super::window::Source;
+use crate::mode::Mode;
 use crate::mode::tree::{ModeTree, Preview};
+use crate::mode::tree_mode::TreeMode;
 use crate::mode::window_tree::{Item, Strip, WindowTree};
 use crate::target::Found;
 
@@ -32,8 +35,8 @@ fn prefix_format() -> String {
     )
 }
 
-/// `mode_tree_help_start`, `mode_tree_help_end` (mode-tree.c:177-224)
-/// and `window_tree_help_lines` (window-tree.c:1067-1096), `%1` the item.
+/// `mode_tree_help_start`, `mode_tree_help_end` (mode-tree.c:177-224),
+/// `%1` the item.
 const HELP_START: &[(&str, &str)] = &[
     ("      Up, k", "Move cursor up"),
     ("    Down, j", "Move cursor down"),
@@ -56,24 +59,9 @@ const HELP_START: &[(&str, &str)] = &[
     ("          r", "Reverse sort order"),
     ("          v", "Toggle preview"),
 ];
-const WINDOW_TREE_HELP: &[(&str, &str)] = &[
-    ("      Enter", "Choose selected item"),
-    ("       S-Up", "Swap current and previous window"),
-    ("     S-Down", "Swap current and next window"),
-    ("          x", "Kill selected item"),
-    ("          X", "Kill tagged items"),
-    ("          <", "Scroll previews left"),
-    ("          >", "Scroll previews right"),
-    ("          m", "Set the marked pane"),
-    ("          M", "Clear the marked pane"),
-    ("          i", "Toggle session, window and pane information"),
-    ("          :", "Run a command for each tagged item"),
-    ("          f", "Enter a format"),
-    ("          H", "Jump to the starting pane"),
-];
 const HELP_END: &[(&str, &str)] = &[("  q, Escape", "Exit mode")];
-/// `window_tree_help`'s width (over `MODE_TREE_HELP_DEFAULT_WIDTH`, 39).
-const HELP_WIDTH: usize = 51;
+/// `MODE_TREE_HELP_DEFAULT_WIDTH`.
+pub const HELP_DEFAULT_WIDTH: usize = 39;
 
 /// `WINDOW_TREE_FLAG` (window-tree.c:146-147).
 fn info_flag(label: &str, cond: &str) -> String {
@@ -203,7 +191,7 @@ const KEEP: &str = "\u{0}";
 /// The screen being drawn: styled cells, turned into terminal cells at
 /// the end.
 #[derive(Clone, Debug)]
-struct Canvas {
+pub struct Canvas {
     cols: usize,
     rows: usize,
     cells: Vec<styled::Cell>,
@@ -224,14 +212,14 @@ fn blank(bg: Colour) -> styled::Cell {
 }
 
 impl Canvas {
-    fn put(&mut self, x: usize, y: usize, c: styled::Cell) {
+    pub(crate) fn put(&mut self, x: usize, y: usize, c: styled::Cell) {
         if x < self.cols && y < self.rows {
             self.cells[y * self.cols + x] = c;
             self.raw[y * self.cols + x] = None;
         }
     }
 
-    fn put_raw(&mut self, x: usize, y: usize, c: vtmux_vt::Cell) {
+    pub(crate) fn put_raw(&mut self, x: usize, y: usize, c: vtmux_vt::Cell) {
         if x < self.cols && y < self.rows {
             self.raw[y * self.cols + x] = Some(c);
         }
@@ -239,7 +227,7 @@ impl Canvas {
 
     /// `screen_write_vline` with no ends: `x` in `style`'s line drawing
     /// from row `y`, `n` rows.
-    fn vline(&mut self, x: usize, y: usize, n: usize, style: &CellStyle) {
+    pub(crate) fn vline(&mut self, x: usize, y: usize, n: usize, style: &CellStyle) {
         let cell = styled::Cell {
             text: "x".into(),
             width: 1,
@@ -256,7 +244,14 @@ impl Canvas {
     /// `screen_write_preview` (screen-write.c:939-990): `nx` x `ny` of
     /// `src` at `x`, `y`: the part around its cursor if shown (the cursor
     /// cell reversed), else the top left.
-    fn preview(&mut self, x: usize, y: usize, src: &vtmux_vt::Snapshot, nx: usize, ny: usize) {
+    pub(crate) fn preview(
+        &mut self,
+        x: usize,
+        y: usize,
+        src: &vtmux_vt::Snapshot,
+        nx: usize,
+        ny: usize,
+    ) {
         if nx == 0 || ny == 0 {
             return;
         }
@@ -301,7 +296,7 @@ impl Canvas {
     }
 
     /// `screen_write_clearendofline` (or the whole line) with `bg`.
-    fn clear_from(&mut self, x: usize, y: usize, bg: Colour) {
+    pub(crate) fn clear_from(&mut self, x: usize, y: usize, bg: Colour) {
         for x in x..self.cols {
             self.put(x, y, blank(bg));
         }
@@ -309,7 +304,7 @@ impl Canvas {
 
     /// `format_draw` of `text` at `x`, `y` in at most `width` cells over
     /// `base`; `default_colours` is its last argument.
-    fn draw(
+    pub(crate) fn draw(
         &mut self,
         x: usize,
         y: usize,
@@ -339,7 +334,7 @@ impl Canvas {
     }
 
     /// `screen_write_box` with `BOX_LINES_DEFAULT`.
-    fn draw_box(&mut self, x: usize, y: usize, w: usize, h: usize, style: &CellStyle) {
+    pub(crate) fn draw_box(&mut self, x: usize, y: usize, w: usize, h: usize, style: &CellStyle) {
         if w < 2 || h < 2 {
             return;
         }
@@ -365,8 +360,42 @@ impl Canvas {
         }
     }
 
+    /// A character `width` columns wide in `style` at `x`, its padding
+    /// after it.
+    pub(crate) fn put_wide(
+        &mut self,
+        x: &mut usize,
+        y: usize,
+        style: &CellStyle,
+        ch: char,
+        width: usize,
+    ) {
+        let w = u8::try_from(width).unwrap_or(1);
+        self.put(
+            *x,
+            y,
+            styled::Cell {
+                text: ch.to_string(),
+                width: w,
+                style: style.clone(),
+            },
+        );
+        for i in 1..width {
+            self.put(
+                *x + i,
+                y,
+                styled::Cell {
+                    text: String::new(),
+                    width: 0,
+                    style: style.clone(),
+                },
+            );
+        }
+        *x += width;
+    }
+
     /// `screen_write_puts`: plain text in `style`.
-    fn puts(&mut self, x: &mut usize, y: usize, style: &CellStyle, text: &str) {
+    pub(crate) fn puts(&mut self, x: &mut usize, y: usize, style: &CellStyle, text: &str) {
         for ch in text.chars() {
             self.put(
                 *x,
@@ -395,22 +424,25 @@ impl Source<'_> {
     /// The pane's screen in tree mode: the mode's last [`Frame`], or a
     /// fresh one if it has none for the pane's size.
     #[must_use]
-    pub fn tree_screen(
-        &self,
-        pane: &crate::model::Pane,
-        mode: &WindowTree,
-        caps: Caps,
-    ) -> Snapshot {
+    pub fn tree_screen(&self, pane: &crate::model::Pane, mode: &Mode, caps: Caps) -> Snapshot {
         let (cols, rows) = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         let fresh;
         let frame = if let Some(f) = mode
-            .frame
-            .as_ref()
+            .tree_common()
+            .and_then(|c| c.frame.as_ref())
             .filter(|f| (f.canvas.cols, f.canvas.rows) == (cols, rows))
         {
             f
         } else {
-            fresh = self.tree_frame(pane, mode);
+            fresh = self.mode_tree_frame(pane, mode).unwrap_or_else(|| Frame {
+                canvas: Canvas {
+                    cols,
+                    rows,
+                    cells: vec![blank(Colour::Default); cols * rows],
+                    raw: vec![None; cols * rows],
+                },
+                cursor: None,
+            });
             &fresh
         };
         let theme = self.theme(caps);
@@ -431,10 +463,22 @@ impl Source<'_> {
         }
     }
 
-    /// `mode_tree_draw` for a window tree on pane `pane`.
+    /// `mode_tree_draw` for the tree mode `mode` on pane `pane`; `None`
+    /// for a mode that is not a tree mode.
     #[must_use]
-    pub fn tree_frame(&self, pane: &crate::model::Pane, mode: &WindowTree) -> Frame {
-        let tree = &mode.tree;
+    pub fn mode_tree_frame(&self, pane: &crate::model::Pane, mode: &Mode) -> Option<Frame> {
+        Some(match mode {
+            Mode::Tree(t) => self.tree_frame(pane, &**t),
+            Mode::Buffer(t) => self.tree_frame(pane, &**t),
+            Mode::Client(t) => self.tree_frame(pane, &**t),
+            _ => return None,
+        })
+    }
+
+    /// `mode_tree_draw` for tree mode `mode` on pane `pane`.
+    #[must_use]
+    pub(crate) fn tree_frame<M: TreeMode>(&self, pane: &crate::model::Pane, mode: &M) -> Frame {
+        let tree = mode.tree();
         let (cols, rows) = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         let mut c = Canvas {
             cols,
@@ -457,11 +501,12 @@ impl Source<'_> {
             if let Some((sx, sy)) = tree.preview_size()
                 && let Some(item) = tree.current_item()
             {
-                self.tree_preview(&mut c, mode, item.data, (2, h + 1), (sx, sy));
+                mode.draw_preview(self, &mut c, &item.data, (2, h + 1), (sx, sy));
             }
         }
         if tree.help {
-            self.tree_help(&mut c, &found, &border);
+            let width = M::HELP_WIDTH.max(HELP_DEFAULT_WIDTH);
+            self.tree_help(&mut c, &found, &border, (M::HELP, width, M::HELP_ITEM));
         }
         Frame {
             canvas: c,
@@ -469,10 +514,10 @@ impl Source<'_> {
         }
     }
 
-    fn tree_lines(
+    fn tree_lines<K: Copy + PartialEq, D>(
         &self,
         c: &mut Canvas,
-        tree: &ModeTree<crate::mode::window_tree::Tag, crate::mode::window_tree::Item>,
+        tree: &ModeTree<K, D>,
         found: &Found,
         sel: &CellStyle,
         w: usize,
@@ -571,7 +616,7 @@ impl Source<'_> {
 
     /// `window_tree_draw`: the preview of `item` in the `size` area at
     /// `at`.
-    fn tree_preview(
+    pub(crate) fn tree_preview(
         &self,
         c: &mut Canvas,
         mode: &WindowTree,
@@ -762,14 +807,15 @@ impl Source<'_> {
         }
     }
 
-    /// `mode_tree_draw_help`.
-    fn tree_help(&self, c: &mut Canvas, found: &Found, border: &CellStyle) {
-        let lines: Vec<&(&str, &str)> = HELP_START
-            .iter()
-            .chain(WINDOW_TREE_HELP)
-            .chain(HELP_END)
-            .collect();
-        let w = HELP_WIDTH;
+    /// `mode_tree_draw_help` with the mode's lines, width and item name.
+    fn tree_help(
+        &self,
+        c: &mut Canvas,
+        found: &Found,
+        border: &CellStyle,
+        (help, w, item): (&[(&str, &str)], usize, &str),
+    ) {
+        let lines: Vec<&(&str, &str)> = HELP_START.iter().chain(help).chain(HELP_END).collect();
         let (box_w, box_h) = (w + 2, lines.len() + 2);
         if c.cols < box_w || c.rows < box_h {
             return;
@@ -781,7 +827,7 @@ impl Source<'_> {
             let line = format!(
                 "#[fg=themelightgrey]{keys} #[#{{E:tree-mode-border-style}},acs]x#[default] {what}"
             );
-            let line = vtmux_core::cmd::template::replace(&line, "item", 1);
+            let line = vtmux_core::cmd::template::replace(&line, item, 1);
             let expanded = vtmux_core::format::expand_time(&line, &ctx);
             for i in 0..w {
                 c.put(x + 1 + i, y + 1 + n, blank(Colour::Default));

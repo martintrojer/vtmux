@@ -2191,15 +2191,15 @@ mod tests {
     /// a table entry that reports `not implemented`.
     #[test]
     fn non_m0_commands_parse_but_do_not_run() {
-        let calls = parse_argv(&words(&["choose-buffer", "-N", "-t", "a"])).unwrap();
-        assert_eq!(calls[0].entry.name, "choose-buffer");
+        let calls = parse_argv(&words(&["lock-server"])).unwrap();
+        assert_eq!(calls[0].entry.name, "lock-server");
         assert_eq!(
             calls[0].entry.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: choose-buffer"
+            "not implemented in vtmux yet: lock-server"
         );
         assert_eq!(
-            argv_err(&["choose-buffer", "-Q"]),
-            "command choose-buffer: unknown flag -Q"
+            argv_err(&["lock-server", "-Q"]),
+            "command lock-server: unknown flag -Q"
         );
     }
 
