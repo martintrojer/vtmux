@@ -101,14 +101,14 @@ impl Server {
     /// or a control client that has not given a size
     /// (`refresh-client -C`).
     fn ignore_client_size(&self, c: &Client) -> bool {
-        if c.attached.is_none() || c.closing {
+        if c.attached.is_none() || c.closing || c.suspended {
             return true;
         }
         if c.flags.ignore_size
             && self
                 .clients
                 .values()
-                .any(|l| l.attached.is_some() && !l.closing && !l.flags.ignore_size)
+                .any(|l| l.attached.is_some() && !l.closing && !l.suspended && !l.flags.ignore_size)
         {
             return true;
         }

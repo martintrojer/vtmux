@@ -139,7 +139,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("display-message", Some("display"), "aCc:d:jlINpt:F:v", 0, Some(1), "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("display-popup", Some("popup"), "Bb:Cc:d:e:Eh:kNs:S:t:T:w:x:y:", 0, None, "[-BCEkN] [-b border-lines] [-c target-client] [-d start-directory] [-e environment] [-h height] [-s style] [-S border-style] [-t target-pane] [-T title] [-w width] [-x position] [-y position] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("display-panes", Some("displayp"), "d:kNs:t:Z", 0, Some(1), "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, true),
-    cmd("find-window", Some("findw"), "CiNrt:TZ", 1, Some(1), "[-CiNrTZ] [-t target-pane] match-string", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("find-window", Some("findw"), "CiNrt:TZ", 1, Some(1), "[-CiNrTZ] [-t target-pane] match-string", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("has-session", Some("has"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("if-shell", Some("if"), "bFt:", 2, Some(3), "[-bF] [-t target-pane] shell-command command [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("join-pane", Some("joinp"), "bdfhvp:l:s:t:", 0, Some(0), "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
@@ -203,7 +203,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("source-file", Some("source"), "t:Fnqv", 1, None, "[-Fnqv] [-t target-pane] path ...", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
     cmd("split-window", Some("splitw"), "bB:c:de:EfF:hIkl:m:p:PR:s:S:t:T:vWZ", 0, None, "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("start-server", Some("start"), "", 0, Some(0), "", None, None, true, true),
-    cmd("suspend-client", Some("suspendc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, false),
+    cmd("suspend-client", Some("suspendc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, true),
     cmd("swap-pane", Some("swapp"), "dDs:t:UZ", 0, Some(0), "[-dDUZ] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("swap-window", Some("swapw"), "ds:t:", 0, Some(0), "[-d] [-s src-window] [-t dst-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("switch-client", Some("switchc"), "c:EFlnO:pt:rT:Z", 0, Some(0), "[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]", None, None, false, true),
@@ -418,6 +418,8 @@ mod tests {
             ("respawn-pane", Some("respawnp")),
             ("choose-buffer", None),
             ("choose-client", None),
+            ("find-window", Some("findw")),
+            ("suspend-client", Some("suspendc")),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);

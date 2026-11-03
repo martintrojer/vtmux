@@ -6394,3 +6394,100 @@ fn synchronized_output_holds_the_pane_until_it_ends() {
         assert_eq!(sync_flag(), "0", "{name}: the timer ends the mode");
     }
 }
+
+/// A process's run state: `T` when stopped (`/proc/PID/stat` on Linux,
+/// `ps` elsewhere).
+fn proc_state(pid: u32) -> char {
+    let state = if cfg!(target_os = "linux") {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        // pid (comm) S ...: comm may hold spaces, the state follows its ')'.
+        stat.rsplit_once(") ")
+            .map(|(_, rest)| rest.to_owned())
+            .unwrap_or_default()
+    } else {
+        let out = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    state.chars().next().unwrap_or('?')
+}
+
+/// `suspend-client` (prefix C-z): the terminal is restored and the client
+/// stops itself with SIGTSTP; the server carries on without it (pane
+/// output, no listed client); SIGCONT (the shell's `fg`) has it take the
+/// terminal back, and the server redraws it in full. The client runs
+/// under a job-control shell: in the orphaned process group of a session
+/// leader the kernel discards SIGTSTP.
+#[test]
+fn suspend_client_stops_and_sigcont_redraws() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        let cli = |args: &[&str]| String::from_utf8_lossy(&w.cli(args).stdout).into_owned();
+        w.cli(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["select-pane", "-t", "a", "-T", "p"]);
+        let go = w.home.path().join("go");
+        let script = format!(
+            "'{}' -L {} -f /dev/null attach -t a; echo STOPPED; \
+             while [ ! -e '{}' ]; do sleep 0.05; done; fg; echo DONE",
+            bin.display(),
+            w.label,
+            go.display()
+        );
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.args(["-m", "-c", &script]);
+        let mut a = w.spawn_attached(cmd, 40, 10, &[]);
+        let ctx = bin.display().to_string();
+        let limit = Duration::from_secs(5);
+        a.wait_labelled(&ctx, limit, |a| status_row(a).starts_with("[a] 0:w*"));
+        let pid: u32 = cli(&["lsc", "-F", "#{client_pid}"]).trim().parse().unwrap();
+
+        a.keys(b"\x02\x1a");
+        a.wait_labelled(&ctx, limit, |a| a.text().contains("STOPPED"));
+        let end = Instant::now() + limit;
+        while proc_state(pid) != 'T' {
+            assert!(Instant::now() < end, "{ctx}: client {pid} not stopped");
+            thread::sleep(Duration::from_millis(10));
+        }
+        // The terminal was handed back before the stop.
+        let text = a.text();
+        let stopped = text.rfind("STOPPED").unwrap();
+        assert!(
+            text[..stopped].contains("\x1b[?1049l"),
+            "{ctx}: no teardown"
+        );
+        // The server keeps going: commands run and the pane takes output.
+        // A suspended client is not listed.
+        assert_eq!(cli(&["lsc"]), "", "{ctx}");
+        w.cli(&["send-keys", "-t", "a", "zebra", "Enter"]);
+        let end = Instant::now() + limit;
+        while !cli(&["capture-pane", "-p", "-t", "a"]).contains("zebra") {
+            assert!(Instant::now() < end, "{ctx}: pane output");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let before = a.text().len();
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(proc_state(pid), 'T', "{ctx}");
+        assert!(
+            !a.text()[before..].contains("zebra"),
+            "{ctx}: drawn while suspended"
+        );
+
+        std::fs::write(&go, "").unwrap();
+        a.wait_labelled(&ctx, limit, |a| {
+            pane_text(a).contains("zebra") && status_row(a).starts_with("[a] 0:w*")
+        });
+        assert_ne!(proc_state(pid), 'T', "{ctx}");
+        assert_eq!(cli(&["lsc", "-F", "#{client_pid}"]).trim(), pid.to_string());
+        // Attached as before: keys reach the pane, prefix d detaches.
+        a.keys(b"yak\r");
+        a.wait_labelled(&ctx, limit, |a| pane_text(a).contains("yak\nyak"));
+        a.keys(b"\x02d");
+        a.wait_labelled(&ctx, limit, |a| a.text().contains("DONE"));
+        a.exited(0);
+    }
+}

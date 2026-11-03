@@ -84,6 +84,10 @@ pub(crate) struct Client {
     /// sent to it, and a second drop (from a write that fails while its
     /// own lost-client hooks run) does nothing.
     pub(crate) dead: bool,
+    /// `CLIENT_SUSPENDED` (`suspend-client`): the terminal is the shell's
+    /// until the client sends `Wakeup`. Nothing is drawn, the client sizes
+    /// no window and is not listed, but it keeps its session.
+    pub(crate) suspended: bool,
     pub(crate) hello: Option<Hello>,
     pub(crate) attached: Option<SessionId>,
     /// Control mode (`-C`) state; `None` for terminal and command clients.
@@ -156,6 +160,7 @@ impl Client {
             unacked: Unacked::default(),
             closing: false,
             dead: false,
+            suspended: false,
             hello: None,
             attached: None,
             control: None,
@@ -740,7 +745,7 @@ impl Server {
                 .map(|d| d.saturating_duration_since(now)),
             self.clients
                 .values()
-                .filter(|c| c.attached.is_some() && c.control.is_none())
+                .filter(|c| c.attached.is_some() && c.control.is_none() && !c.suspended)
                 .filter_map(|c| c.compositor.due())
                 .min()
                 .map(|d| d.saturating_duration_since(now)),
@@ -1103,6 +1108,11 @@ impl Server {
         let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead) else {
             return;
         };
+        // A suspended client's terminal is not tmux's to write
+        // (TTY_STARTED is off: tty_client_ready, tty.c:1634).
+        if c.suspended && matches!(msg, ServerMsg::Frame(_)) {
+            return;
+        }
         // Large payloads are split so no frame exceeds MAX_FRAME.
         let frames: Vec<ServerMsg> = match msg {
             ServerMsg::Stdout(b) | ServerMsg::Stderr(b) | ServerMsg::Frame(b)
@@ -1175,6 +1185,7 @@ impl Server {
             ClientMsg::Stdin(bytes) => self.control_stdin(id, &bytes),
             ClientMsg::StdinEof => self.control_stdin_eof(id),
             ClientMsg::Detach => self.detach_client(id, false),
+            ClientMsg::Wakeup => self.wakeup_client(id),
             ClientMsg::ReadData(bytes) => self.file_read_data(id, &bytes),
             ClientMsg::FileDone { error } => self.file_done(id, error),
             ClientMsg::FrameAck { seq } => {
@@ -1432,7 +1443,11 @@ impl Server {
     /// The sessions with a client (`s->attached != 0`), for
     /// `CMD_FIND_PREFER_UNATTACHED`.
     pub(crate) fn attached_sessions(&self) -> std::collections::BTreeSet<SessionId> {
-        self.clients.values().filter_map(|c| c.attached).collect()
+        self.clients
+            .values()
+            .filter(|c| !c.suspended)
+            .filter_map(|c| c.attached)
+            .collect()
     }
 
     /// `server_client_set_session` (server-client.c:471-472): the current
@@ -1647,6 +1662,52 @@ impl Server {
         );
     }
 
+    /// `server_client_suspend` (server-client.c:598-610): the terminal is
+    /// restored (`tty_stop_tty`) and the client told to stop itself. A
+    /// client without a session, on its way out or already suspended is
+    /// left alone. vtmux sends nothing to a control client either: it has
+    /// no terminal to give back.
+    pub fn suspend_client(&mut self, id: ClientId) {
+        let Some(c) = self.clients.get(&id) else {
+            return;
+        };
+        if c.attached.is_none() || c.suspended || c.closing || c.dead || c.control.is_some() {
+            return;
+        }
+        self.send_teardown(id);
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.suspended = true;
+        }
+        self.send(id, &ServerMsg::Suspend);
+    }
+
+    /// `MSG_WAKEUP` (server-client.c:2741-2763): the client is back
+    /// (SIGCONT). The terminal is started again and redrawn in full.
+    fn wakeup_client(&mut self, id: ClientId) {
+        let stamp = self.model.touch();
+        let Some(c) = self.clients.get_mut(&id).filter(|c| c.suspended) else {
+            return;
+        };
+        c.suspended = false;
+        let Some(s) = c.attached.filter(|_| !c.closing) else {
+            return;
+        };
+        c.activity = stamp;
+        c.activity_secs = now_epoch();
+        c.compositor.invalidate();
+        // tty_start_tty -> tty_invalidate: the modes are written again.
+        c.mouse.invalidate();
+        let caps = c.caps;
+        // tty_start_tty: the startup modes without the terminal queries,
+        // which tty_send_requests sends only once.
+        if let Some(caps) = caps {
+            self.send(id, &ServerMsg::Frame(caps.restart()));
+        }
+        self.redraw_client(id);
+        self.recalculate_sizes();
+        self.model.touch_session(s);
+    }
+
     /// `default-shell` of `tree`, or /bin/sh when `checkshell` fails.
     pub(crate) fn default_shell(&self, tree: TreeId) -> PathBuf {
         let configured = self.model.options.get(tree, "default-shell").map_or_else(
@@ -1664,8 +1725,10 @@ impl Server {
         self.exit_attached_with(id, &ServerMsg::Exit { code, message, hup });
     }
 
-    fn exit_attached_with(&mut self, id: ClientId, last: &ServerMsg) {
-        if let Some(c) = self.clients.get(&id)
+    /// `tty_stop_tty`: the teardown escapes, unless the terminal is
+    /// stopped already (suspended).
+    fn send_teardown(&mut self, id: ClientId) {
+        if let Some(c) = self.clients.get(&id).filter(|c| !c.suspended)
             && let Some(caps) = c.caps
         {
             let dseks = c
@@ -1676,6 +1739,10 @@ impl Server {
             let bytes = caps.teardown(dseks);
             self.send(id, &ServerMsg::Frame(bytes));
         }
+    }
+
+    fn exit_attached_with(&mut self, id: ClientId, last: &ServerMsg) {
+        self.send_teardown(id);
         self.send(id, last);
         let left = self.client_window(id);
         if let Some(c) = self.clients.get_mut(&id) {
@@ -1697,10 +1764,12 @@ impl Server {
     /// (tty-keys.c) and hand each to the key tables
     /// ([`Server::handle_key`], `server_client_key_callback`).
     pub fn on_client_input(&mut self, id: ClientId, bytes: &[u8]) -> Result<(), EdgeError> {
+        // CLIENT_UNATTACHEDFLAGS (server-client.c:1460): a suspended
+        // client's keys go nowhere.
         let Some(s) = self
             .clients
             .get(&id)
-            .filter(|c| c.control.is_none())
+            .filter(|c| c.control.is_none() && !c.suspended)
             .and_then(|c| c.attached)
         else {
             return Ok(());
@@ -2005,6 +2074,36 @@ impl Server {
         self.burst_started.clear();
     }
 
+    /// Whether client `id` takes no frame now: the server is exiting, its
+    /// session is gone, or it is suspended (its terminal is not ours).
+    fn render_skips(&mut self, id: ClientId, s: SessionId) -> bool {
+        let suspended = self.clients[&id].suspended;
+        if self.shutdown {
+            // server_send_exit (server.c:321-323): a suspended client
+            // is dropped, not told.
+            if suspended {
+                self.drop_client(id);
+            } else {
+                self.exit_attached(id, 1, Some("server exited".into()), false);
+            }
+            return true;
+        }
+        if self.model.current_of(s).is_none() {
+            self.exit_attached(id, 0, Some("exited".into()), false);
+            return true;
+        }
+        // server_client_check_redraw (server-client.c:2510).
+        if suspended {
+            self.clients
+                .get_mut(&id)
+                .expect("client")
+                .passthrough
+                .clear();
+            return true;
+        }
+        false
+    }
+
     fn render_clients(&mut self) {
         let attached: Vec<_> = self
             .clients
@@ -2013,12 +2112,7 @@ impl Server {
             .filter_map(|(&id, c)| c.attached.map(|s| (id, s)))
             .collect();
         for (id, s) in attached {
-            if self.shutdown {
-                self.exit_attached(id, 1, Some("server exited".into()), false);
-                continue;
-            }
-            if self.model.current_of(s).is_none() {
-                self.exit_attached(id, 0, Some("exited".into()), false);
+            if self.render_skips(id, s) {
                 continue;
             }
             let client = &self.clients[&id];
@@ -2805,7 +2899,7 @@ impl Server {
     pub fn client_views(&self) -> std::rc::Rc<[ClientView]> {
         self.clients
             .iter()
-            .filter(|(_, c)| c.attached.is_some())
+            .filter(|(_, c)| c.attached.is_some() && !c.suspended)
             .map(|(&id, c)| self.client_view(id, c))
             .collect()
     }
@@ -2886,7 +2980,12 @@ impl Server {
     /// `cmd_find_best_client` (cmd-find.c:112-130): the most recently active
     /// client attached to `s`, or to any session when `s` has none.
     pub fn best_client(&self, s: Option<SessionId>) -> Option<ClientId> {
-        let s = s.filter(|&s| self.clients.values().any(|c| c.attached == Some(s)));
+        // s->attached == 0 (cmd-find.c:117): suspended clients do not count.
+        let s = s.filter(|&s| {
+            self.clients
+                .values()
+                .any(|c| c.attached == Some(s) && !c.suspended)
+        });
         let mut best: Option<(ClientId, u64)> = None;
         for (&id, c) in &self.clients {
             let Some(cs) = c.attached else { continue };

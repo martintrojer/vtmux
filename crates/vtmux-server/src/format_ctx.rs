@@ -3,7 +3,9 @@
 
 use std::rc::Rc;
 
-use vtmux_core::format::{FormatContext, LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop};
+use vtmux_core::format::{
+    FormatContext, LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop, SearchFlags,
+};
 use vtmux_core::ids::{SessionId, WindowId};
 use vtmux_core::layout::PaneStatus;
 use vtmux_core::options::{OptionValue, OptionsStore, Target, TreeId};
@@ -737,6 +739,30 @@ impl FormatContext for Ctx<'_> {
     /// Not for `t` lookups: format.c:4666 skips the environment then.
     fn get_without_environ(&self, name: &str) -> Option<String> {
         self.find_before_environ(name)
+    }
+
+    /// `window_pane_search` (window.c:2123-2168): the visible rows of the
+    /// pane, trailing whitespace stripped, against `*pattern*` (fnmatch)
+    /// or the ERE; a regex that does not compile matches nothing.
+    fn search_pane(&self, pattern: &str, flags: SearchFlags) -> Option<u32> {
+        let term = &self.pane()?.term;
+        let regex = if flags.regex {
+            Some(vtmux_core::regex::Regex::new(pattern, flags.ignore_case).ok()?)
+        } else {
+            None
+        };
+        let glob = format!("*{pattern}*");
+        let hsize = term.history_size();
+        (0..usize::from(term.rows()))
+            .position(|y| {
+                let text = term.row(hsize + y).text();
+                let line = text.trim_end_matches(|c: char| c.is_ascii_whitespace() || c == '\x0b');
+                match &regex {
+                    Some(r) => r.is_match(line).unwrap_or(false),
+                    None => vtmux_core::fnmatch::matches(&glob, line, flags.ignore_case),
+                }
+            })
+            .and_then(|y| u32::try_from(y + 1).ok())
     }
 
     fn time(&self, name: &str) -> Option<i64> {

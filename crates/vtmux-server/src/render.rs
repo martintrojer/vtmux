@@ -90,8 +90,15 @@ impl Caps {
     /// XTVERSION and the synchronised-update DECRQM.
     #[must_use]
     pub fn startup(self) -> Vec<u8> {
+        let mut out = self.restart();
+        out.extend_from_slice(b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p");
+        out
+    }
+    /// `tty_start_tty` alone: a suspended client coming back.
+    #[must_use]
+    pub fn restart(self) -> Vec<u8> {
         let title = if self.xterm { "\x1b[22;0;0t" } else { "" };
-        format!("\x1b[?1049h{title}\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p").into_bytes()
+        format!("\x1b[?1049h{title}\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h").into_bytes()
     }
     /// `tty_stop_tty` (tty.c:470-520); `dseks` is the terminal's `Dseks`
     /// (empty without it).

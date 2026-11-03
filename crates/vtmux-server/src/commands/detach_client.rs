@@ -2,7 +2,8 @@
 //! (else the current one), `-s` detaches every client on a session, `-a`
 //! every client but the target, `-P` has the client hang up its parent
 //! (`MSG_DETACHKILL`), `-E` runs a command in place of the client
-//! (`server_client_exec`). `suspend-client` is separate.
+//! (`server_client_exec`). `suspend-client` shares the entry point
+//! (`server_client_suspend`).
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -11,10 +12,10 @@ use super::Item;
 use crate::server::{ClientId, Server};
 use crate::target;
 
-pub fn exec(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdError> {
-    // CMD_CLIENT_TFLAG (cmd-queue.c:604-609): the target client is found
-    // before anything else, `-s` or not, and a miss is an error.
-    let tc = match args.value('t') {
+/// `CMD_CLIENT_TFLAG` (cmd-queue.c:604-609): the target client is found
+/// before anything else, and a miss is an error.
+fn target_client(server: &Server, item: &Item, args: &Args) -> Result<ClientId, CmdError> {
+    Ok(match args.value('t') {
         None => server
             .target_client(item.client, item.origin)
             .ok_or(EdgeError::NoCurrentClient)?,
@@ -24,7 +25,18 @@ pub fn exec(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdErro
                 let name = name.strip_suffix(':').unwrap_or(name);
                 EdgeError::Message(format!("can't find client: {name}"))
             })?,
-    };
+    })
+}
+
+/// `suspend-client` (cmd-detach-client.c:68-71).
+pub fn suspend(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdError> {
+    let tc = target_client(server, item, args)?;
+    server.suspend_client(tc);
+    Ok(())
+}
+
+pub fn exec(server: &mut Server, item: &Item, args: &Args) -> Result<(), CmdError> {
+    let tc = target_client(server, item, args)?;
     let hup = args.flag('P');
     let command = args.value('E');
     let leave = |server: &mut Server, id: ClientId| match command {
