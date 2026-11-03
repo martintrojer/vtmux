@@ -21,6 +21,7 @@ pub(crate) mod confirm_before;
 pub(crate) mod copy_mode;
 mod delete_buffer;
 mod detach_client;
+mod display_menu;
 mod display_message;
 mod display_panes;
 pub(crate) mod display_popup;
@@ -657,6 +658,7 @@ fn dispatch(
         "suspend-client" => detach_client::suspend(server, item, args),
         "command-prompt" => command_prompt::exec(server, item, args),
         "confirm-before" => confirm_before::exec(server, item, args),
+        "display-menu" => display_menu::exec(server, item, args, found),
         "display-popup" => display_popup::exec(server, item, args, found),
         "show-prompt-history" => prompt_history::show(server, item, args),
         "clear-prompt-history" => prompt_history::clear(server, args),

@@ -1,0 +1,52 @@
+# display-menu from a key binding (cmd-display-menu.c, menu.c menu_key):
+# the menu opens at the first item that can be chosen (-C 0, no mouse);
+# Down and Up skip the separator and the disabled item and wrap; Enter
+# runs the chosen item's command; an item's key runs it at once; Escape
+# and q close; other keys are taken and ignored. The command returns at
+# once, so a CLI display-menu opens one too.
+name = "menu_keys"
+size = [40, 14]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "13", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["bind", "-n", "M-m", "display-menu", "-T", "Pick", "-x", "2", "-y", "10", "Alpha", "a", "set -g @c alpha", "", "", "-Beta", "b", "set -g @c beta", "Gamma", "g", "set -g @c gamma", "Delta", "j", "set -g @c delta"] },
+  { attach = { session = "a" } },
+  { keys = "\u001bm" },
+  { screen = {} },
+  { keys = "\u001b[B" },
+  { screen = {} },
+  { keys = "\u001b[B" },
+  { screen = {} },
+  { keys = "\u001b[B" },
+  { screen = {} },
+  { keys = "\u001b[A" },
+  { screen = {} },
+  { keys = "x" },
+  { screen = {} },
+  { keys = "\r" },
+  { screen = {} },
+  { run = ["show", "-gv", "@c"] },
+  { keys = "\u001bm" },
+  { screen = {} },
+  { keys = "j" },
+  { screen = {} },
+  { run = ["show", "-gv", "@c"] },
+  { keys = "\u001bm" },
+  { screen = {} },
+  { keys = "b" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { screen = {} },
+  { keys = "\u001bm" },
+  { settle = {} },
+  { keys = "q" },
+  { screen = {} },
+  { run = ["display-menu", "-x", "0", "-y", "5", "One", "1", "set -g @c one"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "1" },
+  { screen = {} },
+  { run = ["show", "-gv", "@c"] },
+]

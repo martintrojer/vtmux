@@ -182,6 +182,8 @@ fn move_to_new_window(
             // cmd-break-pane.c:166.
             latest,
             alerts: crate::alerts::WindowAlerts::default(),
+            menu: None,
+            menu_last: (0, 0),
         },
     );
     // window_create -> window_update_activity.

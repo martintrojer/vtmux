@@ -390,8 +390,7 @@ status = "pass"
 status = "pass"
 
 [tests."menu-mouse.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."modal-pane.sh"]
 status = "xfail"
@@ -498,8 +497,8 @@ status = "xfail"
 reason = "not implemented (M0 baseline)"
 
 [tests."screen-redraw-menus.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
+reason = "flaky against reference tmux 3.8 too (scene menu-over-split is timing-dependent, compat/tmux-3.8/README.md)"
 flaky = true
 
 [tests."screen-redraw-outside.sh"]

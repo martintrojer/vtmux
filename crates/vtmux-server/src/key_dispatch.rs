@@ -431,6 +431,14 @@ impl Server {
         if !read_only && self.popup_key(id, core) {
             return None;
         }
+        // server-client.c:1824: the window's menu, before the prompt.
+        let mouse = match &kind {
+            KeyKind::Mouse { input, .. } => Some(*input),
+            _ => None,
+        };
+        if !read_only && self.menu_key(id, core, mouse.as_ref()) {
+            return None;
+        }
         if core == Key::MOUSE {
             // status_prompt_key and window_pane_prompt_key: only a press
             // on the prompt's line, to move its cursor (not here yet); a

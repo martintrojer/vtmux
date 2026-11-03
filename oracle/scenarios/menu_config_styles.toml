@@ -1,0 +1,31 @@
+# menu-style and menu-selected-style from a config, as the owner's
+# .tmux.conf sets them: global, with user-option formats in them
+# (menu.c menu_reapply_styles expands them for the menu's target at every
+# draw), and an attribute in the selected style. A user option changed
+# while the menu is open shows at the next draw. The default window menu
+# (prefix <) and a menu with -C 2 draw in them.
+name = "menu_config_styles"
+size = [60, 16]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "15", "cat"] },
+  { run = ["set-buffer", "-b", "c", "set -g status-right R\nset -s escape-time 0\nset -g @color_text '#cdd6f4'\nset -g @color_base '#1e1e2e'\nset -g @color_crust '#11111b'\nset -g @color_sky '#89dceb'\nset -g menu-style 'fg=#{@color_text},bg=#{@color_base}'\nset -g menu-selected-style 'fg=#{@color_crust},bg=#{@color_sky},bold'\n"] },
+  { run = ["save-buffer", "-b", "c", "menu.conf"] },
+  { run = ["source-file", "menu.conf"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { attach = { session = "a" } },
+  { settle = { quiet_ms = 1000 } },
+  { keys = "\u0002<" },
+  { screen = {} },
+  { keys = "\u001b[B" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { settle = {} },
+  { run = ["display-menu", "-C", "2", "-x", "4", "-y", "10", "One", "1", "", "Two", "2", "", "Three", "3", ""] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["set", "-g", "@color_sky", "#f38ba8"] },
+  { keys = "\u001b[A" },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+]
