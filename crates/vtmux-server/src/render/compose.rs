@@ -199,25 +199,29 @@ fn fill(base: &CellStyle, f: &styled::Cell) -> styled::Cell {
 
 /// Draw `scene` into the top `scene.rows` rows of `screen`.
 pub fn compose(scene: &Scene, d: &Draw, theme: &Theme, screen: &mut Snapshot) {
+    let cols = usize::from(screen.cols);
     // The last row drawn left the terminal cursor past its last column.
     let mut ended_written = false;
-    for y in 0..scene.rows.min(screen.rows) {
-        ended_written = compose_row(scene, d, theme, screen, y, ended_written);
+    for (y, row) in (0..scene.rows.min(screen.rows)).zip(screen.cells.chunks_mut(cols.max(1))) {
+        ended_written = compose_row(scene, d, theme, row, y, ended_written);
     }
 }
 
-/// [`compose`], reusing the rows `cache` composed last time whose inputs
-/// are unchanged: the same scene, styles and theme, and the same content
-/// rows of the panes on them ([`PaneDraw::stamps`]). A key's echo then
-/// composes one row, not the window.
+/// [`compose`] into `cache`, reusing the rows it composed last time whose
+/// inputs are unchanged: the same scene, styles and theme, and the same
+/// content rows of the panes on them ([`PaneDraw::stamps`]). A key's echo
+/// then composes one row, not the window. Returns whether any row was
+/// composed again; [`ComposeCache::copy_to`] draws the result.
 pub fn compose_cached(
     cache: &mut ComposeCache,
     scene: &Rc<Scene>,
     d: &Draw,
     theme: &Theme,
-    screen: &mut Snapshot,
-) {
-    let key = DrawKey::of(d, *theme, screen.cols, screen.rows);
+    cols: u16,
+    rows: u16,
+) -> bool {
+    let rows = scene.rows.min(rows);
+    let key = DrawKey::of(d, *theme, cols, rows);
     let same = cache.scene.as_ref().is_some_and(|s| Rc::ptr_eq(s, scene))
         && cache.key.as_ref() == Some(&key);
     if !same {
@@ -225,34 +229,36 @@ pub fn compose_cached(
         cache.scene = Some(Rc::clone(scene));
         cache.key = Some(key);
     }
-    let cols = usize::from(screen.cols);
+    let mut changed = !same;
     let mut ended_written = false;
-    for y in 0..scene.rows.min(screen.rows) {
+    for y in 0..rows {
         let sig = row_signature(scene, d, y);
-        let at = usize::from(y) * cols;
-        if let Some(row) = cache.rows.get(usize::from(y))
+        let i = usize::from(y);
+        if let Some(row) = cache.rows.get(i)
             && sig.is_some()
             && row.sig == sig
             && row.above == ended_written
         {
-            screen.cells[at..at + cols].clone_from_slice(&row.cells);
             ended_written = row.ended;
             continue;
         }
-        let above = ended_written;
-        ended_written = compose_row(scene, d, theme, screen, y, above);
-        let row = CachedRow {
-            sig,
-            above,
-            ended: ended_written,
-            cells: screen.cells[at..at + cols].to_vec(),
-        };
-        if let Some(slot) = cache.rows.get_mut(usize::from(y)) {
-            *slot = row;
-        } else {
-            cache.rows.push(row);
+        if cache.rows.len() <= i {
+            cache.rows.push(CachedRow {
+                sig: None,
+                above: false,
+                ended: false,
+                cells: vec![Cell::default(); usize::from(cols)],
+            });
         }
+        let row = &mut cache.rows[i];
+        let above = ended_written;
+        ended_written = compose_row(scene, d, theme, &mut row.cells, y, above);
+        row.sig = sig;
+        row.above = above;
+        row.ended = ended_written;
+        changed = true;
     }
+    changed
 }
 
 /// What [`compose_cached`] composed last, per client.
@@ -261,6 +267,16 @@ pub struct ComposeCache {
     scene: Option<Rc<Scene>>,
     key: Option<DrawKey>,
     rows: Vec<CachedRow>,
+}
+
+impl ComposeCache {
+    /// Draw what [`compose_cached`] composed into the top rows of `screen`.
+    pub fn copy_to(&self, screen: &mut Snapshot) {
+        let cols = usize::from(screen.cols).max(1);
+        for (row, cached) in screen.cells.chunks_mut(cols).zip(&self.rows) {
+            row.clone_from_slice(&cached.cells);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -273,10 +289,21 @@ struct CachedRow {
     cells: Vec<Cell>,
 }
 
+/// A [`PaneDraw`] but its content.
+#[derive(Debug, PartialEq)]
+struct PaneKey {
+    id: PaneId,
+    index: Option<u32>,
+    lines: Lines,
+    border: CellStyle,
+    status: Vec<styled::Cell>,
+    selected: Vec<bool>,
+}
+
 /// Everything in a [`Draw`] but the panes' content, and the theme.
 #[derive(Debug, PartialEq)]
 struct DrawKey {
-    panes: Vec<(PaneId, Option<u32>, Lines, CellStyle, Vec<styled::Cell>, Vec<bool>)>,
+    panes: Vec<PaneKey>,
     active: Option<PaneId>,
     offset: u16,
     border: CellStyle,
@@ -294,15 +321,13 @@ impl DrawKey {
             panes: d
                 .panes
                 .iter()
-                .map(|(&id, p)| {
-                    (
-                        id,
-                        p.index,
-                        p.lines,
-                        p.border.clone(),
-                        p.status.clone(),
-                        p.selected.clone(),
-                    )
+                .map(|(&id, p)| PaneKey {
+                    id,
+                    index: p.index,
+                    lines: p.lines,
+                    border: p.border.clone(),
+                    status: p.status.clone(),
+                    selected: p.selected.clone(),
                 })
                 .collect(),
             active: d.active,
@@ -333,7 +358,9 @@ fn row_signature(scene: &Scene, d: &Draw, y: u16) -> Option<Vec<(PaneId, u32, u6
         let stamps = &d.panes.get(pane)?.stamps;
         let at = usize::try_from(*py).ok()?;
         let stamp = *stamps.get(at)?;
-        let above = at.checked_sub(1).map_or(Some(0), |a| stamps.get(a).copied())?;
+        let above = at
+            .checked_sub(1)
+            .map_or(Some(0), |a| stamps.get(a).copied())?;
         sig.push((*pane, *py, stamp, above));
     }
     Some(sig)
@@ -345,14 +372,14 @@ fn compose_row(
     scene: &Scene,
     d: &Draw,
     theme: &Theme,
-    screen: &mut Snapshot,
+    line: &mut [Cell],
     y: u16,
     above_ended_written: bool,
 ) -> bool {
-    let cols = usize::from(screen.cols);
+    let line_cols = u16::try_from(line.len()).unwrap_or(u16::MAX);
     let mut ended_written = false;
     {
-        for x in 0..scene.cols.min(screen.cols) {
+        for x in 0..scene.cols.min(line_cols) {
             let cell = match scene.get(x, y) {
                 SceneCell::Pane { pane, px, py } => d
                     .panes
@@ -386,11 +413,11 @@ fn compose_row(
                     .and_then(|p| p.status.get(usize::try_from(*offset).ok()?))
                     .map_or_else(Cell::default, |c| theme.cell(c)),
             };
-            screen.cells[usize::from(y) * cols + usize::from(x)] = cell;
+            line[usize::from(x)] = cell;
         }
         // Pane and pane status spans go through `tty_draw_line`; borders and
         // fill are drawn cell by cell (`tty_cell`) and keep their text.
-        let width = scene.cols.min(screen.cols);
+        let width = scene.cols.min(line_cols);
         let mut x = 0;
         while x < width {
             let Some(key) = span_key(scene.get(x, y), x) else {
@@ -400,8 +427,7 @@ fn compose_row(
             let end = (x..width)
                 .find(|&e| span_key(scene.get(e, y), e) != Some(key))
                 .unwrap_or(width);
-            let row = usize::from(y) * cols;
-            let full = x == 0 && end == screen.cols;
+            let full = x == 0 && end == line_cols;
             // tty_draw_line's `wrapped`: a full-width row of a line the row
             // above wrapped onto, with the terminal cursor left past the
             // end of that row.
@@ -421,7 +447,7 @@ fn compose_row(
                         .unwrap_or(false),
                     _ => false,
                 };
-            let cells = &mut screen.cells[row + usize::from(x)..row + usize::from(end)];
+            let cells = &mut line[usize::from(x)..usize::from(end)];
             let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
             let keep = selected_span(d, scene, x, end, y);
             let written = draw_line_keeping(cells, &bgs, Color::Default, d.clear, wrapped, &keep);
@@ -737,6 +763,111 @@ mod tests {
         assert!(!draw_line(&mut row, true, true));
         assert!(row[..12].iter().all(|c| c.text == " " && c.style.fg == red));
         assert!(row[13..].iter().all(|c| c.text.is_empty()));
+    }
+
+    /// The row cache composes what a full compose does, after every change
+    /// to two side-by-side panes (echo, scroll, soft wrap, erase), and
+    /// reports no change when nothing changed.
+    #[test]
+    fn cached_compose_matches_a_full_one() {
+        use super::super::scene::{Indicators, SceneCache, ScenePane, WindowView};
+        use vtmux_core::layout::{Geometry, PaneStatus};
+        let mut terms = [
+            vtmux_vt::PaneTerm::new(9, 4, 10),
+            vtmux_vt::PaneTerm::new(10, 4, 10),
+        ];
+        let view = WindowView {
+            sx: 20,
+            sy: 4,
+            panes: (0..2u32)
+                .map(|i| ScenePane {
+                    id: PaneId(i),
+                    rect: if i == 0 {
+                        Geometry::new(9, 4, 0, 0)
+                    } else {
+                        Geometry::new(10, 4, 10, 0)
+                    },
+                    floating: false,
+                    lines: Lines::Single,
+                    status: PaneStatus::Off,
+                })
+                .collect(),
+            indicators: Indicators::Colour,
+            two_pane: None,
+            ring: None,
+        };
+        let scenes = SceneCache::default();
+        let mut cache = ComposeCache::default();
+        let theme = Theme::default();
+        let steps: [(usize, &[u8]); 8] = [
+            (0, b"a"),
+            (1, b"one\r\ntwo"),
+            (0, b"\x1b[31mbcdefghijkl"),
+            (1, b"\r\n\r\n\r\nscroll"),
+            (0, b"\x1b[2J\x1b[H"),
+            (1, b"\x1b[44m\x1b[K"),
+            (0, b"0123456789abcdefgh"),
+            (1, b"\x1bc"),
+        ];
+        for (i, (pane, bytes)) in steps.iter().enumerate() {
+            terms[*pane].feed(bytes);
+            let draw = Draw {
+                panes: (0..2u32)
+                    .map(|p| {
+                        let view = terms[p as usize].screen();
+                        (
+                            PaneId(p),
+                            PaneDraw {
+                                content: view.shared(),
+                                stamps: view.row_stamps().to_vec(),
+                                index: Some(p),
+                                lines: Lines::Single,
+                                border: CellStyle::default(),
+                                status: Vec::new(),
+                                selected: Vec::new(),
+                            },
+                        )
+                    })
+                    .collect(),
+                active: Some(PaneId(1)),
+                offset: 0,
+                border: CellStyle::default(),
+                lines: Lines::Single,
+                outside: styled::Cell {
+                    text: " ".into(),
+                    width: 1,
+                    style: CellStyle::default(),
+                },
+                inside: styled::Cell {
+                    text: " ".into(),
+                    width: 1,
+                    style: CellStyle::default(),
+                },
+                clear: Clear::Bce,
+            };
+            let scene = Scene::cached(&scenes, view.clone(), 20, 4);
+            let blank = |cols, rows| vtmux_vt::Snapshot {
+                cols,
+                rows,
+                cells: vec![Cell::default(); usize::from(cols) * usize::from(rows)],
+                wrapped: Vec::new(),
+                cursor: None,
+                cursor_visible: true,
+            };
+            let mut full = blank(20, 4);
+            compose(&scene, &draw, &theme, &mut full);
+            assert!(
+                compose_cached(&mut cache, &scene, &draw, &theme, 20, 4),
+                "step {i}"
+            );
+            let mut cached = blank(20, 4);
+            cache.copy_to(&mut cached);
+            assert_eq!(cached, full, "step {i}");
+            assert!(
+                !compose_cached(&mut cache, &scene, &draw, &theme, 20, 4),
+                "step {i}: nothing new"
+            );
+        }
     }
 
     #[test]

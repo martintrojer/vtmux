@@ -41,7 +41,15 @@ pub struct Source<'a> {
 /// attaches (`server_client_update_theme_colours`), not per frame; the
 /// slot formats normally read only `#{client_colours}`.
 #[derive(Debug, Default)]
-pub struct ThemeCache(std::cell::RefCell<Option<(i64, Vec<String>, u32, Theme)>>);
+pub struct ThemeCache(std::cell::RefCell<Option<ThemeInputs>>);
+
+#[derive(Debug)]
+struct ThemeInputs {
+    option: i64,
+    values: Vec<String>,
+    colours: u32,
+    theme: Theme,
+}
 
 impl Source<'_> {
     pub(super) fn ctx(&self, found: Found, caps: Caps) -> Ctx<'_> {
@@ -118,10 +126,10 @@ impl Source<'_> {
             .iter()
             .map(|slot| self.string(TreeId::Server, &format!("{prefix}-theme-{slot}")))
             .collect();
-        if let Some((o, v, colours, theme)) = self.themes.0.borrow().as_ref()
-            && (*o, v, *colours) == (option, &values, caps.colours)
+        if let Some(t) = self.themes.0.borrow().as_ref()
+            && (t.option, &t.values, t.colours) == (option, &values, caps.colours)
         {
-            return *theme;
+            return t.theme;
         }
         let ctx = self.ctx(Found::default(), caps);
         let mut slots = values.iter();
@@ -134,7 +142,12 @@ impl Source<'_> {
                 Some(c) => Theme::default().colour(c),
             }
         }));
-        *self.themes.0.borrow_mut() = Some((option, values, caps.colours, theme));
+        *self.themes.0.borrow_mut() = Some(ThemeInputs {
+            option,
+            values,
+            colours: caps.colours,
+            theme,
+        });
         theme
     }
 
@@ -280,7 +293,11 @@ impl Source<'_> {
             return (Rc::new(screen), Vec::new(), Vec::new());
         }
         if let Some(crate::mode::Mode::Panes(m)) = pane.modes.first() {
-            return (Rc::new(self.panes_screen(pane, m, caps)), Vec::new(), Vec::new());
+            return (
+                Rc::new(self.panes_screen(pane, m, caps)),
+                Vec::new(),
+                Vec::new(),
+            );
         }
         if pane.modes.is_empty() && !pane.mode_prompt.as_ref().is_some_and(|m| m.shown(pane)) {
             let view = pane.term.screen();
@@ -524,30 +541,34 @@ fn two_pane(model: &Model, w: WindowId) -> Option<Dir> {
 
 /// Copy the active pane's cursor onto the screen.
 pub fn cursor(screen: &mut Snapshot, draw: &Draw, model: &Model, rows: u16) {
-    screen.cursor = None;
-    screen.cursor_visible = false;
-    let Some(p) = draw.active else { return };
+    (screen.cursor, screen.cursor_visible) = cursor_of(draw, model, screen.cols, rows);
+}
+
+/// Where [`cursor`] puts the cursor on a `cols` x `rows` window, and
+/// whether it shows.
+#[must_use]
+pub fn cursor_of(draw: &Draw, model: &Model, cols: u16, rows: u16) -> (Option<(u16, u16)>, bool) {
+    let Some(p) = draw.active else {
+        return (None, false);
+    };
     let (Some(d), Some(pane)) = (draw.panes.get(&p), model.panes.get(&p)) else {
-        return;
+        return (None, false);
     };
     let Some((cx, cy)) = d.content.cursor else {
-        return;
+        return (None, false);
     };
     let x = pane.rect.xoff + i32::from(cx) + i32::from(draw.offset);
     let y = pane.rect.yoff + i32::from(cy) + i32::from(draw.offset);
     let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
-        return;
+        return (None, false);
     };
     // Panes mode leaves the cursor one past its last write; at the
     // window's edge the terminal keeps it in the last column.
-    let x = if x == screen.cols {
-        x.saturating_sub(1)
+    let x = if x == cols { x.saturating_sub(1) } else { x };
+    if x < cols && y < rows {
+        (Some((x, y)), d.content.cursor_visible)
     } else {
-        x
-    };
-    if x < screen.cols && y < rows {
-        screen.cursor = Some((x, y));
-        screen.cursor_visible = d.content.cursor_visible;
+        (None, false)
     }
 }
 

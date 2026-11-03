@@ -119,6 +119,18 @@ impl Default for StatusLine {
 }
 
 impl StatusLine {
+    /// Nothing to draw and nothing over the panes: no redraw asked for, no
+    /// message, prompt or frozen pane area, the cursor not hidden. The
+    /// status rows are then the ones drawn last.
+    #[must_use]
+    pub fn quiet(&self) -> bool {
+        !self.redraw_pending()
+            && self.message.is_none()
+            && self.prompt.is_none()
+            && !self.frozen
+            && !self.nocursor
+    }
+
     /// `CLIENT_REDRAWSTATUS` is set.
     #[must_use]
     pub fn status_redraw_pending(&self) -> bool {

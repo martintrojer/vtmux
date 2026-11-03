@@ -120,6 +120,31 @@ pub struct WindowCache {
     pub compose: std::cell::RefCell<compose::ComposeCache>,
     /// The window's drawing buffer, kept for the next frame.
     pub buffer: std::cell::RefCell<Option<Snapshot>>,
+    /// What the last frame was drawn from, when it was a plain one (see
+    /// [`PlainFrame`]); `None` otherwise.
+    pub plain: std::cell::Cell<Option<PlainFrame>>,
+}
+
+/// The inputs of a frame with nothing over the window but the status
+/// line: no popup, message, prompt or pane prompt, no frozen pane area.
+/// When the next frame has the same, and the window composes to the same
+/// rows and cursor ([`compose::compose_cached`]), it is the same frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlainFrame {
+    pub caps: Caps,
+    pub size: (u16, u16),
+    /// The window's first row and height.
+    pub area: (u16, u16),
+    /// The window cursor ([`window::cursor_of`]), once drawn.
+    pub cursor: (Option<(u16, u16)>, bool),
+}
+
+impl PlainFrame {
+    /// Drawn from the same inputs, whatever the cursor.
+    #[must_use]
+    pub fn same_inputs(self, other: Self) -> bool {
+        (self.caps, self.size, self.area) == (other.caps, other.size, other.area)
+    }
 }
 
 /// `buffer` emptied for a `cols` x `rows` drawing, or a new one: reusing
@@ -195,6 +220,19 @@ impl Compositor {
     pub fn invalidate(&mut self) {
         self.spare = self.last.take();
     }
+    /// The last frame sent is still what the terminal shows, at this size.
+    #[must_use]
+    pub fn shows(&self, cols: u16, rows: u16) -> bool {
+        !self.blocked
+            && self
+                .last
+                .as_ref()
+                .is_some_and(|s| (s.cols, s.rows) == (cols, rows))
+    }
+    /// Keep `screen`, unsent, as the next frame's buffer.
+    pub fn recycle(&mut self, screen: Snapshot) {
+        self.spare = Some(screen);
+    }
     /// An empty `cols` x `rows` screen for the next frame ([`blank`]).
     pub fn buffer(&mut self, cols: u16, rows: u16) -> Snapshot {
         blank(self.spare.take(), cols, rows)
@@ -247,6 +285,24 @@ impl Compositor {
         }
         true
     }
+    /// Per row of `screen`, whether it differs from what the terminal shows
+    /// (every row when the size changed); `None` when nothing does, the
+    /// cursor included.
+    fn changed_rows(&self, screen: &Snapshot, same_size: bool) -> Option<Vec<bool>> {
+        let Some(last) = self.last.as_ref().filter(|_| same_size) else {
+            return Some(vec![true; usize::from(screen.rows)]);
+        };
+        let width = usize::from(screen.cols).max(1);
+        let rows: Vec<bool> = screen
+            .cells
+            .chunks(width)
+            .zip(last.cells.chunks(width))
+            .map(|(a, b)| a != b)
+            .collect();
+        let same = (last.cursor, last.cursor_visible, &last.wrapped)
+            == (screen.cursor, screen.cursor_visible, &screen.wrapped);
+        (rows.contains(&true) || !same).then_some(rows)
+    }
     /// One frame per tick. The caller supplies a fully composed screen;
     /// therefore changes behind opaque overlays cannot escape into a frame.
     pub fn frame(&mut self, screen: Snapshot, caps: Caps) -> Vec<u8> {
@@ -254,27 +310,10 @@ impl Compositor {
             .last
             .as_ref()
             .is_some_and(|s| (s.cols, s.rows) == (screen.cols, screen.rows));
-        // Rows equal to what the terminal shows are skipped whole.
-        let width = usize::from(screen.cols);
-        let changed_rows: Vec<bool> = match self.last.as_ref().filter(|_| same_size) {
-            Some(last) => screen
-                .cells
-                .chunks(width.max(1))
-                .zip(last.cells.chunks(width.max(1)))
-                .map(|(a, b)| a != b)
-                .collect(),
-            None => vec![true; usize::from(screen.rows)],
-        };
-        if same_size
-            && !changed_rows.contains(&true)
-            && self.last.as_ref().is_some_and(|l| {
-                (l.cursor, l.cursor_visible, &l.wrapped)
-                    == (screen.cursor, screen.cursor_visible, &screen.wrapped)
-            })
-        {
+        let Some(changed_rows) = self.changed_rows(&screen, same_size) else {
             self.spare = Some(screen);
             return Vec::new();
-        }
+        };
         let mut out = String::new();
         if caps.sync {
             out.push_str("\x1b[?2026h");
