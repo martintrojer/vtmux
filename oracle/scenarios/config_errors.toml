@@ -9,7 +9,7 @@ size = [60, 8]
 # the errors go to show-messages as `message: file:line: text`. A startup
 # config's errors reach a control client as `%config-error` lines
 # (cfg_show_causes); for an attached terminal client they go to view mode
-# (D-009, vtmux has none), so no scenario attaches one. Line numbers count
+# (D-009, not done for config causes), so no scenario attaches one. Line numbers count
 # lines of the file, also after a %if.
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },

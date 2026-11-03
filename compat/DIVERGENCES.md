@@ -95,12 +95,12 @@ product reasons" category.
 - Evidence: reference tmux 3.8, isolated: `new -d -s a cat; new -d -s k cat; splitw -d -t a cat; resizep -Z -t a:0.1; respawnw -k -t a; display -p -t a '#{window_layout}'` -> `server exited unexpectedly`, exit 1, and every later command says `no server running`.
 - Category: Do not copy tmux bug
 
-### D-009: run-shell output to a pane or an attached client is dropped (no view mode)
+### D-009: config causes are not shown in view mode once a session is attached
 
-- Test / assertion: regress `run-shell-output.sh`, `[ "$($TMUX display -p '#{pane_mode}')" = "view-mode" ]` after `run -t: 'echo foo'`; the startup config's causes for an attached terminal client (`cfg_show_causes`).
-- tmux behaviour: `cmd_run_shell_print` (cmd-run-shell.c:79-104) writes the job's output lines, and its `returned N` / `terminated by signal N` message, into the target pane's `window_view_mode` when `-t` names a pane, or when there is no waiting item (`-b`, or a config file): the active pane of the client's session or of `cmd_find_from_nothing`. `cmdq_print` from an attached terminal client goes to view mode too (`server_client_print`, server-client.c:3259-3275), and so do the config's causes once a session is attached (cfg.c:258-279).
-- vtmux behaviour: vtmux has no view mode (`window-copy.c` modes are not implemented), so that output is dropped and `#{pane_mode}` stays empty. Output to a command client's stdout (no `-t`, without `-b`, from the CLI or a control client) is printed as tmux prints it. Config causes stay queued until the next `source-file` prints them.
-- Evidence: reference tmux 3.8, isolated: `new -d 'sleep 100'; run -t: 'echo foo'; display -p '#{pane_mode}'` -> `view-mode`; vtmux prints an empty line.
+- Test / assertion: none fails; the startup config's causes for an attached terminal client (`cfg_show_causes`).
+- tmux behaviour: once a session is attached (`new-session`, `attach-session`, cfg.c:239-280), the causes go into the view mode of its active pane, written unparsed (`window_copy_add(wp, 0, ...)`, escapes shown as text).
+- vtmux behaviour: view mode exists (`cmdq_print` from an attached client, `run-shell` output to a pane, parsed as tmux parses them; oracle `view_*`, regress `run-shell-output.sh`), but the config causes stay queued until the next `source-file` prints them; a control client gets them as `%config-error` as in tmux.
+- Evidence: reference tmux 3.8 with a config holding a bad command: `new` shows the cause in view mode; vtmux shows the shell.
 - Category: Deferred
 
 ### D-010: copy mode is partial (U1, U2 and U3 of the copy-mode split)

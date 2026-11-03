@@ -309,15 +309,19 @@ impl Source<'_> {
             let view = pane.term.screen();
             return (view.shared(), view.row_stamps().to_vec(), Vec::new());
         }
-        let (mut screen, selected) = match pane.modes.first() {
-            Some(crate::mode::Mode::Copy(m)) => {
+        let top = pane.modes.first();
+        let (mut screen, selected) = match (top, top.and_then(crate::mode::Mode::as_copy)) {
+            // Copy and view mode draw alike (window_copy_write_line).
+            (_, Some(m)) => {
                 let vi = self
                     .model
                     .number_option(TreeId::Window(pane.window), "mode-keys")
                     == 1;
                 (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
             }
-            Some(m) if m.tree_kind().is_some() => (self.tree_screen(pane, m, caps), Vec::new()),
+            (Some(m), _) if m.tree_kind().is_some() => {
+                (self.tree_screen(pane, m, caps), Vec::new())
+            }
             // A mode prompt over a plain pane (a held pane drew above).
             _ => (
                 pane.term

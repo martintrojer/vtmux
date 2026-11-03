@@ -1612,6 +1612,7 @@ impl Pane {
         let size = (usize::from(self.term.cols()), usize::from(self.term.rows()));
         match self.modes.first_mut() {
             Some(crate::mode::Mode::Copy(m)) => m.resize(size.0, size.1),
+            Some(crate::mode::Mode::View(m)) => m.resize(size.0, size.1),
             Some(crate::mode::Mode::Clock(m)) => m.resize(size.0, size.1),
             _ => {}
         }

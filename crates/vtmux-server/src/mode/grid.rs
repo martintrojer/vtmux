@@ -87,6 +87,11 @@ fn used_cells(mut row: Row) -> Row {
     row
 }
 
+/// Line `y` of `lines` if it is at or after `from`.
+fn lines_at(lines: &mut [Line], y: usize, from: usize) -> Option<&mut Line> {
+    if y < from { None } else { lines.get_mut(y) }
+}
+
 impl Grid {
     /// `window_copy_clone_screen`: a copy of `src` for a view `sx` x `sy`
     /// and the cursor in it (column, line). `trim` drops trailing empty
@@ -142,6 +147,41 @@ impl Grid {
         };
         let (cx, cy) = grid.resize_keeping(sx, sy, cx, hsize + cy);
         (grid, cx, cy)
+    }
+
+    /// The lines of `src` from line `from` on, read again over this copy's
+    /// own (view mode's `window_copy_vadd`, which writes into the copy):
+    /// `src` is the terminal the copy was taken from, at the copy's size,
+    /// and only scrolled since, so the lines before `from` (above the
+    /// cursor where it wrote) are as they were.
+    pub fn extend_from(&mut self, src: &PaneTerm, from: usize) {
+        let hsize = src.history_size();
+        let n = hsize + usize::from(src.rows());
+        let from = from.min(self.lines.len()).min(n);
+        self.lines.truncate(from);
+        self.lines.extend((from..n).map(|y| Line {
+            row: OnceCell::from(used_cells(src.row(y))),
+            src: None,
+            time: if y < hsize {
+                src.history_time(src.history_id(y))
+            } else {
+                0
+            },
+            prompt: false,
+            output: false,
+        }));
+        for (y, mark) in src.line_marks() {
+            if let Some(line) = lines_at(&mut self.lines, y, from) {
+                match mark {
+                    LineMark::Prompt => line.prompt = true,
+                    LineMark::Output => line.output = true,
+                }
+            }
+        }
+        // grid_scroll_history: each line scrolled is history scrolled.
+        self.hscrolled += hsize.saturating_sub(self.hsize);
+        self.hsize = hsize;
+        self.sy = n - hsize;
     }
 
     #[must_use]

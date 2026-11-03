@@ -7,7 +7,7 @@ size = [60, 8]
 # the new keys (-1, -T, -N), show-hooks, the hook firing, the keys typed
 # at an attached client (a root key, a braced one, a custom table), the log of commands
 # in show-messages (newest first, client ids and times removed), -v printing
-# each command with its line number, -n parsing only, (an attached client's view-mode screens are D-009).
+# each command with its line number, -n parsing only.
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "7", "cat"] },
   { run = ["set", "-g", "status-right", "", ";", "select-pane", "-t", "a", "-T", "t", ";", "split-window", "-d", "-T", "t2", "-t", "a", "cat"] },

@@ -2,7 +2,7 @@
 //! a pane's stack of modes, the newest first, drawn instead of the pane's
 //! own screen and given its keys.
 //!
-//! Copy, clock, display-panes and the tree modes (`choose-tree`,
+//! Copy, view, clock, display-panes and the tree modes (`choose-tree`,
 //! `choose-buffer`, `choose-client`: [`tree_mode`]) exist so far. What a
 //! mode offers the rest of the server is [`PaneMode`]
 //! (`struct window_mode`: `name`, `key_table`, `command`), and a mode that
@@ -17,6 +17,7 @@ pub mod prompt;
 pub mod reader;
 pub mod tree;
 pub mod tree_mode;
+pub mod view;
 pub mod window_buffer;
 pub mod window_client;
 pub mod window_tree;
@@ -30,6 +31,7 @@ use crate::server::Server;
 pub use clock::ClockMode;
 pub use copy::CopyMode;
 pub use panes::PanesMode;
+pub use view::ViewMode;
 pub use window_buffer::BufferMode;
 pub use window_client::ClientMode;
 pub use window_tree::WindowTree;
@@ -102,9 +104,11 @@ pub(crate) fn screen_key_mode(model: &Model) -> vtmux_vt::KeyMode {
 }
 
 /// One mode on a pane's stack (`struct window_mode_entry`).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Mode {
     Copy(Box<CopyMode>),
+    /// `window_view_mode`: copy mode over command output ([`view`]).
+    View(Box<ViewMode>),
     Clock(ClockMode),
     /// `choose-tree` (window-tree.c).
     Tree(Box<WindowTree>),
@@ -124,6 +128,7 @@ impl PaneMode for Mode {
     fn name(&self) -> &'static str {
         match self {
             Self::Copy(m) => m.name(),
+            Self::View(_) => "view-mode",
             Self::Clock(m) => m.name(),
             Self::Tree(_) => "tree-mode",
             Self::Panes(m) => m.name(),
@@ -137,6 +142,7 @@ impl PaneMode for Mode {
     fn key_table(&self, vi: bool) -> Option<&'static str> {
         match self {
             Self::Copy(m) => m.key_table(vi),
+            Self::View(m) => m.copy.key_table(vi),
             Self::Clock(m) => m.key_table(vi),
             Self::Tree(_) => None,
             Self::Panes(m) => m.key_table(vi),
@@ -149,6 +155,7 @@ impl PaneMode for Mode {
     fn takes_commands(&self) -> bool {
         match self {
             Self::Copy(m) => m.takes_commands(),
+            Self::View(m) => m.copy.takes_commands(),
             Self::Clock(m) => m.takes_commands(),
             Self::Tree(_) => false,
             Self::Panes(m) => m.takes_commands(),
@@ -161,6 +168,7 @@ impl PaneMode for Mode {
     fn set_prefix(&mut self, n: u32) {
         match self {
             Self::Copy(m) => m.set_prefix(n),
+            Self::View(m) => m.copy.set_prefix(n),
             Self::Clock(m) => m.set_prefix(n),
             Self::Tree(_) => {}
             Self::Panes(m) => m.set_prefix(n),
@@ -179,6 +187,7 @@ impl PaneMode for Mode {
     ) -> Result<copy::Outcome, copy::CommandError> {
         match self {
             Self::Copy(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
+            Self::View(m) => PaneMode::command(&mut m.copy, env, name, args, read_only_client),
             Self::Clock(m) => m.command(env, name, args, read_only_client),
             Self::Tree(_) => Err(copy::CommandError::NotImplemented(name.to_owned())),
             Self::Panes(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
@@ -197,6 +206,7 @@ impl Mode {
     pub fn key_mode(&self) -> vtmux_vt::KeyMode {
         match self {
             Self::Copy(m) => m.key_mode,
+            Self::View(m) => m.copy.key_mode,
             Self::Clock(m) => m.key_mode,
             Self::Tree(m) => m.common.key_mode,
             Self::Panes(m) => m.key_mode,
@@ -207,10 +217,14 @@ impl Mode {
         }
     }
 
+    /// The copy mode of a copy or view mode: the two share everything but
+    /// what they show (window-copy.c accepts either wherever it checks,
+    /// 7072-7214).
     #[must_use]
     pub fn as_copy(&self) -> Option<&CopyMode> {
         match self {
             Self::Copy(m) => Some(m),
+            Self::View(m) => Some(&m.copy),
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
@@ -235,6 +249,7 @@ impl Mode {
     pub fn as_copy_mut(&mut self) -> Option<&mut CopyMode> {
         match self {
             Self::Copy(m) => Some(m),
+            Self::View(m) => Some(&mut m.copy),
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
@@ -248,6 +263,8 @@ impl Mode {
     fn kill(&self) -> bool {
         match self {
             Self::Copy(m) => m.kill,
+            // window_pane_set_mode with no args: never -k.
+            Self::View(_) => false,
             Self::Tree(t) => t.common.kill,
             Self::Panes(m) => m.kill,
             Self::Buffer(t) => t.common.kill,
@@ -356,14 +373,37 @@ impl Model {
         kill: bool,
         mode: impl FnOnce(&Model) -> CopyMode,
     ) -> bool {
-        let pane = &self.panes[&p];
-        let existing = pane.modes.iter().position(|m| matches!(m, Mode::Copy(_)));
+        self.push_mode(
+            p,
+            |m| matches!(m, Mode::Copy(_)),
+            |model| {
+                let mut m = mode(model);
+                m.key_mode = screen_key_mode(model);
+                Mode::Copy(Box::new(m))
+            },
+            kill,
+        )
+    }
+
+    /// The rest of `window_pane_set_mode` (window.c:1758-1794) once the
+    /// mode is known not to be on top: the entry `is_same` finds further
+    /// down comes to the top, else `make` makes one; then the pane is
+    /// redrawn and the mode events fire.
+    pub(crate) fn push_mode(
+        &mut self,
+        p: PaneId,
+        is_same: impl Fn(&Mode) -> bool,
+        make: impl FnOnce(&Model) -> Mode,
+        kill: bool,
+    ) -> bool {
+        let Some(pane) = self.panes.get(&p) else {
+            return false;
+        };
+        let existing = pane.modes.iter().position(is_same);
         let mut entry = if let Some(i) = existing {
             self.panes.get_mut(&p).expect("pane").modes.remove(i)
         } else {
-            let mut m = mode(self);
-            m.key_mode = screen_key_mode(self);
-            Mode::Copy(Box::new(m))
+            make(self)
         };
         if let Some(m) = entry.as_copy_mut() {
             m.kill = kill;
@@ -475,6 +515,7 @@ impl Server {
         let size = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
         match pane.modes.first_mut() {
             Some(Mode::Copy(next)) => next.resize(size.0, size.1),
+            Some(Mode::View(next)) => next.resize(size.0, size.1),
             Some(Mode::Clock(next)) => next.resize(size.0, size.1),
             _ => {}
         }
@@ -622,28 +663,28 @@ impl Server {
             .min()
     }
 
-    /// The soonest drag scroll of a copy mode on top of a pane.
+    /// The soonest drag scroll of a copy or view mode on top of a pane.
     pub(crate) fn copy_drag_deadline(&self) -> Option<std::time::Instant> {
         self.model
             .panes
             .values()
-            .filter_map(|p| match p.modes.first() {
-                Some(Mode::Copy(m)) => m.drag_due(),
-                _ => None,
-            })
+            .filter_map(|p| p.modes.first()?.as_copy()?.drag_due())
             .min()
     }
 
-    /// `window_copy_scroll_timer` for every copy mode on top of a pane
-    /// whose drag timer is due.
+    /// `window_copy_scroll_timer` for every copy or view mode on top of a
+    /// pane whose drag timer is due.
     pub(crate) fn copy_drag_timers(&mut self, now: std::time::Instant) {
         let due: Vec<PaneId> = self
             .model
             .panes
             .iter()
-            .filter(|(_, p)| match p.modes.first() {
-                Some(Mode::Copy(m)) => m.drag_due().is_some_and(|at| at <= now),
-                _ => false,
+            .filter(|(_, p)| {
+                p.modes
+                    .first()
+                    .and_then(Mode::as_copy)
+                    .and_then(CopyMode::drag_due)
+                    .is_some_and(|at| at <= now)
             })
             .map(|(&id, _)| id)
             .collect();

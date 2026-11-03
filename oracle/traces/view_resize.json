@@ -1,0 +1,449 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "view_resize",
+  "inputs": {
+    "name": "view_resize",
+    "size": [
+      30,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "30",
+          "-y",
+          "7",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "[#{copy_position}/#{copy_position_limit}]"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "R",
+          "run-shell",
+          "i=1; while [ $i -le 9 ]; do echo \"line$i abcdefghijklmnopqrstuvwxyz0123456789\"; i=$((i+1)); done; echo short"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "D",
+          "display",
+          "-p",
+          "added after the resize"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0002R"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u000e\u000e"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "resize": [
+          60,
+          12
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u0002D"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "resize": [
+          25,
+          6
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "\u001b>"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002D"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[12/12]\\e[39m\\e[49mbcdefghijklmnopqrstuvwx",
+          "yz0123456789",
+          "line2 abcdefghijklmnopqrstuvwx",
+          "yz0123456789",
+          "line3 abcdefghijklmnopqrstuvwx",
+          "yz0123456789",
+          "line4 abcdefghijklmnopqrstuvwx",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[view-mode] [12] [0,0] [12/12] [line1 abcdefghijklmnopqrstuvwx]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[12/12]\\e[39m\\e[49mbcdefghijklmnopqrstuvwx",
+          "yz0123456789",
+          "line2 abcdefghijklmnopqrstuvwx",
+          "yz0123456789",
+          "line3 abcdefghijklmnopqrstuvwx",
+          "yz0123456789",
+          "line4 abcdefghijklmnopqrstuvwx",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/0]\\e[39m\\e[49m abcdefghijklmnopqrstuvwxyz0123456789",
+          "line2 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line3 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line4 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line5 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line6 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line7 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line8 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line9 abcdefghijklmnopqrstuvwxyz0123456789",
+          "short",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[view-mode] [0] [0,1] [0/0] [line2 abcdefghijklmnopqrstuvwxyz0123456789]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/0]\\e[39m\\e[49m abcdefghijklmnopqrstuvwxyz0123456789",
+          "added after the resizeqrstuvwxyz0123456789",
+          "line3 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line4 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line5 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line6 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line7 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line8 abcdefghijklmnopqrstuvwxyz0123456789",
+          "line9 abcdefghijklmnopqrstuvwxyz0123456789",
+          "short",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[0] [0,1] [0/0] [added after the resizeqrstuvwxyz0123456789]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[13/15]\\e[39m\\e[49mfter the resizeqrs",
+          "tuvwxyz0123456789",
+          "line3 abcdefghijklmnopqrs",
+          "tuvwxyz0123456789",
+          "line4 abcdefghijklmnopqrs",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[13] [0,0] [13/15] [added after the resizeqrs]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/15]\\e[39m\\e[49mz0123456789",
+          "line9 abcdefghijklmnopqrs",
+          "tuvwxyz0123456789",
+          "short",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0/15]\\e[39m\\e[49mz0123456789",
+          "added after the resizeqrs",
+          "tuvwxyz0123456789",
+          "short",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[0] [0,4] [0/15] []\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

@@ -475,8 +475,7 @@ status = "pass"
 status = "pass"
 
 [tests."run-shell-output.sh"]
-status = "xfail"
-reason = "run-shell output to a pane needs view mode (D-009); the CLI stdout, -t and server-survives-client-kill checks pass"
+status = "pass"
 
 [tests."screen-redraw-bidi.sh"]
 status = "xfail"

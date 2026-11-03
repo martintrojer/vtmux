@@ -1,0 +1,38 @@
+# View mode at two client sizes and resized while open
+# (window_copy_resize: the backing reflows, the cursor line is kept), then
+# a line added after the resize (written into the resized backing).
+name = "view_resize"
+size = [30, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "7", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["bind", "R", "run-shell", "i=1; while [ $i -le 9 ]; do echo \"line$i abcdefghijklmnopqrstuvwxyz0123456789\"; i=$((i+1)); done; echo short"] },
+  { run = ["bind", "D", "display", "-p", "added after the resize"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002R" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { keys = "\u000e\u000e" },
+  { screen = {} },
+  { resize = [60, 12] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { keys = "\u0002D" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { resize = [25, 6] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { keys = "\u001b>" },
+  { screen = {} },
+  { keys = "\u0002D" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },
+  { keys = "q" },
+  { screen = {} },
+]

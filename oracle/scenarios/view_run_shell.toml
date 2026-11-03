@@ -1,0 +1,50 @@
+# run-shell from a key binding: the job's lines go through cmdq_print for
+# the waiting item (cmd_run_shell_print), so to view mode on the client's
+# active pane, a last line without a newline too, escapes interpreted
+# (window_copy_vadd parses). A failing job adds its message. A second print
+# while view mode is up appends under the first (backing_written). The
+# mode is entered at print time: a later command in the same binding sees
+# #{pane_mode}. -t sends a job's output to that pane's view mode.
+name = "view_run_shell"
+size = [50, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "11", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["bind", "R", "run-shell", "printf 'one\\ntwo\\n\\033[31mred\\033[0m three\\nlast'"] },
+  { run = ["bind", "D", "display", "-p", "second"] },
+  { run = ["bind", "F", "run-shell", "exit 3"] },
+  { run = ["bind", "G", "display -p 'mode=#{pane_mode}' ; display -p 'again=#{pane_mode}'"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002R" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}]"] },
+  { keys = "\u0002D" },
+  { screen = {} },
+  { keys = "\u0002F" },
+  { screen = {} },
+  { keys = "\u0002R" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}] [#{copy_position}/#{copy_position_limit}]"] },
+  { keys = "q" },
+  { screen = {} },
+  { keys = "\u0002G" },
+  { screen = {} },
+  { keys = "q" },
+  { settle = {} },
+  { run = ["copy-mode", "-t", "a"] },
+  { keys = "\u0002D" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}]"] },
+  { keys = "q" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}]"] },
+  { keys = "q" },
+  { settle = {} },
+  { run = ["run", "-t", "a", "echo to-pane"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_mode}]"] },
+]
