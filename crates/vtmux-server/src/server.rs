@@ -2362,6 +2362,10 @@ impl Server {
                 .and_then(|c| c.plain.get())
                 .is_some_and(|p| p.cursor == cursor)
         {
+            #[cfg(test)]
+            if let Some(c) = cache {
+                c.skipped.set(c.skipped.get() + 1);
+            }
             return false;
         }
         let cols = usize::from(screen.cols);
@@ -3959,6 +3963,21 @@ mod tests {
         out
     }
 
+    /// The characters a frame draws, without its control sequences.
+    fn drawn_text(frame: &str) -> String {
+        let mut text = String::new();
+        let mut chars = frame.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                chars.next();
+                chars.find(|c| ('@'..='~').contains(c));
+            } else {
+                text.push(c);
+            }
+        }
+        text
+    }
+
     /// The plain-frame skip (a turn where no composed row or the cursor
     /// changed sends nothing) does not swallow a change: a turn that only
     /// moves the pane's cursor still sends a frame, and it is a cursor
@@ -4004,23 +4023,32 @@ mod tests {
             })
             .collect();
         assert_eq!(sent.last(), Some(&0), "a turn with no change: {sent:?}");
+        let skipped = |server: &super::Server| server.clients[&id].window_cache.skipped.get();
+        // The no-change turn was skipped by draw_window itself, not just
+        // diffed to nothing by the compositor.
+        let before = skipped(&server);
+        server.render_clients();
+        assert_eq!(frames(&mut server, id, &mut peer), b"");
+        assert_eq!(skipped(&server), before + 1, "draw_window skips a repeat");
         let pane = server.model.panes.get_mut(&p).unwrap();
         pane.term.feed(b"\x1b[3;5H");
         server.render_clients();
         let frame = String::from_utf8(frames(&mut server, id, &mut peer)).unwrap();
         assert!(frame.contains("\x1b[3;5H"), "the cursor moves: {frame:?}");
         // Nothing but control sequences: no cell is drawn again.
-        let mut text = String::new();
-        let mut chars = frame.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                chars.next();
-                chars.find(|c| ('@'..='~').contains(c));
-            } else {
-                text.push(c);
-            }
-        }
+        let text = drawn_text(&frame);
         assert_eq!(text, "", "a cursor move only: {frame:?}");
+        server.render_clients();
+        assert_eq!(frames(&mut server, id, &mut peer), b"", "nothing after it");
+        // A cell changes and the cursor ends where it was: a composed row
+        // changed, so the frame is not skipped and carries the text.
+        let before = skipped(&server);
+        let pane = server.model.panes.get_mut(&p).unwrap();
+        pane.term.feed(b"\x1b[1;1HZQ\x1b[3;5H");
+        server.render_clients();
+        let frame = String::from_utf8(frames(&mut server, id, &mut peer)).unwrap();
+        assert_eq!(drawn_text(&frame), "ZQ", "the changed cells: {frame:?}");
+        assert_eq!(skipped(&server), before, "a changed row is not skipped");
         server.render_clients();
         assert_eq!(frames(&mut server, id, &mut peer), b"", "nothing after it");
         std::fs::remove_dir_all(dir).unwrap();

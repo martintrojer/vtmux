@@ -123,6 +123,10 @@ pub struct WindowCache {
     /// What the last frame was drawn from, when it was a plain one (see
     /// [`PlainFrame`]); `None` otherwise.
     pub plain: std::cell::Cell<Option<PlainFrame>>,
+    /// Plain frames [`crate::server::Server`] skipped outright, for tests
+    /// to tell the skip from the compositor's own empty diff.
+    #[cfg(test)]
+    pub skipped: std::cell::Cell<u32>,
 }
 
 /// The inputs of a frame with nothing over the window but the status
