@@ -31,7 +31,17 @@ pub struct Source<'a> {
     pub env: &'a Environ,
     /// The attached clients (`#{session_attached_list}`).
     pub clients: std::rc::Rc<[crate::format_ctx::ClientView]>,
+    /// The last [`Source::theme`], for the option values it came from.
+    pub themes: &'a ThemeCache,
 }
+
+/// [`Source::theme`]'s last result and its inputs: the `theme` option, the
+/// ten slot options' values and the client's colours. tmux works the
+/// colours out once when one of these options changes or a client
+/// attaches (`server_client_update_theme_colours`), not per frame; the
+/// slot formats normally read only `#{client_colours}`.
+#[derive(Debug, Default)]
+pub struct ThemeCache(std::cell::RefCell<Option<(i64, Vec<String>, u32, Theme)>>);
 
 impl Source<'_> {
     pub(super) fn ctx(&self, found: Found, caps: Caps) -> Ctx<'_> {
@@ -104,16 +114,28 @@ impl Source<'_> {
             return Theme(TERMINAL.map(Color::Palette));
         }
         let prefix = if option == 2 { "light" } else { "dark" };
+        let values: Vec<String> = SLOTS
+            .iter()
+            .map(|slot| self.string(TreeId::Server, &format!("{prefix}-theme-{slot}")))
+            .collect();
+        if let Some((o, v, colours, theme)) = self.themes.0.borrow().as_ref()
+            && (*o, v, *colours) == (option, &values, caps.colours)
+        {
+            return *theme;
+        }
         let ctx = self.ctx(Found::default(), caps);
-        Theme(SLOTS.map(|slot| {
-            let value = self.string(TreeId::Server, &format!("{prefix}-theme-{slot}"));
+        let mut slots = values.iter();
+        let theme = Theme([(); 10].map(|()| {
+            let value = slots.next().map_or("", String::as_str);
             // server_client_update_theme_colours (server-client.c:1293):
             // FORMAT_NOJOBS.
-            match Colour::parse(&vtmux_core::format::expand_str_nojobs(&value, &ctx)) {
+            match Colour::parse(&vtmux_core::format::expand_str_nojobs(value, &ctx)) {
                 None | Some(Colour::Theme(_)) => Color::Default,
                 Some(c) => Theme::default().colour(c),
             }
-        }))
+        }));
+        *self.themes.0.borrow_mut() = Some((option, values, caps.colours, theme));
+        theme
     }
 
     /// The scene and drawing data for session `s`'s current window on a

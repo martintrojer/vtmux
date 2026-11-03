@@ -248,6 +248,8 @@ pub struct Server {
     pub model: Model,
     pub info: ServerInfo,
     pub global_env: Environ,
+    /// The theme colours last worked out ([`crate::render::window::Source::theme`]).
+    pub(crate) themes: crate::render::window::ThemeCache,
     /// `kill-server` ran: exit once replies are out.
     pub shutdown: bool,
     /// Nesting of `source-file`: with no client (cmd-source-file.c
@@ -489,6 +491,7 @@ impl Server {
             model,
             info,
             global_env,
+            themes: crate::render::window::ThemeCache::default(),
             shutdown: false,
             source_depths: BTreeMap::new(),
             focus_stale: std::collections::BTreeSet::new(),
@@ -2038,14 +2041,12 @@ impl Server {
                 self.send_passthrough(id, caps);
                 continue;
             }
-            let mut screen = vtmux_vt::Snapshot {
-                cols,
-                rows,
-                cells: vec![vtmux_vt::Cell::default(); usize::from(cols) * usize::from(rows)],
-                wrapped: Vec::new(),
-                cursor: None,
-                cursor_visible: true,
-            };
+            let mut screen = self
+                .clients
+                .get_mut(&id)
+                .expect("client")
+                .compositor
+                .buffer(cols, rows);
             // screen-redraw.c redraw_set_context: the scene sits below a
             // top status (REDRAW_STATUS_TOP) and above a bottom one.
             let area = rows.saturating_sub(lines);
@@ -2268,14 +2269,11 @@ impl Server {
         };
         let theme = source.theme(caps);
         let cols = usize::from(screen.cols);
-        let mut window = vtmux_vt::Snapshot {
-            rows,
-            cells: vec![vtmux_vt::Cell::default(); cols * usize::from(rows)],
-            cols: screen.cols,
-            wrapped: screen.wrapped.clone(),
-            cursor: screen.cursor,
-            cursor_visible: screen.cursor_visible,
-        };
+        let kept = cache.and_then(|c| c.buffer.borrow_mut().take());
+        let mut window = crate::render::blank(kept, screen.cols, rows);
+        window.wrapped.clone_from(&screen.wrapped);
+        window.cursor = screen.cursor;
+        window.cursor_visible = screen.cursor_visible;
         match cache {
             Some(c) => crate::render::compose::compose_cached(
                 &mut c.compose.borrow_mut(),
@@ -2298,9 +2296,14 @@ impl Server {
         }
         self.draw_pane_prompts(s, &source, &theme, &draw, caps, &mut window);
         let at = usize::from(y) * cols;
-        screen.cells[at..at + window.cells.len()].clone_from_slice(&window.cells);
+        // A swap, not a copy: the window buffer is blanked before its next
+        // use anyway.
+        screen.cells[at..at + window.cells.len()].swap_with_slice(&mut window.cells);
         screen.cursor = window.cursor.map(|(x, cy)| (x, cy + y));
         screen.cursor_visible = window.cursor_visible;
+        if let Some(c) = cache {
+            *c.buffer.borrow_mut() = Some(window);
+        }
     }
 
     /// Client `id`'s popup over `screen` (`popup_draw_cb`), and the cursor
@@ -2641,6 +2644,7 @@ impl Server {
             info: &self.info,
             env: &self.global_env,
             clients: self.client_views(),
+            themes: &self.themes,
         }
     }
 
