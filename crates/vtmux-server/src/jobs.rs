@@ -220,7 +220,24 @@ impl Server {
             &format!("{},{},{idx}", self.socket.display(), std::process::id()),
             false,
         );
+        // D5: not in tmux (compat/DIVERGENCES.md D-022).
+        if let Some(path) = self.shim_path(env.get("PATH")) {
+            env.set("PATH", &path, false);
+        }
         env.for_process()
+    }
+
+    /// `path` with the D5 `tmux` shim first, if the server has one.
+    pub(crate) fn shim_path(&self, path: Option<&str>) -> Option<String> {
+        self.shim.as_ref().map(|s| s.prepend(path))
+    }
+
+    /// A pane's `PATH`: the default when it has none (spawn.c), then the
+    /// D5 shim first (compat/DIVERGENCES.md D-022).
+    pub(crate) fn pane_path(&self, path: Option<&str>) -> String {
+        let path = path.unwrap_or(crate::shim::DEFAULT_PATH);
+        self.shim_path(Some(path))
+            .unwrap_or_else(|| path.to_owned())
     }
 
     /// Write what the job's stdin takes of its input; once all of it is

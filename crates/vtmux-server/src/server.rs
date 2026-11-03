@@ -326,6 +326,9 @@ pub struct Server {
     pub(crate) cmd_mouse: Option<crate::mouse::MouseEvent>,
     /// Where idle compression got to ([`crate::compress`]).
     pub(crate) compress: crate::compress::Rotation,
+    /// The `tmux` shim first on every child's `PATH` (D5); `None` if it
+    /// could not be made. Dropped (and removed) when the server goes.
+    pub(crate) shim: Option<crate::shim::Shim>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -511,7 +514,10 @@ impl Server {
             cmd_client: None,
             cmd_mouse: None,
             compress: crate::compress::Rotation::default(),
+            shim: None,
         };
+        server.shim = crate::shim::own_exe()
+            .and_then(|exe| crate::shim::Shim::create(&server.socket, &exe).ok());
         // server_start: the hourly tidy (server.c:157-172, `evtimer_add`).
         server.format_jobs_start_tidy();
         Ok(server)
@@ -3161,9 +3167,7 @@ impl Server {
         if let Some(path) = ps.client_path {
             child.set("PATH", path, false);
         }
-        if child.get("PATH").is_none() {
-            child.set("PATH", "/usr/bin:/bin:/usr/sbin:/sbin", false);
-        }
+        child.set("PATH", &self.pane_path(child.get("PATH")), false);
         // The shell and history budget come from the session's options,
         // not the starting client's shell.
         let session_tree = TreeId::Session(ps.session);

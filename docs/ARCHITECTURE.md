@@ -100,6 +100,8 @@ Commands run on a command queue (`cmdq.rs`, after tmux's `cmd-queue.c`). Each cl
 
 As in tmux, a command client does its own file I/O: `load-buffer` and `save-buffer` on a path, and `load-buffer -` from its stdin, become `ReadOpen` / `WriteOpen` requests. The command waits on its queue until the client answers `FileDone`, so a slow file such as a FIFO holds up only that client. Attached and control clients get the I/O done in the server, non-blocking.
 
+Scripts and plugins inside vtmux call plain `tmux`. So that they reach this server whatever `tmux` the user's `PATH` holds, the server makes a private `.<label>.bin/` next to its socket with `tmux` → its own executable (`shim.rs`, spec D5). It puts that directory first on `PATH` for every pane, popup and job. Run as `tmux`, the binary finds the server through `$TMUX`. tmux has no shim: compat/DIVERGENCES.md D-022.
+
 Control-mode clients (`vtmux -C`) use the same socket. They send command lines on stdin and get tmux's `%begin`/`%end`/`%error` guards, `%output`, and the other notifications instead of frames.
 
 ## Where libghostty sits

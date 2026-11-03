@@ -9,6 +9,7 @@ product reasons" category.
 - **Ghostty grid**: the D4 arbiter ruled for Ghostty's terminal-emulation behaviour over tmux's.
 - **Do not copy tmux bug**: tmux loses data, hangs or is unsafe. Needs evidence and a regression test.
 - **Deferred**: not done yet. Must not be claimed as compatible.
+- **Spec decision**: a numbered decision in the spec (`docs/specs/2026-10-29-vtmux.md`) chose this behaviour for drop-in use. Cite the decision.
 
 ## Entry template
 
@@ -197,3 +198,12 @@ product reasons" category.
 - tmux behaviour: input-keys.c:612 replaces BSpace with the `backspace` key and keeps the typed key's flags, including `KEYC_IMPLIED_META`; with a keypad key (`KP1`, `KPEnter`, ...) or `BTab` there and a typed CSI-u or xterm-modified M-BSpace, tmux sends nothing in all three key modes (BTab: in standard and mode 1).
 - vtmux behaviour: it sends the Escape-prefixed key (`\e1`, `\e[Z`). Named keys that have a Meta table entry (arrows, F-keys, Home, ...) match tmux.
 - Category: Deferred (needs both an unusual `backspace` value and a modifier-encoded typed key).
+
+### D-022: children's `PATH` starts with the `tmux` shim (spec D5)
+
+- Test / assertion: `crates/vtmux/tests/attach.rs` `tmux_shim_reaches_this_server_from_children` (vtmux only); `vtmux-server` `shim::tests`; regress `new-session-environment.sh` (`PATH=1` became `<shim>:1`).
+- tmux behaviour: panes get the session/global `PATH` (or the command client's, spawn.c:418-424); jobs (`run-shell`, `if-shell`, `#()`, hooks) and popups get `environ_for_session` unchanged. A script's `tmux` is whatever that `PATH` finds.
+- vtmux behaviour: at start the server makes `.<socket name>.bin/` (0700) beside its socket, holding `tmux` -> its own executable (symlinks resolved), and puts that directory first on `PATH` for every pane, respawned pane, popup and job, the config's `run-shell`/`if-shell` included; once only, when `PATH` already starts with it. The directory is removed when the server exits and a stale one is reused. Invoked as `tmux`, the binary finds this server through `$TMUX`, so `tmux set -g @x 1` from a script reaches it even when the server was started as `vtmux -L foo` and the user's `PATH` has another `tmux` first. `show-environment PATH` still shows the stored value.
+- Evidence: the owner's `.tmux.conf` under `vtmux -L foo`: mu-crew's poller and `run-shell` scripts ran the `tmux` 3.7c on `PATH`, which set `@mu_crew_*` on the wrong server, so the status line showed only the host pill. With the shim, after 12 s `@mu_crew_cpu_text`, `@mu_crew_uptime_value` and `@mu_crew_host_color` are set and `#{T:status-right}` has the CPU, RAM, host and uptime pills.
+- Category: Spec decision (D5, drop-in: plugins call `tmux` and must not depend on the user's `PATH`).
+- Patch: `compat/patches/0001-new-session-environment-path-shim.patch` (the script prints a pane's `PATH`; it drops a leading shim entry, a no-op under tmux).

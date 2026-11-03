@@ -1,0 +1,15 @@
+diff --git a/regress/new-session-environment.sh b/regress/new-session-environment.sh
+index fc93568..53b8987 100644
+--- a/regress/new-session-environment.sh
++++ b/regress/new-session-environment.sh
+@@ -18,7 +18,9 @@ cat <<EOF >$SCRIPT
+ (
+ echo TERM=\$TERM
+ echo PWD=\$(pwd)
+-echo PATH=\$PATH
++# vtmux (compat/DIVERGENCES.md D-022): drop the tmux shim dir that D5
++# puts first on a child's PATH; a no-op under tmux.
++echo PATH=\${PATH#*.bin:}
+ echo SHELL=\$SHELL
+ echo TEST=\$TEST
+ ) >$OUT
