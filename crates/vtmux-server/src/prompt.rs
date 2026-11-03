@@ -670,7 +670,7 @@ impl Prompt {
             return Some(out);
         }
         if list.len() > 1 {
-            self.complete_display = Some(list.iter().map(|n| format!(" {n}")).collect());
+            self.complete_display = Some(list.iter().flat_map(|n| [" ", n]).collect());
         }
         None
     }
