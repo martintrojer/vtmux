@@ -1,8 +1,11 @@
 //! Owned, renderable copy of a pane's visible grid.
 
-use libghostty_vt::render::{CellIterator, RenderState, RowIterator};
+use libghostty_vt::render::{CellIteration, CellIterator, Dirty, RenderState, RowIterator};
 use libghostty_vt::screen::{CellContentTag, CellWide};
 use libghostty_vt::style::{self, StyleColor};
+
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::term::PaneTerm;
 
@@ -142,78 +145,208 @@ impl From<style::Style> for Style {
     }
 }
 
-/// Copy the visible grid out of `term`.
+/// Copy the visible grid out of `term` ([`PaneTerm::screen`]).
 ///
 /// # Panics
 /// Only if libghostty fails to allocate.
 #[must_use]
 pub fn snapshot(term: &PaneTerm) -> Snapshot {
-    let mut state = RenderState::new().expect("render state");
-    let mut rows = RowIterator::new().expect("row iterator");
-    let mut cells = CellIterator::new().expect("cell iterator");
-    let snap = state.update(&term.term).expect("render update");
+    term.screen().snapshot().clone()
+}
 
-    let cols = snap.cols().unwrap_or(0);
-    let nrows = snap.rows().unwrap_or(0);
-    let mut out = Vec::with_capacity(usize::from(cols) * usize::from(nrows));
-    let mut wrapped = Vec::with_capacity(usize::from(nrows));
+/// A pane's visible grid kept up to date between frames: a persistent
+/// Ghostty render state re-reads only the rows Ghostty marked dirty, so a
+/// key's echo costs one row, not the whole screen. Each row carries the
+/// [`ScreenView::stamp`] of the update that last changed it, which lets
+/// the compositor skip rows that did not change.
+///
+/// Ghostty's dirty flags have one consumer, so a pane has one view
+/// ([`PaneTerm::screen`]); a fresh one reads every row.
+pub struct ScreenView {
+    state: Option<(RenderState<'static>, RowIterator<'static>, CellIterator<'static>)>,
+    /// Shared with the frames that show it: an update copies it only while
+    /// a frame still holds the previous one.
+    snap: Rc<Snapshot>,
+    /// Per row: the stamp of the update that last changed it.
+    rows: Vec<u64>,
+}
 
-    let mut row_iter = rows.update(&snap).expect("row iteration");
-    while let Some(row) = row_iter.next() {
-        wrapped.push(
-            row.raw_row()
-                .and_then(libghostty_vt::screen::Row::is_wrapped)
-                .unwrap_or(false),
-        );
-        let mut cell_iter = cells.update(row).expect("cell iteration");
-        while let Some(cell) = cell_iter.next() {
-            let mut style: Style = cell.style().map(Style::from).unwrap_or_default();
-            let (mut width, mut acs, mut link) = (1, false, false);
-            if let Ok(raw) = cell.raw_cell() {
-                // A cell erased with a background has no text and carries the
-                // colour in its content tag instead of its style.
-                match raw.content_tag() {
-                    Ok(CellContentTag::BgColorPalette) => {
-                        if let Ok(i) = raw.bg_color_palette() {
-                            style.bg = Color::Palette(i.0);
-                        }
-                    }
-                    Ok(CellContentTag::BgColorRgb) => {
-                        if let Ok(c) = raw.bg_color_rgb() {
-                            style.bg = Color::Rgb(c.r, c.g, c.b);
-                        }
-                    }
-                    _ => {}
-                }
-                width = match raw.wide() {
-                    Ok(CellWide::Wide) => 2,
-                    Ok(CellWide::SpacerTail) => 0,
-                    _ => 1,
-                };
-                acs = raw.is_protected().unwrap_or(false);
-                link = raw.has_hyperlink().unwrap_or(false);
-            }
-            let mut text = String::new();
-            let _ = cell.graphemes_utf8(&mut text);
-            out.push(Cell {
-                text,
-                width,
-                style,
-                acs,
-                link,
-                tab: false,
-            });
+/// Row stamps are unique across every view, so a row of a pane's new
+/// terminal (`respawn-pane`) never looks like an old one.
+static STAMP: AtomicU64 = AtomicU64::new(1);
+
+impl std::fmt::Debug for ScreenView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ScreenView").finish_non_exhaustive()
+    }
+}
+
+impl Default for ScreenView {
+    fn default() -> Self {
+        Self {
+            state: None,
+            snap: Rc::new(Snapshot {
+                cols: 0,
+                rows: 0,
+                cells: Vec::new(),
+                wrapped: Vec::new(),
+                cursor: None,
+                cursor_visible: true,
+            }),
+            rows: Vec::new(),
         }
     }
+}
 
-    Snapshot {
-        cols,
-        rows: nrows,
-        cells: out,
-        wrapped,
-        cursor: snap.cursor_viewport().ok().flatten().map(|c| (c.x, c.y)),
-        cursor_visible: snap.cursor_visible().unwrap_or(true),
+impl ScreenView {
+    /// The grid as of the last [`Self::update`].
+    #[must_use]
+    pub fn snapshot(&self) -> &Snapshot {
+        &self.snap
     }
+
+    /// The grid as of the last [`Self::update`], shared.
+    #[must_use]
+    pub fn shared(&self) -> Rc<Snapshot> {
+        Rc::clone(&self.snap)
+    }
+
+    /// Per row, the stamp of the update that last changed it; a row whose
+    /// stamp is unchanged since an earlier look holds the same cells.
+    #[must_use]
+    pub fn row_stamps(&self) -> &[u64] {
+        &self.rows
+    }
+
+    /// Bring the grid up to date with `term`, reading only dirty rows.
+    /// Returns whether any cell, the cursor or the size changed.
+    ///
+    /// # Panics
+    /// Only if libghostty fails to allocate.
+    pub(crate) fn update(&mut self, term: &PaneTerm) -> bool {
+        let stamp = STAMP.fetch_add(1, Ordering::Relaxed);
+        let (state, rows, cells) = self.state.get_or_insert_with(|| {
+            (
+                RenderState::new().expect("render state"),
+                RowIterator::new().expect("row iterator"),
+                CellIterator::new().expect("cell iterator"),
+            )
+        });
+        let snap = state.update(&term.term).expect("render update");
+        let cols = snap.cols().unwrap_or(0);
+        let nrows = snap.rows().unwrap_or(0);
+        let resized = (cols, nrows) != (self.snap.cols, self.snap.rows);
+        let dirty = snap.dirty().unwrap_or(Dirty::Full);
+        if dirty == Dirty::Clean && !resized {
+            // Nothing to read; the cursor still may have moved.
+            return update_cursor(&mut self.snap, &snap);
+        }
+        let full = resized || dirty == Dirty::Full;
+        let mut changed = resized;
+        let view = Rc::make_mut(&mut self.snap);
+        if resized {
+            let n = usize::from(cols) * usize::from(nrows);
+            view.cells = vec![Cell::default(); n];
+            view.wrapped = vec![false; usize::from(nrows)];
+            self.rows = vec![stamp; usize::from(nrows)];
+            view.cols = cols;
+            view.rows = nrows;
+        }
+        let width = usize::from(cols);
+        let mut scratch = String::new();
+        let mut row_iter = rows.update(&snap).expect("row iteration");
+        let mut y = 0;
+        while let Some(row) = row_iter.next() {
+            if y >= usize::from(nrows) {
+                break;
+            }
+            if full || row.dirty().unwrap_or(true) {
+                let _ = row.set_dirty(false);
+                let wrapped = row
+                    .raw_row()
+                    .and_then(libghostty_vt::screen::Row::is_wrapped)
+                    .unwrap_or(false);
+                let line = &mut view.cells[y * width..(y + 1) * width];
+                let mut row_changed = view.wrapped[y] != wrapped;
+                view.wrapped[y] = wrapped;
+                let mut cell_iter = cells.update(row).expect("cell iteration");
+                let mut x = 0;
+                while let Some(cell) = cell_iter.next() {
+                    let Some(slot) = line.get_mut(x) else { break };
+                    row_changed |= read_cell(cell, slot, &mut scratch);
+                    x += 1;
+                }
+                if row_changed {
+                    self.rows[y] = stamp;
+                    changed = true;
+                }
+            }
+            y += 1;
+        }
+        let _ = snap.set_dirty(Dirty::Clean);
+        update_cursor(&mut self.snap, &snap) || changed
+    }
+
+}
+
+/// Take the cursor from Ghostty's render state; whether it moved.
+fn update_cursor(view: &mut Rc<Snapshot>, snap: &libghostty_vt::render::Snapshot<'_, '_>) -> bool {
+    let cursor = snap.cursor_viewport().ok().flatten().map(|c| (c.x, c.y));
+    let cursor_visible = snap.cursor_visible().unwrap_or(true);
+    if (cursor, cursor_visible) == (view.cursor, view.cursor_visible) {
+        return false;
+    }
+    let view = Rc::make_mut(view);
+    view.cursor = cursor;
+    view.cursor_visible = cursor_visible;
+    true
+}
+
+/// Read one cell into `slot`, reusing its text buffer; whether it changed.
+fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String) -> bool {
+    let mut style: Style = cell.style().map(Style::from).unwrap_or_default();
+    let (mut width, mut acs, mut link) = (1, false, false);
+    if let Ok(raw) = cell.raw_cell() {
+        // A cell erased with a background has no text and carries the
+        // colour in its content tag instead of its style.
+        match raw.content_tag() {
+            Ok(CellContentTag::BgColorPalette) => {
+                if let Ok(i) = raw.bg_color_palette() {
+                    style.bg = Color::Palette(i.0);
+                }
+            }
+            Ok(CellContentTag::BgColorRgb) => {
+                if let Ok(c) = raw.bg_color_rgb() {
+                    style.bg = Color::Rgb(c.r, c.g, c.b);
+                }
+            }
+            _ => {}
+        }
+        width = match raw.wide() {
+            Ok(CellWide::Wide) => 2,
+            Ok(CellWide::SpacerTail) => 0,
+            _ => 1,
+        };
+        acs = raw.is_protected().unwrap_or(false);
+        link = raw.has_hyperlink().unwrap_or(false);
+    }
+    scratch.clear();
+    let _ = cell.graphemes_utf8(scratch);
+    let changed = slot.width != width
+        || slot.style != style
+        || slot.acs != acs
+        || slot.link != link
+        || slot.tab
+        || slot.text != *scratch;
+    if changed {
+        slot.text.clone_from(scratch);
+        slot.width = width;
+        slot.style = style;
+        slot.acs = acs;
+        slot.link = link;
+        slot.tab = false;
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -260,6 +393,46 @@ mod tests {
         );
         assert_eq!(s.cell(1, 0).unwrap().text, "│");
         assert_eq!(s.wrapped, [false, true, false]);
+    }
+
+    /// The kept view, read after every piece of output, matches a fresh
+    /// read of the same grid, and only the rows a piece changed get a new
+    /// stamp.
+    #[test]
+    fn kept_view_matches_a_fresh_read() {
+        let pieces: [&[u8]; 12] = [
+            b"one\r\ntwo\r\nthree",
+            b"\x1b[2;2H\x1b[31mX",
+            b"\r\n\r\n\r\nscrolled\r\nmore\r\n",
+            b"\x1b[?1049hALT\x1b[41m\x1b[K",
+            b"\x1b[?1049l",
+            b"\x1b]4;1;rgb:ff/00/00\x07",
+            b"\x1b[3;1H\xe4\xb8\x96wide\x1b(0q\x1b(B",
+            b"\x1b]8;;http://x\x07link\x1b]8;;\x07",
+            b"\x1b[2J\x1b[H",
+            b"0123456789abcdefwrapped",
+            b"\x1bc",
+            b"\x1b[?25lend",
+        ];
+        let mut kept = PaneTerm::new(16, 4, 100);
+        let mut fresh = PaneTerm::new(16, 4, 100);
+        for (i, piece) in pieces.iter().enumerate() {
+            kept.feed(piece);
+            fresh.feed(piece);
+            if i == 6 {
+                kept.resize(12, 5);
+                fresh.resize(12, 5);
+            }
+            let mut view = ScreenView::default();
+            view.update(&fresh);
+            assert_eq!(kept.screen().snapshot(), view.snapshot(), "after piece {i}");
+        }
+        let before = kept.screen().row_stamps().to_vec();
+        kept.feed(b"\x1b[2;1Hz");
+        let after = kept.screen().row_stamps().to_vec();
+        let moved: Vec<_> = (0..after.len()).filter(|&y| before[y] != after[y]).collect();
+        assert_eq!(moved, [1], "only the written row changed");
+        assert!(!kept.view.borrow_mut().update(&kept), "nothing new: no change");
     }
 
     #[test]
