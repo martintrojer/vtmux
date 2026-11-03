@@ -18,3 +18,14 @@ pub fn ignore_job_control() {
         }
     }
 }
+
+/// SIGTSTP back to its default action, stopping the process: an attached
+/// client stops itself with it on `suspend-client` (client.c:788-795 sets
+/// `SIG_DFL` before `kill(getpid(), SIGTSTP)`), whatever it inherited.
+pub fn default_stop_on_tstp() {
+    // SAFETY: SIG_DFL installs no handler code; signal(2) with a valid
+    // signal number cannot violate memory safety.
+    unsafe {
+        libc::signal(libc::SIGTSTP, libc::SIG_DFL);
+    }
+}

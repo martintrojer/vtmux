@@ -59,7 +59,9 @@ pub fn exec(
     let mut clients: Vec<(ClientId, String, (u32, u32), u64)> = server
         .clients
         .iter()
-        .filter(|(_, c)| c.attached.is_some())
+        // sort_get_clients (sort.c:461): CLIENT_UNATTACHEDFLAGS hides a
+        // suspended client.
+        .filter(|(_, c)| c.attached.is_some() && !c.suspended)
         .map(|(&id, c)| {
             let size = c
                 .hello

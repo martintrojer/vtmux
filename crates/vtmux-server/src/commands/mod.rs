@@ -25,6 +25,7 @@ mod display_message;
 mod display_panes;
 pub(crate) mod display_popup;
 pub(crate) mod file_io;
+mod find_window;
 mod join_pane;
 mod keys;
 mod kill_pane;
@@ -491,6 +492,7 @@ fn dispatch(
         "choose-tree" => choose_tree::exec(server, item, args, found),
         "choose-buffer" => choose_tree::exec_buffer(server, args, found),
         "choose-client" => choose_tree::exec_client(server, args, found),
+        "find-window" => find_window::exec(server, item, args, found),
         "set-buffer" => set_buffer::exec(server, item, args),
         "delete-buffer" => delete_buffer::exec(server, args),
         "show-buffer" => save_buffer::exec(server, item, args, found, true),
@@ -635,6 +637,7 @@ fn dispatch(
             attach(server, item, session, !args.flag('E'), true, detach)
         }
         "detach-client" => detach_client::exec(server, item, args),
+        "suspend-client" => detach_client::suspend(server, item, args),
         "command-prompt" => command_prompt::exec(server, item, args),
         "confirm-before" => confirm_before::exec(server, item, args),
         "display-popup" => display_popup::exec(server, item, args, found),

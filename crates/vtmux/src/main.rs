@@ -378,7 +378,8 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
                 | ServerMsg::ReadOpen { .. }
                 | ServerMsg::WriteOpen { .. }
                 | ServerMsg::WriteData(_)
-                | ServerMsg::WriteClose,
+                | ServerMsg::WriteClose
+                | ServerMsg::Suspend,
             )) => {}
             Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
         }
@@ -418,6 +419,8 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
                 );
             }
             Ok(Some(ServerMsg::Ready)) => {
+                // suspend-client stops the client with SIGTSTP.
+                vtmux_server::sys::signal::default_stop_on_tstp();
                 return ExitCode::from(
                     u8::try_from(vtmux_client::attach::attach(stream)).unwrap_or(1),
                 );
@@ -435,6 +438,8 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
                 let _ = protocol::write_msg(stream, &ClientMsg::FileDone { error });
             }
             Ok(Some(ServerMsg::ReadOpen { path })) => files::read(stream, path.as_deref()),
+            // Only an attached client is suspended.
+            Ok(Some(ServerMsg::Suspend)) => {}
             Ok(None) | Err(_) => {
                 // client.c: CLIENT_EXIT_LOST_SERVER.
                 write_err(b"server exited unexpectedly");

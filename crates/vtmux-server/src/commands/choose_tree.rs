@@ -16,12 +16,12 @@ use crate::target::Found;
 /// the window was zoomed already. Then the pane's size, if it still is.
 fn zoom_and_size(
     server: &mut Server,
-    args: &Args,
+    zoom: bool,
     found: Found,
     p: vtmux_core::ids::PaneId,
 ) -> (Option<vtmux_core::ids::WindowId>, Option<(usize, usize)>) {
     let mut unzoom = None;
-    if args.flag('Z')
+    if zoom
         && let Some(w) = found.window
         && !server
             .model
@@ -61,7 +61,7 @@ pub fn exec_buffer(server: &mut Server, args: &Args, found: Found) -> Result<(),
         return Ok(());
     }
     server.reset_no_stack(p);
-    let (unzoom, Some(size)) = zoom_and_size(server, args, found, p) else {
+    let (unzoom, Some(size)) = zoom_and_size(server, args.flag('Z'), found, p) else {
         return Ok(());
     };
     let options = window_buffer::Options {
@@ -96,7 +96,7 @@ pub fn exec_client(server: &mut Server, args: &Args, found: Found) -> Result<(),
         return Ok(());
     }
     server.reset_no_stack(p);
-    let (unzoom, Some(size)) = zoom_and_size(server, args, found, p) else {
+    let (unzoom, Some(size)) = zoom_and_size(server, args.flag('Z'), found, p) else {
         return Ok(());
     };
     let options = window_client::Options {
@@ -126,7 +126,6 @@ pub fn exec(
     found: Found,
 ) -> Result<(), CmdError> {
     let sort = window_tree::sort_option(args.value('O'))?;
-    let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
     let options = Options {
         start: if args.flag('s') {
             Start::Session
@@ -145,14 +144,25 @@ pub fn exec(
         hide_this_pane: args.flag('h'),
         accept: args.flag('y'),
     };
-    let (unzoom, Some(size)) = zoom_and_size(server, args, found, p) else {
+    open(server, found, options, args.flag('Z'), args.flag('k'))
+}
+
+/// `window_pane_set_mode(wp, NULL, &window_tree_mode, ...)`: open the tree
+/// on the target pane, `zoom` being `-Z` and `kill` `-k`.
+pub(super) fn open(
+    server: &mut Server,
+    found: Found,
+    options: Options,
+    zoom: bool,
+    kill: bool,
+) -> Result<(), CmdError> {
+    let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
+    let (unzoom, Some(size)) = zoom_and_size(server, zoom, found, p) else {
         return Ok(());
     };
     let mut mode = WindowTree::new(p, size, found, options);
     mode.common.unzoom = unzoom;
     mode.build(server);
-    server
-        .model
-        .set_tree_mode(p, args.flag('k'), |_| Some(mode));
+    server.model.set_tree_mode(p, kill, |_| Some(mode));
     Ok(())
 }

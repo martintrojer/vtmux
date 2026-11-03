@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
-use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGWINCH};
+use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::protocol::{self, ClientMsg, ProtocolError, ServerMsg};
 
@@ -88,11 +88,11 @@ fn run(stream: &mut UnixStream) -> io::Result<Leave> {
     // goes to proc_signal_cb and client_signal ignores it while attached;
     // SIGQUIT is SIG_IGN (proc.c proc_set_signals:254-261). Catching it and
     // doing nothing is the same for a process that never execs.
-    let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGQUIT])?;
+    let mut signals = Signals::new([SIGTERM, SIGHUP, SIGWINCH, SIGINT, SIGQUIT, SIGCONT])?;
     let mut poll = Poll::new()?;
     poll.registry()
         .register(&mut signals, SIGNALS, Interest::READABLE)?;
-    let _raw = RawTty::enter()?;
+    let raw = RawTty::enter()?;
     let stdin = io::stdin();
     poll.registry()
         .register(&mut SourceFd(&stdin.as_raw_fd()), STDIN, Interest::READABLE)?;
@@ -113,7 +113,7 @@ fn run(stream: &mut UnixStream) -> io::Result<Leave> {
     );
     stream.set_nonblocking(true)?;
     let mut out = Output::default();
-    let result = relay(stream, &mut poll, &mut signals, &mut out);
+    let result = relay(stream, &mut poll, &mut signals, &mut out, &raw);
     // Teardown escapes are in the buffer: deliver them before the guard
     // restores termios.
     let flushed = out.finish();
@@ -260,11 +260,42 @@ fn high_water() -> usize {
     })
 }
 
+/// Send what the terminal has typed until `WouldBlock`.
+fn read_stdin(stream: &mut UnixStream) -> io::Result<Option<Leave>> {
+    let mut bytes = [0; 4096];
+    loop {
+        match io::stdin().read(&mut bytes) {
+            // The tty is gone: tmux's server drops the client itself
+            // (tty_read_callback -> server_client_lost, tty.c:181-189), with
+            // no MSG_EXITING and so no focus-out. Close the connection, as it
+            // would.
+            Ok(0) => return Ok(Some(Leave::exit(1, "lost tty"))),
+            Ok(n) => send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// `MSG_SUSPEND` (client.c:784-795): the teardown the server sent is
+/// written, the terminal gets its modes back and the client stops itself
+/// with SIGTSTP (left at its default action by the binary). In an
+/// orphaned process group the kernel discards it and the client stays
+/// suspended, as tmux's does.
+fn suspend(out: &mut Output, raw: &RawTty) -> io::Result<()> {
+    out.finish()?;
+    raw.suspend();
+    let _ = rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TSTP);
+    Ok(())
+}
+
 fn relay(
     stream: &mut UnixStream,
     poll: &mut Poll,
     signals: &mut Signals,
     out: &mut Output,
+    raw: &RawTty,
 ) -> io::Result<Leave> {
     let mut events = Events::with_capacity(16);
     let mut socket = Socket::default();
@@ -277,20 +308,12 @@ fn relay(
         }
         for event in &events {
             match event.token() {
+                // A suspended client leaves the terminal's input to
+                // whoever has it now (tty_stop_tty: event_del(event_in)).
+                STDIN if socket.suspended => {}
                 STDIN => {
-                    let mut bytes = [0; 4096];
-                    loop {
-                        match io::stdin().read(&mut bytes) {
-                            // The tty is gone: tmux's server drops the client
-                            // itself (tty_read_callback -> server_client_lost,
-                            // tty.c:181-189), with no MSG_EXITING and so no
-                            // focus-out. Close the connection, as it would.
-                            Ok(0) => return Ok(Leave::exit(1, "lost tty")),
-                            Ok(n) => send(stream, &ClientMsg::Input(bytes[..n].to_vec()))?,
-                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                            Err(e) => return Err(e),
-                        }
+                    if let Some(exit) = read_stdin(stream)? {
+                        return Ok(exit);
                     }
                 }
                 STDOUT => out.flush()?,
@@ -309,16 +332,28 @@ fn relay(
                             }
                             SIGTERM | SIGHUP => {
                                 let _ = send(stream, &ClientMsg::Detach);
-                                socket.signal_exit = Some(
-                                    if sig == SIGTERM {
-                                        "terminated"
-                                    } else {
-                                        "lost tty"
-                                    }
-                                    .to_owned(),
-                                );
+                                // client.c:543-544: a suspended client
+                                // leaves with no reason on SIGTERM.
+                                socket.signal_exit = match sig {
+                                    SIGTERM if socket.suspended => None,
+                                    SIGTERM => Some("terminated".to_owned()),
+                                    _ => Some("lost tty".to_owned()),
+                                };
                             }
-                            _ => {} // SIGINT, SIGQUIT
+                            // client.c:551-559: back from the stop, the
+                            // terminal is raw again and the server told.
+                            // A resize meanwhile comes as SIGWINCH.
+                            SIGCONT if socket.suspended => {
+                                socket.suspended = false;
+                                raw.resume()?;
+                                send(stream, &ClientMsg::Wakeup)?;
+                                // Input typed before the stop was never
+                                // read: edge-triggered, it raises no event.
+                                if let Some(exit) = read_stdin(stream)? {
+                                    return Ok(exit);
+                                }
+                            }
+                            _ => {} // SIGINT, SIGQUIT, SIGCONT
                         }
                     }
                 }
@@ -331,6 +366,10 @@ fn relay(
         {
             return Ok(exit);
         }
+        if socket.suspend_now {
+            socket.suspend_now = false;
+            suspend(out, raw)?;
+        }
         out.ack(stream);
     }
 }
@@ -342,6 +381,10 @@ struct Socket {
     input: Vec<u8>,
     readable: bool,
     signal_exit: Option<String>,
+    /// `client_suspended`: between `Suspend` and SIGCONT.
+    suspended: bool,
+    /// `Suspend` arrived: stop once this read is dispatched.
+    suspend_now: bool,
 }
 
 impl Socket {
@@ -383,6 +426,10 @@ impl Socket {
                             ServerMsg::Exec { command, shell } => {
                                 out.discard_to_last_frame();
                                 return Ok(Some(Leave::Exec { command, shell }));
+                            }
+                            ServerMsg::Suspend => {
+                                self.suspended = true;
+                                self.suspend_now = true;
                             }
                             // File requests go to command clients only: an
                             // attached client's I/O is the server's.

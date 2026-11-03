@@ -188,8 +188,7 @@ status = "pass"
 status = "pass"
 
 [tests."find-window.sh"]
-status = "xfail"
-reason = "not implemented (M0 baseline)"
+status = "pass"
 
 [tests."floating-pane-covers-tiled-pane.sh"]
 status = "skip"
