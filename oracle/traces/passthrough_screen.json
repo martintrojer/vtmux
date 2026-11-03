@@ -1,0 +1,790 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "passthrough_screen",
+  "inputs": {
+    "name": "passthrough_screen",
+    "size": [
+      40,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "7",
+          "sh",
+          "-c",
+          "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:w",
+          "-T",
+          "ptitle"
+        ]
+      },
+      {
+        "wait_for": "up"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-passthrough",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w",
+          "Enter"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "title": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{pane_title}|#{pane_in_mode}|#{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w",
+          "sh",
+          "-c",
+          "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:w",
+          "-T",
+          "ptitle"
+        ]
+      },
+      {
+        "wait_for": "up"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-passthrough",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w",
+          "Enter"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "title": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{pane_title}|#{pane_in_mode}|#{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "a:w",
+          "sh",
+          "-c",
+          "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:w",
+          "-T",
+          "ptitle"
+        ]
+      },
+      {
+        "wait_for": "up"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-passthrough",
+          "all"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w",
+          "Enter"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "title": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{pane_title}|#{pane_in_mode}|#{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-passthrough",
+          "bogus"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-passthrough",
+          "ON"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-passthrough",
+          "1"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "allow-passthrough",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-wu",
+          "-t",
+          "a:w",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-p",
+          "-t",
+          "a:w",
+          "allow-passthrough",
+          "all"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-pv",
+          "-t",
+          "a:w",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "allow-passthrough"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "allow-passthrough",
+          "on"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "XYZ",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ptitle|0|0,2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\nXYZ\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "on\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "XYZ",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "INNER\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ptitle|0|0,2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\nXYZ\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "all\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "XYZ",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "INNER\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ptitle|0|0,2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\nXYZ\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown value: bogus\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown value: ON\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown value: 1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "all\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "all\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "off\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -50,6 +50,7 @@ steps = [ ... ]
 | `{ settle = {} }` | wait for the output a preceding input provoked, then 150 ms without output from any client (`quiet_ms` overrides); `react = true` first waits for any output since the previous settle, for steps that provoke a reaction without keys (a CLI `resize-window` that sends a pane SIGWINCH after its 250 ms timer) |
 | `{ wait_for = "chan" }` | `wait-for chan`; observes like `run` |
 | `{ screen = {} }` | settle, then observe the attached client's screen |
+| `{ title = {} }` | settle, then observe the attached client's terminal title (OSC 0/2 from `set-titles`) as a `cli` observation: the title and a newline |
 | `{ divergence = { id = "D-NNN", expect = {...} } }` | annotates the next observation: replay compares vtmux against `expect` (the documented behaviour from `compat/DIVERGENCES.md`), never skips it |
 
 `expect` uses the stored observation shape, e.g. `{ kind = "cli", stdout = "...", stderr = "", exit = 0 }`.

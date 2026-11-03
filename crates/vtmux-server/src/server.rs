@@ -474,7 +474,13 @@ impl Server {
         );
         let mut model = Model::default();
         model.options = OptionsStore::new(&defaults);
-        let info = ServerInfo::new(socket.to_string_lossy().into_owned());
+        let mut info = ServerInfo::new(socket.to_string_lossy().into_owned());
+        info.config_files = config
+            .config_files
+            .iter()
+            .map(|p| p.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(",");
         model.format_base = Some(std::rc::Rc::new((info.clone(), global_env.clone())));
         let mut server = Self {
             model,

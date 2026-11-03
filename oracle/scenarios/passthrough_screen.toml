@@ -1,0 +1,62 @@
+name = "passthrough_screen"
+size = [40, 8]
+# allow-passthrough (input.c input_dcs_dispatch, screen-write.c
+# screen_write_rawstring): the payload of `DCS tmux; ... ST` (a doubled ESC
+# is one) goes raw to the clients only when allowed. The oracle cannot see raw
+# bytes (those stay in attach.rs); what it sees is what must NOT happen in any
+# mode: nothing of the payload is drawn on the client's screen or in capture-pane,
+# the pane's title is not set by the inner OSC 2, and the inner SGR does not
+# leak into the grid. What it can see is the client terminal's title (`title`
+# step): the inner OSC 2 retitles it when the payload is delivered. Panes in the current window and in a background window,
+# under off/on/all, and the option's own show output (`show -gv`, bad values).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["select-pane", "-t", "a:w", "-T", "ptitle"] },
+  { wait_for = "up" },
+  { run = ["show", "-gv", "allow-passthrough"] },
+  { attach = { session = "a" } },
+  { run = ["set", "-g", "allow-passthrough", "off"] },
+  { run = ["show", "-gv", "allow-passthrough"] },
+  { run = ["send-keys", "-t", "a:w", "Enter"] },
+  { wait_for = "done" },
+  { settle = {} },
+  { screen = {} },
+  { title = {} },
+  { run = ["display", "-p", "-t", "a:w", "#{pane_title}|#{pane_in_mode}|#{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:w"] },
+  { run = ["respawn-pane", "-k", "-t", "a:w", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },
+  { run = ["select-pane", "-t", "a:w", "-T", "ptitle"] },
+  { wait_for = "up" },
+  { run = ["set", "-g", "allow-passthrough", "on"] },
+  { run = ["show", "-gv", "allow-passthrough"] },
+  { run = ["send-keys", "-t", "a:w", "Enter"] },
+  { wait_for = "done" },
+  { settle = {} },
+  { screen = {} },
+  { title = {} },
+  { run = ["display", "-p", "-t", "a:w", "#{pane_title}|#{pane_in_mode}|#{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:w"] },
+  { run = ["respawn-pane", "-k", "-t", "a:w", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },
+  { run = ["select-pane", "-t", "a:w", "-T", "ptitle"] },
+  { wait_for = "up" },
+  { run = ["set", "-g", "allow-passthrough", "all"] },
+  { run = ["show", "-gv", "allow-passthrough"] },
+  { run = ["send-keys", "-t", "a:w", "Enter"] },
+  { wait_for = "done" },
+  { settle = {} },
+  { screen = {} },
+  { title = {} },
+  { run = ["display", "-p", "-t", "a:w", "#{pane_title}|#{pane_in_mode}|#{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:w"] },
+  { run = ["set", "-g", "allow-passthrough", "bogus"] },
+  { run = ["set", "-g", "allow-passthrough", "ON"] },
+  { run = ["set", "-g", "allow-passthrough", "1"] },
+  { run = ["show", "-gv", "allow-passthrough"] },
+  { run = ["set", "-g", "allow-passthrough", "off"] },
+  { run = ["set", "-wu", "-t", "a:w", "allow-passthrough"] },
+  { run = ["set", "-p", "-t", "a:w", "allow-passthrough", "all"] },
+  { run = ["show", "-pv", "-t", "a:w", "allow-passthrough"] },
+  { run = ["show", "-gv", "allow-passthrough"] },
+  { run = ["set", "-s", "allow-passthrough", "on"] },
+]

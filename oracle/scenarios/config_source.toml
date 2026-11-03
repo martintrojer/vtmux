@@ -1,0 +1,52 @@
+name = "config_source"
+size = [60, 8]
+# source-file of a multi-line config (cfg.c load_cfg, cmd-parse.y): comments,
+# %hidden, %if/%elif/%else/%endif over a format, bind/unbind (-n -r -T -N),
+# set-hook (-g, -ga), run-shell, if-shell (command and -F), array and user
+# options, a braced bind. Observed after it ran: the options, list-keys for
+# the new keys (-1, -T, -N), show-hooks, the hook firing, the keys typed
+# at an attached client (a root key, a braced one, a custom table), the log of commands
+# in show-messages (newest first, client ids and times removed), -v printing
+# each command with its line number, -n parsing only, (an attached client's view-mode screens are D-009).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "7", "cat"] },
+  { run = ["set", "-g", "status-right", "", ";", "select-pane", "-t", "a", "-T", "t", ";", "split-window", "-d", "-T", "t2", "-t", "a", "cat"] },
+  { run = ["set-buffer", "-b", "c", "# comment line\nset -g @a 1\n%hidden X=hello\n%if \"#{==:#{@a},1}\"\nset -g @b \"yes-#{X}\"\n%elif \"1\"\nset -g @b elif\n%else\nset -g @b no\n%endif\nbind -n F7 set -g @k f7\nbind -N \"my note\" -T mytab x display-message \"hi\"\nbind -r -T mytab y send-keys -X cancel\nunbind -n F5\nset-hook -g after-select-pane 'set -g @hook fired'\nset-hook -ga after-select-pane 'set -ga @hook +'\nrun-shell 'echo ran-from-run'\nif-shell 'true' 'set -g @c ifyes' 'set -g @c ifno'\nif-shell -F '0' 'set -g @d yes' 'set -g @d no'\nset -g @e \"5 6 7\"\nset -ag @e \" 8\"\nset -g terminal-features[3] 'xterm*:RGB'\nset -g status-left '[#S] '\nbind -n F9 { display-message \"braced\" ; set -g @br 1 }\nbind -T mytab z run-shell 'true' ; bind -n F6 switch-client -T mytab\nset -g @multi 'one \\\ntwo'\n"] },
+  { run = ["save-buffer", "-b", "c", "good.conf"] },
+  { run = ["source-file", "-n", "good.conf"] },
+  { run = ["show", "-gv", "@a"] },
+  { run = ["source-file", "good.conf"] },
+  { run = ["show", "-g", "@a"] },
+  { run = ["show", "-g", "@b"] },
+  { run = ["show", "-g", "@c"] },
+  { run = ["show", "-g", "@d"] },
+  { run = ["show", "-g", "@e"] },
+  { run = ["show", "-g", "@multi"] },
+  { run = ["show", "-g", "@br"] },
+  { run = ["show", "-g", "terminal-features"] },
+  { run = ["show", "-g", "status-left"] },
+  { run = ["list-keys", "-T", "mytab"] },
+  { run = ["list-keys", "-1", "-T", "root", "F7"] },
+  { run = ["list-keys", "-1", "-T", "root", "F9"] },
+  { run = ["list-keys", "-N", "-T", "mytab"] },
+  { run = ["show-hooks", "-g", "after-select-pane"] },
+  { run = ["select-pane", "-t", "a.1"] },
+  { run = ["show", "-gv", "@hook"] },
+  { run = ["run-shell", "tmux show-messages | sed -e 's/^[^ ]* //' -e 's/client-[0-9]* //' | grep -v 'show-messages'"] },
+  { run = ["source-file", "-v", "good.conf"] },
+  { run = ["source-file", "-nv", "good.conf"] },
+  { run = ["run-shell", "tmux show-messages | sed -e 's/^[^ ]* //' -e 's/client-[0-9]* //' | grep -v 'show-messages'"] },
+  { run = ["show-hooks", "-g"] },
+  { attach = { session = "a" } },
+  { keys = "\u001b[18~" },
+  { settle = {} },
+  { keys = "\u001b[20~" },
+  { settle = {} },
+  { screen = {} },
+  { keys = "\u001b[17~x" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["show", "-g", "@k"] },
+  { run = ["show", "-g", "@br"] },
+  { run = ["display-message", "-p", "-t", "a", "#{config_files}"] },
+]

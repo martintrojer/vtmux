@@ -45,6 +45,10 @@ pub enum Step {
     WaitFor(String),
     /// Observe the attached client's screen.
     Screen(Empty),
+    /// Observe the title the attached client's terminal ends up with (after
+    /// OSC 0/2 from `set-titles`), as a `cli` observation: stdout is the
+    /// title and a newline.
+    Title(Empty),
     /// Annotates the next observation: replay compares vtmux against `expect`.
     Divergence(Divergence),
 }

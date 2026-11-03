@@ -1,0 +1,1096 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "config_errors",
+  "inputs": {
+    "name": "config_errors",
+    "size": [
+      60,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-bad.conf",
+          "set -g @one 1\nset -g nosuchopt 1\nset -g @two 2\nset -g status-interval notanumber\nbind -n nosuchkey x\nbind-key -T nosuchtab y display\nset -g @three 3\nif-shell 'true' 'set -g nosuchopt2 x'\nrun-shell 'exit 3'\n%if \"1\"\nset -g @four 4\ndisplay-message -p \"ok-after\"\n%endif\nset-hook -g nosuchhook 'display -p x'\nswitch-client -t nosuchsession\nset -g @five 5\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-bad.conf",
+          "bad.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-parse.conf",
+          "set -g @p1 1\nnosuchcmd arg\nset -g @p2 2\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-parse.conf",
+          "parse.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-parse0.conf",
+          "set -g @r1 1\nbind -n F8\nset -g @r2 2\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-parse0.conf",
+          "parse0.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-parse2.conf",
+          "set -g @q1 1\n%if 1\nset -g @q2 2\nset -g @five \"unterminated\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-parse2.conf",
+          "parse2.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-syn.conf",
+          "set -g @s1 1\nset -g @s2 'abc\nset -g @s3 3\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-syn.conf",
+          "syn.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-syn2.conf",
+          "set -g @t1 1\n%if 1\nset -g @t2 2\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-syn2.conf",
+          "syn2.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-syn3.conf",
+          "set -g @u1 1\n%endif\nset -g @u2 2\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-syn3.conf",
+          "syn3.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-syn4.conf",
+          "set -g @v1 1\nbind -n F8 { display -p a\nset -g @v2 2\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-syn4.conf",
+          "syn4.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-syn5.conf",
+          "set -g @w1 1\ndisplay -p \"x\" }\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-syn5.conf",
+          "syn5.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "b-ok.conf",
+          "set -g @ok1 1\nset -g @ok2 2\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "b-ok.conf",
+          "ok.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "bad.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@one"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@two"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@three"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@four"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@five"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-n",
+          "bad.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-nv",
+          "bad.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-v",
+          "bad.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "parse.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@p1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "parse0.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@r1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "parse2.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@q1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "syn.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@s1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "syn2.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@t1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "syn3.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@u1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "syn4.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@v1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "syn5.conf"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "@w1"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "ok.conf",
+          "bad.conf",
+          "nosuch.conf",
+          "parse.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "nosuch.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-q",
+          "nosuch.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "*.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-q",
+          "nosuch*.conf"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "."
+        ]
+      },
+      {
+        "run": [
+          "source-file"
+        ]
+      },
+      {
+        "run": [
+          "source-file",
+          "-F",
+          "#{d:current_file}x"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux show-messages | sed -e 's/^[^ ]* //' -e 's/client-[0-9]* //' | grep -v 'show-messages' | grep -v '^command: \\(set-buffer\\|save-buffer\\|run-shell\\)'"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "boot",
+          ";",
+          "set-buffer",
+          "-b",
+          "c",
+          "set -g @one 1\nset -g nosuchopt 1\nset -g @two 2\nset -g status-interval notanumber\nbind -n nosuchkey x\nbind-key -T nosuchtab y display\nset -g @three 3\nif-shell 'true' 'set -g nosuchopt2 x'\nrun-shell 'exit 3'\n%if \"1\"\nset -g @four 4\ndisplay-message -p \"ok-after\"\n%endif\nset-hook -g nosuchhook 'display -p x'\nswitch-client -t nosuchsession\nset -g @five 5\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "c",
+          "start-bad.conf"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "c",
+          "set -g @p1 1\nnosuchcmd arg\nset -g @p2 2\n"
+        ]
+      },
+      {
+        "run": [
+          "save-buffer",
+          "-b",
+          "c",
+          "start-parse.conf"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "-f",
+            "start-bad.conf",
+            "new",
+            "-s",
+            "a",
+            "-n",
+            "w",
+            "cat"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display-message -p ready"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "ready"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "show-options -g @one"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "has",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "'exit 3' returned 3\nok-after\n",
+        "stderr": "invalid option: nosuchopt\nvalue is invalid: notanumber\nunknown key: nosuchkey\ninvalid option: nosuchopt2\ninvalid option: nosuchhook\nno current client\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@one 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@two 2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@three 3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@four 4\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@five 5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/bad.conf:1: set-option -g @one 1\n<TMP>/home/bad.conf:2: set-option -g nosuchopt 1\n<TMP>/home/bad.conf:3: set-option -g @two 2\n<TMP>/home/bad.conf:4: set-option -g status-interval notanumber\n<TMP>/home/bad.conf:5: bind-key -n nosuchkey x\n<TMP>/home/bad.conf:6: bind-key -T nosuchtab y display\n<TMP>/home/bad.conf:7: set-option -g @three 3\n<TMP>/home/bad.conf:8: if-shell true \"set -g nosuchopt2 x\"\n<TMP>/home/bad.conf:9: run-shell \"exit 3\"\n<TMP>/home/bad.conf:11: set-option -g @four 4\n<TMP>/home/bad.conf:12: display-message -p ok-after\n<TMP>/home/bad.conf:14: set-hook -g nosuchhook \"display -p x\"\n<TMP>/home/bad.conf:15: switch-client -t nosuchsession\n<TMP>/home/bad.conf:16: set-option -g @five 5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/bad.conf:1: set-option -g @one 1\n<TMP>/home/bad.conf:2: set-option -g nosuchopt 1\n<TMP>/home/bad.conf:3: set-option -g @two 2\n<TMP>/home/bad.conf:4: set-option -g status-interval notanumber\n<TMP>/home/bad.conf:5: bind-key -n nosuchkey x\n<TMP>/home/bad.conf:6: bind-key -T nosuchtab y display\n<TMP>/home/bad.conf:7: set-option -g @three 3\n<TMP>/home/bad.conf:8: if-shell true \"set -g nosuchopt2 x\"\n<TMP>/home/bad.conf:9: run-shell \"exit 3\"\n<TMP>/home/bad.conf:11: set-option -g @four 4\n<TMP>/home/bad.conf:12: display-message -p ok-after\n<TMP>/home/bad.conf:14: set-hook -g nosuchhook \"display -p x\"\n<TMP>/home/bad.conf:15: switch-client -t nosuchsession\n<TMP>/home/bad.conf:16: set-option -g @five 5\n'exit 3' returned 3\nok-after\n",
+        "stderr": "invalid option: nosuchopt\nvalue is invalid: notanumber\nunknown key: nosuchkey\ninvalid option: nosuchopt2\ninvalid option: nosuchhook\nno current client\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/parse.conf:2: unknown command: nosuchcmd\n",
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @p1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@r1 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/parse2.conf:5: syntax error\n",
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @q1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@s1 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/syn2.conf:4: syntax error\n",
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @t1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/syn3.conf:2: syntax error\n",
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @u1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/syn4.conf:4: syntax error\n",
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @v1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<TMP>/home/syn5.conf:2: syntax error\n",
+        "stderr": "",
+        "exit": 1
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @w1\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "'exit 3' returned 3\nok-after\n<TMP>/home/parse.conf:2: unknown command: nosuchcmd\n",
+        "stderr": "No such file or directory: nosuch.conf\ninvalid option: nosuchopt\nvalue is invalid: notanumber\nunknown key: nosuchkey\ninvalid option: nosuchopt2\ninvalid option: nosuchhook\nno current client\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "No such file or directory: nosuch.conf\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "'exit 3' returned 3\nok-after\n<TMP>/home/parse.conf:2: unknown command: nosuchcmd\n<TMP>/home/parse2.conf:5: syntax error\n<TMP>/home/syn2.conf:4: syntax error\n<TMP>/home/syn3.conf:2: syntax error\n<TMP>/home/syn4.conf:4: syntax error\n<TMP>/home/syn5.conf:2: syntax error\n",
+        "stderr": "invalid option: nosuchopt\nvalue is invalid: notanumber\nunknown key: nosuchkey\ninvalid option: nosuchopt2\ninvalid option: nosuchhook\nno current client\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "Input/output error: <TMP>/home/.\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "command source-file: too few arguments (need at least 1)\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "No such file or directory: x\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "cli",
+        "stdout": "message: No such file or directory: x\ncommand: source-file -F \"#{d:current_file}x\"\nmessage: command source-file: too few arguments (need at least 1)\nmessage: Input/output error: <TMP>/home/.\ncommand: source-file .\ncommand: source-file -q nosuch*.conf\ncommand: set-option -g @s2 \"abc\\nset -g @s3 3\\n\"\ncommand: set-option -g @s1 1\ncommand: set-option -g @r2 2\ncommand: bind-key -n F8\ncommand: set-option -g @r1 1\ncommand: set-option -g @ok2 2\ncommand: set-option -g @ok1 1\ncommand: set-option -g @five 5\nmessage: no current client\ncommand: switch-client -t nosuchsession\nmessage: invalid option: nosuchhook\ncommand: set-hook -g nosuchhook \"display -p x\"\ncommand: display-message -p ok-after\ncommand: set-option -g @four 4\nmessage: invalid option: nosuchopt2\ncommand: set-option -g nosuchopt2 x\ncommand: if-shell true \"set -g nosuchopt2 x\"\ncommand: set-option -g @three 3\ncommand: bind-key -T nosuchtab y display\nmessage: unknown key: nosuchkey\ncommand: bind-key -n nosuchkey x\nmessage: value is invalid: notanumber\ncommand: set-option -g status-interval notanumber\ncommand: set-option -g @two 2\nmessage: invalid option: nosuchopt\ncommand: set-option -g nosuchopt 1\ncommand: set-option -g @one 1\ncommand: source-file *.conf\ncommand: source-file -q nosuch.conf\nmessage: No such file or directory: nosuch.conf\ncommand: source-file nosuch.conf\ncommand: set-option -g @five 5\nmessage: no current client\ncommand: switch-client -t nosuchsession\nmessage: invalid option: nosuchhook\ncommand: set-hook -g nosuchhook \"display -p x\"\ncommand: display-message -p ok-after\ncommand: set-option -g @four 4\nmessage: invalid option: nosuchopt2\ncommand: set-option -g nosuchopt2 x\ncommand: if-shell true \"set -g nosuchopt2 x\"\ncommand: set-option -g @three 3\ncommand: bind-key -T nosuchtab y display\nmessage: unknown key: nosuchkey\ncommand: bind-key -n nosuchkey x\nmessage: value is invalid: notanumber\ncommand: set-option -g status-interval notanumber\ncommand: set-option -g @two 2\nmessage: invalid option: nosuchopt\ncommand: set-option -g nosuchopt 1\ncommand: set-option -g @one 1\ncommand: set-option -g @ok2 2\ncommand: set-option -g @ok1 1\nmessage: No such file or directory: nosuch.conf\ncommand: source-file ok.conf bad.conf nosuch.conf parse.conf\nmessage: invalid option: @w1\ncommand: show-options -g @w1\ncommand: source-file syn5.conf\nmessage: invalid option: @v1\ncommand: show-options -g @v1\ncommand: source-file syn4.conf\nmessage: invalid option: @u1\ncommand: show-options -g @u1\ncommand: source-file syn3.conf\nmessage: invalid option: @t1\ncommand: show-options -g @t1\ncommand: source-file syn2.conf\ncommand: show-options -g @s1\ncommand: set-option -g @s2 \"abc\\nset -g @s3 3\\n\"\ncommand: set-option -g @s1 1\ncommand: source-file syn.conf\nmessage: invalid option: @q1\ncommand: show-options -g @q1\ncommand: source-file parse2.conf\ncommand: show-options -g @r1\ncommand: set-option -g @r2 2\ncommand: bind-key -n F8\ncommand: set-option -g @r1 1\ncommand: source-file parse0.conf\nmessage: invalid option: @p1\ncommand: show-options -g @p1\ncommand: source-file parse.conf\ncommand: set-option -g @five 5\nmessage: no current client\ncommand: switch-client -t nosuchsession\nmessage: invalid option: nosuchhook\ncommand: set-hook -g nosuchhook \"display -p x\"\ncommand: display-message -p ok-after\ncommand: set-option -g @four 4\nmessage: invalid option: nosuchopt2\ncommand: set-option -g nosuchopt2 x\ncommand: if-shell true \"set -g nosuchopt2 x\"\ncommand: set-option -g @three 3\ncommand: bind-key -T nosuchtab y display\nmessage: unknown key: nosuchkey\ncommand: bind-key -n nosuchkey x\nmessage: value is invalid: notanumber\ncommand: set-option -g status-interval notanumber\ncommand: set-option -g @two 2\nmessage: invalid option: nosuchopt\ncommand: set-option -g nosuchopt 1\ncommand: set-option -g @one 1\ncommand: source-file -v bad.conf\ncommand: source-file -nv bad.conf\ncommand: source-file -n bad.conf\ncommand: show-options -g @five\ncommand: show-options -g @four\ncommand: show-options -g @three\ncommand: show-options -g @two\ncommand: show-options -g @one\ncommand: set-option -g @five 5\nmessage: no current client\ncommand: switch-client -t nosuchsession\nmessage: invalid option: nosuchhook\ncommand: set-hook -g nosuchhook \"display -p x\"\ncommand: display-message -p ok-after\ncommand: set-option -g @four 4\nmessage: invalid option: nosuchopt2\ncommand: set-option -g nosuchopt2 x\ncommand: if-shell true \"set -g nosuchopt2 x\"\ncommand: set-option -g @three 3\ncommand: bind-key -T nosuchtab y display\nmessage: unknown key: nosuchkey\ncommand: bind-key -n nosuchkey x\nmessage: value is invalid: notanumber\ncommand: set-option -g status-interval notanumber\ncommand: set-option -g @two 2\nmessage: invalid option: nosuchopt\ncommand: set-option -g nosuchopt 1\ncommand: set-option -g @one 1\ncommand: source-file bad.conf\ncommand: new-session -d -n w -s a cat\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 59,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 66,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%config-error start-bad.conf:2: invalid option: nosuchopt",
+          "%config-error start-bad.conf:4: value is invalid: notanumber",
+          "%config-error start-bad.conf:5: unknown key: nosuchkey",
+          "%config-error start-bad.conf:8: invalid option: nosuchopt2",
+          "%config-error start-bad.conf:12: ok-after",
+          "%config-error start-bad.conf:14: invalid option: nosuchhook",
+          "%config-error start-bad.conf:15: no current client",
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%sessions-changed",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "ready",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 1",
+          "@one 1",
+          "%end <TIME> #3 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 67,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

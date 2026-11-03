@@ -1,0 +1,49 @@
+name = "set_titles"
+size = [40, 6]
+# set-titles (server-client.c server_client_set_title): with it on, a redraw
+# writes the expanded set-titles-string to the client's terminal (OSC 0, from
+# the xterm-256color tsl/fsl), unless it is the title last written. The
+# oracle reads the title the terminal ends up with (`title` steps). Off by
+# default; a window rename, a window switch, a user option inside #{T:},
+# #{client_termname}, #{client_session}; a #(job) string is left out (it is async); turning it
+# off leaves the last title. The raw OSC bytes stay in attach.rs.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["select-pane", "-t", "a", "-T", "p"] },
+  { run = ["new-session", "-d", "-s", "b", "-n", "bw", "cat"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { title = {} },
+  { run = ["set", "-g", "set-titles-string", "T:#S:#W:#T"] },
+  { settle = { react = true, quiet_ms = 150 } },
+  { title = {} },
+  { run = ["set", "-g", "set-titles", "on"] },
+  { settle = { react = true } },
+  { title = {} },
+  { run = ["rename-window", "neww"] },
+  { settle = { react = true } },
+  { title = {} },
+  { run = ["new-window", "-d", "-n", "other", "cat"] },
+  { run = ["select-pane", "-t", "a:other", "-T", "q"] },
+  { run = ["select-window", "-t", ":other"] },
+  { settle = { react = true } },
+  { title = {} },
+  { run = ["set", "-g", "@win_label", "lbl-#{window_index}"] },
+  { run = ["set", "-g", "set-titles-string", "#S · #{T:@win_label} #{client_termname}"] },
+  { settle = { react = true } },
+  { title = {} },
+  { run = ["set", "-g", "set-titles-string", "#{?client_attached,att,det}:#{client_width}x#{client_height}:#{window_flags}"] },
+  { settle = { react = true } },
+  { title = {} },
+  { run = ["set", "-g", "set-titles-string", "gone", ";", "set", "-g", "set-titles", "off", ";", "rename-window", "hidden"] },
+  { settle = { react = true, quiet_ms = 300 } },
+  { title = {} },
+  { run = ["set", "-g", "set-titles", "on"] },
+  { settle = { react = true } },
+  { title = {} },
+  { run = ["switch-client", "-t", "b"] },
+  { run = ["set", "-g", "set-titles-string", "S=#S"] },
+  { settle = { react = true } },
+  { title = {} },
+]

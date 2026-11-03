@@ -7,6 +7,7 @@
 //! later `%if` is decided. Any parse error rejects the file before a
 //! command runs. Each command's errors carry `file:line: `.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -186,11 +187,36 @@ fn glob(pattern: &Path) -> Vec<PathBuf> {
 /// or only parses.
 pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) -> Groups {
     let file = path.to_string_lossy().into_owned();
-    let text = match std::fs::read(path) {
+    let read = std::fs::File::open(path).and_then(|mut f| {
+        let mut t = Vec::new();
+        f.read_to_end(&mut t).map(|_| t)
+    });
+    let text = match read {
         Ok(t) => vtmux_core::rawstr::from_vec(t),
         Err(e) => {
-            if !(opts.quiet && e.kind() == std::io::ErrorKind::NotFound) {
-                server.causes.push(format!("{file}: {}", strerror(&e)));
+            if opts.parse_client.is_some() {
+                // `load_cfg` (cfg.c:110-113): the startup config's cause.
+                if !(opts.quiet && e.kind() == std::io::ErrorKind::NotFound) {
+                    server.causes.push(format!("{file}: {}", strerror(&e)));
+                }
+            } else {
+                // `cmd_source_file_done` (cmd-source-file.c:131-132): the
+                // file was read through `file_read`, so a failure is the
+                // command's own error, `strerror: path`. A command client
+                // reads it itself and its read error (a directory) is EIO
+                // (file.c `file_read_error_callback`); an attached client's
+                // server-side `fread` gives the real errno.
+                let text = if e.raw_os_error() == Some(libc::EISDIR)
+                    && !super::file_io::is_attached(server, item)
+                {
+                    "Input/output error".to_owned()
+                } else {
+                    strerror(&e)
+                };
+                item.error(
+                    server,
+                    vtmux_core::rawstr::to_bytes(&format!("{text}: {file}")).into_owned(),
+                );
             }
             return Vec::new();
         }
