@@ -2041,12 +2041,6 @@ impl Server {
                 self.send_passthrough(id, caps);
                 continue;
             }
-            let mut screen = self
-                .clients
-                .get_mut(&id)
-                .expect("client")
-                .compositor
-                .buffer(cols, rows);
             // screen-redraw.c redraw_set_context: the scene sits below a
             // top status (REDRAW_STATUS_TOP) and above a bottom one.
             let area = rows.saturating_sub(lines);
@@ -2073,7 +2067,12 @@ impl Server {
                 .then(|| client.compositor.shown_rows(cols, rows, 0, rows))
                 .flatten()
                 .map(<[vtmux_vt::Cell]>::to_vec);
-            self.draw_window(
+            let repeat = !redrawing
+                && !frozen
+                && self.repeats_plain_frame(id, s, caps, (cols, rows), (scene_y, area));
+            let client = self.clients.get_mut(&id).expect("client");
+            let mut screen = client.compositor.buffer(cols, rows);
+            let drawn = self.draw_window(
                 id,
                 s,
                 caps,
@@ -2082,7 +2081,19 @@ impl Server {
                 area,
                 held.as_deref(),
                 &window_jobs,
+                repeat,
             );
+            if !drawn {
+                let client = self.clients.get_mut(&id).expect("client");
+                client.compositor.recycle(screen);
+                let mut frame = Vec::new();
+                self.add_outer_mouse_modes(id, &mut frame);
+                if !frame.is_empty() {
+                    self.send(id, &ServerMsg::Frame(frame));
+                }
+                self.send_passthrough(id, caps);
+                continue;
+            }
             self.draw_status(id, s, caps, &mut screen, lines, top, jobs);
             // screen-redraw.c:1813: the overlay over everything else.
             self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
@@ -2101,6 +2112,67 @@ impl Server {
             }
             self.send_passthrough(id, caps);
         }
+    }
+
+    /// Whether client `id`'s next frame has nothing over the window but the
+    /// status line and the same inputs as the last one, which was too: it
+    /// is that frame again unless a window row or the cursor changes
+    /// ([`Self::draw_window`]'s `repeat`). Records the frame's inputs.
+    fn repeats_plain_frame(
+        &mut self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        size: (u16, u16),
+        area: (u16, u16),
+    ) -> bool {
+        let plain = self.plain_frame(id, s, caps, size, area);
+        let Some(client) = self.clients.get_mut(&id) else {
+            return false;
+        };
+        let last = client.window_cache.plain.get();
+        // The last cursor stays until this frame's drawing sets it.
+        client
+            .window_cache
+            .plain
+            .set(plain.map(|p| crate::render::PlainFrame {
+                cursor: last.map_or(p.cursor, |l| l.cursor),
+                ..p
+            }));
+        plain.zip(last).is_some_and(|(p, l)| p.same_inputs(l))
+            && client.compositor.shows(size.0, size.1)
+    }
+
+    /// What client `id`'s next frame is drawn from, if nothing but the
+    /// status line is over the window ([`crate::render::PlainFrame`]).
+    fn plain_frame(
+        &self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        size: (u16, u16),
+        area: (u16, u16),
+    ) -> Option<crate::render::PlainFrame> {
+        let client = self.clients.get(&id)?;
+        if client.popup.is_some() || !client.status.quiet() {
+            return None;
+        }
+        let (_, w, _) = self.model.current_of(s)?;
+        let window = self.model.windows.get(&w)?;
+        let prompts = window
+            .panes
+            .panes
+            .iter()
+            .any(|p| self.model.panes.get(p).is_some_and(|x| x.prompt.is_some()));
+        if prompts {
+            return None;
+        }
+        Some(crate::render::PlainFrame {
+            caps,
+            size,
+            area,
+            cursor: (None, false),
+        })
     }
 
     /// The `DCS tmux;` payloads queued for client `id` since its last
@@ -2254,7 +2326,8 @@ impl Server {
         rows: u16,
         held: Option<&[vtmux_vt::Cell]>,
         jobs: &crate::format_jobs::JobHandle,
-    ) {
+        repeat: bool,
+    ) -> bool {
         let source = self.render_source();
         let cache = self.clients.get(&id).map(|c| &c.window_cache);
         let Some((scene, draw)) = source.window(
@@ -2265,9 +2338,28 @@ impl Server {
             Some(jobs),
             cache.map(|c| &c.scene),
         ) else {
-            return;
+            return true;
         };
         let theme = source.theme(caps);
+        let composed = cache.map(|c| {
+            crate::render::compose::compose_cached(
+                &mut c.compose.borrow_mut(),
+                &scene,
+                &draw,
+                &theme,
+                screen.cols,
+                rows,
+            )
+        });
+        let cursor = crate::render::window::cursor_of(&draw, &self.model, screen.cols, rows);
+        if repeat
+            && composed == Some(false)
+            && cache
+                .and_then(|c| c.plain.get())
+                .is_some_and(|p| p.cursor == cursor)
+        {
+            return false;
+        }
         let cols = usize::from(screen.cols);
         let kept = cache.and_then(|c| c.buffer.borrow_mut().take());
         let mut window = crate::render::blank(kept, screen.cols, rows);
@@ -2275,16 +2367,16 @@ impl Server {
         window.cursor = screen.cursor;
         window.cursor_visible = screen.cursor_visible;
         match cache {
-            Some(c) => crate::render::compose::compose_cached(
-                &mut c.compose.borrow_mut(),
-                &scene,
-                &draw,
-                &theme,
-                &mut window,
-            ),
+            Some(c) => c.compose.borrow().copy_to(&mut window),
             None => crate::render::compose::compose(&scene, &draw, &theme, &mut window),
         }
-        crate::render::window::cursor(&mut window, &draw, &self.model, rows);
+        (window.cursor, window.cursor_visible) = cursor;
+        if let Some(c) = cache
+            && let Some(mut plain) = c.plain.get()
+        {
+            plain.cursor = cursor;
+            c.plain.set(Some(plain));
+        }
         if let Some(held) = held {
             for (i, (cell, shown)) in window.cells.iter_mut().zip(held).enumerate() {
                 if let Some(crate::render::scene::SceneCell::Pane { pane, .. }) = scene.cells.get(i)
@@ -2304,6 +2396,7 @@ impl Server {
         if let Some(c) = cache {
             *c.buffer.borrow_mut() = Some(window);
         }
+        true
     }
 
     /// Client `id`'s popup over `screen` (`popup_draw_cb`), and the cursor

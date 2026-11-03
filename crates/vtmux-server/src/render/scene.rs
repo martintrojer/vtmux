@@ -391,6 +391,7 @@ impl Scene {
         scene
     }
 
+    #[must_use]
     pub fn build(win: &WindowView, cols: u16, rows: u16) -> Self {
         let mut cells = Vec::with_capacity(usize::from(cols) * usize::from(rows));
         for y in 0..rows {

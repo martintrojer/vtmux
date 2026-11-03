@@ -187,7 +187,11 @@ pub fn snapshot(term: &PaneTerm) -> Snapshot {
 /// Ghostty's dirty flags have one consumer, so a pane has one view
 /// ([`PaneTerm::screen`]); a fresh one reads every row.
 pub struct ScreenView {
-    state: Option<(RenderState<'static>, RowIterator<'static>, CellIterator<'static>)>,
+    state: Option<(
+        RenderState<'static>,
+        RowIterator<'static>,
+        CellIterator<'static>,
+    )>,
     /// Shared with the frames that show it: an update copies it only while
     /// a frame still holds the previous one.
     snap: Rc<Snapshot>,
@@ -310,7 +314,6 @@ impl ScreenView {
         let _ = snap.set_dirty(Dirty::Clean);
         update_cursor(&mut self.snap, &snap) || changed
     }
-
 }
 
 /// Take the cursor from Ghostty's render state; whether it moved.
@@ -454,9 +457,14 @@ mod tests {
         let before = kept.screen().row_stamps().to_vec();
         kept.feed(b"\x1b[2;1Hz");
         let after = kept.screen().row_stamps().to_vec();
-        let moved: Vec<_> = (0..after.len()).filter(|&y| before[y] != after[y]).collect();
+        let moved: Vec<_> = (0..after.len())
+            .filter(|&y| before[y] != after[y])
+            .collect();
         assert_eq!(moved, [1], "only the written row changed");
-        assert!(!kept.view.borrow_mut().update(&kept), "nothing new: no change");
+        assert!(
+            !kept.view.borrow_mut().update(&kept),
+            "nothing new: no change"
+        );
     }
 
     #[test]
