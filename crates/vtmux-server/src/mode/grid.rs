@@ -159,6 +159,8 @@ impl Grid {
         let n = hsize + usize::from(src.rows());
         let from = from.min(self.lines.len()).min(n);
         self.lines.truncate(from);
+        #[cfg(test)]
+        tests::ROWS_READ.with(|r| r.set(r.get() + (n - from)));
         self.lines.extend((from..n).map(|y| Line {
             row: OnceCell::from(used_cells(src.row(y))),
             src: None,
@@ -504,9 +506,15 @@ impl Grid {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use vtmux_vt::Cell;
+
+    thread_local! {
+        /// Rows [`Grid::extend_from`] read on this thread.
+        pub(in crate::mode) static ROWS_READ: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
 
     fn texts(g: &Grid) -> Vec<(String, bool)> {
         g.lines
