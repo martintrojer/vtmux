@@ -570,6 +570,8 @@ impl<'a> Ctx<'a> {
             "cursor_x" => p.term.cursor().0.to_string(),
             "cursor_y" => p.term.cursor().1.to_string(),
             "alternate_on" => flag(p.term.alternate_on()),
+            // format_cb_synchronized_output_flag (format.c:2143-2150).
+            "synchronized_output_flag" => flag(p.term.sync_held().is_some()),
             // format_cb_mouse_*_flag (format.c:1995-2080), from tmux's own
             // mode bits.
             "mouse_any_flag" => flag(p.term.mouse_modes().any()),

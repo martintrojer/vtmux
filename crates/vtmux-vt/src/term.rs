@@ -134,6 +134,10 @@ const CELL_BYTES: usize = 8;
 /// x86-64 and aarch64 (`cells_align`, page.zig).
 const CELLS_ALIGN: usize = 128;
 
+/// How long synchronized output may hold a pane (`screen_write_start_sync`'s
+/// `tv_sec = 1`, screen-write.c:1035).
+const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// tmux's ground timer (input.c `input_start_ground_timer`).
 const DCS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -264,6 +268,12 @@ pub struct PaneTerm {
     /// the only reader of Ghostty's render state, whose dirty flags one
     /// reader consumes.
     pub(crate) view: RefCell<crate::snapshot::ScreenView>,
+    /// tmux's `MODE_SYNC` hold (screen-write.c:211-240): the screen as it
+    /// was when the program last entered synchronized output (`?2026h`),
+    /// which is what the clients keep showing while the mode is on, and
+    /// when the 1 s sync timer was last armed (`screen_write_start_sync`
+    /// re-arms it on every `?2026h`).
+    sync_hold: Option<(crate::Snapshot, std::time::Instant)>,
 }
 
 /// A `DCS tmux;` payload (input.c `input_dcs_dispatch`), unescaped, for the
@@ -395,6 +405,7 @@ impl PaneTerm {
             dcs_since: None,
             reads: StdCell::new(0),
             view: RefCell::default(),
+            sync_hold: None,
         };
         pane.retain();
         pane
@@ -486,6 +497,18 @@ impl PaneTerm {
                 continue;
             }
             if let Some(e) = event {
+                match self.scan.sync.take() {
+                    Some(true) => self.start_sync(),
+                    // input.c:1981: screen_write_end_sync; the clients
+                    // show the screen as it is now.
+                    Some(false) => self.sync_hold = None,
+                    None => {}
+                }
+                // RIS: screen_write_reset leaves only MODE_CURSOR|MODE_WRAP
+                // (screen-write.c:430), and the pane is redrawn whole.
+                if e == ScanEvent::Reset {
+                    self.sync_hold = None;
+                }
                 let alternate = self.alternate_on();
                 match e {
                     // The alternate screen is about to switch: last chance to
@@ -891,6 +914,10 @@ impl PaneTerm {
     /// # Panics
     /// Only if libghostty fails to allocate.
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        // window_pane_resize (window.c:1712) ends synchronized output.
+        if (cols.max(1), rows.max(1)) != (self.cols(), self.rows()) {
+            self.stop_sync();
+        }
         let before = self.term.scrollback_rows().unwrap_or(0);
         let same_width = cols.max(1) == self.cols();
         let on_primary = !self.alternate_on();
@@ -1172,6 +1199,45 @@ impl PaneTerm {
         }
     }
 
+    /// `screen_write_start_sync` (screen-write.c:1033-1046), on `?2026h`
+    /// (input.c:2091): keep what the clients show now and (re)arm the
+    /// 1 s timer. A second `?2026h` keeps the first hold.
+    fn start_sync(&mut self) {
+        let now = std::time::Instant::now();
+        match self.sync_hold.as_mut() {
+            Some((_, since)) => *since = now,
+            None => self.sync_hold = Some((crate::snapshot(self), now)),
+        }
+    }
+
+    /// The screen the clients keep showing while the program has
+    /// synchronized output on (tmux's `MODE_SYNC`, screen-write.c:211-240:
+    /// nothing of the pane is drawn until it ends); `None` when it is off.
+    #[must_use]
+    pub fn sync_held(&self) -> Option<&crate::Snapshot> {
+        self.sync_hold.as_ref().map(|(s, _)| s)
+    }
+
+    /// When the sync timer ends the hold (`screen_write_sync_callback`,
+    /// one second after the last `?2026h`), if it is on.
+    #[must_use]
+    pub fn sync_deadline(&self) -> Option<std::time::Instant> {
+        self.sync_hold
+            .as_ref()
+            .map(|(_, since)| *since + SYNC_TIMEOUT)
+    }
+
+    /// `screen_write_stop_sync` (screen-write.c:1049-1062): synchronized
+    /// output ends without the program asking (the timer, a resize, a full
+    /// redraw); DECRQM reports it off from now on. Whether it was on.
+    pub fn stop_sync(&mut self) -> bool {
+        if self.sync_hold.take().is_none() {
+            return false;
+        }
+        let _ = self.term.set_mode(Mode::SYNC_OUTPUT, false);
+        true
+    }
+
     /// Whether the program asked for a full pane redraw since the last call
     /// (see the `redraw` field).
     pub fn take_redraw(&mut self) -> bool {
@@ -1361,6 +1427,9 @@ struct AltModeScanner {
     gt: bool,
     key_mode: KeyMode,
     extended_keys: ExtendedKeys,
+    /// The private mode sequence just ended set (`true`) or reset
+    /// synchronized output (`?2026`); [`PaneTerm::feed`] takes it.
+    sync: Option<bool>,
 }
 
 /// Which mouse events the pane program asked for: tmux's mutually exclusive
@@ -1531,6 +1600,8 @@ enum ScanEvent {
     ClearHistory,
     /// `ESC c` (RIS).
     Reset,
+    /// `CSI ? 2026 h` or `l`: [`AltModeScanner::sync`] says which.
+    Sync,
     /// Back in the ground state with [`AltModeScanner::take_resync`] due.
     Resync,
     /// An `OSC 133` that marks the cursor's line ended.
@@ -1835,6 +1906,7 @@ impl AltModeScanner {
                     for p in params {
                         match p {
                             Param::Num(12) => c.set_blinking(b == b'h'),
+                            Param::Num(2026) => self.sync = Some(b == b'h'),
                             Param::Num(n) => m.apply(n, b == b'h'),
                             _ => {}
                         }
@@ -1867,6 +1939,9 @@ impl AltModeScanner {
             // Ghostty keeps a cursor, so a protection bit, per screen.
             self.resync = true;
             return Some(ScanEvent::AltMode(b));
+        }
+        if self.sync.is_some() {
+            return Some(ScanEvent::Sync);
         }
         self.resync.then_some(ScanEvent::Resync)
     }
@@ -2064,6 +2139,53 @@ mod tests {
         t.feed(bytes);
         t.feed(format!("\x1b[?{mode}$p").as_bytes());
         String::from_utf8(t.take_replies()).unwrap()
+    }
+
+    /// `MODE_SYNC` (screen-write.c:1017-1062): `?2026h` keeps the screen
+    /// shown then; `?2026l`, RIS, a resize or `stop_sync` end it, and DECRQM
+    /// follows. A second `?2026h` keeps the first hold and re-arms the timer;
+    /// a mode among others in one SM counts.
+    #[test]
+    fn synchronized_output_holds_the_screen() {
+        let text = |s: &crate::Snapshot| -> String {
+            s.cells.iter().map(|c| c.text.as_str()).collect::<String>()
+        };
+        let mut t = PaneTerm::new(10, 2, 100);
+        t.feed(b"old");
+        assert!(t.sync_held().is_none() && t.sync_deadline().is_none());
+        t.feed(b"[?2026h[2Jnew");
+        assert_eq!(text(t.sync_held().unwrap()), "old");
+        let first = t.sync_deadline().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        t.feed(b"[?25;2026hmore");
+        assert_eq!(text(t.sync_held().unwrap()), "old", "the first hold stays");
+        assert!(t.sync_deadline().unwrap() > first, "the timer is re-armed");
+        t.feed(b"[?2026l");
+        assert!(t.sync_held().is_none());
+        assert!(text(&snapshot(&t)).contains("newmore"));
+
+        for end in [&b"c"[..], b"[?2026l"] {
+            let mut t = PaneTerm::new(10, 2, 100);
+            t.feed(b"[?2026h");
+            t.feed(end);
+            assert!(t.sync_held().is_none(), "{end:?}");
+        }
+        let mut t = PaneTerm::new(10, 2, 100);
+        t.feed(b"[?2026h");
+        t.resize(10, 2);
+        assert!(t.sync_held().is_some(), "the same size is no resize");
+        t.resize(12, 2);
+        assert!(t.sync_held().is_none(), "window_pane_resize stops it");
+        t.feed(b"[?2026h[?2026$p");
+        assert_eq!(t.take_replies(), b"\x1b[?2026;1$y");
+        assert!(t.stop_sync());
+        assert!(!t.stop_sync(), "already off");
+        t.feed(b"[?2026$p");
+        assert_eq!(
+            t.take_replies(),
+            b"\x1b[?2026;2$y",
+            "the timer's stop reports off"
+        );
     }
 
     #[test]
@@ -2508,6 +2630,7 @@ mod tests {
                     | ScanEvent::Reset
                     | ScanEvent::Osc133(_)
                     | ScanEvent::DcsStart
+                    | ScanEvent::Sync
                     | ScanEvent::Skip => None,
                 })
                 .collect::<Vec<u8>>()

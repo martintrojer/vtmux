@@ -312,7 +312,12 @@ impl Source<'_> {
                 (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
             }
             Some(crate::mode::Mode::Tree(t)) => (self.tree_screen(pane, t, caps), Vec::new()),
-            _ => (vtmux_vt::snapshot(&pane.term), Vec::new()),
+            // MODE_SYNC (screen-write.c:211-240): while the program has
+            // synchronized output on, nothing new of it is drawn.
+            _ => match pane.term.sync_held() {
+                Some(held) => (held.clone(), Vec::new()),
+                None => (vtmux_vt::snapshot(&pane.term), Vec::new()),
+            },
         };
         if let Some(prompt) = pane.mode_prompt.as_ref().filter(|m| m.shown(pane)) {
             self.mode_prompt(&mut screen, prompt, tree, caps);

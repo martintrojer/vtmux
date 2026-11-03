@@ -6294,3 +6294,103 @@ fn tmux_shim_reaches_this_server_from_children() {
         }
     }
 }
+
+/// What the attached terminal received after byte `mark`.
+fn since(a: &Attached, mark: usize) -> String {
+    String::from_utf8_lossy(&a.bytes.lock().unwrap()[mark..]).into_owned()
+}
+
+/// Synchronized output (`?2026`) holds a pane's drawing (tmux's
+/// `MODE_SYNC`, screen-write.c:211-240, 1017-1062): while it is on, no byte
+/// of the pane's new content reaches the terminal, and the clients keep its
+/// last rows; `?2026l` (input.c:1981) draws it whole. Another pane keeps
+/// drawing meanwhile. A program that never ends it is drawn anyway one
+/// second after its last `?2026h` (the sync timer). Dogfood bug 4: an
+/// Ink TUI clears and redraws inside `?2026`, and flashed blank.
+/// Modelled on the owner's synccheck.py.
+#[test]
+fn synchronized_output_holds_the_pane_until_it_ends() {
+    for bin in bins() {
+        let name = bin.display().to_string();
+        let w = World::new(bin);
+        let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{name}: {args:?}");
+        ok(&[
+            "new", "-d", "-s", "a", "-x", "60", "-y", "10", "sleep", "1000",
+        ]);
+        ok(&["set", "-g", "status", "off"]);
+        ok(&["splitw", "-h", "-d", "-t", "a:0.0", "sleep", "1000"]);
+        ok(&["selectp", "-t", "a:0.0", "-T", "left"]);
+        ok(&["selectp", "-t", "a:0.1", "-T", "right"]);
+        let tty = |p: &str| {
+            let path = display_t(&w, p, "#{pane_tty}");
+            std::fs::OpenOptions::new().write(true).open(&path).unwrap()
+        };
+        let (mut left, mut right) = (tty("a:0.0"), tty("a:0.1"));
+        let sync_flag = || display_t(&w, "a:0.0", "#{synchronized_output_flag}");
+        let a = w.attach_sized(&["attach", "-t", "a"], 60, 10);
+        let row = |a: &Attached, y: usize| pane_text(a).lines().nth(y).unwrap_or("").to_owned();
+        let rows_start =
+            |a: &Attached, word: &str| (0..5).all(|y| row(a, y).starts_with(&format!("{word}{y}")));
+
+        for y in 0..5 {
+            write!(left, "OLD{y}\r\n").unwrap();
+        }
+        a.wait_labelled(&name, Duration::from_secs(5), |a| rows_start(a, "OLD"));
+        thread::sleep(Duration::from_millis(200));
+
+        // Mid-redraw: the screen is cleared and half drawn.
+        let mark = a.bytes.lock().unwrap().len();
+        left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HMIDSYNC").unwrap();
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            since(&a, mark),
+            "",
+            "{name}: bytes sent while the pane syncs"
+        );
+        assert_eq!(sync_flag(), "1", "{name}");
+
+        // Another pane is not held back. `?2026h` again re-arms the timer.
+        left.write_all(b"\x1b[?2026h").unwrap();
+        right.write_all(b"OTHER").unwrap();
+        a.wait_labelled(&name, Duration::from_secs(5), |a| {
+            row(a, 0).contains("OTHER")
+        });
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            rows_start(&a, "OLD"),
+            "{name}: the pane's last rows stay: {:?}",
+            pane_text(&a)
+        );
+        assert_eq!(sync_flag(), "1", "{name}");
+
+        // ?2026l: the finished drawing, at once.
+        left.write_all(b"\x1b[2J\x1b[H").unwrap();
+        for y in 0..5 {
+            write!(left, "NEW{y}\r\n").unwrap();
+        }
+        left.write_all(b"\x1b[?2026l").unwrap();
+        a.wait_labelled(&name, Duration::from_secs(5), |a| rows_start(a, "NEW"));
+        assert_eq!(sync_flag(), "0", "{name}");
+
+        // A program that never ends it: drawn once the timer is up.
+        thread::sleep(Duration::from_millis(200));
+        let mark = a.bytes.lock().unwrap().len();
+        let start = Instant::now();
+        left.write_all(b"\x1b[?2026h\x1b[2J\x1b[HSTUCK").unwrap();
+        thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            since(&a, mark),
+            "",
+            "{name}: bytes sent while the pane syncs"
+        );
+        a.wait_labelled(&name, Duration::from_secs(5), |a| {
+            row(a, 0).starts_with("STUCK")
+        });
+        let took = start.elapsed();
+        assert!(
+            took >= Duration::from_millis(800) && took < Duration::from_secs(3),
+            "{name}: drawn after {took:?}"
+        );
+        assert_eq!(sync_flag(), "0", "{name}: the timer ends the mode");
+    }
+}
