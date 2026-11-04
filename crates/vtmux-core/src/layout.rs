@@ -67,8 +67,6 @@ pub struct Opts {
     pub status: PaneStatus,
     /// `pane-scrollbars always`: width + pad the scrollbar reserves.
     pub scrollbar_always: Option<u32>,
-    /// Floating panes have a border (`pane-border-lines` is not `none`).
-    pub float_border: bool,
 }
 
 impl Default for Opts {
@@ -76,7 +74,6 @@ impl Default for Opts {
         Self {
             status: PaneStatus::Off,
             scrollbar_always: None,
-            float_border: true,
         }
     }
 }
@@ -92,6 +89,12 @@ pub struct Layout {
     /// Where the last default-placed floating pane went
     /// (`w->last_new_pane_x/y`).
     pub last_new: (i32, i32),
+    /// The floating geometry of cells that were tiled again (`lc->fg`),
+    /// which `break-pane -W` starts from.
+    pub saved_float: std::collections::BTreeMap<PaneId, Geometry>,
+    /// Floating panes drawn without a border (`pane-border-lines none`),
+    /// as the server last set it: they need no padding inside the window.
+    pub borderless: std::collections::BTreeSet<PaneId>,
 }
 
 impl Layout {
@@ -107,6 +110,8 @@ impl Layout {
             }),
             opts: Opts::default(),
             last_new: (0, 0),
+            saved_float: std::collections::BTreeMap::new(),
+            borderless: std::collections::BTreeSet::new(),
         }
     }
 

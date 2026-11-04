@@ -177,10 +177,17 @@ fn term(raw: &str, text: &[Visible], fold: bool) -> Option<(i64, Vec<usize>)> {
     }
 }
 
-pub(super) fn matches(pattern: &str, text: &str, positions: bool) -> String {
-    let width = crate::styled::format_width(text).max(1);
+/// `fuzzy_match` (fuzzy.c:535-665): `None` when `pattern` does not match
+/// `text`, else the best group's score (0 when negative, or for an empty
+/// pattern) and the display columns, within `width`, of the matched
+/// characters as `text` would be drawn there (`format_draw_none`).
+#[must_use]
+pub fn fuzzy_match(pattern: &str, text: &str, width: usize) -> Option<(u32, Vec<usize>)> {
+    if width == 0 {
+        return None;
+    }
     if pattern.chars().all(|c| c == ' ' || c == '|') {
-        return if positions { "" } else { "1" }.to_owned();
+        return Some((0, Vec::new()));
     }
     let fold = !pattern.chars().any(|c| c.is_ascii_uppercase());
     let (visible, widths) = scan(text);
@@ -205,12 +212,7 @@ pub(super) fn matches(pattern: &str, text: &str, positions: bool) -> String {
             best = Some((score, matched));
         }
     }
-    let Some((_, matched)) = best else {
-        return if positions { "" } else { "0" }.to_owned();
-    };
-    if !positions {
-        return "1".to_owned();
-    }
+    let (score, matched) = best?;
     let mut vis = widths;
     while vis[0] + vis[1] + vis[2] > width {
         if vis[1] > 0 {
@@ -237,6 +239,20 @@ pub(super) fn matches(pattern: &str, text: &str, positions: bool) -> String {
         }
         let column = starts[c.align] + c.offset - sources[c.align];
         columns.extend(column..(column + c.width).min(width));
+    }
+    let score = u32::try_from(score.max(0)).unwrap_or(u32::MAX);
+    Some((score, columns.into_iter().collect()))
+}
+
+/// `format_match_fuzzy` (format.c:5050-5085): `1`/`0`, or with
+/// `positions` the matched columns joined by commas.
+pub(super) fn matches(pattern: &str, text: &str, positions: bool) -> String {
+    let width = crate::styled::format_width(text).max(1);
+    let Some((_, columns)) = fuzzy_match(pattern, text, width) else {
+        return if positions { "" } else { "0" }.to_owned();
+    };
+    if !positions {
+        return "1".to_owned();
     }
     columns
         .into_iter()

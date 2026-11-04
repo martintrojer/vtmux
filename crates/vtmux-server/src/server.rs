@@ -674,6 +674,7 @@ impl Server {
             self.cmdq_process();
             self.apply_redraws();
             self.tree_updates();
+            self.switch_resizes();
             self.tree_draws();
             self.render_and_exit();
             self.send_pane_resizes();

@@ -1,8 +1,7 @@
 //! `resize-pane` (cmd-resize-pane.c:52-189): `-Z` toggles zoom, `-x`/`-y`
 //! set a size (cells or a percentage of the window), `-U -D -L -R` adjust
-//! by a count, `-M` resizes tiled panes by dragging their borders.
-//! Dragging a floating pane (out of M1) and `-T` (trim history) are not
-//! done yet.
+//! by a count, `-M` resizes tiled panes by dragging their borders and a
+//! floating pane by its borders and corners, `-T` trims history.
 
 use vtmux_core::cmd::{Args, CmdError, strtonum};
 use vtmux_core::error::EdgeError;
@@ -34,7 +33,8 @@ pub fn exec(
         return Ok(());
     }
     if args.flag('M') {
-        return mouse_update(server, item);
+        mouse_update(server, item);
+        return Ok(());
     }
     if args.flag('Z') {
         if server.model.windows[&w].zoomed() {
@@ -44,7 +44,7 @@ pub fn exec(
         }
         return Ok(());
     }
-    if !server.model.windows[&w].is_floating(wp) {
+    if !server.model.windows[&w].is_floating_now(wp) {
         server.model.unzoom(w);
     }
     let mut req = ResizeRequest {
@@ -79,9 +79,12 @@ pub fn exec(
             }
         }
     }
+    let border = server.model.pane_has_border(w, wp);
     let window = server.model.windows.get_mut(&w).expect("target window");
     let mut resized = 0;
-    let result = window.layout.resize_pane_cmd(wp, &req, &mut resized);
+    let result = window
+        .layout
+        .resize_pane_cmd(wp, &req, border, &mut resized);
     server.model.fix_panes(w);
     // layout_resize_layout's own event for each cell resize (layout.c:1002),
     // then cmd-resize-pane.c:187 (also after a failed adjustment).
@@ -99,26 +102,24 @@ pub fn exec(
 /// `cmd_resize_pane_mouse_update` (cmd-resize-pane.c:194-221): the
 /// mouse's pane, for a client on its session, gets the drag callback and
 /// its first call. Without a mouse event nothing happens.
-fn mouse_update(server: &mut Server, item: &Item) -> Result<(), CmdError> {
+fn mouse_update(server: &mut Server, item: &Item) {
     let Some(event) = item.mouse.as_ref() else {
-        return Ok(());
+        return;
     };
     let Some(found) = event.target.pane_found(&server.model) else {
-        return Ok(());
+        return;
     };
     let (Some(client), Some(w), Some(wp)) = (item.client, found.window, found.pane) else {
-        return Ok(());
+        return;
     };
     if server.client_session(client) != found.session {
-        return Ok(());
-    }
-    if server.model.windows[&w].is_floating(wp) {
-        // cmd_resize_pane_mouse_resize_move_floating: floating panes are
-        // M2 (spec, Milestones).
-        return Err(EdgeError::NotImplemented("resize-pane -M on a floating pane".into()).into());
+        return;
     }
     let event = event.clone();
+    if server.model.windows[&w].is_floating(wp) {
+        server.resize_floating_start(client, w, wp, &event);
+        return;
+    }
     server.set_drag_action(client, Some(crate::mouse::DragAction::ResizeTiled));
     server.resize_drag(client, &event);
-    Ok(())
 }

@@ -16,6 +16,7 @@ pub mod grid;
 pub mod panes;
 pub mod prompt;
 pub mod reader;
+pub mod switch;
 pub mod tree;
 pub mod tree_mode;
 pub mod view;
@@ -123,6 +124,8 @@ pub enum Mode {
     Client(Box<ClientMode>),
     /// `customize-mode` (window-customize.c).
     Customize(Box<CustomizeMode>),
+    /// `switch-mode` (window-switch.c).
+    Switch(Box<switch::SwitchMode>),
     /// A mode with no key table and no command callback, like tmux's tree
     /// and clock modes: only tests need one before those exist.
     #[cfg(test)]
@@ -140,6 +143,7 @@ impl PaneMode for Mode {
             Self::Buffer(_) => "buffer-mode",
             Self::Client(_) => "client-mode",
             Self::Customize(_) => "options-mode",
+            Self::Switch(_) => "switch-mode",
             #[cfg(test)]
             Self::Probe => "probe-mode",
         }
@@ -152,7 +156,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.key_table(vi),
             Self::Tree(_) => None,
             Self::Panes(m) => m.key_table(vi),
-            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => None,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) | Self::Switch(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -165,7 +169,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.takes_commands(),
             Self::Tree(_) => false,
             Self::Panes(m) => m.takes_commands(),
-            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => false,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) | Self::Switch(_) => false,
             #[cfg(test)]
             Self::Probe => false,
         }
@@ -178,7 +182,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.set_prefix(n),
             Self::Tree(_) => {}
             Self::Panes(m) => m.set_prefix(n),
-            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => {}
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) | Self::Switch(_) => {}
             #[cfg(test)]
             Self::Probe => {}
         }
@@ -197,7 +201,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.command(env, name, args, read_only_client),
             Self::Tree(_) => Err(copy::CommandError::NotImplemented(name.to_owned())),
             Self::Panes(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
-            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => {
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) | Self::Switch(_) => {
                 Err(copy::CommandError::NotImplemented(name.to_owned()))
             }
             #[cfg(test)]
@@ -219,6 +223,7 @@ impl Mode {
             Self::Buffer(m) => m.common.key_mode,
             Self::Client(m) => m.common.key_mode,
             Self::Customize(m) => m.common.key_mode,
+            Self::Switch(m) => m.key_mode,
             #[cfg(test)]
             Self::Probe => vtmux_vt::KeyMode::Standard,
         }
@@ -235,7 +240,7 @@ impl Mode {
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
-            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => None,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) | Self::Switch(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -260,7 +265,7 @@ impl Mode {
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
-            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => None,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) | Self::Switch(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -277,6 +282,7 @@ impl Mode {
             Self::Buffer(t) => t.common.kill,
             Self::Client(t) => t.common.kill,
             Self::Customize(t) => t.common.kill,
+            Self::Switch(m) => m.kill,
             // clock-mode has no -k.
             Self::Clock(_) => false,
             #[cfg(test)]
@@ -534,8 +540,13 @@ impl Server {
         self.model.mode_changed(p);
         self.model
             .fire_mode_changed(p, Some(old.name()), current, false);
-        // mode_tree_free: a window the mode zoomed is unzoomed.
-        if let Some(w) = old.tree_common().and_then(|c| c.unzoom) {
+        // mode_tree_free, window_switch_free: a window the mode zoomed is
+        // unzoomed.
+        let unzoom = match &old {
+            Mode::Switch(m) => m.unzoom,
+            _ => old.tree_common().and_then(|c| c.unzoom),
+        };
+        if let Some(w) = unzoom {
             self.model.unzoom(w);
         }
         // mode_tree_resize for the tree mode now shown.
@@ -617,6 +628,33 @@ impl Server {
                 return true;
             }
             return false;
+        }
+        // window_switch_key: Enter and Escape (and the keys like them) are
+        // the mode's before its prompt sees them; a movement key the prompt
+        // passes on is the mode's too.
+        if matches!(
+            self.model.panes.get(&p).and_then(|x| x.modes.first()),
+            Some(Mode::Switch(_))
+        ) {
+            if let Some(client) = c
+                && !key.is_mouse()
+            {
+                // prompt_key's result: HANDLED and NOT_HANDLED end it, a
+                // MOVE (or no prompt) goes on to the movement keys.
+                let shown = self
+                    .model
+                    .panes
+                    .get(&p)
+                    .is_some_and(|x| x.mode_prompt.as_ref().is_some_and(|m| m.shown(x)));
+                let place = crate::open_prompt::Place::Mode(p);
+                let go_on = switch::takes_first(key)
+                    || !shown
+                    || self.prompt_key_moving(place, client, key) == Some(false);
+                if go_on {
+                    self.switch_key(p, c, key);
+                }
+            }
+            return true;
         }
         if self.mode_prompt_key(p, c, key) {
             return true;

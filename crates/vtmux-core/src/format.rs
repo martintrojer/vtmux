@@ -27,6 +27,7 @@ mod colour;
 mod colour_names;
 mod eval;
 mod fuzzy;
+pub use fuzzy::fuzzy_match;
 mod loops;
 mod matching;
 mod mods;

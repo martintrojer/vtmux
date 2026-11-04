@@ -1,8 +1,13 @@
-//! `split-window` (cmd-split-window.c:73-345, layout.c
-//! `layout_get_tiled_cell`): a new pane next to the target, or next to the
-//! whole layout with `-f`; `-E`, `-I` or one empty argument make an empty
-//! pane (no process); `-W` waits for the pane's process to exit; `-k -m`
-//! keep it once it exits (remain-on-exit). `-M` is not done yet.
+//! `split-window` and `new-pane` (cmd-split-window.c:73-345, layout.c
+//! `layout_get_tiled_cell`, `layout_get_floating_cell`): a new pane next to
+//! the target, or next to the whole layout with `-f`; a split of a floating
+//! pane floats beside it. `new-pane` makes a floating pane (`-x -y` its
+//! size, `-X -Y` its place, default staggered) unless `-L` asks for a tiled
+//! one; `new-pane -M` sizes it by the mouse drag that ran it. `-E`, `-I` or
+//! one empty argument make an empty pane (no process); `-W` waits for the
+//! pane's process to exit; `-k -m` keep it once it exits (remain-on-exit).
+//! Modal (`-O` with `-C -D -K`) and float-over-zoom (`-A`) panes are not
+//! done yet.
 
 use std::path::PathBuf;
 
@@ -48,9 +53,28 @@ pub fn exec(
     item: &mut Item,
     args: &Args,
     found: Found,
+    new_pane: bool,
 ) -> Result<(), CmdError> {
-    if args.flag('M') {
-        return Err(EdgeError::NotImplemented("split-window -M".into()).into());
+    if args.flag('O') {
+        return Err(EdgeError::NotImplemented("new-pane -O".into()).into());
+    }
+    if args.flag('A') {
+        return Err(EdgeError::NotImplemented("new-pane -A".into()).into());
+    }
+    let (Some(w), Some(wp)) = (found.window, found.pane) else {
+        return Err(EdgeError::NoCurrentTarget.into());
+    };
+    // cmd-split-window.c:97-108: new-pane floats unless -L; a split floats
+    // when its target does.
+    let floating = if new_pane {
+        !args.flag('L')
+    } else {
+        server.model.windows[&w].is_floating(wp)
+    };
+    // cmd-split-window.c:124-127: -M needs the mouse event that ran it.
+    let drag_client = item.mouse.as_ref().and(item.client);
+    if new_pane && floating && args.flag('M') && drag_client.is_none() {
+        return Ok(());
     }
     // cmd-split-window.c:149-161: -I, or one empty argument, is an empty
     // pane like -E, and a command with one is an error.
@@ -74,16 +98,19 @@ pub fn exec(
         ),
         None => None,
     };
-    let (Some(s), Some(index), Some(w), Some(wp)) =
-        (found.session, found.index, found.window, found.pane)
-    else {
+    let (Some(s), Some(index)) = (found.session, found.index) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
-    // No float-over-zoom panes, so restore_zoom is always 0 and the window
-    // is unzoomed before the split (cmd-split-window.c:102-108).
+    // No float-over-zoom panes, so restore_zoom is always 0: the window is
+    // unzoomed before the split (cmd-split-window.c:102-108), or by
+    // window_push_zoom in layout_get_*_cell for new-pane.
     server.model.unzoom(w);
     let window = &server.model.windows[&w];
-    let floating = window.is_floating(wp);
+    // cmd-split-window.c:163-173: -B, else the window's pane-border-lines.
+    let border = lines.map_or_else(
+        || server.model.window_has_border(w),
+        |n| i64::try_from(n).ok() != Some(crate::model::LINES_NONE),
+    );
     let horizontal = args.flag('h');
     let before = args.flag('b');
     let full = args.flag('f');
@@ -93,12 +120,37 @@ pub fn exec(
     // after layout_get_*_cell), so a split with no room uses no ID.
     let new = server.model.pane_ids.peek();
     if floating {
-        // layout_get_floating_cell with SPAWN_SPLIT.
         let window = server.model.windows.get_mut(&w).expect("target window");
-        let g = window
-            .layout
-            .split_floating(wp, horizontal, before, full)
-            .map_err(|e| EdgeError::Message(e.to_string()))?;
+        let g = if new_pane {
+            // layout_floating_args_parse (layout.c:1727-1832).
+            let fa = vtmux_core::layout::FloatArgs {
+                width: args.value('x').map(|v| expand(server, found, v)),
+                height: args.value('y').map(|v| expand(server, found, v)),
+                x: args.value('X').map(|v| expand(server, found, v)),
+                y: args.value('Y').map(|v| expand(server, found, v)),
+            };
+            let window = server.model.windows.get_mut(&w).expect("target window");
+            window
+                .layout
+                .floating_geometry(&fa, border, None)
+                .map_err(EdgeError::Message)?
+        } else {
+            // layout_split_floating_cell with SPAWN_SPLIT.
+            window
+                .layout
+                .split_floating(
+                    wp,
+                    &SplitRequest {
+                        horizontal,
+                        before,
+                        full,
+                        size: None,
+                    },
+                    border,
+                )
+                .map_err(|e| EdgeError::Message(e.to_string()))?
+        };
+        let window = server.model.windows.get_mut(&w).expect("target window");
         window.layout.add_floating(Some(wp), new, g);
     } else {
         // layout_get_tiled_cell (layout.c:1640-1695).
@@ -219,6 +271,15 @@ pub fn exec(
         pane.resizes.push((created, (rect.sx, rect.sy)));
     }
     server.model.options.add_pane(new, w);
+    // cmd-split-window.c:254-255 (set here, before the pane's rectangle is
+    // worked out, which reads it for a floating pane's padding).
+    if let Some(n) = lines {
+        server.model.options.set_table_value(
+            TreeId::Pane(new),
+            "pane-border-lines",
+            Value::Choice(n),
+        );
+    }
     // cmd-split-window.c:256-262: -k and -m keep the pane until a key once
     // its program goes, -m with its own dead line.
     if args.flag('k') || args.flag('m') {
@@ -259,13 +320,6 @@ pub fn exec(
             }
         }
     }
-    if let Some(n) = lines {
-        server.model.options.set_table_value(
-            pane_tree,
-            "pane-border-lines",
-            vtmux_core::options::Value::Choice(n),
-        );
-    }
     let title = args.value('T').map(|t| expand(server, found, t));
     if let Some(title) = &title
         && let Some(p) = server.model.panes.get_mut(&new)
@@ -277,6 +331,8 @@ pub fn exec(
     server.fire_pane_created(s, index, new, empty, false);
     if !args.flag('d') {
         server.model.set_active(w, new);
+        // cmd-split-window.c:288-289.
+        item.new_current = Some(new_found);
     }
     server.model.layout_changed(w);
     // cmd-split-window.c:264-275: -T fires pane-title-changed (whether or
@@ -289,8 +345,17 @@ pub fn exec(
             .text("new_title", title);
         server.model.push_event(ev);
     }
-    // window_pop_zoom: -Z zooms the (possibly new) active pane.
-    server.model.pop_zoom(w, zoom);
+    // window_pop_zoom: -Z zooms the (possibly new) active pane; never
+    // after a floating pane (cmd-split-window.c:288-294).
+    server.model.pop_zoom(w, zoom && !floating);
+    // cmd-split-window.c:300-304: the drag that ran new-pane -M sizes it.
+    if new_pane
+        && floating
+        && args.flag('M')
+        && let (Some(c), Some(ev)) = (drag_client, item.mouse.clone())
+    {
+        server.start_new_pane_drag(c, new, &ev);
+    }
     // cmd-split-window.c:314-315.
     item.hook_target = Some(Some(new_found));
     if args.flag('P') {

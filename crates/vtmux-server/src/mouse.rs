@@ -26,8 +26,12 @@
 //! A window's menu takes the raw event before any of this
 //! ([`crate::menu`], `server_client_handle_menu_key`).
 //!
-//! Not here: dragging floating panes and `split-window`/`join-pane` drags
-//! (M2), scrollbars (off by default) and pane-border control ranges
+//! Floating panes have three drag callbacks: `new-pane -M` sizes the new
+//! pane between the drag's start and the pointer, `move-pane -M` moves the
+//! pane with the pointer, and `resize-pane -M` on a floating pane resizes
+//! it by the border or corner grabbed (moves it by the top border).
+//!
+//! Not here: scrollbars (off by default) and pane-border control ranges
 //! (`window_pane_status_get_range`).
 
 use std::time::{Duration, Instant};
@@ -294,6 +298,13 @@ pub enum DragAction {
     ResizeTiled,
     /// `window_copy_drag_update` and `window_copy_drag_release`.
     CopySelection,
+    /// `cmd_split_window_mouse_resize`: the pane `new-pane -M` made spans
+    /// the drag's start and the pointer.
+    NewPane,
+    /// `cmd_join_pane_mouse_move`: the floating pane follows the pointer.
+    MoveFloating,
+    /// `cmd_resize_pane_mouse_resize_move_floating`.
+    ResizeFloating,
 }
 
 /// A client's mouse state (`c->tty.mouse_*`, `c->click_*`, the
@@ -851,6 +862,10 @@ impl Server {
             (None, _) => self.mouse_to_program(p, ev),
             (Some(_), _) if is_move => {}
             (Some(crate::mode::Mode::Clock(_)), Some(_)) => self.reset_mode(p),
+            (Some(crate::mode::Mode::Switch(_)), Some(c)) => {
+                let at = ev.at(&self.model, p);
+                self.switch_mouse_key(p, c, ev, at);
+            }
             (Some(m), Some(c)) if m.tree_kind().is_some() => {
                 let at = ev.at(&self.model, p);
                 self.tree_mouse_key(p, c, ev.key, at);
@@ -908,6 +923,9 @@ impl Server {
     pub(crate) fn drag_update(&mut self, id: ClientId, action: DragAction, ev: &MouseEvent) {
         match action {
             DragAction::ResizeTiled => self.resize_drag(id, ev),
+            DragAction::NewPane => self.new_pane_drag(id, ev),
+            DragAction::MoveFloating => self.move_floating_drag(id, ev),
+            DragAction::ResizeFloating => self.resize_floating_drag(id, ev),
             DragAction::CopySelection => {
                 let Some(p) = ev.target.pane_found(&self.model).and_then(|f| f.pane) else {
                     return;
@@ -961,6 +979,233 @@ impl Server {
         for _ in 0..resized {
             self.model.layout_changed(w);
         }
+    }
+
+    /// `new-pane -M` (cmd-split-window.c:300-304): the drag goes on with
+    /// new pane `p` as the client's mouse pane, sized by the event that ran
+    /// it.
+    pub(crate) fn start_new_pane_drag(&mut self, id: ClientId, p: PaneId, ev: &MouseEvent) {
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.mouse.last_pane = Some(p);
+            c.mouse.drag_action = Some(DragAction::NewPane);
+        }
+        self.new_pane_drag(id, ev);
+    }
+
+    /// `cmd_split_window_mouse_resize` (cmd-split-window.c:357-433): the
+    /// floating pane fills the rectangle from where the drag started to the
+    /// pointer, its border included.
+    #[expect(clippy::many_single_char_names, reason = "the C's x, y, sx, sy names")]
+    fn new_pane_drag(&mut self, id: ClientId, ev: &MouseEvent) {
+        let Some(c) = self.clients.get(&id) else {
+            return;
+        };
+        let Some(p) = c.mouse.last_pane else {
+            return;
+        };
+        let off = i64::from(ev.offset);
+        let (dx, dy) = (
+            i64::from(c.mouse.drag_x) - off,
+            i64::from(c.mouse.drag_y) - off,
+        );
+        let Some(w) = self.model.panes.get(&p).map(|x| x.window) else {
+            self.set_drag_action(id, None);
+            return;
+        };
+        if !self.model.windows.get(&w).is_some_and(|x| x.is_floating(p)) {
+            self.set_drag_action(id, None);
+            return;
+        }
+        let border = i64::from(self.model.pane_has_border(w, p));
+        let (x, y) = ev.window_position((ev.input.x, ev.input.y));
+        let (mut sx, xoff) = if x >= dx {
+            (x - dx + 1, dx + border)
+        } else {
+            let sx = dx - x + 1;
+            (sx, dx - sx + 1 + border)
+        };
+        let (mut sy, yoff) = if y >= dy {
+            (y - dy + 1, dy + border)
+        } else {
+            let sy = dy - y + 1;
+            (sy, dy - sy + 1 + border)
+        };
+        let min = i64::from(vtmux_core::layout::PANE_MINIMUM);
+        if border != 0 {
+            sx = if sx <= 2 { min } else { sx - 2 };
+            sy = if sy <= 2 { min } else { sy - 2 };
+        }
+        let g = vtmux_core::layout::Geometry::new(
+            u32::try_from(sx.max(min)).unwrap_or(u32::MAX),
+            u32::try_from(sy.max(min)).unwrap_or(u32::MAX),
+            i32::try_from(xoff).unwrap_or(i32::MAX),
+            i32::try_from(yoff).unwrap_or(i32::MAX),
+        );
+        self.set_floating_geometry(w, p, g);
+    }
+
+    /// `layout_set_size` on floating pane `p`'s cell, then
+    /// `layout_fix_panes` and the redraw.
+    fn set_floating_geometry(&mut self, w: WindowId, p: PaneId, g: vtmux_core::layout::Geometry) {
+        let Some(window) = self.model.windows.get_mut(&w) else {
+            return;
+        };
+        let Some(cell) = window.layout.floating_cell_mut(p) else {
+            return;
+        };
+        if *cell == g {
+            return;
+        }
+        *cell = g;
+        self.model.fix_panes(w);
+        self.model.redraw(crate::model::Redraw::Window(w));
+    }
+
+    /// `cmd_join_pane_mouse_update` (cmd-join-pane.c:274-301): the mouse's
+    /// floating pane, for a client on its session, becomes active and
+    /// follows the drag.
+    pub(crate) fn move_floating_start(&mut self, id: Option<ClientId>, ev: &MouseEvent) {
+        let Some(found) = ev.target.pane_found(&self.model) else {
+            return;
+        };
+        let (Some(id), Some(w), Some(p)) = (id, found.window, found.pane) else {
+            return;
+        };
+        if self.client_session(id) != found.session {
+            return;
+        }
+        if !self.model.windows[&w].is_floating(p) {
+            return;
+        }
+        self.model.set_active(w, p);
+        self.set_drag_action(id, Some(DragAction::MoveFloating));
+        self.move_floating_drag(id, ev);
+    }
+
+    /// `cmd_join_pane_mouse_move` (cmd-join-pane.c:303-341).
+    #[expect(clippy::many_single_char_names, reason = "the C's x, y, lx, ly names")]
+    fn move_floating_drag(&mut self, id: ClientId, ev: &MouseEvent) {
+        let Some(found) = ev.target.pane_found(&self.model) else {
+            self.set_drag_action(id, None);
+            return;
+        };
+        let (Some(w), Some(p)) = (found.window, found.pane) else {
+            return;
+        };
+        let (x, y) = ev.window_position((ev.input.x, ev.input.y));
+        let (lx, ly) = ev.window_position((ev.input.lx, ev.input.ly));
+        if x == lx && y == ly {
+            return;
+        }
+        let Some(mut g) = self
+            .model
+            .windows
+            .get_mut(&w)
+            .and_then(|x| x.layout.floating_cell_mut(p))
+            .copied()
+        else {
+            return;
+        };
+        g.xoff = g.xoff.wrapping_add(i32::try_from(x - lx).unwrap_or(0));
+        g.yoff = g.yoff.wrapping_add(i32::try_from(y - ly).unwrap_or(0));
+        self.set_floating_geometry(w, p, g);
+    }
+
+    /// `resize-pane -M` on a floating pane (cmd-resize-pane.c:213-219):
+    /// it becomes active and the drag resizes it.
+    pub(crate) fn resize_floating_start(
+        &mut self,
+        id: ClientId,
+        w: WindowId,
+        p: PaneId,
+        ev: &MouseEvent,
+    ) {
+        self.model.set_active(w, p);
+        self.set_drag_action(id, Some(DragAction::ResizeFloating));
+        self.resize_floating_drag(id, ev);
+    }
+
+    /// `cmd_resize_pane_mouse_resize_move_floating` (cmd-resize-pane.c:
+    /// 230-355): the corner or border the drag was last on follows the
+    /// pointer (the cell next to a corner counts as the corner); the top
+    /// border moves the pane instead.
+    #[expect(
+        clippy::many_single_char_names,
+        clippy::similar_names,
+        reason = "the C's x, y, sx, sy, lx, ly names"
+    )]
+    fn resize_floating_drag(&mut self, id: ClientId, ev: &MouseEvent) {
+        let Some(found) = ev.target.pane_found(&self.model) else {
+            self.set_drag_action(id, None);
+            return;
+        };
+        let (Some(w), Some(p)) = (found.window, found.pane) else {
+            return;
+        };
+        let Some(rect) = self.model.panes.get(&p).map(|x| x.rect) else {
+            return;
+        };
+        let Some(lc) = self
+            .model
+            .windows
+            .get_mut(&w)
+            .and_then(|x| x.layout.floating_cell_mut(p))
+            .copied()
+        else {
+            return;
+        };
+        let (x, y) = ev.window_position((ev.input.x, ev.input.y));
+        let (lx, ly) = ev.window_position((ev.input.lx, ev.input.ly));
+        let (sx, sy) = (i64::from(rect.sx), i64::from(rect.sy));
+        let (pxoff, pyoff) = (i64::from(rect.xoff), i64::from(rect.yoff));
+        let left = pxoff - 1;
+        let right = pxoff + sx;
+        let (gsx, gsy) = (i64::from(lc.sx), i64::from(lc.sy));
+        let (gx, gy) = (i64::from(lc.xoff), i64::from(lc.yoff));
+        let min = i64::from(vtmux_core::layout::PANE_MINIMUM);
+        let top = ly == pyoff - 1;
+        let bottom = ly == pyoff + sy;
+        let at_left = lx == left || lx == left + 1;
+        let at_right = lx == right + 1 || lx == right;
+        // (sx, sy, xoff, yoff), or None to leave it.
+        let new = if at_left && top {
+            Some((
+                (gsx + lx - x).max(min),
+                (gsy + ly - y).max(min),
+                x + 1,
+                y + 1,
+            ))
+        } else if at_right && top {
+            Some(((x - gx).max(min), (gsy + ly - y).max(min), gx, y + 1))
+        } else if at_left && bottom {
+            let nsy = y - gy;
+            (nsy >= min).then_some(((gsx + lx - x).max(min), nsy, x + 1, gy))
+        } else if at_right && bottom {
+            Some(((x - gx).max(min), (y - gy).max(min), gx, gy))
+        } else if lx == right {
+            let nsx = x - gx;
+            (nsx >= min).then_some((nsx, gsy, gx, gy))
+        } else if lx == left {
+            let nsx = gsx + lx - x;
+            (nsx >= min).then_some((nsx, gsy, x + 1, gy))
+        } else if bottom {
+            let nsy = y - gy;
+            (nsy >= min).then_some((gsx, nsy, gx, gy))
+        } else if top {
+            Some((gsx, gsy, gx + x - lx, y + 1))
+        } else {
+            None
+        };
+        let Some((nsx, nsy, nx, ny)) = new else {
+            return;
+        };
+        let g = vtmux_core::layout::Geometry::new(
+            u32::try_from(nsx).unwrap_or(u32::MAX),
+            u32::try_from(nsy).unwrap_or(u32::MAX),
+            i32::try_from(nx).unwrap_or(i32::MAX),
+            i32::try_from(ny).unwrap_or(i32::MAX),
+        );
+        self.set_floating_geometry(w, p, g);
     }
 
     /// `window_copy_start_drag` (window-copy.c:7084-7151) for client `id`:

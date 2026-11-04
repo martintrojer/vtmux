@@ -361,6 +361,9 @@ impl Source<'_> {
             (Some(m), _) if m.tree_kind().is_some() => {
                 (self.tree_screen(pane, m, caps), Vec::new())
             }
+            (Some(crate::mode::Mode::Switch(m)), _) => {
+                (self.switch_screen(pane, m, caps), Vec::new())
+            }
             // A mode prompt over a plain pane (a held pane drew above).
             _ => (
                 pane.term
@@ -615,8 +618,11 @@ pub fn cursor_of(draw: &Draw, model: &Model, cols: u16, rows: u16) -> (Option<(u
     };
     let x = pane.rect.xoff + i32::from(cx) + i32::from(draw.offset);
     let y = pane.rect.yoff + i32::from(cy) + i32::from(draw.offset);
+    // server_client_reset_state (server-client.c:2243-2276): a cursor off
+    // the window (a floating pane moved past its left or top edge) is
+    // hidden at 0,0.
     let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
-        return (None, false);
+        return (Some((0, 0)), false);
     };
     // Panes mode leaves the cursor one past its last write; at the
     // window's edge the terminal keeps it in the last column.

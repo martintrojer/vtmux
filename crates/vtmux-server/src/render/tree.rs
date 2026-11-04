@@ -411,6 +411,74 @@ impl Canvas {
     }
 }
 
+impl Source<'_> {
+    /// `window_switch_draw_screen` (window-switch.c:269-337): a row per
+    /// match above the prompt, the selected one in `mode-style` across the
+    /// width, the matched columns in `switch-mode-match-style` (keeping
+    /// each cell's text). The prompt is drawn over the last row after.
+    #[must_use]
+    pub fn switch_screen(
+        &self,
+        pane: &crate::model::Pane,
+        m: &crate::mode::switch::SwitchMode,
+        caps: Caps,
+    ) -> Snapshot {
+        let (cols, rows) = (usize::from(pane.term.cols()), usize::from(pane.term.rows()));
+        let mut c = Canvas {
+            cols,
+            rows,
+            cells: vec![blank(Colour::Default); cols * rows],
+            raw: vec![None; cols * rows],
+        };
+        let ptree = TreeId::Pane(pane.id);
+        let found = Found::from_pane(self.model, pane.id);
+        let ctx = crate::format_ctx::Ctx::new(self.model, self.info, self.env, found);
+        if rows > 1 {
+            let mgc = self.style(ptree, "switch-mode-match-style", &ctx);
+            let sgc = self.style(ptree, "mode-style", &ctx);
+            let visible = m.visible();
+            for i in 0..visible {
+                let idx = m.offset + i;
+                let Some(row) = m.rows.get(idx) else {
+                    break;
+                };
+                if idx == m.current {
+                    c.clear_from(0, i, sgc.bg);
+                    c.draw(0, i, cols, &sgc, &row.text, false);
+                } else {
+                    c.draw(0, i, cols, &CellStyle::default(), &row.text, false);
+                }
+                for &x in &row.matched {
+                    if x >= cols {
+                        continue;
+                    }
+                    let at = i * cols + x;
+                    let mut cell = c.cells[at].clone();
+                    cell.style.attrs = mgc.attrs;
+                    cell.style.fg = mgc.fg;
+                    cell.style.bg = mgc.bg;
+                    c.put(x, i, cell);
+                }
+            }
+        }
+        let theme = self.theme(caps);
+        let cells = c
+            .cells
+            .iter()
+            .zip(&c.raw)
+            .map(|(x, raw)| raw.clone().unwrap_or_else(|| theme.cell(x)))
+            .collect();
+        Snapshot {
+            cols: pane.term.cols(),
+            rows: pane.term.rows(),
+            cells,
+            wrapped: Vec::new(),
+            cursor: None,
+            cursor_visible: false,
+        }
+    }
+}
+
 /// A tree mode's screen as `mode_tree_draw` last drew it (`mtd->screen`):
 /// what the pane shows until the mode draws again, however the panes it
 /// previews or the items it lists change meanwhile.

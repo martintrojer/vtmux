@@ -1,0 +1,47 @@
+# new-pane (cmd-split-window.c, layout.c layout_floating_args_parse):
+# floating panes at the default staggered place and size, at -X -Y with
+# -x -y (cells and percentages), with -B none (no border, no inset), -L
+# for a tiled one, the size and position errors, prefix * (`new-pane`),
+# and a split of a floating pane, which floats beside it.
+name = "floating_new_pane"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "default-command", "cat"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { attach = { session = "a" } },
+  { run = ["new-pane", "-d", "cat"] },
+  { run = ["new-pane", "-d", "cat"] },
+  { run = ["new-pane", "-d", "-x", "20", "-y", "6", "-X", "50", "-Y", "12", "cat"] },
+  { run = ["new-pane", "-d", "-x", "25%", "-y", "25%", "-X", "60%", "-Y", "1", "cat"] },
+  { run = ["new-pane", "-d", "-B", "none", "-x", "12", "-y", "3", "-X", "2", "-Y", "18", "cat"] },
+  { run = ["new-pane", "-d", "-x", "0", "cat"] },
+  { run = ["new-pane", "-d", "-X", "100", "cat"] },
+  { run = ["new-pane", "-d", "-y", "x", "cat"] },
+  { run = ["new-pane", "-d", "-E", "cat"] },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_index} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height} z#{pane_z} a#{pane_active}"] },
+  { run = ["select-pane", "-t", "%1", "-T", "p1"] },
+  { run = ["select-pane", "-t", "%2", "-T", "p2"] },
+  { run = ["select-pane", "-t", "%3", "-T", "p3"] },
+  { run = ["select-pane", "-t", "%4", "-T", "p4"] },
+  { run = ["select-pane", "-t", "%5", "-T", "p5"] },
+  { run = ["select-pane", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u0002*" },
+  { settle = {} },
+  { run = ["select-pane", "-t", "%6", "-T", "p6"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["split-window", "-h", "-t", "%6", "cat"] },
+  { run = ["select-pane", "-t", "%7", "-T", "p7"] },
+  { run = ["new-pane", "-L", "-t", "%0", "cat"] },
+  { run = ["select-pane", "-t", "%8", "-T", "p8"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_index} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height} z#{pane_z} a#{pane_active}"] },
+  { run = ["display", "-p", "-t", "a", "#{window_layout}"] },
+]
