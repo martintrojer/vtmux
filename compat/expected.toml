@@ -539,7 +539,8 @@ reason = "frame encoding: vtmux sends a frame as a diff with a cursor move per c
 
 [tests."sync-output-copy-cursor.sh"]
 status = "xfail"
-reason = "a copy-mode command (`send-keys -X cursor-left`) redraws the pane, which ends the program's synchronized output (`application synchronized output ended unexpectedly`); tmux draws copy mode on its own screen and keeps MODE_SYNC"
+reason = "a copy-mode command (`send-keys -X cursor-left`) redraws the pane, which ends the program's synchronized output (`application synchronized output ended unexpectedly`); tmux draws copy mode on its own screen and keeps MODE_SYNC (flaky: it passed once on macOS CI, run 41813579379, and fails every time on Linux; presumably the redraw that ends the sync lands after the script's flag check on a fast host)"
+flaky = true
 
 [tests."sync-output-cursor.sh"]
 status = "pass"
