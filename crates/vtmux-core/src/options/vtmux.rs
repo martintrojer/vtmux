@@ -11,11 +11,11 @@
 
 use std::sync::LazyLock;
 
-use super::table::{DefaultValue, Kind, OptionDef, Scope};
+use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 1] = [
+pub(super) static EXTENSIONS: [OptionDef; 3] = [
     // D23: the focus ring.
     OptionDef {
         name: "vtmux-focus-ring",
@@ -26,6 +26,29 @@ pub(super) static EXTENSIONS: [OptionDef; 1] = [
         separator: None,
         default: DefaultValue::Flag(false),
         text: Some("Whether to draw a ring around the active pane."),
+        unit: None,
+    },
+    // D26: the pane blend.
+    OptionDef {
+        name: "vtmux-pane-active-blend",
+        scope: Scope::Window,
+        kind: Kind::String(StringCheck::Blend),
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Str(""),
+        text: Some("Colours every cell of the active pane is blended toward."),
+        unit: None,
+    },
+    OptionDef {
+        name: "vtmux-pane-inactive-blend",
+        scope: Scope::Window,
+        kind: Kind::String(StringCheck::Blend),
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Str(""),
+        text: Some("Colours every cell of the other panes is blended toward."),
         unit: None,
     },
 ];

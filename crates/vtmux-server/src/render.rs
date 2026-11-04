@@ -7,6 +7,7 @@
 //! gives ([`window::Source`]).
 use std::fmt::Write as _;
 
+pub mod blend;
 pub mod compose;
 pub mod menu;
 pub mod panes;
@@ -44,6 +45,12 @@ pub struct Caps {
     /// `TERM_NOAM`: the terminal has no `am`, so the bottom-right cell is
     /// never written (`tty_cell`, tty.c:2259).
     pub no_am: bool,
+    /// The client's theme is light (`c->theme`, else its background's;
+    /// [`crate::term_queries::Reported::light`]): the theme colours come
+    /// from the `light-theme-*` options (`server_client_update_theme_colours`).
+    /// Not a terminal capability, but per client and part of what every
+    /// drawing of it depends on, as caps are.
+    pub light_theme: bool,
 }
 impl Caps {
     /// How [`compose::draw_line_by`] may clear a run of empty cells.
@@ -88,17 +95,20 @@ impl Caps {
             colours: term.colours(),
             overlay: false,
             no_am: !term.has_name("am"),
+            light_theme: false,
         }
     }
     /// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424) for a
     /// VT100-like terminal, which every terminal vtmux knows is: DA, DA2,
-    /// XTVERSION, the synchronised-update DECRQM and the default colours.
+    /// XTVERSION, the synchronised-update DECRQM and the default colours
+    /// (OSC 10 and 11); then, vtmux-only, palette entries 0-15 (OSC 4) for
+    /// the pane blend (D26, [`crate::term_queries::colour_queries`]).
     /// `clear` is `clear-on-attach`; `rows` the terminal's height.
     #[must_use]
     pub fn startup(self, clear: bool, rows: u32) -> Vec<u8> {
         let mut out = self.restart(clear, rows);
         out.extend_from_slice(b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p");
-        out.extend_from_slice(crate::term_queries::COLOUR_QUERIES);
+        out.extend_from_slice(&crate::term_queries::colour_queries());
         out
     }
     /// `tty_start_tty` alone: a suspended client coming back.
@@ -602,6 +612,7 @@ mod tests {
             colours: 256,
             overlay: false,
             no_am: false,
+            light_theme: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -630,6 +641,7 @@ mod tests {
             colours: 256,
             overlay: false,
             no_am: false,
+            light_theme: false,
         }
     }
 
@@ -711,6 +723,7 @@ mod tests {
             colours: 256,
             overlay: false,
             no_am: false,
+            light_theme: false,
         };
         let mut c = Compositor::default();
         let t0 = std::time::Instant::now();
@@ -747,6 +760,7 @@ mod tests {
             colours: 256,
             overlay: false,
             no_am: false,
+            light_theme: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");

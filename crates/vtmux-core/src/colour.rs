@@ -267,6 +267,51 @@ pub fn x11_rgb(name: &str) -> Option<(u8, u8, u8)> {
     by_name(name).and_then(Colour::rgb)
 }
 
+/// A terminal's colour reply (OSC 4/10/11) as RGB, the forms tmux's
+/// `colour_parseX11` (colour.c:1176) reads: `rgb:RR/GG/BB`,
+/// `rgb:RRRR/GGGG/BBBB` (the high byte kept, as tmux's `>> 8`), `#rrggbb`,
+/// `#rrrrggggbbbb`, `R,G,B` in decimal, or a colour name. `None` for
+/// anything else (tmux's `-1`), `rgb:0/0/0` included.
+#[must_use]
+pub fn parse_x11(s: &str) -> Option<(u8, u8, u8)> {
+    let hex = |h: &str, n: usize| -> Option<u8> {
+        if h.len() != n || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let v = u32::from_str_radix(h, 16).ok()?;
+        u8::try_from(if n == 4 { v >> 8 } else { v }).ok()
+    };
+    let triple = |parts: [&str; 3], n: usize| {
+        Some((hex(parts[0], n)?, hex(parts[1], n)?, hex(parts[2], n)?))
+    };
+    let len = s.len();
+    if let Some(rest) = s.strip_prefix("rgb:")
+        && (len == 12 || len == 18)
+    {
+        let n = (len - 6) / 3;
+        let mut it = rest.split('/');
+        let parts = [it.next()?, it.next()?, it.next()?];
+        return if it.next().is_none() {
+            triple(parts, n)
+        } else {
+            None
+        };
+    }
+    if let Some(rest) = s.strip_prefix('#')
+        && (len == 7 || len == 13)
+    {
+        let n = rest.len() / 3;
+        return triple([&rest[..n], &rest[n..2 * n], &rest[2 * n..]], n);
+    }
+    let ints: Vec<&str> = s.split(',').collect();
+    if let [r, g, b] = ints[..]
+        && let (Ok(r), Ok(g), Ok(b)) = (r.parse::<u8>(), g.parse::<u8>(), b.parse::<u8>())
+    {
+        return Some((r, g, b));
+    }
+    by_name(s.trim_matches(' ')).and_then(Colour::rgb)
+}
+
 impl fmt::Display for Colour {
     /// `colour_tostring` (colour.c:226).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -870,6 +915,29 @@ static X11: &[(&str, (u8, u8, u8))] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn x11_replies_parse_to_rgb() {
+        assert_eq!(parse_x11("rgb:1e1e/1e1e/2e2e"), Some((0x1e, 0x1e, 0x2e)));
+        assert_eq!(parse_x11("rgb:ff/80/00"), Some((0xff, 0x80, 0x00)));
+        assert_eq!(parse_x11("16,32,48"), Some((16, 32, 48)));
+        assert_eq!(parse_x11("#102030"), Some((0x10, 0x20, 0x30)));
+        assert_eq!(parse_x11("#ffff00000000"), Some((0xff, 0, 0)));
+        assert_eq!(parse_x11("red"), Some((0xff, 0, 0)));
+        for bad in [
+            "",
+            "rgb:",
+            "rgb:0/0/0",
+            "rgb:fff/800/000",
+            "rgb:1/2",
+            "rgb:12/34/56/78",
+            "#12",
+            "nope",
+            "rgb:gg/00/00",
+        ] {
+            assert_eq!(parse_x11(bad), None, "{bad}");
+        }
+    }
 
     // BEGIN GENERATED colour_forms
     // set -g status-fg X; show -gv status-fg   (every 7th also set -g pane-colours[0] X)

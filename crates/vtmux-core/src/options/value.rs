@@ -115,6 +115,9 @@ pub(super) fn check_string(
         StringCheck::Colour => {
             validate_colour_string_option(value).map_err(OptionError::InvalidColour)
         }
+        StringCheck::Blend => crate::blend::parse(value)
+            .map(drop)
+            .map_err(OptionError::InvalidStyle),
     }
 }
 

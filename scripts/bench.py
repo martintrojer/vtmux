@@ -25,7 +25,9 @@ owner's config, plugin and mu-crew dirs that owner_* copy; default ~/.tmux.conf,
 ~/.local/share/mu-crew-dotfiles), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s), TRICKLE_RATES ("10 1000 fill": lines/s
 per case; `fill` is 150k lines at once), TRICKLE_SECS (1200), TRICKLE_IDLE_SECS (120), TRICKLE_SAMPLE (10 s),
 TRICKLE_LIMIT (100000), TRICKLE_PREFILL (1: every rate case first writes the 150k lines of `fill`, so the history starts at
-the limit; 0: the trickle alone). Run cargo through `mise exec --`.
+the limit; 0: the trickle alone), BLEND=1 (the attached scenarios
+with `vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'` set and the reader answering OSC 10/11, D26;
+tmux ignores the option). Run cargo through `mise exec --`.
 """
 import ctypes
 import fcntl
@@ -631,6 +633,9 @@ MANY_SIZES = [(80, 24), (100, 30), (120, 40), (132, 43), (160, 50), (200, 50), (
 PANE_W, PANE_H = 95, 22  # render frames fit the smallest tiled pane of a 200x49 window
 QUERY = b"\x1b[?2026$p"
 BSU = b"\x1b[?2026h"
+BLEND = os.environ.get("BLEND") == "1"
+COLOURS_QUERY = b"\x1b]11;?\x1b\\"
+COLOURS_REPLY = b"\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\"
 
 
 def pin_terminal(s, **opts):
@@ -641,6 +646,9 @@ def pin_terminal(s, **opts):
     # status-right defaults to the host name and a clock: host-dependent, time-varying bytes
     s.run("set", "-g", "status-right", "bench")
     s.run("set", "-g", "status-interval", "0")
+    if BLEND:
+        # D26; tmux has no such option, so its error is ignored.
+        s.run("set", "-g", "vtmux-pane-inactive-blend", "fg=bg/25,bg=bg/25", check=False)
 
 
 class Client:
@@ -651,6 +659,7 @@ class Client:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.reply = sync
         self.replied = False
+        self.coloured = False
         self.bytes = 0
         self.bsu = 0
         self.proc = subprocess.Popen(
@@ -676,10 +685,13 @@ class Client:
             # not counted again with the next; one split across two is
             # counted once.
             self.bsu += (tail[-(len(BSU) - 1):] + b).count(BSU)
-            tail = data[-(len(QUERY) - 1):]
+            tail = data[-(len(COLOURS_QUERY) - 1):]
             if self.reply and not self.replied and QUERY in data:
                 self.replied = True
                 os.write(self.master, b"\x1b[?2026;2$y")
+            if BLEND and not self.coloured and COLOURS_QUERY in data:
+                self.coloured = True
+                os.write(self.master, COLOURS_REPLY)
 
     def close(self):
         """After kill-server the client exits on its own; this reaps it and the reader."""

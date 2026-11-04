@@ -55,6 +55,9 @@ pub enum StringCheck {
     Size,
     /// `default-shell`: `checkshell` (tmux.c:98).
     Shell,
+    /// vtmux's pane blend options (D26): empty or [`crate::blend::parse`]'s
+    /// `fg=`/`bg=` parts, with the style error.
+    Blend,
 }
 
 /// The value type of an option (`enum options_table_type`).

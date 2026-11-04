@@ -1,0 +1,29 @@
+name = "terminal_colour_replies"
+size = [40, 8]
+# The terminal's answers to the colour queries every attach sends
+# (tty.c tty_send_requests: OSC 10 and 11; vtmux adds OSC 4 0-15 for the
+# pane blend, D26) and a theme report that asks again
+# (server_client_report_theme -> tty_repeat_requests) are swallowed:
+# never pane input (cat -v would show them), and with no pane blend set
+# the screen is unchanged, explicitly coloured cells included.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "sh", "-c", "printf '\\033[31mred\\033[0m '; stty raw -echo; exec cat -v"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["splitw", "-h", "-t", "a", "sh", "-c", "printf '\\033[38;2;200;0;0mrgb\\033[0m '; stty raw -echo; exec cat -v"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { attach = { session = "a" } },
+  { keys = "\u001b]10;rgb:ffff/ffff/ffff\u001b\\\u001b]11;rgb:0000/0000/0000\u001b\\\u001b]4;1;rgb:f3f3/8b8b/a8a8\u0007" },
+  { keys = "a" },
+  { settle = {} },
+  { screen = {} },
+  { keys = "\u001b[?997;2n" },
+  { settle = { react = true } },
+  { keys = "\u001b]10;#000000\u0007\u001b]11;#ffffff\u0007b" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["selectp", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
