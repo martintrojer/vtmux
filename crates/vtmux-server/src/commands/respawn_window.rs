@@ -37,9 +37,6 @@ pub fn exec(
         ))
         .into());
     }
-    if args.flag('E') {
-        return Err(EdgeError::NotImplemented("respawn-window -E".into()).into());
-    }
     let Some((wp, gone)) = server.model.reset_window_panes(w) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };

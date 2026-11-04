@@ -1,7 +1,7 @@
 //! `send-keys` (cmd-send-keys.c:155-268) for keys and literal text, `-K`,
 //! and `-N`, `-X` and keys for a pane in any mode ([`PaneMode`]); `-c`
 //! names the client whose read-only flag and `-K` keys count; `-M` gives
-//! the binding's mouse event to the pane under it. `-R` is later.
+//! the binding's mouse event to the pane under it; `-R` resets the pane's terminal.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -52,9 +52,6 @@ pub fn exec(
         server.forward_mouse(p, tc, &m);
         return Ok(());
     }
-    if args.flag('R') {
-        return Err(EdgeError::NotImplemented("send-keys -R".into()).into());
-    }
     let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
     let repeat = if args.flag('N') {
         super::number_expanded(server, found, args.value('N'), 1, i64::from(u32::MAX)).map_err(
@@ -88,6 +85,13 @@ pub fn exec(
         }
         let mouse = item.mouse.clone();
         return mode_command(server, args, found, p, tc, mouse.as_ref());
+    }
+    if args.flag('R') {
+        reset_pane(server, p);
+        // cmd-send-keys.c:242-243: nothing more without keys.
+        if args.positionals.is_empty() {
+            return Ok(());
+        }
     }
     if in_mode {
         mode_keys(server, item, args, found, p, repeat, tc);
@@ -131,6 +135,18 @@ pub fn exec(
             .unwrap_or_default()
     });
     Ok(())
+}
+
+/// `send-keys -R` (cmd-send-keys.c:236-240): the palette cleared and the
+/// pane's terminal reset (`input_reset(ictx, 1)`): the parser back to the
+/// ground state, then `screen_write_reset`, as RIS does it (input.c:1407).
+fn reset_pane(server: &mut Server, p: PaneId) {
+    if let Some(pane) = server.model.panes.get_mut(&p) {
+        pane.term.reset_input();
+        pane.term.feed(b"\x1bc");
+        let _ = pane.term.take_replies();
+    }
+    server.model.redraw_panes.insert(p);
 }
 
 /// `send-keys -X`: a command for the pane's mode (`window_copy_command`).

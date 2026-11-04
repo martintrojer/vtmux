@@ -1,7 +1,8 @@
 //! `split-window` (cmd-split-window.c:73-345, layout.c
 //! `layout_get_tiled_cell`): a new pane next to the target, or next to the
-//! whole layout with `-f`. Styles, borders (`-B -s -S -R`), empty panes
-//! (`-E -I`), `-k -m -W` and `-M` are not done yet.
+//! whole layout with `-f`; `-E`, `-I` or one empty argument make an empty
+//! pane (no process); `-W` waits for the pane's process to exit. `-k -m`
+//! and `-M` are not done yet.
 
 use std::path::PathBuf;
 
@@ -48,14 +49,33 @@ pub fn exec(
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    for flag in ['B', 'E', 'I', 'M', 'R', 's', 'S', 'W'] {
+    for flag in ['M'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("split-window -{flag}")).into());
         }
     }
-    if args.positionals.len() == 1 && args.positional(0) == Some("") {
-        return Err(EdgeError::NotImplemented("split-window empty pane".into()).into());
+    // cmd-split-window.c:149-161: -I, or one empty argument, is an empty
+    // pane like -E, and a command with one is an error.
+    let empty_command = args.positionals.len() == 1 && args.positional(0) == Some("");
+    let input = args.flag('I');
+    let empty = input || empty_command || args.flag('E');
+    if empty && !args.positionals.is_empty() && !empty_command {
+        return Err(EdgeError::Message("command cannot be given for empty pane".into()).into());
     }
+    // cmd-split-window.c:163-173: -B is a pane-border-lines choice.
+    let lines = match args.value('B') {
+        Some(v) => Some(
+            vtmux_core::options::find("pane-border-lines")
+                .and_then(|def| match def.kind {
+                    vtmux_core::options::Kind::Choice(names) => names.iter().rposition(|n| *n == v),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    EdgeError::Message(format!("pane-border-lines unknown value: {v}"))
+                })?,
+        ),
+        None => None,
+    };
     let (Some(s), Some(index), Some(w), Some(wp)) =
         (found.session, found.index, found.window, found.pane)
     else {
@@ -179,6 +199,7 @@ pub fn exec(
         cwd,
         rect,
         shell: None,
+        empty,
     });
     let mut pane = match spawned {
         Ok(pane) => pane,
@@ -222,6 +243,31 @@ pub fn exec(
         pane: Some(new),
         new_index: None,
     };
+    // cmd-split-window.c:225-255: the new pane's own styles (unchecked,
+    // options_set_string) and border lines.
+    let pane_tree = vtmux_core::options::TreeId::Pane(new);
+    for (flag, names) in [
+        ('s', &["window-style", "window-active-style"][..]),
+        ('S', &["pane-active-border-style"][..]),
+        ('R', &["pane-border-style"][..]),
+    ] {
+        if let Some(style) = args.value(flag) {
+            for name in names {
+                server.model.options.set_table_value(
+                    pane_tree,
+                    name,
+                    vtmux_core::options::Value::String(style.to_owned()),
+                );
+            }
+        }
+    }
+    if let Some(n) = lines {
+        server.model.options.set_table_value(
+            pane_tree,
+            "pane-border-lines",
+            vtmux_core::options::Value::Choice(n),
+        );
+    }
     if let Some(t) = args.value('T') {
         let title = expand(server, found, t);
         if let Some(p) = server.model.panes.get_mut(&new) {
@@ -230,7 +276,7 @@ pub fn exec(
     }
     // spawn_pane (spawn.c:590-612): pane-created, the new pane active
     // (window-pane-changed, above), then window-layout-changed.
-    server.fire_pane_created(s, index, new, false, false);
+    server.fire_pane_created(s, index, new, empty, false);
     if !args.flag('d') {
         server.model.set_active(w, new);
     }
@@ -243,6 +289,20 @@ pub fn exec(
         let template = args.value('F').unwrap_or(TEMPLATE);
         let text = expand(server, new_found, template);
         item.print(&text);
+    }
+    // cmd-split-window.c:276-286, 320-321: -I reads the client's stdin into
+    // the new pane, the command waiting until it ends.
+    if input {
+        return super::file_io::pane_input(server, item, new).map_err(Into::into);
+    }
+    // cmd-split-window.c:322-330: -W waits until the pane's process exits
+    // (window_pane_wait_finish).
+    if args.flag('W')
+        && let Some(step) = item.step
+        && let Some(pane) = server.model.panes.get_mut(&new)
+    {
+        pane.wait_step = Some(step);
+        item.blocked = true;
     }
     Ok(())
 }

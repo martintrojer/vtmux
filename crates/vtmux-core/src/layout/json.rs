@@ -384,6 +384,43 @@ impl Parser<'_> {
     }
 }
 
+impl std::fmt::Display for Node {
+    /// `json_string_append`: compact, fields in key order, strings as they
+    /// were read (escapes undecoded).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Node::Str(s) => write!(f, "\"{s}\""),
+            Node::Num(n) => write!(f, "{n}"),
+            Node::Bool(b) => write!(f, "{b}"),
+            Node::Object(o) => write!(f, "{o}"),
+            Node::Array(a) => {
+                f.write_str("[")?;
+                for (i, o) in a.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(",")?;
+                    }
+                    write!(f, "{o}")?;
+                }
+                f.write_str("]")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Object {
+    /// `json_to_string` of an object.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("{")?;
+        for (i, (k, v)) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(",")?;
+            }
+            write!(f, "\"{k}\":{v}")?;
+        }
+        f.write_str("}")
+    }
+}
+
 /// `json_parse`: the top-level object of `input`.
 pub fn parse(input: &str) -> Result<Object, String> {
     // C strings end at the first NUL.
@@ -407,4 +444,29 @@ pub fn parse(input: &str) -> Result<Object, String> {
         return Err(p.err("unexpected trailing data", p.tok(0).offset));
     }
     Ok(object)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    /// `json_to_string` after `json_parse` (regress/json.sh): keys sorted,
+    /// no white space, escapes as written.
+    #[test]
+    fn round_trip() {
+        let cases = [
+            ("{}", "{}"),
+            (
+                r#" { "z":true, "a":-9223372036854775808, "m":[{}, {"x":false}] } "#,
+                r#"{"a":-9223372036854775808,"m":[{},{"x":false}],"z":true}"#,
+            ),
+            (
+                r#"{"esc":"\"\\\/\b\f\n\r\t\u0041"}"#,
+                r#"{"esc":"\"\\\/\b\f\n\r\t\u0041"}"#,
+            ),
+        ];
+        for (input, want) in cases {
+            assert_eq!(parse(input).unwrap().to_string(), want, "{input}");
+        }
+    }
 }

@@ -2,6 +2,7 @@
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
+use vtmux_core::format;
 
 use super::Item;
 use crate::server::Server;
@@ -23,17 +24,31 @@ pub fn exec(
         return Ok(());
     }
     if args.flag('a') {
-        if args.value('f').is_some() {
-            return Err(EdgeError::NotImplemented("kill-session -f".into()).into());
-        }
+        // cmd_kill_session_all: in name order, each other session the
+        // filter holds for, expanded against that session alone
+        // (format_defaults(ft, NULL, s, NULL, NULL)) once the ones before
+        // it are gone.
+        let filter = args.value('f');
         let others: Vec<_> = server
             .model
-            .sessions
-            .keys()
+            .by_name
+            .values()
             .copied()
             .filter(|x| *x != s)
             .collect();
         for other in others {
+            if !server.model.sessions.contains_key(&other) {
+                continue;
+            }
+            if let Some(f) = filter {
+                let session_only = Found {
+                    session: Some(other),
+                    ..Found::default()
+                };
+                if !format::is_true(&super::expand(server, session_only, f)) {
+                    continue;
+                }
+            }
             server.destroy_session(other);
         }
         return Ok(());

@@ -293,9 +293,18 @@ impl Source<'_> {
             (d.status, d.status_ranges) = (line.cells, line.ranges);
         }
         let ctx = self.ctx(found, caps);
+        let marked = found
+            .index
+            .and_then(|i| {
+                self.model
+                    .marked()
+                    .filter(|m| m.session == Some(s) && m.index == Some(i))
+            })
+            .and_then(|m| m.pane);
         let draw = Draw {
             panes: draws,
             active: Some(active),
+            marked,
             offset,
             border: self.style(wtree, "pane-border-style", &ctx),
             lines: Lines::from_choice(self.model.number_option(wtree, "pane-border-lines")),

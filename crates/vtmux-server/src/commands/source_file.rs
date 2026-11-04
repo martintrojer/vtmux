@@ -15,7 +15,8 @@ use vtmux_core::cmd::{self, Args, CmdError, CommandCall, CommandList, ParseOpts,
 use vtmux_core::error::{EdgeError, strerror};
 
 use super::Item;
-use crate::cmdq::{Groups, Source, Work};
+use super::file_io::Then;
+use crate::cmdq::{Groups, Source, StepId, Work};
 use crate::server::{GlobalEnv, Server};
 use crate::target::Found;
 
@@ -38,7 +39,7 @@ pub fn exec(
     }
     *depth += 1;
     let quiet = args.flag('q');
-    let mut paths = Vec::new();
+    let mut files = Vec::new();
     let mut failed = false;
     for raw in &args.positionals {
         let raw = &*raw.text();
@@ -47,8 +48,10 @@ pub fn exec(
         } else {
             raw.to_owned()
         };
+        // cmd-source-file.c:225-228: `-` is the client's stdin.
         if path == "-" {
-            return Err(EdgeError::NotImplemented("source-file -".into()).into());
+            files.push(File::Stdin);
+            continue;
         }
         // Relative paths are against the client's directory, then globbed
         // (cmd-source-file.c:218-256); a miss is reported and the other
@@ -67,7 +70,7 @@ pub fn exec(
             );
             failed = true;
         }
-        paths.extend(matches);
+        files.extend(matches.into_iter().map(File::Path));
     }
     let opts = LoadOpts {
         quiet: false,
@@ -79,7 +82,7 @@ pub fn exec(
     // cmd-source-file.c:264-272: with nothing to read, a miss is the
     // command's error (the rest of its group is dropped); otherwise the
     // command waits for its files and the miss only fails the client.
-    if paths.is_empty() {
+    if files.is_empty() {
         if server.cfg_finished
             && let Some(step) = item.step
         {
@@ -87,22 +90,109 @@ pub fn exec(
         }
         return if failed { Err(CmdError::Quiet) } else { Ok(()) };
     }
-    let mut groups = Vec::new();
-    for path in paths {
-        let before = server.causes.len();
-        groups.extend(parse(server, item, &path, opts));
-        failed |= server.causes.len() > before;
-    }
     let Some(step) = item.step else {
+        // No queue to insert into: only parsed (and the causes kept).
+        for file in files {
+            if let File::Path(path) = file {
+                parse(server, item, &path, opts);
+            }
+        }
         return Ok(());
     };
-    let last = server.cmdq_insert_commands(step, groups).unwrap_or(step);
-    // cmd_source_file_complete: while the config loads its causes wait
-    // for cfg_show_causes, and the depth is never given back.
-    if server.cfg_finished {
-        server.cmdq_insert_work(last, Work::SourceDone { failed });
-    }
+    files.reverse();
+    load_files(
+        server,
+        item,
+        Cont {
+            after: step,
+            files,
+            opts,
+            failed,
+        },
+    );
     Ok(())
+}
+
+/// One file `source-file` reads.
+#[derive(Debug)]
+enum File {
+    Path(PathBuf),
+    /// `-`: the client's stdin.
+    Stdin,
+}
+
+/// Where a `source-file` is in its list of files
+/// (`struct cmd_source_file_data`): the step the next file's commands go
+/// after, the files still to read (last first), and whether one failed.
+#[derive(Debug)]
+pub(crate) struct Cont {
+    after: StepId,
+    files: Vec<File>,
+    opts: LoadOpts,
+    failed: bool,
+}
+
+/// `cmd_source_file_done` for each file in turn: a file's commands go in
+/// after the last file's. Stdin is read through the client
+/// ([`super::file_io`]): the command waits, and [`stdin_done`] carries on.
+/// After the last file, the step that reports the causes.
+fn load_files(server: &mut Server, item: &mut Item, mut cont: Cont) {
+    while let Some(file) = cont.files.pop() {
+        match file {
+            File::Path(path) => {
+                let before = server.causes.len();
+                let groups = parse(server, item, &path, cont.opts);
+                cont.failed |= server.causes.len() > before;
+                cont.after = server
+                    .cmdq_insert_commands(cont.after, groups)
+                    .unwrap_or(cont.after);
+            }
+            File::Stdin => {
+                // file_read always completes through its callback; the
+                // error is the done callback's.
+                let _ = super::file_io::read(server, item, None, Then::Source(Box::new(cont)));
+                return;
+            }
+        }
+    }
+    // cmd_source_file_complete: while the config loads its causes wait for
+    // cfg_show_causes, and the depth is never given back.
+    if server.cfg_finished {
+        server.cmdq_insert_work(
+            cont.after,
+            Work::SourceDone {
+                failed: cont.failed,
+            },
+        );
+    }
+}
+
+/// `cmd_source_file_done` for stdin (cmd-source-file.c:115-146): an error
+/// is the command's (`strerror: -`), otherwise what was read is parsed as
+/// file `-`; then the next file.
+pub(crate) fn stdin_done(
+    server: &mut Server,
+    item: &mut Item,
+    mut cont: Cont,
+    data: Vec<u8>,
+    error: i32,
+) {
+    if error != 0 {
+        let e = std::io::Error::from_raw_os_error(error);
+        item.error(
+            server,
+            vtmux_core::rawstr::to_bytes(&format!("{}: -", strerror(&e))).into_owned(),
+        );
+    } else if !data.is_empty() {
+        let before = server.causes.len();
+        let text = vtmux_core::rawstr::from_vec(data);
+        let groups = parse_text(server, item, "-", &text, cont.opts);
+        cont.failed |= server.causes.len() > before;
+        cont.after = server
+            .cmdq_insert_commands(cont.after, groups)
+            .unwrap_or(cont.after);
+    }
+    load_files(server, item, cont);
 }
 
 /// `cmd_source_file_complete_cb` (cmd-source-file.c:77-94): one level
@@ -221,6 +311,17 @@ pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) 
             return Vec::new();
         }
     };
+    parse_text(server, item, &file, &text, opts)
+}
+
+/// Parse `text`, read from `file`, as [`parse`] does a file's.
+fn parse_text(
+    server: &mut Server,
+    item: &mut Item,
+    file: &str,
+    text: &str,
+    opts: LoadOpts,
+) -> Groups {
     let parse = ParseOpts {
         parse_only: opts.parse_only,
         one_group: false,
@@ -259,7 +360,7 @@ pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) 
             groups.push((group.line, calls));
         }
     };
-    let parsed = cmd::parse_file(&text, &mut env, parse, Some(&mut collect));
+    let parsed = cmd::parse_file(text, &mut env, parse, Some(&mut collect));
     if opts.verbose {
         // cmd_parse_print_commands (cmd-parse.y:612-624): groups built
         // before an error are printed too.
@@ -283,7 +384,7 @@ pub fn parse(server: &mut Server, item: &mut Item, path: &Path, opts: LoadOpts) 
         .into_iter()
         .map(|(line, calls)| {
             let source = Rc::new(Source {
-                file: file.clone(),
+                file: file.to_owned(),
                 line,
             });
             (Some(source), calls)

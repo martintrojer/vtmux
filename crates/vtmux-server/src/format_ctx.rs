@@ -212,6 +212,13 @@ impl<'a> Ctx<'a> {
             .collect()
     }
 
+    /// The marked pane's winlink is session `s`'s window at `index`.
+    fn marked_winlink(&self, s: SessionId, index: u32) -> bool {
+        self.model
+            .marked()
+            .is_some_and(|m| m.session == Some(s) && m.index == Some(index))
+    }
+
     fn session(&self) -> Option<&crate::model::Session> {
         self.model.sessions.get(&self.target.session?)
     }
@@ -282,8 +289,9 @@ impl<'a> Ctx<'a> {
             "session_created" => s.created.to_string(),
             "session_activity" => s.activity_secs.to_string(),
             "session_last_attached" => s.last_attached.map(|t| t.to_string()).unwrap_or_default(),
-            // No marked pane yet (server_check_marked), no session groups.
-            "session_marked" | "session_grouped" => "0".to_owned(),
+            // format_cb_session_marked; no session groups.
+            "session_marked" => flag(self.model.marked().is_some_and(|m| m.session == Some(s.id))),
+            "session_grouped" => "0".to_owned(),
             "session_group" => String::new(),
             // s->attached: the clients attached to it (format.c
             // format_cb_session_attached, recalculate_sizes).
@@ -360,7 +368,8 @@ impl<'a> Ctx<'a> {
             "window_index" => wl?.1.to_string(),
             "window_name" => w.name.clone(),
             "window_activity" => w.activity_secs.to_string(),
-            "window_marked_flag" => "0".to_owned(),
+            // format_cb_window_marked_flag: the marked winlink.
+            "window_marked_flag" => flag(wl.is_some_and(|(s, i)| self.marked_winlink(s.id, i))),
             // window_count_panes(w, 1).
             "window_panes" => w.panes.panes.len().to_string(),
             "window_width" => w.sx().to_string(),
@@ -387,7 +396,7 @@ impl<'a> Ctx<'a> {
                 flag(wl.is_some_and(|(s, i)| s.windows.keys().next_back() == Some(&i)))
             }
             // window_printable_flags (window.c:1359-1386) for the flags
-            // vtmux has (no marked pane or modal windows); `window_flags`
+            // vtmux has (no modal windows); `window_flags`
             // doubles the `#` of the activity flag.
             "window_flags" | "window_raw_flags" => {
                 let (s, i) = wl?;
@@ -407,6 +416,9 @@ impl<'a> Ctx<'a> {
                 }
                 if s.last.first() == Some(&i) {
                     f.push('-');
+                }
+                if self.marked_winlink(s.id, i) {
+                    f.push('M');
                 }
                 if w.zoomed() {
                     f.push('Z');
@@ -483,7 +495,8 @@ impl<'a> Ctx<'a> {
         Some(match name {
             "pane_id" => p.id.to_string(),
             "pane_index" => self.model.pane_index(p.id)?.to_string(),
-            // format_cb_pane_pid: none once the PTY is closed.
+            // format_cb_pane_pid: nothing once the PTY is closed, or for an
+            // empty pane.
             "pane_pid" => {
                 io?;
                 p.pid.to_string()
@@ -547,8 +560,11 @@ impl<'a> Ctx<'a> {
             "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),
             "pane_input_off" => flag(p.input_off),
             "pane_synchronized" => flag(self.model.pane_synchronized(p.id)),
-            // No marked pane and no pipe-pane yet.
-            "pane_marked" | "pane_pipe" => "0".to_owned(),
+            // format_cb_pane_marked, format_cb_pane_marked_set; no
+            // pipe-pane yet.
+            "pane_marked" => flag(self.model.marked().is_some_and(|m| m.pane == Some(p.id))),
+            "pane_marked_set" => flag(self.model.marked().is_some()),
+            "pane_pipe" => "0".to_owned(),
             "pane_unseen_changes" => flag(p.unseen_changes),
             // format_cb_pane_dead* (format.c:2255-2311): the PTY closed
             // and the status in; the status or signal as it ended; when

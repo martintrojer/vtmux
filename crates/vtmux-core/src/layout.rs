@@ -32,7 +32,7 @@
 mod arith;
 mod cell;
 mod emit;
-mod json;
+pub mod json;
 mod named;
 mod parse;
 mod window;

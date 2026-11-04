@@ -5668,3 +5668,224 @@ fn send_keys_in_key_modes(name: &str, keys: &[&str], backspace: Option<&str>) {
         runs
     });
 }
+
+/// Empty panes (spawn.c `SPAWN_EMPTY`): `split-window -E` or one empty
+/// argument, `new-window -E`, a command with `-E` refused; no process, so
+/// no pid, not dead. `display-message -I` and `split-window -I` write the
+/// client's stdin into an empty pane (window.c `window_pane_start_input`;
+/// a line feed returns the carriage, `MODE_CRLF`), a live pane refuses.
+/// `respawn-pane -E` and `respawn-window -E` keep the command and the
+/// directory and start nothing; a plain respawn starts them.
+#[test]
+fn empty_panes_and_input() {
+    compare("empty_panes_and_input", |w| {
+        let fmt = "#{pane_id} [#{?pane_pid,live,}] #{pane_dead} #{pane_start_command}";
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]),
+            w.run(&["splitw", "-d", "-E"]),
+            w.run(&["splitw", "-d", ""]),
+            w.run(&["splitw", "-d", "-E", "cat"]),
+            w.run(&["splitw", "-d", "-E", ""]),
+            w.run(&["neww", "-d", "-E", "-n", "e"]),
+            w.run(&["neww", "-d", "-E", "x"]),
+            w.run(&["neww", "-d", "-P", "-F", "#{window_name}", ""]),
+            w.run(&["lsp", "-a", "-F", fmt]),
+            w.run_stdin(
+                &["display", "-I", "-t", "%1"],
+                b"hello\nworld\x1b[31mred\n  x\n",
+            ),
+            w.run(&["capturep", "-p", "-t", "%1"]),
+            w.run(&["capturep", "-pe", "-t", "%1"]),
+            w.run(&["display", "-p", "-t", "%1", "#{cursor_x},#{cursor_y}"]),
+            w.run_stdin(&["display", "-I", "-t", "%0"], b"x"),
+            w.run_stdin(&["display", "-pIj", "-t", "%0", "{}"], b"x"),
+            w.run_stdin(
+                &["splitw", "-d", "-I", "-P", "-F", "#{pane_id}", "-t", "%0"],
+                b"from stdin\n",
+            ),
+        ];
+        let id = runs
+            .last()
+            .map(|r| r.stdout.trim().to_owned())
+            .unwrap_or_default();
+        runs.push(w.run(&["capturep", "-p", "-t", &id]));
+        runs.push(w.run_stdin(&["splitw", "-d", "-I", "-t", "%0", "cat"], b""));
+        // -E stores the command and directory; the next respawn runs them.
+        // (A live pane is not used: its killed process's exit still matches
+        // the pane, which then goes.)
+        runs.push(w.run(&["respawnp", "-E", "-c", "/", "-t", "%1", "pwd; exec cat"]));
+        runs.push(w.run(&["lsp", "-t", "a:0", "-F", fmt]));
+        runs.push(w.run(&["respawnp", "-t", "%1"]));
+        w.wait_for_text("%1", "/");
+        runs.push(w.run(&["capturep", "-p", "-t", "%1"]));
+        runs.push(w.run(&["respawnw", "-k", "-E", "-t", "a:e", "exec cat"]));
+        runs.push(w.run(&["lsp", "-t", "a:e", "-F", fmt]));
+        runs.push(w.run(&["respawnw", "-t", "a:e"]));
+        runs.push(w.run(&["display", "-p", "-t", "a:e", "#{?pane_pid,live,empty}"]));
+        runs
+    });
+}
+
+/// `source-file -` reads the client's stdin as a file named `-`, in order
+/// with the other files (cmd-source-file.c:225-228); a second `-` finds
+/// stdin used (`Bad file descriptor: -`); errors carry `-:line:`; `-n`
+/// parses only; `-v` prints.
+#[test]
+fn source_file_stdin() {
+    compare("source_file_stdin", |w| {
+        let conf = w.dir().join("a.conf");
+        std::fs::write(&conf, "display -p from-file\n").expect("write");
+        let conf = conf.to_str().expect("utf-8");
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run_stdin(
+                &["source", "-"],
+                b"display -p hi\ndisplay -p '#{session_name}'\n",
+            ),
+            w.run_stdin(&["source", "-"], b"display -p one\nbogus\n"),
+            w.run_stdin(&["source", "-", "-"], b"display -p twice\n"),
+            w.run_stdin(&["source", conf, "-", conf], b"display -p from-stdin\n"),
+            w.run_stdin(&["source", "-n", "-"], b"display -p parsed\n"),
+            w.run_stdin(&["source", "-v", "-"], b"set -g @x 1\n"),
+            w.run(&["show", "-gv", "@x"]),
+            w.run_stdin(&["source", "-"], b""),
+            w.run_stdin(&["source", "/nonexistent", "-"], b"display -p after-miss\n"),
+        ]
+    });
+}
+
+/// `display-message -j` (cmd-display-message.c:145-157): the message must
+/// be a JSON object and prints as `json_to_string` writes it (keys sorted,
+/// compact); `-a` and `-I` are ignored with it. `kill-session -a -f` kills
+/// only the other sessions the filter holds for (cmd-kill-session.c:
+/// 90-120).
+#[test]
+fn display_json_and_kill_filter() {
+    compare("display_json_and_kill_filter", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat"]),
+            w.run(&[
+                "display",
+                "-plj",
+                r#" { "z":true, "a":-9, "m":[{}, {"x":false}] } "#,
+            ]),
+            w.run(&["display", "-pj", r##"{"s":"#{session_name}"}"##]),
+            w.run(&["display", "-palj", "{}"]),
+            w.run(&["display", "-pj", r#"{"x":1,}"#]),
+            w.run(&["display", "-pj", "[]"]),
+            w.run(&["display", "-pj"]),
+            w.run(&["new", "-d", "-s", "b", "cat"]),
+            w.run(&["new", "-d", "-s", "c", "cat"]),
+            w.run(&["new", "-d", "-s", "d", "cat"]),
+            w.run(&["kill-session", "-f", "1", "-t", "a"]),
+            // refresh-client -B is for a control client only.
+            w.run(&["refresh-client", "-B", "x::y"]),
+            w.run(&[
+                "kill-session",
+                "-a",
+                "-t",
+                "a",
+                "-f",
+                "#{!=:#{session_name},c}",
+            ]),
+            w.run(&["ls", "-F", "#{session_name}"]),
+        ]
+    });
+}
+
+/// `split-window -W` waits for the pane's process and exits with its
+/// status, 128 + SIGHUP when the pane is killed first (window.c
+/// `window_pane_wait_finish`). `-s -S -R -B` set the new pane's styles and
+/// border lines (unchecked, as `options_set_string`), a bad `-B` is
+/// refused before the split.
+#[test]
+fn split_window_wait_and_styles() {
+    compare("split_window_wait_and_styles", |w| {
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]),
+            w.run(&["splitw", "-W", "sh -c 'exit 7'"]),
+        ];
+        let waiter = w.spawn(&["splitw", "-W", "-d", "exec cat"]);
+        let start = Instant::now();
+        let id = loop {
+            let out = w
+                .run(&["lsp", "-F", "#{pane_id} #{pane_start_command}"])
+                .stdout;
+            if let Some(l) = out.lines().find(|l| l.contains("exec cat")) {
+                break l.split(' ').next().unwrap_or_default().to_owned();
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "no -W pane");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        runs.push(w.run(&["killp", "-t", &id]));
+        let out = waiter.wait_with_output().expect("wait");
+        runs.push(Run::seen(format!("-W exit {:?}", out.status.code())));
+        runs.push(w.run(&["splitw", "-d", "-B", "nope"]));
+        runs.push(w.run(&["lsp", "-F", "#{pane_id}"]));
+        runs.push(w.run(&[
+            "splitw",
+            "-d",
+            "-B",
+            "double",
+            "-s",
+            "bg=red",
+            "-S",
+            "fg=blue",
+            "-R",
+            "bogus",
+            "-P",
+            "-F",
+            "#{pane_id}",
+        ]));
+        let id = runs
+            .last()
+            .map(|r| r.stdout.trim().to_owned())
+            .unwrap_or_default();
+        runs.push(w.run(&["show", "-p", "-t", &id]));
+        runs
+    });
+}
+
+/// `select-pane -m/-M` (cmd-select-pane.c:84-143): the marked pane, its
+/// formats and window flag `M`, the `~` target, the default source of
+/// swap-pane, unmarking by marking again, losing the mark when the pane
+/// leaves its window, the mark following its winlink through a swap and a
+/// move, and no mark on a pane hidden by a zoom. `-P` / `-g` set and show
+/// the pane's window style.
+#[test]
+fn marked_pane() {
+    compare("marked_pane", |w| {
+        let f = "#{pane_id} m=#{pane_marked} ms=#{pane_marked_set} wm=#{window_marked_flag} \
+                 sm=#{session_marked} wf=#{window_flags}";
+        vec![
+            w.run(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]),
+            w.run(&["splitw", "-d", "cat"]),
+            w.run(&["neww", "-d", "cat"]),
+            w.run(&["new", "-d", "-s", "b", "cat"]),
+            w.run(&["display", "-p", "-t", "~", "x"]),
+            w.run(&["selectp", "-m", "-t", "a:0.1"]),
+            w.run(&["lsp", "-a", "-F", f]),
+            w.run(&["display", "-p", "-t", "{marked}", "#S:#I.#P"]),
+            w.run(&["swapp", "-d", "-t", "a:0.0"]),
+            w.run(&["lsp", "-t", "a:0", "-F", "#{pane_index} #{pane_id}"]),
+            w.run(&["selectp", "-m", "-t", "a:0.0"]),
+            w.run(&["display", "-p", "-t", "a:0.0", f]),
+            w.run(&["selectp", "-m", "-t", "a:1"]),
+            w.run(&["selectp", "-M", "-t", "b"]),
+            w.run(&["display", "-p", "-t", "a:1", f]),
+            w.run(&["selectp", "-m", "-t", "a:0.1"]),
+            w.run(&["swapw", "-s", "a:0", "-t", "a:1"]),
+            w.run(&["movew", "-s", "a:1", "-t", "a:5"]),
+            w.run(&["lsw", "-a", "-F", "#S:#I #{window_flags}"]),
+            w.run(&["breakp", "-d", "-s", "a:5.0"]),
+            w.run(&["lsw", "-a", "-F", "#S:#I #{window_flags}"]),
+            w.run(&["resizep", "-Z", "-t", "a:5.0"]),
+            w.run(&["selectp", "-m", "-t", "a:5.0"]),
+            w.run(&["display", "-p", "-t", "a:5", "#{pane_marked_set}"]),
+            w.run(&["selectp", "-g", "-t", "a:5.0"]),
+            w.run(&["selectp", "-P", "bg=red", "-t", "a:5.0"]),
+            w.run(&["selectp", "-g", "-t", "a:5.0"]),
+            w.run(&["show", "-p", "-t", "a:5.0"]),
+        ]
+    });
+}

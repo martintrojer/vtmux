@@ -1,9 +1,9 @@
 //! `respawn-pane` (cmd-respawn-pane.c:46-100, spawn.c `spawn_pane` with
 //! `SPAWN_RESPAWN`): run a new process in an existing pane. Without `-k`
 //! the pane must be dead (kept by remain-on-exit, its PTY closed). The
-//! pane keeps its ID, its command unless a
-//! new one is given, its directory unless `-c`, and its shell. Empty panes
-//! (`-E`) are not done yet.
+//! pane keeps its ID, its command unless a new one is given, its directory
+//! unless `-c`, and its shell. With `-E` the command and directory are
+//! stored and nothing runs (an empty pane).
 
 use std::path::PathBuf;
 
@@ -34,9 +34,6 @@ pub fn exec(
             "respawn pane failed: pane {session}:{index}.{pidx} still active"
         ))
         .into());
-    }
-    if args.flag('E') {
-        return Err(EdgeError::NotImplemented("respawn-pane -E".into()).into());
     }
     respawn(server, item, args, (s, w, wp), "pane")?;
     // cmd-respawn-pane.c:92: PANE_REDRAW.
@@ -81,6 +78,8 @@ pub(super) fn respawn(
             cwd,
             rect,
             shell,
+            // cmd-respawn-pane.c:78-79.
+            empty: args.flag('E'),
         })
         .map_err(|e| EdgeError::Message(format!("respawn {what} failed: fork failed: {e}")))?;
     Ok(())

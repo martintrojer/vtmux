@@ -156,6 +156,10 @@ pub struct PaneDraw {
 pub struct Draw {
     pub panes: BTreeMap<PaneId, PaneDraw>,
     pub active: Option<PaneId>,
+    /// The marked pane when it is in this window of this session
+    /// (`dctx->marked`, screen-redraw.c:1611): the borders next to it are
+    /// drawn reversed.
+    pub marked: Option<PaneId>,
     /// Where the window's origin is in the drawn area: 1 cell in under the
     /// focus ring (D23), else 0.
     pub offset: u16,
@@ -308,6 +312,7 @@ struct PaneKey {
 struct DrawKey {
     panes: Vec<PaneKey>,
     active: Option<PaneId>,
+    marked: Option<PaneId>,
     offset: u16,
     border: CellStyle,
     lines: Lines,
@@ -334,6 +339,7 @@ impl DrawKey {
                 })
                 .collect(),
             active: d.active,
+            marked: d.marked,
             offset: d.offset,
             border: d.border.clone(),
             lines: d.lines,
@@ -403,10 +409,19 @@ fn compose_row(
                     let text = b
                         .arrow_glyph(d.active)
                         .map_or_else(|| b.shape().glyph(lines, index), Into::into);
+                    // screen-redraw.c:1250-1253: GRID_ATTR_REVERSE toggled
+                    // beside the marked pane.
+                    let marked = d
+                        .marked
+                        .is_some_and(|m| [b.up, b.down, b.left, b.right].contains(&Some(m)));
+                    let mut style = theme.style(style);
+                    if marked {
+                        style.inverse = !style.inverse;
+                    }
                     Cell {
                         text,
                         width: 1,
-                        style: theme.style(style),
+                        style,
                         ..Cell::default()
                     }
                 }
@@ -820,6 +835,7 @@ mod tests {
         for (i, (pane, bytes)) in steps.iter().enumerate() {
             terms[*pane].feed(bytes);
             let draw = Draw {
+                marked: None,
                 panes: (0..2u32)
                     .map(|p| {
                         let view = terms[p as usize].screen();

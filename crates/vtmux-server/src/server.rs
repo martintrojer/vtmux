@@ -241,7 +241,14 @@ pub struct PaneSpawn<'a> {
     /// respawn-pane keeps the pane's shell (spawn.c:422-428); otherwise
     /// it comes from `default-shell`.
     pub shell: Option<PathBuf>,
+    /// `SPAWN_EMPTY`: no process; the pane only shows what is written to
+    /// it (`display-message -I`, `split-window -I`).
+    pub empty: bool,
 }
+
+/// An empty pane's screen modes (spawn.c:460-462): no cursor, and a line
+/// feed also returns the carriage (`MODE_CRLF`, Ghostty's LNM).
+pub(crate) const EMPTY_PANE_MODES: &[u8] = b"\x1b[?25l\x1b[20h";
 
 /// The client's `PATH`, if it sent one.
 #[must_use]
@@ -287,6 +294,8 @@ pub struct NewWindow<'a> {
     /// The target client (`sc->tc`): it sizes the window and becomes its
     /// latest client (spawn.c:192-202).
     pub client: Option<ClientId>,
+    /// `SPAWN_EMPTY`: its pane runs nothing.
+    pub empty: bool,
 }
 
 pub struct Server {
@@ -623,6 +632,7 @@ impl Server {
             self.clock_timers(Instant::now());
             self.panes_timers(Instant::now());
             self.sync_timers(Instant::now());
+            self.subs_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -742,6 +752,8 @@ impl Server {
             self.panes_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.sync_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.subs_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.clients
                 .values()
@@ -3261,6 +3273,7 @@ impl Server {
             cwd: spec.cwd.clone(),
             rect: Geometry::new(cols, rows, 0, 0),
             shell: None,
+            empty: false,
         })?;
         self.insert_window(window_id, pane, spec.window_name, cols, rows, None);
         // spawn_window with idx -1: the first free index from base-index
@@ -3473,6 +3486,7 @@ impl Server {
                 cwd: nw.cwd.clone(),
                 rect: Geometry::new(cols, rows, 0, 0),
                 shell: None,
+                empty: nw.empty,
             })
             .map_err(|e| format!("fork failed: {e}"))?;
         self.insert_window(window_id, pane, nw.name.clone(), cols, rows, nw.client);
@@ -3485,7 +3499,7 @@ impl Server {
         // spawn_pane fires pane-created; spawn_window selects, then fires
         // window-created and window-linked.
         let p = self.model.windows[&window_id].active();
-        self.fire_pane_created(s, index, p, false, false);
+        self.fire_pane_created(s, index, p, nw.empty, false);
         if !detached {
             self.model.set_current(s, index);
         }
@@ -3505,12 +3519,9 @@ impl Server {
         self.recalculate_sizes();
     }
 
-    /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment
-    /// (`environ_for_session` plus the spawn additions), the shell from
-    /// `default-shell`, the PTY sized to `rect`, and a terminal whose title
-    /// starts as the host name (window.c:1479-1480). The caller links the
-    /// returned pane into the model.
-    pub fn spawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<Pane> {
+    /// The new pane's environment (`environ_for_session` plus the spawn
+    /// additions, spawn.c:400-424), before `SHELL`.
+    fn pane_environ(&self, ps: &PaneSpawn<'_>) -> Environ {
         let mut child = self.global_env.clone();
         ps.session_env.copy_into(&mut child);
         // environ_for_session (environ.c:243-250): TERM from default-terminal.
@@ -3540,6 +3551,16 @@ impl Server {
             child.set("PATH", path, false);
         }
         child.set("PATH", &self.pane_path(child.get("PATH")), false);
+        child
+    }
+
+    /// `spawn_pane` (spawn.c:216-617) for a new pane: the child environment
+    /// (`environ_for_session` plus the spawn additions), the shell from
+    /// `default-shell`, the PTY sized to `rect`, and a terminal whose title
+    /// starts as the host name (window.c:1479-1480). The caller links the
+    /// returned pane into the model.
+    pub fn spawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<Pane> {
+        let mut child = self.pane_environ(ps);
         // The shell and history budget come from the session's options,
         // not the starting client's shell.
         let session_tree = TreeId::Session(ps.session);
@@ -3567,17 +3588,20 @@ impl Server {
 
         let cols = u16::try_from(ps.rect.sx).unwrap_or(u16::MAX).max(1);
         let rows = u16::try_from(ps.rect.sy).unwrap_or(u16::MAX).max(1);
-        let spawned = sys::pty::spawn(&sys::pty::SpawnSpec {
-            program: sys::pty::Program::Pane(argv.clone()),
-            shell: shell.clone(),
-            cwd: ps.cwd.clone(),
-            home: find_home(&self.global_env),
-            env: child.for_process(),
-            cols,
-            rows,
-        })?;
-        let tty = sys::pty::tty_name(&spawned.master).unwrap_or_default();
-        let io = PaneIo::new(spawned.master);
+        // spawn.c:458-464: an empty pane forks nothing.
+        let spawned = if ps.empty {
+            None
+        } else {
+            Some(sys::pty::spawn(&sys::pty::SpawnSpec {
+                program: sys::pty::Program::Pane(argv.clone()),
+                shell: shell.clone(),
+                cwd: ps.cwd.clone(),
+                home: find_home(&self.global_env),
+                env: child.for_process(),
+                cols,
+                rows,
+            })?)
+        };
         let history_limit =
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
         let mut term = PaneTerm::new(cols, rows, history_limit);
@@ -3589,13 +3613,26 @@ impl Server {
         if !host.chars().any(char::is_control) {
             term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
         }
-        io.register(self.poll.registry(), Token(PANE_BASE + ps.pane.0 as usize))?;
+        if ps.empty {
+            term.feed(EMPTY_PANE_MODES);
+        }
+        let (io, pid, tty) = match spawned {
+            Some(spawned) => {
+                let tty = sys::pty::tty_name(&spawned.master).unwrap_or_default();
+                let io = PaneIo::new(spawned.master);
+                io.register(self.poll.registry(), Token(PANE_BASE + ps.pane.0 as usize))?;
+                (Some(io), spawned.pid.as_raw_nonzero().get(), tty)
+            }
+            None => (None, 0, String::new()),
+        };
         Ok(Pane {
             id: ps.pane,
             window: ps.window,
             term,
-            io: Some(io),
-            pid: spawned.pid.as_raw_nonzero().get(),
+            io,
+            empty: ps.empty,
+            wait_step: None,
+            pid,
             tty,
             argv,
             shell,
@@ -3694,16 +3731,25 @@ impl Server {
         pane.term.reset_input();
         pane.term.stop_sync();
         pane.term.feed(
-            b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
+            b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[20l\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
         );
         let _ = pane.term.take_replies();
         // screen_reinit (spawn.c:329) under the current `extended-keys`.
         pane.term.set_extended_keys(extended_keys);
         pane.term.reset_key_mode();
+        if ps.empty {
+            pane.term.feed(EMPTY_PANE_MODES);
+        }
         pane.compress.observe(&pane.term, Instant::now());
         pane.io = fresh.io;
-        pane.pid = fresh.pid;
-        pane.tty = fresh.tty;
+        pane.empty = fresh.empty;
+        // spawn.c:459-463: an empty respawn forks nothing and keeps the old
+        // pid, so the old process's exit (server_child_exited matches by
+        // pid, server.c:498) still destroys the pane.
+        if !fresh.empty {
+            pane.pid = fresh.pid;
+            pane.tty = fresh.tty;
+        }
         pane.argv = fresh.argv;
         pane.shell = fresh.shell;
         pane.cwd = fresh.cwd;
@@ -3716,7 +3762,33 @@ impl Server {
         Ok(())
     }
 
+    /// `window_pane_wait_finish` (window.c:1486-1507): the `split-window
+    /// -W` waiting on the pane goes on, an unattached client exiting with
+    /// the process's status (128 + SIGHUP when it has none yet: the pane was
+    /// killed).
+    fn pane_wait_finish(&mut self, pane: &mut Pane) {
+        let Some(step) = pane.wait_step.take() else {
+            return;
+        };
+        let retval = match pane.status {
+            Some(crate::jobs::JobStatus::Exited(code)) => code,
+            Some(crate::jobs::JobStatus::Signaled(sig)) => 128 + sig,
+            None => 128 + libc::SIGHUP,
+        };
+        self.cmdq_with_item(step, |server, item| {
+            if item
+                .client
+                .is_some_and(|c| server.client_session(c).is_none())
+            {
+                item.status = retval;
+            }
+        });
+        self.cmdq_continue(step);
+    }
+
     pub(crate) fn close_pane_io(&mut self, mut pane: Pane) {
+        // window_pane_destroy: window_pane_wait_finish first.
+        self.pane_wait_finish(&mut pane);
         // window_pane_destroy: window_pane_clear_prompt frees the prompt's
         // owner, with no pane-prompt-closed (PANE_DESTROYED).
         if let Some(owner) = pane.prompt_owner.take() {
@@ -3764,6 +3836,82 @@ impl Server {
         self.pane_output_queued(p);
     }
 
+    /// `input_parse_buffer` (input.c:1044-1075): `bytes` from pane `p`'s
+    /// program, or written to an empty pane (`display-message -I`), into
+    /// its terminal, with what that sets off. `flooding`: more of a flood
+    /// rather than the start of a burst.
+    pub(crate) fn pane_input(&mut self, p: PaneId, bytes: &[u8], flooding: bool) {
+        if bytes.is_empty() {
+            return;
+        }
+        // DECRQSS / DECRQM 12 fall back to the pane's `cursor-style`
+        // (input.c:1666-1680, 2590-2600).
+        let cursor_style =
+            u8::try_from(self.model.number_option(TreeId::Pane(p), "cursor-style")).unwrap_or(0);
+        let input_buffer = self
+            .model
+            .number_option(TreeId::Server, "input-buffer-size");
+        let extended_keys = self.model.extended_keys();
+        let redraw_pending = self.model.redraw_panes.contains(&p);
+        let Some(pane) = self.model.panes.get_mut(&p) else {
+            return;
+        };
+        pane.term.set_cursor_style_option(cursor_style);
+        let before = (pane.term.title(), pane.term.pwd());
+        let alternate = pane.term.alternate_on();
+        pane.term
+            .set_input_buffer_size(usize::try_from(input_buffer).unwrap_or(0));
+        pane.term.set_extended_keys(extended_keys);
+        pane.term.feed(bytes);
+        let passthrough = pane.term.take_passthrough();
+        pane.compress.observe(&pane.term, Instant::now());
+        let entered_alternate = !alternate && pane.term.alternate_on();
+        // input.c:2725-2740: a new title (OSC 0/2) or path
+        // (OSC 7) redraws the status of the window's sessions.
+        let retitled = (pane.term.title(), pane.term.pwd()) != before;
+        pane.changed = true;
+        // input.c:1061: new input while in a mode.
+        pane.unseen_changes |= !pane.modes.is_empty();
+        let belled = pane.term.take_bells() != 0;
+        let redraw = pane.term.take_redraw();
+        // An empty pane has no program to answer.
+        let replies = pane.term.take_replies();
+        if let Some(io) = pane.io.as_mut()
+            && !replies.is_empty()
+        {
+            io.write(&replies);
+        }
+        if entered_alternate {
+            pane.flush_resizes();
+        }
+        // input_parse_buffer -> window_update_activity on every
+        // non-empty read (input.c:1053): W/t sorts and lsw -O
+        // activity order by it.
+        let window = pane.window;
+        let stamp = self.model.touch();
+        if let Some(w) = self.model.windows.get_mut(&window) {
+            w.activity = stamp;
+            w.activity_secs = crate::model::now_epoch();
+        }
+        self.model.alerts_queue(window, alerts::ACTIVITY);
+        if !flooding {
+            self.burst_started.insert(p);
+        }
+        if redraw {
+            self.model.redraw_panes.insert(p);
+        }
+        if retitled {
+            self.model
+                .redraw(crate::model::Redraw::WindowStatus(window));
+        }
+        if belled {
+            // input_c0_dispatch BEL: alerts_queue(WINDOW_BELL).
+            self.model.alerts_queue(window, alerts::BELL);
+        }
+        self.control_output(p, bytes);
+        self.pane_passthrough(p, passthrough, redraw_pending);
+    }
+
     /// Read a bounded amount from pane `p` (tmux reads once per libevent
     /// callback), so a pane flooding output cannot starve clients.
     /// `flooding`: the pane was in the backlog, so what it wrote is more of
@@ -3776,74 +3924,11 @@ impl Server {
                 self.backlog.insert(p);
                 break;
             }
-            // DECRQSS / DECRQM 12 fall back to the pane's `cursor-style`
-            // (input.c:1666-1680, 2590-2600).
-            let cursor_style =
-                u8::try_from(self.model.number_option(TreeId::Pane(p), "cursor-style"))
-                    .unwrap_or(0);
-            let input_buffer = self
-                .model
-                .number_option(TreeId::Server, "input-buffer-size");
-            let extended_keys = self.model.extended_keys();
-            let redraw_pending = self.model.redraw_panes.contains(&p);
-            let Some(pane) = self.model.panes.get_mut(&p) else {
+            let Some(io) = self.model.panes.get_mut(&p).and_then(|x| x.io.as_mut()) else {
                 return;
             };
-            let Some(io) = pane.io.as_mut() else { return };
             match io.read() {
-                ReadResult::Data(bytes) => {
-                    pane.term.set_cursor_style_option(cursor_style);
-                    let before = (pane.term.title(), pane.term.pwd());
-                    let alternate = pane.term.alternate_on();
-                    pane.term
-                        .set_input_buffer_size(usize::try_from(input_buffer).unwrap_or(0));
-                    pane.term.set_extended_keys(extended_keys);
-                    pane.term.feed(&bytes);
-                    let passthrough = pane.term.take_passthrough();
-                    pane.compress.observe(&pane.term, Instant::now());
-                    let entered_alternate = !alternate && pane.term.alternate_on();
-                    // input.c:2725-2740: a new title (OSC 0/2) or path
-                    // (OSC 7) redraws the status of the window's sessions.
-                    let retitled = (pane.term.title(), pane.term.pwd()) != before;
-                    pane.changed = true;
-                    // input.c:1061: new input while in a mode.
-                    pane.unseen_changes |= !pane.modes.is_empty();
-                    let belled = pane.term.take_bells() != 0;
-                    let redraw = pane.term.take_redraw();
-                    let replies = pane.term.take_replies();
-                    if !replies.is_empty() {
-                        io.write(&replies);
-                    }
-                    if entered_alternate {
-                        pane.flush_resizes();
-                    }
-                    // input_parse_buffer -> window_update_activity on every
-                    // non-empty read (input.c:1053): W/t sorts and lsw -O
-                    // activity order by it.
-                    let window = pane.window;
-                    let stamp = self.model.touch();
-                    if let Some(w) = self.model.windows.get_mut(&window) {
-                        w.activity = stamp;
-                        w.activity_secs = crate::model::now_epoch();
-                    }
-                    self.model.alerts_queue(window, alerts::ACTIVITY);
-                    if !flooding {
-                        self.burst_started.insert(p);
-                    }
-                    if redraw {
-                        self.model.redraw_panes.insert(p);
-                    }
-                    if retitled {
-                        self.model
-                            .redraw(crate::model::Redraw::WindowStatus(window));
-                    }
-                    if belled {
-                        // input_c0_dispatch BEL: alerts_queue(WINDOW_BELL).
-                        self.model.alerts_queue(window, alerts::BELL);
-                    }
-                    self.control_output(p, &bytes);
-                    self.pane_passthrough(p, passthrough, redraw_pending);
-                }
+                ReadResult::Data(bytes) => self.pane_input(p, &bytes, flooding),
                 ReadResult::WouldBlock => break,
                 ReadResult::Closed => {
                     closed = true;
@@ -4002,6 +4087,11 @@ impl Server {
                             p.id
                         });
                     if let Some(p) = found {
+                        // server_child_exited: window_pane_wait_finish.
+                        if let Some(mut pane) = self.model.panes.remove(&p) {
+                            self.pane_wait_finish(&mut pane);
+                            self.model.panes.insert(p, pane);
+                        }
                         // Drain what is left, then the read side reports
                         // the close (EIO) and destroys the pane.
                         let flooding = self.backlog.contains(&p);

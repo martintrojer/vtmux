@@ -21,8 +21,13 @@ pub fn exec(
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    if args.flag('I') {
-        return Err(EdgeError::NotImplemented("display-message -I".into()).into());
+    // cmd-display-message.c:78-91: -I (not with -j) reads the client's
+    // stdin into the target pane, which must be empty.
+    if args.flag('I') && !args.flag('j') {
+        let Some(p) = found.pane else {
+            return Ok(());
+        };
+        return super::file_io::pane_input(server, item, p).map_err(Into::into);
     }
     if args.flag('F') && !args.positionals.is_empty() {
         return Err(EdgeError::FormatAndArgument.into());
@@ -53,16 +58,21 @@ pub fn exec(
         None => None,
     };
     let ctx = server.format_ctx(found, client);
-    if args.flag('a') {
+    // cmd-display-message.c:131: -j ignores -a.
+    if args.flag('a') && !args.flag('j') {
         return Err(EdgeError::NotImplemented("display-message -a".into()).into());
     }
-    let msg = if args.flag('l') {
+    let mut msg = if args.flag('l') {
         template.to_owned()
     } else {
         format::expand_time(template, &ctx)
     };
     if args.flag('j') {
-        return Err(EdgeError::NotImplemented("display-message -j".into()).into());
+        // cmd-display-message.c:145-157: the message must be a JSON
+        // object, shown as json_to_string writes it back.
+        msg = vtmux_core::layout::json::parse(&msg)
+            .map_err(EdgeError::Message)?
+            .to_string();
     }
     if item.client.is_none() {
         // cmdq_error with no client: a config cause.

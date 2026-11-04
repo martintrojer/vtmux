@@ -499,6 +499,15 @@ pub fn resolve_preferring(
     flags: FindFlags,
     prefer: Prefer<'_>,
 ) -> Result<Found, EdgeError> {
+    // cmd-find.c:992-994: with CMD_FIND_DEFAULT_MARKED a valid marked pane
+    // is the current state the lookup starts from.
+    let origin = match model.marked() {
+        Some(m) if flags.default_marked => Origin {
+            current: Some(m),
+            ..origin
+        },
+        _ => origin,
+    };
     let result = resolve_inner(model, origin, spec, kind, flags.window_index, prefer);
     match result {
         Err(_) if flags.can_fail => Ok(partial(model, origin, spec, kind)),
@@ -566,7 +575,12 @@ fn resolve_inner(
             return Ok(Found::from_session(model, s));
         }
         Resolved::Mouse => return mouse_target(model, origin, kind),
-        Resolved::Marked => return Err(EdgeError::NotImplemented("marked target".into())),
+        // cmd-find.c:1058-1066.
+        Resolved::Marked => {
+            return model
+                .marked()
+                .ok_or_else(|| EdgeError::Message("no marked target".into()));
+        }
         Resolved::Parts(p) => p,
     };
     if window_index {

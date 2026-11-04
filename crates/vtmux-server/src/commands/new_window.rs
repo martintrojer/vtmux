@@ -1,5 +1,5 @@
-//! `new-window` (cmd-new-window.c:53-187, spawn.c `spawn_window`). Empty
-//! panes (`-E`, a single empty command) are not done yet.
+//! `new-window` (cmd-new-window.c:53-187, spawn.c `spawn_window`); `-E` or
+//! a single empty command makes its pane empty (no process).
 
 use std::path::PathBuf;
 
@@ -56,9 +56,6 @@ pub fn exec(
         server.recalculate_sizes();
         return Ok(());
     }
-    if args.flag('E') || empty_command {
-        return Err(EdgeError::NotImplemented("new-window empty pane".into()).into());
-    }
     let mut index = found.new_index;
     let before = args.flag('b');
     if args.flag('a') || before {
@@ -103,6 +100,8 @@ pub fn exec(
             extra_env: &extra_env,
             client_path: item.client.and(client_path(&item.env)),
             client: server.target_client(item.client, item.origin),
+            // cmd-new-window.c:154-155.
+            empty: args.flag('E') || empty_command,
         })
         .map_err(EdgeError::CreateWindowFailed)?;
     // cmd-new-window.c:181-182.

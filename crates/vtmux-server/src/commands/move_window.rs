@@ -101,6 +101,7 @@ pub fn exec(
         .model
         .link_window(dst_s, w, idx)
         .map_err(EdgeError::Message)?;
+    server.model.move_mark((src_s, src_idx), (dst_s, index));
     if select {
         server.model.set_current(dst_s, index);
     }

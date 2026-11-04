@@ -146,6 +146,7 @@ fn run(name: &str) {
                     .is_some_and(|f| f.contains('J')),
                 start: line_ref(&c.flags, "-S", LineRef::Visible, LineRef::Start),
                 end: line_ref(&c.flags, "-E", LineRef::Visible, LineRef::End),
+                ..CaptureOpts::default()
             },
         )
     };

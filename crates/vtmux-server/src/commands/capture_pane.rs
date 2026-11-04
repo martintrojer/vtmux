@@ -1,9 +1,9 @@
 //! `capture-pane` (cmd-capture-pane.c:254-485): `-p` to stdout, else into a
-//! paste buffer (`-b`), with `-e`, `-J`, `-S`, `-E`.
+//! paste buffer (`-b`), with `-a -q -e -C -J -N -T -L -I -F -S -E`.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
-use vtmux_vt::{CaptureOpts, LineRef, capture};
+use vtmux_vt::{CaptureOpts, LineRef, capture, capture_alternate};
 
 use super::Item;
 use crate::server::Server;
@@ -33,7 +33,7 @@ pub fn exec(
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    for flag in ['a', 'C', 'H', 'M', 'N', 'P', 'R', 'T', 'L', 'F', 'I'] {
+    for flag in ['H', 'M', 'P', 'R'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("capture-pane -{flag}")).into());
         }
@@ -47,13 +47,28 @@ pub fn exec(
     let opts = CaptureOpts {
         escapes: args.flag('e'),
         join: args.flag('J'),
+        octal: args.flag('C'),
+        keep_spaces: args.flag('N'),
+        used_only: args.flag('T'),
+        numbers: args.flag('L'),
+        times: args.flag('I'),
+        flags: args.flag('F'),
         start,
         end,
     };
     let Some(pane) = server.model.panes.get(&p) else {
         return Err(EdgeError::PaneNotFound(p.to_string()).into());
     };
-    let mut buf = capture(&pane.term, opts);
+    let mut buf = if args.flag('a') {
+        // cmd-capture-pane.c:268-276: no saved screen is an error unless -q.
+        match capture_alternate(&pane.term, opts) {
+            Some(buf) => buf,
+            None if args.flag('q') => Vec::new(),
+            None => return Err(EdgeError::Message("no alternate screen".into()).into()),
+        }
+    } else {
+        capture(&pane.term, opts)
+    };
     if !args.flag('p') {
         // cmd-capture-pane.c:471-481: the text, trailing newline kept, goes
         // to a buffer named by -b (an automatic one otherwise).
