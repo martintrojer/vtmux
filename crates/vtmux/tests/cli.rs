@@ -182,6 +182,23 @@ impl World {
         );
     }
 
+    /// Poll `list-panes -a` (max 10 s) until every pane's
+    /// `#{pane_current_command}` is `want`: `sh -c cat` is `sh` or `bash`
+    /// until it execs, and a rename (break-pane's, automatic-rename's) in
+    /// that window names a window after the shell, which is a race
+    /// between the server and the pane's process, not behaviour.
+    fn wait_all_running(&self, want: &str) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(10) {
+            let r = self.run(&["lsp", "-a", "-F", "#{pane_current_command}"]);
+            if r.stdout.lines().all(|l| l == want) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("panes never all ran {want:?} ({})", self.bin.display());
+    }
+
     /// The pane's `stty size` must come to agree with `#{pane_height}
     /// #{pane_width}`: send Enter to a `while read` loop running `stty
     /// size` until its last line is that size (max 5 s). tmux sends
@@ -2978,7 +2995,7 @@ fn panes_break_join() {
             "-p",
             "#{session_name}:#{window_index}.#{pane_index} #{pane_id}",
         ][..];
-        steps(
+        let mut runs = steps(
             w,
             &[
                 &[
@@ -2989,6 +3006,12 @@ fn panes_break_join() {
                 ],
                 &["splitw", "-t", "a", "-d", "cat"],
                 &["splitw", "-t", "a", "-d", "cat"],
+            ],
+        );
+        w.wait_all_running("cat");
+        runs.extend(steps(
+            w,
+            &[
                 &["breakp", "-t", "a:0", "-s", "a:0.1"],
                 &["breakp", "-s", "a:0.1"],
                 lsw,
@@ -3061,7 +3084,8 @@ fn panes_break_join() {
                 &["ls", "-F", "#{session_name} #{session_windows}"],
                 &["kill-server"],
             ],
-        )
+        ));
+        runs
     });
 }
 
