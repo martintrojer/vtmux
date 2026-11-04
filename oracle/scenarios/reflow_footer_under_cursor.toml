@@ -1,0 +1,34 @@
+name = "reflow_footer_under_cursor"
+size = [60, 21]
+# A primary-screen program with a footer under its input line (the cursor
+# above the last content row, as pi draws; the review repro of
+# gap_render_styles). grid_reflow (grid.c:1528-1608) keeps every line:
+# narrowing splits the long lines into history, widening joins them back,
+# and the screen and cursor are where they were, every time. A shorter
+# screen first eats the lines below the cursor and a taller one pulls
+# history back wherever the cursor is (screen_resize_y, screen.c:430-487),
+# before the reflow.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "20", "sh", "-c", "printf 'L1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nL2 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\nfooter\\033[1A\\033[2G'; tmux wait-for -S drawn; exec cat >/dev/null"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { wait_for = "drawn" },
+  { run = ["resize-window", "-t", "a", "-x", "30", "-y", "20"] },
+  { run = ["display", "-p", "-t", "%0", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "%0", "-S", "-"] },
+  { run = ["resize-window", "-t", "a", "-x", "60", "-y", "20"] },
+  { run = ["display", "-p", "-t", "%0", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "%0", "-S", "-"] },
+  { run = ["resize-window", "-t", "a", "-x", "25", "-y", "15"] },
+  { run = ["resize-window", "-t", "a", "-x", "60", "-y", "20"] },
+  { run = ["display", "-p", "-t", "%0", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "%0", "-S", "-"] },
+  { run = ["resize-window", "-t", "a", "-x", "30", "-y", "6"] },
+  { run = ["display", "-p", "-t", "%0", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "a", "-x", "60", "-y", "20"] },
+  { run = ["display", "-p", "-t", "%0", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "%0", "-S", "-"] },
+  { run = ["resize-window", "-t", "a", "-x", "60", "-y", "3"] },
+  { run = ["display", "-p", "-t", "%0", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "%0", "-S", "-"] },
+]

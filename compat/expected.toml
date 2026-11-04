@@ -140,19 +140,16 @@ status = "xfail"
 reason = "D-011: Ghostty prints U+0085 as a cell of its own where tmux combines it (wcwidth -1, C1, width 0) into the cell before, so next-word stops one column later (3,17 vs 2,17); every other assertion passes"
 
 [tests."cursor-test1.sh"]
-status = "xfail"
-reason = "P2 (`crates/vtmux-vt/DIVERGENCES-PENDING.md`): narrowing `resizew -x10` reflows without pushing the top rows into history, so the capture after it starts one row early (`4 7 t` vs `4 6 t`) and `-x50` then keeps one row less; cursor_character matches"
+status = "pass"
 
 [tests."cursor-test2.sh"]
-status = "xfail"
-reason = "P2 (`crates/vtmux-vt/DIVERGENCES-PENDING.md`): narrowing `resizew -x5` reflows without pushing the top rows into history, so the capture after it starts one row early (`4 7 a` vs `4 6 a`) and `-x50` then keeps one row less; cursor_character matches"
+status = "pass"
 
 [tests."cursor-test3.sh"]
 status = "pass"
 
 [tests."cursor-test4.sh"]
-status = "xfail"
-reason = "P2 (`crates/vtmux-vt/DIVERGENCES-PENDING.md`): `resizew -x3` splits `abcdef` without pushing `abc` into history, so the cursor is `0 2` (`abc`/`def` on screen) where tmux has `0 1` and `def` alone; cursor_character matches"
+status = "pass"
 
 [tests."customize-mode.sh"]
 status = "pass"

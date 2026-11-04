@@ -169,8 +169,10 @@ pub struct BarDraw {
 
 impl BarDraw {
     /// Column `col`, row `row` of the bar: a padding cell in the pane's
-    /// default colours, else the style's colours, swapped on the slider.
-    fn cell(&self, theme: &Theme, col: u32, row: u32) -> Cell {
+    /// default colours (`defaults`, screen-redraw.c:1337
+    /// `tty_default_colours`), else the style's colours, swapped on the
+    /// slider.
+    fn cell(&self, theme: &Theme, defaults: &CellStyle, col: u32, row: u32) -> Cell {
         let (w, pad) = (self.style.width, self.style.pad);
         let is_pad = if self.placement.left {
             col >= w && col < w + pad
@@ -178,7 +180,11 @@ impl BarDraw {
             col < pad
         };
         let mut style = if is_pad {
-            Style::default()
+            theme.style(&CellStyle {
+                fg: defaults.fg,
+                bg: defaults.bg,
+                ..CellStyle::default()
+            })
         } else {
             theme.style(&self.style.cell)
         };
@@ -481,8 +487,8 @@ fn compose_row(
                 SceneCell::Scrollbar { pane, col, row } => d
                     .panes
                     .get(pane)
-                    .and_then(|p| p.scrollbar.as_ref())
-                    .map_or_else(Cell::default, |b| b.cell(theme, *col, *row)),
+                    .and_then(|p| Some((p.scrollbar.as_ref()?, &p.defaults)))
+                    .map_or_else(Cell::default, |(b, def)| b.cell(theme, def, *col, *row)),
             };
             line[usize::from(x)] = cell;
         }

@@ -218,11 +218,8 @@ golden! {
     cap_region_scroll_history,
     #[ignore = "D-pending: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
     fmt_region_scroll_history_size,
-    #[ignore = "D-pending: tmux reflow on narrowing pushes the top row into history; Ghostty keeps both rows on screen"]
     cap_reflow_narrow,
-    #[ignore = "D-pending: tmux reflow on narrowing pushes the top row into history; Ghostty keeps both rows on screen"]
     fmt_reflow_narrow_history_size,
-    #[ignore = "D-pending: tmux reflow on narrowing pushes the top row into history; Ghostty keeps both rows on screen"]
     fmt_reflow_narrow_cursor_y,
     fmt_reflow_pending_wrap_cursor_x,
     #[ignore = "D-pending: P2 tmux reflow of a pending-wrap wide line leaves the cursor at 4,3 with history_size 6; Ghostty at 2,4 with history_size 4"]
