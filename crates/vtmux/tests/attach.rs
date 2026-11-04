@@ -6482,17 +6482,11 @@ fn proc_state(pid: u32) -> char {
 /// under a job-control shell: in the orphaned process group of a session
 /// leader the kernel discards SIGTSTP.
 ///
-/// Linux only for now (task `suspend_client_macos`): on macOS CI the vtmux
-/// client wrote its teardown and sent itself SIGTSTP as tmux's client.c does
-/// (`MSG_SUSPEND`), but the `/bin/sh -m -c` wrapper never reported the stop
-/// (`STOPPED` not printed). macOS's `/bin/sh` is bash 3.2, whose job-control
-/// reporting of a stopped child differs, so the test's shell setup is the
-/// suspect, not the client path. Undiagnosed without a Mac.
+/// The shell is dash where installed (macOS ships `/bin/dash`): macOS's
+/// `/bin/sh` is bash 3.2, which ignores `-m` with `-c` ("fg: no job
+/// control"), so the client stays in the orphaned group and its SIGTSTP
+/// is discarded, for tmux as for vtmux.
 #[test]
-#[cfg_attr(
-    not(target_os = "linux"),
-    ignore = "macOS /bin/sh job control: task suspend_client_macos"
-)]
 fn suspend_client_stops_and_sigcont_redraws() {
     for bin in bins() {
         let w = World::new(bin.clone());
@@ -6510,7 +6504,11 @@ fn suspend_client_stops_and_sigcont_redraws() {
             w.label,
             go.display()
         );
-        let mut cmd = CommandBuilder::new("/bin/sh");
+        let shell = ["/bin/dash", "/bin/sh"]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap();
+        let mut cmd = CommandBuilder::new(shell);
         cmd.args(["-m", "-c", &script]);
         let mut a = w.spawn_attached(cmd, 40, 10, &[]);
         let ctx = bin.display().to_string();
