@@ -171,9 +171,9 @@ product reasons" category.
 ### D-018: `clear-history -H` has no hyperlink table to reset
 
 - Test / assertion: none; `capture-pane-hyperlink.sh` stays xfail.
-- tmux behaviour: `-H` calls `screen_reset_hyperlinks` (cmd-capture-pane.c:427-428), emptying the pane's OSC 8 link table, which `capture-pane -H` and `#{mouse_hyperlink}` read.
-- vtmux behaviour: `-H` is accepted and changes nothing. libghostty-vt keeps links with the pages that hold the rows and vtmux exposes no table (`capture-pane -H` and `#{mouse_hyperlink}` are not implemented), so nothing observable depends on it.
-- Evidence: `clear-history -H` and `clear-history` give the same `history_size` and capture output on the reference and on vtmux (`cli.rs` `clear_history_keeps_the_screen`).
+- tmux behaviour: `-H` calls `screen_reset_hyperlinks` (cmd-capture-pane.c:427-428), emptying the pane's OSC 8 link table, which `capture-pane -H`, `#{mouse_hyperlink}` and `#{copy_cursor_hyperlink}` read: links written before the reset are gone from them.
+- vtmux behaviour: `-H` is accepted and changes nothing. libghostty-vt keeps links with the pages that hold the rows and vtmux exposes no table, so `#{mouse_hyperlink}` and `#{copy_cursor_hyperlink}` still give a link written before `clear-history -H` (`capture-pane -H` is not implemented).
+- Evidence: `clear-history -H` and `clear-history` give the same `history_size` and capture output on the reference and on vtmux (`cli.rs` `clear_history_keeps_the_screen`). After `printf '\033]8;;http://z/\033\\LNK...'`, `clear-history -H`, then `copy-mode` at the link, `#{copy_cursor_hyperlink}` is empty on the reference and `http://z/` on vtmux.
 - Category: Deferred
 
 ### D-019: bytes that are not UTF-8 follow glibc on macOS too

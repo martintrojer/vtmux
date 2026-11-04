@@ -975,59 +975,45 @@ impl CopyMode {
         self.row(self.abs(self.cy)).text()
     }
 
-    /// `copy_cursor_word` (`window_copy_get_word`, `format_grid_word`,
-    /// format.c:7102-7168): the word around the cursor, following wrapped
-    /// lines, ended by `separators`, a space or an empty cell.
+    /// `copy_cursor_word` (`window_copy_get_word`, `format_grid_word`):
+    /// the word around the cursor.
     #[must_use]
     pub fn cursor_word(&self, separators: &str) -> String {
-        let is_sep =
-            |c: &Cell| c.tab || c.text.is_empty() || c.text == " " || separators.contains(&*c.text);
-        let cell = |x: usize, y: usize| self.backing.cell(x, y);
-        let (mut x, mut y) = (self.cx, self.abs(self.cy));
-        let mut found = false;
-        loop {
-            let c = cell(x, y);
-            if c.width != 0 && is_sep(&c) {
-                found = true;
-                break;
-            }
-            if x == 0 {
-                if y == 0 || !self.wrapped(y - 1) {
-                    break;
-                }
-                y -= 1;
-                x = self.find_length(y);
-                if x == 0 {
-                    break;
-                }
-            }
-            x -= 1;
-        }
-        let mut word = String::new();
-        loop {
-            if found {
-                let end = self.find_length(y);
-                if end == 0 || x == end - 1 {
-                    if y == self.last_row() || !self.wrapped(y) {
-                        break;
-                    }
-                    y += 1;
-                    x = 0;
-                } else {
-                    x += 1;
-                }
-            }
-            found = true;
-            let c = cell(x, y);
-            if c.width == 0 {
-                continue;
-            }
-            if is_sep(&c) {
-                break;
-            }
-            word.push_str(&c.text);
-        }
-        word
+        self.word_at(self.cx, self.cy, separators)
+    }
+
+    /// `window_copy_get_word` (window-copy.c:1034-1041): the word at
+    /// screen position `(x, y)` of the view (`mouse_word`).
+    #[must_use]
+    pub fn word_at(&self, x: usize, y: usize, separators: &str) -> String {
+        let Some(line) = (self.hsize() + y).checked_sub(self.oy) else {
+            return String::new();
+        };
+        super::reader::grid_word(
+            &|y| self.row(y).clone(),
+            self.last_row(),
+            self.backing.sx(),
+            (x, line),
+            separators,
+        )
+    }
+
+    /// `window_copy_get_hyperlink` (window-copy.c:1052-1061): the link of
+    /// the cell at screen position `(x, y)` of the view.
+    #[must_use]
+    pub fn hyperlink_at(&self, x: usize, y: usize) -> Option<String> {
+        let line = (self.hsize() + y).checked_sub(self.oy)?;
+        self.backing.hyperlink(x, line)
+    }
+
+    /// `window_copy_get_line` (window-copy.c:1043-1050): the line at
+    /// screen row `y` of the view (`mouse_line`).
+    #[must_use]
+    pub fn line_at(&self, y: usize) -> String {
+        (self.hsize() + y)
+            .checked_sub(self.oy)
+            .map(|line| self.row(line).text())
+            .unwrap_or_default()
     }
 
     // --- drawing ----------------------------------------------------------

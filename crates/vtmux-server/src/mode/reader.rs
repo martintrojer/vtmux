@@ -115,6 +115,98 @@ impl Grid {
     }
 }
 
+/// Lines read one at a time, the last one kept.
+struct Lines<'a> {
+    read: &'a dyn Fn(usize) -> vtmux_vt::Row,
+    sx: usize,
+    at: Option<(usize, vtmux_vt::Row)>,
+}
+
+impl Lines<'_> {
+    fn row(&mut self, y: usize) -> &vtmux_vt::Row {
+        if self.at.as_ref().is_none_or(|(at, _)| *at != y) {
+            self.at = Some((y, (self.read)(y)));
+        }
+        &self.at.as_ref().expect("just read").1
+    }
+
+    /// `grid_get_cell`: past the line's cells, a blank.
+    fn cell(&mut self, x: usize, y: usize) -> Cell {
+        self.row(y).cells.get(x).cloned().unwrap_or(Cell {
+            width: 1,
+            ..Cell::default()
+        })
+    }
+
+    /// `grid_line_length`.
+    fn length(&mut self, y: usize) -> usize {
+        let sx = self.sx;
+        self.row(y).length().min(sx)
+    }
+}
+
+/// `format_grid_word` (format.c:7102-7168): the word around `(x, y)`
+/// (`y` a line, history first, `last` the last line), following wrapped
+/// lines, ended by a character of `separators`, a space, a tab or a blank
+/// cell. `read` reads a line; lines are at most `sx` wide.
+#[must_use]
+pub fn grid_word(
+    read: &dyn Fn(usize) -> vtmux_vt::Row,
+    last: usize,
+    sx: usize,
+    (mut x, mut y): (usize, usize),
+    separators: &str,
+) -> String {
+    let mut g = Lines { read, sx, at: None };
+    // format_is_word_separator: `utf8_cstrhas`, a tab or a space.
+    let is_sep =
+        |c: &Cell| c.tab || c.text.is_empty() || c.text == " " || separators.contains(&*c.text);
+    let mut found = false;
+    loop {
+        let c = g.cell(x, y);
+        if c.width != 0 && is_sep(&c) {
+            found = true;
+            break;
+        }
+        if x == 0 {
+            if y == 0 || !g.row(y - 1).wrapped {
+                break;
+            }
+            y -= 1;
+            x = g.length(y);
+            if x == 0 {
+                break;
+            }
+        }
+        x -= 1;
+    }
+    let mut word = String::new();
+    loop {
+        if found {
+            let end = g.length(y);
+            if end == 0 || x == end - 1 {
+                if y >= last || !g.row(y).wrapped {
+                    break;
+                }
+                y += 1;
+                x = 0;
+            } else {
+                x += 1;
+            }
+        }
+        found = true;
+        let c = g.cell(x, y);
+        if c.width == 0 {
+            continue;
+        }
+        if is_sep(&c) {
+            break;
+        }
+        word.push_str(&c.text);
+    }
+    word
+}
+
 /// `struct grid_reader`.
 pub struct Reader<'a> {
     gd: &'a Grid,
@@ -384,5 +476,34 @@ impl<'a> Reader<'a> {
             }
         }
         (self.cx, self.cy) = old;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn word(t: &vtmux_vt::PaneTerm, x: usize, y: usize, seps: &str) -> String {
+        let last = t.history_size() + usize::from(t.rows()) - 1;
+        grid_word(&|y| t.row(y), last, usize::from(t.cols()), (x, y), seps)
+    }
+
+    /// format.c:7102-7168: the word follows wrapped lines both ways and
+    /// stops at a separator, a space, a tab or a blank; wide characters'
+    /// padding is skipped.
+    #[test]
+    fn grid_word_follows_wraps_and_separators() {
+        let mut t = vtmux_vt::PaneTerm::new(10, 4, 100);
+        t.feed("ab cdefghijkl-mn\r\n\u{4e2d}x\tq".as_bytes());
+        assert_eq!(word(&t, 0, 0, ""), "ab");
+        assert_eq!(word(&t, 5, 0, ""), "cdefghijkl-mn");
+        assert_eq!(word(&t, 1, 1, "-"), "cdefghijkl");
+        assert_eq!(word(&t, 4, 1, "-"), "mn");
+        // On a separator, the word after it.
+        assert_eq!(word(&t, 2, 0, ""), "cdefghijkl-mn");
+        assert_eq!(word(&t, 1, 2, ""), "\u{4e2d}x");
+        assert_eq!(word(&t, 8, 2, ""), "q");
+        assert_eq!(word(&t, 9, 2, ""), "");
+        assert_eq!(word(&t, 9, 3, ""), "");
     }
 }

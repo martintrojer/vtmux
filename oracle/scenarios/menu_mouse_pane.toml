@@ -1,0 +1,84 @@
+# The default MouseDown3Pane menu (key-bindings.c DEFAULT_PANE_MENU) by
+# mouse (menu.c menu_key, server-client.c server_client_handle_menu_key):
+# a right-click on a word opens it at the mouse (-xM -yM) with the
+# word, line and hyperlink items (format.c format_cb_mouse_word,
+# format_cb_mouse_line, format_cb_mouse_hyperlink). The menu's top border
+# is on the mouse row, so the button's release there closes it, as a
+# quick right-click does in tmux. Near the bottom the menu is pushed up
+# over the pointer. A drag in the menu highlights the item under the
+# pointer, a move with no button (reported as a release with the drag
+# bit) only highlights, off the items there is no highlight, and a
+# release outside closes. Releasing on an item runs it with the target
+# and mouse event of the right-click (#{q:mouse_word} was expanded at
+# open). In copy mode the word and line come from the view
+# (window_copy_get_word, window_copy_get_line).
+name = "menu_mouse_pane"
+size = [60, 30]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "29", "sh", "-c", 'printf "alpha beta-gamma delta\n\033]8;;http://ex.com/x\033\\\\LINK\033]8;;\033\\\\ tail\n"; tmux wait-for -S r; exec cat'] },
+  { wait_for = "r" },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { attach = { session = "a" } },
+  { settle = { quiet_ms = 1000 } },
+  # Right-click on "beta": opens at the mouse; the release on the top
+  # border closes it.
+  { keys = "\u001b[<2;8;1M" },
+  { screen = {} },
+  { keys = "\u001b[<2;8;1m" },
+  { screen = {} },
+  # Right-click in the blank lower down: pushed up, the pointer is on an
+  # item. Drag, move with no button, then off the items.
+  { keys = "\u001b[<2;14;20M" },
+  { screen = {} },
+  { keys = "\u001b[<34;14;19M" },
+  { screen = {} },
+  { keys = "\u001b[<35;10;18M" },
+  { screen = {} },
+  { keys = "\u001b[<35;10;17M" },
+  { screen = {} },
+  { keys = "\u001b[<35;50;10M" },
+  { screen = {} },
+  { keys = "\u001b[<2;50;10m" },
+  { screen = {} },
+  # Right-click on "gamma", drag to "Copy gamma", release.
+  { keys = "\u001b[<2;14;1M" },
+  { settle = {} },
+  { keys = "\u001b[<34;14;4M" },
+  { screen = {} },
+  { keys = "\u001b[<2;14;4m" },
+  { screen = {} },
+  { run = ["show-buffer"] },
+  # Copy Line (a buffer now adds Paste and a separator first).
+  { keys = "\u001b[<2;3;1M" },
+  { settle = {} },
+  { keys = "\u001b[<34;3;7M" },
+  { settle = {} },
+  { keys = "\u001b[<2;3;7m" },
+  { settle = {} },
+  { run = ["show-buffer"] },
+  # On the link: the hyperlink items; chosen by key.
+  { keys = "\u001b[<2;2;2M" },
+  { screen = {} },
+  { keys = "h" },
+  { settle = {} },
+  { run = ["show-buffer"] },
+  # Search For: copy mode on the pane of the click, searching backwards.
+  { keys = "\u001b[<2;20;1M" },
+  { settle = {} },
+  { keys = "\u0012" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_mode} #{copy_cursor_x},#{copy_cursor_y}"] },
+  # In copy mode: the mode's items, and the word from the view.
+  { keys = "\u001b[<2;19;25M" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { screen = {} },
+  { keys = "\u001b[<2;8;1M" },
+  { screen = {} },
+  { keys = "c" },
+  { settle = {} },
+  { run = ["show-buffer"] },
+  { run = ["display", "-p", "-t", "a", "#{pane_mode}"] },
+]

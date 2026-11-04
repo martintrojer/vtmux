@@ -208,6 +208,15 @@ impl Grid {
         self.lines.get(y).map_or(&EMPTY, |l| self.line_row(l))
     }
 
+    /// The hyperlink of the cell at `(x, y)`: from the pane's grid as it
+    /// was on entry, while the line is still that grid's (a reflowed line
+    /// has none).
+    #[must_use]
+    pub fn hyperlink(&self, x: usize, y: usize) -> Option<String> {
+        let line = self.lines.get(y)?;
+        self.source.as_ref()?.hyperlink(x, line.src?)
+    }
+
     fn line_row<'a>(&self, line: &'a Line) -> &'a Row {
         line.row.get_or_init(|| match (line.src, &self.source) {
             (Some(y), Some(source)) => used_cells(source.row(y)),

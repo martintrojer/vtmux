@@ -1,0 +1,970 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "menu_mouse_pane",
+  "inputs": {
+    "name": "menu_mouse_pane",
+    "size": [
+      60,
+      30
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "29",
+          "sh",
+          "-c",
+          "printf \"alpha beta-gamma delta\\n\\033]8;;http://ex.com/x\\033\\\\\\\\LINK\\033]8;;\\033\\\\\\\\ tail\\n\"; tmux wait-for -S r; exec cat"
+        ]
+      },
+      {
+        "wait_for": "r"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mouse",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "p0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 1000
+        }
+      },
+      {
+        "keys": "\u001b[<2;8;1M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<2;8;1m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<2;14;20M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<34;14;19M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<35;10;18M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<35;10;17M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<35;50;10M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<2;50;10m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<2;14;1M"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001b[<34;14;4M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<2;14;4m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<2;3;1M"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001b[<34;3;7M"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001b[<2;3;7m"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<2;2;2M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "h"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<2;20;1M"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0012"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_mode} #{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "keys": "\u001b[<2;19;25M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<2;8;1M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "c"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_mode}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m\\e[40m┌────────0 (%0)─────────┐\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Search For \\e[4mbeta\\e[0m\\e[37m\\e[40m (C-r) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Type \\e[4mbeta\\e[0m\\e[37m\\e[40m       (C-y) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy \\e[4mbeta\\e[0m\\e[37m\\e[40m         (c) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy Line         (l) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Float\\e[39m             \\e[37m(f) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Horizontal Split  (h) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Vertical Split    (v) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m           \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Kill\\e[39m              \\e[37m(X) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Respawn\\e[39m           \\e[37m(R) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Mark\\e[39m              \\e[37m(m) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                  \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m└───────────────────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          " \\e[37m\\e[40m┌────────0 (%0)────────┐\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Float\\e[39m            \\e[37m(f) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Horizontal Split (h) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Vertical Split   (v) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m          \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Kill\\e[39m             \\e[37m(X) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Respawn\\e[39m          \\e[37m(R) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Mark\\e[39m             \\e[37m(m) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                 \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m└──────────────────────┘\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          16
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          " \\e[37m\\e[40m┌────────0 (%0)────────┐\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Float\\e[39m            \\e[37m(f) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│\\e[30m\\e[43m Horizontal Split (h) \\e[37m\\e[40m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Vertical Split   (v) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m          \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Kill\\e[39m             \\e[37m(X) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Respawn\\e[39m          \\e[37m(R) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Mark\\e[39m             \\e[37m(m) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                 \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m└──────────────────────┘\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          18
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          " \\e[37m\\e[40m┌────────0 (%0)────────┐\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│\\e[30m\\e[43m Float\\e[39m            \\e[30m(f) \\e[37m\\e[40m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Horizontal Split (h) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Vertical Split   (v) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m          \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Kill\\e[39m             \\e[37m(X) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Respawn\\e[39m          \\e[37m(R) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Mark\\e[39m             \\e[37m(m) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                 \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m└──────────────────────┘\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          17
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          " \\e[37m\\e[40m┌────────0 (%0)────────┐\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Float\\e[39m            \\e[37m(f) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Horizontal Split (h) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Vertical Split   (v) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m          \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Kill\\e[39m             \\e[37m(X) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Respawn\\e[39m          \\e[37m(R) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Mark\\e[39m             \\e[37m(m) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                 \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m└──────────────────────┘\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          16
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          " \\e[37m\\e[40m┌────────0 (%0)────────┐\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Float\\e[39m            \\e[37m(f) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Horizontal Split (h) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Vertical Split   (v) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m          \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m├──────────────────────┤\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Kill\\e[39m             \\e[37m(X) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Respawn\\e[39m          \\e[37m(R) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ Mark\\e[39m             \\e[37m(m) │\\e[39m\\e[49m",
+          " \\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                 \\e[37m│\\e[39m\\e[49m",
+          " \\e[37m\\e[40m└──────────────────────┘\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          16
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m\\e[40m┌─────────0 (%0)─────────┐\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Search For \\e[4mgamma\\e[0m\\e[37m\\e[40m (C-r) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Type \\e[4mgamma\\e[0m\\e[37m\\e[40m       (C-y) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│\\e[30m\\e[43m Copy \\e[4mgamma\\e[0m\\e[30m\\e[43m         (c) \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy Line\\e[39m          \\e[37m(l) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Float\\e[39m              \\e[37m(f) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Horizontal Split   (h) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Vertical Split     (v) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m            \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Kill\\e[39m               \\e[37m(X) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Respawn\\e[39m            \\e[37m(R) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Mark\\e[39m               \\e[37m(m) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                   \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m└────────────────────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "LINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "gamma",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "alpha beta-gamma delta",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma delta",
+          "\\e[37m\\e[40m┌─────────0 (%0)──────────┐\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Paste \\e[4malpha bet...\\e[0m\\e[37m\\e[40m  (p) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├─────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Search For \\e[4mLINK\\e[0m\\e[37m\\e[40m   (C-r) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Type \\e[4mLINK\\e[0m\\e[37m\\e[40m         (C-y) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy \\e[4mLINK\\e[0m\\e[40m           \\e[37m(c) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy Line\\e[39m           \\e[37m(l) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├─────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Type \\e[4mhttp://ex...\\e[0m\\e[37m\\e[40m (C-h) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy \\e[4mhttp://ex...\\e[0m\\e[37m\\e[40m   (h) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├─────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Float\\e[39m               \\e[37m(f) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Horizontal Split    (h) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Vertical Split      (v) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├─────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m             \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├─────────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Kill\\e[39m                \\e[37m(X) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Respawn\\e[39m             \\e[37m(R) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Mark\\e[39m                \\e[37m(m) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                    \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m└─────────────────────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          1
+        ]
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "http://ex.com/x",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma \\e[30m\\e[45mdelta\\e[39m\\e[49m                     \\e[30m\\e[43m[0/0] (1 results)",
+          "\\e[39m\\e[49mLINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          17,
+          0
+        ]
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 17,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma \\e[30m\\e[45mdelta\\e[39m\\e[49m                     \\e[30m\\e[43m[0/0] (1 results)",
+          "\\e[39m\\e[49mLINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "      \\e[37m\\e[40m┌────────0 (%0)─────────┐\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Go To Top         (<) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Go To Bottom      (>) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Show Line Numbers (L) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Refresh On        (r) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Float\\e[39m             \\e[37m(f) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Horizontal Split  (h) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Vertical Split    (v) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m           \\e[37m│\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Kill\\e[39m              \\e[37m(X) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Respawn\\e[39m           \\e[37m(R) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ Mark\\e[39m              \\e[37m(m) │\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                  \\e[37m│\\e[39m\\e[49m",
+          "      \\e[37m\\e[40m└───────────────────────┘\\e[39m\\e[49m",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          8,
+          10
+        ]
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "alpha beta-gamma \\e[30m\\e[45mdelta\\e[39m\\e[49m                     \\e[30m\\e[43m[0/0] (1 results)",
+          "\\e[39m\\e[49mLINK tail",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          17,
+          0
+        ]
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m\\e[40m┌────────0 (%0)─────────┐\\e[39m\\e[49m                  \\e[30m\\e[43m[0/0] (1 results)",
+          "\\e[37m\\e[40m│ Go To Top         (<) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Go To Bottom      (>) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Show Line Numbers (L) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Refresh On        (r) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Search For \\e[4mbeta\\e[0m\\e[37m\\e[40m (C-r) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Type \\e[4mbeta\\e[0m\\e[37m\\e[40m       (C-y) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy \\e[4mbeta\\e[0m\\e[37m\\e[40m         (c) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Copy Line         (l) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Float\\e[39m             \\e[37m(f) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Horizontal Split  (h) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Vertical Split    (v) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mSwap Marked\\e[0m\\e[40m           \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m├───────────────────────┤\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Kill\\e[39m              \\e[37m(X) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Respawn\\e[39m           \\e[37m(R) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ Mark\\e[39m              \\e[37m(m) │\\e[39m\\e[49m",
+          "\\e[37m\\e[40m│ \\e[2mZoom\\e[0m\\e[40m                  \\e[37m│\\e[39m\\e[49m",
+          "\\e[37m\\e[40m└───────────────────────┘\\e[39m\\e[49m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "beta",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

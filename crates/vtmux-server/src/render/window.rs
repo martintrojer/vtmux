@@ -227,9 +227,12 @@ impl Source<'_> {
                     lines,
                     border: self.style(TreeId::Pane(p), option, &ctx),
                     status: Vec::new(),
+                    status_ranges: Vec::new(),
                 },
             );
         }
+        let status_rows: BTreeMap<PaneId, PaneStatus> =
+            panes.iter().map(|p| (p.id, p.status)).collect();
         let frame = 2 * u32::from(offset);
         let view = WindowView {
             sx: window.sx() + frame,
@@ -254,7 +257,31 @@ impl Source<'_> {
             .map(|d| d.border.clone())
             .unwrap_or_default();
         for p in order {
-            let under = scene.status_line(p);
+            let mut under = scene.status_line(p);
+            // redraw_mark_menu goes over the scene first, so the status
+            // line is as wide as what the menu leaves of it
+            // (redraw_pane_status_width).
+            if let (Some(menu), Some(pane)) = (window.menu.as_ref(), self.model.panes.get(&p)) {
+                let r = pane.rect;
+                let wy = match status_rows.get(&p) {
+                    Some(PaneStatus::Top) => i64::from(r.yoff) - 1,
+                    Some(PaneStatus::Bottom) => i64::from(r.yoff) + i64::from(r.sy),
+                    _ => -1,
+                };
+                let (mx, my) = (i64::from(menu.px), i64::from(menu.py));
+                let (mw, mh) = (i64::from(menu.box_width()), i64::from(menu.box_height()));
+                let covered = |o: usize| {
+                    let wx = i64::from(r.xoff) + 2 + i64::try_from(o).unwrap_or(i64::MAX);
+                    (mx..mx + mw).contains(&wx) && (my..my + mh).contains(&wy)
+                };
+                while under
+                    .len()
+                    .checked_sub(1)
+                    .is_some_and(|o| under[o].is_none() || covered(o))
+                {
+                    under.pop();
+                }
+            }
             if under.is_empty() {
                 continue;
             }
@@ -262,7 +289,8 @@ impl Source<'_> {
             let format = self.string(TreeId::Pane(p), "pane-border-format");
             let expanded = vtmux_core::format::expand_time(&format, &ctx);
             let d = draws.get_mut(&p).expect("drawn pane");
-            d.status = pane_status(&under, &d.border, &ring_style, d.lines, d.index, &expanded);
+            let line = pane_status(&under, &d.border, &ring_style, d.lines, d.index, &expanded);
+            (d.status, d.status_ranges) = (line.cells, line.ranges);
         }
         let ctx = self.ctx(found, caps);
         let draw = Draw {

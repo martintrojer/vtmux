@@ -5138,6 +5138,67 @@ fn outer_mouse_modes_follow_the_mouse_option_and_panes() {
     assert_eq!(seen[1][2], "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h");
 }
 
+/// `server_client_reset_state` with a window menu (server-client.c:
+/// 2201-2203, menu.c:633-634): the menu's screen gives the modes, all
+/// motion when it takes the mouse (opened by a mouse event or with -M),
+/// none when it does not, whatever `mouse` is; `mouse on` then adds
+/// button mode (server-client.c:2294-2308) but not, under a menu, the
+/// panes' all-motion.
+#[test]
+fn outer_mouse_modes_under_a_menu() {
+    let mut seen = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
+        a.wait(|a| mouse_modes(&a.bytes.lock().unwrap()).contains(&"?1002h".to_owned()));
+        thread::sleep(Duration::from_millis(300));
+        let mut marks = vec![a.bytes.lock().unwrap().len()];
+        let menu = |m: &str| -> Vec<String> {
+            let mut v = vec!["display-menu".to_owned()];
+            v.extend(m.split_whitespace().map(str::to_owned));
+            v.extend(["-x", "0", "-y", "5", "A", "a", ""].map(str::to_owned));
+            v
+        };
+        // A CLI step, or None: `q` typed to the client, closing the menu.
+        let steps: [Option<Vec<String>>; 7] = [
+            Some(menu("")),
+            None,
+            Some(menu("-M")),
+            None,
+            Some(vec![
+                "set".into(),
+                "-g".into(),
+                "mouse".into(),
+                "off".into(),
+            ]),
+            Some(menu("-M")),
+            None,
+        ];
+        for step in steps {
+            match step {
+                Some(args) => {
+                    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                    assert!(w.cli(&args).status.success());
+                }
+                None => a.keys(b"q"),
+            }
+            thread::sleep(Duration::from_millis(400));
+            marks.push(a.bytes.lock().unwrap().len());
+        }
+        let bytes = a.bytes.lock().unwrap().clone();
+        let mut got = Vec::new();
+        for pair in marks.windows(2) {
+            got.push(mouse_modes(&bytes[pair[0]..pair[1]]).join(" "));
+        }
+        seen.push(got);
+    }
+    assert_eq!(seen[0], seen[1]);
+    let all = "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h ?1002h ?1003h";
+    let button = "?1006l ?1000l ?1002l ?1003l ?1006h ?1000h ?1002h";
+    let off = "?1006l ?1000l ?1002l ?1003l";
+    assert_eq!(seen[1], ["", "", all, button, off, all, off]);
+}
+
 /// `server_client_check_mouse` and the default bindings: a click selects the
 /// pane under it (`MouseDown1Pane`), a click on a window in the status line
 /// switches to it (`MouseDown1Status`), the wheel over the status line

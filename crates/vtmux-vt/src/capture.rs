@@ -303,6 +303,17 @@ impl ScreenCopy {
         }
     }
 
+    /// The hyperlink of the cell at `(x, y)` when the copy was taken (see
+    /// [`PaneTerm::hyperlink`]); history hidden by an alternate screen has
+    /// none.
+    #[must_use]
+    pub fn hyperlink(&self, x: usize, y: usize) -> Option<String> {
+        if y >= self.hsize + self.rows || (self.frozen.is_some() && y < self.hsize) {
+            return None;
+        }
+        hyperlink_at(self.term.as_ref()?, y + self.retained - self.hsize, x)
+    }
+
     /// `history_size` when the copy was taken.
     #[must_use]
     pub fn history_size(&self) -> usize {
@@ -323,6 +334,20 @@ impl ScreenCopy {
 }
 
 impl PaneTerm {
+    /// The OSC 8 URI of the cell at `(x, y)` of tmux's grid (history
+    /// first), stepping left off a wide character's padding
+    /// (`format_grid_hyperlink`, format.c:7200-7218). History hidden by an
+    /// alternate screen has none.
+    #[must_use]
+    pub fn hyperlink(&self, x: usize, y: usize) -> Option<String> {
+        let hsize = self.history_size();
+        if y >= hsize + usize::from(self.rows()) || (self.alternate_on() && y < hsize) {
+            return None;
+        }
+        let retained = self.term.scrollback_rows().unwrap_or(0);
+        hyperlink_at(&self.term, y + retained - hsize, x)
+    }
+
     /// Copy the grid (see [`ScreenCopy`]). Compressed history pages are
     /// copied compressed: the pane's stay so, the copy decodes a page on
     /// its first read.
@@ -536,6 +561,40 @@ fn whole_tabs(cells: &mut [RowCell]) {
 
 /// tmux's cell data size: `UTF8_SIZE` (tmux.h:721).
 const UTF8_SIZE: usize = 32;
+
+/// The URI of cell `x` of screen row `y` (history included), or of the
+/// character a padding cell belongs to.
+fn hyperlink_at(term: &Terminal<'_, '_>, y: usize, x: usize) -> Option<String> {
+    let (cells, _) = read_screen_row(term, y, usize::MAX);
+    let mut x = x;
+    cells.get(x)?;
+    while cells[x].wide == Width::SpacerTail {
+        x = x.checked_sub(1)?;
+    }
+    if !cells[x].link {
+        return None;
+    }
+    let (at, y): (fn(PointCoordinate) -> Point, usize) =
+        match y.checked_sub(term.scrollback_rows().unwrap_or(0)) {
+            Some(active) => (Point::Active, active),
+            None => (Point::Screen, y),
+        };
+    let gr = term
+        .grid_ref(at(PointCoordinate {
+            x: u16::try_from(x).ok()?,
+            y: u32::try_from(y).ok()?,
+        }))
+        .ok()?;
+    let mut buf = vec![0u8; 256];
+    let n = loop {
+        match gr.hyperlink_uri(&mut buf) {
+            Ok(n) => break n,
+            Err(Error::OutOfSpace { required }) if required > buf.len() => buf.resize(required, 0),
+            Err(_) => return None,
+        }
+    };
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n]).into_owned())
+}
 
 /// The cell's cluster as tmux stores it: a combining character that would
 /// take the cell past `UTF8_SIZE` bytes is discarded, the base stays
@@ -789,6 +848,25 @@ mod tests {
         assert_eq!(LOOKUPS.with(std::cell::Cell::get) - before, rows.len());
         assert_eq!(rows[0].trim_end(), "ab\u{e9}");
         assert_eq!(rows[3].trim_end(), "e");
+    }
+
+    /// format.c:7200-7218: a cell's OSC 8 URI, from history too and from
+    /// the padding of a wide character; none outside the link, none from
+    /// a copy for history the alternate screen hides.
+    #[test]
+    fn hyperlink_of_a_cell() {
+        let mut t = PaneTerm::new(20, 2, 100);
+        t.feed("\x1b]8;;http://a/\x1b\\L\u{4e2d}\x1b]8;;\x1b\\ x\r\n\r\n\r\n".as_bytes());
+        assert_eq!(t.history_size(), 2);
+        assert_eq!(t.hyperlink(0, 0).as_deref(), Some("http://a/"));
+        assert_eq!(t.hyperlink(2, 0).as_deref(), Some("http://a/"));
+        assert_eq!(t.hyperlink(4, 0), None);
+        assert_eq!(t.hyperlink(15, 0), None);
+        let copy = t.copy_screen();
+        assert_eq!(copy.hyperlink(1, 0).as_deref(), Some("http://a/"));
+        t.feed(b"\x1b[?1049h");
+        assert_eq!(t.hyperlink(0, 0), None);
+        assert_eq!(t.copy_screen().hyperlink(0, 0), None);
     }
 
     fn cap(cols: u16, rows: u16, bytes: &[u8], opts: CaptureOpts) -> String {
