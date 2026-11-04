@@ -1,0 +1,15 @@
+name = "capture_grid_dump"
+size = [40, 8]
+# capture-pane -R (cmd-capture-pane.c cmd_capture_pane_grid): G, L and C
+# lines for history and screen rows, over a background erase (CLEARED
+# cells keep the colour), a wrapped line, attributes and 256 colours, a
+# tab (TAB and PADDING cells), a wide character, ACS (the printed byte with
+# CHARSET), a backslash, and a hyperlink without an id (linkid NONE).
+steps = [
+  { run = ["set", "-g", "history-limit", "50"] },
+  { run = ["new", "-d", "-s", "a", "-x", "8", "-y", "4", "sh", "-c", "printf 'h1\\nh2\\na\\033[44mb\\033[K\\033[m\\nwrapping!\\033[1;4;38;5;196mX\\033[m\\t\\344\\270\\226\\n\\033(0qx\\033(B\\\\\\033]8;;http://e\\033\\\\L\\033]8;;\\033\\\\'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pR"] },
+  { run = ["capturep", "-R", "-b", "g"] },
+  { run = ["show-buffer", "-b", "g"] },
+]

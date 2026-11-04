@@ -274,55 +274,47 @@ status = "pass"
 
 [tests."input-malformed.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
-
-[tests."input-modes.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+reason = "remain-on-exit works now and capture-pane -C -e -J are in; re-triage after rebase (see regress run)"
 
 [tests."input-osc.sh"]
 status = "xfail"
 reason = "needs capture-pane -H (hyperlink URIs)"
 
 [tests."input-raw-controls.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+status = "pass"
 
 [tests."input-raw-cursor.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+status = "pass"
 
 [tests."input-raw-edit.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+reason = "capture-pane -R is in; the tabs case differs: after TBC (CSI 2 g) and CBT tmux overwrites the TAB cell's first column with C, Ghostty keeps the tab and writes C before it"
 
 [tests."input-raw-history.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
+reason = "capture-pane -R is in; edhistory differs: tmux's ED 0 at home scrolls the screen into history (grid_view_clear_history, scroll-on-clear), Ghostty erases it in place"
 
 [tests."input-raw-reflow.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
+status = "pass"
 
 [tests."input-raw-scroll.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
+reason = "capture-pane -R is in; index differs: tmux moves the scroll region's top row into history on IND at the region bottom when the region starts at row 1, Ghostty does not"
 
 [tests."input-raw-sgr.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -R (raw capture): `not implemented in vtmux yet: capture-pane -R`"
+reason = "capture-pane -R is in; the hyperlink case needs the OSC 8 id (linkid), which Ghostty does not keep"
 
 [tests."input-raw-unicode.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+reason = "capture-pane -R is in; Ghostty differs from tmux on regional-indicator pairs (two cells, not one wide cluster), U+FE0F widening, and overwriting half of a wide character (tmux leaves a plain space, Ghostty a CLEARED-looking blank with the line not EXTENDED)"
 
 [tests."input-raw-wrap.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+status = "pass"
 
 [tests."input-reflow-stress.sh"]
 status = "xfail"
-reason = "needs capture-pane -R (tmux's internal grid dump) and -M"
+reason = "capture-pane -R is in; needs capture-pane -M (copy mode's screen)"
 
 [tests."input-replies.sh"]
 status = "xfail"
@@ -341,7 +333,7 @@ status = "pass"
 
 [tests."input-unicode.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+reason = "capture-pane -N/-F are in; -F flags a line holding a wide character X in tmux even after it is overwritten, vtmux reads Ghostty's current cells"
 
 [tests."join-pane-modal.sh"]
 status = "xfail"
@@ -603,7 +595,7 @@ status = "pass"
 
 [tests."utf8-test.sh"]
 status = "xfail"
-reason = "remain-on-exit and an empty remain-on-exit-format work now; the script then needs capture-pane -C (`not implemented in vtmux yet: capture-pane -C`)"
+reason = "remain-on-exit works now and capture-pane -C -e -J are in; re-triage after rebase (see regress run)"
 
 [tests."wait-for-E.sh"]
 status = "xfail"

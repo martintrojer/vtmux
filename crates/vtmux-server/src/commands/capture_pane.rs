@@ -1,9 +1,10 @@
 //! `capture-pane` (cmd-capture-pane.c:254-485): `-p` to stdout, else into a
-//! paste buffer (`-b`), with `-a -q -e -C -J -N -T -L -I -F -S -E`.
+//! paste buffer (`-b`), with `-a -q -e -C -J -N -T -L -I -F -S -E`, and the
+//! `-R` grid dump.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
-use vtmux_vt::{CaptureOpts, LineRef, capture, capture_alternate};
+use vtmux_vt::{CaptureOpts, LineRef, capture, capture_alternate, capture_grid};
 
 use super::Item;
 use crate::server::Server;
@@ -33,7 +34,7 @@ pub fn exec(
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    for flag in ['H', 'M', 'P', 'R'] {
+    for flag in ['H', 'M', 'P'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("capture-pane -{flag}")).into());
         }
@@ -59,7 +60,10 @@ pub fn exec(
     let Some(pane) = server.model.panes.get(&p) else {
         return Err(EdgeError::PaneNotFound(p.to_string()).into());
     };
-    let mut buf = if args.flag('a') {
+    // cmd-capture-pane.c:451-452: -R is the grid dump, before anything else.
+    let mut buf = if args.flag('R') {
+        capture_grid(&pane.term, pane.history_limit)
+    } else if args.flag('a') {
         // cmd-capture-pane.c:268-276: no saved screen is an error unless -q.
         match capture_alternate(&pane.term, opts) {
             Some(buf) => buf,
