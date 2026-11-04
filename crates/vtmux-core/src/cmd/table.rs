@@ -158,9 +158,9 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("list-sessions", Some("ls"), "F:f:O:r", 0, Some(0), "[-r] [-F format] [-f filter] [-O order]", None, None, false, true),
     cmd("list-windows", Some("lsw"), "aF:f:O:rt:", 0, Some(0), "[-ar] [-F format] [-f filter] [-O order][-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("load-buffer", Some("loadb"), "b:t:w", 1, Some(1), "[-b buffer-name] [-t target-client] path", None, None, false, true),
-    cmd("lock-client", Some("lockc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, false),
-    cmd("lock-server", Some("lock"), "", 0, Some(0), "", None, None, false, false),
-    cmd("lock-session", Some("locks"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, false),
+    cmd("lock-client", Some("lockc"), "t:", 0, Some(0), "[-t target-client]", None, None, false, true),
+    cmd("lock-server", Some("lock"), "", 0, Some(0), "", None, None, false, true),
+    cmd("lock-session", Some("locks"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("move-pane", Some("movep"), "bdD::fhMvl:L::P:R::s:t:U::X:Y:z:", 0, Some(0), "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("move-window", Some("movew"), "abdkrs:t:", 0, Some(0), "[-abdkr] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, true),
     cmd("new-pane", Some("newp"), "AbB:Cc:Dde:EfF:hIkl:KLMm:Op:PR:s:S:t:T:vWx:X:y:Y:Z", 0, None, "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
@@ -187,7 +187,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("select-window", Some("selectw"), "lnpTt:", 0, Some(0), "[-lnpT] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("send-keys", Some("send"), "c:FHKlMN:Rt:X", 0, None, "[-FHKlMRX] [-c target-client] [-N repeat-count] [-t target-pane] [key ...]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("send-prefix", None, "2t:", 0, Some(0), "[-2] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
-    cmd("server-access", None, "adglrw", 0, Some(1), "[-adglrw] [-t target-pane] [user|group]", None, None, false, false),
+    cmd("server-access", None, "adglrw", 0, Some(1), "[-adglrw] [-t target-pane] [user|group]", None, None, false, true),
     cmd("set-buffer", Some("setb"), "ab:t:n:w", 0, Some(1), "[-aw] [-b buffer-name] [-n new-buffer-name] [-t target-client] [data]", None, None, false, true),
     cmd("set-environment", Some("setenv"), "Fhgrt:u", 1, Some(2), "[-Fhgru] [-t target-session] variable [value]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, false, true),
     cmd("set-hook", None, "agpERTt:uB:w", 0, Some(2), "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]", Some(slot('t', TargetKind::Pane, FindFlags::CANFAIL)), None, false, true),
@@ -423,6 +423,10 @@ mod tests {
             ("suspend-client", Some("suspendc")),
             ("display-menu", Some("menu")),
             ("pipe-pane", Some("pipep")),
+            ("lock-server", Some("lock")),
+            ("lock-session", Some("locks")),
+            ("lock-client", Some("lockc")),
+            ("server-access", None),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);
@@ -433,7 +437,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 86);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 90);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
@@ -553,10 +557,10 @@ mod tests {
 
     #[test]
     fn non_m0_commands_are_not_implemented() {
-        let e = find("lock-server").unwrap();
+        let e = find("switch-mode").unwrap();
         assert_eq!(
             e.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: lock-server"
+            "not implemented in vtmux yet: switch-mode"
         );
         assert!(find("new-session").unwrap().ensure_implemented().is_ok());
     }

@@ -82,8 +82,7 @@ status = "pass"
 status = "pass"
 
 [tests."confirm-before-lock.sh"]
-status = "xfail"
-reason = "needs lock-client, lock-session and lock-server (confirm-before is in)"
+status = "pass"
 
 [tests."control-client-exit-stalled.sh"]
 status = "xfail"
@@ -507,8 +506,7 @@ status = "xfail"
 reason = "window-style / window-active-style do not show: the outer `capturep -pe` has no SGR where tmux has a blue background (`scene window-style-single differs`)"
 
 [tests."server-access.sh"]
-status = "xfail"
-reason = "missing command server-access: `not implemented in vtmux yet: server-access`"
+status = "pass"
 
 [tests."server-socket-error.sh"]
 status = "pass"

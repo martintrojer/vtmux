@@ -368,6 +368,7 @@ impl Server {
             // server-client.c:465.
             self.set_latest(s, id);
             self.model.session_attached_now(s);
+            self.arm_lock_timer(s);
             if let Some(tty) = self
                 .clients
                 .get(&id)

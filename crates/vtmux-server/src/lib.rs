@@ -3,6 +3,7 @@
 //!
 //! `unsafe` is confined to [`sys`] (D10).
 
+pub mod acl;
 pub mod alerts;
 pub mod client_flags;
 pub mod cmdq;

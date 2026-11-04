@@ -6563,3 +6563,244 @@ fn suspend_client_stops_and_sigcont_redraws() {
         a.exited(0);
     }
 }
+
+/// Lines in `path`, 0 while it does not exist.
+fn line_count(path: &std::path::Path) -> usize {
+    std::fs::read_to_string(path).map_or(0, |s| s.lines().count())
+}
+
+/// Wait until `path` has `n` lines.
+fn wait_lines(ctx: &str, path: &std::path::Path, n: usize) {
+    let end = Instant::now() + Duration::from_secs(5);
+    while line_count(path) < n {
+        assert!(
+            Instant::now() < end,
+            "{ctx}: {} has {} lines, want {n}",
+            path.display(),
+            line_count(path)
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// `server_lock_client` (server-fn.c:197-218) and client.c `MSG_LOCK`: the
+/// terminal is handed back in its own modes, `lock-command` runs in the
+/// foreground on it, and when it exits the client is raw again and
+/// redrawn in full; nothing is drawn meanwhile and the locked client is
+/// not listed.
+#[test]
+fn lock_client_runs_the_lock_command_and_redraws() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        let cli = |args: &[&str]| String::from_utf8_lossy(&w.cli(args).stdout).into_owned();
+        w.cli(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["select-pane", "-t", "a", "-T", "p"]);
+        let home = w.home.path();
+        let (modes, go) = (home.join("modes"), home.join("go"));
+        let script = home.join("lock.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "stty -a >'{}'\necho LOCKED\nwhile [ ! -e '{}' ]; do sleep 0.05; done\n",
+                modes.display(),
+                go.display()
+            ),
+        )
+        .unwrap();
+        w.cli(&[
+            "set",
+            "-g",
+            "lock-command",
+            &format!("/bin/sh '{}'", script.display()),
+        ]);
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        let ctx = bin.display().to_string();
+        let limit = Duration::from_secs(5);
+        a.wait_labelled(&ctx, limit, |a| status_row(a).starts_with("[a] 0:w*"));
+        a.keys(b"zebra\r");
+        a.wait_labelled(&ctx, limit, |a| pane_text(a).contains("zebra\nzebra"));
+        let name = cli(&["lsc", "-F", "#{client_name}"]).trim().to_owned();
+
+        let out = w.cli(&["lock-client", "-t", &name]);
+        assert!(out.status.success(), "{ctx}: {out:?}");
+        a.wait_labelled(&ctx, limit, |a| a.text().contains("LOCKED"));
+        wait_lines(&ctx, &modes, 1);
+        // The command had the terminal in its own (cooked) modes.
+        let stty = std::fs::read_to_string(&modes).unwrap();
+        assert!(
+            stty.split_whitespace().any(|f| f == "icanon"),
+            "{ctx}: not cooked: {stty}"
+        );
+        // Teardown, then the alternate screen cleared for the command.
+        let text = a.text();
+        let locked = text.rfind("LOCKED").unwrap();
+        let leave = text[..locked].rfind("\x1b[?1049l").expect("teardown");
+        assert!(
+            text[leave..locked].contains("\x1b[?1049h"),
+            "{ctx}: no lock screen"
+        );
+        // Not listed, and nothing drawn while locked.
+        assert_eq!(cli(&["lsc"]), "", "{ctx}");
+        w.cli(&["send-keys", "-t", "a", "yak", "Enter"]);
+        let end = Instant::now() + limit;
+        while !cli(&["capture-pane", "-p", "-t", "a"]).contains("yak\nyak") {
+            assert!(Instant::now() < end, "{ctx}: pane output");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let before = a.text().len();
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(a.text().len(), before, "{ctx}: drawn while locked");
+
+        // The command exits: the client is back, the terminal started
+        // again (tty_start_tty), redrawn in full and raw.
+        std::fs::write(&go, "").unwrap();
+        a.wait_labelled(&ctx, limit, |a| {
+            a.text()[before..].contains("\x1b[?1049h")
+                && pane_text(a).contains("yak\nyak")
+                && status_row(a).starts_with("[a] 0:w*")
+        });
+        assert_eq!(cli(&["lsc", "-F", "#{client_name}"]).trim(), name, "{ctx}");
+        a.keys(b"gnu\r");
+        a.wait_labelled(&ctx, limit, |a| pane_text(a).contains("gnu\ngnu"));
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}
+
+/// `server_lock_session` and `server_lock` (server-fn.c:174-194): every
+/// client on the session, or every client with a session, runs its
+/// session's `lock-command`; each comes back redrawn.
+#[test]
+fn lock_session_and_lock_server_lock_every_matching_client() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        for s in ["a", "b"] {
+            w.cli(&[
+                "new", "-d", "-s", s, "-n", "w", "-x", "40", "-y", "9", "cat",
+            ]);
+            w.cli(&["select-pane", "-t", s, "-T", "p"]);
+        }
+        w.cli(&["set", "-g", "status-right", "R"]);
+        let home = w.home.path();
+        let (la, lb) = (home.join("a"), home.join("b"));
+        w.cli(&[
+            "set",
+            "-t",
+            "a",
+            "lock-command",
+            &format!("echo x >>'{}'", la.display()),
+        ]);
+        w.cli(&[
+            "set",
+            "-t",
+            "b",
+            "lock-command",
+            &format!("echo x >>'{}'", lb.display()),
+        ]);
+        let ctx = bin.display().to_string();
+        let limit = Duration::from_secs(5);
+        let clients = [
+            w.attach(&["attach", "-t", "a"]),
+            w.attach(&["attach", "-t", "a"]),
+            w.attach(&["attach", "-t", "b"]),
+        ];
+        for (c, s) in clients.iter().zip(["[a]", "[a]", "[b]"]) {
+            c.wait_labelled(&ctx, limit, |c| status_row(c).starts_with(s));
+        }
+        // Locked and back: the lock screen and tty_start_tty each enter
+        // the alternate screen, then the full redraw shows the status.
+        let quiet = |c: &Attached| {
+            let n = c.text().len();
+            move |c: &Attached| {
+                c.text()[n..].matches("\x1b[?1049h").count() >= 2 && status_row(c).starts_with('[')
+            }
+        };
+
+        let marks: Vec<_> = clients.iter().map(quiet).collect();
+        assert!(w.cli(&["lock-session", "-t", "a"]).status.success());
+        wait_lines(&ctx, &la, 2);
+        // Both of a's clients come back redrawn.
+        for (c, m) in clients[..2].iter().zip(&marks) {
+            c.wait_labelled(&ctx, limit, m);
+        }
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(line_count(&la), 2, "{ctx}");
+        assert_eq!(line_count(&lb), 0, "{ctx}");
+
+        let marks: Vec<_> = clients.iter().map(quiet).collect();
+        assert!(w.cli(&["lock-server"]).status.success());
+        wait_lines(&ctx, &la, 4);
+        wait_lines(&ctx, &lb, 1);
+        for (c, m) in clients.iter().zip(&marks) {
+            c.wait_labelled(&ctx, limit, m);
+        }
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(line_count(&la), 4, "{ctx}");
+        assert_eq!(line_count(&lb), 1, "{ctx}");
+        let listed = String::from_utf8_lossy(&w.cli(&["lsc"]).stdout)
+            .lines()
+            .count();
+        assert_eq!(listed, 3, "{ctx}");
+    }
+}
+
+/// session.c `session_update_activity` / `session_lock_timer`: an
+/// attached session with `lock-after-time` set locks its clients that
+/// many seconds after its last activity (attach, a key, an unlock), and
+/// the timer goes again after the unlock.
+#[test]
+fn lock_after_time_locks_an_idle_session() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        w.cli(&[
+            "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat",
+        ]);
+        w.cli(&["set", "-g", "status-right", "R"]);
+        w.cli(&["select-pane", "-t", "a", "-T", "p"]);
+        let locked = w.home.path().join("locked");
+        w.cli(&[
+            "set",
+            "-g",
+            "lock-command",
+            &format!("echo x >>'{}'", locked.display()),
+        ]);
+        w.cli(&["set", "-g", "lock-after-time", "2"]);
+        let ctx = bin.display().to_string();
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait_labelled(&ctx, Duration::from_secs(5), |a| {
+            status_row(a).starts_with("[a] 0:w*")
+        });
+        // Keys keep it awake.
+        for _ in 0..6 {
+            a.keys(b"k");
+            thread::sleep(Duration::from_millis(250));
+        }
+        assert_eq!(line_count(&locked), 0, "{ctx}: locked while active");
+        let idle = Instant::now();
+        wait_lines(&ctx, &locked, 1);
+        assert!(
+            idle.elapsed() >= Duration::from_millis(1000),
+            "{ctx}: too soon"
+        );
+        // Unlocking is activity: it locks again two seconds later.
+        wait_lines(&ctx, &locked, 2);
+        w.cli(&["set", "-g", "lock-after-time", "0"]);
+        a.keys(b"\r");
+        thread::sleep(Duration::from_millis(2500));
+        let n = line_count(&locked);
+        thread::sleep(Duration::from_millis(2500));
+        assert_eq!(
+            line_count(&locked),
+            n,
+            "{ctx}: locked with lock-after-time 0"
+        );
+        a.wait_labelled(&ctx, Duration::from_secs(5), |a| {
+            pane_text(a).contains("kkkkkk") && status_row(a).starts_with("[a] 0:w*")
+        });
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}

@@ -88,6 +88,9 @@ pub(crate) struct Client {
     /// until the client sends `Wakeup`. Nothing is drawn, the client sizes
     /// no window and is not listed, but it keeps its session.
     pub(crate) suspended: bool,
+    /// The connecting process's uid and gid (`getpeereid`, proc.c:331),
+    /// checked against the server's access list.
+    peer: Option<(u32, u32)>,
     pub(crate) hello: Option<Hello>,
     pub(crate) attached: Option<SessionId>,
     /// Control mode (`-C`) state; `None` for terminal and command clients.
@@ -153,7 +156,12 @@ pub(crate) struct Client {
 impl Client {
     /// A client just accepted on `stream`, at model activity `activity`.
     fn new(stream: UnixStream, activity: u64) -> Self {
+        let peer = {
+            use std::os::fd::AsFd;
+            sys::user::peer_ids(stream.as_fd())
+        };
         Self {
+            peer,
             stream,
             inbuf: Vec::new(),
             outbuf: Vec::new(),
@@ -401,6 +409,11 @@ pub struct Server {
     /// The `tmux` shim first on every child's `PATH` (D5); `None` if it
     /// could not be made. Dropped (and removed) when the server goes.
     pub(crate) shim: Option<crate::shim::Shim>,
+    /// Each session's `lock-after-time` timer (`s->lock_timer`), armed by
+    /// its activity while it has a client ([`Server::arm_lock_timer`]).
+    lock_timers: BTreeMap<SessionId, Instant>,
+    /// Who may connect (server-acl.c, `server-access`).
+    pub(crate) acl: crate::acl::Acl,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -594,6 +607,8 @@ impl Server {
             cmd_mouse: None,
             compress: crate::compress::Rotation::default(),
             shim: None,
+            lock_timers: BTreeMap::new(),
+            acl: crate::acl::Acl::new(rustix::process::getuid().as_raw()),
         };
         server.shim = crate::shim::own_exe()
             .and_then(|exe| crate::shim::Shim::create(&server.socket, &exe).ok());
@@ -646,6 +661,7 @@ impl Server {
             self.panes_timers(Instant::now());
             self.sync_timers(Instant::now());
             self.subs_timers(Instant::now());
+            self.lock_timer_fire(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -772,6 +788,10 @@ impl Server {
             self.sync_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.subs_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.lock_timers
+                .values()
+                .min()
                 .map(|d| d.saturating_duration_since(now)),
             self.clients
                 .values()
@@ -1215,7 +1235,8 @@ impl Server {
             ClientMsg::Stdin(bytes) => self.control_stdin(id, &bytes),
             ClientMsg::StdinEof => self.control_stdin_eof(id),
             ClientMsg::Detach => self.detach_client(id, false),
-            ClientMsg::Wakeup => self.wakeup_client(id),
+            // server-client.c:2741-2742: both end CLIENT_SUSPENDED.
+            ClientMsg::Wakeup | ClientMsg::Unlock => self.wakeup_client(id),
             ClientMsg::ReadData(bytes) => self.file_read_data(id, &bytes),
             ClientMsg::FileDone { error } => self.file_done(id, error),
             ClientMsg::FrameAck { seq } => {
@@ -1231,6 +1252,49 @@ impl Server {
         line.push(b'\n');
         self.send(id, &ServerMsg::Stderr(line));
         self.finish_client(id, 1);
+    }
+
+    /// `CLIENT_EXIT` with `access not allowed` (server.c:402-404,
+    /// server-acl.c `server_acl_update`): status 1 and the reason.
+    fn refuse_client(&mut self, id: ClientId) {
+        let message = Some("access not allowed".to_owned());
+        if self
+            .clients
+            .get(&id)
+            .is_some_and(|c| c.attached.is_some() && c.control.is_none())
+        {
+            self.exit_attached(id, 1, message, false);
+            return;
+        }
+        self.send(
+            id,
+            &ServerMsg::Exit {
+                code: 1,
+                message,
+                hup: false,
+            },
+        );
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.closing = true;
+        }
+        self.flush_client(id);
+    }
+
+    /// `server_acl_update` (server-acl.c:96-113): after an entry is
+    /// removed or its access changed, a client with no entry leaves and
+    /// the others are read-only or not as their entries say.
+    pub(crate) fn acl_update(&mut self) {
+        let ids: Vec<ClientId> = self.clients.keys().copied().collect();
+        for id in ids {
+            let Some(c) = self.clients.get_mut(&id).filter(|c| !c.closing && !c.dead) else {
+                continue;
+            };
+            match self.acl.check(c.peer) {
+                crate::acl::Access::Denied => self.refuse_client(id),
+                crate::acl::Access::ReadOnly => c.flags.read_only = true,
+                crate::acl::Access::Write => c.flags.read_only = false,
+            }
+        }
     }
 
     pub(crate) fn finish_client(&mut self, id: ClientId, code: i32) {
@@ -1252,6 +1316,21 @@ impl Server {
         if let Err(e) = hello.check_version() {
             self.fail_client(id, &e);
             return;
+        }
+        // server_accept (server.c:401-405): a client the access list does
+        // not let in leaves with nothing run.
+        let peer = self.clients.get(&id).and_then(|c| c.peer);
+        match self.acl.check(peer) {
+            crate::acl::Access::Denied => {
+                self.refuse_client(id);
+                return;
+            }
+            crate::acl::Access::ReadOnly => {
+                if let Some(c) = self.clients.get_mut(&id) {
+                    c.flags.read_only = true;
+                }
+            }
+            crate::acl::Access::Write => {}
         }
         let origin = Origin {
             attached: None,
@@ -1446,6 +1525,7 @@ impl Server {
         // (server-client.c:465), then session_update_activity (468).
         self.set_latest(s, id);
         self.model.session_attached_now(s);
+        self.arm_lock_timer(s);
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
         // set of modes, not their ordering. Focus reports and extended
@@ -1711,8 +1791,99 @@ impl Server {
         self.send(id, &ServerMsg::Suspend);
     }
 
-    /// `MSG_WAKEUP` (server-client.c:2741-2763): the client is back
-    /// (SIGCONT). The terminal is started again and redrawn in full.
+    /// `server_lock_client` (server-fn.c:197-218): the terminal is
+    /// restored, then the alternate screen entered and cleared for
+    /// `lock-command`, which the client runs in the foreground before it
+    /// answers `Unlock`. Control clients, suspended clients and an empty
+    /// or oversized command are left alone.
+    pub fn lock_client(&mut self, id: ClientId) {
+        let Some(c) = self.clients.get(&id) else {
+            return;
+        };
+        if c.suspended || c.closing || c.dead || c.control.is_some() {
+            return;
+        }
+        let Some(s) = c.attached else { return };
+        let command = self
+            .model
+            .options
+            .get(TreeId::Session(s), "lock-command")
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default();
+        // MAX_IMSGSIZE - IMSG_HEADER_SIZE, with the NUL.
+        if command.is_empty() || command.len() + 1 > 16384 - 16 {
+            return;
+        }
+        self.send_teardown(id);
+        // tty_raw: smcup, clear, E3.
+        if let Some(c) = self.clients.get(&id)
+            && let (Some(caps), Some(term)) = (c.caps, c.term.as_ref())
+        {
+            let bytes = caps.lock_screen(term.clears_scrollback());
+            self.send(id, &ServerMsg::Frame(bytes));
+        }
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.suspended = true;
+        }
+        self.send(id, &ServerMsg::Lock { command });
+    }
+
+    /// `server_lock_session` (server-fn.c:185-194): every client on `s`.
+    pub fn lock_session(&mut self, s: SessionId) {
+        for id in self.session_clients(s) {
+            self.lock_client(id);
+        }
+    }
+
+    /// `server_lock` (server-fn.c:174-183): every client with a session.
+    pub fn lock_server(&mut self) {
+        for id in self.attached_clients() {
+            self.lock_client(id);
+        }
+    }
+
+    /// `session_update_activity`'s timer (session.c:262-272): disarmed,
+    /// then armed for `lock-after-time` seconds if `s` has a client.
+    pub(crate) fn arm_lock_timer(&mut self, s: SessionId) {
+        self.lock_timers.remove(&s);
+        if !self.attached_sessions().contains(&s) {
+            return;
+        }
+        let secs = self
+            .model
+            .number_option(TreeId::Session(s), "lock-after-time");
+        if let Ok(secs @ 1..) = u64::try_from(secs) {
+            self.lock_timers
+                .insert(s, Instant::now() + Duration::from_secs(secs));
+        }
+    }
+
+    /// `session_lock_timer` (session.c:232-245): a session still with a
+    /// client when its timer runs out is locked. The timer is not armed
+    /// again until the session sees activity.
+    fn lock_timer_fire(&mut self, now: Instant) {
+        let due: Vec<SessionId> = self
+            .lock_timers
+            .iter()
+            .filter(|&(_, &at)| at <= now)
+            .map(|(&s, _)| s)
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        let attached = self.attached_sessions();
+        for s in due {
+            self.lock_timers.remove(&s);
+            if attached.contains(&s) {
+                self.lock_session(s);
+            }
+        }
+        self.recalculate_sizes();
+    }
+
+    /// `MSG_WAKEUP` and `MSG_UNLOCK` (server-client.c:2741-2763): the
+    /// client is back (SIGCONT, or the lock command exited). The terminal
+    /// is started again and redrawn in full.
     fn wakeup_client(&mut self, id: ClientId) {
         let stamp = self.model.touch();
         let Some(c) = self.clients.get_mut(&id).filter(|c| c.suspended) else {
@@ -1736,6 +1907,7 @@ impl Server {
         self.redraw_client(id);
         self.recalculate_sizes();
         self.model.touch_session(s);
+        self.arm_lock_timer(s);
     }
 
     /// `default-shell` of `tree`, or /bin/sh when `checkshell` fails.
@@ -1924,6 +2096,7 @@ impl Server {
         c.keys.activity = Instant::now();
         if let Some(s) = c.attached {
             self.model.touch_session(s);
+            self.arm_lock_timer(s);
         }
     }
 

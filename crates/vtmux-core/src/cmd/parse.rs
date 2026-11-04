@@ -2191,15 +2191,15 @@ mod tests {
     /// a table entry that reports `not implemented`.
     #[test]
     fn non_m0_commands_parse_but_do_not_run() {
-        let calls = parse_argv(&words(&["lock-server"])).unwrap();
-        assert_eq!(calls[0].entry.name, "lock-server");
+        let calls = parse_argv(&words(&["switch-mode"])).unwrap();
+        assert_eq!(calls[0].entry.name, "switch-mode");
         assert_eq!(
             calls[0].entry.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: lock-server"
+            "not implemented in vtmux yet: switch-mode"
         );
         assert_eq!(
-            argv_err(&["lock-server", "-Q"]),
-            "command lock-server: unknown flag -Q"
+            argv_err(&["switch-mode", "-Q"]),
+            "command switch-mode: unknown flag -Q"
         );
     }
 
