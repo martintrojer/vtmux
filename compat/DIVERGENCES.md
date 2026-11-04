@@ -170,9 +170,9 @@ product reasons" category.
 
 ### D-018: `clear-history -H` has no hyperlink table to reset
 
-- Test / assertion: none; `capture-pane-hyperlink.sh` stays xfail.
+- Test / assertion: none.
 - tmux behaviour: `-H` calls `screen_reset_hyperlinks` (cmd-capture-pane.c:427-428), emptying the pane's OSC 8 link table, which `capture-pane -H`, `#{mouse_hyperlink}` and `#{copy_cursor_hyperlink}` read: links written before the reset are gone from them.
-- vtmux behaviour: `-H` is accepted and changes nothing. libghostty-vt keeps links with the pages that hold the rows and vtmux exposes no table, so `#{mouse_hyperlink}` and `#{copy_cursor_hyperlink}` still give a link written before `clear-history -H` (`capture-pane -H` is not implemented).
+- vtmux behaviour: `-H` is accepted and changes nothing. libghostty-vt keeps links with the pages that hold the rows and vtmux exposes no table, so `#{mouse_hyperlink}` and `#{copy_cursor_hyperlink}` still give a link written before `clear-history -H`, and so do `capture-pane -H`, `-e` and `-R`.
 - Evidence: `clear-history -H` and `clear-history` give the same `history_size` and capture output on the reference and on vtmux (`cli.rs` `clear_history_keeps_the_screen`). After `printf '\033]8;;http://z/\033\\LNK...'`, `clear-history -H`, then `copy-mode` at the link, `#{copy_cursor_hyperlink}` is empty on the reference and `http://z/` on vtmux.
 - Category: Deferred
 
@@ -240,3 +240,11 @@ product reasons" category.
 - Evidence: `vtmux -V` gives `vtmux 0.0.0 (tmux 3.8)`; `vtmux display -p '#{version}'` gives `3.8`.
 - Category: Spec decision (D21, amended by D25).
 - Patch: `compat/patches/0002-format-variables-version.patch` (the script takes the tmux version out of a `vtmux` `-V` line too; a no-op under tmux).
+
+### D-027: `capture-pane -R` and `-F` model tmux's grid from Ghostty's
+
+- Test / assertion: oracle `capture_grid_dump` and `capture_hyperlinks` pin the scenes where the model is exact. Regress `input-unicode.sh` (wide/widepad `-F`) and the overwrite scenes of `input-raw-unicode.sh` stay xfail on it.
+- tmux behaviour: `-R` (`cmd_capture_pane_grid`, cmd-capture-pane.c:132-178) dumps tmux's own grid: each line's flags, `cellused`/`cellsize` and OSC 133 data, each cell's flags, attributes and colours. Line flags such as `GRID_LINE_EXTENDED` stay set once a cell needed the extended form; `cellsize` is how far the line has been allocated, which also bounds `-N` and `-e`; a palette colour keeps the form it was set with (`ESC[31m` is `red[1]`, `ESC[38;5;1m` is `colour1[1000001]` with `FG256`).
+- vtmux behaviour: Ghostty keeps none of that, so it is derived from the cells as they are now (`capture.rs` `tmux_cellsize`, `capture/raw.rs`): `EXTENDED` and `HYPERLINK` when a cell on the line needs them now; `cellsize` from the runs of written cells with one style, charset and link; palette 0-15 in the short form. A line whose wide character was overwritten (tmux keeps `EXTENDED`, and the other half as an uncleared cell), a line erased and rewritten shorter, a line whose run tmux flushed in two pieces (plain text with an escape sequence in it that changes nothing, `zz ESC[m out`: tmux allocates up to the second piece's end, 5/5 on a 20-column line, vtmux one run, 5/10), and `ESC[38;5;1m` show differently; under `-N` the trailing blanks follow the same model.
+- Evidence: reference tmux 3.8, 10x3 pane, `printf '\343\201\202B\rX'`: `capture-pane -pR` line 0 `flags=EXTENDED[2] 3/5`, cell 0,1 `flags=NONE[0]`; vtmux `flags=NONE[0] 3/5` and `flags=CLEARED[40]`. 20x3, `printf 'zz\033[mout'`: tmux `capture-pane -pN` gives `zzout`, vtmux `zzout` and five spaces.
+- Category: Ghostty grid (the state does not exist in Ghostty's grid).

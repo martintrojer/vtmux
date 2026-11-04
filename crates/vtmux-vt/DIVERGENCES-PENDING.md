@@ -55,6 +55,10 @@ and the probes from `review_vt_wrap`.
 - vtmux (Ghostty without mode 2027): does not cluster, `cursor_x` 8, which is what
   xterm does.
 - Visible: `#{cursor_x}`, CPR and capture of emoji text.
+- Same for regional-indicator pairs and VS16 (regress `input-raw-unicode.sh`,
+  scenes flag and variation, `capture-pane -R`): tmux makes `\U0001F1EC\U0001F1E7`
+  one cell `data=(2,8,...)` and `*` + U+FE0F one width-2 cell; Ghostty keeps
+  two width-2 cells, and `*` width 1 with the selector dropped.
 
 ## P4. Tab cells: closed (`d_tab_capture`)
 
@@ -140,3 +144,15 @@ and the probes from `review_vt_wrap`.
 
 - From review_d_tab_capture (rv-d_tab_capture). (1) `printf 'a\t\033[41m \033[0m'`, `capture-pane -p -e`: tmux emits `a\t` ESC[41m, a space, ESC[49m; vtmux emits `a\t` ESC[41m with no blank. With two red spaces tmux emits no blank and vtmux one (3-6 match). (2) After DECLRMM (`?69h`, `3;10s`), a TAB is kept as spaces: vtmux's tab marking bails when left/right margins are set (patch 0002); tmux has no DECLRMM, so its cursor stop differs anyway.
 - Visible: `capture-pane -e` bytes after a TAB followed by one or two styled blanks; capture after DECLRMM. Rare.
+
+## P10. OSC 133;A starts a fresh line
+
+- Golden: none; regress `input-modes.sh` (scene osc133) stays xfail on it.
+- tmux: `OSC 133;A` only flags the cursor's line `START_PROMPT` and records
+  the column (input.c `input_osc_133`): `printf 'xx\033]133;A\007p>'` gives
+  one line `xxp>`.
+- vtmux (Ghostty): `OSC 133;A` is `fresh_line_new_prompt` (Terminal.zig
+  `semanticPrompt`): with the cursor past column 0 it moves to a new line
+  first, so the capture is `xx` then `p>`, and the line data `capture-pane -R`
+  prints (`osc133=` and the flags) lands on the second line.
+- Visible: any prompt that sends `OSC 133;A` without a newline before it.

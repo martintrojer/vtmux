@@ -1,0 +1,21 @@
+name = "capture_hyperlinks"
+size = [40, 8]
+# capture-pane over OSC 8 links (cmd-capture-pane.c:216-252,
+# grid.c grid_string_cells_add_hyperlink): -H lists each link's URI once
+# (a link is its URI and id, hyperlinks_put; one without an id is its own),
+# lines without one are left out; -e and -Ce write OSC 8 with id=, a line
+# ending inside a link closes it after the last cell's codes again; -R
+# gives each cell's linkid. ACS cells capture as the byte tmux stores, with
+# SO/SI under -e. OSC 133 line data shows in -R (flags, columns, status).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "24", "-y", "6", "sh", "-c", "printf '\\033]8;id=a;http://a\\033\\\\A1\\033]8;;\\033\\\\ \\033]8;;http://b\\033\\\\B\\033]8;;\\033\\\\ \\033]8;id=a;http://a\\033\\\\A2\\033]8;;\\033\\\\\\nplain\\n\\033]8;;http://b\\033\\\\b2\\033]8;;\\033\\\\ \\033]8;;http://c\\033\\\\C\\033[31mD\\n\\033]8;;\\033\\\\\\033(0lqk\\033(B x\\033]133;C\\007o\\033]133;D;3\\007\\n'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pH"] },
+  { run = ["capturep", "-pLH", "-S", "1"] },
+  { run = ["capturep", "-pe"] },
+  { run = ["capturep", "-pCeT"] },
+  { run = ["capturep", "-pF"] },
+  { run = ["capturep", "-pR"] },
+  { run = ["capturep", "-H", "-b", "h"] },
+  { run = ["show-buffer", "-b", "h"] },
+]

@@ -1,0 +1,194 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "capture_mode_screen",
+  "inputs": {
+    "name": "capture_mode_screen",
+    "size": [
+      20,
+      5
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "20",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "seq 1 30; printf 'ab\\033[1mcd\\033[m\\tz'; tmux wait-for -S ready; tmux wait-for go; printf 'after\\n'; tmux wait-for -S after; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pM"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "after"
+      },
+      {
+        "run": [
+          "capturep",
+          "-p"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pM"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pMeN",
+          "-S",
+          "-3"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pMLF",
+          "-S",
+          "-2"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pMT",
+          "-S",
+          "-",
+          "-E",
+          "1"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "28\n29\n30\nabcd\tz\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "29\n30\nabcd\tzafter\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "28\n29\n30\nabcd\tz\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "25   \n26   \n27   \n28   \n29   \n30   \nab\u001b[1mcd\u001b[0m\tz \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "-2 - 26\n-1 - 27\n0 - 28\n1 - 29\n2 - 30\n3 X abcd\tz\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

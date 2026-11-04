@@ -6182,3 +6182,217 @@ fn pipe_pane_closes_with_the_pane() {
         runs
     });
 }
+
+/// A session `name` running `cat` over `payload` (a file in the world's
+/// directory, so no shell quoting), then `READY` on a line of its own and a
+/// wait. Returns once
+/// `READY` shows.
+fn capture_pane_session(w: &World, name: &str, size: (&str, &str), payload: &[u8]) {
+    let file = format!("{name}.bin");
+    std::fs::write(w.dir().join(&file), payload).expect("write payload");
+    w.run(&[
+        "new",
+        "-d",
+        "-s",
+        name,
+        "-x",
+        size.0,
+        "-y",
+        size.1,
+        "sh",
+        "-c",
+        &format!("cat {file}; printf '\\033[m\\r\\nREADY'; exec sleep 100"),
+    ]);
+    w.wait_for_text(name, "READY");
+}
+
+/// Every capture-pane line flag over styled, wide, tabbed, ACS and OSC 8
+/// cells (cmd-capture-pane.c:330-413, grid.c `grid_string_cells`): `-N`
+/// keeps the blanks up to the line's allocated size, `-T` stops at the
+/// last written cell, `-J` joins wrapped lines, `-e` writes SGR, SO/SI and
+/// OSC 8, `-C` writes their ESC as `\033` and a backslash as two, `-L` and
+/// `-F` prefix line numbers and flags, `-H` lists each hyperlink once.
+/// Reference: the same captures on the reference server.
+#[test]
+fn capture_pane_line_flags() {
+    compare("capture_pane_line_flags", |w| {
+        let payload: &[u8] = b"plain  \r\n\
+            \x1b[1;31mred\x1b[0m \x1b[4mul\x1b[24m \x1b[38;5;200mx\x1b[48;2;1;2;3my\x1b[m\r\n\
+            \x1b(0lqqk\x1b(B ok \\ back\r\n\
+            \x1b]8;id=a;http://a\x1b\\A1\x1b]8;;\x1b\\ \x1b]8;;http://b\x1b\\B\x1b]8;;\x1b\\ \
+            \x1b]8;id=a;http://a\x1b\\A2\x1b]8;;\x1b\\\r\n\
+            a\tb\tc\r\n\
+            \x1b[44mbg\x1b[K\x1b[m\r\n\
+            abcdefghijklmnopqrstuvwxyz0123\r\n\
+            \xe3\x81\x82x\x1b[3mit\x1b[23m\x1b[9ms\x1b[29m\x1b[53mo\x1b[55m\x1b[58;5;45m\x1b[4:3mc\x1b[59m\x1b[4:0m\r\n";
+        capture_pane_session(w, "a", ("20", "10"), payload);
+        let mut runs = Vec::new();
+        for flags in [
+            "-p", "-pN", "-pT", "-pNT", "-pJ", "-pNJ", "-pe", "-peN", "-peT", "-pC", "-pCe",
+            "-pCeN", "-pL", "-pF", "-pLF", "-pH", "-peH", "-pLFH",
+        ] {
+            runs.push(w.run(&["capture-pane", flags, "-t", "a"]));
+        }
+        // Into a buffer: the same text, trailing newline kept.
+        runs.push(w.run(&["capture-pane", "-CeN", "-b", "cap", "-t", "a"]));
+        runs.push(w.run(&["show-buffer", "-b", "cap"]));
+        runs
+    });
+}
+
+/// `-L`, `-I` and `-F` over history (cmd-capture-pane.c:363-401): history
+/// lines are numbered from `-hsize`, the time a line entered the history
+/// shows (0 for the visible lines, compared here as zero or not), and OSC
+/// 133 marks show as `P` and `O`, wrapped lines as `W`.
+#[test]
+fn capture_pane_history_prefixes() {
+    compare("capture_pane_history_prefixes", |w| {
+        let payload: &[u8] = b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\nabcdefghijklmnopqrstuvwxyz\r\n\
+            \x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C\x07out\x1b]133;D;3\x07\r\n";
+        capture_pane_session(w, "a", ("10", "4"), payload);
+        let mut runs = Vec::new();
+        for args in [
+            &["-pLF", "-S", "-", "-E", "-"][..],
+            &["-pL", "-S", "-3", "-E", "1"],
+            &["-pLFN", "-S", "-2"],
+            &["-pJ", "-S", "-", "-E", "-"],
+        ] {
+            let mut cmd = vec!["capture-pane", "-t", "a"];
+            cmd.extend_from_slice(args);
+            runs.push(w.run(&cmd));
+        }
+        let mut timed = w.run(&["capture-pane", "-pIL", "-S", "-", "-E", "-", "-t", "a"]);
+        // `-L` then `-I`: the time is the second field; non-zero is `T`.
+        let mut masked = String::new();
+        for line in timed.stdout.lines() {
+            let mut f: Vec<&str> = line.splitn(3, ' ').collect();
+            if f.get(1).is_some_and(|t| *t != "0") {
+                f[1] = "T";
+            }
+            masked.push_str(&f.join(" "));
+            masked.push('\n');
+        }
+        timed.stdout = masked;
+        runs.push(timed);
+        runs
+    });
+}
+
+/// `-a` (cmd-capture-pane.c:265-276) captures the primary screen the
+/// alternate screen hides, and errors without one unless `-q`; `-P`
+/// (cmd-capture-pane.c:181-213) gives the start of an unfinished escape
+/// sequence, with `-C` in octal, and is ignored with `-H`.
+#[test]
+fn capture_pane_alternate_and_pending() {
+    compare("capture_pane_alternate_and_pending", |w| {
+        capture_pane_session(w, "a", ("20", "4"), b"main1\r\n\x1b[1mbold\x1b[m\r\n");
+        capture_pane_session(
+            w,
+            "b",
+            ("20", "4"),
+            b"pre\r\n\x1b[1mB\x1b[m\x1b[?1049h\x1b[2;3Halt",
+        );
+        // A pane that stops inside an OSC: READY is part of the sequence,
+        // so the poll waits on what precedes it.
+        w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "c",
+            "-x",
+            "20",
+            "-y",
+            "4",
+            "sh",
+            "-c",
+            "printf 'x\\033]2;half\\\\READY'; exec sleep 100",
+        ]);
+        w.wait_for_text("c", "x");
+        let mut runs = Vec::new();
+        for t in ["a", "b"] {
+            for f in ["-pa", "-paq", "-pae", "-paN", "-paL"] {
+                runs.push(w.run(&["capture-pane", f, "-t", t]));
+            }
+        }
+        runs.push(w.run(&["capture-pane", "-a", "-b", "alt", "-t", "b"]));
+        runs.push(w.run(&["show-buffer", "-b", "alt"]));
+        for t in ["a", "c"] {
+            for f in ["-pP", "-pPC", "-pPH", "-pPe"] {
+                runs.push(w.run(&["capture-pane", f, "-t", t]));
+            }
+        }
+        runs
+    });
+}
+
+/// `-M` (cmd-capture-pane.c:277-285) reads copy mode's own copy of the
+/// grid, not the pane: output after copy mode began does not show. With
+/// no mode, the pane's grid.
+#[test]
+fn capture_pane_mode_screen() {
+    compare("capture_pane_mode_screen", |w| {
+        w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            "-x",
+            "20",
+            "-y",
+            "4",
+            "sh",
+            "-c",
+            "seq 1 30; printf 'ab\\033[1mcd\\033[m'; exec cat",
+        ]);
+        w.wait_for_text("a", "abcd");
+        let mut runs = vec![w.run(&["capture-pane", "-pM", "-t", "a"])];
+        runs.push(w.run(&["copy-mode", "-t", "a"]));
+        // Output after copy mode began, which the mode's copy does not show.
+        let tty = w.run(&["display", "-p", "-t", "a", "#{pane_tty}"]).stdout;
+        std::fs::write(tty.trim(), b"after\r\n").expect("write to the pane's tty");
+        std::thread::sleep(Duration::from_millis(300));
+        for args in [
+            &["-pM"][..],
+            &["-pM", "-S", "-", "-E", "-"],
+            &["-pMe", "-S", "-3"],
+            &["-pMLF", "-S", "-3"],
+            &["-pMN", "-S", "-2", "-E", "0"],
+            &["-pMJ", "-S", "-2"],
+        ] {
+            let mut cmd = vec!["capture-pane", "-t", "a"];
+            cmd.extend_from_slice(args);
+            runs.push(w.run(&cmd));
+        }
+        runs
+    });
+}
+
+/// `-R` (`cmd_capture_pane_grid`, cmd-capture-pane.c:132-178): the grid's
+/// size and history, each line's flags, used and allocated cells and OSC
+/// 133 data, each cell's data, flags, attributes, colours and link.
+/// Scenes chosen where vtmux's model of tmux's internal state is exact
+/// (see `compat/DIVERGENCES.md`, capture-pane -R).
+#[test]
+fn capture_pane_raw_grid() {
+    compare("capture_pane_raw_grid", |w| {
+        w.run(&["set", "-g", "history-limit", "5"]);
+        let scenes: [&[u8]; 6] = [
+            b"\x1b[1mB\x1b[2mD\x1b[3mI\x1b[4mU\x1b[5mK\x1b[7mR\x1b[8mH\x1b[9mS\x1b[53mO\x1b[m",
+            b"\x1b[38;5;196;48;5;17mX\x1b[58;5;45mY\x1b[m \x1b[44mA\x1b[K\x1b[m\r\n\
+              \x1b[4:2m2\x1b[4:3m3\x1b[4:4m4\x1b[4:5m5\x1b[m\x1b[38;2;1;2;3mR\x1b[m",
+            b"\x1b]8;id=id1;https://example.com/a\x1b\\A\x1b]8;;\x1b\\B\x1b]8;;http://x\x1b\\C\x1b]8;;\x1b\\",
+            b"A\xe3\x81\x82B\tT\x1b(0qx\x1b(BZ\\\r\nABCDEZ",
+            b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven\r\neight",
+            // No OSC 133;A: Ghostty starts a fresh line for it (P9).
+            b"xy\x1b]133;P\x07p>\x1b]133;B\x07cmd\r\nxy\x1b]133;P;k=s\x07more\r\n\
+              zz\x1b]133;C\x07out\x1b]133;D;7\x07\r\nq\x1b]133;C\x07bad\x1b]133;D;-1\x07",
+        ];
+        let mut runs = Vec::new();
+        for (i, scene) in scenes.iter().enumerate() {
+            let name = format!("s{i}");
+            capture_pane_session(w, &name, ("12", "4"), scene);
+            runs.push(w.run(&["capture-pane", "-pR", "-t", &name]));
+        }
+        runs
+    });
+}

@@ -5,7 +5,7 @@
 
 use libghostty_vt::Terminal;
 use libghostty_vt::error::Error;
-use libghostty_vt::screen::{CellContentTag, CellWide, GridRef};
+use libghostty_vt::screen::{CellContentTag, CellWide, GridRef, HyperlinkId};
 use libghostty_vt::terminal::{Point, PointCoordinate};
 
 use crate::snapshot::{Cell, Color, Style, Underline};
@@ -15,6 +15,7 @@ use crate::term::{HistoryRow, LineMark, PaneTerm};
 
 mod raw;
 pub use raw::capture_grid;
+use raw::dec_special_source;
 
 /// One end of the captured range, as `-S` / `-E` give it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +50,8 @@ pub struct CaptureOpts {
     pub times: bool,
     /// `-F`: each line starts with its flags.
     pub flags: bool,
+    /// `-H`: each line's hyperlinks instead of its text.
+    pub hyperlinks: bool,
     pub start: LineRef,
     pub end: LineRef,
 }
@@ -64,8 +67,104 @@ impl Default for CaptureOpts {
             numbers: false,
             times: false,
             flags: false,
+            hyperlinks: false,
             start: LineRef::Visible,
             end: LineRef::Visible,
+        }
+    }
+}
+
+/// A grid other than the pane's that `capture-pane -M` reads: a mode's
+/// screen (copy mode's backing grid). Its rows carry no hyperlink URIs, so
+/// `-e` and `-H` see no links there.
+pub trait Lines {
+    /// History lines before the screen's (`hsize`).
+    fn history_size(&self) -> usize;
+    /// Screen lines (`sy`).
+    fn screen_rows(&self) -> usize;
+    fn line(&self, y: usize) -> &Row;
+    /// When line `y` entered the history, 0 if never (`grid_line_time`).
+    fn time(&self, y: usize) -> i64;
+    /// OSC 133 marked line `y` as a prompt's start, or with `output` as
+    /// command output's start.
+    fn starts(&self, y: usize, output: bool) -> bool;
+}
+
+/// Where a capture reads (cmd-capture-pane.c:265-291).
+enum Source<'a> {
+    /// The pane's grid, history included.
+    Pane(&'a PaneTerm),
+    /// `-a`: the primary screen saved under the alternate one, no history.
+    Saved(Rc<Vec<FrozenRow>>),
+    /// `-M`: a mode's screen, `sx` columns.
+    Mode(&'a dyn Lines, usize),
+}
+
+/// One line of a capture: its cells, wrap flag, history time and OSC 133
+/// prompt/output marks.
+struct Line {
+    cells: Vec<RowCell>,
+    wrapped: bool,
+    time: i64,
+    prompt: bool,
+    output: bool,
+}
+
+impl Source<'_> {
+    /// `hsize` and `sy`.
+    fn size(&self) -> (usize, usize) {
+        match self {
+            Self::Pane(t) => (t.history_size(), usize::from(t.rows())),
+            Self::Saved(rows) => (0, rows.len()),
+            Self::Mode(l, _) => (l.history_size(), l.screen_rows()),
+        }
+    }
+
+    fn line(&self, y: usize, marks: &[(usize, LineMark)]) -> Line {
+        let marked = |m: LineMark| marks.iter().any(|&(my, mm)| my == y && mm == m);
+        let (cells, wrapped, time, prompt, output) = match self {
+            Self::Pane(t) => {
+                let hsize = t.history_size();
+                let (cells, wrapped) = read_row(t, y, hsize, usize::from(t.cols()));
+                let time = if y < hsize {
+                    t.history_time(t.history_id(y))
+                } else {
+                    0
+                };
+                let (p, o) = (marked(LineMark::Prompt), marked(LineMark::Output));
+                (cells, wrapped, time, p, o)
+            }
+            Self::Saved(rows) => {
+                let (cells, wrapped) = rows.get(y).map(FrozenRow::thaw).unwrap_or_default();
+                (cells, wrapped, 0, false, false)
+            }
+            Self::Mode(l, sx) => {
+                let row = l.line(y);
+                let mut cells: Vec<RowCell> = Vec::with_capacity(row.cells.len());
+                for c in &row.cells {
+                    let after_tab = cells.last().is_some_and(|p: &RowCell| p.tab != 0);
+                    cells.push(RowCell::from_cell(c, after_tab));
+                }
+                let blank = RowCell {
+                    empty: true,
+                    ..RowCell::default()
+                };
+                cells.resize((*sx).max(cells.len()), blank);
+                (
+                    cells,
+                    row.wrapped,
+                    l.time(y),
+                    l.starts(y, false),
+                    l.starts(y, true),
+                )
+            }
+        };
+        Line {
+            cells,
+            wrapped,
+            time,
+            prompt,
+            output,
         }
     }
 }
@@ -75,83 +174,95 @@ impl Default for CaptureOpts {
 /// history; `None` while no alternate screen is up.
 #[must_use]
 pub fn capture_alternate(term: &PaneTerm, opts: CaptureOpts) -> Option<Vec<u8>> {
-    let rows = term.saved_rows()?;
-    let last = rows.len().saturating_sub(1);
-    let mut top = resolve(opts.start, 0, last, true);
-    let mut bottom = resolve(opts.end, 0, last, false);
-    if bottom < top {
-        std::mem::swap(&mut top, &mut bottom);
-    }
-    let mut out = Vec::new();
-    let mut last_style = Style::default();
-    for (y, row) in rows.iter().enumerate().take(bottom + 1).skip(top) {
-        let (cells, wrapped) = row.thaw();
-        if opts.numbers {
-            out.extend_from_slice(format!("{y} ").as_bytes());
-        }
-        if opts.times {
-            out.extend_from_slice(b"0 ");
-        }
-        if opts.flags {
-            out.extend_from_slice(row_flags(&cells, wrapped, None).as_bytes());
-        }
-        emit_row(&mut out, &cells, opts, &mut last_style);
-        if !opts.join || !wrapped {
-            out.push(b'\n');
-        }
-    }
-    Some(out)
+    Some(capture_from(&Source::Saved(term.saved_rows()?), opts))
 }
 
 /// Capture `term` the way `capture-pane` does, returning the buffer before
 /// `-p` strips its final newline.
 #[must_use]
 pub fn capture(term: &PaneTerm, opts: CaptureOpts) -> Vec<u8> {
-    let sy = usize::from(term.rows());
-    let hsize = term.history_size();
-    let last = hsize + sy - 1;
+    capture_from(&Source::Pane(term), opts)
+}
 
+/// `capture-pane -M` over a mode's screen, `sx` the pane's width.
+#[must_use]
+pub fn capture_lines(lines: &dyn Lines, sx: usize, opts: CaptureOpts) -> Vec<u8> {
+    capture_from(&Source::Mode(lines, sx), opts)
+}
+
+/// `cmd_capture_pane_history` (cmd-capture-pane.c:254-422).
+fn capture_from(src: &Source<'_>, opts: CaptureOpts) -> Vec<u8> {
+    let (hsize, sy) = src.size();
+    let last = (hsize + sy).saturating_sub(1);
     let mut top = resolve(opts.start, hsize, last, true);
     let mut bottom = resolve(opts.end, hsize, last, false);
     if bottom < top {
         std::mem::swap(&mut top, &mut bottom);
     }
-
-    let cols = usize::from(term.cols());
-    let mut out = Vec::new();
-    // tmux threads one `lastgc` through every line of a capture (cmd-capture-pane.c:333).
-    let mut last_style = Style::default();
-    let marks = if opts.flags {
-        term.line_marks()
-    } else {
-        Vec::new()
+    let marks = match src {
+        Source::Pane(t) if opts.flags => t.line_marks(),
+        _ => Vec::new(),
     };
+    let mut out = Vec::new();
+    // tmux threads one `lastgc` through every line of a capture
+    // (cmd-capture-pane.c:333), and one list of the links -H has listed.
+    let mut last = Gc::default();
+    let mut seen: Vec<LinkKey> = Vec::new();
     for y in top..=bottom {
-        let (cells, wrapped) = read_row(term, y, hsize, cols);
-        // cmd-capture-pane.c:375-410: the line's number, history time and
+        let line = src.line(y, &marks);
+        let mut text = Vec::new();
+        if opts.hyperlinks {
+            line_links(&mut text, &line.cells, &mut seen);
+            if text.is_empty() {
+                continue;
+            }
+        } else {
+            emit_row(&mut text, &line.cells, opts, &mut last);
+        }
+        // cmd-capture-pane.c:363-401: the line's number, history time and
         // flags first.
         if opts.numbers {
             let n = i64::try_from(y).unwrap_or(0) - i64::try_from(hsize).unwrap_or(0);
             out.extend_from_slice(format!("{n} ").as_bytes());
         }
         if opts.times {
-            let t = if y < hsize {
-                term.history_time(term.history_id(y))
-            } else {
-                0
-            };
-            out.extend_from_slice(format!("{t} ").as_bytes());
+            out.extend_from_slice(format!("{} ", line.time).as_bytes());
         }
         if opts.flags {
-            let mark = marks.iter().find(|(row, _)| *row == y).map(|(_, m)| *m);
-            out.extend_from_slice(row_flags(&cells, wrapped, mark).as_bytes());
+            out.extend_from_slice(
+                row_flags(&line.cells, line.wrapped, line.prompt, line.output).as_bytes(),
+            );
         }
-        emit_row(&mut out, &cells, opts, &mut last_style);
-        if !opts.join || !wrapped {
+        out.extend_from_slice(&text);
+        if !opts.join || !line.wrapped {
             out.push(b'\n');
         }
     }
     out
+}
+
+/// A hyperlink as tmux tells them apart (`hyperlinks_put`): one URI and
+/// explicit id are one link, a link without an id is its own.
+type LinkKey = (String, HyperlinkId);
+
+/// `cmd_capture_pane_hyperlinks` (cmd-capture-pane.c:216-252): the URIs
+/// of the line's links not listed on an earlier line, space separated.
+fn line_links(out: &mut Vec<u8>, cells: &[RowCell], seen: &mut Vec<LinkKey>) {
+    let used = cells.iter().rposition(|c| !c.empty).map_or(0, |i| i + 1);
+    for c in cells[..used].iter().filter(|c| !c.spacer()) {
+        let Some(key) = c.link_key() else { continue };
+        if seen.contains(&key) {
+            continue;
+        }
+        if seen.len() == cells.len() {
+            break;
+        }
+        if !out.is_empty() {
+            out.push(b' ');
+        }
+        out.extend_from_slice(key.0.as_bytes());
+        seen.push(key);
+    }
 }
 
 /// tmux's `GRID_LINE_EXTENDED` (grid.c `grid_need_extended_cell`): a cell
@@ -163,7 +274,7 @@ fn row_extended(cells: &[RowCell]) -> bool {
         c.link
             || c.tab != 0
             || c.wide == Width::Double
-            || c.text.len() > 1
+            || c.data().len() > 1
             || matches!(st.fg, Color::Rgb(..))
             || matches!(st.bg, Color::Rgb(..))
             || st.underline_color != Color::Default
@@ -175,24 +286,18 @@ fn row_extended(cells: &[RowCell]) -> bool {
 
 /// `capture-pane -F` (cmd-capture-pane.c:390-410): the line's flags and a
 /// space (`X`: [`row_extended`]). vtmux has no dead lines (`D`).
-fn row_flags(cells: &[RowCell], wrapped: bool, mark: Option<LineMark>) -> String {
-    let link = cells.iter().any(|c| c.link);
-    let extended = row_extended(cells);
+fn row_flags(cells: &[RowCell], wrapped: bool, prompt: bool, output: bool) -> String {
     let mut f = String::new();
-    if link {
-        f.push('H');
-    }
-    if mark == Some(LineMark::Output) {
-        f.push('O');
-    }
-    if mark == Some(LineMark::Prompt) {
-        f.push('P');
-    }
-    if wrapped {
-        f.push('W');
-    }
-    if extended {
-        f.push('X');
+    for (on, c) in [
+        (cells.iter().any(|c| c.link), 'H'),
+        (output, 'O'),
+        (prompt, 'P'),
+        (wrapped, 'W'),
+        (row_extended(cells), 'X'),
+    ] {
+        if on {
+            f.push(c);
+        }
     }
     if f.is_empty() {
         f.push('-');
@@ -244,8 +349,9 @@ pub(crate) struct RowCell {
     wide: Width,
     acs: bool,
     link: bool,
-    /// The hyperlink's URI, read only for `capture-pane -R`.
+    /// The hyperlink's URI and OSC 8 id (Ghostty patch 0006).
     uri: Option<String>,
+    link_id: Option<HyperlinkId>,
     /// Ghostty's tab mark (`Cell.tab`, `patches/0002-tab-cell-mark.patch`):
     /// 0 none, 1..=32 the first cell of a tab that many columns wide,
     /// [`TAB_CONTINUATION`] for the other cells of it.
@@ -275,6 +381,50 @@ impl RowCell {
     /// a line's end when a wide character wrapped, which tmux never writes.
     fn padding(&self) -> bool {
         self.wide == Width::SpacerTail || self.tab != 0
+    }
+
+    /// The cell's text as tmux stores it: a character printed under DEC
+    /// Special Graphics is the ASCII byte tmux keeps (it maps it only when
+    /// drawing, `tty_acs_get`), where Ghostty stores the glyph.
+    pub(crate) fn data(&self) -> std::borrow::Cow<'_, str> {
+        if self.acs {
+            self.text
+                .chars()
+                .map(dec_special_source)
+                .collect::<String>()
+                .into()
+        } else {
+            self.text.as_str().into()
+        }
+    }
+
+    /// The cell's link as tmux tells links apart.
+    fn link_key(&self) -> Option<LinkKey> {
+        Some((self.uri.clone()?, self.link_id.clone()?))
+    }
+
+    /// A [`Row`]'s cell back in capture form (`-M`). Rows keep no URIs. A
+    /// width-0 cell is a wide character's padding, or a tab's when the
+    /// cell before is a tab or a tab's padding ([`RowCell::to_cell`]).
+    fn from_cell(c: &Cell, after_tab: bool) -> Self {
+        let (text, wide, tab) = match (c.tab, c.width) {
+            (true, n) => ("\t".to_owned(), Width::Narrow, n),
+            (false, 0) if after_tab => (String::new(), Width::Narrow, TAB_CONTINUATION),
+            (false, 0) => (String::new(), Width::SpacerTail, 0),
+            (false, 2) => (c.text.clone(), Width::Double, 0),
+            (false, _) => (c.text.clone(), Width::Narrow, 0),
+        };
+        Self {
+            empty: text.is_empty(),
+            text,
+            style: c.style,
+            wide,
+            acs: c.acs,
+            link: c.link,
+            uri: None,
+            link_id: None,
+            tab,
+        }
     }
 
     /// The cell as the renderer sees it (as [`crate::snapshot`] reads it).
@@ -657,8 +807,9 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
             wide,
             acs: cell.is_protected().unwrap_or(false),
             link,
-            // Links are rare: their URI is read as the cell is.
+            // Links are rare: their URI and id are read as the cell is.
             uri: link.then(|| hyperlink_uri(&gr)).flatten(),
+            link_id: link.then(|| gr.hyperlink_id().ok()).flatten(),
             tab,
         });
     }
@@ -769,7 +920,15 @@ fn cell_text(gr: &GridRef<'_>) -> String {
     text
 }
 
-fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut Style) {
+/// What `grid_string_cells_code` compares between cells (its `lastgc`).
+#[derive(Clone, Default, PartialEq)]
+struct Gc {
+    style: Style,
+    acs: bool,
+    link: Option<LinkKey>,
+}
+
+fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut Gc) {
     // `cellused`: one past the last cell with text.
     let used = cells.iter().rposition(|c| !c.empty).map_or(0, |i| i + 1);
     // GRID_STRING_EMPTY_CELLS unless -J or -T (cmd-capture-pane.c:349-350):
@@ -783,23 +942,62 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
     };
 
     let mut line = Vec::new();
+    let mut has_link = false;
+    // The last cell's sequences (`code`), which the closing OSC 8 is
+    // appended to.
+    let (mut code_at, mut code_len) = (0, 0);
     // Spacer cells are tmux's PADDING cells: skipped (grid.c:1214-1215).
     for c in cells[..end.min(cells.len())].iter().filter(|c| !c.spacer()) {
         if opts.escapes {
             let at = line.len();
-            sgr_code(&mut line, last, &c.style);
+            code_at = at;
+            let gc = Gc {
+                style: c.style,
+                acs: c.acs,
+                link: c.link_key(),
+            };
+            sgr_code(&mut line, &last.style, &gc.style);
             if opts.octal {
                 escape_esc(&mut line, at);
             }
-            *last = c.style;
+            // SO/SI on the charset (a leading 0 keeps it).
+            if gc.acs != last.acs {
+                line.extend_from_slice(match (gc.acs, opts.octal) {
+                    (true, false) => b"\x0e",
+                    (true, true) => b"\\016",
+                    (false, false) => b"\x0f",
+                    (false, true) => b"\\017",
+                });
+            }
+            if gc.link != last.link {
+                if let Some((uri, id)) = &gc.link {
+                    let id: &[u8] = match id {
+                        HyperlinkId::Explicit(id) => id,
+                        _ => b"",
+                    };
+                    has_link = add_hyperlink(&mut line, id, uri.as_bytes(), opts.octal);
+                } else if has_link {
+                    add_hyperlink(&mut line, b"", b"", opts.octal);
+                    has_link = false;
+                }
+            }
+            *last = gc;
+            code_len = line.len() - code_at;
         }
         if c.empty {
             line.push(b' ');
         } else if opts.octal && c.text == "\\" {
             line.extend_from_slice(b"\\\\");
         } else {
-            line.extend_from_slice(c.text.as_bytes());
+            line.extend_from_slice(c.data().as_bytes());
         }
+    }
+    if has_link {
+        // grid.c:1255-1258 appends the close to `code` with strlcat, which
+        // still holds the last cell's sequences: they come out again.
+        let code = line[code_at..code_at + code_len].to_vec();
+        line.extend_from_slice(&code);
+        add_hyperlink(&mut line, b"", b"", opts.octal);
     }
     if !opts.join && !opts.keep_spaces {
         // GRID_STRING_TRIM_SPACES (grid.c:1263).
@@ -808,6 +1006,26 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
         }
     }
     out.extend_from_slice(&line);
+}
+
+/// `grid_string_cells_add_hyperlink` (grid.c:1035-1060): OSC 8 with `id=`
+/// when there is one; ST is `ESC \` (`\033\\` under `-C`).
+fn add_hyperlink(out: &mut Vec<u8>, id: &[u8], uri: &[u8], octal: bool) -> bool {
+    if uri.len() + id.len() + 17 >= 8192 {
+        return false;
+    }
+    let esc: &[u8] = if octal { b"\\033" } else { b"\x1b" };
+    out.extend_from_slice(esc);
+    out.extend_from_slice(b"]8;");
+    if !id.is_empty() {
+        out.extend_from_slice(b"id=");
+        out.extend_from_slice(id);
+    }
+    out.push(b';');
+    out.extend_from_slice(uri);
+    out.extend_from_slice(esc);
+    out.extend_from_slice(if octal { b"\\\\" } else { b"\\" });
+    true
 }
 
 /// `GRID_STRING_ESCAPE_SEQUENCES`: each ESC from `at` on as `\033`.
@@ -851,7 +1069,11 @@ fn tmux_cellsize(cells: &[RowCell], used: usize) -> usize {
         // A run is what one grid_set_cells writes: same style, charset
         // and link.
         let same = |a: &RowCell, b: &RowCell| {
-            b.spacer() || (a.style == b.style && a.acs == b.acs && a.uri == b.uri)
+            b.spacer()
+                || (a.style == b.style
+                    && a.acs == b.acs
+                    && a.uri == b.uri
+                    && a.link_id == b.link_id)
         };
         let mut j = i + 1;
         while j < extent && written(&cells[j]) && same(&cells[j], &cells[i]) {

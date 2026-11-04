@@ -1150,6 +1150,17 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " Get the OSC 8 id of the hyperlink of the cell at the grid reference's\n position (vtmux, patch 0006): out_kind 0 none, 1 explicit (bytes in buf),\n 2 implicit (out_implicit).\n"]
+    pub fn ghostty_grid_ref_hyperlink_id(
+        ref_: *const GridRef,
+        buf: *mut u8,
+        buf_len: usize,
+        out_len: *mut usize,
+        out_kind: *mut u8,
+        out_implicit: *mut u32,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Get the style of the cell at the grid reference's position.\n\n         node is NULL\n"]
     pub fn ghostty_grid_ref_style(ref_: *const GridRef, out_style: *mut Style) -> Result::Type;
 }

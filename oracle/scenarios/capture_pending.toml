@@ -1,0 +1,21 @@
+name = "capture_pending"
+size = [20, 4]
+# capture-pane -P (cmd-capture-pane.c:181-213, input.c since_ground): the
+# input since the parser left the ground state, while it has not come back:
+# nothing in the ground state, a half OSC (and with -C the bytes below a
+# space and a backslash in octal), a half DCS; -H with -P is a line capture.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "4", "sh", "-c", "printf 'x\\n'; tmux wait-for -S ground; read l; printf '\\033]2;half\\\\'; tmux wait-for -S osc; read l; printf '\\007\\033P1$q'; tmux wait-for -S dcs; exec cat"] },
+  { wait_for = "ground" },
+  { run = ["capturep", "-pP"] },
+  { feed = { pane = "%0", bytes = "\r" } },
+  { wait_for = "osc" },
+  { run = ["capturep", "-pP"] },
+  { run = ["capturep", "-pPC"] },
+  { run = ["capturep", "-pPH"] },
+  { run = ["capturep", "-P", "-b", "p"] },
+  { run = ["show-buffer", "-b", "p"] },
+  { feed = { pane = "%0", bytes = "\r" } },
+  { wait_for = "dcs" },
+  { run = ["capturep", "-pPC"] },
+]

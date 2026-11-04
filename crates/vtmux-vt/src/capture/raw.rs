@@ -13,18 +13,20 @@
 //!   `38;5;1`, as `capture-pane -e` does);
 //! - an ACS cell shows the character that was printed (Ghostty's line
 //!   drawing table read backwards), as tmux stores it;
-//! - Ghostty gives a link's URI but not its `id=`: `linkid` is `NONE`;
-//! - OSC 133 columns and exit statuses are not kept: rows marked as a
-//!   prompt or output carry the flag only, and no `osc133=` part.
+//! - a link's `id=` comes from Ghostty patch 0006; one opened without an
+//!   id is `NONE`;
+//! - OSC 133 line data (the flags each kind sets, the prompt, command and
+//!   output columns, the exit status) is kept by [`PaneTerm`] per line, as
+//!   `input_osc_133` keeps it.
 
 use std::fmt::Write as _;
 
 use super::{RowCell, Width, read_row, tmux_cellsize};
 use crate::snapshot::{Color, Style, Underline};
-use crate::term::{LineMark, PaneTerm};
+use crate::term::{Osc133, PaneTerm};
 
 /// `GRID_LINE_*` names in `grid_line_flags_string` order.
-fn line_flags(wrapped: bool, extended: bool, mark: Option<LineMark>, link: bool) -> (String, u32) {
+fn line_flags(wrapped: bool, extended: bool, osc133: u32, link: bool) -> (String, u32) {
     let mut names = Vec::new();
     let mut bits = 0;
     let mut add = |on: bool, name: &'static str, bit: u32| {
@@ -35,8 +37,11 @@ fn line_flags(wrapped: bool, extended: bool, mark: Option<LineMark>, link: bool)
     };
     add(wrapped, "WRAPPED", 0x1);
     add(extended, "EXTENDED", 0x2);
-    add(mark == Some(LineMark::Prompt), "START_PROMPT", 0x8);
-    add(mark == Some(LineMark::Output), "START_OUTPUT", 0x40);
+    add(osc133 & 0x8 != 0, "START_PROMPT", 0x8);
+    add(osc133 & 0x10 != 0, "SECOND_PROMPT", 0x10);
+    add(osc133 & 0x20 != 0, "START_COMMAND", 0x20);
+    add(osc133 & 0x40 != 0, "START_OUTPUT", 0x40);
+    add(osc133 & 0x80 != 0, "END_OUTPUT", 0x80);
     add(link, "HYPERLINK", 0x100);
     (joined(&names), bits)
 }
@@ -132,7 +137,7 @@ struct Raw {
 /// Ghostty's DEC Special Graphics table (charsets.zig `dec_special`)
 /// backwards: the character the program printed for a glyph, as tmux
 /// stores it (the charset is an attribute in tmux).
-fn dec_special_source(c: char) -> char {
+pub(super) fn dec_special_source(c: char) -> char {
     const TABLE: [(u32, char); 31] = [
         (0x25C6, '`'),
         (0x2592, 'a'),
@@ -205,11 +210,7 @@ fn raw(c: &RowCell, in_size: bool) -> Raw {
     }
     Raw {
         width: if c.wide == Width::Double { 2 } else { 1 },
-        data: if c.acs {
-            c.text.chars().map(dec_special_source).collect()
-        } else {
-            c.text.clone()
-        },
+        data: c.data().into_owned(),
         padding: false,
         cleared: false,
         tab: false,
@@ -222,7 +223,7 @@ pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
     let sy = usize::from(term.rows());
     let sx = usize::from(term.cols());
     let hsize = term.history_size();
-    let marks = term.line_marks();
+    let osc133 = term.osc133_lines();
     let mut out = format!("G {sx}x{sy} ({hsize}/{history_limit})\n");
     for y in 0..hsize + sy {
         let (cells, wrapped) = read_row(term, y, hsize, sx);
@@ -234,14 +235,31 @@ pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
         let size = tmux_cellsize(&cells, used).max(used);
         let link = cells.iter().any(|c| c.link);
         let extended = super::row_extended(&cells);
-        let mark = marks.iter().find(|(row, _)| *row == y).map(|(_, m)| *m);
-        let (names, bits) = line_flags(wrapped, extended, mark, link);
+        let data: Osc133 = osc133
+            .iter()
+            .find(|(row, _)| *row == y)
+            .map(|(_, d)| *d)
+            .unwrap_or_default();
+        let (names, bits) = line_flags(wrapped, extended, data.flags, link);
         let p = if y < hsize {
             "-".to_owned()
         } else {
             (y - hsize).to_string()
         };
-        let _ = writeln!(out, "\tL {y} ({p}) flags={names}[{bits:x}] {used}/{size}");
+        let _ = write!(out, "\tL {y} ({p}) flags={names}[{bits:x}] {used}/{size}");
+        // cmd-capture-pane.c:151-158: the OSC 133 data on a line it touched.
+        if data.flags != 0 {
+            let _ = write!(
+                out,
+                " osc133={},{},{},{},{}",
+                data.prompt_col,
+                data.cmd_col,
+                data.out_start_col,
+                data.out_end_col,
+                data.exit_status
+            );
+        }
+        out.push('\n');
         for (x, c) in cells.iter().enumerate() {
             let r = raw(c, x < size);
             let style = if r.padding { Style::default() } else { c.style };
@@ -272,10 +290,17 @@ pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
             }
             let (an, ab) = attrs(&style, c.acs && !r.padding);
             let link = c.uri.as_deref().filter(|_| !r.padding).unwrap_or("NONE");
+            let linkid = match (&c.link_id, r.padding, link) {
+                (_, _, "NONE") | (_, true, _) => "NONE".to_owned(),
+                (Some(libghostty_vt::screen::HyperlinkId::Explicit(id)), ..) if !id.is_empty() => {
+                    String::from_utf8_lossy(id).into_owned()
+                }
+                _ => "NONE".to_owned(),
+            };
             let _ = writeln!(
                 out,
                 "\t\tC {y},{x} data=({},{},{}) flags={}[{fbits:x}] attr={an}[{ab:x}] \
-                 fg={fg}[{fgn:x}] bg={bg}[{bgn:x}] us={us}[{usn:x}] link={link} linkid=NONE",
+                 fg={fg}[{fgn:x}] bg={bg}[{bgn:x}] us={us}[{usn:x}] link={link} linkid={linkid}",
                 r.width,
                 r.data.len(),
                 vis(&r.data),

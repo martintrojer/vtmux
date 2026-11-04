@@ -1,0 +1,177 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "capture_hyperlinks",
+  "inputs": {
+    "name": "capture_hyperlinks",
+    "size": [
+      40,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "24",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '\\033]8;id=a;http://a\\033\\\\A1\\033]8;;\\033\\\\ \\033]8;;http://b\\033\\\\B\\033]8;;\\033\\\\ \\033]8;id=a;http://a\\033\\\\A2\\033]8;;\\033\\\\\\nplain\\n\\033]8;;http://b\\033\\\\b2\\033]8;;\\033\\\\ \\033]8;;http://c\\033\\\\C\\033[31mD\\n\\033]8;;\\033\\\\\\033(0lqk\\033(B x\\033]133;C\\007o\\033]133;D;3\\007\\n'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pH"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pLH",
+          "-S",
+          "1"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pe"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pCeT"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pF"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pR"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-H",
+          "-b",
+          "h"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer",
+          "-b",
+          "h"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "http://a http://b\nhttp://b http://c\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "2 http://b http://c\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;id=a;http://a\u001b\\A1\u001b]8;;\u001b\\ \u001b]8;;http://b\u001b\\B\u001b]8;;\u001b\\ \u001b]8;id=a;http://a\u001b\\A2\u001b]8;;\u001b\\\nplain\n\u001b]8;;http://b\u001b\\b2\u001b]8;;\u001b\\ \u001b]8;;http://c\u001b\\C\u001b[31mD\u001b[39m\u001b]8;;\u001b\\\n\u001b[31m\u000elqk\u000f xo\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\\033]8;id=a;http://a\\033\\\\A1\\033]8;;\\033\\\\ \\033]8;;http://b\\033\\\\B\\033]8;;\\033\\\\ \\033]8;id=a;http://a\\033\\\\A2\\033]8;;\\033\\\\\nplain\n\\033]8;;http://b\\033\\\\b2\\033]8;;\\033\\\\ \\033]8;;http://c\\033\\\\C\\033[31mD\\033[31m\\033]8;;\\033\\\\\n\\016lqk\\017 xo\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "HX A1 B A2\n- plain\nHX b2 CD\nO lqk xo\n- \n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "G 24x6 (0/2000)\n\tL 0 (0) flags=EXTENDED,HYPERLINK[102] 7/12\n\t\tC 0,0 data=(1,1,A) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://a linkid=a\n\t\tC 0,1 data=(1,1,1) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://a linkid=a\n\t\tC 0,2 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,3 data=(1,1,B) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://b linkid=NONE\n\t\tC 0,4 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,5 data=(1,1,A) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://a linkid=a\n\t\tC 0,6 data=(1,1,2) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://a linkid=a\n\t\tC 0,7 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,8 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,9 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,10 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,11 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,20 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,22 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 0,23 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 1 (1) flags=NONE[0] 5/6\n\t\tC 1,0 data=(1,1,p) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,1 data=(1,1,l) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,2 data=(1,1,a) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,3 data=(1,1,i) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,4 data=(1,1,n) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,5 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,10 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,11 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,20 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,22 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 1,23 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 2 (2) flags=EXTENDED,HYPERLINK[102] 5/6\n\t\tC 2,0 data=(1,1,b) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://b linkid=NONE\n\t\tC 2,1 data=(1,1,2) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://b linkid=NONE\n\t\tC 2,2 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,3 data=(1,1,C) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=http://c linkid=NONE\n\t\tC 2,4 data=(1,1,D) flags=NONE[0] attr=NONE[0] fg=red[1] bg=default[8] us=default[8] link=http://c linkid=NONE\n\t\tC 2,5 data=(1,1, ) flags=CLEARED[40] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,10 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,11 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,20 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,22 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 2,23 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 3 (3) flags=START_OUTPUT,END_OUTPUT[c0] 6/6 osc133=0,0,5,6,3\n\t\tC 3,0 data=(1,1,l) flags=NONE[0] attr=CHARSET[80] fg=red[1] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,1 data=(1,1,q) flags=NONE[0] attr=CHARSET[80] fg=red[1] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,2 data=(1,1,k) flags=NONE[0] attr=CHARSET[80] fg=red[1] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,3 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=red[1] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,4 data=(1,1,x) flags=NONE[0] attr=NONE[0] fg=red[1] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,5 data=(1,1,o) flags=NONE[0] attr=NONE[0] fg=red[1] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,10 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,11 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,20 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,22 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 3,23 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 4 (4) flags=NONE[0] 0/0\n\t\tC 4,0 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,1 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,2 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,3 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,4 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,10 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,11 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,20 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,22 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 4,23 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\tL 5 (5) flags=NONE[0] 0/0\n\t\tC 5,0 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,1 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,2 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,3 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,4 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,5 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,6 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,7 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,8 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,9 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,10 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,11 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,12 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,13 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,14 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,15 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,16 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,17 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,18 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,19 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,20 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,21 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,22 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n\t\tC 5,23 data=(1,1, ) flags=NONE[0] attr=NONE[0] fg=default[8] bg=default[8] us=default[8] link=NONE linkid=NONE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "http://a http://b\nhttp://b http://c\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

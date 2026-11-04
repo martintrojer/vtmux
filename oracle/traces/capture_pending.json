@@ -1,0 +1,196 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "capture_pending",
+  "inputs": {
+    "name": "capture_pending",
+    "size": [
+      20,
+      4
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "20",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf 'x\\n'; tmux wait-for -S ground; read l; printf '\\033]2;half\\\\'; tmux wait-for -S osc; read l; printf '\\007\\033P1$q'; tmux wait-for -S dcs; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ground"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pP"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\r"
+        }
+      },
+      {
+        "wait_for": "osc"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pP"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pPC"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pPH"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-P",
+          "-b",
+          "p"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer",
+          "-b",
+          "p"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\r"
+        }
+      },
+      {
+        "wait_for": "dcs"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pPC"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]2;half\\\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\\033]2;half\\134\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]2;half\\",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\\033P1$q\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
