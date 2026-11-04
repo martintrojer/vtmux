@@ -1,0 +1,713 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "group_new_session",
+  "inputs": {
+    "name": "group_new_session",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:1",
+          "-n",
+          "w1",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-added-to-group",
+          "set -gaF @log '[add #{hook_session_name} #{hook_group} #{hook_group_size}]'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-removed-from-group",
+          "set -gaF @log '[rm #{hook_session_name} #{hook_group} #{hook_group_size}]'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-linked",
+          "set -gaF @log '[lnk #{hook_session_name}:#{hook_window_index} #{hook_window}]'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-unlinked",
+          "set -gaF @log '[unl #{hook_session_name}:#{hook_window_index} #{hook_window}]'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-created",
+          "set -gaF @log '[sc #{hook_session_name}]'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "session-closed",
+          "set -gaF @log '[cl #{hook_session_name}]'"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "a",
+          "-x",
+          "80",
+          "-y",
+          "24"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "a-1",
+          "-s",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "a",
+          "-s",
+          "c",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "a",
+          "-s",
+          "c",
+          "-n",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "a",
+          "-s",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "ls"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} g=#{session_grouped} n=#{session_group} sz=#{session_group_size} l=#{session_group_list} at=#{session_group_attached} ma=#{session_group_many_attached} al=#{session_group_attached_list} w=#{session_windows} cur=#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_id} #{window_name} [#{window_flags}] linked=#{window_linked} n=#{window_linked_sessions} list=#{window_linked_sessions_list}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "b",
+          "#{session_name} #{session_grouped} #{session_group} #{last_window_index}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "nosuch",
+          "-s",
+          "n1"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "nosuch"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "bad:name",
+          "-s",
+          "n2"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "n1",
+          "-s",
+          "n3"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} g=#{session_grouped} n=#{session_group} sz=#{session_group_size} l=#{session_group_list} at=#{session_group_attached} ma=#{session_group_many_attached} al=#{session_group_attached_list} w=#{session_windows} cur=#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} g=#{session_grouped} n=#{session_group} sz=#{session_group_size} l=#{session_group_list} at=#{session_group_attached} ma=#{session_group_many_attached} al=#{session_group_attached_list} w=#{session_windows} cur=#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_id} #{window_name} [#{window_flags}] linked=#{window_linked} n=#{window_linked_sessions} list=#{window_linked_sessions_list}"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-t",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} g=#{session_grouped} n=#{session_group} sz=#{session_group_size} l=#{session_group_list} at=#{session_group_attached} ma=#{session_group_many_attached} al=#{session_group_attached_list} w=#{session_windows} cur=#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-t",
+          "a-1",
+          "-s",
+          "d"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-g",
+          "-t",
+          "d"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} g=#{session_grouped} n=#{session_group} sz=#{session_group_size} l=#{session_group_list} at=#{session_group_attached} ma=#{session_group_many_attached} al=#{session_group_attached_list} w=#{session_windows} cur=#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "kill-session",
+          "-g",
+          "-t",
+          "n2"
+        ]
+      },
+      {
+        "run": [
+          "ls",
+          "-F",
+          "#{session_name} g=#{session_grouped} n=#{session_group} sz=#{session_group_size} l=#{session_group_list} at=#{session_group_attached} ma=#{session_group_many_attached} al=#{session_group_attached_list} w=#{session_windows} cur=#{window_index}"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "command or window name given with target\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "command or window name given with target\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "duplicate session: b\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[lnk a-1:0 @2][add a a 1][add a-1 a 2][lnk a-1:0 @0][lnk a-1:1 @1][unl a-1:0 @2][sc a-1][lnk b:0 @3][add b a 3][lnk b:0 @0][lnk b:1 @1][unl b:0 @3][sc b]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a: 2 windows (created <DATE>) (group a)\na-1: 2 windows (created <DATE>) (group a)\nb: 2 windows (created <DATE>) (group a)\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a g=1 n=a sz=3 l=a,a-1,b at=0 ma=0 al= w=2 cur=0\na-1 g=1 n=a sz=3 l=a,a-1,b at=0 ma=0 al= w=2 cur=0\nb g=1 n=a sz=3 l=a,a-1,b at=0 ma=0 al= w=2 cur=0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0 @0 w0 [*] linked=1 n=1 list=a,a-1,b\na:1 @1 w1 [] linked=1 n=1 list=a,a-1,b\na-1:0 @0 w0 [*] linked=1 n=1 list=a,a-1,b\na-1:1 @1 w1 [] linked=1 n=1 list=a,a-1,b\nb:0 @0 w0 [*] linked=1 n=1 list=a,a-1,b\nb:1 @1 w1 [] linked=1 n=1 list=a,a-1,b\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "b 1 a 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a g=1 n=a sz=3 l=a,a-1,b at=0 ma=0 al= w=2 cur=0\na-1 g=1 n=a sz=3 l=a,a-1,b at=0 ma=0 al= w=2 cur=0\nb g=1 n=a sz=3 l=a,a-1,b at=0 ma=0 al= w=2 cur=0\nn1 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nn2 g=1 n=bad:name sz=1 l=n2 at=0 ma=0 al= w=1 cur=0\nn3 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nnosuch-4 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[lnk n1:0 @4][add n1 nosuch 1][sc n1][lnk nosuch-4:0 @5][add nosuch-4 nosuch 2][lnk nosuch-4:0 @4][unl nosuch-4:0 @5][sc nosuch-4][lnk n2:0 @6][add n2 bad:name 1][sc n2][lnk n3:0 @7][add n3 nosuch 3][lnk n3:0 @4][unl n3:0 @7][sc n3][cl a][rm a a 3][unl a:0 @0][unl a:1 @1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a-1 g=1 n=a sz=2 l=a-1,b at=0 ma=0 al= w=2 cur=0\nb g=1 n=a sz=2 l=a-1,b at=0 ma=0 al= w=2 cur=0\nn1 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nn2 g=1 n=bad:name sz=1 l=n2 at=0 ma=0 al= w=1 cur=0\nn3 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nnosuch-4 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a-1:0 @0 w0 [*] linked=1 n=1 list=a-1,b\na-1:1 @1 w1 [] linked=1 n=1 list=a-1,b\nb:0 @0 w0 [*] linked=1 n=1 list=a-1,b\nb:1 @1 w1 [] linked=1 n=1 list=a-1,b\nn1:0 @4 sh [*] linked=1 n=1 list=n1,nosuch-4,n3\nn2:0 @6 sh [*] linked=0 n=1 list=n2\nn3:0 @4 sh [*] linked=1 n=1 list=n1,nosuch-4,n3\nnosuch-4:0 @4 sh [*] linked=1 n=1 list=n1,nosuch-4,n3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a-1 g=1 n=a sz=1 l=a-1 at=0 ma=0 al= w=2 cur=0\nn1 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nn2 g=1 n=bad:name sz=1 l=n2 at=0 ma=0 al= w=1 cur=0\nn3 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nnosuch-4 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[cl b][rm b a 2][unl b:0 @0][unl b:1 @1][lnk d:0 @8][add d a 2][lnk d:0 @0][lnk d:1 @1][unl d:0 @8][sc d][cl a-1][rm a-1 a 2][unl a-1:0 @0][unl a-1:1 @1][cl d][rm d a 1][unl d:0 @0][unl d:1 @1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "n1 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nn2 g=1 n=bad:name sz=1 l=n2 at=0 ma=0 al= w=1 cur=0\nn3 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nnosuch-4 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "n1 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nn3 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\nnosuch-4 g=1 n=nosuch sz=3 l=n1,nosuch-4,n3 at=0 ma=0 al= w=1 cur=0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

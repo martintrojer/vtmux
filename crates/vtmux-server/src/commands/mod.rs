@@ -325,6 +325,7 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
     server.cmd_client = item.client;
     server.cmd_mouse.clone_from(&item.mouse);
     let result = run_one(server, item, call);
+    server.close_dropped();
     server.cmd_client = None;
     server.cmd_mouse = None;
     // The events the command fired go to their sinks inside its guard

@@ -40,6 +40,8 @@ mod time;
 pub mod trim {
     pub use super::text::{trim_left, trim_right, width};
 }
+/// `format_quote_shell_single`, for `#{pane_start_command_list}`.
+pub use text::quote_shell_single;
 mod wcwidth;
 mod wcwidth_tables;
 

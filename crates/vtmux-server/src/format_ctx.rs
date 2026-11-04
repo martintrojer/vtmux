@@ -279,6 +279,17 @@ impl<'a> Ctx<'a> {
         self.clients.iter().filter(move |c| c.session == Some(s))
     }
 
+    /// The clients attached to a member of `s`'s group, `None` when it is
+    /// in no group.
+    fn group_clients(&self, s: SessionId) -> Option<impl Iterator<Item = &ClientView>> {
+        let members = self.model.groups.members_of(s)?;
+        Some(
+            self.clients
+                .iter()
+                .filter(move |c| c.session.is_some_and(|x| members.contains(&x))),
+        )
+    }
+
     fn session_value(&self, name: &str) -> Option<String> {
         let s = self.session()?;
         let flag = |b: bool| u8::from(b).to_string();
@@ -286,13 +297,37 @@ impl<'a> Ctx<'a> {
             "session_name" => s.name.clone(),
             "session_id" => s.id.to_string(),
             "session_windows" => s.windows.len().to_string(),
+            // format_cb_last_window_index: the highest index.
+            "last_window_index" => s.windows.keys().next_back()?.to_string(),
             "session_created" => s.created.to_string(),
             "session_activity" => s.activity_secs.to_string(),
             "session_last_attached" => s.last_attached.map(|t| t.to_string()).unwrap_or_default(),
-            // format_cb_session_marked; no session groups.
+            // format_cb_session_marked.
             "session_marked" => flag(self.model.marked().is_some_and(|m| m.session == Some(s.id))),
-            "session_grouped" => "0".to_owned(),
-            "session_group" => String::new(),
+            // format.c format_cb_session_grouped and friends: empty (not
+            // set) for a session in no group.
+            "session_grouped" => flag(self.model.groups.name_of(s.id).is_some()),
+            "session_group" => self.model.groups.name_of(s.id)?.to_owned(),
+            "session_group_size" => self.model.groups.members_of(s.id)?.len().to_string(),
+            "session_group_list" => self
+                .model
+                .groups
+                .members_of(s.id)?
+                .iter()
+                .filter_map(|m| self.model.sessions.get(m))
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            // session_group_attached_count: the clients attached to any
+            // member.
+            "session_group_attached" => self.group_clients(s.id)?.count().to_string(),
+            "session_group_many_attached" => flag(self.group_clients(s.id)?.count() > 1),
+            // format_cb_session_group_attached_list: client order.
+            "session_group_attached_list" => self
+                .group_clients(s.id)?
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
             // s->attached: the clients attached to it (format.c
             // format_cb_session_attached, recalculate_sizes).
             "session_attached" => self.attached_to(s.id).count().to_string(),
@@ -431,11 +466,11 @@ impl<'a> Ctx<'a> {
                 wl?;
                 flag(self.model.window_links(w.id).len() > 1)
             }
-            // format_cb_window_linked_sessions: sessions linking it (no
-            // session groups yet, so each session counts once).
+            // format_cb_window_linked_sessions: groups whose first member
+            // links it, then ungrouped sessions linking it.
             "window_linked_sessions" => {
                 wl?;
-                self.model.sessions_with(w.id).count().to_string()
+                self.model.linked_sessions(w.id).to_string()
             }
             // format_cb_window_linked_sessions_list: one name per winlink,
             // in the order they were attached to the window.
@@ -583,6 +618,13 @@ impl<'a> Ctx<'a> {
             },
             "pane_dead_time" => p.dead_time?.to_string(),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),
+            // format_cb_start_command_list: each word single-quoted for sh.
+            "pane_start_command_list" => p
+                .argv
+                .iter()
+                .map(|w| vtmux_core::format::quote_shell_single(w))
+                .collect::<Vec<_>>()
+                .join(" "),
             // format_cb_start_path (format.c:943-955).
             "pane_start_path" => p.cwd.to_string_lossy().into_owned(),
             "pane_tty" => p.tty.clone(),

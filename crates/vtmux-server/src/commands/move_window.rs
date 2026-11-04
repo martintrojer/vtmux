@@ -1,10 +1,10 @@
 //! `link-window` and `move-window` (cmd-move-window.c:62-130, which both
 //! use `cmd_move_window_exec`; `server_link_window`, server-fn.c:283-336).
-//! `move-window -r` renumbers a session. Session groups do not exist yet,
-//! so the `sessions are grouped` error is not reachable.
+//! `move-window -r` renumbers a session.
 
 use vtmux_core::cmd::{Args, CmdError, FindFlags, TargetKind};
 use vtmux_core::error::EdgeError;
+use vtmux_core::options::TreeId;
 
 use super::Item;
 use crate::model::Redraw;
@@ -76,6 +76,9 @@ pub fn exec(
     }
 
     // server_link_window.
+    if server.model.grouped_together(src_s, dst_s) {
+        return Err(EdgeError::Message("sessions are grouped".into()).into());
+    }
     let mut select = !args.flag('d');
     if let Some(i) = idx
         && let Some(&x) = server.model.sessions[&dst_s].windows.get(&i)
@@ -105,23 +108,30 @@ pub fn exec(
     if select {
         server.model.set_current(dst_s, index);
     }
-    server.model.redraw(Redraw::Session(dst_s));
+    server.model.redraw_group(dst_s);
     // window-linked fires before the unlink's window-unlinked.
 
     if moving {
         // server_unlink_window: the source's only window cannot go, so the
         // session does.
         if server.model.detach_window(src_s, src_idx) {
-            for pane in server.model.remove_session(src_s) {
+            for pane in server.model.remove_session_group(src_s) {
                 server.close_pane_io(pane);
             }
         } else {
-            server.model.redraw(Redraw::Session(src_s));
+            server.model.redraw_group(src_s);
         }
     }
-    // Only the source is renumbered, and only without -s.
-    if !args.flag('s') && server.model.sessions.contains_key(&src_s) {
-        server.model.renumber_if_set(src_s);
+    // Only the source is renumbered (not its group), and only without -s
+    // (cmd-move-window.c:116-117).
+    if !args.flag('s')
+        && server.model.sessions.contains_key(&src_s)
+        && server
+            .model
+            .number_option(TreeId::Session(src_s), "renumber-windows")
+            != 0
+    {
+        server.model.renumber(src_s);
     }
     server.recalculate_sizes();
     Ok(())

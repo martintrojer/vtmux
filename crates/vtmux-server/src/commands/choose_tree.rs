@@ -1,7 +1,7 @@
 //! `choose-tree`, `choose-buffer` and `choose-client`
 //! (cmd-choose-tree.c:120-156; window-tree.c:1107-1158,
 //! window-buffer.c:376-412, window-client.c:394-434): a tree mode on the
-//! target pane. `-G` (session groups) does nothing: vtmux has none.
+//! target pane.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -173,6 +173,7 @@ pub fn exec(
         command: template(args),
         hide_this_pane: args.flag('h'),
         accept: args.flag('y'),
+        squash_groups: !args.flag('G'),
     };
     open(server, found, options, args.flag('Z'), args.flag('k'))
 }

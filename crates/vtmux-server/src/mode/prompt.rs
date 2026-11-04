@@ -189,6 +189,7 @@ pub(crate) mod tests {
                 extra_env: Vec::new(),
                 update_env: false,
                 default_size: None,
+                group: None,
             })
             .unwrap();
         let p = server.model.current_of(s).unwrap().2;

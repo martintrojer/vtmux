@@ -82,8 +82,11 @@ pub fn exec(
         if let Some(n) = name {
             set_name(server, w, n);
         }
+        // server_unlink_window: server_destroy_session_group.
         if server.model.detach_window(src_s, src_idx) {
-            server.destroy_session(src_s);
+            for x in server.model.group_peers(src_s) {
+                server.destroy_session(x);
+            }
         }
         let index = server.model.index_of(dst_s, w).unwrap_or(index);
         (index, w)
