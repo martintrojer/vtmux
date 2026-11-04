@@ -460,6 +460,10 @@ pub struct Server {
     /// backlog): a key's echo or a prompt, not more of a flood. A frame
     /// that shows one is not paced ([`crate::render::FRAME_INTERVAL`]).
     burst_started: std::collections::BTreeSet<PaneId>,
+    /// Panes whose copy or view mode drew to the terminal this turn without
+    /// a pane redraw ([`Self::with_mode`]): like a burst, the frame that
+    /// shows it is not paced, and the program's synchronized output stays.
+    pub(crate) mode_drawn: std::collections::BTreeSet<PaneId>,
     /// Command clients whose commands are done, with their exit codes:
     /// told after this turn's frames, as `server_client_loop` runs
     /// `server_client_check_exit` for a client after the redraws of the
@@ -688,6 +692,7 @@ impl Server {
             jobs: crate::jobs::Jobs::default(),
             backlog: std::collections::BTreeSet::new(),
             burst_started: std::collections::BTreeSet::new(),
+            mode_drawn: std::collections::BTreeSet::new(),
             pending_exits: Vec::new(),
             waits: WaitChannels::default(),
             files: BTreeMap::new(),
@@ -2491,6 +2496,7 @@ impl Server {
         self.format_jobs_flush();
         self.model.redraw_panes.clear();
         self.burst_started.clear();
+        self.mode_drawn.clear();
     }
 
     /// Whether client `id` takes no frame now: the server is exiting, its
@@ -2530,6 +2536,9 @@ impl Server {
             .filter(|(_, c)| c.control.is_none())
             .filter_map(|(&id, c)| c.attached.map(|s| (id, s)))
             .collect();
+        // The rows each pane wrote under synchronized output that ended,
+        // drawn whole for every client ([`Self::force_sync_flush`]).
+        let mut flushed: BTreeMap<PaneId, Vec<bool>> = BTreeMap::new();
         for (id, s) in attached {
             if self.render_skips(id, s) {
                 continue;
@@ -2562,6 +2571,11 @@ impl Server {
                 continue;
             }
             self.redraw_stops_sync(id, s);
+            for (&p, pane) in &mut self.model.panes {
+                if let Some(rows) = pane.term.take_sync_flush() {
+                    flushed.insert(p, rows);
+                }
+            }
             // screen-redraw.c redraw_set_context: the scene sits below a
             // top status (REDRAW_STATUS_TOP) and above a bottom one.
             let area = rows.saturating_sub(lines);
@@ -2618,6 +2632,7 @@ impl Server {
             self.draw_status(id, s, caps, &mut screen, lines, top, jobs);
             // screen-redraw.c:1813: the overlay over everything else.
             self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
+            self.force_sync_flush(id, s, &flushed, scene_y, area);
             let mut frame = self
                 .clients
                 .get_mut(&id)
@@ -2728,6 +2743,60 @@ impl Server {
         }
     }
 
+    /// `screen_write_flush_dirty` (screen-write.c:1267-1290): when a
+    /// pane's synchronized output ends, each line it wrote meanwhile goes
+    /// to the terminal whole (`tty_cmd_redrawline`), not as a diff, so the
+    /// update arrives as whole rows in one synchronized frame. `flushed`
+    /// has those rows per pane; the ones of client `id`'s current window
+    /// that show the pane's own screen are forced into its next frame.
+    fn force_sync_flush(
+        &mut self,
+        id: ClientId,
+        s: SessionId,
+        flushed: &BTreeMap<PaneId, Vec<bool>>,
+        scene_y: u16,
+        area: u16,
+    ) {
+        if flushed.is_empty() {
+            return;
+        }
+        let Some((_, w, _)) = self.model.current_of(s) else {
+            return;
+        };
+        let Some(window) = self.model.windows.get(&w) else {
+            return;
+        };
+        let offset = i64::from(
+            self.model
+                .number_option(TreeId::Window(w), "vtmux-focus-ring")
+                != 0,
+        );
+        let Some(client) = self.clients.get_mut(&id) else {
+            return;
+        };
+        for (p, rows) in flushed {
+            let Some(pane) = self.model.panes.get(p) else {
+                continue;
+            };
+            if pane.window != w || !window.is_visible(*p) || !pane.modes.is_empty() {
+                continue;
+            }
+            let rect = pane.rect;
+            let left = i64::from(rect.xoff) + offset;
+            let (Ok(left), Ok(width)) = (u16::try_from(left), u16::try_from(rect.sx)) else {
+                continue;
+            };
+            for (py, _) in rows.iter().enumerate().filter(|(_, d)| **d) {
+                let wy = i64::from(rect.yoff) + offset + i64::try_from(py).unwrap_or(i64::MAX);
+                if let Ok(wy) = u16::try_from(wy)
+                    && wy < area
+                {
+                    client.compositor.force(scene_y + wy, left, width);
+                }
+            }
+        }
+    }
+
     /// When the soonest sync timer expires (`screen_write_sync_callback`).
     fn sync_deadline(&self) -> Option<Instant> {
         self.model
@@ -2814,11 +2883,12 @@ impl Server {
             .is_some_and(|(_, w, _)| self.unpaced_change_in(w))
     }
 
-    /// A pane of window `w` started a burst of output this turn or is to be
-    /// redrawn whole.
+    /// A pane of window `w` started a burst of output this turn, had its
+    /// copy mode drawn ([`Self::mode_drawn`]) or is to be redrawn whole.
     fn unpaced_change_in(&self, w: WindowId) -> bool {
         self.burst_started
             .iter()
+            .chain(&self.mode_drawn)
             .chain(&self.model.redraw_panes)
             .any(|p| self.model.panes.get(p).is_some_and(|x| x.window == w))
     }

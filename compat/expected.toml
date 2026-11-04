@@ -431,8 +431,7 @@ status = "xfail"
 reason = "bidi-single passes ($TMUX_PANE picks the session, not the window: cli tmux_pane_picks_the_session_not_the_window); bidi-split needs the Bidi terminal override's isolates (U+2069 before and U+2066 after each vertical border span, screen-redraw.c:1256-1264), which vtmux does not draw"
 
 [tests."screen-redraw-cache.sh"]
-status = "xfail"
-reason = "scene after `rotate-window` differs (`scene cache-rotate-after differs`: pane columns/stale cells differ from the golden); earlier scenes of the script pass"
+status = "pass"
 
 [tests."screen-redraw-fill-character.sh"]
 status = "pass"
@@ -441,8 +440,7 @@ status = "pass"
 status = "pass"
 
 [tests."screen-redraw-indicators.sh"]
-status = "xfail"
-reason = "its arrow, colour and floating (colour-two-plus-float) scenes pass; scene marked-pane-tb differs (the marked pane's reversed border on a top/bottom split)"
+status = "pass"
 
 [tests."screen-redraw-menus.sh"]
 status = "pass"
@@ -469,8 +467,7 @@ status = "pass"
 status = "pass"
 
 [tests."screen-redraw-window-style.sh"]
-status = "xfail"
-reason = "window-style / window-active-style do not show: the outer `capturep -pe` has no SGR where tmux has a blue background (`scene window-style-single differs`)"
+status = "pass"
 
 [tests."server-access.sh"]
 status = "pass"
@@ -509,13 +506,10 @@ status = "pass"
 status = "pass"
 
 [tests."sync-output-atomic.sh"]
-status = "xfail"
-reason = "frame encoding: vtmux sends a frame as a diff with a cursor move per cell under TERM=screen, so the marker `FRAME_000001_ROW_23` never appears contiguously in the outer client's bytes (`client did not receive both synchronized frames`); pipe-pane captures them fine"
+status = "pass"
 
 [tests."sync-output-copy-cursor.sh"]
-status = "xfail"
-reason = "a copy-mode command (`send-keys -X cursor-left`) redraws the pane, which ends the program's synchronized output (`application synchronized output ended unexpectedly`); tmux draws copy mode on its own screen and keeps MODE_SYNC (flaky: it passed once on macOS CI, run 41813579379, and fails every time on Linux; presumably the redraw that ends the sync lands after the script's flag check on a fast host)"
-flaky = true
+status = "pass"
 
 [tests."sync-output-cursor.sh"]
 status = "pass"

@@ -97,7 +97,7 @@ impl ViewMode {
     /// first), and the cursor keeps its line unless that went into history
     /// (then the top left). A reflow does not keep it at all
     /// (`screen_reflow` without `cursor`, screen.c:681-684): the top left
-    /// of the screen, so the next line overwrites the screen's second row.
+    /// of the screen, so the next line goes on the screen's second row.
     pub fn resize(&mut self, sx: usize, sy: usize) {
         self.copy.resize(sx, sy);
         let clamp = |n: usize| u16::try_from(n.max(1)).unwrap_or(u16::MAX);
@@ -110,6 +110,15 @@ impl ViewMode {
         let line = self.term.history_size() + usize::from(cy);
         if rows < old_rows {
             self.term.feed(format!("\x1b[{old_rows};1H").as_bytes());
+        }
+        if cols != old_cols {
+            // The reflow does not carry the cursor. Ghostty's does: a
+            // cursor past the end of a line split to the new width adds a
+            // row grid_reflow does not have, and one above the bottom keeps
+            // its row where grid_reflow keeps the bottom. It waits at the
+            // bottom left, after the height changed with it there.
+            self.term.resize(old_cols, rows);
+            self.term.feed(format!("\x1b[{rows};1H").as_bytes());
         }
         self.term.resize(cols, rows);
         let hsize = self.term.history_size();
@@ -299,7 +308,11 @@ mod tests {
         v.add(b"abcdefgh");
         v.resize(4, 3);
         assert_eq!(lines(&v), ["abcd", "efgh", ""]);
+        // grid_reflow keeps the blank lines: the split pushes "abcd" into
+        // history and the cursor goes to the screen's top left ("efgh"),
+        // so the line goes on the row below it.
+        assert_eq!(v.term.history_size(), 1);
         v.add(b"z");
-        assert_eq!(lines(&v), ["abcd", "zfgh", ""]);
+        assert_eq!(lines(&v), ["abcd", "efgh", "z"]);
     }
 }

@@ -136,6 +136,11 @@ pub struct PaneDraw {
     pub stamps: Vec<u64>,
     /// `pane_index`, for `number` lines.
     pub index: Option<u32>,
+    /// The colours a default-coloured content cell draws in
+    /// (tty.c `tty_default_colours`): `window-active-style`'s where it
+    /// sets them on the active pane, else `window-style`'s. Only `fg` and
+    /// `bg` count.
+    pub defaults: CellStyle,
     pub lines: Lines,
     /// `pane-active-border-style` for the active pane, else
     /// `pane-border-style` (window-border.c `window_pane_get_border_style`).
@@ -340,6 +345,7 @@ struct CachedRow {
 struct PaneKey {
     id: PaneId,
     index: Option<u32>,
+    defaults: CellStyle,
     lines: Lines,
     border: CellStyle,
     status: Vec<styled::Cell>,
@@ -372,6 +378,7 @@ impl DrawKey {
                 .map(|(&id, p)| PaneKey {
                     id,
                     index: p.index,
+                    defaults: p.defaults.clone(),
                     lines: p.lines,
                     border: p.border.clone(),
                     status: p.status.clone(),
@@ -512,14 +519,58 @@ fn compose_row(
                     _ => false,
                 };
             let cells = &mut line[usize::from(x)..usize::from(end)];
-            let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
             let keep = selected_span(d, scene, x, end, y);
-            let written = draw_line_keeping(cells, &bgs, Color::Default, d.clear, wrapped, &keep);
+            let written = draw_pane_span(scene.get(x, y), d, theme, cells, wrapped, &keep);
             ended_written = full && written;
             x = end;
         }
     }
     ended_written
+}
+
+/// One `tty_draw_line` span of `cell`'s pane (or status line) in `cells`
+/// ([`draw_line_keeping`]). `redraw_draw_pane_span`: a pane's content draws
+/// over its default colours (`style_ctx.defaults`, [`PaneDraw::defaults`]),
+/// which `tty_attributes` puts in for a default fg or bg. Which cells are
+/// empty is decided on the grid's own colours: a blank cell (no text)
+/// stands for tmux's cells past the line's end, empty whatever the
+/// defaults (tty-draw.c:243-246). Returns whether the span ended written.
+fn draw_pane_span(
+    cell: &SceneCell,
+    d: &Draw,
+    theme: &Theme,
+    cells: &mut [Cell],
+    wrapped: bool,
+    keep: &[bool],
+) -> bool {
+    let bgs: Vec<Color> = cells.iter().map(|c| c.style.bg).collect();
+    let defaults = match cell {
+        SceneCell::Pane { pane, .. } => d
+            .panes
+            .get(pane)
+            .map(|p| theme.style(&p.defaults))
+            .filter(|s| (s.fg, s.bg) != (Color::Default, Color::Default)),
+        _ => None,
+    };
+    // tty_fake_bce: no BCE and a default background that is not the
+    // terminal's means spaces.
+    let clear = match d.clear {
+        Clear::FakeBce if defaults.is_some_and(|s| s.bg != Color::Default) => Clear::Spaces,
+        c => c,
+    };
+    let written = draw_line_keeping(cells, &bgs, Color::Default, clear, wrapped, keep);
+    if let Some(defaults) = defaults {
+        for c in cells.iter_mut() {
+            // Erased cells keep only their background.
+            if c.style.fg == Color::Default && !c.text.is_empty() {
+                c.style.fg = defaults.fg;
+            }
+            if c.style.bg == Color::Default {
+                c.style.bg = defaults.bg;
+            }
+        }
+    }
+    written
 }
 
 /// Which cells of the span `x..end` of row `y` are [`PaneDraw::selected`].
@@ -880,6 +931,11 @@ mod tests {
             (0, b"0123456789abcdefgh"),
             (1, b"\x1bc"),
         ];
+        let space = styled::Cell {
+            text: " ".into(),
+            width: 1,
+            style: CellStyle::default(),
+        };
         for (i, (pane, bytes)) in steps.iter().enumerate() {
             terms[*pane].feed(bytes);
             let draw = Draw {
@@ -893,6 +949,7 @@ mod tests {
                                 content: view.shared(),
                                 stamps: view.row_stamps().to_vec(),
                                 index: Some(p),
+                                defaults: CellStyle::default(),
                                 lines: Lines::Single,
                                 border: CellStyle::default(),
                                 status: Vec::new(),
@@ -907,16 +964,8 @@ mod tests {
                 offset: 0,
                 border: CellStyle::default(),
                 lines: Lines::Single,
-                outside: styled::Cell {
-                    text: " ".into(),
-                    width: 1,
-                    style: CellStyle::default(),
-                },
-                inside: styled::Cell {
-                    text: " ".into(),
-                    width: 1,
-                    style: CellStyle::default(),
-                },
+                outside: space.clone(),
+                inside: space.clone(),
                 clear: Clear::Bce,
             };
             let scene = Scene::cached(&scenes, view.clone(), 20, 4);

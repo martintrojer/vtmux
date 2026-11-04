@@ -1,0 +1,23 @@
+name = "sync_copy_mode_keeps_hold"
+size = [40, 10]
+# A copy mode command draws its lines straight to the terminal
+# (window_copy_redraw_lines, window-copy.c:5535-5568), not with PANE_REDRAW,
+# so it does not end the program's synchronized output underneath
+# (screen-redraw.c:1757-1770 ends it only for a pane redrawn whole). The
+# program starts it once, after copy mode is up (entering a mode redraws the
+# pane, which would end it), and the flag is read within its 1 s timer.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "printf 'copy cursor'; tmux wait-for go; printf '\\033[?2026h'; tmux wait-for -S on; exec cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { attach = { session = "a" } },
+  { run = ["copy-mode", "-t", "%0"] },
+  { settle = { react = true } },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "on" },
+  { run = ["send-keys", "-t", "%0", "-X", "cursor-left"] },
+  { run = ["display", "-p", "-t", "%0", "#{synchronized_output_flag} #{copy_cursor_x}"] },
+  { run = ["send-keys", "-t", "%0", "-X", "cursor-left"] },
+  { run = ["display", "-p", "-t", "%0", "#{synchronized_output_flag} #{copy_cursor_x}"] },
+  { screen = {} },
+]

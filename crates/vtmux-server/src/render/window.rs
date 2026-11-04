@@ -221,6 +221,7 @@ impl Source<'_> {
             };
             let (content, stamps, selected) =
                 self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
+            let defaults = self.pane_defaults(p, p == active, &ctx);
             draws.insert(
                 p,
                 PaneDraw {
@@ -228,6 +229,7 @@ impl Source<'_> {
                     stamps,
                     selected,
                     index: self.model.pane_index(p),
+                    defaults,
                     lines,
                     border: self.style(TreeId::Pane(p), option, &ctx),
                     status: Vec::new(),
@@ -322,6 +324,22 @@ impl Source<'_> {
             clear: caps.clear(),
         };
         Some((scene, draw))
+    }
+
+    /// tty.c `tty_default_colours` (`tty_style_changed`): pane `p`'s
+    /// default fg and bg, `window-active-style`'s where it sets them and
+    /// `p` is the active pane, else `window-style`'s. tmux starts from the
+    /// pane's OSC 10/11 colours; vtmux leaves those to the terminal.
+    fn pane_defaults(&self, p: PaneId, active: bool, ctx: &Ctx<'_>) -> CellStyle {
+        let tree = TreeId::Pane(p);
+        let style = self.style(tree, "window-style", ctx);
+        let on = active.then(|| self.style(tree, "window-active-style", ctx));
+        let pick = |a: Option<Colour>, b: Colour| a.filter(|&c| c != Colour::Default).unwrap_or(b);
+        CellStyle {
+            fg: pick(on.as_ref().map(|s| s.fg), style.fg),
+            bg: pick(on.as_ref().map(|s| s.bg), style.bg),
+            ..CellStyle::default()
+        }
     }
 
     /// What `pane` shows: its shown mode's screen, else its own, its row

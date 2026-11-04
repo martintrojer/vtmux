@@ -1,0 +1,29 @@
+name = "rotate_window_reflow"
+size = [40, 15]
+# rotate-window moves panes between cells of other widths; each pane is
+# resized and reflowed (grid_reflow, grid.c:1528-1608), which keeps the
+# blank lines below the cursor: a pane narrowed so its lines split pushes
+# its top rows into history rather than growing into the blank rows.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "14", "sh", "-c", "i=0; while [ $i -lt 13 ]; do printf 'BASE%02d abcdefghij\\n' $i; i=$((i + 1)); done; exec cat"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["setw", "-t", "a", "pane-border-format", " #{pane_title} "] },
+  { run = ["setw", "-t", "a", "pane-border-status", "top"] },
+  { run = ["splitw", "-h", "-t", "a", "sh", "-c", "i=0; while [ $i -lt 5 ]; do printf 'PANE%02d abcdefghij\\n' $i; i=$((i + 1)); done; exec cat"] },
+  { run = ["selectp", "-t", "a:.0"] },
+  { run = ["splitw", "-h", "-t", "a", "sh", "-c", "i=0; while [ $i -lt 5 ]; do printf 'PANE%02d abcdefghij\\n' $i; i=$((i + 1)); done; exec cat"] },
+  { run = ["select-pane", "-t", "a:.0", "-T", "AAA"] },
+  { run = ["select-pane", "-t", "a:.1", "-T", "BBB"] },
+  { run = ["select-pane", "-t", "a:.2", "-T", "CCC"] },
+  { run = ["selectp", "-t", "a:.0"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["rotate-window", "-t", "a"] },
+  { run = ["selectp", "-t", "a:.0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:.1", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["rotate-window", "-t", "a"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
