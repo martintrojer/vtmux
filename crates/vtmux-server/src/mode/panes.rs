@@ -577,7 +577,7 @@ mod tests {
             .iter()
             .filter_map(|q| match q {
                 crate::events::Queued::Event(e) => Some(e.name.clone()),
-                crate::events::Queued::Focus(_) => None,
+                crate::events::Queued::Focus(_) | crate::events::Queued::Destroyed(_) => None,
             })
             .collect();
         assert_eq!(
