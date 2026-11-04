@@ -182,6 +182,9 @@ pub struct Pane {
     /// The PTY and its process; `None` once the PTY is closed.
     pub io: Option<PaneIo>,
     pub pid: i32,
+    /// The PTY's slave name (`wp->tty`, `#{pane_tty}`), kept after the PTY
+    /// closes.
+    pub tty: String,
     /// The command it was started with (`#{pane_start_command}`).
     pub argv: Vec<String>,
     pub shell: PathBuf,
@@ -190,6 +193,9 @@ pub struct Pane {
     pub exited: bool,
     /// Its wait status once reaped (`wp->status`, `PANE_STATUSREADY`).
     pub status: Option<crate::jobs::JobStatus>,
+    /// When remain-on-exit kept the pane after its program went, epoch
+    /// seconds (`wp->dead_time`, set with `PANE_STATUSDRAWN`).
+    pub dead_time: Option<i64>,
     /// Output arrived since the last automatic-rename check (tmux's
     /// `PANE_CHANGED`).
     pub changed: bool,

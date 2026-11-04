@@ -1,8 +1,8 @@
 //! `respawn-window` (cmd-respawn-window.c:46-110, spawn.c `spawn_window`
 //! with `SPAWN_RESPAWN`): kill every pane but the first, give it the whole
 //! window and run a new process in it. The window keeps its ID and index.
-//! Without `-k` it fails while any pane is alive, which with no
-//! remain-on-exit is always. As `spawn_window` ends with `session_select`
+//! Without `-k` it fails while any pane is alive (not kept dead by
+//! remain-on-exit). As `spawn_window` ends with `session_select`
 //! (no `SPAWN_DETACHED`), the window becomes the session's current one.
 
 use vtmux_core::cmd::{Args, CmdError};

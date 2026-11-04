@@ -1,7 +1,7 @@
 //! `respawn-pane` (cmd-respawn-pane.c:46-100, spawn.c `spawn_pane` with
 //! `SPAWN_RESPAWN`): run a new process in an existing pane. Without `-k`
-//! the pane must be dead; vtmux has no remain-on-exit yet, so a live pane
-//! is the only kind there is. The pane keeps its ID, its command unless a
+//! the pane must be dead (kept by remain-on-exit, its PTY closed). The
+//! pane keeps its ID, its command unless a
 //! new one is given, its directory unless `-c`, and its shell. Empty panes
 //! (`-E`) are not done yet.
 

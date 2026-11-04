@@ -207,3 +207,11 @@ product reasons" category.
 - Evidence: the owner's `.tmux.conf` under `vtmux -L foo`: mu-crew's poller and `run-shell` scripts ran the `tmux` 3.7c on `PATH`, which set `@mu_crew_*` on the wrong server, so the status line showed only the host pill. With the shim, after 12 s `@mu_crew_cpu_text`, `@mu_crew_uptime_value` and `@mu_crew_host_color` are set and `#{T:status-right}` has the CPU, RAM, host and uptime pills.
 - Category: Spec decision (D5, drop-in: plugins call `tmux` and must not depend on the user's `PATH`).
 - Patch: `compat/patches/0001-new-session-environment-path-shim.patch` (the script prints a pane's `PATH`; it drops a leading shim entry, a no-op under tmux).
+
+### D-023: a dead pane's line after a written last cell, and its reflow
+
+- Test / assertion: none pins it (`remain_on_exit` and `remain_on_exit_screen` keep away from it); reproduction below.
+- tmux behaviour: `server_destroy_pane` (server-fn.c:406-408) scrolls the dead pane with `screen_write_linefeed(ctx, 1, 8)`, which marks the old last line wrapped whatever it holds, so `capture-pane -J` joins it to the `remain-on-exit-format` line, and a wider pane reflows the two into one: 20x4, `printf 'a\nb\nc\nlast'; exit 2` with the format `DEAD #{pane_dead_status}`, `capture-pane -pJ` ends `lastDEAD 2`; after `resize-window -x 30` the last row is `lastDEAD 2` with the cursor at 4,3 (tmux's grid holds only the cells written).
+- vtmux behaviour: Ghostty marks a row wrapped only when a print wraps, so vtmux prints at the line's last column to get the mark (`remain.rs` `mark_wrapped`): rewriting the cell that was there, or clearing a blank one with ICH. `capture-pane -J` then matches tmux, except when that cell is one it cannot write back as it was (a wide character's half, a hyperlink, a line-drawing character, a TAB, a blank with attributes beyond its background): that line is not marked and `-J` prints it on a line of its own. A wider pane reflows the joined line with its blank cells (Ghostty's rows are full width): `last` then 16 blanks then `DEAD 2`, cursor 20,3; narrower, Ghostty splits it where tmux keeps it.
+- Evidence: the reproduction above against tmux 3.8 and vtmux.
+- Category: Ghostty grid (rows are full width and carry no settable wrap flag, D4).

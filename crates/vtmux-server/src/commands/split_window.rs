@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use vtmux_core::cmd::{Args, CmdError, NumError, strtonum};
 use vtmux_core::error::EdgeError;
 use vtmux_core::layout::{AddFlags, PANE_MAXIMUM, SplitRequest};
+use vtmux_core::options::{TreeId, Value};
 
 use super::{Item, expand};
 use crate::server::{PaneSpawn, Server, client_path};
@@ -47,7 +48,7 @@ pub fn exec(
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    for flag in ['B', 'E', 'I', 'k', 'm', 'M', 'R', 's', 'S', 'W'] {
+    for flag in ['B', 'E', 'I', 'M', 'R', 's', 'S', 'W'] {
         if args.flag(flag) {
             return Err(EdgeError::NotImplemented(format!("split-window -{flag}")).into());
         }
@@ -199,6 +200,19 @@ pub fn exec(
         pane.resizes.push((created, (rect.sx, rect.sy)));
     }
     server.model.options.add_pane(new, w);
+    // cmd-split-window.c:256-262: -k and -m keep the pane until a key once
+    // its program goes, -m with its own dead line.
+    if args.flag('k') || args.flag('m') {
+        let options = &mut server.model.options;
+        options.set_table_value(TreeId::Pane(new), "remain-on-exit", Value::Choice(3));
+        if let Some(m) = args.value('m') {
+            options.set_table_value(
+                TreeId::Pane(new),
+                "remain-on-exit-format",
+                Value::String(m.to_owned()),
+            );
+        }
+    }
     server.model.panes.insert(new, pane);
     server.model.fix_panes_except(w, zoom.then_some(new));
     let new_found = Found {

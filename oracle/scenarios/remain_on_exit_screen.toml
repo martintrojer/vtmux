@@ -1,0 +1,71 @@
+name = "remain_on_exit_screen"
+# What a dead pane shows (server-fn.c:403-419): the screen scrolls up a line
+# and remain-on-exit-format is drawn on the last line, styles and all, with
+# the cursor hidden. A respawn clears it (screen_reinit) and shows the
+# cursor again. remain-on-exit key (and split-window -k / -m, which set it
+# on the new pane, cmd-split-window.c:256-262) closes the pane on the next
+# key, which goes nowhere else and fires no hook
+# (server_client_handle_dead_key, server-client.c:1411-1428). A window whose
+# only pane died stays.
+size = [60, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "12", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["selectp", "-t", "a:w.0", "-T", "t0"] },
+  { run = ["set", "-g", "remain-on-exit", "on"] },
+  { run = ["set-hook", "-g", "pane-died", "wait-for -S died"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { run = ["splitw", "-t", "a:w", "printf 'one\\ntwo'; exit 3"] },
+  { wait_for = "died" },
+  { run = ["selectp", "-t", "a:w.1", "-T", "t1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["set", "-g", "remain-on-exit-format", "#[fg=red,bold]DEAD#[default] #{pane_dead_status}:#{pane_index}#[align=right,reverse]END"] },
+  { run = ["respawnp", "-t", "a:w.1", "printf x; exit 4"] },
+  { wait_for = "died" },
+  { settle = { react = true } },
+  { screen = {} },
+  # An empty format draws nothing, but the cursor still goes.
+  { run = ["set", "-g", "remain-on-exit-format", ""] },
+  { run = ["respawnp", "-t", "a:w.1", "printf 'no line'; exit 1"] },
+  { wait_for = "died" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["set", "-g", "remain-on-exit-format", "gone #{pane_dead_status}"] },
+  { run = ["set", "-g", "remain-on-exit", "key"] },
+  { run = ["respawnp", "-t", "a:w.1", "exit 0"] },
+  { wait_for = "died" },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "x" },
+  { settle = {} },
+  { run = ["lsp", "-t", "a:w", "-F", "#{pane_index} #{pane_dead}"] },
+  { screen = {} },
+  # failed-key: a clean exit goes at once.
+  { run = ["set", "-g", "remain-on-exit", "failed-key"] },
+  { run = ["set-hook", "-g", "pane-exited", "wait-for -S exited"] },
+  { run = ["splitw", "-t", "a:w", "exit 0"] },
+  { wait_for = "exited" },
+  { run = ["lsp", "-t", "a:w", "-F", "#{pane_index} #{pane_dead}"] },
+  # split-window -m: its own line, kept until a key.
+  { run = ["set", "-g", "remain-on-exit", "off"] },
+  { run = ["splitw", "-t", "a:w", "-m", "#[reverse]bye #{pane_dead_status}", "exit 9"] },
+  { wait_for = "died" },
+  { run = ["selectp", "-t", "a:w.1", "-T", "t2"] },
+  { run = ["show", "-p", "-t", "a:w.1", "remain-on-exit"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u0002" },
+  { settle = {} },
+  { run = ["lsp", "-t", "a:w", "-F", "#{pane_index} #{pane_dead}"] },
+  # The only pane of a window dies: the window stays, dead.
+  { run = ["set", "-g", "remain-on-exit", "on"] },
+  { run = ["respawnw", "-k", "-t", "a:w", "printf last; exit 2"] },
+  { wait_for = "died" },
+  { run = ["selectp", "-t", "a:w.0", "-T", "t3"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["lsw", "-F", "#{window_index} #{window_name} #{window_panes} #{pane_dead}"] },
+  { run = ["kill-server"] },
+]

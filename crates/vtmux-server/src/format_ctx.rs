@@ -481,7 +481,11 @@ impl<'a> Ctx<'a> {
         Some(match name {
             "pane_id" => p.id.to_string(),
             "pane_index" => self.model.pane_index(p.id)?.to_string(),
-            "pane_pid" => p.pid.to_string(),
+            // format_cb_pane_pid: none once the PTY is closed.
+            "pane_pid" => {
+                io?;
+                p.pid.to_string()
+            }
             "pane_width" => r.sx.to_string(),
             // format_cb_pane_unzoomed_width / _height (format.c:2704-2776):
             // the pane's cell in the full layout, the row of a pane status
@@ -544,13 +548,23 @@ impl<'a> Ctx<'a> {
             // No marked pane and no pipe-pane yet.
             "pane_marked" | "pane_pipe" => "0".to_owned(),
             "pane_unseen_changes" => flag(p.unseen_changes),
-            "pane_dead" => flag(p.exited && io.is_none()),
+            // format_cb_pane_dead* (format.c:2255-2311): the PTY closed
+            // and the status in; the status or signal as it ended; when
+            // remain-on-exit kept it.
+            "pane_dead" => flag(p.status.is_some() && io.is_none()),
+            "pane_dead_status" => match p.status? {
+                crate::jobs::JobStatus::Exited(code) => code.to_string(),
+                crate::jobs::JobStatus::Signaled(_) => return None,
+            },
+            "pane_dead_signal" => match p.status? {
+                crate::jobs::JobStatus::Signaled(sig) => crate::server::sig_name(sig),
+                crate::jobs::JobStatus::Exited(_) => return None,
+            },
+            "pane_dead_time" => p.dead_time?.to_string(),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),
             // format_cb_start_path (format.c:943-955).
             "pane_start_path" => p.cwd.to_string_lossy().into_owned(),
-            "pane_tty" => io
-                .and_then(|io| sys::pty::tty_name(&io.owned().try_clone_to_owned().ok()?))
-                .unwrap_or_default(),
+            "pane_tty" => p.tty.clone(),
             "pane_current_command" => {
                 // format_cb_current_command (format.c:958-978).
                 let cmd = io
@@ -771,6 +785,7 @@ impl FormatContext for Ctx<'_> {
             "session_activity" => self.session().map(|s| s.activity_secs),
             "session_last_attached" => self.session().and_then(|s| s.last_attached),
             "window_activity" => self.window().map(|w| w.activity_secs),
+            "pane_dead_time" => self.pane().and_then(|p| p.dead_time),
             "client_activity" => self.client.as_ref().map(|c| c.activity_secs),
             "client_created" => self.client.as_ref().map(|c| c.created_secs),
             "buffer_created" => {
