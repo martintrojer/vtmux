@@ -689,9 +689,22 @@ impl Model {
         }
     }
 
+    /// `window_redraw_active_switch` then `window_set_active_pane`, as
+    /// select-pane, switch-client and the floating mouse drags do: a
+    /// floating pane made active goes to the top of the z-order
+    /// (window.c:833-838). False when `p` already is active.
+    pub fn switch_active(&mut self, w: WindowId, p: PaneId) -> bool {
+        self.set_active_inner(w, p, true)
+    }
+
     /// `window_set_active_pane` (window.c:755-791) without the zoom part:
-    /// stamps the active point. False when `p` already is active.
+    /// stamps the active point; the z-order stays (swap-pane, a new pane,
+    /// attach-session). False when `p` already is active.
     pub fn set_active(&mut self, w: WindowId, p: PaneId) -> bool {
+        self.set_active_inner(w, p, false)
+    }
+
+    fn set_active_inner(&mut self, w: WindowId, p: PaneId, raise: bool) -> bool {
         let Some(window) = self.windows.get(&w) else {
             return false;
         };
@@ -704,7 +717,7 @@ impl Model {
             self.unzoom(w);
         }
         let window = self.windows.get_mut(&w).expect("checked above");
-        let floating = window.is_floating(p);
+        let floating = raise && window.is_floating(p);
         if !window.panes.select_raising(p, floating) {
             return false;
         }

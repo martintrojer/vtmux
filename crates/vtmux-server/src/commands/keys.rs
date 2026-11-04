@@ -138,7 +138,8 @@ pub(crate) fn select_target(server: &mut Server, found: Found, zoom: Option<bool
         if let Some(zflag) = zoom {
             let visible = server.model.windows[&w].is_visible(p);
             let was = !visible && server.model.push_zoom(w, false, zflag);
-            server.model.set_active(w, p);
+            // cmd-switch-client.c:148-149.
+            server.model.switch_active(w, p);
             if !visible {
                 server.model.pop_zoom(w, was);
             }

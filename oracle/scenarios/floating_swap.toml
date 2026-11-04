@@ -1,0 +1,34 @@
+# swap-pane among floating panes (cmd-swap-pane.c:133-141): the panes
+# trade places in the z-order and their cells, and the pane made active
+# is not raised (window_set_active_pane, unlike select-pane's
+# window_redraw_active_switch, window.c:834-839), so the stacking of the
+# rectangles stays and the panes in them change. Then a floating pane
+# swapped with a tiled one, and -d.
+name = "floating_swap"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set-hook", "-g", "after-split-window", "select-pane -T new"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["split-window", "-h", "-t", "a", "cat"] },
+  { run = ["new-pane", "-t", "a", "-x", "30", "-y", "10", "-X", "10", "-Y", "5", "sh", "-c", "printf AAAA; exec cat"] },
+  { run = ["new-pane", "-t", "a", "sh", "-c", "printf BBBB; exec cat"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id}:#{pane_index} #{pane_left},#{pane_top} z#{pane_z} a#{pane_active}"] },
+  { run = ["swap-pane", "-s", "a.2", "-t", "a.0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id}:#{pane_index} #{pane_left},#{pane_top} z#{pane_z} a#{pane_active}"] },
+  { run = ["swap-pane", "-s", "a.3", "-t", "a.2"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id}:#{pane_index} #{pane_left},#{pane_top} z#{pane_z} a#{pane_active}"] },
+  { run = ["swap-pane", "-d", "-s", "a.1", "-t", "a.3"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id}:#{pane_index} #{pane_left},#{pane_top} z#{pane_z} a#{pane_active}"] },
+  { run = ["display", "-p", "-t", "a", "#{window_layout}"] },
+]
