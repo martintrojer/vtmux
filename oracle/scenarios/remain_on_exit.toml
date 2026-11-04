@@ -1,0 +1,63 @@
+name = "remain_on_exit"
+# server_destroy_pane (server-fn.c:353-437): once the exit status is in,
+# remain-on-exit on keeps the pane (pane-died, the dead line drawn once),
+# failed keeps it only for a non-zero exit or a signal, off lets it go
+# (pane-exited). The pane_dead* formats (format.c:2255-2311): pane_pid is
+# gone with the PTY (format_cb_pane_pid). The signal's name is
+# per-platform (sig2name), so only its presence is shown. respawn-pane
+# without -k takes a dead pane (spawn.c:312-320) and clears its status;
+# kill-pane of a dead pane fires nothing, and its window goes with it.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "pane-died", "set -agF @log '|died:#{hook_pane}:#{hook_exit_status}:#{hook_exit_success}:#{pane_dead}'"] },
+  { run = ["set-hook", "-ga", "pane-died", "wait-for -S died"] },
+  { run = ["set-hook", "-g", "pane-exited", "set -agF @log '|exited:#{hook_pane}:#{hook_exit_status}:#{hook_exit_success}'"] },
+  { run = ["set-hook", "-ga", "pane-exited", "wait-for -S exited"] },
+  { run = ["set", "-g", "remain-on-exit", "on"] },
+  { run = ["neww", "-d", "-n", "won", "printf hello; exit 3"] },
+  { wait_for = "died" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsw", "-F", "#{window_index} #{window_name} #{window_panes}"] },
+  { run = ["display", "-p", "-t", "a:won", "#{pane_dead} [#{pane_dead_status}] [#{pane_dead_signal}] [#{pane_pid}] #{?pane_dead_time,t,} #{pane_current_command} #{pane_start_command}"] },
+  { run = ["display", "-p", "-t", "a:w", "#{pane_dead} [#{pane_dead_status}] [#{pane_dead_signal}] [#{pane_dead_time}]"] },
+  { run = ["capturep", "-p", "-t", "a:won"] },
+  { run = ["capturep", "-pJ", "-t", "a:won"] },
+  # failed: a clean exit goes, a failure or a signal stays.
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set", "-g", "remain-on-exit", "failed"] },
+  { run = ["neww", "-d", "-n", "wok", "exit 0"] },
+  { wait_for = "exited" },
+  { run = ["neww", "-d", "-n", "wbad", "exit 4"] },
+  { wait_for = "died" },
+  { run = ["neww", "-d", "-n", "wsig", "kill -TERM $$"] },
+  { wait_for = "died" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["display", "-p", "-t", "a:wsig", "#{pane_dead} [#{pane_dead_status}] #{?pane_dead_signal,signalled,}"] },
+  { run = ["lsw", "-F", "#{window_index} #{window_name} #{window_panes}"] },
+  # off; a window option beats the global one.
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set", "-g", "remain-on-exit", "off"] },
+  { run = ["neww", "-d", "-n", "woff", "exit 5"] },
+  { wait_for = "exited" },
+  { run = ["set", "-w", "-t", "a:w", "remain-on-exit", "on"] },
+  { run = ["splitw", "-d", "-t", "a:w", "exit 6"] },
+  { wait_for = "died" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsp", "-t", "a:w", "-F", "#{pane_index} #{pane_dead} [#{pane_dead_status}]"] },
+  # respawn-pane takes a dead pane without -k; a live one needs it.
+  { run = ["respawnp", "-t", "a:won", "printf again; exec cat"] },
+  { run = ["display", "-p", "-t", "a:won", "#{pane_dead} [#{pane_dead_status}] [#{?pane_dead_time,t,}]"] },
+  { run = ["respawnp", "-t", "a:won", "cat"] },
+  { run = ["respawnw", "-t", "a:won", "cat"] },
+  { run = ["respawnw", "-t", "a:wbad", "exec cat"] },
+  { run = ["display", "-p", "-t", "a:wbad", "#{pane_dead} [#{pane_dead_status}]"] },
+  # kill-pane of a dead pane fires nothing; the last one takes its window.
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["killp", "-t", "a:w.1"] },
+  { run = ["killp", "-t", "a:wsig"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsw", "-F", "#{window_index} #{window_name} #{window_panes}"] },
+  { run = ["lsp", "-t", "a:w", "-F", "#{pane_index} #{pane_dead}"] },
+  { run = ["kill-server"] },
+]

@@ -127,8 +127,7 @@ reason = "missing flag refresh-client -B (control subscriptions): `not implement
 status = "pass"
 
 [tests."copy-mode-no-client-scroll.sh"]
-status = "xfail"
-reason = "needs remain-on-exit (dead panes): the script sets remain-on-exit, a pane-died hook `copy-mode -S`, then respawn-pane -k 'exit 0'; vtmux has no dead panes, the server exits with its only pane and the script fails `server died in copy-mode -S`"
+status = "pass"
 
 [tests."copy-mode-redraw.sh"]
 status = "xfail"
@@ -174,8 +173,7 @@ status = "xfail"
 reason = "missing command customize-mode: `not implemented in vtmux yet: customize-mode`"
 
 [tests."decrqm-sync.sh"]
-status = "xfail"
-reason = "needs remain-on-exit (dead panes): each query is `respawn-window -k` on a remain-on-exit window and vtmux exits after the first (`no server running on ...`); the DECRQM 2026 reply itself is not the blocker"
+status = "pass"
 
 [tests."display-panes.sh"]
 status = "xfail"
@@ -251,8 +249,7 @@ status = "pass"
 status = "pass"
 
 [tests."hooks-lifecycle.sh"]
-status = "xfail"
-reason = "hooks and their order pass up to the pane-died case: vtmux has no remain-on-exit (dead panes), so the pane goes and pane-exited fires instead"
+status = "pass"
 
 [tests."hooks-notify.sh"]
 status = "xfail"
@@ -336,11 +333,11 @@ reason = "missing flags capture-pane -N, -R and -M: `not implemented in vtmux ye
 
 [tests."input-replies.sh"]
 status = "xfail"
-reason = "needs remain-on-exit (dead panes): the script respawns a remain-on-exit window for each query and vtmux exits after the first. The replies themselves (DSR, DA, DECRQM, DECRQSS) match tmux: goldens in crates/vtmux-vt/tests/golden/reply_*.case and oracle scenario reply_decrqss; the OSC colour and clipboard queries are not answered yet"
+reason = "remain-on-exit works now (each query respawns the dead window); the OSC 4/10/11/12 colour queries and the OSC 52 clipboard query get no answer (`FAIL: osc-10-query`, expected `^[]10;rgb:ffff/0000/0000^G`). The other replies (DSR, DA, DECRQM, DECRQSS) match tmux: goldens in crates/vtmux-vt/tests/golden/reply_*.case and oracle scenario reply_decrqss"
 
 [tests."input-requests.sh"]
 status = "xfail"
-reason = "terminal requests from a pane are not seen on the client output: `did not see terminal request` for the OSC 4 colour query (ESC ] 4;99;?); the script also respawns a remain-on-exit window"
+reason = "terminal requests from a pane are not seen on the client output: `did not see terminal request` for the OSC 4 colour query (ESC ] 4;99;?); the script also respawns a remain-on-exit window, which works now"
 
 [tests."input-scroll.sh"]
 status = "xfail"
@@ -618,7 +615,7 @@ status = "pass"
 
 [tests."utf8-test.sh"]
 status = "xfail"
-reason = "needs remain-on-exit (+ remain-on-exit-format) and capture-pane -C: the script runs `new -d -- cat UTF-8-test.txt` with remain-on-exit on; vtmux's pane exits and the server with it (`no server running on ...`)"
+reason = "remain-on-exit and an empty remain-on-exit-format work now; the script then needs capture-pane -C (`not implemented in vtmux yet: capture-pane -C`)"
 
 [tests."wait-for-E.sh"]
 status = "xfail"

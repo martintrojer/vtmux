@@ -3568,6 +3568,7 @@ impl Server {
             cols,
             rows,
         })?;
+        let tty = sys::pty::tty_name(&spawned.master).unwrap_or_default();
         let io = PaneIo::new(spawned.master);
         let history_limit =
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
@@ -3587,11 +3588,13 @@ impl Server {
             term,
             io: Some(io),
             pid: spawned.pid.as_raw_nonzero().get(),
+            tty,
             argv,
             shell,
             cwd: ps.cwd.clone(),
             exited: false,
             status: None,
+            dead_time: None,
             changed: false,
             unseen_changes: false,
             last_rename: None,
@@ -3632,16 +3635,15 @@ impl Server {
         }
     }
 
-    /// `server_destroy_pane(wp, 1)` for a pane whose program went:
-    /// pane-exited (with its status, once reaped), then the pane goes.
+    /// `server_destroy_pane(wp, 1)` for a pane whose program went
+    /// ([`Self::destroy_exited_pane`], remain-on-exit aside).
     fn pane_exited(&mut self, p: PaneId) {
-        self.fire_pane_exit("pane-exited", p);
-        self.destroy_pane(p);
+        self.destroy_exited_pane(p, true);
     }
 
     /// `server_fire_pane_exit` (server-fn.c:35-56) once the status is in
     /// (`PANE_STATUSREADY`): kill-pane and friends fire nothing.
-    fn fire_pane_exit(&mut self, name: &str, p: PaneId) {
+    pub(crate) fn fire_pane_exit(&mut self, name: &str, p: PaneId) {
         let Some(pane) = self.model.panes.get(&p) else {
             return;
         };
@@ -3693,10 +3695,15 @@ impl Server {
         pane.compress.observe(&pane.term, Instant::now());
         pane.io = fresh.io;
         pane.pid = fresh.pid;
+        pane.tty = fresh.tty;
         pane.argv = fresh.argv;
         pane.shell = fresh.shell;
         pane.cwd = fresh.cwd;
+        // spawn.c:349, 587: the old status and the dead pane's line go
+        // with the old process.
         pane.exited = false;
+        pane.status = None;
+        pane.dead_time = None;
         pane.changed = true;
         Ok(())
     }
@@ -3723,7 +3730,7 @@ impl Server {
         }
     }
 
-    fn hangup_pane(&mut self, p: PaneId) {
+    pub(crate) fn hangup_pane(&mut self, p: PaneId) {
         if let Some(pane) = self.model.panes.get_mut(&p)
             && let Some(io) = pane.io.take()
         {
@@ -4085,7 +4092,7 @@ pub fn run_server(listener: StdListener, socket: PathBuf, config: ServerConfig) 
 /// `sig2name` (tmux.c:327-338): `sys_signame[signo]` where libc has it
 /// (`HAVE_SYS_SIGNAME`: the BSDs and macOS, lower-case names), else the
 /// number (glibc and musl have no `sys_signame`).
-fn sig_name(sig: i32) -> String {
+pub(crate) fn sig_name(sig: i32) -> String {
     #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",

@@ -28,6 +28,7 @@ pub mod paste;
 pub mod popup;
 pub mod prompt;
 pub mod prompt_history;
+pub mod remain;
 pub mod render;
 pub mod resize;
 pub mod server;

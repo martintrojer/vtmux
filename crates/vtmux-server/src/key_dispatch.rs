@@ -431,6 +431,11 @@ impl Server {
         if !read_only && self.popup_key(id, core) {
             return None;
         }
+        // server-client.c:1805: a key closes a dead pane kept by
+        // remain-on-exit key / failed-key.
+        if !read_only && self.dead_pane_key(id, core) {
+            return None;
+        }
         // server-client.c:1824: the window's menu, before the prompt.
         let mouse = match &kind {
             KeyKind::Mouse { input, .. } => Some(*input),
