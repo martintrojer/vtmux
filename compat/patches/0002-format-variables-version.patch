@@ -1,0 +1,15 @@
+diff --git a/regress/format-variables.sh b/regress/format-variables.sh
+--- a/regress/format-variables.sh
++++ b/regress/format-variables.sh
+@@ -377,7 +377,10 @@
+ fi
+ 
+ # Version reported by the variable matches tmux -V.
+-VER=$($TMUX -V | sed 's/^tmux //')
++# vtmux (compat/DIVERGENCES.md D-026): -V as vtmux names vtmux's own
++# version; #{version} is the tmux one. A no-op under tmux.
++VER=$($TMUX -V | sed -e 's/^tmux //' -e 's/^vtmux .*(tmux \(.*\))$/\1/' \
++    -e 's/^vtmux \([0-9][0-9.]*[a-z]*\).*/\1/')
+ test_var version "$VER" -t "$TGT"
+ 
+ # Client variables from each kind of client.
