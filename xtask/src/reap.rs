@@ -407,7 +407,13 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let (procs, got) = loop {
             thread::sleep(Duration::from_millis(100));
-            let procs = parse_procs(&ps_full());
+            let mut procs = parse_procs(&ps_full());
+            // A subreaper above the test (muzzle, under the gate) adopts the
+            // orphan instead of init; show it to `orphans` as init's, which
+            // is what a dead agent's leftovers look like.
+            for p in procs.iter_mut().filter(|p| p.args.contains(&orphan)) {
+                p.ppid = 1;
+            }
             let got = picked(&procs);
             if got.len() == 1 || std::time::Instant::now() >= deadline {
                 break (procs, got);
