@@ -1,0 +1,27 @@
+name = "resize_pane_trim"
+size = [20, 9]
+# resize-pane -T (cmd-resize-pane.c:71-81): the rows below the cursor go
+# and as many history rows come back; the cursor moves down with its row;
+# nothing while the pane is in a mode. Then the screen after output.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "8", "sh", "-c", "i=1; while [ $i -le 30 ]; do echo $i; i=$((i+1)); done; printf '\\033[3;4H'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["copy-mode", "-t", "%0"] },
+  { run = ["resizep", "-T", "-t", "%0"] },
+  { run = ["send", "-X", "-t", "%0", "cancel"] },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resizep", "-T", "-t", "%0"] },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capturep", "-p"] },
+  { run = ["capturep", "-p", "-S", "-", "-E", "-1"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "XY" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["resizep", "-T", "-t", "%0"] },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+]

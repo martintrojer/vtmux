@@ -1,0 +1,248 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "control_subscriptions",
+  "inputs": {
+    "name": "control_subscriptions",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B 'sw::#{session_windows}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%subscription-changed"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "new-window -d -n two cat"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%subscription-changed"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B sw"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B 'pn:%0:#{pane_index}-#{window_name}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%subscription-changed"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "rename-window -t a:0 renamed"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%subscription-changed"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B pn"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B 'wn:@1:#{window_name}:#{pane_id}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%subscription-changed"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B wn"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B 'aw:@*:#{window_index}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%subscription-changed"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B aw"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B 'ap:%*:#{pane_id}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%subscription-changed"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "refresh-client -B ap"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%subscription-changed sw $0 - - - : 1",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%window-add @1",
+          "%subscription-changed sw $0 - - - : 2",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%begin <TIME> #5 1",
+          "%end <TIME> #5 1",
+          "%subscription-changed pn $0 @0 0 %0 : 0-w",
+          "%begin <TIME> #6 1",
+          "%end <TIME> #6 1",
+          "%window-renamed @0 renamed",
+          "%subscription-changed pn $0 @0 0 %0 : 0-renamed",
+          "%begin <TIME> #7 1",
+          "%end <TIME> #7 1",
+          "%begin <TIME> #8 1",
+          "%end <TIME> #8 1",
+          "%subscription-changed wn $0 @1 1 - : two:%1",
+          "%begin <TIME> #9 1",
+          "%end <TIME> #9 1",
+          "%begin <TIME> #10 1",
+          "%end <TIME> #10 1",
+          "%subscription-changed aw $0 @0 0 - : 0",
+          "%subscription-changed aw $0 @1 1 - : 1",
+          "%begin <TIME> #11 1",
+          "%end <TIME> #11 1",
+          "%begin <TIME> #12 1",
+          "%end <TIME> #12 1",
+          "%subscription-changed ap $0 @0 0 %0 : %0",
+          "%subscription-changed ap $0 @1 1 %1 : %1",
+          "%begin <TIME> #13 1",
+          "%end <TIME> #13 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

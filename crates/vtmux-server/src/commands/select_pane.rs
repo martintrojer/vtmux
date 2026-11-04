@@ -1,5 +1,4 @@
-//! `select-pane` and `last-pane` (cmd-select-pane.c:146-291). Marking
-//! (`-m -M`) and the deprecated `-P`/`-g` are not done yet.
+//! `select-pane` and `last-pane` (cmd-select-pane.c:146-291).
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -24,10 +23,33 @@ pub fn exec(
     if last_pane || args.flag('l') {
         return last(server, w, args, zflag);
     }
-    for flag in ['m', 'M', 'P', 'g'] {
-        if args.flag(flag) {
-            return Err(EdgeError::NotImplemented(format!("select-pane -{flag}")).into());
+    if args.flag('m') || args.flag('M') {
+        mark(server, found, wp, args.flag('M'));
+        return Ok(());
+    }
+    // cmd-select-pane.c:221-235: -P sets the pane's window-style and
+    // window-active-style (unchecked, options_set_string); -g prints its
+    // window-style and stops.
+    let pane_tree = vtmux_core::options::TreeId::Pane(wp);
+    if let Some(style) = args.value('P') {
+        for name in ["window-style", "window-active-style"] {
+            server.model.options.set_table_value(
+                pane_tree,
+                name,
+                vtmux_core::options::Value::String(style.to_owned()),
+            );
         }
+        server.model.redraw_panes.insert(wp);
+    }
+    if args.flag('g') {
+        let style = server
+            .model
+            .options
+            .get(pane_tree, "window-style")
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default();
+        item.print(&style);
+        return Ok(());
     }
     let side = [
         ('L', Side::Left),
@@ -90,6 +112,54 @@ pub fn exec(
         item.origin.current
     });
     Ok(())
+}
+
+/// `cmd_select_pane_marked_pane` (cmd-select-pane.c:84-143): `-m` marks
+/// the pane, or clears the mark if it is the marked pane; `-M` clears it.
+/// `-m` on a pane hidden by a zoom does nothing. Then the
+/// marked-pane-changed event, and both panes' borders and status redrawn.
+fn mark(server: &mut Server, found: Found, wp: PaneId, clear: bool) {
+    let m = &mut server.model;
+    let (Some(s), Some(index), Some(w)) = (found.session, found.index, found.window) else {
+        return;
+    };
+    if !clear && !m.windows[&w].is_visible(wp) {
+        return;
+    }
+    let lwp = m.marked().and_then(|f| f.pane);
+    if clear || m.is_marked(s, index, wp) {
+        m.marked = None;
+    } else {
+        m.marked = Some(Found {
+            session: Some(s),
+            index: Some(index),
+            window: Some(w),
+            pane: Some(wp),
+            new_index: None,
+        });
+    }
+    let mwp = m.marked().and_then(|f| f.pane);
+    let about = mwp.or(lwp).unwrap_or(wp);
+    let about_window = m.panes.get(&about).map_or(w, |p| p.window);
+    let mut ev = crate::events::Event::new("marked-pane-changed")
+        .target(Found::from_pane(m, about))
+        .pane("pane", about);
+    if let Some(n) = mwp {
+        ev = ev.pane("new_pane", n);
+    }
+    ev = ev.window(m, "window", about_window);
+    if let Some(l) = lwp {
+        ev = ev.pane("old_pane", l);
+    }
+    ev = ev.int("marked", i64::from(mwp.is_some()));
+    m.push_event(ev);
+    for p in [lwp, mwp].into_iter().flatten() {
+        if let Some(pw) = m.panes.get(&p).map(|x| x.window) {
+            m.redraw_panes.insert(p);
+            m.redraw(Redraw::Window(pw));
+            m.redraw(Redraw::WindowStatus(pw));
+        }
+    }
 }
 
 /// `last-pane` / `select-pane -l` (cmd-select-pane.c:167-205).

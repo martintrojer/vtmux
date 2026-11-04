@@ -1,0 +1,322 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "capture_flags",
+  "inputs": {
+    "name": "capture_flags",
+    "size": [
+      40,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-x",
+          "20",
+          "-y",
+          "8",
+          "sh",
+          "-c",
+          "printf 'ab\\n\\033[41mx  \\033[m\\nlong line that wraps around\\n\\\\back\\n\\344\\270\\226z\\033[38;2;1;2;3mc\\033[m\\n\\033[9mst\\033[m  '; tmux wait-for -S ready; read x; printf '\\033[?1049halt'; tmux wait-for -S alt; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pN"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pT"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pNT"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-peN"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pC"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-peC"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-peCJ"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pJN"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pLF"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pLIF",
+          "-S",
+          "1",
+          "-E",
+          "3"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pa"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-paq"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "\r"
+        }
+      },
+      {
+        "wait_for": "alt"
+      },
+      {
+        "run": [
+          "capturep",
+          "-p"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pa"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-paeL",
+          "-S",
+          "1",
+          "-E",
+          "2"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-paF",
+          "-S",
+          "-",
+          "-E",
+          "-"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab   \nx    \nlong line that wraps\n around   \n\\back     \n世zc \nst   \n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab\nx\nlong line that wraps\n around\n\\back\n世zc\nst\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab\nx  \nlong line that wraps\n around\n\\back\n世zc\nst  \n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab   \n\u001b[41mx  \u001b[49m  \nlong line that wraps\n around   \n\\back     \n世z\u001b[38;2;1;2;3mc\u001b[39m \n\u001b[9mst\u001b[0m   \n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab\nx\nlong line that wraps\n around\n\\\\back\n世zc\nst\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab\n\\033[41mx  \\033[49m\nlong line that wraps\n around\n\\\\back\n世z\\033[38;2;1;2;3mc\\033[39m\n\\033[9mst\\033[0m\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab\n\\033[41mx  \n\\033[49mlong line that wraps around\n\\\\back\n世z\\033[38;2;1;2;3mc\n\\033[9m\\033[39mst\\033[0m  \n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab\nx  \nlong line that wraps around\n\\back\n世zc\nst  \n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 - ab\n1 - x\n2 W long line that wraps\n3 -  around\n4 - \\back\n5 X 世zc\n6 X st\n7 - \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1 0 - x\n2 0 W long line that wraps\n3 0 -  around\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no alternate screen\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n\n\n\n\n\n\nalt\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "ab\nx\nlong line that wraps\n around\n\\back\n世zc\nst\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1 \u001b[41mx  \u001b[49m\n2 long line that wraps\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "- ab\n- x\nW long line that wraps\n-  around\n- \\back\nX 世zc\nX st\n- \n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

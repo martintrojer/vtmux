@@ -1,0 +1,32 @@
+name = "marked_pane_border"
+size = [40, 10]
+# select-pane -m (cmd-select-pane.c:84-143): the marked pane's borders are
+# drawn reversed (screen-redraw.c:1250-1253) and the window flag shows M;
+# marking it again or -M clears it; marked-pane-changed fires.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-v", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set-hook", "-g", "marked-pane-changed", "set -gF @ev '#{hook_pane} #{marked} #{hook_window}'"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["selectp", "-m", "-t", "%1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["show", "-gv", "@ev"] },
+  { run = ["selectp", "-m", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["selectp", "-m", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["show", "-gv", "@ev"] },
+  { run = ["selectp", "-m", "-t", "%2"] },
+  { run = ["selectp", "-M"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

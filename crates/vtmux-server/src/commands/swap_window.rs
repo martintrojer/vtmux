@@ -32,6 +32,20 @@ pub fn exec(server: &mut Server, args: &Args, source: Found, found: Found) -> Re
     let session = m.sessions.get_mut(&src_s).expect("source session");
     session.windows.insert(src_idx, w_dst);
     session.link_seq.insert(src_idx, stamp_src);
+    // cmd-swap-window.c:80-81: a mark on the source winlink moves to the
+    // destination winlink, which now has the marked window. Only the
+    // winlink moves: across sessions the mark's session no longer has it,
+    // so the mark is no longer valid (cmd_find_valid_state).
+    if let Some(mk) = m.marked.as_mut()
+        && mk.session == Some(src_s)
+        && mk.index == Some(src_idx)
+    {
+        if src_s == dst_s {
+            mk.index = Some(dst_idx);
+        } else {
+            m.marked = None;
+        }
+    }
     // -d selects (not the opposite): cmd-swap-window.c:83-87.
     if args.flag('d') {
         m.set_current(dst_s, dst_idx);

@@ -15,7 +15,7 @@
 //! server; the result is still reported after the guard. Batches that
 //! cannot park (key bindings, config files) finish it at once. Inside
 //! `source-file` the batch parks with the rest of the file behind it
-//! ([`source_file::Cont`]).
+//! (`source_file::Cont`).
 //!
 //! [`ServerMsg::WriteOpen`]: vtmux_core::protocol::ServerMsg::WriteOpen
 //! [`ServerMsg::ReadOpen`]: vtmux_core::protocol::ServerMsg::ReadOpen
@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 
 use vtmux_core::error::{EdgeError, strerror};
 use vtmux_core::protocol::ServerMsg;
+
+use vtmux_core::ids::PaneId;
 
 use super::Item;
 use crate::server::{ClientId, Server};
@@ -55,6 +57,13 @@ pub(crate) enum Then {
         name: Option<String>,
         clip: Option<ClientId>,
     },
+    /// `window_pane_input_callback` (window.c:2513-2535): each chunk of
+    /// the client's stdin goes into the empty pane as it comes; the end,
+    /// or an error, only lets the command go on.
+    PaneInput(PaneId),
+    /// `cmd_source_file_done`: parse what was read as file `-`, then go
+    /// on with the rest of the command's files.
+    Source(Box<super::source_file::Cont>),
 }
 
 /// `file_get_path` with `server_client_get_cwd` (server-client.c:3082):
@@ -76,6 +85,19 @@ pub(super) fn path(server: &Server, item: &Item, file: &str) -> PathBuf {
         .and_then(|s| server.model.sessions.get(&s))
         .map_or_else(|| item.cwd.clone(), |s| s.cwd.clone());
     cwd.join(joined)
+}
+
+/// `window_pane_start_input` (window.c:2537-2560): read the command
+/// client's stdin into the empty pane `p`, the command waiting until it
+/// ends. An attached or control client, or none, reads nothing.
+pub(super) fn pane_input(server: &mut Server, item: &mut Item, p: PaneId) -> Result<(), EdgeError> {
+    if !server.model.panes.get(&p).is_some_and(|x| x.empty) {
+        return Err(EdgeError::Message("pane is not empty".into()));
+    }
+    if item.client.is_none() || is_attached(server, item) {
+        return Ok(());
+    }
+    read(server, item, None, Then::PaneInput(p))
 }
 
 /// Whether the item's client is attached or a control client, for which
@@ -193,6 +215,10 @@ fn complete(
         server.wake(c);
         return Ok(());
     }
+    if let Then::Source(cont) = then {
+        super::source_file::stdin_done(server, item, *cont, data, error);
+        return Ok(());
+    }
     let op = FileOp {
         path,
         then,
@@ -224,6 +250,9 @@ fn park(
 
 /// The done callback: `Err` is the `cmdq_error` message.
 fn finish(server: &mut Server, op: FileOp) -> Result<(), String> {
+    if matches!(op.then, Then::PaneInput(_) | Then::Source(_)) {
+        return Ok(());
+    }
     let error = op.done.unwrap_or(0);
     if error != 0 {
         let e = io::Error::from_raw_os_error(error);
@@ -251,10 +280,12 @@ fn finish(server: &mut Server, op: FileOp) -> Result<(), String> {
 impl Server {
     /// `MSG_READ`: more of the file the client is reading.
     pub(crate) fn file_read_data(&mut self, id: ClientId, bytes: &[u8]) {
-        if let Some(op) = self.files.get_mut(&id)
-            && op.done.is_none()
-        {
-            op.data.extend_from_slice(bytes);
+        let Some(op) = self.files.get_mut(&id).filter(|op| op.done.is_none()) else {
+            return;
+        };
+        match op.then {
+            Then::PaneInput(p) => self.pane_input(p, bytes, false),
+            _ => op.data.extend_from_slice(bytes),
         }
     }
 
@@ -277,7 +308,26 @@ impl Server {
             Some(op) if op.done.is_none() => return false,
             Some(_) => {}
         }
-        let op = self.files.remove(&id).expect("checked above");
+        let mut op = self.files.remove(&id).expect("checked above");
+        // window.c:2522-2526: the pane went while its input was read; the
+        // client fails.
+        if let Then::PaneInput(p) = op.then
+            && !self.model.panes.contains_key(&p)
+        {
+            item.status = 1;
+        }
+        if matches!(op.then, Then::Source(_)) {
+            let Then::Source(cont) = std::mem::replace(&mut op.then, Then::Write) else {
+                unreachable!("checked above");
+            };
+            let data = std::mem::take(&mut op.data);
+            super::source_file::stdin_done(self, item, *cont, data, op.done.unwrap_or(0));
+            // A further `-` parks again: the step goes on waiting for it,
+            // or reports it now if it failed at once.
+            item.blocked = false;
+            self.control_take_output(id, item);
+            return self.file_resume(id, item);
+        }
         if let Err(msg) = finish(self, op) {
             item.error(self, vtmux_core::rawstr::to_bytes(&msg).into_owned());
         }

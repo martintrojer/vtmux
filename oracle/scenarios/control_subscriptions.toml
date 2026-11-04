@@ -1,0 +1,35 @@
+name = "control_subscriptions"
+# refresh-client -B name:what:format (cmd-refresh-client.c:46-60, monitor.c,
+# control.c control_sub_change): each second a subscription's format is
+# expanded and a changed value (the first one too) is reported as
+# %subscription-changed; a name alone removes it. One subscription at a
+# time, so the line order cannot depend on which tick a change lands in.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "refresh-client -B 'sw::#{session_windows}'" } },
+  { control_wait = { id = "c1", until = "%subscription-changed" } },
+  { control_send = { id = "c1", line = "new-window -d -n two cat" } },
+  { control_wait = { id = "c1", until = "%subscription-changed" } },
+  { control_send = { id = "c1", line = "refresh-client -B sw" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "refresh-client -B 'pn:%0:#{pane_index}-#{window_name}'" } },
+  { control_wait = { id = "c1", until = "%subscription-changed" } },
+  { control_send = { id = "c1", line = "rename-window -t a:0 renamed" } },
+  { control_wait = { id = "c1", until = "%subscription-changed" } },
+  { control_send = { id = "c1", line = "refresh-client -B pn" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "refresh-client -B 'wn:@1:#{window_name}:#{pane_id}'" } },
+  { control_wait = { id = "c1", until = "%subscription-changed" } },
+  { control_send = { id = "c1", line = "refresh-client -B wn" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "refresh-client -B 'aw:@*:#{window_index}'" } },
+  { control_wait = { id = "c1", until = "%subscription-changed" } },
+  { control_send = { id = "c1", line = "refresh-client -B aw" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "refresh-client -B 'ap:%*:#{pane_id}'" } },
+  { control_wait = { id = "c1", until = "%subscription-changed" } },
+  { control_send = { id = "c1", line = "refresh-client -B ap" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+]

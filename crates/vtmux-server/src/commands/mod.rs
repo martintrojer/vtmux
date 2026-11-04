@@ -667,9 +667,9 @@ fn dispatch(
 }
 
 /// `cmdq_fire_command` (cmd-queue.c:618-623): the `-s` source is resolved
-/// before the target. detach-client looks its `-s` up itself. With no
-/// marked pane (vtmux has none yet), `CMD_FIND_DEFAULT_MARKED` starts from
-/// the current state like any other lookup (cmd-find.c:992-1006).
+/// before the target. detach-client looks its `-s` up itself.
+/// `CMD_FIND_DEFAULT_MARKED` starts from the marked pane while there is
+/// one (cmd-find.c:992-994).
 fn resolve_source(server: &Server, item: &Item, call: &CommandCall) -> Result<Found, CmdError> {
     match &call.entry.source {
         Some(spec) if call.entry.name != "detach-client" => {

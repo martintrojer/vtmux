@@ -81,6 +81,10 @@ pub fn exec(
         .close_pane(src_wp);
     // layout_close_pane fires window-layout-changed (layout.c:1548).
     m.layout_changed(src_w);
+    if src_w != dst_w {
+        // window_lost_pane: a moved pane loses its mark.
+        m.clear_mark_of(src_wp);
+    }
     let src = m.windows.get_mut(&src_w).expect("source window");
     if src_w == dst_w {
         src.panes.panes.retain(|p| *p != src_wp);

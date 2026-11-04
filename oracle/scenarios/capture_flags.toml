@@ -1,0 +1,28 @@
+name = "capture_flags"
+size = [40, 8]
+# capture-pane -N -T -C -L -F -I (visible rows: time 0) and -J, over a pane
+# with trailing spaces, a background run, a wrapped line, a backslash,
+# a wide character and an RGB colour (cmd-capture-pane.c:315-413).
+# -a/-q read the primary screen saved under the alternate one.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "8", "sh", "-c", "printf 'ab\\n\\033[41mx  \\033[m\\nlong line that wraps around\\n\\\\back\\n\\344\\270\\226z\\033[38;2;1;2;3mc\\033[m\\n\\033[9mst\\033[m  '; tmux wait-for -S ready; read x; printf '\\033[?1049halt'; tmux wait-for -S alt; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pN"] },
+  { run = ["capturep", "-pT"] },
+  { run = ["capturep", "-pNT"] },
+  { run = ["capturep", "-peN"] },
+  { run = ["capturep", "-pC"] },
+  { run = ["capturep", "-peC"] },
+  { run = ["capturep", "-peCJ"] },
+  { run = ["capturep", "-pJN"] },
+  { run = ["capturep", "-pLF"] },
+  { run = ["capturep", "-pLIF", "-S", "1", "-E", "3"] },
+  { run = ["capturep", "-pa"] },
+  { run = ["capturep", "-paq"] },
+  { feed = { pane = "%0", bytes = "\r" } },
+  { wait_for = "alt" },
+  { run = ["capturep", "-p"] },
+  { run = ["capturep", "-pa"] },
+  { run = ["capturep", "-paeL", "-S", "1", "-E", "2"] },
+  { run = ["capturep", "-paF", "-S", "-", "-E", "-"] },
+]

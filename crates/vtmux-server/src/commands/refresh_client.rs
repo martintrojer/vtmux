@@ -2,10 +2,10 @@
 //! redraws, `-f`/`-F` client flags, `-A` pane output state, `-C` control
 //! client sizes and `-l` the clipboard query.
 //!
-//! Not here yet: `-c -D -L -R -U` (panning a window larger than the
-//! terminal: no client offsets in the compositor), `-B` (control
-//! subscriptions) and `-r` (colour reports for panes; accepted and
-//! ignored).
+//! `-B` control subscriptions are [`crate::control_subs`]. Not here yet:
+//! `-c -D -L -R -U` (panning a window larger than the terminal: no client
+//! offsets in the compositor) and `-r` (colour reports for panes; accepted
+//! and ignored).
 
 use vtmux_core::cmd::{Args, CmdError, strtonum};
 use vtmux_core::error::EdgeError;
@@ -62,7 +62,10 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
         if !control {
             return Err(not_control());
         }
-        return Err(EdgeError::NotImplemented("refresh-client -B".into()).into());
+        for value in args.values('B') {
+            server.control_subscribe(tc, value);
+        }
+        return Ok(());
     }
     if let Some(size) = args.value('C') {
         if !control {

@@ -17,8 +17,7 @@ status = "xfail"
 reason = "terminal-overrides `*:am@` (no auto-margin) not honoured by the client tty: last status line is `LLLWWW           RRR`, expected `LLLWWW           RR` (the inner client still draws the last column)"
 
 [tests."border-arrows.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -C (outer capture of the inner client's escapes): `capturep -Cep` exits 1 with `not implemented in vtmux yet: capture-pane -C`, so the capture is empty and no arrow is found; then needs pane-border-indicators drawing"
+status = "pass"
 
 [tests."buffers.sh"]
 status = "pass"
@@ -31,8 +30,7 @@ reason = "capture-pane -e drops OSC 8 hyperlinks: captured `test1`, expected the
 status = "pass"
 
 [tests."capture-pane-time.sh"]
-status = "xfail"
-reason = "missing flags capture-pane -L/-F/-I (time-range capture): `not implemented in vtmux yet: capture-pane -L`"
+status = "pass"
 
 [tests."cfg-client-lost.sh"]
 status = "pass"
@@ -120,8 +118,7 @@ status = "pass"
 status = "pass"
 
 [tests."control-subscriptions.sh"]
-status = "xfail"
-reason = "missing flag refresh-client -B (control subscriptions): `not implemented in vtmux yet: refresh-client -B`; no %subscription-changed is emitted"
+status = "pass"
 
 [tests."copy-mode-commands.sh"]
 status = "pass"
@@ -267,16 +264,13 @@ status = "pass"
 status = "pass"
 
 [tests."input-cursor.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+status = "pass"
 
 [tests."input-edit.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+status = "pass"
 
 [tests."input-keys.sh"]
-status = "xfail"
-reason = "missing flag send-keys -R (reset terminal state): `not implemented in vtmux yet: send-keys -R`"
+status = "pass"
 
 [tests."input-malformed.sh"]
 status = "xfail"
@@ -288,7 +282,7 @@ reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-p
 
 [tests."input-osc.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N` (also uses -H and respawn-pane on a remain-on-exit pane)"
+reason = "needs capture-pane -H (hyperlink URIs)"
 
 [tests."input-raw-controls.sh"]
 status = "xfail"
@@ -328,7 +322,7 @@ reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-p
 
 [tests."input-reflow-stress.sh"]
 status = "xfail"
-reason = "missing flags capture-pane -N, -R and -M: `not implemented in vtmux yet: capture-pane -N` (first), then `capture-pane -R`"
+reason = "needs capture-pane -R (tmux's internal grid dump) and -M"
 
 [tests."input-replies.sh"]
 status = "xfail"
@@ -340,11 +334,10 @@ reason = "terminal requests from a pane are not seen on the client output: `did 
 
 [tests."input-scroll.sh"]
 status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+reason = "capture-pane -N is in; fails on a cursor difference with autowrap off (DECAWM reset: tmux 4,0, vtmux 5,0)"
 
 [tests."input-sgr.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -N: `not implemented in vtmux yet: capture-pane -N`; the script's first capture fails (cmp: EOF on empty file) and every later scene needs it too"
+status = "pass"
 
 [tests."input-unicode.sh"]
 status = "xfail"
@@ -355,8 +348,7 @@ status = "xfail"
 reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."json.sh"]
-status = "xfail"
-reason = "missing flag display-message -j (JSON output): `not implemented in vtmux yet: display-message -j`"
+status = "pass"
 
 [tests."kill-session-process-exit.sh"]
 status = "pass"
@@ -377,7 +369,7 @@ reason = "missing command new-pane (floating/modal panes, M2): `not implemented 
 
 [tests."lifecycle-deferred.sh"]
 status = "xfail"
-reason = "needs refresh-client -B (subscriptions), and switch-client -c finding a control client by name; its choose-tree section passes"
+reason = "needs switch-client -c finding a control client by name (refresh-client -B is in); its choose-tree section passes"
 
 [tests."list-commands.sh"]
 status = "pass"
@@ -443,7 +435,7 @@ reason = "OSC 11 (set background) is not tracked: `#{pane_bg}` is empty after a 
 
 [tests."pane-ops.sh"]
 status = "xfail"
-reason = "missing marked pane: `not implemented in vtmux yet: select-pane -m` (`Command failed (expected success): select-pane -m -t %3`); the script also uses new-pane"
+reason = "its split, break, join, swap, respawn (-E included), marked pane, empty pane (-E, -I, empty command) and resize-pane -T sections pass; it stops at new-pane (floating panes)"
 
 [tests."pipe-pane.sh"]
 status = "xfail"
@@ -490,7 +482,7 @@ reason = "missing command new-pane (floating/modal panes, M2): `not implemented 
 
 [tests."screen-redraw-indicators.sh"]
 status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+reason = "needs new-pane (floating panes); select-pane -m is in"
 
 [tests."screen-redraw-menus.sh"]
 status = "pass"
@@ -552,12 +544,10 @@ status = "xfail"
 reason = "missing flag set-hook -B (monitor hooks, monitor.c): `not supported in vtmux yet: set-hook -B`"
 
 [tests."split-window-wait-kill.sh"]
-status = "xfail"
-reason = "missing flag split-window -W: `not implemented in vtmux yet: split-window -W`"
+status = "pass"
 
 [tests."style-trim.sh"]
-status = "xfail"
-reason = "missing flag capture-pane -C: `not implemented in vtmux yet: capture-pane -C`"
+status = "pass"
 
 [tests."swap-pane-zoom-error.sh"]
 status = "xfail"
@@ -586,8 +576,7 @@ status = "pass"
 status = "pass"
 
 [tests."targets-panes.sh"]
-status = "xfail"
-reason = "missing marked pane: the `~` target fails with `not implemented in vtmux yet: marked target` where tmux says `no marked target`"
+status = "pass"
 
 [tests."targets.sh"]
 status = "pass"
@@ -607,7 +596,7 @@ reason = "missing flag refresh-client -U (pan the client view): `not implemented
 
 [tests."tty-draw-line.sh"]
 status = "xfail"
-reason = "missing flag refresh-client -c (client pan/clear): `not implemented in vtmux yet: refresh-client -c`"
+reason = "needs refresh-client -c/-L/-R (panning a window larger than the client); its capture-pane -N/-e sections pass"
 
 [tests."tty-keys.sh"]
 status = "pass"

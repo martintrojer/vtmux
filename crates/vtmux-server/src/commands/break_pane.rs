@@ -75,6 +75,7 @@ pub fn exec(
             .model
             .link_window(dst_s, w, idx)
             .map_err(EdgeError::Message)?;
+        server.model.move_mark((src_s, src_idx), (dst_s, index));
         if !detached {
             server.model.set_current(dst_s, index);
         }
@@ -139,6 +140,8 @@ fn move_to_new_window(
     latest: Option<crate::server::ClientId>,
 ) -> vtmux_core::ids::WindowId {
     let m = &mut server.model;
+    // window_lost_pane: a moved pane loses its mark.
+    m.clear_mark_of(wp);
     let old = m.windows.get_mut(&w).expect("source window");
     old.panes.remove(wp);
     old.layout.close_pane(wp);

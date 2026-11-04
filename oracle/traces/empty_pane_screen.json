@@ -1,0 +1,294 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "empty_pane_screen",
+  "inputs": {
+    "name": "empty_pane_screen",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-E",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%1",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "feed": {
+          "pane": "%1",
+          "bytes": "keys go nowhere"
+        }
+      },
+      {
+        "run": [
+          "splitw",
+          "-v",
+          "-d",
+          "-t",
+          "%1",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%2",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{pane_id} #{?pane_pid,live,empty} #{cursor_x},#{cursor_y}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "respawnp",
+          "-k",
+          "-E",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsp",
+          "-F",
+          "#{pane_id} #{?pane_pid,live,empty} #{pane_dead}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mx"
+        ],
+        "cursor": [
+          21,
+          0
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%1 empty 0,0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m│\\e[39m",
+          "                    \\e[32m├───────────────────",
+          "\\e[39m                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "                    \\e[37m│\\e[39m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mx"
+        ],
+        "cursor": [
+          21,
+          0
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "\\e[32m─────────────────────\\e[37m───────────────────",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mx"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%1 empty 0\n%2 empty 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

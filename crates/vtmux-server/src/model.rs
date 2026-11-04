@@ -189,6 +189,12 @@ pub struct Pane {
     pub argv: Vec<String>,
     pub shell: PathBuf,
     pub cwd: PathBuf,
+    /// `PANE_EMPTY`: made with no process (`SPAWN_EMPTY`); it shows only
+    /// what is written to it.
+    pub empty: bool,
+    /// `wp->wait_item`: the `split-window -W` step waiting for the process
+    /// to exit.
+    pub wait_step: Option<crate::cmdq::StepId>,
     /// The process has been reaped.
     pub exited: bool,
     /// Its wait status once reaped (`wp->status`, `PANE_STATUSREADY`).
@@ -294,6 +300,10 @@ pub struct Model {
         Option<std::rc::Rc<(crate::format_ctx::ServerInfo, crate::environ::Environ)>>,
     /// Events fired since the sinks last heard ([`crate::events`]).
     pub events: Vec<crate::events::Queued>,
+    /// The marked pane (server.c `marked_pane`, `select-pane -m`): its
+    /// session, winlink, window and pane, valid only while all four still
+    /// fit together ([`Model::marked`]).
+    pub(crate) marked: Option<crate::target::Found>,
 }
 
 impl Default for Model {
@@ -317,6 +327,7 @@ impl Default for Model {
             moving_cells: None,
             format_base: None,
             events: Vec::new(),
+            marked: None,
         }
     }
 }
@@ -559,6 +570,41 @@ impl Model {
             i += u32::from(w.is_floating(q));
         }
         None
+    }
+
+    /// `server_check_marked`: the marked pane while its session still has
+    /// the window at that index and the window the pane.
+    #[must_use]
+    pub fn marked(&self) -> Option<crate::target::Found> {
+        self.marked.filter(|f| f.still_valid(self))
+    }
+
+    /// `window_lost_pane` (window.c:1191-1192): the pane leaving its window
+    /// stops being the marked pane.
+    pub fn clear_mark_of(&mut self, p: PaneId) {
+        if self.marked.is_some_and(|f| f.pane == Some(p)) {
+            self.marked = None;
+        }
+    }
+
+    /// `server_link_window` (server-fn.c:335-336): a mark on the source
+    /// winlink moves to the new link. The pane is unchanged; the session
+    /// and index become the new link's.
+    pub fn move_mark(&mut self, from: (SessionId, u32), to: (SessionId, u32)) {
+        if let Some(m) = self.marked.as_mut()
+            && m.session == Some(from.0)
+            && m.index == Some(from.1)
+        {
+            m.session = Some(to.0);
+            m.index = Some(to.1);
+        }
+    }
+
+    /// `server_is_marked`.
+    #[must_use]
+    pub fn is_marked(&self, s: SessionId, index: u32, p: PaneId) -> bool {
+        self.marked()
+            .is_some_and(|f| f.session == Some(s) && f.index == Some(index) && f.pane == Some(p))
     }
 
     #[must_use]
@@ -1031,6 +1077,11 @@ impl Model {
         session.link_tree = rb::Tree::default();
         session.sync_link_tree();
         session.current = moved.get(&session.current).copied().unwrap_or(base);
+        // session_renumber_windows (session.c:776-800): the mark follows
+        // its winlink.
+        if let Some(m) = self.marked.as_mut().filter(|m| m.session == Some(s)) {
+            m.index = m.index.and_then(|i| moved.get(&i).copied());
+        }
         for i in &mut session.last {
             if let Some(new) = moved.get(i) {
                 *i = *new;
@@ -1089,6 +1140,10 @@ impl Model {
             .into_iter()
             .map(|(i, f)| (shift(i), f))
             .collect();
+        // The winlinks move, the mark with its one.
+        if let Some(m) = self.marked.as_mut().filter(|m| m.session == Some(s)) {
+            m.index = m.index.map(shift);
+        }
         Some(idx)
     }
 

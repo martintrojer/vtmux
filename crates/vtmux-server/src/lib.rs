@@ -9,6 +9,7 @@ pub mod cmdq;
 pub mod commands;
 pub mod compress;
 pub mod control;
+pub mod control_subs;
 pub mod environ;
 pub mod events;
 pub mod format_ctx;

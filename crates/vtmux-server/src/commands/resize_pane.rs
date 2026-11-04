@@ -21,8 +21,17 @@ pub fn exec(
     let (Some(w), Some(wp)) = (found.window, found.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
+    // cmd-resize-pane.c:71-81: -T trims the rows below the cursor, pulling
+    // history into view; nothing while the pane is in a mode.
     if args.flag('T') {
-        return Err(EdgeError::NotImplemented("resize-pane -T".into()).into());
+        if let Some(pane) = server.model.panes.get_mut(&wp)
+            && pane.modes.is_empty()
+        {
+            pane.term.trim_below_cursor();
+            pane.compress.observe(&pane.term, std::time::Instant::now());
+            server.model.redraw_panes.insert(wp);
+        }
+        return Ok(());
     }
     if args.flag('M') {
         return mouse_update(server, item);

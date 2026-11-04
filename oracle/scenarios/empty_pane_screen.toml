@@ -1,0 +1,26 @@
+name = "empty_pane_screen"
+size = [40, 10]
+# An empty pane (split-window -E, spawn.c:459-464) has no cursor and its
+# line feeds return the carriage (MODE_CRLF); a split with an empty
+# command is empty too; keys reach no program; respawn-pane -E keeps a
+# pane empty. (What display-message -I writes into one is a cli test:
+# empty_panes_and_input.)
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["splitw", "-h", "-E", "-t", "a"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { feed = { pane = "%1", bytes = "keys go nowhere" } },
+  { run = ["splitw", "-v", "-d", "-t", "%1", ""] },
+  { run = ["select-pane", "-t", "%2", "-T", "t"] },
+  { run = ["display", "-p", "#{pane_id} #{?pane_pid,live,empty} #{cursor_x},#{cursor_y}"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["respawnp", "-k", "-E", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["lsp", "-F", "#{pane_id} #{?pane_pid,live,empty} #{pane_dead}"] },
+]

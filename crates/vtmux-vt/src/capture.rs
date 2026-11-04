@@ -28,11 +28,24 @@ pub enum LineRef {
 
 /// Options for [`capture`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[expect(clippy::struct_excessive_bools, reason = "one per capture-pane flag")]
 pub struct CaptureOpts {
     /// `-e`: emit SGR sequences for styles.
     pub escapes: bool,
     /// `-J`: join soft-wrapped rows and keep trailing spaces.
     pub join: bool,
+    /// `-C`: escape the sequences and a backslash (`\033`, `\\`).
+    pub octal: bool,
+    /// `-N`: keep trailing spaces.
+    pub keep_spaces: bool,
+    /// `-T`: stop at the last cell with a character.
+    pub used_only: bool,
+    /// `-L`: each line starts with its number.
+    pub numbers: bool,
+    /// `-I`: each line starts with when it entered the history.
+    pub times: bool,
+    /// `-F`: each line starts with its flags.
+    pub flags: bool,
     pub start: LineRef,
     pub end: LineRef,
 }
@@ -42,10 +55,49 @@ impl Default for CaptureOpts {
         Self {
             escapes: false,
             join: false,
+            octal: false,
+            keep_spaces: false,
+            used_only: false,
+            numbers: false,
+            times: false,
+            flags: false,
             start: LineRef::Visible,
             end: LineRef::Visible,
         }
     }
+}
+
+/// `capture-pane -a` (cmd-capture-pane.c:268-279): the primary screen
+/// saved when the alternate screen came up (`saved_grid`), which has no
+/// history; `None` while no alternate screen is up.
+#[must_use]
+pub fn capture_alternate(term: &PaneTerm, opts: CaptureOpts) -> Option<Vec<u8>> {
+    let rows = term.saved_rows()?;
+    let last = rows.len().saturating_sub(1);
+    let mut top = resolve(opts.start, 0, last, true);
+    let mut bottom = resolve(opts.end, 0, last, false);
+    if bottom < top {
+        std::mem::swap(&mut top, &mut bottom);
+    }
+    let mut out = Vec::new();
+    let mut last_style = Style::default();
+    for (y, row) in rows.iter().enumerate().take(bottom + 1).skip(top) {
+        let (cells, wrapped) = row.thaw();
+        if opts.numbers {
+            out.extend_from_slice(format!("{y} ").as_bytes());
+        }
+        if opts.times {
+            out.extend_from_slice(b"0 ");
+        }
+        if opts.flags {
+            out.extend_from_slice(row_flags(&cells, wrapped, None).as_bytes());
+        }
+        emit_row(&mut out, &cells, opts, &mut last_style);
+        if !opts.join || !wrapped {
+            out.push(b'\n');
+        }
+    }
+    Some(out)
 }
 
 /// Capture `term` the way `capture-pane` does, returning the buffer before
@@ -66,16 +118,80 @@ pub fn capture(term: &PaneTerm, opts: CaptureOpts) -> Vec<u8> {
     let mut out = Vec::new();
     // tmux threads one `lastgc` through every line of a capture (cmd-capture-pane.c:333).
     let mut last_style = Style::default();
+    let marks = if opts.flags {
+        term.line_marks()
+    } else {
+        Vec::new()
+    };
     for y in top..=bottom {
-        let (mut cells, wrapped) = read_row(term, y, hsize, cols);
-        // Spacer cells are tmux's PADDING cells: skipped (grid.c:1219).
-        cells.retain(|c| !c.spacer());
+        let (cells, wrapped) = read_row(term, y, hsize, cols);
+        // cmd-capture-pane.c:375-410: the line's number, history time and
+        // flags first.
+        if opts.numbers {
+            let n = i64::try_from(y).unwrap_or(0) - i64::try_from(hsize).unwrap_or(0);
+            out.extend_from_slice(format!("{n} ").as_bytes());
+        }
+        if opts.times {
+            let t = if y < hsize {
+                term.history_time(term.history_id(y))
+            } else {
+                0
+            };
+            out.extend_from_slice(format!("{t} ").as_bytes());
+        }
+        if opts.flags {
+            let mark = marks.iter().find(|(row, _)| *row == y).map(|(_, m)| *m);
+            out.extend_from_slice(row_flags(&cells, wrapped, mark).as_bytes());
+        }
         emit_row(&mut out, &cells, opts, &mut last_style);
         if !opts.join || !wrapped {
             out.push(b'\n');
         }
     }
     out
+}
+
+/// `capture-pane -F` (cmd-capture-pane.c:390-410): the line's flags and a
+/// space. `X` is tmux's extended line (grid.c `grid_need_extended_cell`): a
+/// cell wider than one column or of more than one byte, an RGB colour, an
+/// attribute past the first eight, an underline colour, a link or a tab.
+/// vtmux has no dead lines (`D`).
+fn row_flags(cells: &[RowCell], wrapped: bool, mark: Option<LineMark>) -> String {
+    let link = cells.iter().any(|c| c.link);
+    let extended = cells.iter().any(|c| {
+        let st = &c.style;
+        c.link
+            || c.tab != 0
+            || c.wide == Width::Double
+            || c.text.len() > 1
+            || matches!(st.fg, Color::Rgb(..))
+            || matches!(st.bg, Color::Rgb(..))
+            || st.underline_color != Color::Default
+            || st.strikethrough
+            || st.overline
+            || !matches!(st.underline, Underline::None | Underline::Single)
+    });
+    let mut f = String::new();
+    if link {
+        f.push('H');
+    }
+    if mark == Some(LineMark::Output) {
+        f.push('O');
+    }
+    if mark == Some(LineMark::Prompt) {
+        f.push('P');
+    }
+    if wrapped {
+        f.push('W');
+    }
+    if extended {
+        f.push('X');
+    }
+    if f.is_empty() {
+        f.push('-');
+    }
+    f.push(' ');
+    f
 }
 
 /// tmux's range arithmetic: cmd-capture-pane.c:354-395.
@@ -622,33 +738,54 @@ fn cell_text(gr: &GridRef<'_>) -> String {
 fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut Style) {
     // `cellused`: one past the last cell with text.
     let used = cells.iter().rposition(|c| !c.empty).map_or(0, |i| i + 1);
-    let end = if opts.join {
+    // GRID_STRING_EMPTY_CELLS unless -J or -T (cmd-capture-pane.c:349-350):
+    // to `cellsize`, else `cellused`.
+    let end = if opts.join || opts.used_only {
         used
-    } else if opts.escapes {
+    } else if opts.escapes || opts.keep_spaces {
         tmux_cellsize(cells, used)
     } else {
         cells.len()
     };
 
     let mut line = Vec::new();
-    for c in &cells[..end.min(cells.len())] {
+    // Spacer cells are tmux's PADDING cells: skipped (grid.c:1214-1215).
+    for c in cells[..end.min(cells.len())].iter().filter(|c| !c.spacer()) {
         if opts.escapes {
+            let at = line.len();
             sgr_code(&mut line, last, &c.style);
+            if opts.octal {
+                escape_esc(&mut line, at);
+            }
             *last = c.style;
         }
         if c.empty {
             line.push(b' ');
+        } else if opts.octal && c.text == "\\" {
+            line.extend_from_slice(b"\\\\");
         } else {
             line.extend_from_slice(c.text.as_bytes());
         }
     }
-    if !opts.join {
+    if !opts.join && !opts.keep_spaces {
         // GRID_STRING_TRIM_SPACES (grid.c:1263).
         while line.last() == Some(&b' ') {
             line.pop();
         }
     }
     out.extend_from_slice(&line);
+}
+
+/// `GRID_STRING_ESCAPE_SEQUENCES`: each ESC from `at` on as `\033`.
+fn escape_esc(line: &mut Vec<u8>, at: usize) {
+    let tail: Vec<u8> = line.split_off(at);
+    for b in tail {
+        if b == 0x1b {
+            line.extend_from_slice(b"\\033");
+        } else {
+            line.push(b);
+        }
+    }
 }
 
 /// How many cells tmux has allocated for a row, which decides how many

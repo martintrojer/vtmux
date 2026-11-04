@@ -71,6 +71,8 @@ pub struct ControlState {
     windows: std::collections::BTreeMap<WindowId, (u32, u32)>,
     /// `c->tty.sx`, `c->tty.sy` (`refresh-client -C XxY`).
     size: Option<(u32, u32)>,
+    /// `cs->subs` (`refresh-client -B`).
+    pub(crate) subs: crate::control_subs::Subs,
 }
 
 /// `CONTROL_PANE_OFF` and `CONTROL_PANE_PAUSED`.
@@ -749,6 +751,12 @@ impl Server {
         for id in self.control_ids() {
             self.control_notify_one(id, false, line.to_vec());
         }
+    }
+
+    /// `control_notify_write` of `line` to client `id`, if it still hears
+    /// notifications.
+    pub(crate) fn control_notify_line(&mut self, id: ClientId, line: Vec<u8>) {
+        self.control_notify_one(id, false, line);
     }
 
     /// `control_notify_write` to client `id` if it should hear

@@ -1,0 +1,26 @@
+name = "send_keys_reset"
+size = [30, 6]
+# send-keys -R (cmd-send-keys.c:236-244): the pane's terminal is reset as
+# RIS does it (screen cleared, cursor home, modes and attributes back);
+# with keys they follow, without nothing is sent.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "30", "-y", "5", "sh", "-c", "stty -echo; printf '\\033[?1h\\033[4h\\033[31mred\\033[2;3r\\033[?25l'; tmux wait-for -S ready; while read -r l; do printf 'got:%s\\n' \"$l\"; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "#{cursor_x},#{cursor_y}"] },
+  { run = ["send-keys", "-R", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "#{cursor_x},#{cursor_y} #{pane_title}"] },
+  { run = ["capturep", "-p"] },
+  { feed = { pane = "%0", bytes = "one\r" } },
+  { wait_for = "fed" },
+  { run = ["send-keys", "-R", "-t", "%0", "abc", "Enter"] },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["capturep", "-pe"] },
+]

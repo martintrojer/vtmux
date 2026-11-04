@@ -231,6 +231,9 @@ pub struct PaneTerm {
     /// entered: libghostty only reads the active screen, and tmux keeps
     /// showing the primary history while an alternate screen is up.
     frozen: Option<Rc<Vec<FrozenRow>>>,
+    /// The primary screen's visible rows, copied as the alternate screen
+    /// came up (tmux's `saved_grid`, screen.c:704-705), while it is up.
+    saved: Option<Rc<Vec<FrozenRow>>>,
     /// The oldest row of tmux's primary history (the active top when it
     /// has none), pinned as the alternate screen came up, and the history
     /// rows Ghostty kept then. Ghostty reflows the primary screen at every
@@ -394,6 +397,7 @@ impl PaneTerm {
                 ..AltModeScanner::default()
             },
             frozen: None,
+            saved: None,
             alt_entry: None,
             clear_primary_history: false,
             redraw: false,
@@ -515,6 +519,7 @@ impl PaneTerm {
                     // read the primary history.
                     ScanEvent::AltMode(b'h') if !self.alternate_on() => {
                         self.frozen = Some(Rc::new(self.freeze_history()));
+                        self.saved = Some(Rc::new(self.freeze_visible()));
                         self.frozen_marks = self.line_marks();
                         self.alt_entry = self.pin_oldest().map(|pin| (pin, self.retained_rows()));
                     }
@@ -679,6 +684,7 @@ impl PaneTerm {
         self.term.vt_write(piece);
         if !self.alternate_on() {
             self.frozen = None;
+            self.saved = None;
             let entry = self.alt_entry.take();
             if std::mem::take(&mut self.clear_primary_history) {
                 // Back on the primary screen: apply the ED3 that arrived
@@ -827,6 +833,21 @@ impl PaneTerm {
         (0..self.hsize)
             .map(|y| FrozenRow::capture(&self.term, hidden + y, cols))
             .collect()
+    }
+
+    /// Copy the visible rows of the primary screen.
+    fn freeze_visible(&self) -> Vec<FrozenRow> {
+        let cols = usize::from(self.cols());
+        let top = self.term.scrollback_rows().unwrap_or(0);
+        (0..usize::from(self.rows()))
+            .map(|y| FrozenRow::capture(&self.term, top + y, cols))
+            .collect()
+    }
+
+    /// The primary screen's visible rows as the alternate screen came up,
+    /// while it is up (`capture-pane -a`).
+    pub(crate) fn saved_rows(&self) -> Option<Rc<Vec<FrozenRow>>> {
+        self.saved.clone()
     }
 
     /// Pin `mark` to the cursor's line. Under the alternate screen the
@@ -978,6 +999,36 @@ impl PaneTerm {
             self.clamp_history_to_retained();
         }
         self.generation += 1;
+    }
+
+    /// `resize-pane -T` (cmd-resize-pane.c:71-81, `grid_remove_history`):
+    /// the rows below the cursor, as many as there is history for, go from
+    /// the bottom and that many history rows come back at the top; the
+    /// cursor moves down with its row. The terminal keeps its size.
+    ///
+    /// Ghostty does it as a resize: the bottom rows are blanked, a smaller
+    /// screen trims them, and growing it again with the cursor on the last
+    /// row pulls the newest history rows back. The cursor is then put back
+    /// on its row and column.
+    pub fn trim_below_cursor(&mut self) {
+        let (cols, rows) = (self.cols(), self.rows());
+        let (cx, cy) = self.cursor();
+        let below = usize::from(rows - 1 - cy.min(rows - 1));
+        let adjust = below.min(self.history_size());
+        let Ok(n) = u16::try_from(adjust) else {
+            return;
+        };
+        if n == 0 || self.alternate_on() {
+            return;
+        }
+        let keep = rows - n;
+        self.term
+            .vt_write(format!("\x1b[{};1H\x1b[J\x1b[{keep};1H", keep + 1).as_bytes());
+        self.resize(cols, keep);
+        self.term.vt_write(format!("\x1b[{keep};1H").as_bytes());
+        self.resize(cols, rows);
+        self.term
+            .vt_write(format!("\x1b[{};{}H", cy + n + 1, cx.min(cols - 1) + 1).as_bytes());
     }
 
     /// Width in cells.
