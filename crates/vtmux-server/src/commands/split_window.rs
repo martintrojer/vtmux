@@ -266,11 +266,11 @@ pub fn exec(
             vtmux_core::options::Value::Choice(n),
         );
     }
-    if let Some(t) = args.value('T') {
-        let title = expand(server, found, t);
-        if let Some(p) = server.model.panes.get_mut(&new) {
-            p.term.set_title(&title);
-        }
+    let title = args.value('T').map(|t| expand(server, found, t));
+    if let Some(title) = &title
+        && let Some(p) = server.model.panes.get_mut(&new)
+    {
+        p.term.set_title(title);
     }
     // spawn_pane (spawn.c:590-612): pane-created, the new pane active
     // (window-pane-changed, above), then window-layout-changed.
@@ -279,6 +279,16 @@ pub fn exec(
         server.model.set_active(w, new);
     }
     server.model.layout_changed(w);
+    // cmd-split-window.c:264-275: -T fires pane-title-changed (whether or
+    // not the title changed) after spawn_pane's events.
+    if let Some(title) = title {
+        let ev = crate::events::Event::new("pane-title-changed")
+            .target(Found::from_pane(&server.model, new))
+            .pane("pane", new)
+            .window(&server.model, "window", w)
+            .text("new_title", title);
+        server.model.push_event(ev);
+    }
     // window_pop_zoom: -Z zooms the (possibly new) active pane.
     server.model.pop_zoom(w, zoom);
     // cmd-split-window.c:314-315.

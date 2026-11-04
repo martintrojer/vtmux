@@ -248,7 +248,7 @@ status = "pass"
 
 [tests."hooks-notify.sh"]
 status = "xfail"
-reason = "events up to pane-died pass (session groups included); the test then needs pane-title-changed from split-window -T, a pane's own OSC 0/2 title, title stacks, and later copy-mode and pane events"
+reason = "events up to split-window -T pass (session groups included); the test then needs pane-title-changed from a pane's own OSC 0/2 title, title stacks, and later copy-mode and pane events"
 
 [tests."hooks.sh"]
 status = "pass"
