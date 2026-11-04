@@ -100,11 +100,26 @@ impl SwitchMode {
     }
 }
 
+/// `window_switch_key` (window-switch.c:563-570) first: the flags go
+/// (`window_pane_key`), and C-p/C-k are Up, C-n/C-j Down, before the
+/// prompt sees them.
+#[must_use]
+pub fn remap(key: Key) -> Key {
+    let key = key.without_flags();
+    let c = Key::ascii;
+    if key == c(b'p').ctrl() || key == c(b'k').ctrl() {
+        Key::UP
+    } else if key == c(b'n').ctrl() || key == c(b'j').ctrl() {
+        Key::DOWN
+    } else {
+        key
+    }
+}
+
 /// The keys `window_switch_key` handles before its prompt: Enter and the
-/// ways out.
+/// ways out (`key` through [`remap`]).
 #[must_use]
 pub fn takes_first(key: Key) -> bool {
-    let key = key.without_flags();
     let c = Key::ascii;
     [
         c(b'\r'),
@@ -394,17 +409,9 @@ impl Server {
     }
 
     /// `window_switch_key` for a key the prompt did not use up.
+    /// `key` is already through [`remap`].
     pub(crate) fn switch_key(&mut self, p: PaneId, c: Option<ClientId>, key: Key) {
-        // window_pane_key: `key &= ~KEYC_MASK_FLAGS`.
-        let key = key.without_flags();
         let c_ = |b: u8| Key::ascii(b);
-        let key = if key == c_(b'p').ctrl() || key == c_(b'k').ctrl() {
-            Key::UP
-        } else if key == c_(b'n').ctrl() || key == c_(b'j').ctrl() {
-            Key::DOWN
-        } else {
-            key
-        };
         if key == c_(b'\r') {
             if self.switch_run(p, c) {
                 self.reset_mode(p);

@@ -3,8 +3,9 @@
 # switch-mode -wk`, a floating empty pane at the bottom listing every
 # window by name; typing filters them fuzzily (the matched columns in
 # switch-mode-match-style), Down moves, Enter switches the client there
-# and -k kills the pane. prefix BTab lists sessions; Escape leaves and
-# kills the pane.
+# and -k kills the pane. prefix BTab lists sessions; C-n and C-j move
+# down, C-p and C-k up (wrapping), before the search prompt sees them
+# (window_switch_key); Escape leaves and kills the pane.
 name = "switch_mode_keys"
 size = [80, 24]
 steps = [
@@ -37,6 +38,14 @@ steps = [
   { keys = "\u0002\u001b[Z" },
   { screen = {} },
   { keys = "\u001b[A" },
+  { screen = {} },
+  { keys = "\u000e" },
+  { screen = {} },
+  { keys = "\u000a" },
+  { screen = {} },
+  { keys = "\u0010" },
+  { screen = {} },
+  { keys = "\u000b\u000b" },
   { screen = {} },
   { keys = "\u001b" },
   { screen = {} },

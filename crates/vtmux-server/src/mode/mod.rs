@@ -639,6 +639,7 @@ impl Server {
             if let Some(client) = c
                 && !key.is_mouse()
             {
+                let key = switch::remap(key);
                 // prompt_key's result: HANDLED and NOT_HANDLED end it, a
                 // MOVE (or no prompt) goes on to the movement keys.
                 let shown = self
