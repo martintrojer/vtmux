@@ -310,11 +310,11 @@ fn lock(
         .arg(command)
         .status();
     raw.resume()?;
-    // The server went away meanwhile (kill-server drops a locked client):
-    // client.c CLIENT_EXIT_LOST_SERVER.
-    if send(stream, &ClientMsg::Unlock).is_err() {
-        return Ok(Some(Leave::exit(1, "server exited unexpectedly")));
-    }
+    // A client that left meanwhile (detach-client, its session killed)
+    // has its teardown and Exit waiting on a socket the server has
+    // closed: the failed send is ignored and the socket read as usual,
+    // where Exit, or EOF for a server that went (kill-server), ends it.
+    let _ = send(stream, &ClientMsg::Unlock);
     read_stdin(stream)
 }
 
@@ -374,7 +374,11 @@ fn relay(
                             SIGCONT if socket.suspended => {
                                 socket.suspended = false;
                                 raw.resume()?;
-                                send(stream, &ClientMsg::Wakeup)?;
+                                // As for Unlock: a client that left while
+                                // stopped finds its Exit on the socket,
+                                // read below.
+                                let _ = send(stream, &ClientMsg::Wakeup);
+                                socket.readable = true;
                                 // Input typed before the stop was never
                                 // read: edge-triggered, it raises no event.
                                 if let Some(exit) = read_stdin(stream)? {
@@ -398,10 +402,16 @@ fn relay(
             socket.suspend_now = false;
             suspend(out, raw)?;
         }
-        if let Some(command) = socket.lock.take()
-            && let Some(exit) = lock(stream, out, raw, &command)?
-        {
-            return Ok(exit);
+        if let Some(command) = socket.lock.take() {
+            if let Some(exit) = lock(stream, out, raw, &command)? {
+                return Ok(exit);
+            }
+            // What came while the command ran (the redraw, or the Exit of
+            // a client that left meanwhile) is read now, not on the next
+            // event.
+            if let Some(exit) = socket.pump(stream, out)? {
+                return Ok(exit);
+            }
         }
         out.ack(stream);
     }

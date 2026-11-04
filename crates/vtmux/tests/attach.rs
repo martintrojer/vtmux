@@ -6804,3 +6804,61 @@ fn lock_after_time_locks_an_idle_session() {
         a.exited(0);
     }
 }
+
+/// A client that leaves while its lock command runs (detach-client,
+/// its session killed) goes as tmux's does once the command exits, with
+/// the reason and status of its exit, not as if the server had gone.
+/// tmux keeps the connection until the client answers (`MSG_EXITING`
+/// after `MSG_UNLOCK`). Detached, the unlock starts the terminal again
+/// and the exit tears it down, off the lock screen's alternate screen;
+/// with the session gone (`c->session` NULL) neither happens, and tmux
+/// leaves the terminal on it.
+#[test]
+fn a_client_leaving_while_locked_exits_with_its_reason() {
+    for bin in bins() {
+        for (leave, reason, teardown) in [
+            (&["detach-client"][..], "[detached (from session a)]", true),
+            (&["kill-session", "-t", "a"][..], "[exited]", false),
+        ] {
+            let w = World::new(bin.clone());
+            for s in ["a", "b"] {
+                w.cli(&[
+                    "new", "-d", "-s", s, "-n", "w", "-x", "40", "-y", "9", "cat",
+                ]);
+                w.cli(&["select-pane", "-t", s, "-T", "p"]);
+            }
+            w.cli(&["set", "-g", "status-right", "R"]);
+            let go = w.home.path().join("go");
+            w.cli(&[
+                "set",
+                "-g",
+                "lock-command",
+                &format!(
+                    "echo LOCKED; while [ ! -e '{}' ]; do sleep 0.05; done",
+                    go.display()
+                ),
+            ]);
+            let mut a = w.attach(&["attach", "-t", "a"]);
+            let ctx = format!("{} {leave:?}", bin.display());
+            let limit = Duration::from_secs(5);
+            a.wait_labelled(&ctx, limit, |a| status_row(a).starts_with("[a] 0:w*"));
+            assert!(w.cli(&["lock-client"]).status.success(), "{ctx}");
+            a.wait_labelled(&ctx, limit, |a| a.text().contains("LOCKED"));
+            assert!(w.cli(leave).status.success(), "{ctx}");
+            thread::sleep(Duration::from_millis(200));
+            std::fs::write(&go, "").unwrap();
+            a.wait_labelled(&ctx, limit, |a| a.text().contains(reason));
+            a.exited(0);
+            let text = a.text();
+            let after = &text[text.rfind("LOCKED").unwrap()..];
+            match after.rfind("\x1b[?1049l") {
+                Some(left) => assert!(
+                    teardown && !after[left..].contains("\x1b[?1049h"),
+                    "{ctx}: {after:?}"
+                ),
+                None => assert!(!teardown, "{ctx}: no teardown after the lock: {after:?}"),
+            }
+            assert!(!text.contains("server exited unexpectedly"), "{ctx}");
+        }
+    }
+}

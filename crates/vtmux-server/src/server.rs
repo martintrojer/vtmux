@@ -1944,6 +1944,23 @@ impl Server {
     }
 
     fn exit_attached_with(&mut self, id: ClientId, last: &ServerMsg) {
+        // A suspended or locked client reads this once it is back. tmux
+        // keeps it until MSG_EXITING, which comes after its MSG_WAKEUP or
+        // MSG_UNLOCK; that starts the terminal again while the client
+        // still has its session (server-client.c:2741-2763), so tty_close
+        // writes the teardown, taking it off the lock screen. With its
+        // session gone (kill-session) nothing is started or torn down.
+        let session_alive = |server: &Self, c: &Client| {
+            c.attached
+                .is_some_and(|s| server.model.sessions.contains_key(&s))
+        };
+        if let Some(c) = self.clients.get(&id)
+            && c.suspended
+            && session_alive(self, c)
+            && let Some(c) = self.clients.get_mut(&id)
+        {
+            c.suspended = false;
+        }
         self.send_teardown(id);
         self.send(id, last);
         let left = self.client_window(id);
