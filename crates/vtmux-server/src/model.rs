@@ -304,6 +304,11 @@ pub struct Model {
     /// session, winlink, window and pane, valid only while all four still
     /// fit together ([`Model::marked`]).
     pub(crate) marked: Option<crate::target::Found>,
+    /// The session the marked winlink (`marked_pane.wl`) really is in,
+    /// when a link into another session moved it there without changing
+    /// `marked_pane.s` (server-fn.c:335-336): the mark is invalid until a
+    /// link back into the mark's session moves it home.
+    pub(crate) marked_link_elsewhere: Option<SessionId>,
 }
 
 impl Default for Model {
@@ -328,6 +333,7 @@ impl Default for Model {
             format_base: None,
             events: Vec::new(),
             marked: None,
+            marked_link_elsewhere: None,
         }
     }
 }
@@ -576,28 +582,49 @@ impl Model {
     /// the window at that index and the window the pane.
     #[must_use]
     pub fn marked(&self) -> Option<crate::target::Found> {
+        if self.marked_link_elsewhere.is_some() {
+            return None;
+        }
         self.marked.filter(|f| f.still_valid(self))
+    }
+
+    /// Set (or with `None` clear) the marked pane (`server_set_marked`,
+    /// `server_clear_marked`).
+    pub(crate) fn set_marked(&mut self, f: Option<crate::target::Found>) {
+        self.marked = f;
+        self.marked_link_elsewhere = None;
+    }
+
+    /// The session and index of the marked winlink as tmux holds it
+    /// (`marked_pane.wl`), whatever the mark's session.
+    fn marked_link(&self) -> Option<(SessionId, u32)> {
+        let m = self.marked?;
+        Some((self.marked_link_elsewhere.or(m.session)?, m.index?))
     }
 
     /// `window_lost_pane` (window.c:1191-1192): the pane leaving its window
     /// stops being the marked pane.
     pub fn clear_mark_of(&mut self, p: PaneId) {
         if self.marked.is_some_and(|f| f.pane == Some(p)) {
-            self.marked = None;
+            self.set_marked(None);
         }
     }
 
-    /// `server_link_window` (server-fn.c:335-336): a mark on the source
-    /// winlink moves to the new link. The pane is unchanged; the session
-    /// and index become the new link's.
+    /// `server_link_window` (server-fn.c:335-336) and cmd-swap-window.c:
+    /// 80-81: a mark on the source winlink points at the new winlink, but
+    /// `marked_pane.s` stays the old session. Within the session that is
+    /// the new index; into another session the mark's session no longer
+    /// has that winlink, so the mark is invalid (`cmd_find_valid_state`)
+    /// for good: no later move brings that winlink back.
     pub fn move_mark(&mut self, from: (SessionId, u32), to: (SessionId, u32)) {
-        if let Some(m) = self.marked.as_mut()
-            && m.session == Some(from.0)
-            && m.index == Some(from.1)
-        {
-            m.session = Some(to.0);
-            m.index = Some(to.1);
+        if self.marked_link() != Some(from) {
+            return;
         }
+        let Some(m) = self.marked.as_mut() else {
+            return;
+        };
+        m.index = Some(to.1);
+        self.marked_link_elsewhere = (m.session != Some(to.0)).then_some(to.0);
     }
 
     /// `server_is_marked`.
@@ -1077,11 +1104,6 @@ impl Model {
         session.link_tree = rb::Tree::default();
         session.sync_link_tree();
         session.current = moved.get(&session.current).copied().unwrap_or(base);
-        // session_renumber_windows (session.c:776-800): the mark follows
-        // its winlink.
-        if let Some(m) = self.marked.as_mut().filter(|m| m.session == Some(s)) {
-            m.index = m.index.and_then(|i| moved.get(&i).copied());
-        }
         for i in &mut session.last {
             if let Some(new) = moved.get(i) {
                 *i = *new;
@@ -1093,6 +1115,14 @@ impl Model {
             .collect();
         // Every winlink is made anew and appended to its window's list.
         let keys: Vec<u32> = session.windows.keys().copied().collect();
+        // session_renumber_windows (session.c:776-800): the mark follows
+        // its winlink.
+        if self.marked_link().is_some_and(|(ms, _)| ms == s)
+            && let Some(m) = self.marked.as_mut()
+        {
+            m.index = m.index.and_then(|i| moved.get(&i).copied());
+        }
+        let session = self.sessions.get_mut(&s).expect("session");
         session.link_seq.clear();
         for i in keys {
             self.link_stamp += 1;
@@ -1141,7 +1171,9 @@ impl Model {
             .map(|(i, f)| (shift(i), f))
             .collect();
         // The winlinks move, the mark with its one.
-        if let Some(m) = self.marked.as_mut().filter(|m| m.session == Some(s)) {
+        if self.marked_link().is_some_and(|(ms, _)| ms == s)
+            && let Some(m) = self.marked.as_mut()
+        {
             m.index = m.index.map(shift);
         }
         Some(idx)

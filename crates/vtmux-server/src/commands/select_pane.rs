@@ -128,15 +128,15 @@ fn mark(server: &mut Server, found: Found, wp: PaneId, clear: bool) {
     }
     let lwp = m.marked().and_then(|f| f.pane);
     if clear || m.is_marked(s, index, wp) {
-        m.marked = None;
+        m.set_marked(None);
     } else {
-        m.marked = Some(Found {
+        m.set_marked(Some(Found {
             session: Some(s),
             index: Some(index),
             window: Some(w),
             pane: Some(wp),
             new_index: None,
-        });
+        }));
     }
     let mwp = m.marked().and_then(|f| f.pane);
     let about = mwp.or(lwp).unwrap_or(wp);

@@ -5889,3 +5889,56 @@ fn marked_pane() {
         ]
     });
 }
+
+/// server_link_window (server-fn.c:335-336) and cmd-swap-window.c:80-81
+/// point the mark at the new winlink but keep its session: a link or move
+/// within the session moves the mark to the new index, one into another
+/// session leaves it invalid (`cmd_find_valid_state`: no mark, `~` is `no
+/// marked target`); a new window at the old index does not revive it, a
+/// move back into the mark's session does.
+#[test]
+fn marked_pane_across_sessions() {
+    compare("marked_pane_across_sessions", |w| {
+        let all = |w: &World| {
+            w.run(&[
+                "lsp",
+                "-a",
+                "-F",
+                "#S:#I.#P #{pane_id} m=#{pane_marked} ms=#{pane_marked_set} wf=#{window_flags}",
+            ])
+        };
+        vec![
+            w.run(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]),
+            w.run(&["new", "-d", "-s", "b", "-x", "40", "-y", "10", "cat"]),
+            w.run(&["neww", "-d", "-t", "b:1", "cat"]),
+            // move-window into another session.
+            w.run(&["selectp", "-m", "-t", "b:1.0"]),
+            w.run(&["movew", "-s", "b:1", "-t", "a:9"]),
+            all(w),
+            w.run(&["display", "-p", "-t", "~", "#{pane_id}"]),
+            // A new window where the marked one was is not marked.
+            w.run(&["neww", "-d", "-t", "b:1", "cat"]),
+            all(w),
+            w.run(&["killw", "-t", "b:1"]),
+            // Moved back into the mark's session, the winlink is valid again.
+            w.run(&["movew", "-s", "a:9", "-t", "b:1"]),
+            all(w),
+            w.run(&["display", "-p", "-t", "~", "#S:#I #{pane_id}"]),
+            // link-window into another session.
+            w.run(&["selectp", "-m", "-t", "a:0.0"]),
+            w.run(&["linkw", "-s", "a:0", "-t", "b:5"]),
+            all(w),
+            w.run(&["display", "-p", "-t", "~", "#{pane_id}"]),
+            // link-window within the session: the mark is the new link's.
+            w.run(&["selectp", "-m", "-t", "b:1.0"]),
+            w.run(&["linkw", "-s", "b:1", "-t", "b:7"]),
+            all(w),
+            w.run(&["display", "-p", "-t", "~", "#S:#I #{pane_id}"]),
+            // break-pane of a window's only pane into another session.
+            w.run(&["selectp", "-m", "-t", "b:7.0"]),
+            w.run(&["breakp", "-d", "-s", "b:7.0", "-t", "a:3"]),
+            all(w),
+            w.run(&["display", "-p", "-t", "~", "#{pane_id}"]),
+        ]
+    });
+}
