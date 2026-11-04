@@ -413,7 +413,22 @@ mod tests {
                 break (procs, got);
             }
         };
-        assert_eq!(got.len(), 1, "{got:?}");
+        let diag: Vec<_> = procs
+            .iter()
+            .filter(|p| p.args.contains(&tag))
+            .map(|p| {
+                (
+                    p.pid,
+                    p.ppid,
+                    p.args.clone(),
+                    procs
+                        .iter()
+                        .find(|q| q.pid == p.ppid)
+                        .map(|q| q.args.clone()),
+                )
+            })
+            .collect();
+        assert_eq!(got.len(), 1, "{got:?} DIAG {diag:#?}");
         assert!(got[0].contains(&orphan), "{got:?}");
         // Reap only ours (other worktrees' servers may be running).
         let pids: Vec<u32> = procs
