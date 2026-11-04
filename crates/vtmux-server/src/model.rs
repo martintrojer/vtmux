@@ -808,6 +808,19 @@ impl Model {
     /// [`Self::fix_panes`] leaving `skip` alone (`layout_fix_panes(w, wp)`,
     /// for a pane spawned zoomed, which keeps the window's size).
     pub fn fix_panes_except(&mut self, w: WindowId, skip: Option<PaneId>) {
+        self.fix_panes_resized_from(w, skip, None);
+    }
+
+    /// [`Self::fix_panes_except`] where `created` is a pane whose terminal
+    /// already has its cell's size but which tmux made at another size
+    /// (`window_add_pane` at the window's): it fires `pane-resized` from
+    /// that size in its turn.
+    pub fn fix_panes_resized_from(
+        &mut self,
+        w: WindowId,
+        skip: Option<PaneId>,
+        created: Option<(PaneId, (u32, u32))>,
+    ) {
         self.sync_borderless(w);
         let status = self.pane_status(w);
         let Some(window) = self.windows.get_mut(&w) else {
@@ -826,6 +839,7 @@ impl Model {
                     .is_some_and(crate::mode::Mode::hides_pane_status)
             })
         });
+        let mut resized = Vec::new();
         for p in window.panes.panes.iter().filter(|p| Some(**p) != skip) {
             // Panes hidden by a zoom keep their last rectangle.
             let Some(mut rect) = window.layout.pane_rect(*p) else {
@@ -836,9 +850,18 @@ impl Model {
             {
                 rect = *window.layout.root.get(&path).g();
             }
-            if let Some(pane) = self.panes.get_mut(p) {
-                pane.set_rect(rect);
+            if let Some(pane) = self.panes.get_mut(p)
+                && let Some(old) = pane.set_rect(rect)
+            {
+                resized.push((*p, old));
+            } else if let Some((c, old)) = created
+                && c == *p
+            {
+                resized.push((c, old));
             }
+        }
+        for (p, old) in resized {
+            self.fire_pane_resized(p, old);
         }
         self.panes_resized(w);
     }
@@ -1565,13 +1588,33 @@ impl Model {
         let Some(pane) = self.panes.get_mut(&p) else {
             return;
         };
-        let changed = (pane.rect.sx, pane.rect.sy) != (rect.sx, rect.sy);
-        pane.set_rect(rect);
+        let old = pane.set_rect(rect);
+        let changed = old.is_some();
         if changed && matches!(pane.modes.first(), Some(crate::mode::Mode::Panes(_))) {
             self.moving_cells = Some(cells.clone());
             self.panes_redrawn(p);
             self.moving_cells = None;
         }
+        if let Some(old) = old {
+            self.fire_pane_resized(p, old);
+        }
+    }
+
+    /// The event at the end of `window_pane_resize` (window.c:1731-1740).
+    fn fire_pane_resized(&mut self, p: PaneId, (old_width, old_height): (u32, u32)) {
+        let Some(pane) = self.panes.get(&p) else {
+            return;
+        };
+        let (w, width, height) = (pane.window, pane.rect.sx, pane.rect.sy);
+        let ev = crate::events::Event::new("pane-resized")
+            .target(crate::target::Found::from_pane(self, p))
+            .pane("pane", p)
+            .window(self, "window", w)
+            .int("width", width)
+            .int("height", height)
+            .int("old_width", old_width)
+            .int("old_height", old_height);
+        self.push_event(ev);
     }
 
     /// The window half of `spawn_window` with `SPAWN_RESPAWN`
@@ -1819,12 +1862,13 @@ impl Rect {
 impl Pane {
     /// `window_pane_resize` (window.c:1702-1740) plus the pane offsets: the
     /// terminal reflows at once; the program hears of a new size later,
-    /// from the queue [`Self::send_resizes`] works through.
-    pub fn set_rect(&mut self, rect: Geometry) {
+    /// from the queue [`Self::send_resizes`] works through. The old size
+    /// when the size changed, for `pane-resized`.
+    pub fn set_rect(&mut self, rect: Geometry) -> Option<(u32, u32)> {
         let from = (self.rect.sx, self.rect.sy);
         self.rect = rect;
         if from == (rect.sx, rect.sy) {
-            return;
+            return None;
         }
         self.resizes.push((from, (rect.sx, rect.sy)));
         self.term.resize(clamp16(rect.sx), clamp16(rect.sy));
@@ -1837,6 +1881,7 @@ impl Pane {
             Some(crate::mode::Mode::Clock(m)) => m.resize(size.0, size.1),
             _ => {}
         }
+        Some(from)
     }
 
     /// `server_client_check_pane_resize` (server-client.c:1984-2041): once

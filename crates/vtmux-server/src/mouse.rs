@@ -702,10 +702,11 @@ impl Server {
                 st.click_deadline = Some(Instant::now() + CLICK_TIMEOUT);
             }
         }
-        // Stop dragging if needed: the drag's button ends it. Outside every
-        // location (tmux's KEYC_MOUSE_LOCATION_NOWHERE, which no key binds)
-        // a drag still ends or goes on.
-        let mut b = b;
+        // Stop dragging if needed. Outside every location (tmux's
+        // KEYC_MOUSE_LOCATION_NOWHERE, which no key binds) a drag still
+        // ends or goes on. The end key keeps this event's button and
+        // modifiers (server-client.c:1158-1178 leaves `b` alone), so a
+        // Ctrl release is `C-MouseDragEnd1...`.
         if !matches!(
             kind,
             MouseKind::Drag
@@ -717,7 +718,6 @@ impl Server {
         {
             *released = st.drag_action.take().map(|a| (a, ev.clone()));
             kind = MouseKind::DragEnd;
-            b = st.drag_flag - 1;
             st.drag_flag = 0;
             st.last_pane = None;
         }

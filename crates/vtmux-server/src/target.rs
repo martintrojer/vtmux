@@ -195,15 +195,15 @@ pub fn current_preferring(model: &Model, origin: Origin, prefer: Prefer<'_>) -> 
         let f = Found::from_session(model, s);
         return f.valid().then_some(f);
     }
+    // cmd-find.c:909-928: the pane only picks the session (the best one
+    // with its window); the target is then that session's current window
+    // and its active pane, whichever window the pane is in.
     if let Some(p) = origin.inside_pane
         && let Some(pane) = model.panes.get(&p)
-        && let Some(mut f) = best_with_window(model, pane.window, prefer)
+        && let Some(s) = best_with_window(model, pane.window, prefer).and_then(|f| f.session)
     {
-        f.pane = model
-            .windows
-            .get(&pane.window)
-            .map(crate::model::Window::active);
-        return Some(f);
+        let f = Found::from_session(model, s);
+        return f.valid().then_some(f);
     }
     best_session(model, None, prefer).map(|s| Found::from_session(model, s))
 }

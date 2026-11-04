@@ -192,6 +192,7 @@ impl Server {
     fn subs_expand(&self, id: ClientId, found: Found, format: &str) -> String {
         let mut ctx = self.format_ctx(found, Some(id));
         ctx.jobs = None;
+        ctx.old_layouts = false;
         vtmux_core::format::expand_str_nojobs(format, &ctx)
     }
 

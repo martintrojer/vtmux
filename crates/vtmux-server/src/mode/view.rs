@@ -85,6 +85,7 @@ impl ViewMode {
         drop(self.term.take_replies());
         drop(self.term.take_passthrough());
         self.term.take_bells();
+        self.term.take_title_events();
         self.copy.view_added(&self.term, from);
         self.stale = false;
     }

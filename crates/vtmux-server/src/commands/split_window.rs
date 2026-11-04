@@ -267,7 +267,8 @@ pub fn exec(
     // that queued size changes nothing for the program, which started at
     // the cell's size, but sending it starts the pane's resize timer.
     let created = (window_rect.sx, window_rect.sy);
-    if created != (rect.sx, rect.sy) {
+    let assigned = !zoom && created != (rect.sx, rect.sy);
+    if assigned {
         pane.resizes.push((created, (rect.sx, rect.sy)));
     }
     server.model.options.add_pane(new, w);
@@ -294,7 +295,11 @@ pub fn exec(
         }
     }
     server.model.panes.insert(new, pane);
-    server.model.fix_panes_except(w, zoom.then_some(new));
+    // That resize is a window_pane_resize in layout_fix_panes, so it
+    // fires pane-resized, in window order with the other panes'.
+    server
+        .model
+        .fix_panes_resized_from(w, zoom.then_some(new), assigned.then_some((new, created)));
     let new_found = Found {
         session: Some(s),
         index: Some(index),

@@ -152,6 +152,7 @@ impl Server {
         drop(pane.term.take_replies());
         drop(pane.term.take_passthrough());
         pane.term.take_bells();
+        pane.term.take_title_events();
     }
 
     /// `server_client_handle_dead_key`: a key (not a mouse event or paste

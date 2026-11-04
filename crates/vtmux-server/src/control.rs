@@ -739,6 +739,7 @@ impl Server {
             // control_notify_layout_change (control-notify.c:99): the
             // client's own format tree.
             ctx.jobs = Some(self.job_handle(Some(id)));
+            ctx.old_layouts = self.old_layouts(Some(id));
             let line =
                 vtmux_core::rawstr::to_bytes(&vtmux_core::format::expand_str(TEMPLATE, &ctx))
                     .into_owned();

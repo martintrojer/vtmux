@@ -89,6 +89,10 @@ pub fn exec(
             }
         }
         let index = server.model.index_of(dst_s, w).unwrap_or(index);
+        // cmd-break-pane.c:145.
+        server
+            .model
+            .fire_pane_moved(wp, (w, Some(src_idx)), (w, Some(index)));
         (index, w)
     } else {
         if let Some(i) = idx
@@ -102,6 +106,11 @@ pub fn exec(
             .model
             .link_window(dst_s, new_w, idx)
             .map_err(EdgeError::Message)?;
+        // cmd-break-pane.c:185-187.
+        server.model.fire_window("window-created", new_w);
+        server
+            .model
+            .fire_pane_moved(wp, (w, Some(src_idx)), (new_w, Some(index)));
         if !detached {
             server.model.set_current(dst_s, index);
         }

@@ -1460,6 +1460,14 @@ impl Server {
             out.extend_from_slice(b"\x1b[?1004h");
         }
         let caps = crate::render::Caps::from_term(term);
+        // tty_apply_features (tty-features.c:562-563).
+        if term
+            .features()
+            .has(vtmux_core::term_features::Feature::Utf8)
+            && let Some(h) = c.hello.as_mut()
+        {
+            h.flags.utf8 = true;
+        }
         let changed = c.caps != Some(caps);
         c.caps = Some(caps);
         if !out.is_empty() {
@@ -1517,6 +1525,15 @@ impl Server {
             })?;
         client.decoder.set_terminal(&term);
         client.caps = Some(caps);
+        // tty_apply_features (tty-features.c:562-563): the utf8 feature
+        // marks the client UTF-8 (`-T utf8` with a C locale).
+        if term
+            .features()
+            .has(vtmux_core::term_features::Feature::Utf8)
+            && let Some(h) = client.hello.as_mut()
+        {
+            h.flags.utf8 = true;
+        }
         let mut term = term;
         term.set_utf8(client.hello.as_ref().is_some_and(|h| h.flags.utf8));
         client.term = Some(term);
@@ -3340,7 +3357,16 @@ impl Server {
         // format_create(cmdq_get_client(item), ...): the running command's
         // client owns the jobs, whatever client the formats describe.
         ctx.jobs = Some(self.job_handle(self.cmd_client));
+        ctx.old_layouts = self.old_layouts(self.cmd_client);
         ctx
+    }
+
+    /// `client` is a control client without `new-layouts`, which is dumped
+    /// v1 layouts (`LAYOUT_CUSTOM_OLD_FORMAT`, format.c:874-877).
+    pub fn old_layouts(&self, client: Option<ClientId>) -> bool {
+        client
+            .and_then(|id| self.clients.get(&id))
+            .is_some_and(|c| c.control.is_some() && !c.flags.new_layouts)
     }
 
     /// Most recent attached client (`cmd_find_current_client`, M0 one client).
@@ -3849,6 +3875,8 @@ impl Server {
         let host = &self.info.host;
         if !host.chars().any(char::is_control) {
             term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
+            // screen_init sets the title directly: no event.
+            term.take_title_events();
         }
         if ps.empty {
             term.feed(EMPTY_PANE_MODES);
@@ -4187,10 +4215,11 @@ impl Server {
         // input.c:2725-2740: a new title (OSC 0/2) or path
         // (OSC 7) redraws the status of the window's sessions.
         let retitled = (pane.term.title(), pane.term.pwd()) != before;
+        let titles = pane.term.take_title_events();
         pane.changed = true;
         // input.c:1061: new input while in a mode.
         pane.unseen_changes |= !pane.modes.is_empty();
-        let belled = pane.term.take_bells() != 0;
+        let bells = pane.term.take_bells();
         let redraw = pane.term.take_redraw();
         // An empty pane has no program to answer.
         let replies = pane.term.take_replies();
@@ -4218,12 +4247,26 @@ impl Server {
         if redraw {
             self.model.redraw_panes.insert(p);
         }
-        if retitled {
+        if retitled || !titles.is_empty() {
             self.model
                 .redraw(crate::model::Redraw::WindowStatus(window));
         }
-        if belled {
-            // input_c0_dispatch BEL: alerts_queue(WINDOW_BELL).
+        // input_fire_pane_title_changed (input.c:795-809): one event per
+        // OSC 0/2 and per title stack pop.
+        for title in titles {
+            let ev = crate::events::Event::new("pane-title-changed")
+                .target(crate::target::Found::from_pane(&self.model, p))
+                .pane("pane", p)
+                .window(&self.model, "window", window)
+                .text("new_title", title);
+            self.model.push_event(ev);
+        }
+        if bells != 0 {
+            // input_c0_dispatch BEL (input.c:1322-1326): pane-bell for
+            // each, whatever monitor-bell says, then alerts_queue.
+            for _ in 0..bells {
+                self.model.fire_pane("pane-bell", p);
+            }
             self.model.alerts_queue(window, alerts::BELL);
         }
         self.control_output(p, bytes);

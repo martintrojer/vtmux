@@ -43,7 +43,7 @@ pub fn exec(
     for pane in gone {
         server.close_pane_io(pane);
     }
-    respawn(server, item, args, (s, w, wp), "window")?;
+    respawn(server, item, args, (s, index, w, wp), "window")?;
     // spawn.c:228-238: session_select, then the group follows.
     server.model.set_current(s, index);
     server.model.group_sync_from(s);
