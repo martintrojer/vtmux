@@ -2187,16 +2187,12 @@ mod tests {
         );
     }
 
-    /// Non-M0 commands parse (arity and flags are validated) but resolve to
-    /// a table entry that reports `not implemented`.
+    /// Commands parse against their table entry: arity and flags are
+    /// validated before anything runs.
     #[test]
-    fn non_m0_commands_parse_but_do_not_run() {
+    fn commands_parse_against_their_entry() {
         let calls = parse_argv(&words(&["switch-mode"])).unwrap();
         assert_eq!(calls[0].entry.name, "switch-mode");
-        assert_eq!(
-            calls[0].entry.ensure_implemented().unwrap_err().to_string(),
-            "not implemented in vtmux yet: switch-mode"
-        );
         assert_eq!(
             argv_err(&["switch-mode", "-Q"]),
             "command switch-mode: unknown flag -Q"
