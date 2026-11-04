@@ -1,0 +1,54 @@
+name = "hooks_pane_events"
+# Pane events from what a pane's program writes and from layout changes.
+# pane-title-changed fires for each OSC 0/2 title and for each CSI 23 t
+# title pop, with the title it leaves (input.c:795-809, 2198-2212, 2725-2731);
+# a pane's starting title (the host name) fires nothing. pane-bell fires
+# for every BEL whatever monitor-bell says (input.c:1322-1326).
+# pane-resized fires from window_pane_resize (window.c:1702-1740) for each
+# pane whose size changes. pane-created fires on respawn with
+# created_respawn (spawn.c:73-111, 592). break-pane fires window-created and
+# pane-moved (cmd-break-pane.c:145, 185-187).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-g", "@t", "0"] },
+  { run = ["set-hook", "-g", "pane-title-changed", "set -gaF @t '|#{hook_pane}:#{hook_new_title}:#{pane_title}'"] },
+  { run = ["splitw", "-d", "-t", "a:w", "sh", "-c", "printf '\\033]2;one\\007\\033]0;two\\033\\\\\\033[22;0t\\033]2;three\\007\\033[23;0t\\033[23;0t'; tmux wait-for -S t; exec cat"] },
+  { wait_for = "t" },
+  { run = ["show", "-gv", "@t"] },
+  { run = ["set-hook", "-gu", "pane-title-changed"] },
+  { run = ["set", "-g", "@b", "0"] },
+  { run = ["setw", "-t", "a:w", "monitor-bell", "off"] },
+  { run = ["set-hook", "-g", "pane-bell", "set -gaF @b '|#{hook}:#{hook_pane}:#{hook_window}'"] },
+  { run = ["send-keys", "-t", "a:w.0", "-H", "07", "07", "0a"] },
+  { run = ["send-keys", "-t", "a:w.0", "-H", "07", "0a"] },
+  { run = ["set-hook", "-gu", "pane-bell"] },
+  { run = ["send-keys", "-t", "a:w.0", "-l", "x"] },
+  { run = ["display", "-p", "-t", "a:w.0", "#{pane_id}"] },
+  { run = ["show", "-gv", "@b"] },
+  { run = ["set", "-g", "@r", "0"] },
+  { run = ["set-hook", "-g", "pane-resized", "set -gaF @r '|#{hook_pane}:#{hook_old_width}x#{hook_old_height}->#{hook_width}x#{hook_height}'"] },
+  { run = ["resizep", "-t", "a:w.1", "-y", "8"] },
+  { run = ["resizep", "-t", "a:w.1", "-y", "8"] },
+  { run = ["splitw", "-d", "-h", "-t", "a:w.0", "cat"] },
+  { run = ["resize-window", "-t", "a:w", "-x", "60", "-y", "20"] },
+  { run = ["resizep", "-Z", "-t", "a:w.0"] },
+  { run = ["resizep", "-Z", "-t", "a:w.0"] },
+  { run = ["selectl", "-t", "a:w", "even-vertical"] },
+  { run = ["show", "-gv", "@r"] },
+  { run = ["set-hook", "-gu", "pane-resized"] },
+  { run = ["set", "-g", "@c", "0"] },
+  { run = ["set-hook", "-g", "pane-created", "set -gaF @c '|#{hook_pane}:#{hook_pane_command}:#{hook_created_empty}:#{hook_created_respawn}:#{hook_window_index}'"] },
+  { run = ["respawnp", "-k", "-t", "a:w.2", "cat"] },
+  { run = ["neww", "-d", "-t", "a:5", "-n", "r", "cat"] },
+  { run = ["respawnw", "-k", "-t", "a:r", "cat"] },
+  { run = ["show", "-gv", "@c"] },
+  { run = ["set-hook", "-gu", "pane-created"] },
+  { run = ["set", "-g", "@m", ""] },
+  { run = ["set-hook", "-g", "window-created", "set -gaF @m '|created:#{hook_window}'"] },
+  { run = ["set-hook", "-g", "pane-moved", "set -gaF @m '|moved:#{hook_pane}:#{hook_old_window}:#{hook_old_window_index}->#{hook_new_window}:#{hook_new_window_index}'"] },
+  { run = ["breakp", "-d", "-s", "a:w.2", "-n", "b", "-t", "a:7"] },
+  { run = ["breakp", "-d", "-s", "a:b.0", "-n", "c", "-t", "a:8"] },
+  { run = ["show", "-gv", "@m"] },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index} #{window_id} #{window_name}"] },
+]

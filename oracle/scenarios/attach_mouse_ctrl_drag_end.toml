@@ -1,0 +1,35 @@
+name = "attach_mouse_ctrl_drag_end"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["set", "-g", "@end", "none"] },
+  # The end of a drag is keyed with the release's button and modifiers
+  # (server-client.c:1158-1178), so a Ctrl release is C-MouseDragEnd1Pane
+  # and a plain one MouseDragEnd1Pane.
+  { run = ["bind", "-n", "C-MouseDrag1Pane", "set", "-g", "@drag", "ctrl"] },
+  { run = ["bind", "-n", "C-MouseDragEnd1Pane", "set", "-g", "@end", "ctrl"] },
+  { run = ["bind", "-n", "MouseDragEnd1Pane", "set", "-g", "@end", "plain"] },
+  { run = ["bind", "-n", "C-MouseDrag1Status", "set", "-g", "@drag", "ctrl-status"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { keys = "\u001b[<16;5;3M\u001b[<48;8;3M\u001b[<48;12;5M\u001b[<16;12;5m" },
+  { settle = {} },
+  { run = ["show", "-gv", "@drag"] },
+  { run = ["show", "-gv", "@end"] },
+  # Pressed with Ctrl, released without: the plain end key.
+  { run = ["set", "-g", "@end", "none"] },
+  { keys = "\u001b[<16;5;3M\u001b[<48;8;3M\u001b[<48;12;5M\u001b[<0;12;5m" },
+  { settle = {} },
+  { run = ["show", "-gv", "@end"] },
+  # A Ctrl drag from the status line, ending in the pane.
+  { run = ["set", "-g", "@end", "none"] },
+  { keys = "\u001b[<16;5;10M\u001b[<48;8;10M\u001b[<48;12;5M\u001b[<16;12;5m" },
+  { settle = {} },
+  { run = ["show", "-gv", "@drag"] },
+  { run = ["show", "-gv", "@end"] },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_floating_flag}"] },
+]

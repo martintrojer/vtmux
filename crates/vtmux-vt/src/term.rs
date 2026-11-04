@@ -267,9 +267,9 @@ pub struct PaneTerm {
     /// BELs seen since the last [`PaneTerm::take_bells`] (input.c
     /// `input_c0_dispatch`, `case '\007'`).
     bells: Rc<std::cell::Cell<u32>>,
-    /// A title set by the server (`select-pane -T`); the next OSC 0/2 from
-    /// the program replaces it, as both write the one `s->title`.
-    title_override: Rc<RefCell<Option<String>>>,
+    /// The server's title over Ghostty's, and the program's title changes
+    /// since the last [`PaneTerm::take_title_events`].
+    titles: Rc<RefCell<Titles>>,
     history_lines: usize,
     /// tmux's `GRID_HISTORY`: the pane was made with a non-zero limit
     /// (`grid_create`, grid.c:381-382), so it keeps history for good,
@@ -400,8 +400,8 @@ impl PaneTerm {
         let mouse_scan = Rc::clone(&mouse);
         let bells = Rc::new(std::cell::Cell::new(0u32));
         let belled = Rc::clone(&bells);
-        let title_override = Rc::new(RefCell::new(None));
-        let overridden = Rc::clone(&title_override);
+        let titles = Rc::new(RefCell::new(Titles::default()));
+        let retitled = Rc::clone(&titles);
         let registered = term
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
@@ -424,11 +424,7 @@ impl PaneTerm {
                     })
                 })
             })
-            .and_then(|t| {
-                t.on_title_changed(move |_| {
-                    overridden.borrow_mut().take();
-                })
-            })
+            .and_then(|t| t.on_title_changed(move |term| Titles::program(&retitled, term)))
             .and_then(|t| t.on_bell(move |_| belled.set(belled.get().saturating_add(1))))
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
             .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")))
@@ -456,7 +452,7 @@ impl PaneTerm {
             term,
             replies,
             bells,
-            title_override,
+            titles,
             history_lines,
             history: history_lines > 0,
             alt_collected: 0,
@@ -626,7 +622,7 @@ impl PaneTerm {
                 let title = (e == ScanEvent::Reset).then(|| self.title());
                 self.feed_piece(&bytes[i..=i]);
                 if let Some(title) = title {
-                    *self.title_override.borrow_mut() = Some(title);
+                    self.titles.borrow_mut().server = Some(title);
                 }
                 i += 1;
                 if e == ScanEvent::Reset {
@@ -634,11 +630,7 @@ impl PaneTerm {
                     c.reset();
                     self.cursor.set(c);
                 }
-                if e == ScanEvent::Osc133
-                    && let Some(payload) = self.scan.osc133.take()
-                {
-                    self.mark_cursor_line(&payload);
-                }
+                self.scanned_strings(e);
                 if matches!(e, ScanEvent::AltMode(_) | ScanEvent::Reset)
                     && (e == ScanEvent::Reset || self.alternate_on() != alternate)
                 {
@@ -647,6 +639,21 @@ impl PaneTerm {
                 if self.scan.take_resync() {
                     self.sync_charset();
                 }
+            }
+        }
+    }
+
+    /// What the scanner collected for an OSC 133 or an XTWINOPS title
+    /// stack sequence that just ended, applied after Ghostty saw it.
+    fn scanned_strings(&mut self, e: ScanEvent) {
+        if e == ScanEvent::Osc133
+            && let Some(payload) = self.scan.osc133.take()
+        {
+            self.mark_cursor_line(&payload);
+        }
+        if e == ScanEvent::TitleStack {
+            for push in std::mem::take(&mut self.scan.title_ops) {
+                self.title_stack_op(push);
             }
         }
     }
@@ -1242,7 +1249,7 @@ impl PaneTerm {
     /// Pane title as tmux stores it (`screen_set_title`, screen.c:264-274).
     #[must_use]
     pub fn title(&self) -> String {
-        if let Some(t) = self.title_override.borrow().as_ref() {
+        if let Some(t) = self.titles.borrow().server.as_ref() {
             return t.clone();
         }
         self.term
@@ -1251,11 +1258,39 @@ impl PaneTerm {
             .unwrap_or_default()
     }
 
+    /// The title changes the program made since the last call (OSC 0/2,
+    /// and every `CSI 23 t`), each with the title it reported, oldest
+    /// first (`input_fire_pane_title_changed`, input.c:795-809).
+    pub fn take_title_events(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.titles.borrow_mut().events)
+    }
+
+    /// `CSI 22 t` (`push`) or `CSI 23 t` (input.c:2187-2212). A push keeps
+    /// the title on a stack of at most ten (`screen_push_title`); a pop
+    /// restores the newest, if any (`screen_pop_title`), and reports the
+    /// title either way.
+    fn title_stack_op(&mut self, push: bool) {
+        let title = self.title();
+        let mut titles = self.titles.borrow_mut();
+        if push {
+            titles.stack.truncate(9);
+            titles.stack.insert(0, title);
+            return;
+        }
+        if !titles.stack.is_empty() {
+            let title = titles.stack.remove(0);
+            titles.server = Some(title);
+        }
+        drop(titles);
+        let title = self.title();
+        self.titles.borrow_mut().event(&title);
+    }
+
     /// Set the title from the server side (`select-pane -T`,
     /// `split-window -T`): `screen_set_title(s, title, 0)`, a trusted
     /// clean, so `#(` stays.
     pub fn set_title(&mut self, title: &str) {
-        *self.title_override.borrow_mut() = Some(clean_name(title, false));
+        self.titles.borrow_mut().server = Some(clean_name(title, false));
     }
 
     /// Path from OSC 7 as tmux stores it (`screen_set_path`, screen.c:278-288).
@@ -1668,6 +1703,9 @@ struct AltModeScanner {
     /// The private mode sequence just ended set (`true`) or reset
     /// synchronized output (`?2026`); [`PaneTerm::feed`] takes it.
     sync: Option<bool>,
+    /// The title stack operations of the XTWINOPS that just ended, in
+    /// order: `true` a push, `false` a pop.
+    title_ops: Vec<bool>,
 }
 
 /// Which mouse events the pane program asked for: tmux's mutually exclusive
@@ -1829,6 +1867,92 @@ fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
     Some(out)
 }
 
+/// Title events kept for [`PaneTerm::take_title_events`]; older ones are
+/// dropped from a terminal nobody drains.
+const MAX_TITLE_EVENTS: usize = 64;
+
+/// A pane's title as tmux keeps it, beside Ghostty's.
+#[derive(Debug, Default)]
+struct Titles {
+    /// A title set by the server (`select-pane -T`, a title pop, RIS
+    /// keeping the old one); the next OSC 0/2 from the program replaces it,
+    /// as both write the one `s->title`.
+    server: Option<String>,
+    /// Each title change from the program, with the title it reported
+    /// (`input_fire_pane_title_changed`), oldest first.
+    events: Vec<String>,
+    /// tmux's title stack (`s->titles`, `CSI 22 t` / `CSI 23 t`), newest
+    /// first; Ghostty ignores both.
+    stack: Vec<String>,
+}
+
+impl Titles {
+    /// An OSC 0/2 from the program: it replaces the server's title, and
+    /// the event carries the OSC's text (input.c:2725-2731).
+    fn program(titles: &RefCell<Self>, term: &Terminal<'_, '_>) {
+        let mut titles = titles.borrow_mut();
+        titles.server = None;
+        titles.event(term.title().unwrap_or_default());
+    }
+
+    /// Queue a title event; a terminal nobody drains (a popup) keeps the
+    /// newest [`MAX_TITLE_EVENTS`].
+    fn event(&mut self, title: &str) {
+        if self.events.len() >= MAX_TITLE_EVENTS {
+            self.events.remove(0);
+        }
+        self.events.push(title.to_owned());
+    }
+}
+
+/// The title stack operations in an XTWINOPS (`input_csi_dispatch_winops`,
+/// input.c:2124-2220): `true` for each `22;0` or `22;2` (push), `false`
+/// for each `23;0` or `23;2` (pop), walking the parameters as tmux does.
+/// A missing or string parameter where a number is read stops the walk.
+fn winops_title_ops(raw: &[u8]) -> Vec<bool> {
+    let mut ops = Vec::new();
+    let Some(params) = parse_params(raw) else {
+        return ops;
+    };
+    // input_get(ictx, m, 0, -1).
+    let get = |m: usize| match params.get(m) {
+        Some(Param::Num(n)) => Some(*n),
+        _ => None,
+    };
+    let mut m = 0;
+    while let Some(n) = get(m) {
+        match n {
+            3 | 4 | 8 => {
+                m += 1;
+                if get(m).is_none() {
+                    return ops;
+                }
+                m += 1;
+                if get(m).is_none() {
+                    return ops;
+                }
+            }
+            9 | 10 => {
+                m += 1;
+                if get(m).is_none() {
+                    return ops;
+                }
+            }
+            22 | 23 => {
+                m += 1;
+                match get(m) {
+                    None => return ops,
+                    Some(0 | 2) => ops.push(n == 22),
+                    Some(_) => {}
+                }
+            }
+            _ => {}
+        }
+        m += 1;
+    }
+    ops
+}
+
 /// What [`AltModeScanner`] found; reported on the sequence's final byte.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScanEvent {
@@ -1846,6 +1970,8 @@ enum ScanEvent {
     Osc133,
     /// `ESC P`: a DCS starts (on the `P`).
     DcsStart,
+    /// `CSI 22 t` or `CSI 23 t`: `AltModeScanner::title_ops` has them.
+    TitleStack,
     /// A byte tmux ignores inside a CSI (0x7f-0xff, input.c:579, 597, 612,
     /// 628) without leaving it: Ghostty must not see it.
     Skip,
@@ -2150,6 +2276,13 @@ impl AltModeScanner {
                     }
                     self.cursor.set(c);
                     self.mouse.set(m);
+                }
+                None
+            }
+            (false, None, b't') if !self.other && !self.csi_ignored => {
+                self.title_ops = winops_title_ops(&self.params);
+                if !self.title_ops.is_empty() {
+                    return Some(ScanEvent::TitleStack);
                 }
                 None
             }
@@ -2868,6 +3001,7 @@ mod tests {
                     | ScanEvent::Osc133
                     | ScanEvent::DcsStart
                     | ScanEvent::Sync
+                    | ScanEvent::TitleStack
                     | ScanEvent::Skip => None,
                 })
                 .collect::<Vec<u8>>()

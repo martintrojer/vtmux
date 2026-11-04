@@ -233,8 +233,7 @@ status = "pass"
 status = "pass"
 
 [tests."hooks-notify.sh"]
-status = "xfail"
-reason = "events up to split-window -T pass (session groups included); the test then needs pane-title-changed from a pane's own OSC 0/2 title, title stacks, and later copy-mode and pane events"
+status = "pass"
 
 [tests."hooks.sh"]
 status = "pass"
@@ -338,7 +337,7 @@ status = "pass"
 
 [tests."layout-custom.sh"]
 status = "xfail"
-reason = "a control client that has not asked for new-layouts is dumped the v2 JSON layout: got `{\"V\":2,\"L\":{...}}`, expected the v1 string `020a,80x24,0,0{40x24,0,0,1,39x24,41,0,2}`"
+reason = "v1 dumps for control clients and the double %layout-change of a v1 layout pass (oracle control_layout_v1); the floating-zoom loop then needs `new-pane -A` (PANE_FLOATOVERZOOM: a float kept above a zoomed pane): `not implemented in vtmux yet: new-pane -A`"
 
 [tests."layout-nesting-limit.sh"]
 status = "pass"
@@ -372,8 +371,7 @@ status = "pass"
 status = "pass"
 
 [tests."new-pane-mouse-status.sh"]
-status = "xfail"
-reason = "Ctrl-drag from the status line: the `C-MouseDragEnd1Pane` binding is not dispatched, `got @drag-end '', expected 'done'` (no new-pane error; the script's new-pane use comes after)"
+status = "pass"
 
 [tests."new-pane-mouse.sh"]
 status = "pass"
@@ -440,7 +438,7 @@ status = "pass"
 
 [tests."screen-redraw-bidi.sh"]
 status = "xfail"
-reason = "attach-session without -t switches to window 0 where tmux keeps the session's current window (the script's `new_scene` then `respawn-pane -k 'tmux attach'` shows BIDI-BASE not BIDI-LEFT); then needs the Bidi terminal override (isolates)"
+reason = "bidi-single passes ($TMUX_PANE picks the session, not the window: cli tmux_pane_picks_the_session_not_the_window); bidi-split needs the Bidi terminal override's isolates (U+2069 before and U+2066 after each vertical border span, screen-redraw.c:1256-1264), which vtmux does not draw"
 
 [tests."screen-redraw-cache.sh"]
 status = "xfail"
@@ -551,7 +549,7 @@ status = "pass"
 
 [tests."terminal-feature-utf8.sh"]
 status = "xfail"
-reason = "`-T utf8` (terminal feature) does not set client_utf8 for a client run with LC_ALL=C: `utf8 terminal feature did not set client_utf8` (flaky)"
+reason = "`-T utf8` sets client_utf8 (attach utf8_terminal_feature_sets_client_utf8); under the harness the script's `env -i` drops the private TMUX_TMPDIR, so the nested client never reaches the inner server (reference tmux fails the same way); run plainly it then fails on `#{I/f:utf8}`: the `I` format modifier (client feature/capability/environment lookup) is not implemented"
 flaky = true
 
 [tests."theme-report.sh"]
@@ -579,7 +577,7 @@ reason = "missing flag set-hook -B (monitor hooks, monitor.c): `not supported in
 
 [tests."wait-for-client-lost.sh"]
 status = "xfail"
-reason = "server log (`-vv` writes tmux-server-PID.log in cwd) is not written: `awk: cannot open .../tmux-server-*.log`; the test greps it for wait-channel debug lines"
+reason = "server log (`-vv` writes tmux-server-PID.log in cwd) is not written: `client N was not freed` (the awk finds no log); the test greps tmux's debug lines (`IDENTIFY_CLIENTPID`, `free client`, `remove empty wait channel`). With those checks removed the wait/lock/event releases all pass; emitting tmux's debug log needs a design decision"
 
 [tests."window-index-limit.sh"]
 status = "pass"

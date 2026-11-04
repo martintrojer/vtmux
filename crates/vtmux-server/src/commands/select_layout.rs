@@ -97,10 +97,13 @@ fn select(
     };
     let window = server.model.windows.get_mut(&w).expect("target window");
     let before = window.panes.active;
-    if let Err(cause) = window.layout.select_custom(w, &mut window.panes, &name) {
-        window.old_layout = old;
-        return Err(EdgeError::Message(format!("{cause}: {name}")).into());
-    }
+    let v1 = match window.layout.select_custom(w, &mut window.panes, &name) {
+        Ok(v1) => v1,
+        Err(cause) => {
+            window.old_layout = old;
+            return Err(EdgeError::Message(format!("{cause}: {name}")).into());
+        }
+    };
     // layout_parse_apply_ctx sets the "a" pane with window_set_active_pane,
     // which stamps its active point.
     if let Some(active) = window.panes.active
@@ -109,6 +112,12 @@ fn select(
         server.model.stamp_active(active);
     }
     server.model.fix_panes(w);
+    // layout_parse (layout-custom.c:717-721): "backwards compatibility", a
+    // v1 layout fires window-layout-changed itself, so it gets two.
+    if v1 {
+        server.recalculate_size(w, false);
+        server.model.layout_changed(w);
+    }
     Ok(true)
 }
 

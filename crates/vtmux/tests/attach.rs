@@ -6918,3 +6918,32 @@ fn choose_client_info_view_shows_the_terminal() {
         );
     }
 }
+
+/// `-T utf8` marks a client UTF-8 when its locale does not (`LC_ALL=C`):
+/// `tty_apply_features` sets `CLIENT_UTF8` for the utf8 feature
+/// (tty-features.c:562-563), so `#{client_utf8}` is 1; without it the
+/// client is not UTF-8.
+#[test]
+fn utf8_terminal_feature_sets_client_utf8() {
+    let mut outputs = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        w.cli(&["new", "-d", "-s", "s", "-n", "w", "cat"]);
+        w.cli(&["set", "-g", "status", "off"]);
+        let mut seen = Vec::new();
+        for features in [&["-T", "utf8"][..], &[][..]] {
+            let mut args = features.to_vec();
+            args.extend(["attach", "-t", "s"]);
+            let mut a = w.attach_env(&args, 40, 10, &[("LC_ALL", "C")]);
+            a.wait(|a| a.text().contains("\x1b[?1049h"));
+            let out = w.cli(&["lsc", "-F", "u8=#{client_utf8}"]);
+            seen.push(String::from_utf8_lossy(&out.stdout).into_owned());
+            w.cli(&["detach-client", "-s", "s"]);
+            a.exited(0);
+        }
+        w.cli(&["kill-server"]);
+        outputs.push(seen);
+    }
+    assert_eq!(outputs[0], ["u8=1\n", "u8=0\n"]);
+    assert_eq!(outputs[0], outputs[1], "left vtmux, right tmux 3.8");
+}

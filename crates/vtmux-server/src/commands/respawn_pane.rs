@@ -35,7 +35,7 @@ pub fn exec(
         ))
         .into());
     }
-    respawn(server, item, args, (s, w, wp), "pane")?;
+    respawn(server, item, args, (s, index, w, wp), "pane")?;
     // cmd-respawn-pane.c:92: PANE_REDRAW.
     server.model.redraw_panes.insert(wp);
     Ok(())
@@ -48,7 +48,7 @@ pub(super) fn respawn(
     server: &mut Server,
     item: &Item,
     args: &Args,
-    (s, w, wp): (SessionId, WindowId, PaneId),
+    (s, index, w, wp): (SessionId, u32, WindowId, PaneId),
     what: &str,
 ) -> Result<(), CmdError> {
     let cwd = start_dir(server, item, args, s);
@@ -82,6 +82,9 @@ pub(super) fn respawn(
             empty: args.flag('E'),
         })
         .map_err(|e| EdgeError::Message(format!("respawn {what} failed: fork failed: {e}")))?;
+    // spawn_pane (spawn.c:592): pane-created with created_respawn, for
+    // respawn-window too (its spawn_window ends in spawn_pane).
+    server.fire_pane_created(s, index, wp, args.flag('E'), true);
     Ok(())
 }
 

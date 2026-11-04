@@ -1,0 +1,267 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "control_layout_v1",
+  "inputs": {
+    "name": "control_layout_v1",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "a",
+          "cat"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "display-message",
+            "-p",
+            "-t",
+            "a:w",
+            "#{window_layout} #{window_visible_layout}"
+          ],
+          "id": "d1"
+        }
+      },
+      {
+        "control_close": {
+          "id": "d1"
+        }
+      },
+      {
+        "run": [
+          "display-message",
+          "-p",
+          "-t",
+          "a:w",
+          "#{window_layout}"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "old"
+        }
+      },
+      {
+        "control_send": {
+          "id": "old",
+          "line": "display-message -p -t a:w '#{window_layout}'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "old",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "select-layout",
+          "-t",
+          "a:w",
+          "{\"V\":2,\"L\":{\"t\":\"v\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":80,\"h\":9,\"x\":0,\"y\":0,\"i\":0},{\"t\":\"p\",\"w\":80,\"h\":14,\"x\":0,\"y\":10,\"i\":1}]}}"
+        ]
+      },
+      {
+        "run": [
+          "display-message",
+          "-p",
+          "-t",
+          "a:w",
+          "#{window_layout}"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "old",
+          "line": "display-message -p marker1"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "old",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "select-layout",
+          "-t",
+          "a:w",
+          "9295,80x24,0,0[80x11,0,0,0,80x12,0,12,1]"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "old",
+          "line": "display-message -p marker2"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "old",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "old"
+        }
+      },
+      {
+        "control": {
+          "argv": [
+            "display-message",
+            "-p",
+            "-t",
+            "a:w",
+            "#{window_layout}"
+          ],
+          "id": "d2"
+        }
+      },
+      {
+        "control_close": {
+          "id": "d2"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1} 8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}",
+          "%end <TIME> #1 0",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "{\"V\":2,\"L\":{\"t\":\"h\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":40,\"h\":24,\"x\":0,\"y\":0,\"l\":0,\"i\":0,\"I\":\"%0\"},{\"t\":\"p\",\"w\":39,\"h\":24,\"x\":41,\"y\":0,\"a\":true,\"i\":1,\"I\":\"%1\"}]}}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "{\"V\":2,\"L\":{\"t\":\"v\",\"w\":80,\"h\":24,\"x\":0,\"y\":0,\"c\":[{\"t\":\"p\",\"w\":80,\"h\":9,\"x\":0,\"y\":0,\"i\":0,\"I\":\"%0\"},{\"t\":\"p\",\"w\":80,\"h\":14,\"x\":0,\"y\":10,\"a\":true,\"i\":1,\"I\":\"%1\"}]}}\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}",
+          "%end <TIME> #2 1",
+          "%layout-change @0 09c9,80x24,0,0[80x9,0,0,0,80x14,0,10,1] 09c9,80x24,0,0[80x9,0,0,0,80x14,0,10,1] *",
+          "%begin <TIME> #3 1",
+          "marker1",
+          "%end <TIME> #3 1",
+          "%layout-change @0 9295,80x24,0,0[80x11,0,0,0,80x12,0,12,1] 9295,80x24,0,0[80x11,0,0,0,80x12,0,12,1] *",
+          "%layout-change @0 9295,80x24,0,0[80x11,0,0,0,80x12,0,12,1] 9295,80x24,0,0[80x11,0,0,0,80x12,0,12,1] *",
+          "%begin <TIME> #4 1",
+          "marker2",
+          "%end <TIME> #4 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "9295,80x24,0,0[80x11,0,0,0,80x12,0,12,1]",
+          "%end <TIME> #1 0",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

@@ -511,21 +511,24 @@ impl super::Layout {
     }
 
     /// `select-layout <string>`: parse `input` and make it the layout.
+    /// `Ok(true)` for a v1 layout (`pctx.version == 1`), which tmux
+    /// announces with an extra window-layout-changed (layout-custom.c:719).
     pub fn select_custom(
         &mut self,
         window: WindowId,
         win: &mut WindowPanes,
         input: &str,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         let parsed = parse(window, input, &self.pane_list(win))?;
         if let Some((sx, sy)) = parsed.resize {
             self.sx = sx;
             self.sy = sy;
         }
         self.root = parsed.root;
+        let v1 = parsed.state.is_none();
         if let Some(state) = parsed.state {
             state.apply(win, &self.root);
         }
-        Ok(())
+        Ok(v1)
     }
 }

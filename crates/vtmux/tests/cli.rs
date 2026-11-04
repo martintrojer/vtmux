@@ -6625,3 +6625,46 @@ fn codepoint_widths_reach_the_pane_grid() {
         runs
     });
 }
+
+/// `$TMUX_PANE` names the pane an unattached client runs in, which picks
+/// the session (the best one holding the pane's window); the target is then
+/// that session's current window and its active pane, not the named pane's
+/// window (cmd-find.c `cmd_find_from_client`, 903-931).
+#[test]
+fn tmux_pane_picks_the_session_not_the_window() {
+    compare("tmux_pane_picks_the_session_not_the_window", |w| {
+        let fmt = "#{session_name}:#{window_index}.#{pane_index} #{pane_id}";
+        // raw_env clears TMUX_PANE after its extra variables.
+        let with_pane = |pane: &str, args: &[&str]| {
+            let out = Command::new(&w.bin)
+                .args(["-L", &w.label, "-f", "/dev/null"])
+                .args(args)
+                .current_dir(w.dir())
+                .env_remove("TMUX")
+                .env("TMUX_PANE", pane)
+                .env("TMUX_TMPDIR", w.dir())
+                .env("SHELL", "/bin/sh")
+                .output()
+                .expect("run binary");
+            Run {
+                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                code: out.status.code().unwrap_or(-1),
+            }
+        };
+        vec![
+            w.run(&["new", "-d", "-s", "a", "-n", "w0", "cat"]),
+            w.run(&["neww", "-d", "-t", "a:1", "-n", "w1", "cat"]),
+            w.run(&["splitw", "-d", "-t", "a:1", "cat"]),
+            w.run(&["selectw", "-t", "a:1"]),
+            w.run(&["new", "-d", "-s", "b", "-n", "w2", "cat"]),
+            with_pane("%0", &["display", "-p", fmt]),
+            with_pane("%2", &["display", "-p", fmt]),
+            with_pane("%3", &["display", "-p", fmt]),
+            with_pane("%9", &["display", "-p", fmt]),
+            with_pane("%0", &["selectp", "-t", ".1"]),
+            w.run(&["display", "-p", "-t", "a", fmt]),
+            w.run(&["display", "-p", "-t", "a:0", fmt]),
+        ]
+    });
+}

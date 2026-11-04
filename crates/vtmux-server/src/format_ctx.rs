@@ -106,12 +106,6 @@ pub struct ClientView {
 }
 
 impl ClientView {
-    /// A control client without `new-layouts` (`LAYOUT_CUSTOM_OLD_FORMAT`).
-    #[must_use]
-    pub fn old_layouts(&self) -> bool {
-        self.control && !self.flags.new_layouts
-    }
-
     /// `server_client_get_flags` (server-client.c:3163-3199) for the flags
     /// vtmux clients have: every listed client is attached.
     fn flags(&self) -> String {
@@ -154,6 +148,10 @@ pub struct Ctx<'a> {
     /// The `#()` job cache this expansion reaches (`ft->client`, `ft->tag`,
     /// `ft->flags`); without one `#()` is empty.
     pub jobs: Option<JobHandle>,
+    /// The client the tree was created for (`ft->client`, not `ft->c`) is a
+    /// control client without `new-layouts`, so layouts dump as v1
+    /// (format.c `format_cb_window_layout`, `LAYOUT_CUSTOM_OLD_FORMAT`).
+    pub old_layouts: bool,
 }
 
 impl<'a> Ctx<'a> {
@@ -190,6 +188,7 @@ impl<'a> Ctx<'a> {
             client: None,
             buffer: None,
             jobs: None,
+            old_layouts: false,
         }
     }
 
@@ -200,6 +199,7 @@ impl<'a> Ctx<'a> {
         c.clients = Rc::clone(&self.clients);
         c.client = client;
         // format_create(c, item, FORMAT_NONE, ft->flags): the client, the flags.
+        c.old_layouts = self.old_layouts;
         c.jobs = self.jobs.clone().map(|j| j.with_tag(0));
         c
     }
@@ -512,14 +512,8 @@ impl<'a> Ctx<'a> {
             // format_cb_window_layout: the saved layout while zoomed.
             // format.c:859-896: a control client without new-layouts sees
             // the v1 form.
-            "window_layout" if self.client.as_ref().is_some_and(ClientView::old_layouts) => {
-                w.full_layout().dump_v1()
-            }
-            "window_visible_layout"
-                if self.client.as_ref().is_some_and(ClientView::old_layouts) =>
-            {
-                w.layout.dump_v1()
-            }
+            "window_layout" if self.old_layouts => w.full_layout().dump_v1(),
+            "window_visible_layout" if self.old_layouts => w.layout.dump_v1(),
             "window_layout" => w.full_layout().dump_v2(&self.layout_panes(w))?,
             "window_visible_layout" => w.layout.dump_v2(&self.layout_panes(w))?,
             _ => return self.winlink_value(w, wl, name),
