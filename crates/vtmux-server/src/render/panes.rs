@@ -1,9 +1,10 @@
 //! The screen of `panes-mode` (window-panes.c:709-875 `window_panes_draw_*`):
 //! each tiled pane of the source window in its place, scaled down when the
 //! screen is smaller than the window, with its number over it, and the
-//! borders between the panes from `display-panes-border-style`.
-//!
-//! Floating panes are not drawn: vtmux cannot make them yet.
+//! borders between the panes from `display-panes-border-style`. Floating
+//! panes go over them from the bottom of the z-order up, each on a cleared
+//! area inside a frame in the border style, whatever its own
+//! `pane-border-lines`.
 
 use vtmux_core::colour::Colour;
 use vtmux_core::ids::{PaneId, WindowId};
@@ -229,6 +230,110 @@ impl Borders {
             };
             self.hline(x, x2, y);
         }
+    }
+}
+
+impl Borders {
+    /// An empty map of the same size and scale.
+    fn blank(&self) -> Self {
+        Self {
+            map: vec![0; self.map.len()],
+            ..*self
+        }
+    }
+
+    /// Put the marked border cells on the canvas in `style`.
+    fn draw(&self, canvas: &mut Canvas, style: Style) {
+        let cols = self.dsx as usize;
+        for (i, &mask) in self.map.iter().enumerate() {
+            if mask != 0 {
+                canvas.put(
+                    u32::try_from(i % cols).unwrap_or(0),
+                    u32::try_from(i / cols).unwrap_or(0),
+                    Cell {
+                        text: border_glyph(mask).into(),
+                        width: 1,
+                        style,
+                        acs: true,
+                        link: false,
+                        tab: false,
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// `window_panes_get_floating_borders` (window-panes.c:401-424): the
+/// frame round a floating cell on the screen, `-1` for a side at the
+/// window's edge.
+struct Frame {
+    x: i64,
+    y: i64,
+    x2: i64,
+    y2: i64,
+}
+
+fn floating_frame(g: &Geometry, b: &Borders) -> Frame {
+    let (xoff, yoff) = (i64::from(g.xoff), i64::from(g.yoff));
+    Frame {
+        x: if xoff == 0 { -1 } else { b.map_x(xoff - 1) },
+        y: if yoff == 0 { -1 } else { b.map_y(yoff - 1) },
+        x2: b.map_x(xoff + i64::from(g.sx)),
+        y2: b.map_y(yoff + i64::from(g.sy)),
+    }
+}
+
+impl Frame {
+    /// `window_panes_clear_floating_area`: blanks over the frame and what
+    /// it holds, inside the screen.
+    fn clear(&self, canvas: &mut Canvas) {
+        let (cols, rows) = (i64::from(canvas.snap.cols), i64::from(canvas.snap.rows));
+        let (x, y) = (self.x.max(0), self.y.max(0));
+        let (x2, y2) = (self.x2.min(cols - 1), self.y2.min(rows - 1));
+        if x2 < x || y2 < y {
+            return;
+        }
+        let blank = Cell {
+            text: " ".into(),
+            width: 1,
+            ..Cell::default()
+        };
+        for yy in y..=y2 {
+            for xx in x..=x2 {
+                let n = |v: i64| u32::try_from(v).unwrap_or(0);
+                canvas.put(n(xx), n(yy), blank.clone());
+            }
+        }
+    }
+
+    /// `window_panes_clip_floating_pane` (window-panes.c:426-457): the
+    /// area inside the frame; `None` when nothing is left.
+    fn clip(&self, a: &Area, (dsx, dsy): (u32, u32)) -> Option<Area> {
+        let (mut bx, mut by) = (i64::from(a.x), i64::from(a.y));
+        let (mut bx2, mut by2) = (bx + i64::from(a.sx) - 1, by + i64::from(a.sy) - 1);
+        if self.x >= 0 && bx <= self.x {
+            bx = self.x + 1;
+        }
+        if self.y >= 0 && by <= self.y {
+            by = self.y + 1;
+        }
+        if self.x2 < i64::from(dsx) && bx2 >= self.x2 {
+            bx2 = self.x2 - 1;
+        }
+        if self.y2 < i64::from(dsy) && by2 >= self.y2 {
+            by2 = self.y2 - 1;
+        }
+        if bx2 < bx || by2 < by {
+            return None;
+        }
+        let n = |v: i64| u32::try_from(v).ok();
+        Some(Area {
+            x: n(bx)?,
+            y: n(by)?,
+            sx: n(bx2 - bx + 1)?,
+            sy: n(by2 - by + 1)?,
+        })
     }
 }
 
@@ -462,7 +567,15 @@ impl Source<'_> {
         let wtree = TreeId::Window(pane.window);
         let tiled: Vec<PaneId> = drawn.tiled.iter().map(|(q, _)| *q).collect();
         for &(q, index) in &drawn.tiled {
-            self.panes_draw_pane(&mut canvas, pane, m, (q, index), (layout, os, ds), caps);
+            self.panes_draw_pane(
+                &mut canvas,
+                pane,
+                m,
+                (q, index),
+                (layout, os, ds),
+                None,
+                caps,
+            );
         }
         // The borders over the panes.
         let mut borders = Borders {
@@ -478,22 +591,32 @@ impl Source<'_> {
         let found = self.panes_found(m, window.id, pane.id);
         let ctx = self.ctx(found, caps);
         let style = theme.style(&self.style(wtree, "display-panes-border-style", &ctx));
-        for (i, &mask) in borders.map.iter().enumerate() {
-            if mask != 0 {
-                let (x, y) = (i % usize::from(cols), i / usize::from(cols));
-                canvas.put(
-                    u32::try_from(x).unwrap_or(0),
-                    u32::try_from(y).unwrap_or(0),
-                    Cell {
-                        text: border_glyph(mask).into(),
-                        width: 1,
-                        style,
-                        acs: true,
-                        link: false,
-                        tab: false,
-                    },
-                );
-            }
+        borders.draw(&mut canvas, style);
+        // window_panes_draw_screen's floating layer.
+        for &(q, index) in &drawn.floating {
+            let Some(frame) = drawn
+                .cells
+                .get(&q)
+                .map(|path| floating_frame(layout.root.get(path).g(), &borders))
+            else {
+                continue;
+            };
+            frame.clear(&mut canvas);
+            self.panes_draw_pane(
+                &mut canvas,
+                pane,
+                m,
+                (q, index),
+                (layout, os, ds),
+                Some(&frame),
+                caps,
+            );
+            let mut lines = borders.blank();
+            lines.hline(frame.x, frame.x2 + 1, frame.y);
+            lines.hline(frame.x, frame.x2 + 1, frame.y2);
+            lines.vline(frame.x, frame.y, frame.y2 + 1);
+            lines.vline(frame.x2, frame.y, frame.y2 + 1);
+            lines.draw(&mut canvas, style);
         }
         // MODE_CURSOR is off: the cursor is hidden where drawing left it.
         canvas.snap.cursor = Some((
@@ -516,7 +639,9 @@ impl Source<'_> {
         }
     }
 
-    /// `window_panes_draw_pane`.
+    /// `window_panes_draw_pane`; a floating pane's area is clipped inside
+    /// its `frame`.
+    #[allow(clippy::too_many_arguments)] // the C's own
     fn panes_draw_pane(
         &self,
         canvas: &mut Canvas,
@@ -524,6 +649,7 @@ impl Source<'_> {
         m: &PanesMode,
         (q, index): (PaneId, u32),
         (layout, os, ds): (&Layout, (u32, u32), (u32, u32)),
+        frame: Option<&Frame>,
         caps: Caps,
     ) {
         let Some(drawn) = m.drawn.as_ref() else {
@@ -533,9 +659,15 @@ impl Source<'_> {
             return;
         };
         let border = layout.cell_needs_border(path).then_some(layout.opts.status);
-        let Some(a) = geometry(layout.root.get(path).g(), os, ds, border) else {
+        let Some(mut a) = geometry(layout.root.get(path).g(), os, ds, border) else {
             return;
         };
+        if let Some(f) = frame {
+            let Some(clipped) = f.clip(&a, ds) else {
+                return;
+            };
+            a = clipped;
+        }
         let src = match (q == mode_pane.id, m.preview.as_ref(), drawn.screens.get(&q)) {
             (true, Some(pre), _) if a.sx <= u32::from(pre.cols) && a.sy <= u32::from(pre.rows) => {
                 pre

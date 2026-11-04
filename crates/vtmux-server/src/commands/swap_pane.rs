@@ -1,7 +1,7 @@
 //! `swap-pane` (cmd-swap-pane.c:57-210): exchange two panes' places (pane
 //! order, z-order, layout cells and windows), or swap the target with the
 //! next (`-D`) or previous (`-U`) tiled pane. `-d` keeps the active panes,
-//! `-Z` keeps a zoomed window zoomed. Modal panes are not modelled.
+//! `-Z` keeps a zoomed window zoomed. A modal pane is not swapped.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -18,6 +18,11 @@ pub fn exec(server: &mut Server, args: &Args, source: Found, found: Found) -> Re
     let (Some(mut src_w), Some(mut src_wp)) = (source.window, source.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
+    // cmd-swap-pane.c:80-83.
+    let is_modal = |w, p| server.model.windows[&w].panes.modal == Some(p);
+    if is_modal(src_w, src_wp) || is_modal(dst_w, dst_wp) {
+        return Err(EdgeError::Message("pane is modal".into()).into());
+    }
     let zoom = args.flag('Z');
     let m = &mut server.model;
     let dst_zoomed = m.push_zoom(dst_w, false, zoom);

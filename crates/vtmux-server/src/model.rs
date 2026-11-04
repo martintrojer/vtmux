@@ -106,6 +106,9 @@ pub struct Window {
     /// Pane order, active pane, last-used stack, z-order.
     pub panes: WindowPanes,
     pub zoom: Option<Zoom>,
+    /// `w->was_zoomed`: the pane [`Model::push_zoom`] found zoomed, for
+    /// [`Model::pop_zoom`] when the active pane floats over the zoom.
+    pub was_zoomed: Option<PaneId>,
     /// `w->lastlayout`: the named layout last applied (select-layout with
     /// no name and next-layout/previous-layout start from it).
     pub last_layout: Option<NamedLayout>,
@@ -151,24 +154,39 @@ impl Window {
         self.zoom.is_some()
     }
 
-    /// `window_pane_is_visible`: every pane, or only the zoomed one.
+    /// `window_pane_is_visible`: every pane, or while zoomed those with a
+    /// cell in the zoomed layout (the zoomed one and the panes floating
+    /// over it).
     #[must_use]
     pub fn is_visible(&self, p: PaneId) -> bool {
-        self.zoom.as_ref().is_none_or(|z| z.pane == p)
+        self.zoom.is_none() || self.layout.root.find_pane(p).is_some()
     }
 
-    /// `window_pane_is_floating` (with the saved layout while zoomed).
+    /// `w->modal != NULL && wp != w->modal`: a modal pane keeps the focus
+    /// from `p`.
+    #[must_use]
+    pub fn modal_blocks(&self, p: PaneId) -> bool {
+        self.panes.modal.is_some_and(|m| m != p)
+    }
+
+    /// `window_pane_is_floating_with_hidden`: the pane's cell in the
+    /// visible layout floats, or, for a pane a zoom hides, its cell in the
+    /// saved layout does.
     #[must_use]
     pub fn is_floating(&self, p: PaneId) -> bool {
+        let root = &self.layout.root;
+        if let Some(at) = root.find_pane(p) {
+            return root.get(&at).is_floating();
+        }
         let root = &self.full_layout().root;
         root.find_pane(p)
             .is_some_and(|at| root.get(&at).is_floating())
     }
 
     /// `window_pane_is_floating` proper: the pane's cell in the visible
-    /// layout floats. While zoomed no pane's does (the zoomed pane fills
-    /// the window, the others have no cell); [`Self::is_floating`] is
-    /// tmux's `window_pane_is_floating_with_hidden`.
+    /// layout floats. While zoomed only the panes floating over the zoom
+    /// have one; [`Self::is_floating`] is tmux's
+    /// `window_pane_is_floating_with_hidden`.
     #[must_use]
     pub fn is_floating_now(&self, p: PaneId) -> bool {
         let root = &self.layout.root;
@@ -261,6 +279,15 @@ pub struct Pane {
     pub pipe: Option<crate::pipe::PanePipe>,
     /// Its auto-hide scrollbar's state ([`crate::scrollbar`]).
     pub sb: crate::scrollbar::AutoHide,
+    /// `PANE_FLOATOVERZOOM` (`new-pane -A`, `-O`): a floating pane that
+    /// stays shown above a zoomed pane.
+    pub over_zoom: bool,
+    /// `PANE_CAPTUREALLKEYS` (`new-pane -OK`): every key goes to it.
+    pub capture_keys: bool,
+    /// `PANE_CLOSEONCLICK` (`new-pane -OC`): a click outside it kills it.
+    pub close_on_click: bool,
+    /// `PANE_CLOSEONCANCEL` (`new-pane -OD`): Escape or C-c kills it.
+    pub close_on_cancel: bool,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its
@@ -711,6 +738,10 @@ impl Model {
             return false;
         };
         if window.panes.active == Some(p) {
+            return false;
+        }
+        // window.c:763-764: nothing but the modal pane takes the focus.
+        if window.modal_blocks(p) {
             return false;
         }
         let old = window.panes.active;
@@ -1406,10 +1437,11 @@ impl Model {
         if window.panes.panes.len() == 1 {
             return self.kill_window(wid, true);
         }
-        // window_push_zoom(w, 0, ...) / window_pop_zoom: unzoom around the
-        // removal; the flag is only set for float-over-zoom panes, which
-        // vtmux does not have, so the window stays unzoomed.
-        self.unzoom(wid);
+        // window_push_zoom(w, 0, wp->flags & PANE_FLOATOVERZOOM) ..
+        // window_pop_zoom (server-fn.c:229-233, 426-434): unzoom around the
+        // removal, and zoom again if the pane floated over the zoom.
+        let over_zoom = self.panes.get(&id).is_some_and(|p| p.over_zoom);
+        let was_zoomed = self.push_zoom(wid, false, over_zoom);
         let window = self.windows.get_mut(&wid).expect("checked above");
         // layout_close_pane (layout.c:1548), then window_remove_pane ->
         // window_lost_pane, which fires window-pane-changed for a new
@@ -1427,13 +1459,34 @@ impl Model {
         }
         self.options.remove_pane(id);
         let pane = self.panes.remove(&id);
+        self.pop_zoom(wid, was_zoomed);
         // server-fn.c:435 / 567: server_redraw_window.
         self.redraw(Redraw::Window(wid));
         pane.into_iter().collect()
     }
 
+    /// `PANE_FLOATOVERZOOM` of pane `p`.
+    fn over_zoom(&self, p: PaneId) -> bool {
+        self.panes.get(&p).is_some_and(|x| x.over_zoom)
+    }
+
+    /// `window_active_pane_is_over_zoom` (window.c:1095-1106): the window
+    /// is zoomed and its active pane floats over the zoom.
+    #[must_use]
+    pub fn active_over_zoom(&self, w: WindowId) -> bool {
+        let Some(window) = self.windows.get(&w).filter(|x| x.zoomed()) else {
+            return false;
+        };
+        let active = window.active();
+        self.over_zoom(active) && window.is_floating_now(active)
+    }
+
     /// `window_zoom` (window.c:971-1020): false when already zoomed or the
-    /// window has one pane.
+    /// window has one pane. The zoomed pane fills the window; panes that
+    /// float over the zoom keep their floating cells above it (each placed
+    /// right after the zoomed pane's cell, in pane order) and a floating
+    /// zoom target goes behind them in the z-order. An active pane
+    /// floating over the zoom stays active.
     pub fn zoom(&mut self, w: WindowId, p: PaneId) -> bool {
         let Some(window) = self.windows.get(&w) else {
             return false;
@@ -1441,14 +1494,43 @@ impl Model {
         if window.zoomed() || window.panes.panes.len() == 1 {
             return false;
         }
-        if window.active() != p {
+        let active = window.active();
+        if active != p && !(self.over_zoom(active) && window.is_floating(active)) {
             self.set_active(w, p);
         }
+        let over: Vec<(PaneId, vtmux_core::layout::Geometry)> = {
+            let window = &self.windows[&w];
+            window
+                .panes
+                .panes
+                .iter()
+                .filter(|&&q| q != p && self.over_zoom(q))
+                .filter_map(|&q| {
+                    let path = window.layout.root.find_pane(q)?;
+                    match window.layout.root.get(&path) {
+                        Cell::Floating(leaf) => Some((q, leaf.g)),
+                        _ => None,
+                    }
+                })
+                .collect()
+        };
         let window = self.windows.get_mut(&w).expect("checked above");
+        let target_floating = window.is_floating(p);
         let mut single = Layout::new(window.layout.sx, window.layout.sy, p);
         single.opts = window.layout.opts;
+        single.borderless.clone_from(&window.layout.borderless);
+        // `w->last_new_pane_x/y` belong to the window, not the layout.
+        single.last_new = window.layout.last_new;
+        for (q, g) in over {
+            single.add_floating(Some(p), q, g);
+        }
         let saved = std::mem::replace(&mut window.layout, single);
         window.zoom = Some(Zoom { pane: p, saved });
+        // window.c:1006-1010.
+        if target_floating {
+            window.panes.z_order.retain(|&q| q != p);
+            window.panes.z_order.push(p);
+        }
         self.fix_panes(w);
         // window.c:1014-1015.
         self.fire_window("window-zoomed", w);
@@ -1502,24 +1584,37 @@ impl Model {
 
     /// `window_push_zoom` (window.c:1108-1124): unzoom, and say whether
     /// [`Self::pop_zoom`] should zoom again (`WINDOW_WASZOOMED`): `flag`
-    /// and either `always` or the window was zoomed.
+    /// and either `always` or the window was zoomed. The zoomed pane is
+    /// kept (`w->was_zoomed`) for a pop while a pane floats over the zoom.
     pub fn push_zoom(&mut self, w: WindowId, always: bool, flag: bool) -> bool {
-        let zoomed = self.windows.get(&w).is_some_and(Window::zoomed);
+        let Some(window) = self.windows.get_mut(&w) else {
+            return false;
+        };
+        let was = flag && (always || window.zoomed());
+        window.was_zoomed = window.zoom.as_ref().map(|z| z.pane).filter(|_| was);
         self.unzoom(w);
-        flag && (always || zoomed)
+        was
     }
 
-    /// `window_pop_zoom` (window.c:1126-1145): zoom the active pane again
-    /// if the matching push asked for it. vtmux has no float-over-zoom
-    /// panes, so the active pane is the one zoomed.
+    /// `window_pop_zoom` (window.c:1126-1145): zoom again if the matching
+    /// push asked for it: the active pane, unless it floats over the zoom,
+    /// when the pane zoomed before is (the active pane if that has gone).
     pub fn pop_zoom(&mut self, w: WindowId, was_zoomed: bool) -> bool {
+        let Some(window) = self.windows.get_mut(&w) else {
+            return false;
+        };
+        let before = window.was_zoomed.take();
         if !was_zoomed {
             return false;
         }
-        let Some(active) = self.windows.get(&w).map(Window::active) else {
-            return false;
+        let active = window.active();
+        let window = &self.windows[&w];
+        let target = if self.over_zoom(active) && window.is_floating_now(active) {
+            before.filter(|p| window.panes.panes.contains(p))
+        } else {
+            None
         };
-        self.zoom(w, active)
+        self.zoom(w, target.unwrap_or(active))
     }
 
     /// The pane order and cells of `rotate-window` (cmd-rotate-window.c:
@@ -1663,15 +1758,49 @@ impl Model {
         Some((first, removed))
     }
 
-    /// `window_unzoom` (window.c:1022-1080): false when not zoomed.
+    /// `window_unzoom` (window.c:1022-1080): false when not zoomed. The
+    /// panes floating over the zoom take their geometry back to the full
+    /// layout; a floating zoom target returns to the front of the z-order
+    /// if active, else behind the other floating panes.
     pub fn unzoom(&mut self, w: WindowId) -> bool {
-        let Some(window) = self.windows.get_mut(&w) else {
+        let Some(window) = self.windows.get(&w) else {
             return false;
         };
-        let Some(z) = window.zoom.take() else {
+        let Some(z) = window.zoom.as_ref() else {
             return false;
         };
+        let moved: Vec<(PaneId, vtmux_core::layout::Geometry)> = window
+            .panes
+            .panes
+            .iter()
+            .filter(|&&q| q != z.pane && self.over_zoom(q))
+            .filter_map(|&q| Some((q, window.layout.pane_cell_geometry(q)?)))
+            .collect();
+        let window = self.windows.get_mut(&w).expect("checked above");
+        let z = window.zoom.take().expect("checked above");
+        let last_new = window.layout.last_new;
         window.layout = z.saved;
+        window.layout.last_new = last_new;
+        for (q, g) in moved {
+            if let Some(cell) = window.layout.floating_cell_mut(q) {
+                *cell = g;
+            }
+        }
+        if window.is_floating_now(z.pane) {
+            let zp = z.pane;
+            window.panes.z_order.retain(|&q| q != zp);
+            let at = if window.panes.active == Some(zp) {
+                0
+            } else {
+                window
+                    .panes
+                    .z_order
+                    .iter()
+                    .position(|&q| !window.is_floating_now(q))
+                    .unwrap_or(window.panes.z_order.len())
+            };
+            window.panes.z_order.insert(at, zp);
+        }
         self.fix_panes(w);
         // window_unzoom(w, 1) (window.c:1072-1075).
         self.fire_window("window-unzoomed", w);
@@ -1790,13 +1919,40 @@ impl Model {
         self.pane_at(w, to_i64(x), to_i64(y))
     }
 
-    /// `window_get_active_at` (window.c:849-928) without modal panes:
-    /// floating panes first (with their border), then the pane status line
-    /// of a tiled pane, then any visible pane in z-order, tiled ones up to
-    /// and including their right and bottom border.
+    /// `window_pane_contains` (window.c:650-676): `(x, y)` is in pane `p`
+    /// shown in window `w`, a tiled pane up to and including its right and
+    /// bottom border, a floating one with its border all round (unless
+    /// `pane-border-lines` is `none`).
+    #[must_use]
+    pub fn pane_contains(&self, w: WindowId, p: PaneId, x: i64, y: i64) -> bool {
+        let (Some(window), Some(pane)) = (self.windows.get(&w), self.panes.get(&p)) else {
+            return false;
+        };
+        if !window.is_visible(p) {
+            return false;
+        }
+        let rect = Rect::of(pane);
+        let (left, top, right, bottom) = (rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+        if !window.is_floating_now(p) {
+            (left..=right).contains(&x) && (top..=bottom).contains(&y)
+        } else if !self.pane_has_border(w, p) {
+            (left..right).contains(&x) && (top..bottom).contains(&y)
+        } else {
+            (left - 1..=right).contains(&x) && (top - 1..=bottom).contains(&y)
+        }
+    }
+
+    /// `window_get_active_at` (window.c:849-928): only the modal pane if
+    /// there is one; else floating panes first (with their border), then
+    /// the pane status line of a tiled pane, then any visible pane in
+    /// z-order, tiled ones up to and including their right and bottom
+    /// border.
     #[must_use]
     pub fn pane_at(&self, w: WindowId, x: i64, y: i64) -> Option<PaneId> {
         let window = self.windows.get(&w)?;
+        if let Some(m) = window.panes.modal {
+            return self.pane_contains(w, m, x, y).then_some(m);
+        }
         let status = self.pane_status(w);
         let stack: Vec<&Pane> = window
             .panes

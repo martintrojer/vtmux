@@ -200,7 +200,9 @@ fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<()
 /// window unzooms it, and with `-Z` the zoom comes back on the new pane
 /// (`window_push_zoom(w, 0, Z)` .. `window_pop_zoom`).
 fn activate(server: &mut Server, w: WindowId, wp: PaneId, zflag: bool) -> bool {
-    let visible = server.model.windows[&w].is_visible(wp);
+    // cmd-select-pane.c:276-279: under a modal pane nothing changes.
+    let window = &server.model.windows[&w];
+    let visible = window.modal_blocks(wp) || window.is_visible(wp);
     let was = !visible && server.model.push_zoom(w, false, zflag);
     let changed = server.model.switch_active(w, wp);
     if changed {

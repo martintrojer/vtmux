@@ -437,6 +437,9 @@ impl Server {
         if !read_only && self.dead_pane_key(id, core) {
             return None;
         }
+        if !read_only && self.modal_key(id, &kind, core) {
+            return None;
+        }
         // server-client.c:1824: the window's menu, before the prompt.
         let mouse = match &kind {
             KeyKind::Mouse { input, .. } => Some(*input),
@@ -469,6 +472,44 @@ impl Server {
             Some(after) => self.cmdq_insert_batch(after, batch),
             None => self.cmdq_append(Some(id), batch),
         }
+    }
+
+    /// server-client.c:1807-1822: Escape or C-c kills a `new-pane -OD`
+    /// modal pane that is active; a `-K` pane not in a mode and still
+    /// running takes every key that is not the mouse at once. True when the
+    /// key was taken.
+    fn modal_key(&mut self, id: ClientId, kind: &KeyKind, core: Key) -> bool {
+        let Some(p) = self.client_pane(id) else {
+            return false;
+        };
+        let Some(pane) = self.model.panes.get(&p) else {
+            return false;
+        };
+        let modal = self
+            .model
+            .windows
+            .get(&pane.window)
+            .and_then(|w| w.panes.modal)
+            == Some(p);
+        let key = core.without_flags();
+        if modal
+            && pane.close_on_cancel
+            && (key == Key::ascii(0x1b) || key == Key::ascii(b'c').ctrl())
+        {
+            self.destroy_pane(p);
+            return true;
+        }
+        if let KeyKind::Key(k) = kind
+            && pane.capture_keys
+            && pane.modes.is_empty()
+            && !pane.exited
+            && pane.io.is_some()
+        {
+            let k = *k;
+            self.forward_key(p, Some(id), &k, false);
+            return true;
+        }
+        false
     }
 
     /// `server_client_key_callback` for the queued key at step `step`.
@@ -569,6 +610,11 @@ impl Server {
                 return;
             }
             crate::mouse::Located::Nothing => {
+                self.update_latest(id);
+                return;
+            }
+            crate::mouse::Located::CloseModal(p) => {
+                self.destroy_pane(p);
                 self.update_latest(id);
                 return;
             }

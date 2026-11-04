@@ -409,6 +409,7 @@ impl<'a> Ctx<'a> {
         })
     }
 
+    #[allow(clippy::too_many_lines)] // one arm per variable
     fn window_value(&self, name: &str) -> Option<String> {
         let w = self.window()?;
         // The winlink callbacks (format.c format_cb_window_active and
@@ -439,6 +440,8 @@ impl<'a> Ctx<'a> {
                 }
             }
             "window_zoomed_flag" => flag(w.zoomed()),
+            // format_cb_window_modal_pane (format.c:3318-3325).
+            "window_modal_pane" => w.panes.modal?.to_string(),
             "window_active" => flag(wl.is_some_and(|(s, i)| s.current == i)),
             "window_last_flag" => flag(wl.is_some_and(|(s, i)| s.last.first() == Some(&i))),
             "window_start_flag" => {
@@ -447,8 +450,7 @@ impl<'a> Ctx<'a> {
             "window_end_flag" => {
                 flag(wl.is_some_and(|(s, i)| s.windows.keys().next_back() == Some(&i)))
             }
-            // window_printable_flags (window.c:1359-1386) for the flags
-            // vtmux has (no modal windows); `window_flags`
+            // window_printable_flags (window.c:1359-1386); `window_flags`
             // doubles the `#` of the activity flag.
             "window_flags" | "window_raw_flags" => {
                 let (s, i) = wl?;
@@ -471,6 +473,9 @@ impl<'a> Ctx<'a> {
                 }
                 if self.marked_winlink(s.id, i) {
                     f.push('M');
+                }
+                if w.panes.modal.is_some() {
+                    f.push('O');
                 }
                 if w.zoomed() {
                     f.push('Z');
@@ -667,9 +672,7 @@ impl<'a> Ctx<'a> {
             "pane_title" => p.term.title(),
             "pane_active" => flag(w.active() == p.id),
             "pane_last" => flag(w.panes.last.first() == Some(&p.id)),
-            // window_pane_printable_flags (window.c:1389-1409) for the
-            // flags vtmux has: active, last, zoomed, floating (no
-            // float-over-zoom or modal panes).
+            // window_pane_printable_flags (window.c:1389-1409).
             "pane_flags" => {
                 let mut f = String::new();
                 if w.active() == p.id {
@@ -681,12 +684,21 @@ impl<'a> Ctx<'a> {
                 if w.zoom.as_ref().is_some_and(|z| z.pane == p.id) {
                     f.push('Z');
                 }
-                if w.is_floating(p.id) {
+                if w.is_floating_now(p.id) {
                     f.push('F');
+                }
+                if p.over_zoom {
+                    f.push('A');
+                }
+                if w.panes.modal == Some(p.id) {
+                    f.push('O');
                 }
                 f
             }
-            "pane_floating_flag" => flag(w.is_floating(p.id)),
+            // format_cb_pane_floating_flag: the pane's cell in the visible
+            // layout (a pane hidden by a zoom has none).
+            "pane_floating_flag" => flag(w.is_floating_now(p.id)),
+            "pane_modal_flag" => flag(w.panes.modal == Some(p.id)),
             // format_cb_pane_z.
             "pane_z" => self.model.pane_zindex(p.id)?.to_string(),
             "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),

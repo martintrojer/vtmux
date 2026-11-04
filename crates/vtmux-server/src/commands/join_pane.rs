@@ -35,6 +35,11 @@ pub fn exec(
     let (Some(src_w), Some(src_wp)) = (source.window, source.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
+    // cmd-join-pane.c:468-471.
+    let is_modal = |w, p| server.model.windows[&w].panes.modal == Some(p);
+    if is_modal(src_w, src_wp) || is_modal(dst_w, dst_wp) {
+        return Err(EdgeError::Message("pane is modal".into()).into());
+    }
     server.model.unzoom(dst_w);
     server.model.unzoom(src_w);
     if src_wp == dst_wp {

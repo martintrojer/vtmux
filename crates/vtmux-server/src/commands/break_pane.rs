@@ -29,6 +29,10 @@ pub fn exec(
     else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
+    // cmd-break-pane.c:106-109.
+    if server.model.windows[&w].panes.modal == Some(wp) {
+        return Err(EdgeError::Message("pane is modal".into()).into());
+    }
     if args.flag('W') {
         return float(server, args, source, w, wp);
     }
@@ -190,6 +194,7 @@ fn move_to_new_window(
             layout,
             panes: WindowPanes::new(wp),
             zoom: None,
+            was_zoomed: None,
             last_layout: None,
             old_layout: None,
             pending_size: None,

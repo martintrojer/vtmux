@@ -3859,6 +3859,7 @@ impl Server {
                 layout: CoreLayout::new(cols, rows, pane_id),
                 panes: WindowPanes::new(pane_id),
                 zoom: None,
+                was_zoomed: None,
                 last_layout: None,
                 old_layout: None,
                 pending_size: None,
@@ -4098,6 +4099,10 @@ impl Server {
             compress: crate::compress::PaneCompress::default(),
             pipe: None,
             sb: crate::scrollbar::AutoHide::default(),
+            over_zoom: false,
+            capture_keys: false,
+            close_on_click: false,
+            close_on_cancel: false,
         })
     }
 

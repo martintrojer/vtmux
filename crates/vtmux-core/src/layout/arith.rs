@@ -1394,6 +1394,16 @@ impl Layout {
 }
 
 impl Layout {
+    /// The geometry of `pane`'s cell if it is floating.
+    #[must_use]
+    pub fn pane_cell_geometry(&self, pane: PaneId) -> Option<Geometry> {
+        let path = self.root.find_pane(pane)?;
+        match self.root.get(&path) {
+            Cell::Floating(l) => Some(l.g),
+            _ => None,
+        }
+    }
+
     /// The geometry of `pane`'s cell if it is floating (`lc->g` of a
     /// `LAYOUT_CELL_FLOATING` cell), for the commands that move it.
     pub fn floating_cell_mut(&mut self, pane: PaneId) -> Option<&mut Geometry> {
