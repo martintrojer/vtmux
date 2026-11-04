@@ -539,7 +539,13 @@ impl Source<'_> {
             Mode::Tree(t) => self.tree_frame(pane, &**t),
             Mode::Buffer(t) => self.tree_frame(pane, &**t),
             Mode::Client(t) => self.tree_frame(pane, &**t),
-            Mode::Customize(t) => self.tree_frame(pane, &**t),
+            Mode::Customize(t) => {
+                let mut frame = self.tree_frame(pane, &**t);
+                if let Some(pid) = t.editing() {
+                    draw_waiting(&mut frame.canvas, pid);
+                }
+                frame
+            }
             _ => return None,
         })
     }
@@ -996,4 +1002,22 @@ fn tree_preview_box<K, D>(
             canvas.puts(&mut at, h, border, " ");
         }
     }
+}
+
+/// `window_customize_draw_waiting` (window-customize.c:391-435): a box in
+/// the middle of the mode saying it waits for editor `pid`; nothing if the
+/// pane is too small for it.
+fn draw_waiting(c: &mut Canvas, pid: i32) {
+    let text = format!("WAITING FOR EDITOR (PID {pid})");
+    let (box_w, box_h) = (text.len() + 4, 3);
+    if c.cols < box_w || c.rows < box_h {
+        return;
+    }
+    let (x, y) = ((c.cols - box_w) / 2, (c.rows - box_h) / 2);
+    let plain = CellStyle::default();
+    c.draw_box(x, y, box_w, box_h, &plain);
+    let mut at = x + 1;
+    c.puts(&mut at, y + 1, &plain, &" ".repeat(box_w - 2));
+    let mut at = x + (box_w - text.len()) / 2;
+    c.puts(&mut at, y + 1, &plain, &text);
 }

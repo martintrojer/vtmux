@@ -6668,3 +6668,214 @@ fn tmux_pane_picks_the_session_not_the_window() {
         ]
     });
 }
+
+/// `command-alias` items set by the user are expanded (cmd.c
+/// `cmd_get_alias`, cmd-parse.y `cmd_parse_expand_alias`): any index, the
+/// first matching name wins, an item without `=` never matches, words after
+/// the alias go on its last command, and replacing or unsetting the option
+/// changes what expands (command-alias.sh).
+#[test]
+fn command_alias_user_items() {
+    compare("command_alias_user_items", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat -"]),
+            w.run(&["split-window", "-d", "-t", "a:0.0", "cat -"]),
+            w.run(&["set", "-s", "command-alias[100]", "zoom=resize-pane -Z"]),
+            w.run(&["zoom", "-t", "a:0.0"]),
+            w.run(&["display", "-p", "-t", "a:0.0", "#{window_zoomed_flag}"]),
+            w.run(&["set", "-s", "command-alias[0]", "hello=display -p"]),
+            w.run(&["hello", "hi"]),
+            // Index 0 held split-pane.
+            w.run(&["split-pane", "-d"]),
+            w.run(&["set", "-s", "command-alias[3]", "noeq"]),
+            w.run(&["noeq"]),
+            w.run(&[
+                "set",
+                "-s",
+                "command-alias[7]",
+                "two=display -p a ; display -p",
+            ]),
+            w.run(&["two", "b"]),
+            w.run(&["set", "-s", "command-alias[8]", "hello=display -p second"]),
+            w.run(&["hello", "x"]),
+            w.run(&["set", "-su", "command-alias"]),
+            w.run(&["hello"]),
+            w.run(&["split-pane", "-d", "cat -"]),
+        ]
+    });
+}
+
+/// The screen-style window name `ESC k name ST` (input.c
+/// `input_exit_rename`): under `allow-rename` it names the window and turns
+/// `automatic-rename` off; `#(` becomes `_(`, other `#` stays; invalid
+/// UTF-8 is ignored; ESC (any sequence), CAN and SUB end the name too and
+/// the name is never printed; an empty name unsets the window's
+/// `automatic-rename` and empties the name while the option is off
+/// (check-names.sh).
+#[test]
+fn screen_window_name_escape() {
+    compare("screen_window_name_escape", |w| {
+        let mut runs = vec![
+            w.run(&[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat -",
+            ]),
+            w.run(&["set", "-g", "automatic-rename", "off"]),
+        ];
+        let cases = [
+            (false, r"a\033kno\033\\b"),
+            (true, r"a\033kesc#:.ok#(x)\033\\b"),
+            (true, r"a\033kbad\302name\033\\b"),
+            (true, r"a\033kca\030nb"),
+            (true, r"a\033kone\033[1mtwo"),
+            (true, r"a\033k\303\251t\303\251\033\\b"),
+            (true, r"a\033k\033\\b"),
+        ];
+        for (i, (allow, seq)) in cases.iter().enumerate() {
+            runs.push(w.run(&[
+                "setw",
+                "-t",
+                "a",
+                "allow-rename",
+                if *allow { "on" } else { "off" },
+            ]));
+            runs.push(w.run(&["setw", "-t", "a", "automatic-rename", "on"]));
+            runs.push(w.run(&["rename-window", "-t", "a", "before"]));
+            let cmd = format!("printf '{seq}'; printf ' end{i}'; exec cat -");
+            runs.push(w.run(&["respawn-pane", "-k", "-t", "a", &cmd]));
+            w.wait_for_text("a", &format!(" end{i}"));
+            runs.push(w.run(&["capture-pane", "-p", "-t", "a", "-E", "0"]));
+            runs.push(w.run(&[
+                "display",
+                "-p",
+                "-t",
+                "a",
+                "#{window_name}|#{automatic-rename}",
+            ]));
+        }
+        runs
+    });
+}
+
+/// `set-hook -B name:what:format` (cmd-set-option.c
+/// `cmd_set_hook_monitor_exec`, hooks.c `hooks_monitor_*`): the errors,
+/// the `''` user option it creates, hidden from `show` without `-H`, the
+/// `show-hooks -B` listing and its `-F` variables, `-a` on the command,
+/// `-u -B` taking the monitor and leaving the option, `-u` taking both, and
+/// session and pane trees (show-options-output.sh).
+#[test]
+fn set_hook_monitor_listing() {
+    compare("set_hook_monitor_listing", |w| {
+        let mut runs = vec![w.run(&["new", "-d", "-s", "a", "cat -"])];
+        let steps: &[&[&str]] = &[
+            &["set-hook", "-g", "-B", "@mon:%*:#{pane_width}"],
+            &["show-hooks", "-g", "-B"],
+            &["show-hooks", "-g", "-B", "@mon"],
+            &["show-hooks", "-g", "-F", "#{option_name}=#{option_value}"],
+            &["show", "-g", "@mon"],
+            &["show", "-gH", "@mon"],
+            &["show", "-g", "-F", "#{option_name}"],
+            &["show", "-gH", "-F", "#{option_name}"],
+            &["set-hook", "-g", "-B", "nocolon"],
+            &["set-hook", "-g", "-B", "mon::x"],
+            &["set-hook", "-g", "-B", "@x:%bad:y"],
+            &["set-hook", "-g", "-B", ""],
+            &["set-hook", "-B", "@s::x", "a", "b"],
+            &[
+                "set-hook",
+                "-g",
+                "-B",
+                "@c::#{session_name}",
+                "display -p hi",
+            ],
+            &["show", "-g", "@c"],
+            &[
+                "show-hooks",
+                "-g",
+                "-B",
+                "-F",
+                "#{option_name}|#{hook_monitor_target}|#{hook_monitor_format}|#{hook_fire_count}|#{option_value}|#{option_is_hook}",
+            ],
+            &["set-hook", "-t", "a", "-B", "@sess:@0:#{window_name}"],
+            &["show-hooks", "-t", "a", "-B"],
+            &["show-hooks", "-g", "-B", "@sess"],
+            &["show-hooks", "-B", "@nosuch"],
+            &["set-hook", "-p", "-t", "%0", "-B", "@y:@ 0:#{window_id}"],
+            &["show-hooks", "-p", "-t", "%0", "-B"],
+            &["set-hook", "-gu", "-B", "@mon"],
+            &["show-hooks", "-g", "-B"],
+            &["show", "-gH", "@mon"],
+            &["set-hook", "-gu", "-B", "@c:x:y"],
+            &["show-hooks", "-g", "-B"],
+            &["set-hook", "-g", "-B", "@n:%*:x", "one"],
+            &["set-hook", "-ga", "-B", "@n:%*:y", "two"],
+            &["show-hooks", "-g", "-F", "#{option_name}=#{option_value}"],
+            &["show-hooks", "-g", "-B", "@n"],
+            &["set-hook", "-gu", "@n"],
+            &["show-hooks", "-g", "-B"],
+            &["show-hooks", "-g", "-F", "#{option_name}=#{option_value}"],
+        ];
+        for s in steps {
+            runs.push(w.run(s));
+        }
+        runs
+    });
+}
+
+/// A monitor hook runs when its value changes (monitor.c `monitor_timer`,
+/// once a second, no report for the first value), with the change in
+/// `hook_*` formats expanded into the hook's text before it is parsed
+/// (hooks.c `hooks_parse`); `-T` reports only changes to a true value;
+/// `show-hooks -B` counts the firings (wait-for-E.sh).
+#[test]
+fn set_hook_monitor_fires_on_change() {
+    compare("set_hook_monitor_fires_on_change", |w| {
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "b", "-x", "80", "-y", "24", "cat -"]),
+            w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat -"]),
+            w.run(&["set", "-g", "@v", "0"]),
+            w.run(&[
+                "set-hook",
+                "-g",
+                "-B",
+                "@m::#{session_name}:#{@v}",
+                "set -g @rm 'v=#{hook_value} last=#{hook_last} s=#{hook_session_name} h=#{hook}'; wait-for -S m",
+            ]),
+            w.run(&[
+                "set-hook",
+                "-g",
+                "-B",
+                "@p:%*:#{@v}",
+                "set -g @rp '#{hook_pane} #{hook_window} #{hook_window_index} #{hook_value}'; wait-for -S p",
+            ]),
+            w.run(&[
+                "set-hook",
+                "-g",
+                "-T",
+                "-B",
+                "@t::#{==:#{@v},2}",
+                "set -ga @tt '#{hook_value},'",
+            ]),
+        ];
+        // The first sample (one second in) only remembers the values.
+        std::thread::sleep(Duration::from_millis(1600));
+        for v in ["1", "2"] {
+            runs.push(w.run(&["set", "-g", "@v", v]));
+            runs.push(w.run(&["wait-for", "m"]));
+            runs.push(w.run(&["wait-for", "p"]));
+            runs.push(w.run(&["show", "-gv", "@rm"]));
+            runs.push(w.run(&["show", "-gv", "@rp"]));
+        }
+        runs.push(w.run(&["set", "-g", "@v", "3"]));
+        runs.push(w.run(&["wait-for", "m"]));
+        runs.push(w.run(&["wait-for", "p"]));
+        runs.push(w.run(&["show", "-gv", "@tt"]));
+        runs.push(w.run(&[
+            "show-hooks",
+            "-g",
+            "-B",
+            "-F",
+            "#{option_name} #{hook_fire_count} #{?hook_fire_time,t,}",
+        ]));
+        runs
+    });
+}

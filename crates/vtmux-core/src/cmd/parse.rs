@@ -11,8 +11,9 @@
 //!   quotes, backslash escapes, `$VAR` and `~` expansion, `#` comments, `;`
 //!   separators and newlines.
 //!
-//! Both then run `cmd_parse_build_command` (886-940): expand a default
-//! `command-alias`, find the command, parse its arguments. Everything is
+//! Both then run `cmd_parse_build_command` (886-940): expand a
+//! `command-alias` ([`super::table::command_alias`]), find the command,
+//! parse its arguments. Everything is
 //! parsed before anything runs: a bad command anywhere in the text rejects
 //! the whole text, but an execution-time failure (`new -d -x abc`) never
 //! shows up here.
@@ -46,7 +47,7 @@
 //! [`parse_config_with`] carry no `file:line:` prefix; [`parse_file`]
 //! returns the line and the caller adds the prefix.
 
-use super::table::{DEFAULT_COMMAND_ALIASES, find};
+use super::table::{command_alias, find};
 use super::{ArgValue, Args, CmdError, CommandCall, CommandList};
 
 /// What the lexer needs from the host. vtmux-core does no I/O: the server
@@ -351,7 +352,7 @@ fn build_command(
             Some(RawArg::Str(first)) => first.as_str(),
             _ => return Ok(Vec::new()),
         };
-        if let Some((_, text)) = DEFAULT_COMMAND_ALIASES.iter().find(|(a, _)| *a == first) {
+        if let Some(text) = command_alias(first) {
             // Parse the alias text, append the remaining words to its last
             // command, and build without expanding again.
             let opts = ParseOpts {
@@ -359,7 +360,7 @@ fn build_command(
                 one_group: b.one_group,
                 from_file: false,
             };
-            let mut expanded = lex_commands(text, &mut NoEnv, opts, b.line).map_err(|e| e.1)?;
+            let mut expanded = lex_commands(&text, &mut NoEnv, opts, b.line).map_err(|e| e.1)?;
             let Some(last) = expanded.last_mut() else {
                 return Ok(Vec::new());
             };

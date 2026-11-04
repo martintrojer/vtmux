@@ -38,7 +38,7 @@ pub use parse::{
     parse_argv_values, parse_config_with, parse_file, parse_string,
 };
 pub use print::{PrintFlags, args_escape};
-pub use table::{CmdEntry, FindFlags, FindSpec, TMUX_COMMANDS};
+pub use table::{CmdEntry, FindFlags, FindSpec, TMUX_COMMANDS, command_alias, set_command_aliases};
 pub use target::{TargetKind, TargetSpec};
 
 use crate::error::EdgeError;

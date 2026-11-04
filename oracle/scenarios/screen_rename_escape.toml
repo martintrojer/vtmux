@@ -1,0 +1,23 @@
+# The screen-style window name `ESC k name ST` (input.c input_exit_rename), fed with send-keys -l to `cat` (so the pane shows its echo): with allow-rename off nothing happens; on, the window takes the name (#( made _( ) and automatic-rename goes off, and the status line follows at once (server_status_window); an empty name unsets the window's automatic-rename and, with the global one off, empties the name. Then refresh-client -c, which only redraws the client (vtmux has no pan to clear), and its adjustment check.
+name = "screen_rename_escape"
+size = [60, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "9", "exec cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { attach = { session = "a" } },
+  { feed = { pane = "%0", bytes = "a\u001bkoff\u001b\\b\r\n" } },
+  { screen = {} },
+  { run = ["setw", "-g", "allow-rename", "on"] },
+  { feed = { pane = "%0", bytes = "c\u001bkn#(x)#[fg=red]\u001b\\d\r\n" } },
+  { screen = {} },
+  { run = ["display", "-p", "#{window_name}|#{automatic-rename}"] },
+  { run = ["setw", "-g", "automatic-rename", "off"] },
+  { feed = { pane = "%0", bytes = "e\u001bk\u001b\\f\r\n" } },
+  { screen = {} },
+  { run = ["display", "-p", "#{window_name}|#{automatic-rename}"] },
+  { run = ["refresh-client", "-c"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["refresh-client", "-c", "0"] },
+]

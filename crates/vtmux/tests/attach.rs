@@ -6947,3 +6947,48 @@ fn utf8_terminal_feature_sets_client_utf8() {
     assert_eq!(outputs[0], ["u8=1\n", "u8=0\n"]);
     assert_eq!(outputs[0], outputs[1], "left vtmux, right tmux 3.8");
 }
+
+/// `clear-on-attach` (tty.c `tty_start_tty`, `tty_stop_tty`): on, the
+/// client's terminal goes to the alternate screen and is cleared, and back
+/// at the end; off, its contents are scrolled into its history (`csr`,
+/// `cup`, `indn` of the height plus one) and the alternate screen is never
+/// used, the screen cleared on the way out instead (clear-on-attach.sh).
+#[test]
+fn clear_on_attach_off_scrolls_instead_of_the_alternate_screen() {
+    for bin in bins() {
+        for (setting, start, end) in [
+            (
+                "on",
+                "\x1b[?1049h\x1b[22;0;0t\x1b[H\x1b[2J",
+                "\x1b[?1049l\x1b[23;0;0t\x1b[?2031l",
+            ),
+            (
+                "off",
+                "\x1b[1;10r\x1b[1;10H\x1b[11S",
+                "\x1b[?1004l\x1b[H\x1b[2J\x1b[?2031l",
+            ),
+        ] {
+            let w = World::new(bin.clone());
+            let mut v = vec!["new", "-d", "-s", "a"];
+            v.extend(CAT);
+            assert!(w.cli(&v).status.success());
+            w.cli(&["set", "-g", "clear-on-attach", setting]);
+            let mut a = w.attach(&["attach", "-t", "a"]);
+            a.wait(|a| a.text().contains("\x1b[?2026$p"));
+            let what = format!("{} {setting}", bin.display());
+            assert!(a.text().starts_with(start), "{what}: {:?}", a.text());
+            assert!(w.cli(&["detach-client", "-s", "a"]).status.success());
+            a.exited(0);
+            let text = a.text();
+            assert!(
+                text.contains(&format!("{end}[detached")),
+                "{what}: {text:?}"
+            );
+            assert_eq!(
+                text.contains("\x1b[?1049"),
+                setting == "on",
+                "{what}: alternate screen"
+            );
+        }
+    }
+}

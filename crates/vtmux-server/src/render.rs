@@ -92,18 +92,31 @@ impl Caps {
     }
     /// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424) for a
     /// VT100-like terminal, which every terminal vtmux knows is: DA, DA2,
-    /// XTVERSION and the synchronised-update DECRQM.
+    /// XTVERSION and the synchronised-update DECRQM. `clear` is
+    /// `clear-on-attach`; `rows` the terminal's height.
     #[must_use]
-    pub fn startup(self) -> Vec<u8> {
-        let mut out = self.restart();
+    pub fn startup(self, clear: bool, rows: u32) -> Vec<u8> {
+        let mut out = self.restart(clear, rows);
         out.extend_from_slice(b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p");
         out
     }
     /// `tty_start_tty` alone: a suspended client coming back.
+    /// `clear-on-attach` on enters the alternate screen and clears it;
+    /// off, the terminal's contents are scrolled up into its history
+    /// instead: `csr`, `cup`, then `indn` of one more than the height
+    /// (every terminal vtmux knows has `indn`), tty.c:357-369. tmux gives
+    /// `cup` 0 and the last row in that order, which terminfo takes as row
+    /// then column: row 1, column `rows`.
     #[must_use]
-    pub fn restart(self) -> Vec<u8> {
-        let title = if self.xterm { "\x1b[22;0;0t" } else { "" };
-        format!("\x1b[?1049h{title}\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h").into_bytes()
+    pub fn restart(self, clear: bool, rows: u32) -> Vec<u8> {
+        let start = if clear {
+            let title = if self.xterm { "\x1b[22;0;0t" } else { "" };
+            format!("\x1b[?1049h{title}\x1b[H\x1b[2J")
+        } else {
+            let rows = rows.max(1);
+            format!("\x1b[1;{rows}r\x1b[1;{rows}H\x1b[{}S", rows + 1)
+        };
+        format!("{start}\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h").into_bytes()
     }
     /// `server_lock_client`'s `tty_raw` calls (server-fn.c:211-213):
     /// `smcup`, `clear` and, where the terminal has it, `E3`.
@@ -118,11 +131,18 @@ impl Caps {
         format!("{smcup}{clear}{e3}").into_bytes()
     }
     /// `tty_stop_tty` (tty.c:470-520); `dseks` is the terminal's `Dseks`
-    /// (empty without it).
+    /// (empty without it). `clear` is `clear-on-attach`: on, the screen is
+    /// cleared and the alternate screen left; off, there is no alternate
+    /// screen to leave and the clear comes last.
     #[must_use]
-    pub fn teardown(self, dseks: &str) -> Vec<u8> {
-        let title = if self.xterm { "\x1b[23;0;0t" } else { "" };
-        format!("\x1b[r\x1b[0m\x1b[?1l\x1b>\x1b[H\x1b[2J\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l{dseks}\x1b[?1049l{title}\x1b[?2031l").into_bytes()
+    pub fn teardown(self, dseks: &str, clear: bool) -> Vec<u8> {
+        let (early, late) = if clear {
+            let title = if self.xterm { "\x1b[23;0;0t" } else { "" };
+            ("\x1b[H\x1b[2J", format!("\x1b[?1049l{title}"))
+        } else {
+            ("", "\x1b[H\x1b[2J".to_owned())
+        };
+        format!("\x1b[r\x1b[0m\x1b[?1l\x1b>{early}\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l{dseks}{late}\x1b[?2031l").into_bytes()
     }
 }
 

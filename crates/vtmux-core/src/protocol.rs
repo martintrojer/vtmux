@@ -21,7 +21,7 @@ use crate::error::EdgeError;
 use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
@@ -173,6 +173,13 @@ pub enum ServerMsg {
     /// (client.c:797-803).
     Lock {
         command: String,
+    },
+    /// `MSG_FLAGS` (`server_client_set_flags`): the client flags the client
+    /// itself acts on. `wait_exit`: a control client waits, after printing
+    /// `%exit`, for an empty line or the end of its input (client.c:423,
+    /// control.c `control_wait_exit`).
+    Flags {
+        wait_exit: bool,
     },
 }
 
@@ -624,6 +631,7 @@ impl Message for ServerMsg {
             Self::Exec { command, shell } => 4 + command.len() + 4 + shell.as_os_str().len(),
             Self::Lock { command } => 4 + command.len(),
             Self::Ready | Self::WriteClose | Self::Suspend => 0,
+            Self::Flags { .. } => 1,
             Self::ReadOpen { path } => option_len(path.as_ref(), |p| 4 + p.as_os_str().len()),
             Self::WriteOpen { path, .. } => 4 + path.as_os_str().len() + 1,
         }
@@ -676,6 +684,10 @@ impl Message for ServerMsg {
                 out.push(11);
                 put_bytes(out, command.as_bytes());
             }
+            Self::Flags { wait_exit } => {
+                out.push(12);
+                out.push(u8::from(*wait_exit));
+            }
         }
     }
 
@@ -706,6 +718,9 @@ impl Message for ServerMsg {
             10 => Self::Suspend,
             11 => Self::Lock {
                 command: r.string()?,
+            },
+            12 => Self::Flags {
+                wait_exit: r.flag()?,
             },
             t => return Err(ProtocolError::UnknownTag(t)),
         })
@@ -814,6 +829,8 @@ mod tests {
             ServerMsg::Lock {
                 command: "printf locked >/tmp/x".into(),
             },
+            ServerMsg::Flags { wait_exit: true },
+            ServerMsg::Flags { wait_exit: false },
         ]
     }
 
@@ -1001,7 +1018,7 @@ mod tests {
         // client.c:659-668 shape, vtmux numbers.
         assert_eq!(
             err.to_string(),
-            "protocol version mismatch (client 0, server 7)"
+            "protocol version mismatch (client 0, server 8)"
         );
     }
 }

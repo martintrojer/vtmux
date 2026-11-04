@@ -508,3 +508,100 @@ fn refresh_client_new_layouts_format() {
         (out, code)
     });
 }
+
+/// `wait-exit` (client.c:423, control.c `control_wait_exit`): after
+/// `%exit` the client keeps reading its input and exits at the first empty
+/// line, even one read together with the lines before it; without the
+/// flag (or with it cleared) it exits at `%exit` (control-client-wait-exit.sh).
+#[test]
+fn wait_exit_lingers_until_an_empty_line() {
+    compare("wait_exit_lingers_until_an_empty_line", |w| {
+        let mut out = Vec::new();
+        for flags in ["wait-exit", "wait-exit,!wait-exit"] {
+            w.run(&["new", "-d", "-s", "c", "-n", "w", "cat"]);
+            let mut c = w.control(&["attach", "-t", "c"]);
+            c.wait("%session-changed", |t| t.contains("%session-changed"));
+            for f in flags.split(',') {
+                c.send(&format!("refresh-client -f '{f}'"));
+            }
+            c.send("display -p ready");
+            c.wait("ready", |t| t.contains("ready\n"));
+            w.run(&["detach-client", "-s", "c"]);
+            c.wait("%exit", |t| t.contains("%exit"));
+            thread::sleep(Duration::from_millis(300));
+            let waiting = c.child.try_wait().unwrap().is_none();
+            if waiting {
+                // A line, then the empty one, in one write.
+                let stdin = c.stdin.as_mut().unwrap();
+                stdin.write_all(b"a\n\n").unwrap();
+                stdin.flush().unwrap();
+                let end = Instant::now() + WAIT;
+                while c.child.try_wait().unwrap().is_none() {
+                    assert!(Instant::now() < end, "{flags}: still waiting");
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            let (text, _, code) = c.close();
+            let tail: Vec<String> = normalise_guards(&text)
+                .into_iter()
+                .filter(|l| l.starts_with("%exit"))
+                .collect();
+            out.push((flags, waiting, tail, code));
+            w.run(&["kill-session", "-t", "c"]);
+        }
+        out
+    });
+}
+
+/// `server_client_exit_timer` (server-client.c:2361-2387): after
+/// `kill-server` a control client whose output never drains (its reader
+/// stopped) cannot keep the server alive past the exit timeout, 10 s
+/// (control-client-exit-stalled.sh; compat/DIVERGENCES.md D-029).
+#[test]
+fn stalled_client_does_not_keep_the_server() {
+    for bin in bins() {
+        let w = World::new(&bin);
+        w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "c",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat /dev/zero | tr '\\000' x",
+        ]);
+        let pid = common::parse_pid(&w.run(&["display", "-p", "#{pid}"]).0).expect("server pid");
+        // stdout is a pipe nobody reads: it fills and stays full.
+        let mut child = w
+            .command(&["-C", "attach", "-t", "c"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn control client");
+        let end = Instant::now() + WAIT;
+        while !w.run(&["lsc", "-F", "x"]).0.contains('x') {
+            assert!(
+                Instant::now() < end,
+                "{}: client never attached",
+                bin.display()
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
+        thread::sleep(Duration::from_secs(2));
+        w.run(&["kill-server"]);
+        let end = Instant::now() + Duration::from_secs(20);
+        while rustix::process::test_kill_process(pid).is_ok() {
+            assert!(
+                Instant::now() < end,
+                "{}: server still running 20 s after kill-server",
+                bin.display()
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}

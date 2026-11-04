@@ -9,9 +9,13 @@
 //! `H`, which tmux handles but does not document, hides the global
 //! options.
 //!
-//! Not here yet: `e` (editing in `$EDITOR` in a modal floating pane,
-//! `spawn_editor`, which needs floating panes), monitor hooks
-//! (`set-hook -B`) and the mouse menu.
+//! `e` edits the current value in `editor` (`window_customize_start_edit`):
+//! tmux runs the editor in a modal floating pane, vtmux in a popup over
+//! the client ([`crate::popup::Editor`], compat/DIVERGENCES.md D-028);
+//! while it runs the mode shows `WAITING FOR EDITOR` and takes only `q`,
+//! Escape and C-c, which end it.
+//!
+//! Not here yet: the mouse menu.
 
 use vtmux_core::colour::Colour;
 use vtmux_core::ids::{PaneId, SessionId};
@@ -144,6 +148,16 @@ pub struct CustomizeMode {
     hide_default: bool,
     /// `-y` (`PROMPT_ACCEPT`).
     accept: bool,
+    /// The pid of the editor open for this mode (`data->editor`,
+    /// `spawn_get_editor_pid`), which the waiting box shows.
+    editing: Option<i32>,
+}
+
+/// What an editor started by `e` is editing (`window_customize_editdata`):
+/// the item as it was, which must still be valid when the editor exits.
+#[derive(Clone, Debug)]
+pub struct Edit {
+    item: Item,
 }
 
 /// The `customize-mode` arguments the mode reads.
@@ -263,6 +277,12 @@ fn string_check(def: &OptionDef) -> Option<vtmux_core::options::StringCheck> {
 }
 
 impl CustomizeMode {
+    /// The pid of the editor open for the mode.
+    #[must_use]
+    pub fn editing(&self) -> Option<i32> {
+        self.editing
+    }
+
     /// `window_customize_init` up to `mode_tree_build`.
     #[must_use]
     pub fn new(pane: PaneId, size: (usize, usize), start: Found, o: Options) -> Self {
@@ -275,6 +295,7 @@ impl CustomizeMode {
             format: o.format.unwrap_or_else(|| DEFAULT_FORMAT.to_owned()),
             hide_global: false,
             hide_default: false,
+            editing: None,
             accept: o.accept,
         }
     }
@@ -465,6 +486,16 @@ impl TreeMode for CustomizeMode {
         key: Key,
         item: Option<Item>,
     ) -> bool {
+        // window_customize_key: while the editor runs only q, Escape and
+        // C-c do anything, and they end the mode.
+        if server
+            .with_tree::<CustomizeMode, _>(p, |_, t| t.editing.is_some())
+            .unwrap_or(false)
+        {
+            return key == Key::from_char('q')
+                || key == Key::ascii(0x1b)
+                || key == Key::ascii(b'c').ctrl();
+        }
         server.customize_key(p, c, key, item.as_ref());
         false
     }
@@ -595,8 +626,9 @@ impl CustomizeMode {
         let store = &server.model.options;
         let def = entry.def;
         let is_hook = def.is_some_and(|d| d.hook);
+        let monitor = store.monitor(tree, name).map(|m| m.describe(name));
         let is_user_hook = name.starts_with('@') && store.is_hook_event(name);
-        let any_hook = is_hook || is_user_hook;
+        let any_hook = is_hook || monitor.is_some() || is_user_hook;
         if (section == Section::Hooks) != any_hook {
             return 0;
         }
@@ -618,7 +650,7 @@ impl CustomizeMode {
             ("option_is_global".into(), flag(global)),
             ("option_is_array".into(), flag(array)),
             ("option_is_hook".into(), flag(is_hook)),
-            ("option_is_monitor".into(), "0".into()),
+            ("option_is_monitor".into(), flag(monitor.is_some())),
             (
                 "option_scope".into(),
                 scope_text(&server.model, place, found),
@@ -627,7 +659,7 @@ impl CustomizeMode {
                 "option_unit".into(),
                 def.and_then(|d| d.unit).unwrap_or_default().to_owned(),
             ),
-            ("option_monitor".into(), String::new()),
+            ("option_monitor".into(), monitor.unwrap_or_default()),
         ];
         if !array {
             vars.push(("option_value".into(), entry.value.to_text(def, None, false)));
@@ -1105,8 +1137,9 @@ impl CustomizeMode {
         };
         let def = entry.def;
         let is_hook = def.is_some_and(|d| d.hook);
+        let monitor = store.monitor(holder, name).map(|m| m.describe(name));
         let is_user_hook = name.starts_with('@') && store.is_hook_event(name);
-        let any_hook = is_hook || is_user_hook;
+        let any_hook = is_hook || monitor.is_some() || is_user_hook;
         let (space, unit) = match def.and_then(|d| d.unit) {
             Some(u) => (" ", u),
             None => ("", ""),
@@ -1114,6 +1147,7 @@ impl CustomizeMode {
         let plain = CellStyle::default();
         let text = match def.and_then(|d| d.text) {
             Some(t) => t,
+            None if monitor.is_some() => "This hook runs when a monitor changes.",
             None if is_user_hook => "This hook doesn't have a description.",
             None => "This option doesn't have a description.",
         };
@@ -1127,7 +1161,9 @@ impl CustomizeMode {
             Some(Scope::Session) => "session",
             Some(Scope::Server) => "server",
         };
-        let line = if is_user_hook {
+        let line = if monitor.is_some() {
+            "This is a monitor hook.".to_owned()
+        } else if is_user_hook {
             "This is a user hook.".to_owned()
         } else if is_hook {
             format!("This is a {kind} hook.")
@@ -1137,6 +1173,12 @@ impl CustomizeMode {
         let left = w.left();
         if !w.text(left, false, &plain, &line) {
             return;
+        }
+        if let Some(m) = &monitor {
+            let left = w.left();
+            if !w.value(left, "Monitor: ", m) {
+                return;
+            }
         }
         if def.is_some_and(|d| d.array) {
             if is_hook {
@@ -1281,9 +1323,12 @@ impl CustomizeMode {
         }
     }
 
-    /// `window_customize_write_hook_fire`.
+    /// `window_customize_write_hook_fire`: a monitor hook's own count.
     fn hook_fire(source: &Source<'_>, w: &mut Writer<'_>, tree: TreeId, name: &str) -> bool {
-        let (count, time) = source.model.options.hook_fire_stats(tree, name);
+        let store = &source.model.options;
+        let (count, time) = store
+            .monitor(tree, name)
+            .map_or_else(|| store.hook_fire_stats(tree, name), |m| m.fires);
         let left = w.left();
         let plain = CellStyle::default();
         if time != 0 {
@@ -1508,6 +1553,11 @@ impl Server {
                 };
                 self.customize_prompt(p, c, &format!("({name}[{k}]) "), &k.to_string(), ask);
             }
+            ('e', Some(i)) => {
+                if let Some(c) = c {
+                    self.customize_start_edit(p, c, i);
+                }
+            }
             ('C' | 'H', _) => {
                 self.with_tree::<CustomizeMode, _>(p, |s, t| {
                     if ch == 'C' {
@@ -1525,6 +1575,162 @@ impl Server {
         if matches!(ch, '\r' | 's' | 'w' | 'S' | 'W') {
             self.customize_rebuild(p);
         }
+    }
+
+    /// `window_customize_start_edit` (window-customize.c:2052-2115): the
+    /// current option (not a flag or choice), key Command or Note, or
+    /// environment variable, in the editor; an empty value is a newline.
+    fn customize_start_edit(&mut self, p: PaneId, c: ClientId, item: &Item) {
+        let valid = self
+            .with_tree::<CustomizeMode, _>(p, |s, t| (t.editing.is_some(), t.check(s, item)))
+            .unwrap_or((true, false));
+        if valid.0 {
+            return;
+        }
+        let value = match item {
+            Item::Option {
+                tree, name, key, ..
+            } => {
+                if !valid.1 {
+                    return;
+                }
+                let Some(entry) = self.model.options.get(*tree, name) else {
+                    return;
+                };
+                if entry
+                    .def
+                    .is_some_and(|d| matches!(d.kind, Kind::Flag | Kind::Choice(_)))
+                {
+                    return;
+                }
+                entry.value.to_text(entry.def, key.as_ref(), false)
+            }
+            Item::Key { table, key, line } => {
+                let Some(bd) = self.key_bindings.get(table, *key) else {
+                    return;
+                };
+                match line {
+                    KeyLine::Command => bd.commands.print(vtmux_core::cmd::PrintFlags::default()),
+                    KeyLine::Note => bd.note.clone().unwrap_or_default(),
+                    _ => return,
+                }
+            }
+            Item::Environment { session, name, .. } => {
+                if !valid.1 {
+                    return;
+                }
+                match self.env_of(*session).and_then(|e| e.find(name)) {
+                    Some(e) if e.value.is_some() => e.value.clone().unwrap_or_default(),
+                    _ => return,
+                }
+            }
+            Item::Title(_) => return,
+        };
+        let value = if value.is_empty() {
+            "\n".to_owned()
+        } else {
+            value
+        };
+        let edit = Edit { item: item.clone() };
+        if self.spawn_editor(c, p, value.as_bytes(), edit) {
+            let pid = self.editor_pid(p);
+            self.with_tree::<CustomizeMode, _>(p, |_, t| t.editing = pid);
+        }
+    }
+
+    /// `window_customize_edit_close_cb` (window-customize.c:1979-2043):
+    /// the editor is done; `value` is what it left in the file, `None`
+    /// when it failed. Nothing changes if the mode is gone, the file is
+    /// empty, or the item is no longer valid; one trailing newline goes.
+    pub(crate) fn customize_edit_done(
+        &mut self,
+        editor: &crate::popup::Editor,
+        value: Option<Vec<u8>>,
+    ) {
+        let p = editor.pane;
+        // data->dead, or not this mode's editor (spawn_cancel_editor when
+        // the mode went): nothing happens.
+        if self.with_tree::<CustomizeMode, _>(p, |_, t| t.editing.take().is_some()) != Some(true) {
+            return;
+        }
+        let Some(mut value) = value.filter(|v| !v.is_empty()) else {
+            return;
+        };
+        if value.last() == Some(&b'\n') {
+            value.pop();
+        }
+        let value = vtmux_core::rawstr::from_vec(value);
+        let Some(found) = self.with_tree::<CustomizeMode, _>(p, |s, t| t.found(s)) else {
+            return;
+        };
+        let item = &editor.edit.item;
+        let valid = self
+            .with_tree::<CustomizeMode, _>(p, |s, t| t.check(s, item))
+            .unwrap_or(false);
+        match item {
+            Item::Option {
+                section,
+                tree,
+                name,
+                key,
+                ..
+            } => {
+                // window_customize_option_editable, then
+                // window_customize_set_option_value.
+                let editable = valid
+                    && self.model.options.get(*tree, name).is_some_and(|e| {
+                        !e.def
+                            .is_some_and(|d| matches!(d.kind, Kind::Flag | Kind::Choice(_)))
+                    });
+                if !editable {
+                    return;
+                }
+                let result = crate::commands::set_option::with_option_host(self, found, |o, h| {
+                    o.set_from_prompt(*tree, name, key.as_ref(), &value, h)
+                });
+                if result.is_err() {
+                    return;
+                }
+                if *section == Section::Hooks && name.starts_with('@') {
+                    self.model.options.add_hook_event(name);
+                }
+                self.options_push_changes(name);
+            }
+            Item::Key { table, key, line } => match line {
+                KeyLine::Command => {
+                    let parsed = {
+                        let mut env = crate::server::GlobalEnv::new(
+                            &mut self.global_env,
+                            &self.model,
+                            &self.info,
+                        );
+                        vtmux_core::cmd::parse_string(&value, &mut env)
+                    };
+                    let Ok(list) = parsed else { return };
+                    if let Some(bd) = self.key_bindings.get_mut(table, *key) {
+                        bd.commands = list;
+                    }
+                }
+                KeyLine::Note => {
+                    if let Some(bd) = self.key_bindings.get_mut(table, *key) {
+                        bd.note = (!value.is_empty()).then_some(value);
+                    }
+                }
+                _ => return,
+            },
+            Item::Environment { session, name, .. } => {
+                if !valid {
+                    return;
+                }
+                let Some(env) = self.env_of_mut(*session) else {
+                    return;
+                };
+                let hidden = env.find(name).is_some_and(|e| e.hidden);
+                env.set(name, &value, hidden);
+            }
+            Item::Title(_) => return,
+        }
+        self.customize_rebuild(p);
     }
 
     /// `mode_tree_set_prompt` with `PROMPT_NOFORMAT` for one of the mode's

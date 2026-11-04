@@ -20,15 +20,15 @@
 //!
 //! Known divergences:
 //!
-//! - `set-hook -B` and `show-hooks -B` (monitor hooks) are not handled
-//!   here; they return [`OptionError::Unsupported`]. Monitors are server
-//!   state.
+//! - Monitor hooks (`set-hook -B`, [`monitor`]): the store holds what each
+//!   entry watches; the server runs the timer.
 //! - `set -U` on a window option also unsets it in the target window's
 //!   panes, `-g` included, as tmux does. With no target window tmux
 //!   dereferences a missing window (cmd-set-option.c:328); this skips the
 //!   panes.
 
 mod customize;
+pub mod monitor;
 mod set;
 mod show;
 mod table;
@@ -205,6 +205,11 @@ pub struct OptionsStore {
     /// `o->fire_count` and `o->fire_time` of the hooks that have run, by
     /// the tree that holds them (`options_hook_fired`).
     hook_fires: HashMap<(TreeId, String), (u32, i64)>,
+    /// `options_get_monitor_data`: the monitor hooks, by the entry that
+    /// holds them.
+    monitors: HashMap<(TreeId, String), monitor::Monitor>,
+    /// The last [`monitor::Monitor::serial`] given out.
+    monitor_serial: u64,
     /// `TMUX_TERM`, the default `-u` restores to `default-terminal`.
     term: String,
 }
@@ -227,6 +232,8 @@ impl OptionsStore {
             pane_window: HashMap::new(),
             hook_events: BTreeSet::new(),
             hook_fires: HashMap::new(),
+            monitors: HashMap::new(),
+            monitor_serial: 0,
             term: defaults.term.clone(),
         };
         for def in table::table() {
@@ -266,6 +273,7 @@ impl OptionsStore {
 
     pub fn remove_session(&mut self, id: SessionId) {
         self.sessions.remove(&id);
+        self.monitors.retain(|(t, _), _| *t != TreeId::Session(id));
     }
 
     pub fn add_window(&mut self, id: WindowId) {
@@ -274,6 +282,7 @@ impl OptionsStore {
 
     pub fn remove_window(&mut self, id: WindowId) {
         self.windows.remove(&id);
+        self.monitors.retain(|(t, _), _| *t != TreeId::Window(id));
     }
 
     /// A new pane's tree, under its window's.
@@ -290,6 +299,7 @@ impl OptionsStore {
     pub fn remove_pane(&mut self, id: PaneId) {
         self.panes.remove(&id);
         self.pane_window.remove(&id);
+        self.monitors.retain(|(t, _), _| *t != TreeId::Pane(id));
     }
 
     /// A tree; one the store does not know is empty.
@@ -409,6 +419,33 @@ impl OptionsStore {
         self.hook_events.contains(name)
     }
 
+    /// The monitor hook of the entry `name` in `tree` (this tree only).
+    #[must_use]
+    pub fn monitor(&self, tree: TreeId, name: &str) -> Option<&monitor::Monitor> {
+        self.monitors.get(&(tree, name.to_owned()))
+    }
+
+    /// Every monitor hook, oldest first: tmux gives each its own
+    /// one-second timer, so those set earlier look first.
+    #[must_use]
+    pub fn monitors(&self) -> Vec<(TreeId, &str, &monitor::Monitor)> {
+        let mut all: Vec<_> = self
+            .monitors
+            .iter()
+            .map(|((t, n), m)| (*t, n.as_str(), m))
+            .collect();
+        all.sort_by_key(|(_, _, m)| m.serial);
+        all
+    }
+
+    /// `monitor_report`: the monitor hook `name` in `tree` fired at `now`.
+    pub fn monitor_fired(&mut self, tree: TreeId, name: &str, now: i64) {
+        if let Some(m) = self.monitors.get_mut(&(tree, name.to_owned())) {
+            m.fires.0 += 1;
+            m.fires.1 = now;
+        }
+    }
+
     /// An option as a format variable (`format_find`, format.c:4624-4640):
     /// `name` or `name[key]`, searched in the server options, then the
     /// pane, window, global window, session and global session trees, each
@@ -489,8 +526,10 @@ pub enum OptionError {
     /// A command option's text did not parse: the parser's message.
     Command(String),
     Other(&'static str),
-    /// Something tmux does that vtmux does not do here.
-    Unsupported(&'static str),
+    /// `set-hook -B` with a value `monitor_parse` rejects.
+    InvalidSubscription(String),
+    /// `set-hook -B` on a name that is not `@...`.
+    MonitorName,
 }
 
 impl fmt::Display for OptionError {
@@ -520,7 +559,8 @@ impl fmt::Display for OptionError {
             Self::NotSuitableShell(s) => write!(f, "not a suitable shell: {s}"),
             Self::Command(s) => f.write_str(s),
             Self::Other(s) => f.write_str(s),
-            Self::Unsupported(s) => write!(f, "not supported in vtmux yet: {s}"),
+            Self::InvalidSubscription(s) => write!(f, "invalid subscription: {s}"),
+            Self::MonitorName => f.write_str("monitor hook name must start with @"),
         }
     }
 }

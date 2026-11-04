@@ -345,6 +345,9 @@ pub struct PaneTerm {
     passthrough: Vec<Passthrough>,
     /// When the DCS being read began (tmux's five-second ground timer).
     dcs_since: Option<std::time::Instant>,
+    /// The screen-style window name (`ESC k name ST`) being read, and
+    /// those finished since the last [`PaneTerm::take_renames`].
+    rename: Rename,
     /// History rows read out of Ghostty (see [`history_reads`]).
     reads: StdCell<u64>,
     /// The visible grid, kept up to date from Ghostty's dirty rows. It is
@@ -484,6 +487,7 @@ impl PaneTerm {
             input_buffer_size: dcs::DEFAULT_BUFFER_SIZE,
             passthrough: Vec::new(),
             dcs_since: None,
+            rename: Rename::default(),
             reads: StdCell::new(0),
             view: RefCell::default(),
             sync_hold: None,
@@ -524,6 +528,10 @@ impl PaneTerm {
     /// the distance from a pin on the first active row to the active top. The
     /// model is exact while rows scroll off the top of a full-width region;
     /// see `DIVERGENCES-PENDING.md` for where Ghostty's grid differs.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one dispatch over the sequences tmux handles itself"
+    )]
     pub fn feed(&mut self, bytes: &[u8]) {
         let step = if self.history {
             // A pane lowered to limit 0 still keeps the row tmux lets in
@@ -542,10 +550,15 @@ impl PaneTerm {
         if self.scan.in_dcs() && self.dcs_since.is_some_and(|t| t.elapsed() >= DCS_TIMEOUT) {
             self.scan.end_dcs();
         }
+        self.rename_timeout();
         let mut i = 0;
         while i < bytes.len() {
             if self.scan.in_dcs() {
                 i = self.feed_dcs(bytes, i);
+                continue;
+            }
+            if self.scan.state == ScanState::Rename {
+                i = self.feed_rename(bytes, i);
                 continue;
             }
             let mut j = i;
@@ -571,6 +584,11 @@ impl PaneTerm {
                 self.term.vt_write(b"\x18");
                 self.dcs.begin();
                 self.dcs_since = Some(std::time::Instant::now());
+                i += 1;
+                continue;
+            }
+            if event == Some(ScanEvent::RenameStart) {
+                self.rename_start();
                 i += 1;
                 continue;
             }
@@ -733,6 +751,68 @@ impl PaneTerm {
     #[must_use]
     pub fn history_limit(&self) -> usize {
         self.history_lines
+    }
+
+    /// The bytes of a rename string from `bytes[i..]` (`input_state_rename_string_table`,
+    /// input.c:742-752): 0x20-0xff are collected (`input_input`, discarded
+    /// past `input-buffer-size`), other C0 controls ignored. ESC, CAN and
+    /// SUB leave the state, which runs `input_exit_rename`: the name is
+    /// done, and the byte is left for the caller to parse as usual (`ESC \`
+    /// is then the ST it usually is). The index of that byte.
+    fn feed_rename(&mut self, bytes: &[u8], mut i: usize) -> usize {
+        while i < bytes.len() {
+            match bytes[i] {
+                0x1b | 0x18 | 0x1a => {
+                    self.scan.state = ScanState::Ground;
+                    let buf = std::mem::take(&mut self.rename.buf);
+                    if !std::mem::take(&mut self.rename.discard) {
+                        self.rename.done.push(buf);
+                    }
+                    return i;
+                }
+                b @ 0x20..=0xff => {
+                    // input_input: the buffer doubles up to the limit.
+                    if self.rename.buf.len() >= self.scan.osc_cap {
+                        self.rename.discard = true;
+                    } else if !self.rename.discard {
+                        self.rename.buf.push(b);
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        i
+    }
+
+    /// The window names the program set with `ESC k name ST` since the
+    /// last call, in order, as raw bytes (not checked: `input_exit_rename`
+    /// checks `allow-rename` and UTF-8 then).
+    pub fn take_renames(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.rename.done)
+    }
+
+    /// `ESC k` (`input_enter_rename`): the name starts empty, under the
+    /// ground timer. It is tmux's alone, as `ESC P` is: Ghostty would
+    /// print the name, so it gets CAN for the ESC it has seen.
+    fn rename_start(&mut self) {
+        self.term.vt_write(b"\x18");
+        self.rename.buf.clear();
+        self.rename.discard = false;
+        self.rename.since = Some(std::time::Instant::now());
+    }
+
+    /// The ground timer abandons a rename not ended in five seconds:
+    /// `input_reset`, which runs no exit handler, so no name.
+    fn rename_timeout(&mut self) {
+        if self.scan.state == ScanState::Rename
+            && self
+                .rename
+                .since
+                .is_some_and(|t| t.elapsed() >= DCS_TIMEOUT)
+        {
+            self.scan.state = ScanState::Ground;
+        }
     }
 
     /// The `extended-keys` option the next input is read under.
@@ -1972,6 +2052,8 @@ enum ScanEvent {
     DcsStart,
     /// `CSI 22 t` or `CSI 23 t`: `AltModeScanner::title_ops` has them.
     TitleStack,
+    /// `ESC k`: a screen-style window name starts (on the `k`).
+    RenameStart,
     /// A byte tmux ignores inside a CSI (0x7f-0xff, input.c:579, 597, 612,
     /// 628) without leaving it: Ghostty must not see it.
     Skip,
@@ -1989,6 +2071,18 @@ enum ScanState {
     Str,
     /// Inside a DCS, which [`Dcs`] reads.
     Dcs,
+    /// Inside `ESC k ... ST`, which [`PaneTerm::feed`] reads.
+    Rename,
+}
+
+/// A window name being read (`ESC k`): tmux's `input_buf` and
+/// `INPUT_DISCARD` for the rename state; `done` the names finished.
+#[derive(Debug, Default)]
+struct Rename {
+    buf: Vec<u8>,
+    discard: bool,
+    since: Option<std::time::Instant>,
+    done: Vec<Vec<u8>>,
 }
 
 impl AltModeScanner {
@@ -2057,6 +2151,10 @@ impl AltModeScanner {
         ControlFlow::Continue(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match over the parser states, as input.c's tables"
+    )]
     fn push_state(&mut self, b: u8) -> Option<ScanEvent> {
         if let ControlFlow::Break(end) = self.push_osc(b) {
             return end;
@@ -2065,8 +2163,8 @@ impl AltModeScanner {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
             // Strings are skipped; further intermediates change nothing we track.
-            (ScanState::Str | ScanState::Dcs, _) | (ScanState::EscIntermediate(_), 0x20..=0x2f) => {
-            }
+            (ScanState::Str | ScanState::Dcs | ScanState::Rename, _)
+            | (ScanState::EscIntermediate(_), 0x20..=0x2f) => {}
             // SO and SI are executed anywhere outside a string, even inside
             // an escape sequence.
             (_, 0x0e | 0x0f) => self.charset_op(CharsetOp::Shift(b == 0x0e)),
@@ -2089,9 +2187,14 @@ impl AltModeScanner {
                 self.palette_discard = false;
                 self.osc = Some(Vec::new());
             }
-            (ScanState::Esc, b'P') => {
-                self.state = ScanState::Dcs;
-                return Some(ScanEvent::DcsStart);
+            (ScanState::Esc, b'P' | b'k') => {
+                let (state, event) = if b == b'P' {
+                    (ScanState::Dcs, ScanEvent::DcsStart)
+                } else {
+                    (ScanState::Rename, ScanEvent::RenameStart)
+                };
+                self.state = state;
+                return Some(event);
             }
             (ScanState::Esc, b'_' | b'^' | b'X') => self.state = ScanState::Str,
             (ScanState::Esc, 0x20..=0x2f) => self.state = ScanState::EscIntermediate(b),
@@ -3000,6 +3103,7 @@ mod tests {
                     | ScanEvent::Reset
                     | ScanEvent::Osc133
                     | ScanEvent::DcsStart
+                    | ScanEvent::RenameStart
                     | ScanEvent::Sync
                     | ScanEvent::TitleStack
                     | ScanEvent::Skip => None,

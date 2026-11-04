@@ -67,6 +67,9 @@ pub struct Event {
     /// mode says `%window-*` to their clients and `%unlinked-window-*` to
     /// the rest (control-notify.c:128-203).
     pub linked: BTreeSet<SessionId>,
+    /// `_hooks_monitor`: a monitor hook's event, fired by the monitor of
+    /// the hook in this tree. Only that hook runs for it.
+    pub monitor: Option<TreeId>,
 }
 
 impl Event {
@@ -450,8 +453,13 @@ impl Server {
 
     // ---------------------------------------------------------- hooks
 
-    /// `hooks_event_cb` (hooks.c:231-248).
+    /// `hooks_event_cb` (hooks.c:231-248), and `hooks_monitor_hook_cb`
+    /// (hooks.c:354-363) for a monitor hook's own event.
     fn hooks_event(&mut self, ev: &Event) {
+        if let Some(tree) = ev.monitor {
+            self.hooks_monitor_insert(tree, ev);
+            return;
+        }
         let hook = ev.name.starts_with('@') && self.model.options.is_hook_event(&ev.name)
             || vtmux_core::options::find(&ev.name).is_some_and(|d| d.hook);
         if !hook {
@@ -482,6 +490,50 @@ impl Server {
         let Some((tree, lists)) = self.hook_commands(&ev.name, fs) else {
             return;
         };
+        self.hooks_queue(after, ev, fs, tree, lists, payload);
+    }
+
+    /// `hooks_insert_event(cmdq_running(NULL), name, ep, hm->oo, 1)` for a
+    /// monitor hook: the option in the monitor's own tree, its text
+    /// expanded with the payload's `hook_*` formats before it is parsed
+    /// (`hooks_parse`); a parse error is only logged. Nothing runs from a
+    /// command that has hooks off.
+    fn hooks_monitor_insert(&mut self, tree: TreeId, ev: &Event) {
+        let fs = self.hook_target(ev.target);
+        let Some(entry) = self.model.options.tree(tree).get_only(&ev.name) else {
+            return;
+        };
+        let text = match &entry.value {
+            OptionValue::Single(v) => v.to_text(entry.def, false),
+            OptionValue::Array(_) => return,
+        };
+        let payload = ev.formats("hook_");
+        let mut ctx = self.format_ctx(fs.unwrap_or_default(), None);
+        ctx.extra
+            .extend(payload.iter().map(|(k, v)| (k.clone().into(), v.clone())));
+        ctx.extra.push(("hook".into(), ev.name.clone()));
+        let expanded = vtmux_core::format::expand_str(&text, &ctx);
+        drop(ctx);
+        let mut env = GlobalEnv::new(&mut self.global_env, &self.model, &self.info);
+        let lists: Vec<CommandList> =
+            vtmux_core::cmd::parse_string(&expanded, &mut env as &mut dyn ConfigEnv)
+                .ok()
+                .into_iter()
+                .collect();
+        self.hooks_queue(None, ev, fs, tree, lists, payload);
+    }
+
+    /// The rest of `hooks_insert`: count the firing, then queue `lists`
+    /// with the hook's state.
+    fn hooks_queue(
+        &mut self,
+        after: Option<StepId>,
+        ev: &Event,
+        fs: Option<Found>,
+        tree: TreeId,
+        lists: Vec<CommandList>,
+        payload: Vec<(String, String)>,
+    ) {
         self.model.options.hook_fired(tree, &ev.name, now_epoch());
         // format_create(c, item): `command`, then the payload, then `hook`;
         // a later value replaces an earlier one.

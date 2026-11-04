@@ -34,8 +34,7 @@ status = "pass"
 status = "pass"
 
 [tests."check-names.sh"]
-status = "xfail"
-reason = "the screen-style window-name escape (ESC k name, string terminator) does not rename the window: got `format:.#(ok)`, expected `escape#:.ok`; every name/title check before it passes"
+status = "pass"
 
 [tests."choose-buffer.sh"]
 status = "pass"
@@ -47,8 +46,7 @@ status = "pass"
 status = "pass"
 
 [tests."clear-on-attach.sh"]
-status = "xfail"
-reason = "clear-on-attach is not implemented: with it off vtmux still enters the alternate screen on attach (`clear-on-attach off used smcup`); pipe-pane captures the outer client fine"
+status = "pass"
 
 [tests."client-key-order-focus.sh"]
 status = "pass"
@@ -69,8 +67,7 @@ status = "xfail"
 reason = "terminal-emulator diff (libghostty): line 7 (two emoji + skin-tone modifiers at columns 3/12) has the second cell 2 columns narrower than tmux; every other row matches (`👍🏻     👍🏻4` vs `👍🏻       👍🏻4`)"
 
 [tests."command-alias.sh"]
-status = "xfail"
-reason = "command-alias set with `set -s command-alias[100] zoom=...` is not applied: `unknown command: zoom`"
+status = "pass"
 
 [tests."command-order.sh"]
 status = "pass"
@@ -82,8 +79,7 @@ status = "pass"
 status = "pass"
 
 [tests."control-client-exit-stalled.sh"]
-status = "xfail"
-reason = "server does not exit after kill-server while a control client is stalled: `server did not exit after kill-server; new clients see: server exited unexpectedly` (needs the bounded exit handshake, 10 s)"
+status = "pass"
 
 [tests."control-client-exit.sh"]
 status = "pass"
@@ -104,8 +100,7 @@ status = "pass"
 status = "pass"
 
 [tests."control-client-wait-exit.sh"]
-status = "xfail"
-reason = "control client flag wait-exit is stored but not honoured: the client exits at %exit instead of waiting for an empty line (writer gets SIGPIPE, exit 141)"
+status = "pass"
 
 [tests."control-notify-events.sh"]
 status = "pass"
@@ -123,8 +118,7 @@ status = "pass"
 status = "pass"
 
 [tests."copy-mode-redraw.sh"]
-status = "xfail"
-reason = "missing flag refresh-client -c (client pan/clear): `not implemented in vtmux yet: refresh-client -c`"
+status = "pass"
 
 [tests."copy-mode-scroll-exit.sh"]
 status = "pass"
@@ -161,8 +155,7 @@ status = "xfail"
 reason = "P2 (`crates/vtmux-vt/DIVERGENCES-PENDING.md`): `resizew -x3` splits `abcdef` without pushing `abc` into history, so the cursor is `0 2` (`abc`/`def` on screen) where tmux has `0 1` and `def` alone; cursor_character matches"
 
 [tests."customize-mode.sh"]
-status = "xfail"
-reason = "customize-mode `e` (edit in $EDITOR) needs floating/modal panes (gap_floating): test_editor and test_editor_invalidation fail; every other section passes"
+status = "pass"
 
 [tests."decrqm-sync.sh"]
 status = "pass"
@@ -462,7 +455,7 @@ flaky = true
 
 [tests."screen-redraw-outside.sh"]
 status = "xfail"
-reason = "missing flag refresh-client -U (pan the client view): `not implemented in vtmux yet: refresh-client -U`"
+reason = "needs refresh-client -U/-D/-L/-R (panning a window larger than the client): the compositor draws every window from its origin and has no view offset, not even the cursor-following one (tty.c tty_window_offset1), so a pan is the offset plus its use in the scene, cursor, mouse, popups, menus and #{window_offset_x}; `not implemented in vtmux yet: refresh-client -U`"
 
 [tests."screen-redraw-popups.sh"]
 status = "pass"
@@ -498,8 +491,7 @@ status = "pass"
 status = "pass"
 
 [tests."set-hook-B.sh"]
-status = "xfail"
-reason = "set-hook -B (monitor hooks, monitor.c) is not implemented"
+status = "pass"
 
 [tests."set-hook-E.sh"]
 status = "pass"
@@ -508,8 +500,7 @@ status = "pass"
 status = "pass"
 
 [tests."show-options-output.sh"]
-status = "xfail"
-reason = "missing flag set-hook -B (monitor hooks, monitor.c): `not supported in vtmux yet: set-hook -B`"
+status = "pass"
 
 [tests."split-window-wait-kill.sh"]
 status = "pass"
@@ -558,7 +549,7 @@ reason = "DSR 996 / mode 2031 theme report: a pane's DSR 996 query gets no answe
 
 [tests."tty-clamp-area-status-top.sh"]
 status = "xfail"
-reason = "missing flag refresh-client -U (pan the client view): `not implemented in vtmux yet: refresh-client -U`"
+reason = "needs refresh-client -U/-D/-L/-R (panning a window larger than the client): the compositor draws every window from its origin and has no view offset, not even the cursor-following one (tty.c tty_window_offset1), so a pan is the offset plus its use in the scene, cursor, mouse, popups, menus and #{window_offset_x}; `not implemented in vtmux yet: refresh-client -U`"
 
 [tests."tty-draw-line.sh"]
 status = "xfail"
@@ -572,8 +563,7 @@ status = "xfail"
 reason = "runs to the end now (remain-on-exit, capture-pane -C -e -J -S-); the capture of the UTF-8 stress file differs from utf8-test.result (malformed and overlong sequences, Ghostty decodes them differently: D-013 and the input-malformed reason)"
 
 [tests."wait-for-E.sh"]
-status = "xfail"
-reason = "missing flag set-hook -B (monitor hooks, monitor.c): `not supported in vtmux yet: set-hook -B`"
+status = "pass"
 
 [tests."wait-for-client-lost.sh"]
 status = "xfail"

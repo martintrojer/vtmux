@@ -255,7 +255,6 @@ pub fn find(name: &str) -> Result<&'static CmdEntry, EdgeError> {
 /// The default `command-alias` server option (options-table.c:322-331). An
 /// alias is replaced by its text before lookup (cmd-parse.y
 /// `cmd_parse_expand_alias`), and only an exact name matches.
-/// User-configured aliases are an options feature (M1).
 pub const DEFAULT_COMMAND_ALIASES: [(&str, &str); 6] = [
     ("split-pane", "split-window"),
     ("splitp", "split-window"),
@@ -264,6 +263,38 @@ pub const DEFAULT_COMMAND_ALIASES: [(&str, &str); 6] = [
     ("choose-window", "choose-tree -w"),
     ("choose-session", "choose-tree -s"),
 ];
+
+thread_local! {
+    /// The `command-alias` items (`name=text`) the parser expands, in key
+    /// order; `None` is the default option. tmux reads the option each time
+    /// (`cmd_get_alias` on `global_options`); the parser has no handle on
+    /// the option store, so the server hands it the items whenever the
+    /// option changes ([`set_command_aliases`]). The server is one thread.
+    static ALIASES: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Replace the aliases this thread's parser expands with the items of the
+/// `command-alias` option.
+pub fn set_command_aliases(items: Vec<String>) {
+    ALIASES.with(|a| *a.borrow_mut() = Some(items));
+}
+
+/// `cmd_get_alias` (cmd.c:430-458): the text of the first item whose name
+/// before `=` is exactly `name`; an item without `=` never matches.
+#[must_use]
+pub fn command_alias(name: &str) -> Option<String> {
+    ALIASES.with(|a| match a.borrow().as_ref() {
+        Some(items) => items.iter().find_map(|item| {
+            let (n, text) = item.split_once('=')?;
+            (n == name).then(|| text.to_owned())
+        }),
+        None => DEFAULT_COMMAND_ALIASES
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, text)| (*text).to_owned()),
+    })
+}
 
 /// The commands with `CMD_AFTERHOOK`: the queue fires `after-<name>` once
 /// they succeed (cmd-queue.c:625-639). new-session, new-window,

@@ -248,6 +248,12 @@ impl Server {
                 self.model.fix_panes(w);
             }
         }
+        if name == "command-alias" {
+            // cmd_get_alias reads the option at every parse.
+            vtmux_core::cmd::set_command_aliases(
+                self.array_option(vtmux_core::options::TreeId::Server, "command-alias"),
+            );
+        }
         if name == "history-limit" {
             // options.c:1464-1466: session_update_history.
             self.model.update_history();

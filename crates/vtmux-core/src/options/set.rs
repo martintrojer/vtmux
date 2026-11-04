@@ -48,7 +48,7 @@ pub fn apply_set(
         return fire_event(store, args, host);
     }
     if hook_cmd && args.flag('B') {
-        return Err(OptionError::Unsupported("set-hook -B"));
+        return set_monitor(store, args, target);
     }
     let Some(first) = args.positional_text(0) else {
         return Err(OptionError::MissingArgument);
@@ -149,6 +149,62 @@ pub fn apply_set(
     Ok(SetOutcome::Changed(opt_name))
 }
 
+/// `cmd_set_hook_monitor_exec` (cmd-set-option.c:135-218): `set-hook -B
+/// name:what:format [command]` gives the user hook `name` a monitor that
+/// runs it when the format's value changes; `-u -B name` takes the monitor
+/// away and leaves the option. A command sets (`-a` appends to) the
+/// option's text first.
+fn set_monitor(
+    store: &mut OptionsStore,
+    args: &crate::cmd::Args,
+    target: &Target,
+) -> Result<SetOutcome, OptionError> {
+    if args.positionals.len() > 1 {
+        return Err(OptionError::TooManyArguments);
+    }
+    let spec = args.value('B').unwrap_or_default();
+    let parsed = super::monitor::parse_monitor(spec);
+    let name = match parsed {
+        Some((name, ..)) => name,
+        None if args.flag('u') => spec,
+        None => return Err(OptionError::InvalidSubscription(spec.to_owned())),
+    };
+    if !name.starts_with('@') {
+        return Err(OptionError::MonitorName);
+    }
+    let (tree, _) = resolve_tree(None, args, false, target)?;
+    let Some((name, what, format)) = parsed.filter(|_| !args.flag('u')) else {
+        store.monitors.remove(&(tree, name.to_owned()));
+        return Ok(SetOutcome::Unchanged);
+    };
+    let mut outcome = SetOutcome::Unchanged;
+    if let Some(value) = args.positional_text(0) {
+        store.set_string(tree, name, None, &value, args.flag('a'));
+        outcome = SetOutcome::Changed(name.to_owned());
+    }
+    // hooks_monitor_add: a global tree's monitor watches whichever session
+    // is first when it looks.
+    let session = if tree.is_global() {
+        None
+    } else {
+        target.session
+    };
+    if store.tree(tree).get_only(name).is_none() {
+        store.set_string(tree, name, None, "", false);
+    }
+    store.monitor_serial += 1;
+    let monitor = super::monitor::Monitor {
+        what,
+        format: format.to_owned(),
+        notify_true: args.flag('T'),
+        session,
+        serial: store.monitor_serial,
+        fires: (0, 0),
+    };
+    store.monitors.insert((tree, name.to_owned()), monitor);
+    Ok(outcome)
+}
+
 /// `cmd_set_hook_event_exec` (cmd-set-option.c:91): `set-hook -E @name`.
 fn fire_event(
     store: &OptionsStore,
@@ -176,9 +232,11 @@ impl OptionsStore {
     pub(super) fn remove_or_default(&mut self, tree: TreeId, name: &str, key: Option<&ArrayKey>) {
         let term = self.term.clone();
         if key.is_none() {
-            // A new entry (options_default / options_remove): no fires.
+            // A new entry (options_default / options_remove): no fires,
+            // and no monitor (options_remove frees it, options.c:415).
             let full = super::table::find(name).map_or(name, |d| d.name);
             self.hook_fires.remove(&(tree, full.to_owned()));
+            self.monitors.remove(&(tree, full.to_owned()));
         }
         let options = self.tree_mut(tree);
         let Some(entry) = options.get_only_mut(name) else {

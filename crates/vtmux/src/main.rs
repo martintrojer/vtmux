@@ -332,29 +332,69 @@ fn check_control_tty(mode: ControlMode) -> Result<(), ExitCode> {
     Ok(())
 }
 
-/// Copy stdin to the server as `Stdin` messages, then `StdinEof`.
-fn pump_stdin(mut stream: UnixStream) {
+/// Copy stdin to the server as `Stdin` messages, then `StdinEof`. Once
+/// the server is gone, or `after` is set (the client has printed `%exit`),
+/// what is read goes to `rest` instead, `None` at the end of the input,
+/// for [`wait_exit`].
+fn pump_stdin(
+    mut stream: UnixStream,
+    after: &std::sync::atomic::AtomicBool,
+    rest: &std::sync::mpsc::Sender<Option<Vec<u8>>>,
+) {
     let mut buf = [0u8; 16 * 1024];
     let mut stdin = io::stdin().lock();
+    let mut server = true;
     loop {
-        let msg = match stdin.read(&mut buf) {
-            Ok(0) | Err(_) => ClientMsg::StdinEof,
-            Ok(n) => ClientMsg::Stdin(buf[..n].to_vec()),
+        let read = match stdin.read(&mut buf) {
+            Ok(0) | Err(_) => None,
+            Ok(n) => Some(buf[..n].to_vec()),
         };
-        let eof = msg == ClientMsg::StdinEof;
-        if protocol::write_msg(&mut stream, &msg).is_err() || eof {
+        let eof = read.is_none();
+        if server && !after.load(std::sync::atomic::Ordering::SeqCst) {
+            let msg = read.clone().map_or(ClientMsg::StdinEof, ClientMsg::Stdin);
+            server = protocol::write_msg(&mut stream, &msg).is_ok();
+            if server {
+                if eof {
+                    return;
+                }
+                continue;
+            }
+        }
+        if rest.send(read).is_err() || eof {
             return;
+        }
+    }
+}
+
+/// `control_wait_exit` (control.c:745-785), for a control client with the
+/// `wait-exit` flag: after `%exit`, read the input until an empty line or
+/// its end. Lines already read in one go count one at a time.
+fn wait_exit(rest: &std::sync::mpsc::Receiver<Option<Vec<u8>>>) {
+    let mut line = Vec::new();
+    while let Ok(Some(chunk)) = rest.recv() {
+        for b in chunk {
+            if b != b'\n' {
+                line.push(b);
+            } else if line.is_empty() {
+                return;
+            } else {
+                line.clear();
+            }
         }
     }
 }
 
 /// A control client (`-C`): stdin goes to the server, the server's
 /// protocol stream to stdout; on exit print `%exit [reason]`
-/// (client.c:417-422).
+/// (client.c:417-424), then wait for the input if `wait-exit` is set.
 fn control_relay(stream: &mut UnixStream) -> ExitCode {
+    let after = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (tx, rest) = std::sync::mpsc::channel();
     if let Ok(writer) = stream.try_clone() {
-        std::thread::spawn(move || pump_stdin(writer));
+        let after = std::sync::Arc::clone(&after);
+        std::thread::spawn(move || pump_stdin(writer, &after, &tx));
     }
+    let mut wait = false;
     let (code, reason) = loop {
         match protocol::read_msg::<ServerMsg>(stream) {
             Ok(Some(ServerMsg::Stdout(b) | ServerMsg::Frame(b))) => {
@@ -372,6 +412,7 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
                     u8::try_from(vtmux_client::attach::exec(&shell, &command)).unwrap_or(1),
                 );
             }
+            Ok(Some(ServerMsg::Flags { wait_exit })) => wait = wait_exit,
             // A control client's file I/O is the server's (file.c:321).
             Ok(Some(
                 ServerMsg::Ready
@@ -385,12 +426,17 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
             Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
         }
     };
+    after.store(true, std::sync::atomic::Ordering::SeqCst);
     let mut out = io::stdout().lock();
     let _ = match reason {
         Some(r) => writeln!(out, "%exit {r}"),
         None => writeln!(out, "%exit"),
     };
     let _ = out.flush();
+    drop(out);
+    if wait {
+        wait_exit(&rest);
+    }
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
@@ -439,8 +485,9 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
                 let _ = protocol::write_msg(stream, &ClientMsg::FileDone { error });
             }
             Ok(Some(ServerMsg::ReadOpen { path })) => files::read(stream, path.as_deref()),
-            // Only an attached client is suspended or locked.
-            Ok(Some(ServerMsg::Suspend | ServerMsg::Lock { .. })) => {}
+            // Only an attached client is suspended or locked, and only a
+            // control client waits to exit.
+            Ok(Some(ServerMsg::Suspend | ServerMsg::Lock { .. } | ServerMsg::Flags { .. })) => {}
             Ok(None) | Err(_) => {
                 // client.c: CLIENT_EXIT_LOST_SERVER.
                 write_err(b"server exited unexpectedly");
