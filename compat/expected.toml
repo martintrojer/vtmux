@@ -608,5 +608,4 @@ reason = "server log (`-vv` writes tmux-server-PID.log in cwd) is not written: `
 status = "pass"
 
 [tests."window-ops.sh"]
-status = "xfail"
-reason = "session groups pass; the test then needs kill-window -a killing the current window when it is linked into the session twice (`Session D survived kill-window -a on multiply-linked window`)"
+status = "pass"
