@@ -33,6 +33,8 @@ pub struct Source<'a> {
     pub clients: std::rc::Rc<[crate::format_ctx::ClientView]>,
     /// The last [`Source::theme`], for the option values it came from.
     pub themes: &'a ThemeCache,
+    /// The key tables (customize-mode's preview).
+    pub keys: &'a vtmux_core::keys::KeyBindings,
 }
 
 /// [`Source::theme`]'s last result and its inputs: the `theme` option, the

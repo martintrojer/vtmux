@@ -193,6 +193,22 @@ impl<K: Copy + PartialEq, D> Build<K, D> {
     pub fn set_align(&mut self, id: usize, align: i8) {
         self.items[id].align = align;
     }
+
+    /// `mode_tree_no_tag`: `t` and `C-t` leave the item alone.
+    pub fn set_no_tag(&mut self, id: usize) {
+        self.items[id].no_tag = true;
+    }
+
+    /// `mode_tree_draw_as_parent`: the preview shows the parent's title.
+    pub fn set_draw_as_parent(&mut self, id: usize) {
+        self.items[id].draw_as_parent = true;
+    }
+
+    /// The items added so far, sections and all, have none at the top.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.roots.is_empty()
+    }
 }
 
 /// What a key leaves for the mode to do (`mode_tree_key`'s result and the
@@ -220,8 +236,9 @@ pub enum Action {
 pub trait Env<K, D> {
     /// `mode_tree_build`: the items again (see [`ModeTree::build`]).
     fn rebuild(&mut self, tree: &mut ModeTree<K, D>);
-    /// `searchcb`.
-    fn matches(&self, data: &D, search: &str, icase: bool) -> bool;
+    /// `searchcb`; `name` is the item's (`mti->name`, what tmux matches
+    /// without one).
+    fn matches(&self, name: &str, data: &D, search: &str, icase: bool) -> bool;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -253,6 +270,9 @@ pub struct ModeTree<K, D> {
     pub filter: Option<String>,
     pub no_matches: bool,
     pub help: bool,
+    /// The mode's `heightcb`: the rows its preview wants, whatever the
+    /// lines (`window_customize_height`).
+    pub preview_rows: Option<usize>,
     /// How many times the items were built.
     builds: u64,
 }
@@ -278,6 +298,7 @@ impl<K, D> Default for ModeTree<K, D> {
             filter: None,
             no_matches: false,
             help: false,
+            preview_rows: None,
             builds: 0,
         }
     }
@@ -475,10 +496,20 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
         }
     }
 
-    /// `mode_tree_set_height` with no height callback.
+    /// `mode_tree_set_height`: the mode's preview rows, else by the
+    /// preview's size.
     fn set_height(&mut self) {
         let sy = self.size.1;
         let n = self.lines.len();
+        if let Some(rows) = self.preview_rows {
+            if rows < sy {
+                self.height = sy - rows;
+            }
+            if sy.saturating_sub(self.height) < 2 {
+                self.height = sy;
+            }
+            return;
+        }
         self.height = match self.preview {
             Preview::Normal => {
                 let mut h = (sy / 3) * 2;
@@ -708,7 +739,8 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
             if id == last {
                 return None;
             }
-            if env.matches(&self.items[id].data, search, self.search_icase) {
+            let item = &self.items[id];
+            if env.matches(&item.name, &item.data, search, self.search_icase) {
                 return Some(id);
             }
         }
@@ -999,7 +1031,7 @@ mod tests {
                 },
             );
         }
-        fn matches(&self, data: &&'static str, search: &str, icase: bool) -> bool {
+        fn matches(&self, _: &str, data: &&'static str, search: &str, icase: bool) -> bool {
             contains(data, search, icase)
         }
     }

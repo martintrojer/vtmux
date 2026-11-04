@@ -25,6 +25,8 @@ pub(super) static EXTENSIONS: [OptionDef; 1] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether to draw a ring around the active pane."),
+        unit: None,
     },
 ];
 

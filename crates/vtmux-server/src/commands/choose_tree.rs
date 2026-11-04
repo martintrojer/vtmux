@@ -8,7 +8,9 @@ use vtmux_core::error::EdgeError;
 
 use super::Item;
 use crate::mode::window_tree::{self, Options, Start, WindowTree};
-use crate::mode::{BufferMode, ClientMode, window_buffer, window_client};
+use crate::mode::{
+    BufferMode, ClientMode, CustomizeMode, window_buffer, window_client, window_customize,
+};
 use crate::server::Server;
 use crate::target::Found;
 
@@ -111,6 +113,34 @@ pub fn exec_client(server: &mut Server, args: &Args, found: Found) -> Result<(),
         info: args.flag('i'),
     };
     let mut mode = ClientMode::new(p, size, options);
+    mode.common.unzoom = unzoom;
+    mode.build(server);
+    server
+        .model
+        .set_tree_mode(p, args.flag('k'), |_| Some(mode));
+    Ok(())
+}
+
+/// `customize-mode`.
+pub fn exec_customize(server: &mut Server, args: &Args, found: Found) -> Result<(), CmdError> {
+    let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
+    if !server
+        .model
+        .pane_may_enter(p, |m| matches!(m, crate::mode::Mode::Customize(_)))
+    {
+        return Ok(());
+    }
+    server.reset_no_stack(p);
+    let (unzoom, Some(size)) = zoom_and_size(server, args.flag('Z'), found, p) else {
+        return Ok(());
+    };
+    let options = window_customize::Options {
+        previews: args.count('N'),
+        filter: args.value('f').map(str::to_owned),
+        format: args.value('F').map(str::to_owned),
+        accept: args.flag('y'),
+    };
+    let mut mode = CustomizeMode::new(p, size, found, options);
     mode.common.unzoom = unzoom;
     mode.build(server);
     server

@@ -2965,6 +2965,7 @@ impl Server {
             env: &self.global_env,
             clients: self.client_views(),
             themes: &self.themes,
+            keys: &self.key_bindings,
         }
     }
 

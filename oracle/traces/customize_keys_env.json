@@ -1,0 +1,1953 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "customize_keys_env",
+  "inputs": {
+    "name": "customize_keys_env",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "aaa",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "display-time",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "aaa"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{m:User*,#{key}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "jjjjjjjjjjj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "User0 display-message hello\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-keys",
+          "-T",
+          "root",
+          "User0"
+        ]
+      },
+      {
+        "keys": "\rNoSuchKey x\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\rUser1\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "lj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "lj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "s"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015display-message changed\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "js"
+      },
+      {
+        "keys": "my note\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "s"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-keys",
+          "-T",
+          "root",
+          "User0"
+        ]
+      },
+      {
+        "run": [
+          "list-keys",
+          "-N",
+          "-T",
+          "root",
+          "User0"
+        ]
+      },
+      {
+        "keys": "kk"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "s\u0015not-a-command\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-keys",
+          "-T",
+          "root",
+          "User0"
+        ]
+      },
+      {
+        "keys": "ku"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-keys",
+          "-T",
+          "root",
+          "User0"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "bind",
+          "-T",
+          "prefix",
+          "c",
+          "display-message",
+          "C"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{==:#{key},c}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001b+jjjjjjjjjjj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "d"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-keys",
+          "-T",
+          "prefix",
+          "c"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "setenv",
+          "-t",
+          "aaa",
+          "CM_A",
+          "one"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-g",
+          "CM_A",
+          "g"
+        ]
+      },
+      {
+        "run": [
+          "setenv",
+          "-h",
+          "-g",
+          "CM_H",
+          "hid"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{m:CM_*,#{environment_name}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "\u001b+"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "jjjjjj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "jj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015two\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "aaa",
+          "CM_A"
+        ]
+      },
+      {
+        "keys": "S"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015gg\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "showenv",
+          "-g",
+          "CM_A"
+        ]
+      },
+      {
+        "keys": "k\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "CM_B=bee\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\rnoequals\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r-CM_C\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "aaa",
+          "CM_B"
+        ]
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "aaa",
+          "CM_C"
+        ]
+      },
+      {
+        "keys": "jj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "ju"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "showenv",
+          "-t",
+          "aaa",
+          "CM_A"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)   \\e[39mSession Options",
+          "\\e[37m(2)   \\e[39mWindow & Pane Options",
+          "\\e[37m(3)   \\e[39mSession Hooks",
+          "\\e[37m(4)   \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[39mGlobal Environment",
+          "\\e[37m(6)   \\e[39mSession Environment",
+          "\\e[37m(7)   \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)   \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) Key Table - root\\e[39m",
+          "\\e[37m\\e[40m┌ Key Table - root (filter: active) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)   \\e[39mSession Options",
+          "\\e[37m(2)   \\e[39mWindow & Pane Options",
+          "\\e[37m(3)   \\e[39mSession Hooks",
+          "\\e[37m(4)   \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[39mGlobal Environment",
+          "\\e[37m(6)   \\e[39mSession Environment",
+          "\\e[37m(7)   \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)   \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) Key Table - root\\e[39m",
+          "\\e[37m\\e[40m┌ Key Table - root (filter: active) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mNew key in root: \\e[37m\\e[40m──────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          17,
+          22
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) + Key Table - root\\e[39m",
+          "\\e[37m\\e[40m┌ Key Table - root (filter: active) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key  -T root User0 display-message hello\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) + Key Table - root\\e[39m",
+          "\\e[37m\\e[40m┌ Key Table - root (filter: active) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[43mUnknown key: NoSuchKey\\e[39m"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) + Key Table - root\\e[39m",
+          "\\e[37m\\e[40m┌ Key Table - root (filter: active) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[43mKey binding must be key command\\e[39m"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[30m\\e[43m(M-c) └─→ + User0\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message hello\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[30m\\e[43m(M-d)     ├─→ Command: display-message hello\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message hello\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[30m\\e[43m(M-d)     ├─→ Command: display-message hello\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message hello\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(User0) display-message hello\\e[37m\\e[40m──────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          29,
+          22
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[30m\\e[43m(M-d)     ├─→ Command: display-message changed\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message changed\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[37m(M-d)     ├─→ \\e[39mCommand\\e[37m: display-message changed\\e[39m",
+          "\\e[30m\\e[43m(M-e)     ├─→ Note: my note\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m my note.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message changed\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[37m(M-d)     ├─→ \\e[39mCommand\\e[37m: display-message changed\\e[39m",
+          "\\e[37m(M-e)     ├─→ \\e[39mNote\\e[37m: my note\\e[39m",
+          "\\e[30m\\e[43m(M-f)     └─→ Repeat: off\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m my note.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message changed\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[37m(M-d)     ├─→ \\e[39mCommand\\e[37m: display-message changed\\e[39m",
+          "\\e[37m(M-e)     ├─→ \\e[39mNote\\e[37m: my note\\e[39m",
+          "\\e[30m\\e[43m(M-f)     └─→ Repeat: on\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m my note.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37mon\\e[39m                                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message changed\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key -r -T root User0 display-message changed\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "C-b User0 my note\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[30m\\e[43m(M-d)     ├─→ Command: display-message changed\\e[39m",
+          "\\e[37m\\e[49m(M-e)     ├─→ \\e[39mNote\\e[37m: my note\\e[39m",
+          "\\e[37m(M-f)     └─→ \\e[39mRepeat\\e[37m: on\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m my note.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37mon\\e[39m                                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message changed\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          8
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[37m(M-c) └─→ \\e[31m-\\e[37m \\e[39mUser0",
+          "\\e[30m\\e[43m(M-d)     ├─→ Command: display-message changed\\e[39m",
+          "\\e[37m\\e[49m(M-e)     ├─→ \\e[39mNote\\e[37m: my note\\e[39m",
+          "\\e[37m(M-f)     └─→ \\e[39mRepeat\\e[37m: on\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m my note.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37mon\\e[39m                                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message changed\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[43mUnknown command: not-a-command\\e[39m"
+        ],
+        "cursor": [
+          0,
+          8
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key -r -T root User0 display-message changed\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) \\e[31m-\\e[37m \\e[39mKey Table - root",
+          "\\e[30m\\e[43m(M-c) └─→ - User0\\e[39m",
+          "\\e[37m\\e[49m(M-d)     ├─→ \\e[39mCommand\\e[37m: display-message changed\\e[39m",
+          "\\e[37m(M-e)     ├─→ \\e[39mNote\\e[37m: my note\\e[39m",
+          "\\e[37m(M-f)     └─→ \\e[39mRepeat\\e[37m: on\\e[39m",
+          "\\e[37m\\e[40m┌ User0 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m my note.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the root table.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37mon\\e[39m                                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message changed\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mUnset User0? \\e[37m\\e[40m──────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          13,
+          22
+        ]
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)   \\e[39mSession Options",
+          "\\e[37m(2)   \\e[39mWindow & Pane Options",
+          "\\e[37m(3)   \\e[39mSession Hooks",
+          "\\e[37m(4)   \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[39mGlobal Environment",
+          "\\e[37m(6)   \\e[39mSession Environment",
+          "\\e[37m(7)   \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)   \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) Key Table - root\\e[39m",
+          "\\e[37m\\e[40m┌ Key Table - root (filter: active) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "unknown key: User0\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[31m-\\e[37m \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) └─→ + c\\e[39m",
+          "\\e[37m\\e[40m┌ c (filter: active) ──────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the prefix table.                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message C\\e[39m                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mnew-window\\e[39m                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[31m-\\e[37m \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) └─→ + c\\e[39m",
+          "\\e[37m\\e[40m┌ c (filter: active) ──────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the prefix table.                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message C\\e[39m                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mnew-window\\e[39m                                                   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mReset c to default? \\e[37m\\e[40m───────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          20,
+          22
+        ]
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[31m-\\e[37m \\e[39mKey Table - prefix",
+          "\\e[30m\\e[43m(M-b) └─→ + c\\e[39m",
+          "\\e[37m\\e[40m┌ c (filter: active) ──────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Create a new window.                                                         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the prefix table.                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mnew-window\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key  -T prefix c new-window\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 61,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 62,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 63,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 66,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0)     Server Options\\e[39m",
+          "\\e[37m\\e[49m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: g\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[37m(9)   └─→ \\e[39mCM_A\\e[37m: one\\e[39m",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ Server Options (filter: active) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 68,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[30m\\e[43m(6)   ├─→ CM_A: g\\e[39m",
+          "\\e[37m\\e[49m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[37m(9)   └─→ \\e[39mCM_A\\e[37m: one\\e[39m",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_A (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a global environment variable.                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mg\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          6
+        ]
+      }
+    },
+    {
+      "step": 70,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: g\\e[39m",
+          "\\e[30m\\e[43m(7)   └─→ CM_H: hid\\e[39m",
+          "\\e[37m\\e[49m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[37m(9)   └─→ \\e[39mCM_A\\e[37m: one\\e[39m",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_H (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a global environment variable.                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This variable is hidden.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mhid\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          7
+        ]
+      }
+    },
+    {
+      "step": 72,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: g\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[30m\\e[43m(9)   └─→ CM_A: one\\e[39m",
+          "\\e[37m\\e[49m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_A (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mone\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37mg\\e[39m                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 74,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: g\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[30m\\e[43m(9)   └─→ CM_A: one\\e[39m",
+          "\\e[37m\\e[49m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_A (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mone\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37mg\\e[39m                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(CM_A, for session aaa) one\\e[37m\\e[40m────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          27,
+          22
+        ]
+      }
+    },
+    {
+      "step": 76,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: g\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[30m\\e[43m(9)   └─→ CM_A: two\\e[39m",
+          "\\e[37m\\e[49m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_A (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mtwo\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37mg\\e[39m                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 77,
+      "observation": {
+        "kind": "cli",
+        "stdout": "CM_A=two\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 79,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: g\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[30m\\e[43m(9)   └─→ CM_A: two\\e[39m",
+          "\\e[37m\\e[49m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_A (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mtwo\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37mg\\e[39m                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(CM_A, global) two\\e[37m\\e[40m─────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          18,
+          22
+        ]
+      }
+    },
+    {
+      "step": 81,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[30m\\e[43m(9)   └─→ CM_A: two\\e[39m",
+          "\\e[37m\\e[49m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_A (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mtwo\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37mgg\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 82,
+      "observation": {
+        "kind": "cli",
+        "stdout": "CM_A=gg\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 84,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[30m\\e[43m(8)   - Session Environment\\e[39m",
+          "\\e[37m\\e[49m(9)   └─→ \\e[39mCM_A\\e[37m: two\\e[39m",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ Session Environment (filter: active) ────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mNew environment: \\e[37m\\e[40m──────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          17,
+          22
+        ]
+      }
+    },
+    {
+      "step": 86,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[30m\\e[43m(8)   - Session Environment\\e[39m",
+          "\\e[37m\\e[49m(9)   ├─→ \\e[39mCM_A\\e[37m: two\\e[39m",
+          "\\e[37m(M-a) └─→ \\e[39mCM_B\\e[37m: bee\\e[39m",
+          "\\e[37m\\e[40m┌ Session Environment (filter: active) ────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          8
+        ]
+      }
+    },
+    {
+      "step": 88,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[30m\\e[43m(8)   - Session Environment\\e[39m",
+          "\\e[37m\\e[49m(9)   ├─→ \\e[39mCM_A\\e[37m: two\\e[39m",
+          "\\e[37m(M-a) └─→ \\e[39mCM_B\\e[37m: bee\\e[39m",
+          "\\e[37m\\e[40m┌ Session Environment (filter: active) ────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[43mEnvironment variable must be NAME=value\\e[39m"
+        ],
+        "cursor": [
+          0,
+          8
+        ]
+      }
+    },
+    {
+      "step": 90,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[30m\\e[43m(8)   - Session Environment\\e[39m",
+          "\\e[37m\\e[49m(9)   ├─→ \\e[39mCM_A\\e[37m: two\\e[39m",
+          "\\e[37m(M-a) ├─→ \\e[39mCM_B\\e[37m: bee\\e[39m",
+          "\\e[37m\\e[40m┌ Session Environment (filter: active) ────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          8
+        ]
+      }
+    },
+    {
+      "step": 91,
+      "observation": {
+        "kind": "cli",
+        "stdout": "CM_B=bee\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 92,
+      "observation": {
+        "kind": "cli",
+        "stdout": "-CM_C\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 94,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[37m(9)   ├─→ \\e[39mCM_A\\e[37m: two\\e[39m",
+          "\\e[30m\\e[43m(M-a) ├─→ CM_B: bee\\e[39m",
+          "\\e[37m\\e[40m┌ CM_B (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mbee\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 96,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[37m(9)   ├─→ \\e[39mCM_A\\e[37m: two\\e[39m",
+          "\\e[37m(M-a) ├─→ \\e[39mCM_B\\e[37m: bee\\e[39m",
+          "\\e[30m\\e[43m(M-b) └─→ -CM_C\\e[39m",
+          "\\e[37m\\e[40m┌ -CM_C (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable is removed.                                                         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mUnset CM_C? \\e[37m\\e[40m───────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          12,
+          22
+        ]
+      }
+    },
+    {
+      "step": 98,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(1)     \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[31m-\\e[37m \\e[39mGlobal Environment",
+          "\\e[37m(6)   ├─→ \\e[39mCM_A\\e[37m: gg\\e[39m",
+          "\\e[37m(7)   └─→ \\e[39mCM_H\\e[37m: hid\\e[39m",
+          "\\e[37m(8)   \\e[31m-\\e[37m \\e[39mSession Environment",
+          "\\e[37m(9)   ├─→ \\e[39mCM_A\\e[37m: two\\e[39m",
+          "\\e[30m\\e[43m(M-a) └─→ CM_B: bee\\e[39m",
+          "\\e[37m\\e[49m(M-b)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ CM_B (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This is a session environment variable.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Variable value: \\e[37mbee\\e[39m                                                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          9
+        ]
+      }
+    },
+    {
+      "step": 99,
+      "observation": {
+        "kind": "cli",
+        "stdout": "CM_A=two\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 101,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

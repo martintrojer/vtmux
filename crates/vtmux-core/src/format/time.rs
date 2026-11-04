@@ -108,6 +108,16 @@ fn pretty(tm: &Tm, now_tm: &Tm, age: i64) -> String {
     }
 }
 
+/// `format_pretty_time(t, 0)` (format.c:4515) in `wall`'s zone and time.
+#[must_use]
+pub fn pretty_time(t: i64, wall: &dyn crate::time::WallClock) -> String {
+    let now = wall.now().max(t);
+    match (wall.local_time(t), wall.local_time(now)) {
+        (Some(tm), Some(now_tm)) => pretty(&tm, &now_tm, now - t),
+        _ => String::new(),
+    }
+}
+
 impl Eval<'_> {
     /// The strftime pass of `format_expand1` over text (format.c:6728-6741), with the
     /// time taken once per expansion (`es->time`). `None` is "format is too long",

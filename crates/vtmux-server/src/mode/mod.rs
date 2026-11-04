@@ -3,7 +3,8 @@
 //! own screen and given its keys.
 //!
 //! Copy, view, clock, display-panes and the tree modes (`choose-tree`,
-//! `choose-buffer`, `choose-client`: [`tree_mode`]) exist so far. What a
+//! `choose-buffer`, `choose-client`, `customize-mode`: [`tree_mode`])
+//! exist so far. What a
 //! mode offers the rest of the server is [`PaneMode`]
 //! (`struct window_mode`: `name`, `key_table`, `command`), and a mode that
 //! asks the user a question keeps a [`prompt::ModePrompt`] on its pane
@@ -20,6 +21,7 @@ pub mod tree_mode;
 pub mod view;
 pub mod window_buffer;
 pub mod window_client;
+pub mod window_customize;
 pub mod window_tree;
 
 use vtmux_core::ids::PaneId;
@@ -34,6 +36,7 @@ pub use panes::PanesMode;
 pub use view::ViewMode;
 pub use window_buffer::BufferMode;
 pub use window_client::ClientMode;
+pub use window_customize::CustomizeMode;
 pub use window_tree::WindowTree;
 
 /// What the server asks of a mode (`struct window_mode`). A mode without
@@ -118,6 +121,8 @@ pub enum Mode {
     Buffer(Box<BufferMode>),
     /// `choose-client` (window-client.c).
     Client(Box<ClientMode>),
+    /// `customize-mode` (window-customize.c).
+    Customize(Box<CustomizeMode>),
     /// A mode with no key table and no command callback, like tmux's tree
     /// and clock modes: only tests need one before those exist.
     #[cfg(test)]
@@ -134,6 +139,7 @@ impl PaneMode for Mode {
             Self::Panes(m) => m.name(),
             Self::Buffer(_) => "buffer-mode",
             Self::Client(_) => "client-mode",
+            Self::Customize(_) => "options-mode",
             #[cfg(test)]
             Self::Probe => "probe-mode",
         }
@@ -146,7 +152,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.key_table(vi),
             Self::Tree(_) => None,
             Self::Panes(m) => m.key_table(vi),
-            Self::Buffer(_) | Self::Client(_) => None,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -159,7 +165,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.takes_commands(),
             Self::Tree(_) => false,
             Self::Panes(m) => m.takes_commands(),
-            Self::Buffer(_) | Self::Client(_) => false,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => false,
             #[cfg(test)]
             Self::Probe => false,
         }
@@ -172,7 +178,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.set_prefix(n),
             Self::Tree(_) => {}
             Self::Panes(m) => m.set_prefix(n),
-            Self::Buffer(_) | Self::Client(_) => {}
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => {}
             #[cfg(test)]
             Self::Probe => {}
         }
@@ -191,7 +197,7 @@ impl PaneMode for Mode {
             Self::Clock(m) => m.command(env, name, args, read_only_client),
             Self::Tree(_) => Err(copy::CommandError::NotImplemented(name.to_owned())),
             Self::Panes(m) => PaneMode::command(&mut **m, env, name, args, read_only_client),
-            Self::Buffer(_) | Self::Client(_) => {
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => {
                 Err(copy::CommandError::NotImplemented(name.to_owned()))
             }
             #[cfg(test)]
@@ -212,6 +218,7 @@ impl Mode {
             Self::Panes(m) => m.key_mode,
             Self::Buffer(m) => m.common.key_mode,
             Self::Client(m) => m.common.key_mode,
+            Self::Customize(m) => m.common.key_mode,
             #[cfg(test)]
             Self::Probe => vtmux_vt::KeyMode::Standard,
         }
@@ -228,7 +235,7 @@ impl Mode {
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
-            Self::Buffer(_) | Self::Client(_) => None,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -253,7 +260,7 @@ impl Mode {
             Self::Clock(_) => None,
             Self::Tree(_) => None,
             Self::Panes(_) => None,
-            Self::Buffer(_) | Self::Client(_) => None,
+            Self::Buffer(_) | Self::Client(_) | Self::Customize(_) => None,
             #[cfg(test)]
             Self::Probe => None,
         }
@@ -269,6 +276,7 @@ impl Mode {
             Self::Panes(m) => m.kill,
             Self::Buffer(t) => t.common.kill,
             Self::Client(t) => t.common.kill,
+            Self::Customize(t) => t.common.kill,
             // clock-mode has no -k.
             Self::Clock(_) => false,
             #[cfg(test)]

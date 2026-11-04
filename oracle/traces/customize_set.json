@@ -1,0 +1,3201 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "customize_set",
+  "inputs": {
+    "name": "customize_set",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "aaa",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "display-time",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "aaa"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{||:#{==:#{option_name},buffer-limit},#{||:#{==:#{option_name},exit-empty},#{==:#{option_name},set-clipboard}}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "lj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001542\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "buffer-limit"
+        ]
+      },
+      {
+        "keys": "\r\u0015zz\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "buffer-limit"
+        ]
+      },
+      {
+        "keys": "j\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "exit-empty"
+        ]
+      },
+      {
+        "keys": "j\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "set-clipboard"
+        ]
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "set-clipboard"
+        ]
+      },
+      {
+        "keys": "ku"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "n"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "exit-empty"
+        ]
+      },
+      {
+        "keys": "u"
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "exit-empty"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{||:#{==:#{option_name},repeat-time},#{==:#{option_name},remain-on-exit-format}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "jlj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "s"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u00151234\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "aaa",
+          "repeat-time"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "repeat-time"
+        ]
+      },
+      {
+        "keys": "S"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u00152000\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "repeat-time"
+        ]
+      },
+      {
+        "keys": "d"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "aaa",
+          "repeat-time"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "repeat-time"
+        ]
+      },
+      {
+        "keys": "jlj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "w"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015WIN\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-w",
+          "-t",
+          "aaa:0",
+          "remain-on-exit-format"
+        ]
+      },
+      {
+        "keys": "s"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015PANE\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-p",
+          "-t",
+          "%0",
+          "remain-on-exit-format"
+        ]
+      },
+      {
+        "keys": "u"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-p",
+          "-t",
+          "%0",
+          "remain-on-exit-format"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-w",
+          "-t",
+          "aaa:0",
+          "remain-on-exit-format"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{m:@*,#{option_name}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "j\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "one first value\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "aaa",
+          "@one"
+        ]
+      },
+      {
+        "keys": "\r\u0015bad\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r\u0015x y\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "lj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015changed\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "aaa",
+          "@one"
+        ]
+      },
+      {
+        "keys": "jj\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "hk display-message hi\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-t",
+          "aaa",
+          "@hk"
+        ]
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-t",
+          "aaa"
+        ]
+      },
+      {
+        "keys": "lj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "user-keys[3]",
+          "abc"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{m:user-keys*,#{option_name}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "ljlj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "a"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u00157\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "user-keys"
+        ]
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015def\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "user-keys"
+        ]
+      },
+      {
+        "keys": "k\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015ghi\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "user-keys"
+        ]
+      },
+      {
+        "keys": "ju"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-s",
+          "user-keys"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@t1",
+          "one"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@t2",
+          "two"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@t3",
+          "three"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{m:@t*,#{option_name}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "jlj"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "tjt"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "U"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gq",
+          "@t1"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gq",
+          "@t2"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gq",
+          "@t3"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "repeat-time",
+          "5000"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "history-limit",
+          "123"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-y",
+          "-t",
+          "aaa:0.0",
+          "-f",
+          "#{||:#{==:#{option_name},repeat-time},#{==:#{option_name},history-limit}}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "C"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b+"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "jtt"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "D"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "repeat-time"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-g",
+          "history-limit"
+        ]
+      },
+      {
+        "keys": "C"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   ├─→ buffer-limit: 50\\e[39m",
+          "\\e[37m\\e[49m(2)   ├─→ \\e[39mexit-empty\\e[37m: on\\e[39m",
+          "\\e[37m(3)   └─→ \\e[39mset-clipboard\\e[37m: external\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ buffer-limit (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m The maximum number of automatic buffers. When this is reached, the oldest    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m buffer is deleted.                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m50\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   ├─→ buffer-limit: 50\\e[39m",
+          "\\e[37m\\e[49m(2)   ├─→ \\e[39mexit-empty\\e[37m: on\\e[39m",
+          "\\e[37m(3)   └─→ \\e[39mset-clipboard\\e[37m: external\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ buffer-limit (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m The maximum number of automatic buffers. When this is reached, the oldest    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m buffer is deleted.                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m50\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(buffer-limit) 50\\e[37m\\e[40m──────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          17,
+          22
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   ├─→ buffer-limit: 42\\e[39m",
+          "\\e[37m\\e[49m(2)   ├─→ \\e[39mexit-empty\\e[37m: on\\e[39m",
+          "\\e[37m(3)   └─→ \\e[39mset-clipboard\\e[37m: external\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ buffer-limit (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m The maximum number of automatic buffers. When this is reached, the oldest    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m buffer is deleted.                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m42\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37m50\\e[39m                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "buffer-limit 42\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   ├─→ buffer-limit: 42\\e[39m",
+          "\\e[37m\\e[49m(2)   ├─→ \\e[39mexit-empty\\e[37m: on\\e[39m",
+          "\\e[37m(3)   └─→ \\e[39mset-clipboard\\e[37m: external\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ buffer-limit (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m The maximum number of automatic buffers. When this is reached, the oldest    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m buffer is deleted.                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m42\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37m50\\e[39m                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[43mValue is invalid: zz\\e[39m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "buffer-limit 42\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   ├─→ \\e[39mbuffer-limit\\e[37m: 42\\e[39m",
+          "\\e[30m\\e[43m(2)   ├─→ exit-empty: off\\e[39m",
+          "\\e[37m\\e[49m(3)   └─→ \\e[39mset-clipboard\\e[37m: external\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ exit-empty (filter: active) ─────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Whether the server should exit if there are no sessions.                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37moff\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mon\\e[39m                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "exit-empty off\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   ├─→ \\e[39mbuffer-limit\\e[37m: 42\\e[39m",
+          "\\e[37m(2)   ├─→ \\e[39mexit-empty\\e[37m: off\\e[39m",
+          "\\e[30m\\e[43m(3)   └─→ set-clipboard: on\\e[39m",
+          "\\e[37m\\e[49m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ set-clipboard (filter: active) ──────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Whether to attempt to set the system clipboard ('on' or 'external') and      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m whether to allow applications to create paste buffers with an escape         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m sequence ('on' only).                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mon\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Available values are: \\e[37moff, external, on\\e[39m                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mexternal\\e[39m                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "set-clipboard on\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   ├─→ \\e[39mbuffer-limit\\e[37m: 42\\e[39m",
+          "\\e[37m(2)   ├─→ \\e[39mexit-empty\\e[37m: off\\e[39m",
+          "\\e[30m\\e[43m(3)   └─→ set-clipboard: off\\e[39m",
+          "\\e[37m\\e[49m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ set-clipboard (filter: active) ──────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Whether to attempt to set the system clipboard ('on' or 'external') and      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m whether to allow applications to create paste buffers with an escape         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m sequence ('on' only).                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37moff\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Available values are: \\e[37moff, external, on\\e[39m                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mexternal\\e[39m                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "set-clipboard off\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   ├─→ \\e[39mbuffer-limit\\e[37m: 42\\e[39m",
+          "\\e[30m\\e[43m(2)   ├─→ exit-empty: off\\e[39m",
+          "\\e[37m\\e[49m(3)   └─→ \\e[39mset-clipboard\\e[37m: off\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ exit-empty (filter: active) ─────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Whether the server should exit if there are no sessions.                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37moff\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mon\\e[39m                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mUnset exit-empty? \\e[37m\\e[40m─────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          18,
+          22
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   ├─→ \\e[39mbuffer-limit\\e[37m: 42\\e[39m",
+          "\\e[30m\\e[43m(2)   ├─→ exit-empty: off\\e[39m",
+          "\\e[37m\\e[49m(3)   └─→ \\e[39mset-clipboard\\e[37m: off\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ exit-empty (filter: active) ─────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Whether the server should exit if there are no sessions.                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37moff\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mon\\e[39m                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "exit-empty off\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   ├─→ \\e[39mbuffer-limit\\e[37m: 42\\e[39m",
+          "\\e[30m\\e[43m(2)   ├─→ exit-empty: on\\e[39m",
+          "\\e[37m\\e[49m(3)   └─→ \\e[39mset-clipboard\\e[37m: off\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ exit-empty (filter: active) ─────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Whether the server should exit if there are no sessions.                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mon\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "exit-empty on\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ repeat-time: 500 milliseconds\\e[39m",
+          "\\e[37m\\e[49m(3)   \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m500 milliseconds\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ repeat-time: 500 milliseconds\\e[39m",
+          "\\e[37m\\e[49m(3)   \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m500 milliseconds\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(repeat-time, for session aaa) 500\\e[37m\\e[40m─────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          34,
+          22
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ repeat-time: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m 1234 milliseconds\\e[39m",
+          "\\e[37m\\e[49m(3)   \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m1234 milliseconds\\e[39m                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37m500 milliseconds\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37m500 milliseconds\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "repeat-time 1234\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "repeat-time 500\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ repeat-time: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m 1234 milliseconds\\e[39m",
+          "\\e[37m\\e[49m(3)   \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m1234 milliseconds\\e[39m                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37m500 milliseconds\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37m500 milliseconds\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(repeat-time, global) 1234\\e[37m\\e[40m─────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          26,
+          22
+        ]
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ repeat-time: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m 1234 milliseconds\\e[39m",
+          "\\e[37m\\e[49m(3)   \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m1234 milliseconds\\e[39m                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37m500 milliseconds\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37m2000 milliseconds\\e[39m                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "repeat-time 2000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ repeat-time: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m 1234 milliseconds\\e[39m",
+          "\\e[37m\\e[49m(3)   \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m1234 milliseconds\\e[39m                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37m500 milliseconds\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Global value: \\e[37m2000 milliseconds\\e[39m                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mReset repeat-time to default? \\e[37m\\e[40m─────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          30,
+          22
+        ]
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ repeat-time: 500 milliseconds\\e[39m",
+          "\\e[37m\\e[49m(3)   \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m500 milliseconds\\e[39m                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
+        "stdout": "repeat-time 500\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(3)   \\e[31m-\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   └─→ remain-on-exit-format: Pane is dead (#{?#{!=:#{pane_dead_status},},sta",
+          "\\e[37m\\e[49m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ remain-on-exit-format (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Message shown after the program in a pane has exited, if remain-on-exit is   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m enabled.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a window and pane option.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mPane is dead (#{?#{!=:#{pane_dead_status},},status\\e[39m             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal\\e[39m                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_signal},}, #{t:pane_dead_time})\\e[39m                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This expands to: \\e[37mPane is dead (, )\\e[39m                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 62,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(3)   \\e[31m-\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   └─→ remain-on-exit-format: Pane is dead (#{?#{!=:#{pane_dead_status},},sta",
+          "\\e[37m\\e[49m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ remain-on-exit-format (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Message shown after the program in a pane has exited, if remain-on-exit is   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m enabled.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a window and pane option.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mPane is dead (#{?#{!=:#{pane_dead_status},},status\\e[39m             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal\\e[39m                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_signal},}, #{t:pane_dead_time})\\e[39m                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This expands to: \\e[37mPane is dead (, )\\e[39m                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(remain-on-exit-format, for window 0) pane_dead_signal},}, #{t:pane_dead_time})\\e[37m\\e[40m┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          79,
+          22
+        ]
+      }
+    },
+    {
+      "step": 64,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(3)   \\e[31m-\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   └─→ remain-on-exit-format: \\e[7m(window 0)\\e[0m\\e[30m\\e[43m WIN\\e[39m",
+          "\\e[37m\\e[49m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ remain-on-exit-format (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Message shown after the program in a pane has exited, if remain-on-exit is   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m enabled.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a window and pane option.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mWIN\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mPane is dead (#{?#{!=:#{pane_dead_status},},status\\e[39m           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal\\e[39m                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_signal},}, #{t:pane_dead_time})\\e[39m                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 65,
+      "observation": {
+        "kind": "cli",
+        "stdout": "remain-on-exit-format WIN\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 67,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(3)   \\e[31m-\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   └─→ remain-on-exit-format: \\e[7m(window 0)\\e[0m\\e[30m\\e[43m WIN\\e[39m",
+          "\\e[37m\\e[49m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ remain-on-exit-format (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Message shown after the program in a pane has exited, if remain-on-exit is   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m enabled.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a window and pane option.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mWIN\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mPane is dead (#{?#{!=:#{pane_dead_status},},status\\e[39m           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal\\e[39m                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_signal},}, #{t:pane_dead_time})\\e[39m                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(remain-on-exit-format, for pane 0) WIN\\e[37m\\e[40m────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          39,
+          22
+        ]
+      }
+    },
+    {
+      "step": 69,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(3)   \\e[31m-\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   └─→ remain-on-exit-format: \\e[7m(pane 0)\\e[0m\\e[30m\\e[43m PANE\\e[39m",
+          "\\e[37m\\e[49m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ remain-on-exit-format (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Message shown after the program in a pane has exited, if remain-on-exit is   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m enabled.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a window and pane option.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mPANE\\e[39m                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mPane is dead (#{?#{!=:#{pane_dead_status},},status\\e[39m           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal\\e[39m                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_signal},}, #{t:pane_dead_time})\\e[39m                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 70,
+      "observation": {
+        "kind": "cli",
+        "stdout": "remain-on-exit-format PANE\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 72,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(3)   \\e[31m-\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   └─→ remain-on-exit-format: \\e[7m(pane 0)\\e[0m\\e[30m\\e[43m PANE\\e[39m",
+          "\\e[37m\\e[49m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ remain-on-exit-format (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Message shown after the program in a pane has exited, if remain-on-exit is   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m enabled.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a window and pane option.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mPANE\\e[39m                                                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mPane is dead (#{?#{!=:#{pane_dead_status},},status\\e[39m           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal\\e[39m                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_signal},}, #{t:pane_dead_time})\\e[39m                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mUnset remain-on-exit-format? \\e[37m\\e[40m──────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          29,
+          22
+        ]
+      }
+    },
+    {
+      "step": 74,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(3)   \\e[31m-\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   └─→ remain-on-exit-format: \\e[7m(window 0)\\e[0m\\e[30m\\e[43m WIN\\e[39m",
+          "\\e[37m\\e[49m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ remain-on-exit-format (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Message shown after the program in a pane has exited, if remain-on-exit is   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m enabled.                                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a window and pane option.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mWIN\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37mPane is dead (#{?#{!=:#{pane_dead_status},},status\\e[39m           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal\\e[39m                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m#{pane_dead_signal},}, #{t:pane_dead_time})\\e[39m                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 75,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 76,
+      "observation": {
+        "kind": "cli",
+        "stdout": "remain-on-exit-format WIN\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 79,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 81,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0)   Server Options\\e[39m",
+          "\\e[37m\\e[49m(1)   \\e[39mSession Options",
+          "\\e[37m(2)   \\e[39mWindow & Pane Options",
+          "\\e[37m(3)   \\e[39mSession Hooks",
+          "\\e[37m(4)   \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[39mGlobal Environment",
+          "\\e[37m(6)   \\e[39mSession Environment",
+          "\\e[37m(7)   \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)   \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[39mKey Table - prefix",
+          "\\e[37m\\e[40m┌ Server Options (filter: active) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 83,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   Session Options\\e[39m",
+          "\\e[37m\\e[49m(2)   \\e[39mWindow & Pane Options",
+          "\\e[37m(3)   \\e[39mSession Hooks",
+          "\\e[37m(4)   \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)   \\e[39mGlobal Environment",
+          "\\e[37m(6)   \\e[39mSession Environment",
+          "\\e[37m(7)   \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)   \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[39mKey Table - prefix",
+          "\\e[37m\\e[40m┌ Session Options (filter: active) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mNew user option: @\\e[37m\\e[40m─────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          18,
+          22
+        ]
+      }
+    },
+    {
+      "step": 85,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   + Session Options\\e[39m",
+          "\\e[37m\\e[49m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m\\e[40m┌ Session Options (filter: active) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 86,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@one \"first value\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 88,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   + Session Options\\e[39m",
+          "\\e[37m\\e[49m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m\\e[40m┌ Session Options (filter: active) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[43mUser option must be @name value\\e[39m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 90,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   + Session Options\\e[39m",
+          "\\e[37m\\e[49m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m\\e[40m┌ Session Options (filter: active) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[43mUser option name must start with @\\e[39m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 92,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ @one: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m first value\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ @one (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mfirst value\\e[39m                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 94,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ @one: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m first value\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ @one (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mfirst value\\e[39m                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(@one, for session aaa) first value\\e[37m\\e[40m────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          35,
+          22
+        ]
+      }
+    },
+    {
+      "step": 96,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ @one: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m changed\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ @one (filter: active) ───────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mchanged\\e[39m                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 97,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@one changed\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 99,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39m@one\\e[37m: \\e[7m\\e[39m(session aaa)\\e[0m \\e[37mchanged\\e[39m",
+          "\\e[37m(3)     \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)     Session Hooks\\e[39m",
+          "\\e[37m\\e[49m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ Session Hooks (filter: active) ──────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mNew user hook: @\\e[37m\\e[40m───────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          16,
+          22
+        ]
+      }
+    },
+    {
+      "step": 101,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39m@one\\e[37m: \\e[7m\\e[39m(session aaa)\\e[0m \\e[37mchanged\\e[39m",
+          "\\e[37m(3)     \\e[39mWindow & Pane Options",
+          "\\e[30m\\e[43m(4)   + Session Hooks\\e[39m",
+          "\\e[37m\\e[49m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ Session Hooks (filter: active) ──────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "step": 102,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@hk \"display-message hi\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 103,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@hk \"display-message hi\"\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 105,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39m@one\\e[37m: \\e[7m\\e[39m(session aaa)\\e[0m \\e[37mchanged\\e[39m",
+          "\\e[37m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)   \\e[31m-\\e[37m \\e[39mSession Hooks",
+          "\\e[30m\\e[43m(5)   └─→ @hk: \\e[7m(session aaa)\\e[0m\\e[30m\\e[43m display-message hi\\e[39m",
+          "\\e[37m\\e[49m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ @hk (filter: active) ────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This hook doesn't have a description.                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user hook.                                                         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Hook command: \\e[37mdisplay-message hi\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This hook has been fired 0 times.                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          5
+        ]
+      }
+    },
+    {
+      "step": 108,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 109,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 112,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   └─→ \\e[31m-\\e[37m \\e[39muser-keys",
+          "\\e[30m\\e[43m(2)       └─→ user-keys[3]: abc\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mSession Options",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ user-keys[3] (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option, key 3.                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mabc\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 114,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   └─→ \\e[31m-\\e[37m \\e[39muser-keys",
+          "\\e[30m\\e[43m(2)       └─→ user-keys[3]: abc\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mSession Options",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ user-keys[3] (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option, key 3.                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mabc\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(user-keys[3]) 3\\e[37m\\e[40m───────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          16,
+          22
+        ]
+      }
+    },
+    {
+      "step": 116,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   └─→ \\e[31m-\\e[37m \\e[39muser-keys",
+          "\\e[30m\\e[43m(2)       └─→ user-keys[7]: abc\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mSession Options",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ user-keys[7] (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option, key 7.                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mabc\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 117,
+      "observation": {
+        "kind": "cli",
+        "stdout": "user-keys[7] abc\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 119,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   └─→ \\e[31m-\\e[37m \\e[39muser-keys",
+          "\\e[30m\\e[43m(2)       └─→ user-keys[7]: abc\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mSession Options",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ user-keys[7] (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option, key 7.                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mabc\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(user-keys[7]) abc\\e[37m\\e[40m─────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          18,
+          22
+        ]
+      }
+    },
+    {
+      "step": 121,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   └─→ \\e[31m-\\e[37m \\e[39muser-keys",
+          "\\e[30m\\e[43m(2)       └─→ user-keys[7]: def\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mSession Options",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ user-keys[7] (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option, key 7.                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mdef\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 122,
+      "observation": {
+        "kind": "cli",
+        "stdout": "user-keys[7] def\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 124,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   └─→ - user-keys\\e[39m",
+          "\\e[37m\\e[49m(2)       └─→ \\e[39muser-keys[7]\\e[37m: def\\e[39m",
+          "\\e[37m(3)     \\e[39mSession Options",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ user-keys (filter: active) ──────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(user-keys[+]) def\\e[37m\\e[40m─────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          18,
+          22
+        ]
+      }
+    },
+    {
+      "step": 126,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   └─→ - user-keys\\e[39m",
+          "\\e[37m\\e[49m(2)       ├─→ \\e[39muser-keys[0]\\e[37m: ghi\\e[39m",
+          "\\e[37m(3)       └─→ \\e[39muser-keys[7]\\e[37m: def\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ user-keys (filter: active) ──────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 127,
+      "observation": {
+        "kind": "cli",
+        "stdout": "user-keys[0] ghi\nuser-keys[7] def\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 129,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[37m(1)   └─→ \\e[31m-\\e[37m \\e[39muser-keys",
+          "\\e[30m\\e[43m(2)       ├─→ user-keys[0]: ghi\\e[39m",
+          "\\e[37m\\e[49m(3)       └─→ \\e[39muser-keys[7]\\e[37m: def\\e[39m",
+          "\\e[37m(4)     \\e[39mSession Options",
+          "\\e[37m(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ user-keys[0] (filter: active) ───────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option, key 0.                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mghi\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mUnset user-keys[0]? \\e[37m\\e[40m───────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          20,
+          22
+        ]
+      }
+    },
+    {
+      "step": 131,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)   \\e[31m-\\e[37m \\e[39mServer Options",
+          "\\e[30m\\e[43m(1)   └─→ - user-keys\\e[39m",
+          "\\e[37m\\e[49m(2)       └─→ \\e[39muser-keys[7]\\e[37m: def\\e[39m",
+          "\\e[37m(3)     \\e[39mSession Options",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ user-keys (filter: active) ──────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m User key assignments. Each sequence in the list is translated into a key:    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m 'User0', 'User1' and so on.                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a server option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is an array option.                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 132,
+      "observation": {
+        "kind": "cli",
+        "stdout": "user-keys[7] def\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 135,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 136,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 137,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 138,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 141,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   ├─→ @t1: one\\e[39m",
+          "\\e[37m\\e[49m(3)   ├─→ \\e[39m@t2\\e[37m: two\\e[39m",
+          "\\e[37m(4)   └─→ \\e[39m@t3\\e[37m: three",
+          "(5)     \\e[39mWindow & Pane Options",
+          "\\e[37m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ @t1 (filter: active) ────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mone\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 143,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   ├─→ \\e[36m@t1*\\e[37m: one\\e[39m",
+          "\\e[37m(3)   ├─→ \\e[39m@t2\\e[37m: two\\e[39m",
+          "\\e[37m(4)   └─→ \\e[36m@t3*\\e[37m: three\\e[39m",
+          "\\e[30m\\e[43m(5)     Window & Pane Options\\e[39m",
+          "\\e[37m\\e[49m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ Window & Pane Options (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          5
+        ]
+      }
+    },
+    {
+      "step": 145,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   ├─→ \\e[36m@t1*\\e[37m: one\\e[39m",
+          "\\e[37m(3)   ├─→ \\e[39m@t2\\e[37m: two\\e[39m",
+          "\\e[37m(4)   └─→ \\e[36m@t3*\\e[37m: three\\e[39m",
+          "\\e[30m\\e[43m(5)     Window & Pane Options\\e[39m",
+          "\\e[37m\\e[49m(6)     \\e[39mSession Hooks",
+          "\\e[37m(7)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(8)     \\e[39mGlobal Environment",
+          "\\e[37m(9)     \\e[39mSession Environment",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode",
+          "\\e[37m\\e[40m┌ Window & Pane Options (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43mUnset 2 tagged? \\e[37m\\e[40m───────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          16,
+          22
+        ]
+      }
+    },
+    {
+      "step": 147,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)   └─→ \\e[39m@t2\\e[37m: two\\e[39m",
+          "\\e[30m\\e[43m(3)     Window & Pane Options\\e[39m",
+          "\\e[37m\\e[49m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ Window & Pane Options (filter: active) ──────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 148,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 149,
+      "observation": {
+        "kind": "cli",
+        "stdout": "@t2 two\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 150,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 153,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 154,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 155,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 157,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0)     Server Options\\e[39m",
+          "\\e[37m\\e[49m(1)   \\e[32m+\\e[37m \\e[39mSession Options",
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a)   \\e[39mKey Table - prefix",
+          "\\e[37m\\e[40m┌ Server Options (filter: active) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 159,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) + Session Options\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ Session Options (filter: active) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 161,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) - Session Options\\e[39m",
+          "\\e[37m\\e[49m(1) ├─→ \\e[39mhistory-limit\\e[37m: 123 lines\\e[39m",
+          "\\e[37m(2) └─→ \\e[39mrepeat-time\\e[37m: 5000 milliseconds\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ Session Options (filter: active) ────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 163,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[37m(1) ├─→ \\e[36mhistory-limit*\\e[37m: 123 lines\\e[39m",
+          "\\e[36m\\e[43m(2) └─→ repeat-time*: 5000 milliseconds\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ repeat-time (filter: active) ────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Time to wait for a key binding to repeat, if it is bound with the '-r' flag. \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m5000 milliseconds\\e[39m                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m The default is: \\e[37m500 milliseconds\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 165,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[32m+\\e[37m \\e[39mServer Options",
+          "\\e[37m(1) \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2) ├─→ @t2: two\\e[39m",
+          "\\e[37m\\e[49m(3) ├─→ \\e[39m@one\\e[37m: \\e[7m\\e[39m(session aaa)\\e[0m \\e[37mchanged\\e[39m",
+          "\\e[37m(4) ├─→ \\e[39mdefault-size\\e[37m: \\e[7m\\e[39m(session aaa)\\e[0m \\e[37m80x23\\e[39m",
+          "\\e[37m(5) ├─→ \\e[39mdisplay-time\\e[37m: 0 milliseconds\\e[39m",
+          "\\e[37m(6) └─→ \\e[39mstatus-right\\e[37m: R\\e[39m",
+          "\\e[37m(7) \\e[32m+\\e[37m \\e[39mWindow & Pane Options",
+          "\\e[37m(8) \\e[32m+\\e[37m \\e[39mSession Hooks",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ @t2 (filter: no matches) ────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mtwo\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 166,
+      "observation": {
+        "kind": "cli",
+        "stdout": "repeat-time 500\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 167,
+      "observation": {
+        "kind": "cli",
+        "stdout": "history-limit 2000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 169,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   ├─→ history-limit: 2000 lines\\e[39m",
+          "\\e[37m\\e[49m(3)   └─→ \\e[39mrepeat-time\\e[37m: 500 milliseconds\\e[39m",
+          "\\e[37m(4)     \\e[39mWindow & Pane Options",
+          "\\e[37m(5)     \\e[39mSession Hooks",
+          "\\e[37m(6)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(7)     \\e[39mGlobal Environment",
+          "\\e[37m(8)     \\e[39mSession Environment",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(M-a)   \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m\\e[40m┌ history-limit (filter: active) ──────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Maximum number of lines to keep in the history for each pane. If changed,    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m the new value applies only to new panes.                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37m2000 lines\\e[39m                                                     \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 171,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[42m                                                                    \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

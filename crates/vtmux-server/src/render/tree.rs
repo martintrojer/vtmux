@@ -471,6 +471,7 @@ impl Source<'_> {
             Mode::Tree(t) => self.tree_frame(pane, &**t),
             Mode::Buffer(t) => self.tree_frame(pane, &**t),
             Mode::Client(t) => self.tree_frame(pane, &**t),
+            Mode::Customize(t) => self.tree_frame(pane, &**t),
             _ => return None,
         })
     }

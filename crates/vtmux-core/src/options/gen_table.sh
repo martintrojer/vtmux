@@ -167,6 +167,22 @@ main(void)
 		default:
 			exit(1);
 		}
+		printf(",\n        text: ");
+		if (oe->text == NULL)
+			printf("None");
+		else {
+			printf("Some(");
+			rust_str(oe->text);
+			printf(")");
+		}
+		printf(",\n        unit: ");
+		if (oe->unit == NULL)
+			printf("None");
+		else {
+			printf("Some(");
+			rust_str(oe->unit);
+			printf(")");
+		}
 		printf(",\n    },\n");
 	}
 	printf("];\n\n");

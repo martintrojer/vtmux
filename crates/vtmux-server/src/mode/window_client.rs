@@ -363,7 +363,7 @@ impl TreeMode for ClientMode {
     }
 
     /// No `searchcb`: the item's name (mode-tree.c:1215-1220).
-    fn matches(&self, _server: &Server, data: &Item, search: &str, icase: bool) -> bool {
+    fn matches(&self, _server: &Server, _: &str, data: &Item, search: &str, icase: bool) -> bool {
         super::tree::contains(&data.name, search, icase)
     }
 

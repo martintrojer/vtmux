@@ -8,6 +8,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Key(Key::from_code(0x7f)),
+        text: Some("The key to send for backspace."),
+        unit: None,
     },
     OptionDef {
         name: "buffer-limit",
@@ -17,6 +19,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(50),
+        text: Some("The maximum number of automatic buffers. When this is reached, the oldest buffer is deleted."),
+        unit: None,
     },
     OptionDef {
         name: "clear-on-attach",
@@ -26,6 +30,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether to use the alternate screen and clear it when a client is attached. When disabled, tmux does not enter the alternate screen on attach so terminal content before tmux remains in scrollback."),
+        unit: None,
     },
     OptionDef {
         name: "command-alias",
@@ -35,6 +41,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("split-pane=split-window,splitp=split-window,server-info=show-messages -JT,info=show-messages -JT,choose-window=choose-tree -w,choose-session=choose-tree -s"),
+        text: Some("Array of command aliases. Each entry is an alias and a command separated by '='."),
+        unit: None,
     },
     OptionDef {
         name: "codepoint-widths",
@@ -44,6 +52,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str(""),
+        text: Some("Array of override widths for Unicode codepoints."),
+        unit: None,
     },
     OptionDef {
         name: "copy-command",
@@ -53,6 +63,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(""),
+        text: Some("Shell command run when text is copied. If empty, no command is run."),
+        unit: None,
     },
     OptionDef {
         name: "cursor-colour",
@@ -62,6 +74,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(""),
+        text: Some("Colour of the cursor."),
+        unit: None,
     },
     OptionDef {
         name: "cursor-style",
@@ -71,6 +85,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Style of the cursor."),
+        unit: None,
     },
     OptionDef {
         name: "default-client-command",
@@ -80,6 +96,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("new-session"),
+        text: Some("Default command to run when tmux is run without a command."),
+        unit: None,
     },
     OptionDef {
         name: "default-terminal",
@@ -89,6 +107,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("tmux-256color"),
+        text: Some("Default for the 'TERM' environment variable."),
+        unit: None,
     },
     OptionDef {
         name: "editor",
@@ -98,6 +118,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("/usr/bin/vi"),
+        text: Some("Editor run to edit files."),
+        unit: None,
     },
     OptionDef {
         name: "escape-time",
@@ -107,6 +129,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(10),
+        text: Some("Time to wait before assuming a key is Escape."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "exit-empty",
@@ -116,6 +140,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether the server should exit if there are no sessions."),
+        unit: None,
     },
     OptionDef {
         name: "exit-unattached",
@@ -125,6 +151,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether the server should exit if there are no attached clients."),
+        unit: None,
     },
     OptionDef {
         name: "extended-keys",
@@ -134,6 +162,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Whether to request extended key sequences from terminals that support it."),
+        unit: None,
     },
     OptionDef {
         name: "extended-keys-format",
@@ -143,6 +173,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("The format of emitted extended key sequences."),
+        unit: None,
     },
     OptionDef {
         name: "focus-events",
@@ -152,6 +184,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether to send focus events to applications."),
+        unit: None,
     },
     OptionDef {
         name: "get-clipboard",
@@ -161,6 +195,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("When an application requests the clipboard, whether to ignore the request ('off'); respond with the newest buffer ('buffer'); request the clipboard from the most recently used terminal ('request'); or to request the clipboard, create a buffer, and send it to the application ('both')."),
+        unit: None,
     },
     OptionDef {
         name: "history-file",
@@ -170,6 +206,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(""),
+        text: Some("Location of the command prompt history file. Empty does not write a history file."),
+        unit: None,
     },
     OptionDef {
         name: "input-buffer-size",
@@ -179,6 +217,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(1048576),
+        text: Some("Number of bytes accepted in a single input before dropping."),
+        unit: None,
     },
     OptionDef {
         name: "menu-style",
@@ -188,6 +228,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themedarkgrey,fg=themewhite"),
+        text: Some("Default style of menu."),
+        unit: None,
     },
     OptionDef {
         name: "menu-selected-style",
@@ -197,6 +239,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themeyellow,fg=themeblack"),
+        text: Some("Default style of selected menu item."),
+        unit: None,
     },
     OptionDef {
         name: "menu-border-style",
@@ -206,6 +250,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themedarkgrey,fg=themelightgrey"),
+        text: Some("Default style of menu borders."),
+        unit: None,
     },
     OptionDef {
         name: "menu-border-lines",
@@ -215,6 +261,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Type of characters used to draw menu border lines. Some of these are only supported on terminals with UTF-8 support."),
+        unit: None,
     },
     OptionDef {
         name: "message-limit",
@@ -224,6 +272,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(1000),
+        text: Some("Maximum number of server messages to keep."),
+        unit: None,
     },
     OptionDef {
         name: "prefix-timeout",
@@ -233,6 +283,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(0),
+        text: Some("The timeout for the prefix key if no subsequent key is pressed. Zero means disabled."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "prompt-history-limit",
@@ -242,6 +294,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(100),
+        text: Some("Maximum number of commands to keep in history."),
+        unit: None,
     },
     OptionDef {
         name: "set-clipboard",
@@ -251,6 +305,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("Whether to attempt to set the system clipboard ('on' or 'external') and whether to allow applications to create paste buffers with an escape sequence ('on' only)."),
+        unit: None,
     },
     OptionDef {
         name: "terminal-overrides",
@@ -260,6 +316,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("linux*:AX@"),
+        text: Some("List of terminal capabilities overrides."),
+        unit: None,
     },
     OptionDef {
         name: "terminal-features",
@@ -269,6 +327,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("xterm*:clipboard:ccolour:cstyle:focus:title,screen*:title,rxvt*:ignorefkeys"),
+        text: Some("List of terminal features, used if they cannot be automatically detected."),
+        unit: None,
     },
     OptionDef {
         name: "theme",
@@ -278,6 +338,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Whether tmux should detect the terminal theme, use terminal ANSI colours, or force the light or dark theme."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-black",
@@ -287,6 +349,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray5,black}"),
+        text: Some("Dark theme colour for black."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-white",
@@ -296,6 +360,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray90,white}"),
+        text: Some("Dark theme colour for white."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-light-grey",
@@ -305,6 +371,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray70,white}"),
+        text: Some("Dark theme colour for light grey."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-dark-grey",
@@ -314,6 +382,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray15,black}"),
+        text: Some("Dark theme colour for dark grey."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-green",
@@ -323,6 +393,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},yellowgreen,green}"),
+        text: Some("Dark theme colour for green."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-yellow",
@@ -332,6 +404,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"),
+        text: Some("Dark theme colour for yellow."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-red",
@@ -341,6 +415,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},indianred,red}"),
+        text: Some("Dark theme colour for red."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-blue",
@@ -350,6 +426,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},skyblue3,blue}"),
+        text: Some("Dark theme colour for blue."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-cyan",
@@ -359,6 +437,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"),
+        text: Some("Dark theme colour for cyan."),
+        unit: None,
     },
     OptionDef {
         name: "dark-theme-magenta",
@@ -368,6 +448,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"),
+        text: Some("Dark theme colour for magenta."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-black",
@@ -377,6 +459,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray10,black}"),
+        text: Some("Light theme colour for black."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-white",
@@ -386,6 +470,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray95,white}"),
+        text: Some("Light theme colour for white."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-light-grey",
@@ -395,6 +481,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray80,white}"),
+        text: Some("Light theme colour for light grey."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-dark-grey",
@@ -404,6 +492,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},gray45,black}"),
+        text: Some("Light theme colour for dark grey."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-green",
@@ -413,6 +503,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},seagreen,green}"),
+        text: Some("Light theme colour for green."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-yellow",
@@ -422,6 +514,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"),
+        text: Some("Light theme colour for yellow."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-red",
@@ -431,6 +525,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},indianred4,red}"),
+        text: Some("Light theme colour for red."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-blue",
@@ -440,6 +536,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},steelblue,blue}"),
+        text: Some("Light theme colour for blue."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-cyan",
@@ -449,6 +547,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"),
+        text: Some("Light theme colour for cyan."),
+        unit: None,
     },
     OptionDef {
         name: "light-theme-magenta",
@@ -458,6 +558,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?#{e|>=:#{client_colours},256},purple4,magenta}"),
+        text: Some("Light theme colour for magenta."),
+        unit: None,
     },
     OptionDef {
         name: "user-keys",
@@ -467,6 +569,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str(""),
+        text: Some("User key assignments. Each sequence in the list is translated into a key: 'User0', 'User1' and so on."),
+        unit: None,
     },
     OptionDef {
         name: "variation-selector-always-wide",
@@ -476,6 +580,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("If the Unicode VS16 codepoint should always be treated as a wide character."),
+        unit: None,
     },
     OptionDef {
         name: "activity-action",
@@ -485,6 +591,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(3),
+        text: Some("Action to take on an activity alert."),
+        unit: None,
     },
     OptionDef {
         name: "assume-paste-time",
@@ -494,6 +602,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(1),
+        text: Some("Maximum time between input to assume it is pasting rather than typing."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "base-index",
@@ -503,6 +613,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(0),
+        text: Some("Default index of the first window in each session."),
+        unit: None,
     },
     OptionDef {
         name: "bell-action",
@@ -512,6 +624,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("Action to take on a bell alert."),
+        unit: None,
     },
     OptionDef {
         name: "default-command",
@@ -521,6 +635,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(""),
+        text: Some("Default command to run in new panes. If empty, a shell is started."),
+        unit: None,
     },
     OptionDef {
         name: "default-shell",
@@ -530,6 +646,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("/bin/sh"),
+        text: Some("Location of default shell."),
+        unit: None,
     },
     OptionDef {
         name: "default-size",
@@ -539,6 +657,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("80x24"),
+        text: Some("Initial size of new sessions."),
+        unit: None,
     },
     OptionDef {
         name: "destroy-unattached",
@@ -548,6 +668,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Whether to destroy sessions when they have no attached clients, or keep the last session whether in the group."),
+        unit: None,
     },
     OptionDef {
         name: "detach-on-destroy",
@@ -557,6 +679,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("Whether to detach when a session is destroyed, or switch the client to another session if any exist."),
+        unit: None,
     },
     OptionDef {
         name: "display-time",
@@ -566,6 +690,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(750),
+        text: Some("Time for which status line messages should appear."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "focus-follows-mouse",
@@ -575,6 +701,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether moving the mouse into a pane selects it."),
+        unit: None,
     },
     OptionDef {
         name: "history-limit",
@@ -584,6 +712,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(2000),
+        text: Some("Maximum number of lines to keep in the history for each pane. If changed, the new value applies only to new panes."),
+        unit: Some("lines"),
     },
     OptionDef {
         name: "initial-repeat-time",
@@ -593,6 +723,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(0),
+        text: Some("Time to wait for a key binding to repeat the first time the key is pressed, if it is bound with the '-r' flag. Subsequent presses use the 'repeat-time' option."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "key-table",
@@ -602,6 +734,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("root"),
+        text: Some("Default key table. Key presses are first looked up in this table."),
+        unit: None,
     },
     OptionDef {
         name: "lock-after-time",
@@ -611,6 +745,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(0),
+        text: Some("Time after which a client is locked if not used."),
+        unit: Some("seconds"),
     },
     OptionDef {
         name: "lock-command",
@@ -620,6 +756,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("lock -np"),
+        text: Some("Shell command to run to lock a client."),
+        unit: None,
     },
     OptionDef {
         name: "message-command-style",
@@ -629,6 +767,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"),
+        text: Some("Style of the command prompt when in command mode, if 'status-keys' is set to 'vi'."),
+        unit: None,
     },
     OptionDef {
         name: "message-format",
@@ -638,6 +778,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"),
+        text: Some("Format string for the prompt and message area. The '#{message}' placeholder is replaced with the content."),
+        unit: None,
     },
     OptionDef {
         name: "message-line",
@@ -647,6 +789,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Position (line) of messages and the command prompt."),
+        unit: None,
     },
     OptionDef {
         name: "message-style",
@@ -656,6 +800,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"),
+        text: Some("Style of messages and the command prompt. A 'fill' attribute controls background clearing and a 'width' attribute (fixed or percentage) constrains the prompt area width."),
+        unit: None,
     },
     OptionDef {
         name: "mouse",
@@ -665,6 +811,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether the mouse is recognised and mouse key bindings are executed. Applications inside panes can use the mouse even when 'off'."),
+        unit: None,
     },
     OptionDef {
         name: "prefix",
@@ -674,6 +822,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Key(Key::from_code(0x200000000062)),
+        text: Some("The prefix key."),
+        unit: None,
     },
     OptionDef {
         name: "prefix2",
@@ -683,6 +833,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Key(Key::from_code(0x200000000)),
+        text: Some("A second prefix key."),
+        unit: None,
     },
     OptionDef {
         name: "renumber-windows",
@@ -692,6 +844,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether windows are automatically renumbered rather than leaving gaps."),
+        unit: None,
     },
     OptionDef {
         name: "repeat-time",
@@ -701,6 +855,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(500),
+        text: Some("Time to wait for a key binding to repeat, if it is bound with the '-r' flag."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "set-titles",
@@ -710,6 +866,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether to set the terminal title, if supported."),
+        unit: None,
     },
     OptionDef {
         name: "set-titles-string",
@@ -719,6 +877,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#S:#I:#W - \"#T\" #{session_alerts}"),
+        text: Some("Format of the terminal title to set."),
+        unit: None,
     },
     OptionDef {
         name: "silence-action",
@@ -728,6 +888,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(3),
+        text: Some("Action to take on a silence alert."),
+        unit: None,
     },
     OptionDef {
         name: "status",
@@ -737,6 +899,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("Number of lines in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-bg",
@@ -746,6 +910,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Colour(Colour::Default),
+        text: Some("Background colour of the status line. This option is deprecated, use 'status-style' instead."),
+        unit: None,
     },
     OptionDef {
         name: "status-fg",
@@ -755,6 +921,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Colour(Colour::Default),
+        text: Some("Foreground colour of the status line. This option is deprecated, use 'status-style' instead."),
+        unit: None,
     },
     OptionDef {
         name: "status-format",
@@ -768,6 +936,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
             "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}",
             "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{q/h:session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{q/h:session_alert}#[pop-default]#[norange list=on default] }",
         ]),
+        text: Some("Formats for the status lines. Each array member is the format for one status line. The default status line is made up of several components which may be configured individually with other options such as 'status-left'."),
+        unit: None,
     },
     OptionDef {
         name: "status-interval",
@@ -777,6 +947,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(15),
+        text: Some("Number of seconds between status line updates."),
+        unit: Some("seconds"),
     },
     OptionDef {
         name: "status-justify",
@@ -786,6 +958,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Position of the window list in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-keys",
@@ -795,6 +969,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Key set to use at the command prompt."),
+        unit: None,
     },
     OptionDef {
         name: "status-left",
@@ -804,6 +980,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("[#{session_name}] "),
+        text: Some("Contents of the left side of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-left-length",
@@ -813,6 +991,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(10),
+        text: Some("Maximum width of the left side of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-left-style",
@@ -822,6 +1002,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Style of the left side of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-position",
@@ -831,6 +1013,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("Position of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-right",
@@ -840,6 +1024,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"),
+        text: Some("Contents of the right side of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-right-length",
@@ -849,6 +1035,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(40),
+        text: Some("Maximum width of the right side of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-right-style",
@@ -858,6 +1046,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Style of the right side of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "status-style",
@@ -867,6 +1057,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themegreen,fg=themeblack"),
+        text: Some("Style of the status line."),
+        unit: None,
     },
     OptionDef {
         name: "pane-status-current-style",
@@ -876,6 +1068,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("underscore"),
+        text: Some("Style of the current pane in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "pane-status-style",
@@ -885,6 +1079,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Style of panes in the status line, except the current pane."),
+        unit: None,
     },
     OptionDef {
         name: "prompt-cursor-colour",
@@ -894,6 +1090,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(""),
+        text: Some("Colour of the cursor when in the command prompt."),
+        unit: None,
     },
     OptionDef {
         name: "prompt-command-cursor-colour",
@@ -903,6 +1101,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(""),
+        text: Some("Colour of the cursor in the command prompt when in command mode, if 'status-keys' is set to 'vi'."),
+        unit: None,
     },
     OptionDef {
         name: "prompt-cursor-style",
@@ -912,6 +1112,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Style of the cursor when in the command prompt."),
+        unit: None,
     },
     OptionDef {
         name: "prompt-command-cursor-style",
@@ -921,6 +1123,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Style of the cursor in the command prompt when in command mode, if 'status-keys' is set to 'vi'."),
+        unit: None,
     },
     OptionDef {
         name: "session-status-current-style",
@@ -930,6 +1134,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("underscore"),
+        text: Some("Style of the current session in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "session-status-style",
@@ -939,6 +1145,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Style of sessions in the status line, except the current session."),
+        unit: None,
     },
     OptionDef {
         name: "update-environment",
@@ -948,6 +1156,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("DISPLAY KRB5CCNAME MSYSTEM SSH_ASKPASS SSH_AUTH_SOCK SSH_AGENT_PID SSH_CONNECTION WAYLAND_DISPLAY WINDOWID XAUTHORITY XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE"),
+        text: Some("List of environment variables to update in the session environment when a client is attached."),
+        unit: None,
     },
     OptionDef {
         name: "visual-activity",
@@ -957,6 +1167,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("How activity alerts should be shown: a message ('on'), a message and a bell ('both') or nothing ('off')."),
+        unit: None,
     },
     OptionDef {
         name: "visual-bell",
@@ -966,6 +1178,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("How bell alerts should be shown: a message ('on'), a message and a bell ('both') or nothing ('off')."),
+        unit: None,
     },
     OptionDef {
         name: "visual-silence",
@@ -975,6 +1189,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("How silence alerts should be shown: a message ('on'), a message and a bell ('both') or nothing ('off')."),
+        unit: None,
     },
     OptionDef {
         name: "word-separators",
@@ -984,6 +1200,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"),
+        text: Some("Characters considered to separate words; a space matches any character with the Unicode White_Space property."),
+        unit: None,
     },
     OptionDef {
         name: "aggressive-resize",
@@ -993,6 +1211,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("When 'window-size' is 'smallest', whether the maximum size of a window is the smallest attached session where it is the current window ('on') or the smallest session it is linked to ('off')."),
+        unit: None,
     },
     OptionDef {
         name: "allow-passthrough",
@@ -1002,6 +1222,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Whether applications are allowed to use the escape sequence to bypass tmux. Can be 'off' (disallowed), 'on' (allowed if the pane is visible), or 'all' (allowed even if the pane is invisible)."),
+        unit: None,
     },
     OptionDef {
         name: "allow-rename",
@@ -1011,6 +1233,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether applications are allowed to use the escape sequence to rename windows."),
+        unit: None,
     },
     OptionDef {
         name: "allow-set-title",
@@ -1020,6 +1244,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether applications are allowed to use the escape sequence to set the pane title."),
+        unit: None,
     },
     OptionDef {
         name: "alternate-screen",
@@ -1029,6 +1255,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether applications are allowed to use the alternate screen."),
+        unit: None,
     },
     OptionDef {
         name: "automatic-rename",
@@ -1038,6 +1266,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether windows are automatically renamed."),
+        unit: None,
     },
     OptionDef {
         name: "automatic-rename-format",
@@ -1047,6 +1277,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"),
+        text: Some("Format used to automatically rename windows."),
+        unit: None,
     },
     OptionDef {
         name: "clock-mode-colour",
@@ -1056,6 +1288,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("themeblue"),
+        text: Some("Colour of the clock in clock mode."),
+        unit: None,
     },
     OptionDef {
         name: "clock-mode-style",
@@ -1065,6 +1299,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("Time format of the clock in clock mode."),
+        unit: None,
     },
     OptionDef {
         name: "display-panes-active-colour",
@@ -1074,6 +1310,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("themered"),
+        text: Some("Colour of the active pane for 'display-panes'."),
+        unit: None,
     },
     OptionDef {
         name: "display-panes-border-style",
@@ -1083,6 +1321,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themedarkgrey,fg=themelightgrey"),
+        text: Some("Style of the pane borders in 'display-panes'."),
+        unit: None,
     },
     OptionDef {
         name: "display-panes-colour",
@@ -1092,6 +1332,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("themeblue"),
+        text: Some("Colour of not active panes for 'display-panes'."),
+        unit: None,
     },
     OptionDef {
         name: "display-panes-format",
@@ -1101,6 +1343,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"),
+        text: Some("Format of text shown by 'display-panes', expanded for each pane."),
+        unit: None,
     },
     OptionDef {
         name: "display-panes-time",
@@ -1110,6 +1354,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(1000),
+        text: Some("Time for which 'display-panes' should show pane numbers."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "copy-mode-match-style",
@@ -1119,6 +1365,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themecyan,fg=themeblack"),
+        text: Some("Style of search matches in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-current-match-style",
@@ -1128,6 +1376,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=thememagenta,fg=themeblack"),
+        text: Some("Style of the current search match in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-mark-style",
@@ -1137,6 +1387,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themeyellow,fg=themeblack"),
+        text: Some("Style of the marked line in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-position-format",
@@ -1146,6 +1398,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"),
+        text: Some("Format of the position indicator in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-position-style",
@@ -1155,6 +1409,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("#{E:mode-style}"),
+        text: Some("Style of position indicator in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-selection-style",
@@ -1164,6 +1420,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("#{E:mode-style}"),
+        text: Some("Style of selection in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-current-line-number-style",
@@ -1173,6 +1431,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("fg=themeyellow"),
+        text: Some("Style of current line number in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-current-line-style",
@@ -1182,6 +1442,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Style of the line containing the cursor in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-line-number-style",
@@ -1191,6 +1453,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("fg=themelightgrey,dim"),
+        text: Some("Style of line numbers in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "copy-mode-line-numbers",
@@ -1200,6 +1464,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Line number mode in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "fill-character",
@@ -1209,6 +1475,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}"),
+        text: Some("Format used to fill unused parts of window."),
+        unit: None,
     },
     OptionDef {
         name: "main-pane-height",
@@ -1218,6 +1486,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("24"),
+        text: Some("Height of the main pane in the 'main-horizontal' layout. This may be a percentage, for example '10%'."),
+        unit: None,
     },
     OptionDef {
         name: "main-pane-width",
@@ -1227,6 +1497,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("80"),
+        text: Some("Width of the main pane in the 'main-vertical' layout. This may be a percentage, for example '10%'."),
+        unit: None,
     },
     OptionDef {
         name: "mode-keys",
@@ -1236,6 +1508,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Key set used in copy mode."),
+        unit: None,
     },
     OptionDef {
         name: "mode-style",
@@ -1245,6 +1519,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("noattr,bg=themeyellow,fg=themeblack"),
+        text: Some("Style of indicators and highlighting in modes."),
+        unit: None,
     },
     OptionDef {
         name: "monitor-activity",
@@ -1254,6 +1530,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether an alert is triggered by activity."),
+        unit: None,
     },
     OptionDef {
         name: "monitor-bell",
@@ -1263,6 +1541,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether an alert is triggered by a bell."),
+        unit: None,
     },
     OptionDef {
         name: "monitor-silence",
@@ -1272,6 +1552,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(0),
+        text: Some("Time after which an alert is triggered by silence. Zero means no alert."),
+        unit: None,
     },
     OptionDef {
         name: "other-pane-height",
@@ -1281,6 +1563,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("0"),
+        text: Some("Height of the other panes in the 'main-horizontal' layout. This may be a percentage, for example '10%'."),
+        unit: None,
     },
     OptionDef {
         name: "other-pane-width",
@@ -1290,6 +1574,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("0"),
+        text: Some("Height of the other panes in the 'main-vertical' layout. This may be a percentage, for example '10%'."),
+        unit: None,
     },
     OptionDef {
         name: "pane-active-border-style",
@@ -1299,6 +1585,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"),
+        text: Some("Style of the active pane border."),
+        unit: None,
     },
     OptionDef {
         name: "pane-base-index",
@@ -1308,6 +1596,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(0),
+        text: Some("Index of the first pane in each window."),
+        unit: None,
     },
     OptionDef {
         name: "pane-border-format",
@@ -1317,6 +1607,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"),
+        text: Some("Format of text in the pane status lines."),
+        unit: None,
     },
     OptionDef {
         name: "pane-border-indicators",
@@ -1326,6 +1618,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(1),
+        text: Some("Whether to indicate the active pane by colouring border or displaying arrow markers."),
+        unit: None,
     },
     OptionDef {
         name: "pane-border-lines",
@@ -1335,6 +1629,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Type of characters used to draw pane border lines. Some of these are only supported on terminals with UTF-8 support."),
+        unit: None,
     },
     OptionDef {
         name: "pane-border-status",
@@ -1344,6 +1640,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Position of the pane status lines."),
+        unit: None,
     },
     OptionDef {
         name: "pane-border-style",
@@ -1353,6 +1651,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("fg=themelightgrey"),
+        text: Some("Style of the pane status lines."),
+        unit: None,
     },
     OptionDef {
         name: "pane-colours",
@@ -1362,6 +1662,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(""),
+        text: Some("The default colour palette for colours zero to 255."),
+        unit: None,
     },
     OptionDef {
         name: "pane-scrollbars",
@@ -1371,6 +1673,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Pane scrollbar state: off, on, modal, or auto-hide."),
+        unit: None,
     },
     OptionDef {
         name: "pane-scrollbars-timeout",
@@ -1380,6 +1684,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(500),
+        text: Some("Time before modal and auto-hide pane scrollbars disappear."),
+        unit: Some("milliseconds"),
     },
     OptionDef {
         name: "pane-scrollbars-style",
@@ -1389,6 +1695,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themedarkgrey,fg=themelightgrey,width=1,pad=0"),
+        text: Some("Style of the pane scrollbar."),
+        unit: None,
     },
     OptionDef {
         name: "pane-scrollbars-position",
@@ -1398,6 +1706,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Pane scrollbar position."),
+        unit: None,
     },
     OptionDef {
         name: "popup-style",
@@ -1407,6 +1717,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themedarkgrey,fg=themewhite"),
+        text: Some("Default style of popups."),
+        unit: None,
     },
     OptionDef {
         name: "popup-border-style",
@@ -1416,6 +1728,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themedarkgrey,fg=themelightgrey"),
+        text: Some("Default style of popup borders."),
+        unit: None,
     },
     OptionDef {
         name: "popup-border-lines",
@@ -1425,6 +1739,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Type of characters used to draw popup border lines. Some of these are only supported on terminals with UTF-8 support."),
+        unit: None,
     },
     OptionDef {
         name: "remain-on-exit",
@@ -1434,6 +1750,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(0),
+        text: Some("Whether panes should remain ('on'), remain until a key is pressed after any exit ('key') or after a failure ('failed-key'), or be automatically killed ('off' or 'failed') when the program inside exits."),
+        unit: None,
     },
     OptionDef {
         name: "remain-on-exit-format",
@@ -1443,6 +1761,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"),
+        text: Some("Message shown after the program in a pane has exited, if remain-on-exit is enabled."),
+        unit: None,
     },
     OptionDef {
         name: "scroll-on-clear",
@@ -1452,6 +1772,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether the contents of the screen should be scrolled intohistory when clearing the whole screen."),
+        unit: None,
     },
     OptionDef {
         name: "switch-mode-match-style",
@@ -1461,6 +1783,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=cyan fg=black"),
+        text: Some("Style of matched characters in switch mode."),
+        unit: None,
     },
     OptionDef {
         name: "synchronize-panes",
@@ -1470,6 +1794,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(false),
+        text: Some("Whether typing should be sent to all panes simultaneously."),
+        unit: None,
     },
     OptionDef {
         name: "tiled-layout-max-columns",
@@ -1479,6 +1805,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Number(0),
+        text: Some("Maximum number of columns in the 'tiled' layout. A value of 0 means no limit."),
+        unit: None,
     },
     OptionDef {
         name: "tree-mode-border-style",
@@ -1488,6 +1816,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("bg=themedarkgrey,fg=themelightgrey"),
+        text: Some("Style of borders in tree mode."),
+        unit: None,
     },
     OptionDef {
         name: "tree-mode-preview-format",
@@ -1497,6 +1827,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"),
+        text: Some("Format of the preview indicator in tree mode."),
+        unit: None,
     },
     OptionDef {
         name: "tree-mode-preview-style",
@@ -1506,6 +1838,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"),
+        text: Some("Style of preview indicator in tree mode."),
+        unit: None,
     },
     OptionDef {
         name: "tree-mode-selection-style",
@@ -1515,6 +1849,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("#{E:mode-style}"),
+        text: Some("Style of the selected line in tree mode."),
+        unit: None,
     },
     OptionDef {
         name: "window-active-style",
@@ -1524,6 +1860,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Default style of the active pane."),
+        unit: None,
     },
     OptionDef {
         name: "window-pane-current-status-format",
@@ -1533,6 +1871,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#P:[#T]#{?pane_flags,#{pane_flags}, }"),
+        text: Some("Format of the current window pane in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "window-pane-status-format",
@@ -1542,6 +1882,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#P:[#T]#{?pane_flags,#{pane_flags}, }"),
+        text: Some("Format of window panes in the status line, except the current pane."),
+        unit: None,
     },
     OptionDef {
         name: "window-size",
@@ -1551,6 +1893,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Choice(3),
+        text: Some("How window size is calculated. 'latest' uses the size of the most recently used client, 'largest' the largest client, 'smallest' the smallest client and 'manual' a size set by the 'resize-window' command."),
+        unit: None,
     },
     OptionDef {
         name: "window-style",
@@ -1560,6 +1904,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Default style of panes that are not the active pane."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-activity-style",
@@ -1569,6 +1915,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("reverse"),
+        text: Some("Style of windows in the status line with an activity alert."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-bell-style",
@@ -1578,6 +1926,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("reverse"),
+        text: Some("Style of windows in the status line with a bell alert."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-current-format",
@@ -1587,6 +1937,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#I:#W#{?window_flags,#{window_flags}, }"),
+        text: Some("Format of the current window in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-current-style",
@@ -1596,6 +1948,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("underscore"),
+        text: Some("Style of the current window in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-format",
@@ -1605,6 +1959,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str("#I:#W#{?window_flags,#{window_flags}, }"),
+        text: Some("Format of windows in the status line, except the current window."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-last-style",
@@ -1614,6 +1970,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Style of the last window in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-separator",
@@ -1623,6 +1981,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Str(" "),
+        text: Some("Separator between windows in the status line."),
+        unit: None,
     },
     OptionDef {
         name: "window-status-style",
@@ -1632,6 +1992,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: Some(","),
         default: DefaultValue::Str("default"),
+        text: Some("Style of windows in the status line, except the current and last windows."),
+        unit: None,
     },
     OptionDef {
         name: "wrap-search",
@@ -1641,6 +2003,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether searching in copy mode should wrap at the top or bottom."),
+        unit: None,
     },
     OptionDef {
         name: "xterm-keys",
@@ -1650,6 +2014,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: false,
         separator: None,
         default: DefaultValue::Flag(true),
+        text: Some("Whether xterm-style function key sequences should be sent. This option is no longer used."),
+        unit: None,
     },
     OptionDef {
         name: "after-bind-key",
@@ -1659,6 +2025,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the bind-key command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-capture-pane",
@@ -1668,6 +2036,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the capture-pane command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-copy-mode",
@@ -1677,6 +2047,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the copy-mode command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-display-message",
@@ -1686,6 +2058,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the display-message command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-display-panes",
@@ -1695,6 +2069,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the display-panes command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-kill-pane",
@@ -1704,6 +2080,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the kill-pane command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-list-buffers",
@@ -1713,6 +2091,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the list-buffers command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-list-clients",
@@ -1722,6 +2102,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the list-clients command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-list-keys",
@@ -1731,6 +2113,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the list-keys command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-list-panes",
@@ -1740,6 +2124,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the list-panes command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-list-sessions",
@@ -1749,6 +2135,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the list-sessions command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-list-windows",
@@ -1758,6 +2146,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the list-windows command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-load-buffer",
@@ -1767,6 +2157,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the load-buffer command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-lock-server",
@@ -1776,6 +2168,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the lock-server command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-new-session",
@@ -1785,6 +2179,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the new-session command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-new-window",
@@ -1794,6 +2190,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the new-window command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-paste-buffer",
@@ -1803,6 +2201,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the paste-buffer command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-pipe-pane",
@@ -1812,6 +2212,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the pipe-pane command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-refresh-client",
@@ -1821,6 +2223,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the refresh-client command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-rename-session",
@@ -1830,6 +2234,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the rename-session command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-rename-window",
@@ -1839,6 +2245,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the rename-window command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-resize-pane",
@@ -1848,6 +2256,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the resize-pane command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-resize-window",
@@ -1857,6 +2267,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the resize-window command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-save-buffer",
@@ -1866,6 +2278,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the save-buffer command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-select-layout",
@@ -1875,6 +2289,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the select-layout command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-select-pane",
@@ -1884,6 +2300,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the select-pane command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-select-window",
@@ -1893,6 +2311,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the select-window command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-send-keys",
@@ -1902,6 +2322,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the send-keys command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-set-buffer",
@@ -1911,6 +2333,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the set-buffer command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-set-environment",
@@ -1920,6 +2344,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the set-environment command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-set-hook",
@@ -1929,6 +2355,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the set-hook command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-set-option",
@@ -1938,6 +2366,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the set-option command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-show-environment",
@@ -1947,6 +2377,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the show-environment command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-show-messages",
@@ -1956,6 +2388,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the show-messages command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-show-options",
@@ -1965,6 +2399,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the show-options command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-split-window",
@@ -1974,6 +2410,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the split-window command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-swap-window",
@@ -1983,6 +2421,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the swap-window command completes."),
+        unit: None,
     },
     OptionDef {
         name: "after-unbind-key",
@@ -1992,6 +2432,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run after the unbind-key command completes."),
+        unit: None,
     },
     OptionDef {
         name: "alert-activity",
@@ -2001,6 +2443,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window has activity."),
+        unit: None,
     },
     OptionDef {
         name: "alert-bell",
@@ -2010,6 +2454,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window has received a bell."),
+        unit: None,
     },
     OptionDef {
         name: "alert-silence",
@@ -2019,6 +2465,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window has been silent."),
+        unit: None,
     },
     OptionDef {
         name: "client-active",
@@ -2028,6 +2476,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client becomes the latest active client of its session."),
+        unit: None,
     },
     OptionDef {
         name: "client-attached",
@@ -2037,6 +2487,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client is attached."),
+        unit: None,
     },
     OptionDef {
         name: "client-created",
@@ -2046,6 +2498,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client is created."),
+        unit: None,
     },
     OptionDef {
         name: "client-closed",
@@ -2055,6 +2509,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client is closed."),
+        unit: None,
     },
     OptionDef {
         name: "client-detached",
@@ -2064,6 +2520,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client is detached."),
+        unit: None,
     },
     OptionDef {
         name: "client-focus-in",
@@ -2073,6 +2531,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when focus enters a client."),
+        unit: None,
     },
     OptionDef {
         name: "client-focus-out",
@@ -2082,6 +2542,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when focus exits a client."),
+        unit: None,
     },
     OptionDef {
         name: "client-resized",
@@ -2091,6 +2553,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client is resized."),
+        unit: None,
     },
     OptionDef {
         name: "client-session-changed",
@@ -2100,6 +2564,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client's attached session is changed."),
+        unit: None,
     },
     OptionDef {
         name: "client-light-theme",
@@ -2109,6 +2575,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client switches to a light theme."),
+        unit: None,
     },
     OptionDef {
         name: "client-dark-theme",
@@ -2118,6 +2586,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a client switches to a dark theme."),
+        unit: None,
     },
     OptionDef {
         name: "command-error",
@@ -2127,6 +2597,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a command fails."),
+        unit: None,
     },
     OptionDef {
         name: "marked-pane-changed",
@@ -2136,6 +2608,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when the marked pane is set or cleared."),
+        unit: None,
     },
     OptionDef {
         name: "pane-activity",
@@ -2145,6 +2619,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when there is new output in a pane."),
+        unit: None,
     },
     OptionDef {
         name: "pane-bell",
@@ -2154,6 +2630,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane receives a bell."),
+        unit: None,
     },
     OptionDef {
         name: "pane-command-finished",
@@ -2163,6 +2641,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when an OSC 133 command finishes in a pane."),
+        unit: None,
     },
     OptionDef {
         name: "pane-command-started",
@@ -2172,6 +2652,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when an OSC 133 command starts in a pane."),
+        unit: None,
     },
     OptionDef {
         name: "pane-created",
@@ -2181,6 +2663,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane is created or respawned."),
+        unit: None,
     },
     OptionDef {
         name: "pane-died",
@@ -2190,6 +2674,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when the program running in a pane exits, but remain-on-exit is on so the pane has not closed."),
+        unit: None,
     },
     OptionDef {
         name: "pane-exited",
@@ -2199,6 +2685,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when the program running in a pane exits."),
+        unit: None,
     },
     OptionDef {
         name: "pane-focus-in",
@@ -2208,6 +2696,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when the focus enters a pane, if the focus-events option is on."),
+        unit: None,
     },
     OptionDef {
         name: "pane-focus-out",
@@ -2217,6 +2707,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when the focus exits a pane, if the focus-events option is on."),
+        unit: None,
     },
     OptionDef {
         name: "pane-mode-changed",
@@ -2226,6 +2718,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane changes mode."),
+        unit: None,
     },
     OptionDef {
         name: "pane-mode-entered",
@@ -2235,6 +2729,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane enters a mode."),
+        unit: None,
     },
     OptionDef {
         name: "pane-mode-exited",
@@ -2244,6 +2740,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane exits a mode."),
+        unit: None,
     },
     OptionDef {
         name: "pane-moved",
@@ -2253,6 +2751,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane is moved to another window."),
+        unit: None,
     },
     OptionDef {
         name: "pane-prompt-closed",
@@ -2262,6 +2762,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a prompt in a pane is closed."),
+        unit: None,
     },
     OptionDef {
         name: "pane-prompt-opened",
@@ -2271,6 +2773,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a prompt is opened in a pane."),
+        unit: None,
     },
     OptionDef {
         name: "pane-resized",
@@ -2280,6 +2784,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane is resized."),
+        unit: None,
     },
     OptionDef {
         name: "pane-set-clipboard",
@@ -2289,6 +2795,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when the terminal clipboard is set using the xterm escape sequence."),
+        unit: None,
     },
     OptionDef {
         name: "pane-shell-prompt",
@@ -2298,6 +2806,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when an OSC 133 shell prompt starts in a pane."),
+        unit: None,
     },
     OptionDef {
         name: "pane-title-changed",
@@ -2307,6 +2817,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a pane title is changed."),
+        unit: None,
     },
     OptionDef {
         name: "session-closed",
@@ -2316,6 +2828,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a session is closed."),
+        unit: None,
     },
     OptionDef {
         name: "session-created",
@@ -2325,6 +2839,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a new session is created."),
+        unit: None,
     },
     OptionDef {
         name: "session-added-to-group",
@@ -2334,6 +2850,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a session is added to a session group."),
+        unit: None,
     },
     OptionDef {
         name: "session-renamed",
@@ -2343,6 +2861,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a session is renamed."),
+        unit: None,
     },
     OptionDef {
         name: "session-removed-from-group",
@@ -2352,6 +2872,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a session is removed from a session group."),
+        unit: None,
     },
     OptionDef {
         name: "session-window-changed",
@@ -2361,6 +2883,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a session changes its active window."),
+        unit: None,
     },
     OptionDef {
         name: "window-created",
@@ -2370,6 +2894,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is created."),
+        unit: None,
     },
     OptionDef {
         name: "window-closed",
@@ -2379,6 +2905,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is closed."),
+        unit: None,
     },
     OptionDef {
         name: "window-layout-changed",
@@ -2388,6 +2916,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window layout is changed."),
+        unit: None,
     },
     OptionDef {
         name: "window-linked",
@@ -2397,6 +2927,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is linked into a session."),
+        unit: None,
     },
     OptionDef {
         name: "window-pane-changed",
@@ -2406,6 +2938,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window changes its active pane."),
+        unit: None,
     },
     OptionDef {
         name: "window-renamed",
@@ -2415,6 +2949,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is renamed."),
+        unit: None,
     },
     OptionDef {
         name: "window-resized",
@@ -2424,6 +2960,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is resized. This may be after the client-resized hook is run."),
+        unit: None,
     },
     OptionDef {
         name: "window-unzoomed",
@@ -2433,6 +2971,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is unzoomed."),
+        unit: None,
     },
     OptionDef {
         name: "window-zoomed",
@@ -2442,6 +2982,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is zoomed."),
+        unit: None,
     },
     OptionDef {
         name: "window-unlinked",
@@ -2451,6 +2993,8 @@ pub(super) static TABLE: [OptionDef; 272] = [
         hook: true,
         separator: Some(""),
         default: DefaultValue::Str(""),
+        text: Some("Run when a window is unlinked from a session."),
+        unit: None,
     },
 ];
 

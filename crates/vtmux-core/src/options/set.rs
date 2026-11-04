@@ -173,7 +173,7 @@ impl OptionsStore {
     /// or one item of it. The global trees keep every table option, so
     /// there "unset" is "back to the default"; a vtmux option is removed
     /// everywhere, so it leaves the listings again.
-    fn remove_or_default(&mut self, tree: TreeId, name: &str, key: Option<&ArrayKey>) {
+    pub(super) fn remove_or_default(&mut self, tree: TreeId, name: &str, key: Option<&ArrayKey>) {
         let term = self.term.clone();
         if key.is_none() {
             // A new entry (options_default / options_remove): no fires.
@@ -206,7 +206,7 @@ impl OptionsStore {
 
     /// `options_set_string` (options.c:917): `-a` appends to the value set
     /// in this tree (not an inherited one), with the table's separator.
-    fn set_string(
+    pub(super) fn set_string(
         &mut self,
         tree: TreeId,
         name: &str,
@@ -286,7 +286,7 @@ impl OptionsStore {
 
     /// An array option, whole (`options_array_assign`, replacing the items
     /// unless `append`) or one item (`options_array_set`).
-    fn set_array(
+    pub(super) fn set_array(
         &mut self,
         tree: TreeId,
         def: &'static OptionDef,
@@ -314,7 +314,7 @@ impl OptionsStore {
 
     /// `options_from_string` (options.c:1286) for a table option that is
     /// not an array.
-    fn set_from_string(
+    pub(super) fn set_from_string(
         &mut self,
         tree: TreeId,
         def: &'static OptionDef,
