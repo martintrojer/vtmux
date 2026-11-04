@@ -1,0 +1,42 @@
+name = "scrollbars_mouse"
+size = [40, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "12", "sh", "-c", "i=1; while [ $i -le 60 ]; do echo L$i; i=$((i+1)); done; exec cat"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  # The default shows the line's time, which depends on when it was made.
+  { run = ["set", "-g", "copy-mode-position-format", "#[align=right][#{copy_position}/#{copy_position_limit}]"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars", "on"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-style", "bg=red,fg=blue,width=1,pad=0"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # MouseDown1ScrollbarUp, above the slider: copy-mode -u.
+  { keys = "\u001b[<0;40;1M\u001b[<0;40;1m" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_mode} #{scroll_position}"] },
+  # MouseDown1ScrollbarDown, below the slider: page-down.
+  { keys = "\u001b[<0;40;12M\u001b[<0;40;12m" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_mode} #{scroll_position}"] },
+  # MouseDrag1ScrollbarSlider: grab the slider and drag it up, then down.
+  { keys = "\u001b[<0;40;11M\u001b[<32;40;8M\u001b[<32;40;4M" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_mode} #{scroll_position}"] },
+  { keys = "\u001b[<32;40;7M\u001b[<0;40;7m" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_mode} #{scroll_position}"] },
+  # Press on the slider, then drag off the bar past the bottom of the
+  # window: the slider stays held (mouse_scrolling_flag) and goes to the
+  # bottom; the release is on the slider too, so nothing cancels. Separate
+  # steps: tmux locates a drag against the slider it last drew.
+  { keys = "\u001b[<0;40;5M" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_mode} #{scroll_position}"] },
+  { keys = "\u001b[<32;20;12M" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_mode} #{scroll_position}"] },
+  { keys = "\u001b[<0;20;12m" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_mode} #{scroll_position}"] },
+]

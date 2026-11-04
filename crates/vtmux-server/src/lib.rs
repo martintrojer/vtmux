@@ -35,6 +35,7 @@ pub mod prompt_history;
 pub mod remain;
 pub mod render;
 pub mod resize;
+pub mod scrollbar;
 pub mod server;
 pub mod shim;
 pub mod sys;

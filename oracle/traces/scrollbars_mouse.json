@@ -1,0 +1,517 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "scrollbars_mouse",
+  "inputs": {
+    "name": "scrollbars_mouse",
+    "size": [
+      40,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "12",
+          "sh",
+          "-c",
+          "i=1; while [ $i -le 60 ]; do echo L$i; i=$((i+1)); done; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mouse",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "#[align=right][#{copy_position}/#{copy_position_limit}]"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-style",
+          "bg=red,fg=blue,width=1,pad=0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;40;1M\u001b[<0;40;1m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_mode} #{scroll_position}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;40;12M\u001b[<0;40;12m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_mode} #{scroll_position}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;40;11M\u001b[<32;40;8M\u001b[<32;40;4M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_mode} #{scroll_position}"
+        ]
+      },
+      {
+        "keys": "\u001b[<32;40;7M\u001b[<0;40;7m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_mode} #{scroll_position}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;40;5M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_mode} #{scroll_position}"
+        ]
+      },
+      {
+        "keys": "\u001b[<32;20;12M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_mode} #{scroll_position}"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;20;12m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_mode} #{scroll_position}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L50                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL51                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL52                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL53                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL54                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL55                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL56                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL57                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL58                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL59                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL60                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49m                                       \\e[31m\\e[44m"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L40                             \\e[30m\\e[43m[10/49]\\e[34m\\e[41m",
+          "\\e[39m\\e[49mL41                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL42                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL43                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL44                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL45                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL46                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL47                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL48                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL49                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL50                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL51                                    \\e[34m\\e[41m"
+        ],
+        "cursor": [
+          3,
+          11
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 10\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L50                              \\e[30m\\e[43m[0/49]\\e[34m\\e[41m",
+          "\\e[39m\\e[49mL51                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL52                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL53                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL54                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL55                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL56                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL57                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL58                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL59                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL60                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49m                                       \\e[31m\\e[44m"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L16                             \\e[30m\\e[43m[34/49]\\e[34m\\e[41m",
+          "\\e[39m\\e[49mL17                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL18                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL19                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL20                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL21                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL22                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL23                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL24                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL25                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL26                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL27                                    \\e[34m\\e[41m"
+        ],
+        "cursor": [
+          3,
+          11
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 34\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L31                             \\e[30m\\e[43m[19/49]\\e[34m\\e[41m",
+          "\\e[39m\\e[49mL32                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL33                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL34                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL35                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL36                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL37                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL38                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL39                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL40                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL41                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL42                                    \\e[34m\\e[41m"
+        ],
+        "cursor": [
+          3,
+          11
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 19\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L21                             \\e[30m\\e[43m[29/49]\\e[34m\\e[41m",
+          "\\e[39m\\e[49mL22                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL23                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL24                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL25                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL26                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL27                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL28                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL29                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL30                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL31                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL32                                    \\e[34m\\e[41m"
+        ],
+        "cursor": [
+          3,
+          11
+        ]
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 29\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L50                              \\e[30m\\e[43m[0/49]\\e[34m\\e[41m",
+          "\\e[39m\\e[49mL51                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL52                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL53                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL54                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL55                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL56                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL57                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL58                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL59                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL60                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49m                                       \\e[31m\\e[44m"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L50                              \\e[30m\\e[43m[0/49]\\e[34m\\e[41m",
+          "\\e[39m\\e[49mL51                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL52                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL53                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL54                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL55                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL56                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL57                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL58                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL59                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL60                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49m                                       \\e[31m\\e[44m"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

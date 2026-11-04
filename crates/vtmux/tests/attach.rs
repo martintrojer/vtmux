@@ -1943,6 +1943,90 @@ fn focus_ring_two_panes_left_right() {
     );
 }
 
+/// D23 with `pane-scrollbars on`: each pane's bar sits inside the ring, in
+/// the columns the pane gave up; the active pane's heavy rectangle takes
+/// its bar in, and the bars are not border cells. Under the ring's offset
+/// a click on the bar is still a scrollbar location of that pane.
+#[test]
+fn focus_ring_encloses_scrollbars() {
+    let (w, mut a) = ring_world(&[
+        &["set", "-g", "pane-scrollbars", "on"],
+        &[
+            "set",
+            "-g",
+            "pane-scrollbars-style",
+            "bg=red,fg=blue,width=1,pad=0",
+        ],
+        &["splitw", "-h", "-t", "a", "cat"],
+        &["set", "-g", "mouse", "on"],
+        &[
+            "bind",
+            "-n",
+            "MouseDown1ScrollbarUp",
+            "set",
+            "-gF",
+            "@sb",
+            "#{mouse_pane}",
+        ],
+    ]);
+    ring_settles(
+        &a,
+        &[
+            "┌─────────┲━━━━━━━━┓",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "│         ┃        ┃",
+            "└─────────┺━━━━━━━━┛",
+            "bbbbbbbbbbAAAAAAAAAA",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "b.........A........A",
+            "bbbbbbbbbbAAAAAAAAAA",
+        ],
+    );
+    // The window is 18 wide: panes 0-7 and 10-16, bars at 8 and 17.
+    assert_eq!(
+        String::from_utf8_lossy(
+            &w.cli(&["list-panes", "-t", "a", "-F", "#{pane_left} #{pane_width}"])
+                .stdout
+        ),
+        "0 8\n10 7\n"
+    );
+    // With no history the slider fills each bar: its colours swapped.
+    let snap = vtmux_vt::snapshot(&a.screen());
+    for (x, y) in [(9, 1), (18, 6)] {
+        let c = snap.cell(x, y).unwrap();
+        assert_eq!(c.style.bg, vtmux_vt::Color::Palette(4), "bar at {x},{y}");
+    }
+    // Give the right pane history: its slider shrinks to the bottom, and
+    // client column 19 (1-based), first row inside the ring, is above it.
+    let lines = "x\n".repeat(40);
+    assert!(
+        w.cli(&["send", "-t", "a:0.1", "-l", &lines])
+            .status
+            .success()
+    );
+    a.wait(|a| {
+        let snap = vtmux_vt::snapshot(&a.screen());
+        snap.cell(18, 1).unwrap().style.bg == vtmux_vt::Color::Palette(1)
+    });
+    a.keys(&click(19, 2));
+    a.wait(|_| !user_option(&w, "@sb").is_empty());
+    let right = String::from_utf8_lossy(
+        &w.cli(&["display", "-p", "-t", "a:0.1", "#{pane_id}"])
+            .stdout,
+    )
+    .trim()
+    .to_owned();
+    assert_eq!(user_option(&w, "@sb"), right);
+}
+
 /// D23, two panes split top-bottom: the bottom pane is enclosed.
 #[test]
 fn focus_ring_two_panes_top_bottom() {

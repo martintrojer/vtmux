@@ -10,6 +10,10 @@
 //! plays no part: an arm is heavy, and its cell takes the active colour,
 //! when it lies on the active pane's rectangle. A 4-way junction has one
 //! owner slot per side for four panes, so the slots cannot say that.
+//!
+//! A pane's scrollbar ([`crate::scrollbar`]) is marked after its borders.
+//! An `on` bar sits in columns the pane gave up, inside its borders and so
+//! inside the ring's rectangle; an auto-hide bar goes over the pane.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -239,6 +243,26 @@ pub struct ScenePane {
     pub lines: Lines,
     /// `window_pane_get_pane_status`.
     pub status: PaneStatus,
+    /// Its scrollbar, when one is drawn.
+    pub scrollbar: Option<crate::scrollbar::Placement>,
+}
+
+impl ScenePane {
+    /// The columns of the pane's left and right borders: a reserved
+    /// scrollbar's columns are inside them (`redraw_mark_pane_borders`,
+    /// screen-redraw.c:688-695).
+    fn border_columns(&self) -> (i32, i32) {
+        let g = &self.rect;
+        let (mut left, mut right) = (g.xoff - 1, g.xoff + int(g.sx));
+        if let Some(sb) = self.scrollbar.filter(|sb| !sb.overlay) {
+            if sb.left {
+                left -= int(sb.width);
+            } else {
+                right += int(sb.width);
+            }
+        }
+        (left, right)
+    }
 }
 
 /// The window being drawn.
@@ -345,6 +369,13 @@ pub enum SceneCell {
         py: u32,
     },
     Border(Border),
+    /// Column `col` of `pane`'s scrollbar (padding included), on row
+    /// `row` of the bar.
+    Scrollbar {
+        pane: PaneId,
+        col: u32,
+        row: u32,
+    },
     /// Column `offset` of `pane`'s status line, over a border of shape
     /// `under`.
     Status {
@@ -422,7 +453,8 @@ impl Scene {
             // Status lines take the ring's weights, so they go on last.
             for p in win.panes.iter().filter(|p| !p.floating) {
                 let g = &p.rect;
-                scene.mark_status(p, g.xoff + int(g.sx), g.yoff - 1, g.yoff + int(g.sy));
+                let right = p.border_columns().1;
+                scene.mark_status(p, right, g.yoff - 1, g.yoff + int(g.sy));
             }
         }
         if win.indicators.colour()
@@ -467,7 +499,7 @@ impl Scene {
         self.index(wx, wy)
     }
 
-    /// `redraw_mark_pane` without scrollbars.
+    /// `redraw_mark_pane`.
     fn mark_pane(&mut self, p: &ScenePane, indicators: Indicators) {
         for py in 0..p.rect.sy {
             for px in 0..p.rect.sx {
@@ -477,6 +509,34 @@ impl Scene {
             }
         }
         self.mark_borders(p, indicators);
+        self.mark_scrollbar(p);
+    }
+
+    /// `redraw_mark_pane_scrollbar`: beside the pane, or over its edge
+    /// columns when it is an overlay.
+    fn mark_scrollbar(&mut self, p: &ScenePane) {
+        let Some(sb) = p.scrollbar else {
+            return;
+        };
+        let g = &p.rect;
+        let w = int(sb.width);
+        let start = match (sb.overlay, sb.left) {
+            (true, true) => g.xoff,
+            (true, false) => g.xoff + int(g.sx) - w,
+            (false, true) => g.xoff - w,
+            (false, false) => g.xoff + int(g.sx),
+        };
+        for row in 0..g.sy {
+            for (col, wx) in (0..).zip(start..start + w) {
+                if let Some(i) = self.index(wx, g.yoff + int(row)) {
+                    self.cells[i] = SceneCell::Scrollbar {
+                        pane: p.id,
+                        col,
+                        row,
+                    };
+                }
+            }
+        }
     }
 
     /// `redraw_mark_pane_borders`.
@@ -485,7 +545,7 @@ impl Scene {
             return;
         }
         let g = &p.rect;
-        let (mut left, mut right) = (g.xoff - 1, g.xoff + int(g.sx));
+        let (mut left, mut right) = p.border_columns();
         let (mut top, mut bottom) = (g.yoff - 1, g.yoff + int(g.sy));
         let mark_left = left >= 0;
         let mut mark_top = top >= 0;
@@ -614,7 +674,7 @@ impl Scene {
     /// weights, so they stay as tmux draws them.
     fn mark_ring(&mut self, p: &ScenePane) {
         let g = &p.rect;
-        let (left, right) = (g.xoff - 1, g.xoff + int(g.sx));
+        let (left, right) = p.border_columns();
         let (top, bottom) = (g.yoff - 1, g.yoff + int(g.sy));
         let mut heavy = |wx: i32, wy: i32, sides: Sides| {
             if let Some(i) = self.index(wx, wy)
@@ -727,6 +787,7 @@ mod tests {
             floating: false,
             lines: Lines::Single,
             status: PaneStatus::Off,
+            scrollbar: None,
         }
     }
 
@@ -740,6 +801,7 @@ mod tests {
                             .arrow_glyph(active)
                             .map_or_else(|| b.shape().glyph(Lines::Single, None), Into::into),
                         SceneCell::Status { .. } => "s".into(),
+                        SceneCell::Scrollbar { .. } => "S".into(),
                         SceneCell::Empty => ".".into(),
                         SceneCell::Outside => "#".into(),
                     })

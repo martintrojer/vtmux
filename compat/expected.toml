@@ -162,7 +162,7 @@ status = "pass"
 
 [tests."display-panes.sh"]
 status = "xfail"
-reason = "panes-mode is done (entry, zoom, -Z, -s, keys, template, format, border-status) and new-pane runs; the floating half (regress/display-panes.sh:258-297) stops at `wait_capture '┌'`: panes-mode does not draw a frame round a floating pane (window-panes.c window_panes_draw_floating_border). Its scrollbar block (117-137) passes only because vtmux has no scrollbars: pane-scrollbars is accepted and ignored"
+reason = "panes-mode is done (entry, zoom, -Z, -s, keys, template, format, border-status) and new-pane runs; the floating half (regress/display-panes.sh:258-297) stops at `wait_capture '┌'`: panes-mode does not draw a frame round a floating pane (window-panes.c window_panes_draw_floating_border). Its scrollbar block (117-137) passes: pane_unzoomed_width leaves out an `on` scrollbar"
 
 [tests."environ-update.sh"]
 status = "pass"
@@ -441,8 +441,7 @@ reason = "scene after `rotate-window` differs (`scene cache-rotate-after differs
 status = "pass"
 
 [tests."screen-redraw-floating.sh"]
-status = "xfail"
-reason = "its floating scenes (borders, -B, -T, clipping at every edge, overlap, border status) pass; scene floating-over-scrollbar differs: pane-scrollbars is accepted and ignored (no scrollbar column)"
+status = "pass"
 
 [tests."screen-redraw-indicators.sh"]
 status = "xfail"
@@ -461,12 +460,10 @@ reason = "needs refresh-client -U/-D/-L/-R (panning a window larger than the cli
 status = "pass"
 
 [tests."screen-redraw-scrollbars-auto-hide.sh"]
-status = "xfail"
-reason = "pane-scrollbars auto-hide not implemented (no scrollbar overlay): `scrollbar did not hide after timeout` (captures never differ)"
+status = "pass"
 
 [tests."screen-redraw-scrollbars.sh"]
-status = "xfail"
-reason = "pane-scrollbars is accepted and ignored: first scene has no scrollbar column (`scene scrollbar-right-w1 differs`)"
+status = "pass"
 
 [tests."screen-redraw-status.sh"]
 status = "pass"
