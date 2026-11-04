@@ -208,7 +208,7 @@ impl TreeMode for BufferMode {
     }
 
     /// `window_buffer_search`: the name, then the bytes (ASCII case).
-    fn matches(&self, server: &Server, data: &Item, search: &str, icase: bool) -> bool {
+    fn matches(&self, server: &Server, _: &str, data: &Item, search: &str, icase: bool) -> bool {
         let Some(pb) = server.model.paste.get(data) else {
             return false;
         };

@@ -656,7 +656,7 @@ impl TreeMode for WindowTree {
         .key(data, line)
     }
 
-    fn matches(&self, server: &Server, data: &Item, search: &str, icase: bool) -> bool {
+    fn matches(&self, server: &Server, _: &str, data: &Item, search: &str, icase: bool) -> bool {
         View {
             model: &server.model,
             server,

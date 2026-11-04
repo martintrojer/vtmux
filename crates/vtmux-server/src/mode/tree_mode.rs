@@ -2,8 +2,9 @@
 //! callbacks): building over the server, keys, the search and filter
 //! prompts, running the template, and the frame `mode_tree_draw` leaves.
 //! `choose-tree` ([`super::window_tree`]), `choose-buffer`
-//! ([`super::window_buffer`]) and `choose-client` ([`super::window_client`])
-//! each implement [`TreeMode`]; the drawing is `render::tree`.
+//! ([`super::window_buffer`]), `choose-client` ([`super::window_client`])
+//! and `customize-mode` ([`super::window_customize`]) each implement
+//! [`TreeMode`]; the drawing is `render::tree`.
 
 use std::marker::PhantomData;
 
@@ -60,6 +61,7 @@ pub(crate) enum TreeKind {
     Window,
     Buffer,
     Client,
+    Customize,
 }
 
 /// A tree mode: its `mode_tree_start` callbacks and its own keys.
@@ -92,8 +94,15 @@ pub(crate) trait TreeMode: Sized + 'static {
     ) -> Option<Self::Tag>;
     /// `keycb`: the item's shortcut key on `line`.
     fn item_key(&self, server: &Server, data: &Self::Data, line: usize) -> Option<Key>;
-    /// `searchcb`.
-    fn matches(&self, server: &Server, data: &Self::Data, search: &str, icase: bool) -> bool;
+    /// `searchcb`; `name` is the item's.
+    fn matches(
+        &self,
+        server: &Server,
+        name: &str,
+        data: &Self::Data,
+        search: &str,
+        icase: bool,
+    ) -> bool;
     /// After each build.
     fn built(&mut self) {}
     /// A key moved the selection or built the items again.
@@ -152,8 +161,8 @@ impl<M: TreeMode> Env<M::Tag, M::Data> for KeyEnv<'_, M> {
         build_tree(self.mode, self.server, tree);
     }
 
-    fn matches(&self, data: &M::Data, search: &str, icase: bool) -> bool {
-        self.mode.matches(self.server, data, search, icase)
+    fn matches(&self, name: &str, data: &M::Data, search: &str, icase: bool) -> bool {
+        self.mode.matches(self.server, name, data, search, icase)
     }
 }
 
@@ -205,6 +214,7 @@ impl Mode {
             Self::Tree(_) => Some(TreeKind::Window),
             Self::Buffer(_) => Some(TreeKind::Buffer),
             Self::Client(_) => Some(TreeKind::Client),
+            Self::Customize(_) => Some(TreeKind::Customize),
             _ => None,
         }
     }
@@ -216,6 +226,7 @@ impl Mode {
             Self::Tree(t) => Some(t.common()),
             Self::Buffer(t) => Some(t.common()),
             Self::Client(t) => Some(t.common()),
+            Self::Customize(t) => Some(t.common()),
             _ => None,
         }
     }
@@ -225,6 +236,7 @@ impl Mode {
             Self::Tree(t) => Some(t.common_mut()),
             Self::Buffer(t) => Some(t.common_mut()),
             Self::Client(t) => Some(t.common_mut()),
+            Self::Customize(t) => Some(t.common_mut()),
             _ => None,
         }
     }
@@ -236,6 +248,7 @@ impl Mode {
             Self::Tree(t) => Some(t.tree().size),
             Self::Buffer(t) => Some(t.tree().size),
             Self::Client(t) => Some(t.tree().size),
+            Self::Customize(t) => Some(t.tree().size),
             _ => None,
         }
     }
@@ -277,6 +290,7 @@ impl Server {
             Some(TreeKind::Window) => self.tree_update_as::<super::WindowTree>(p),
             Some(TreeKind::Buffer) => self.tree_update_as::<super::BufferMode>(p),
             Some(TreeKind::Client) => self.tree_update_as::<super::ClientMode>(p),
+            Some(TreeKind::Customize) => self.tree_update_as::<super::CustomizeMode>(p),
             None => {}
         }
     }
@@ -309,6 +323,14 @@ impl Server {
             .filter_map(|s| self.model.current_of(s))
             .filter_map(|(_, w, _)| self.model.windows.get(&w))
             .flat_map(|w| w.panes.panes.iter().copied())
+            // window_customize_update only draws: customize-mode keeps its
+            // items, stale or not, until a key or a resize builds them.
+            .filter(|p| {
+                !matches!(
+                    self.model.panes.get(p).and_then(|x| x.modes.first()),
+                    Some(Mode::Customize(_))
+                )
+            })
             .collect();
         due.extend(self.model.panes.iter().filter_map(|(&p, x)| {
             let size = (usize::from(x.term.cols()), usize::from(x.term.rows()));
@@ -383,6 +405,9 @@ impl Server {
             Some(TreeKind::Window) => self.tree_key_as::<super::WindowTree>(p, c, key, typed),
             Some(TreeKind::Buffer) => self.tree_key_as::<super::BufferMode>(p, c, key, typed),
             Some(TreeKind::Client) => self.tree_key_as::<super::ClientMode>(p, c, key, typed),
+            Some(TreeKind::Customize) => {
+                self.tree_key_as::<super::CustomizeMode>(p, c, key, typed);
+            }
             None => {}
         }
     }
@@ -431,6 +456,9 @@ impl Server {
             Some(TreeKind::Window) => self.tree_mouse_as::<super::WindowTree>(p, c, key, at),
             Some(TreeKind::Buffer) => self.tree_mouse_as::<super::BufferMode>(p, c, key, at),
             Some(TreeKind::Client) => self.tree_mouse_as::<super::ClientMode>(p, c, key, at),
+            Some(TreeKind::Customize) => {
+                self.tree_mouse_as::<super::CustomizeMode>(p, c, key, at);
+            }
             None => {}
         }
     }

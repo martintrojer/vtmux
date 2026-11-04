@@ -8,7 +8,7 @@ use crate::keys::Key;
 
 /// Which options trees an option lives in (`OPTIONS_TABLE_SERVER` ...).
 /// tmux's 3.8 table uses exactly these four combinations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Scope {
     Server,
     Session,
@@ -97,6 +97,10 @@ pub struct OptionDef {
     /// `None` is tmux's NULL (`" ,"` for arrays, nothing for strings).
     pub separator: Option<&'static str>,
     pub default: DefaultValue,
+    /// The description `customize-mode` shows (`oe->text`).
+    pub text: Option<&'static str>,
+    /// The unit `customize-mode` shows after the value (`oe->unit`).
+    pub unit: Option<&'static str>,
 }
 
 impl OptionDef {

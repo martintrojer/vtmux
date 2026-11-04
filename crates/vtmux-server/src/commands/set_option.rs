@@ -168,17 +168,78 @@ pub fn exec(
         },
     );
     server.model.options = options;
-    // options_push_changes (options.c:1399-1401): every client goes back to
-    // the (new) default key table.
-    if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "key-table") {
-        let ids: Vec<_> = server.clients.keys().copied().collect();
-        for id in ids {
-            server.set_key_table(id, None);
-        }
-    }
-    // options_push_changes (options.c:1464-1466): session_update_history.
-    if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "history-limit") {
-        server.model.update_history();
-    }
     result
+}
+
+/// Run `f` over the option store with a [`Host`] for target `found` and
+/// no client (what a mode's prompt callback has).
+pub(crate) fn with_option_host<R>(
+    server: &mut Server,
+    found: Found,
+    f: impl FnOnce(&mut OptionsStore, &mut dyn OptionHost) -> R,
+) -> R {
+    let clients = server.client_views();
+    let mut options = std::mem::replace(
+        &mut server.model.options,
+        OptionsStore::new(&vtmux_core::options::Defaults::default()),
+    );
+    let result = f(
+        &mut options,
+        &mut Host {
+            model: &server.model,
+            info: &server.info,
+            env: GlobalEnv::new(&mut server.global_env, &server.model, &server.info),
+            found,
+            clients,
+            client: None,
+            formats: Vec::new(),
+            jobs: None,
+        },
+    );
+    server.model.options = options;
+    result
+}
+
+impl Server {
+    /// `options_push_changes` (options.c:1359-1475) for option `name`,
+    /// the parts vtmux has.
+    pub(crate) fn options_push_changes(&mut self, name: &str) {
+        let windows: Vec<_> = self.model.windows.keys().copied().collect();
+        if name == "automatic-rename" {
+            // options.c:1380-1386: windows with it on look again.
+            for &w in &windows {
+                self.model.mark_for_rename(w);
+            }
+        }
+        if name == "key-table" {
+            // options.c:1399-1401: every client goes back to the (new)
+            // default key table.
+            let ids: Vec<_> = self.clients.keys().copied().collect();
+            for id in ids {
+                self.set_key_table(id, None);
+            }
+        }
+        if name == "status" || name == "status-interval" {
+            // options.c:1409-1411.
+            self.status_timer_start_all();
+        }
+        if name == "monitor-silence" {
+            // options.c:1422: alerts_reset_all.
+            self.model.alerts_reset_all();
+        }
+        if matches!(
+            name,
+            "pane-border-status" | "pane-scrollbars" | "pane-scrollbars-position"
+        ) {
+            // options.c:1437-1446: layout_fix_panes everywhere.
+            for &w in &windows {
+                self.model.fix_panes(w);
+            }
+        }
+        if name == "history-limit" {
+            // options.c:1464-1466: session_update_history.
+            self.model.update_history();
+        }
+        self.push_option_changes();
+    }
 }

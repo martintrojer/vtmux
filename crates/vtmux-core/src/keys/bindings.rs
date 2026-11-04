@@ -51,6 +51,18 @@ impl KeyTable {
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()
     }
+
+    /// `key_bindings_get_default`.
+    #[must_use]
+    pub fn get_default(&self, key: Key) -> Option<&Binding> {
+        self.defaults.get(&key.without_flags())
+    }
+
+    /// The binding for `key` to change in place (customize-mode sets its
+    /// command, note and repeat flag).
+    pub fn get_mut(&mut self, key: Key) -> Option<&mut Binding> {
+        self.bindings.get_mut(&key.without_flags())
+    }
 }
 
 /// A key command failed: tmux's `cmdq_error` text, if it prints one. A
@@ -148,6 +160,10 @@ impl KeyBindings {
     #[must_use]
     pub fn get(&self, table: &str, key: Key) -> Option<&Binding> {
         self.table(table)?.get(key)
+    }
+
+    pub fn get_mut(&mut self, table: &str, key: Key) -> Option<&mut Binding> {
+        self.tables.get_mut(table)?.get_mut(key)
     }
 
     /// `key_bindings_add`. `commands: None` is `bind KEY` with no command:

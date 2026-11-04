@@ -177,6 +177,7 @@ pub trait FormatContext {
 }
 
 pub use loops::{LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop};
+pub use time::pretty_time;
 
 /// A borrowed context is a context, so a loop child can be `Box::new(&ctx)`.
 impl<T: FormatContext + ?Sized> FormatContext for &T {

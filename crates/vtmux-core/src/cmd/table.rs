@@ -132,7 +132,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("command-prompt", None, "1CbeFiklI:NPp:t:T:", 0, Some(1), "[-1CbeFiklNP] [-I inputs] [-p prompts] [-t target-client] [-T prompt-type] [template]", None, None, false, true),
     cmd("confirm-before", Some("confirm"), "bc:p:t:y", 1, Some(1), "[-by] [-c confirm-key] [-p prompt] [-t target-client] command", None, None, false, true),
     cmd("copy-mode", None, "dekHMqSs:t:u", 0, Some(0), "[-dekHMqSu] [-s src-pane] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::NONE)), false, true),
-    cmd("customize-mode", None, "F:f:kNt:yZ", 0, Some(0), "[-kNZ] [-F format] [-f filter] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("customize-mode", None, "F:f:kNt:yZ", 0, Some(0), "[-kNZ] [-F format] [-f filter] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("delete-buffer", Some("deleteb"), "b:", 0, Some(0), "[-b buffer-name]", None, None, false, true),
     cmd("detach-client", Some("detach"), "aE:s:t:P", 0, Some(0), "[-aP] [-E shell-command] [-s target-session] [-t target-client]", None, Some(slot('s', TargetKind::Session, FindFlags::CANFAIL)), false, true),
     cmd("display-menu", Some("menu"), "b:c:C:H:s:S:MOt:T:x:y:", 1, None, "[-MO] [-b border-lines] [-c target-client] [-C starting-choice] [-H selected-style] [-s style] [-S border-style] [-t target-pane] [-T title] [-x position] [-y position] name [key] [command] ...", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
@@ -418,6 +418,7 @@ mod tests {
             ("respawn-pane", Some("respawnp")),
             ("choose-buffer", None),
             ("choose-client", None),
+            ("customize-mode", None),
             ("find-window", Some("findw")),
             ("suspend-client", Some("suspendc")),
             ("display-menu", Some("menu")),
@@ -432,7 +433,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 85);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 86);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is

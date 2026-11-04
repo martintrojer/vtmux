@@ -167,7 +167,7 @@ reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8
 
 [tests."customize-mode.sh"]
 status = "xfail"
-reason = "missing command customize-mode: `not implemented in vtmux yet: customize-mode`"
+reason = "customize-mode `e` (edit in $EDITOR) needs floating/modal panes (gap_floating): test_editor and test_editor_invalidation fail; every other section passes"
 
 [tests."decrqm-sync.sh"]
 status = "pass"
@@ -224,8 +224,7 @@ status = "xfail"
 reason = "session-level formats read empty without a current client: `#{active_window_index}` is `` (expected 0); also last_window_index, session_stack, window_active_clients(_list)"
 
 [tests."format-render-contexts.sh"]
-status = "xfail"
-reason = "needs customize-mode (its choose-tree section passes)"
+status = "pass"
 
 [tests."format-strings.sh"]
 status = "pass"
@@ -384,8 +383,7 @@ reason = "missing command new-pane (floating/modal panes, M2): `not implemented 
 status = "pass"
 
 [tests."mode-mutation.sh"]
-status = "xfail"
-reason = "needs customize-mode (its choose-tree, choose-buffer and choose-client sections pass)"
+status = "pass"
 
 [tests."mode-tree-scroll.sh"]
 status = "pass"

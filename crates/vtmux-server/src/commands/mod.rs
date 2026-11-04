@@ -63,7 +63,7 @@ mod select_window;
 mod send_keys;
 mod set_buffer;
 mod set_environment;
-mod set_option;
+pub(crate) mod set_option;
 mod show_environment;
 mod show_messages;
 mod show_options;
@@ -511,6 +511,7 @@ fn dispatch(
         "choose-tree" => choose_tree::exec(server, item, args, found),
         "choose-buffer" => choose_tree::exec_buffer(server, args, found),
         "choose-client" => choose_tree::exec_client(server, args, found),
+        "customize-mode" => choose_tree::exec_customize(server, args, found),
         "find-window" => find_window::exec(server, item, args, found),
         "set-buffer" => set_buffer::exec(server, item, args),
         "delete-buffer" => delete_buffer::exec(server, args),
@@ -572,23 +573,8 @@ fn dispatch(
             for &w in &windows {
                 server.model.fix_panes(w);
             }
-            if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "automatic-rename") {
-                // options.c:1380-1386: windows with it on look again.
-                for w in windows {
-                    server.model.mark_for_rename(w);
-                }
-            }
-            if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "monitor-silence") {
-                // options.c:1422: alerts_reset_all.
-                server.model.alerts_reset_all();
-            }
-            if matches!(&result, Ok(SetOutcome::Changed(name)) if name == "status" || name == "status-interval")
-            {
-                // options.c:1409-1411.
-                server.status_timer_start_all();
-            }
-            if matches!(&result, Ok(SetOutcome::Changed(_))) {
-                server.push_option_changes();
+            if let Ok(SetOutcome::Changed(name)) = &result {
+                server.options_push_changes(name);
             }
             result.map(|_| ()).map_err(Into::into)
         }

@@ -28,6 +28,7 @@
 //!   dereferences a missing window (cmd-set-option.c:328); this skips the
 //!   panes.
 
+mod customize;
 mod set;
 mod show;
 mod table;
@@ -40,6 +41,7 @@ mod golden;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
+pub use customize::{default_text, is_changed};
 pub use set::{SetOutcome, apply_set};
 pub use show::apply_show;
 pub use table::{ArrayKey, DefaultValue, Kind, Level, OptionDef, Scope, StringCheck, find, table};
