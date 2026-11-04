@@ -88,8 +88,9 @@ pub enum End {
 /// share its state (`cmdq_get_command(cmdlist, cmdq_get_state(item))`).
 #[derive(Debug, Default)]
 pub struct StepState {
-    /// `state->current`.
-    pub current: Option<crate::target::Found>,
+    /// `state->current`, which a command may move on for the commands
+    /// after it (`cmdq_get_current`).
+    pub current: std::cell::Cell<Option<crate::target::Found>>,
     /// `CMDQ_STATE_NOHOOKS`: a hook's commands fire no hooks.
     pub no_hooks: bool,
     pub formats: Vec<(String, String)>,
@@ -576,9 +577,9 @@ impl Server {
                 // a hook's commands start from the event's target, fire no
                 // hooks, see its formats and, having no CMDQ_STATE_CONTROL,
                 // get guard flags 0.
-                let saved = (item.origin.current, item.control, item.no_hooks);
+                let mut saved = (item.origin.current, item.control, item.no_hooks);
                 if let Some(st) = state {
-                    item.origin.current = st.current;
+                    item.origin.current = st.current.get();
                     item.no_hooks = st.no_hooks;
                     if st.no_hooks {
                         item.control = item.control.map(|_| 0);
@@ -608,6 +609,15 @@ impl Server {
                     self.cmdq_add_message(&item, &call);
                 }
                 let ok = commands::fire(self, &mut item, &call);
+                // The command moved the current state on (split-window's
+                // cmd_find_from_winlink_pane(current, ...)): the commands
+                // after it in the same state see it.
+                if let Some(f) = item.new_current.take() {
+                    match state {
+                        Some(st) => st.current.set(Some(f)),
+                        None => saved.0 = Some(f),
+                    }
+                }
                 self.info.current_file = outer;
                 self.cmd_formats.clear();
                 if item.borrow_client {

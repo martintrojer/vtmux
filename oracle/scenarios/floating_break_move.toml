@@ -1,0 +1,47 @@
+# break-pane -W floats a tiled pane in place (cmd-break-pane.c
+# cmd_break_pane_float), move-pane moves a floating pane (cmd-join-pane.c:
+# -P places, -X -Y, -U -D -L -R, -z and the z-order moves) and joining a
+# floating pane to itself tiles it again (cmd_join_pane_tile); floating it
+# a second time brings back its old geometry. The errors for a pane that
+# is not floating, is floating already, or an unknown place.
+name = "floating_break_move"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["splitw", "-d", "-h", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "%1", "-T", "p1"] },
+  { run = ["splitw", "-d", "-v", "-t", "%1", "cat"] },
+  { run = ["select-pane", "-t", "%2", "-T", "p2"] },
+  { attach = { session = "a" } },
+  { run = ["break-pane", "-W", "-s", "%1"] },
+  { run = ["break-pane", "-W", "-s", "%1"] },
+  { run = ["break-pane", "-W", "-s", "%2", "-x", "30", "-y", "10", "-X", "5", "-Y", "5"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["move-pane", "-t", "%1", "-P", "bottom-right"] },
+  { run = ["move-pane", "-t", "%2", "-P", "top-centre"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["move-pane", "-t", "%1", "-P", "centre"] },
+  { run = ["move-pane", "-t", "%1", "-X", "3", "-Y", "2"] },
+  { run = ["move-pane", "-t", "%1", "-D", "3", "-R"] },
+  { run = ["move-pane", "-t", "%0", "-P", "centre"] },
+  { run = ["move-pane", "-t", "%1", "-P", "middle"] },
+  { run = ["move-pane", "-t", "%1", "-z", "1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height} z#{pane_z} a#{pane_active}"] },
+  { run = ["move-pane", "-t", "%1", "-P", "front"] },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} z#{pane_z}"] },
+  { run = ["join-pane", "-s", "%1", "-t", "%1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["break-pane", "-W", "-s", "%1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height} z#{pane_z} a#{pane_active}"] },
+  { run = ["display", "-p", "-t", "a", "#{window_layout}"] },
+]

@@ -592,6 +592,8 @@ impl<'a> Ctx<'a> {
                 f
             }
             "pane_floating_flag" => flag(w.is_floating(p.id)),
+            // format_cb_pane_z.
+            "pane_z" => self.model.pane_zindex(p.id)?.to_string(),
             "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),
             "pane_input_off" => flag(p.input_off),
             "pane_synchronized" => flag(self.model.pane_synchronized(p.id)),

@@ -83,6 +83,9 @@ impl Session {
 
 /// A zoomed window: the full layout is kept aside while the zoomed pane
 /// fills the window (`w->saved_layout_root`, window.c `window_zoom`).
+/// `PANE_LINES_NONE`: the `none` choice of `pane-border-lines`.
+pub const LINES_NONE: i64 = 6;
+
 #[derive(Debug)]
 pub struct Zoom {
     pub pane: PaneId,
@@ -158,6 +161,17 @@ impl Window {
     #[must_use]
     pub fn is_floating(&self, p: PaneId) -> bool {
         let root = &self.full_layout().root;
+        root.find_pane(p)
+            .is_some_and(|at| root.get(&at).is_floating())
+    }
+
+    /// `window_pane_is_floating` proper: the pane's cell in the visible
+    /// layout floats. While zoomed no pane's does (the zoomed pane fills
+    /// the window, the others have no cell); [`Self::is_floating`] is
+    /// tmux's `window_pane_is_floating_with_hidden`.
+    #[must_use]
+    pub fn is_floating_now(&self, p: PaneId) -> bool {
+        let root = &self.layout.root;
         root.find_pane(p)
             .is_some_and(|at| root.get(&at).is_floating())
     }
@@ -584,9 +598,9 @@ impl Model {
         let mut i = 0;
         for &q in &w.panes.z_order {
             if q == p {
-                return Some(i + u32::from(!w.is_floating(p)));
+                return Some(i + u32::from(!w.is_floating_now(p)));
             }
-            i += u32::from(w.is_floating(q));
+            i += u32::from(w.is_floating_now(q));
         }
         None
     }
@@ -781,6 +795,7 @@ impl Model {
     /// [`Self::fix_panes`] leaving `skip` alone (`layout_fix_panes(w, wp)`,
     /// for a pane spawned zoomed, which keeps the window's size).
     pub fn fix_panes_except(&mut self, w: WindowId, skip: Option<PaneId>) {
+        self.sync_borderless(w);
         let status = self.pane_status(w);
         let Some(window) = self.windows.get_mut(&w) else {
             return;
@@ -813,6 +828,50 @@ impl Model {
             }
         }
         self.panes_resized(w);
+    }
+
+    /// `window_pane_get_pane_lines(wp) != PANE_LINES_NONE` (window.c:
+    /// 2905-2915): a floating pane reads its own `pane-border-lines`, a
+    /// tiled one its window's.
+    #[must_use]
+    pub fn pane_has_border(&self, w: WindowId, p: PaneId) -> bool {
+        let floating = self.windows.get(&w).is_some_and(|x| x.is_floating(p));
+        let tree = if floating {
+            TreeId::Pane(p)
+        } else {
+            TreeId::Window(w)
+        };
+        self.number_option(tree, "pane-border-lines") != LINES_NONE
+    }
+
+    /// `window_get_pane_lines(w) != PANE_LINES_NONE`: the window's
+    /// `pane-border-lines`, which a pane about to float gets.
+    #[must_use]
+    pub fn window_has_border(&self, w: WindowId) -> bool {
+        self.number_option(TreeId::Window(w), "pane-border-lines") != LINES_NONE
+    }
+
+    /// Tell the layout which floating panes have no border, for
+    /// `layout_clamp_floating_panes`.
+    pub(crate) fn sync_borderless(&mut self, w: WindowId) {
+        let Some(window) = self.windows.get(&w) else {
+            return;
+        };
+        let set: std::collections::BTreeSet<PaneId> = window
+            .panes
+            .panes
+            .iter()
+            .copied()
+            .filter(|&p| {
+                window.is_floating(p)
+                    && self.number_option(TreeId::Pane(p), "pane-border-lines") == LINES_NONE
+            })
+            .collect();
+        let window = self.windows.get_mut(&w).expect("checked above");
+        if let Some(z) = &mut window.zoom {
+            z.saved.borderless.clone_from(&set);
+        }
+        window.layout.borderless = set;
     }
 
     pub fn insert_session(&mut self, session: Session) {
@@ -1356,6 +1415,8 @@ impl Model {
         };
         window.pending_size = None;
         let old = (window.sx(), window.sy());
+        self.sync_borderless(w);
+        let window = self.windows.get_mut(&w).expect("checked above");
         window.layout.resize_window(sx, sy);
         // window_resize: menu_resize, inside the new size.
         let (nx, ny) = (window.sx(), window.sy());

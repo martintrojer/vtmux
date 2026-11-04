@@ -1,15 +1,16 @@
 //! `join-pane` and `move-pane` (cmd-join-pane.c:420-539): split the target
 //! pane and move the source pane into the new cell, from any window of any
-//! session; a window left without panes is killed. The floating-pane forms
-//! of move-pane (`-P -z -X -Y -U -D -L -R`, `-M`, tiling a floating pane by
-//! joining it to itself) are not done yet, apart from the errors that need
-//! no floating panes.
+//! session; a window left without panes is killed. Joining a floating pane
+//! to itself tiles it. move-pane also moves a floating pane: `-P` to a named
+//! place or through the z-order, `-z` to a z-index, `-X -Y` to a position,
+//! `-U -D -L -R` by a count, `-M` with the mouse.
 
 use vtmux_core::cmd::{Args, CmdError, NumError};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, WindowId};
 use vtmux_core::layout::SplitRequest;
 
+use super::Item;
 use super::split_window::percentage_expanded;
 use crate::model::relabel_cell;
 use crate::server::Server;
@@ -17,6 +18,7 @@ use crate::target::Found;
 
 pub fn exec(
     server: &mut Server,
+    item: &Item,
     args: &Args,
     source: Found,
     found: Found,
@@ -27,20 +29,8 @@ pub fn exec(
     else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
-    if is_move {
-        if args.flag('M') {
-            // No mouse event: nothing to do (cmd-join-pane.c:286-287).
-            return Ok(());
-        }
-        if ['P', 'z', 'X', 'Y', 'U', 'D', 'L', 'R']
-            .iter()
-            .any(|f| args.flag(*f))
-        {
-            if !server.model.windows[&dst_w].is_floating(dst_wp) {
-                return Err(EdgeError::Message("pane is not floating".into()).into());
-            }
-            return Err(EdgeError::NotImplemented("move-pane floating".into()).into());
-        }
+    if is_move && let Some(result) = move_floating(server, item, args, found) {
+        return result;
     }
     let (Some(src_w), Some(src_wp)) = (source.window, source.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
@@ -49,7 +39,7 @@ pub fn exec(
     server.model.unzoom(src_w);
     if src_wp == dst_wp {
         if server.model.windows[&src_w].is_floating(src_wp) {
-            return Err(EdgeError::NotImplemented("join-pane tile".into()).into());
+            return tile(server, args, src_w, src_wp);
         }
         return Err(EdgeError::Message("source and target panes must be different".into()).into());
     }
@@ -166,4 +156,266 @@ fn tiled_size(
         return Ok(Some(curval * p / 100));
     }
     Ok(None)
+}
+
+/// move-pane's forms for a floating pane (cmd-join-pane.c:441-459): `-M`
+/// starts a mouse move, `-P -z -X -Y -U -D -L -R` place it. `None` when
+/// none of them is given, for a join.
+fn move_floating(
+    server: &mut Server,
+    item: &Item,
+    args: &Args,
+    found: Found,
+) -> Option<Result<(), CmdError>> {
+    let (w, wp) = (found.window?, found.pane?);
+    if args.flag('M') {
+        // cmd_join_pane_mouse_update: nothing without a mouse event.
+        if let Some(ev) = item.mouse.clone() {
+            server.move_floating_start(item.client, &ev);
+        }
+        return Some(Ok(()));
+    }
+    if !['P', 'z', 'X', 'Y', 'U', 'D', 'L', 'R']
+        .iter()
+        .any(|f| args.flag(*f))
+    {
+        return None;
+    }
+    if !server.model.windows[&w].is_floating_now(wp) {
+        return Some(Err(EdgeError::Message("pane is not floating".into()).into()));
+    }
+    Some(if let Some(p) = args.value('P') {
+        place(server, w, wp, p)
+    } else if let Some(z) = args.value('z') {
+        zindex(server, w, wp, z)
+    } else {
+        move_by(server, args, found, w, wp)
+    })
+}
+
+/// `cmd_join_pane_place` (cmd-join-pane.c:66-196): a named place in the
+/// window (inside the border), or a move through the z-order.
+fn place(server: &mut Server, w: WindowId, wp: PaneId, position: &str) -> Result<(), CmdError> {
+    let border = i32::from(server.model.pane_has_border(w, wp));
+    let window = server.model.windows.get_mut(&w).expect("target window");
+    let (wx, wy) = (window.sx().cast_signed(), window.sy().cast_signed());
+    let Some(g) = window.layout.floating_cell_mut(wp).copied() else {
+        return Ok(());
+    };
+    let (px, py) = (g.sx.cast_signed(), g.sy.cast_signed());
+    let centre_x = (wx - px) / 2;
+    let centre_y = (wy - py) / 2;
+    let (left, right) = (border, wx - px - border);
+    let (top, bottom) = (border, wy - py - border);
+    let at = match position {
+        "top-left" => Some((left, top)),
+        "top-centre" | "top-center" => Some((centre_x, top)),
+        "top-right" => Some((right, top)),
+        "centre-left" | "center-left" => Some((left, centre_y)),
+        "centre" | "center" => Some((centre_x, centre_y)),
+        "centre-right" | "center-right" => Some((right, centre_y)),
+        "bottom-left" => Some((left, bottom)),
+        "bottom-centre" | "bottom-center" => Some((centre_x, bottom)),
+        "bottom-right" => Some((right, bottom)),
+        "top-left-centre" | "top-left-center" => Some((wx / 4 - px / 2, wy / 4 - py / 2)),
+        "top-right-centre" | "top-right-center" => Some(((3 * wx) / 4 - px / 2, wy / 4 - py / 2)),
+        "bottom-left-centre" | "bottom-left-center" => {
+            Some((wx / 4 - px / 2, (3 * wy) / 4 - py / 2))
+        }
+        "bottom-right-centre" | "bottom-right-center" => {
+            Some(((3 * wx) / 4 - px / 2, (3 * wy) / 4 - py / 2))
+        }
+        "front" | "back" | "forward" | "backward" | "forward-loop" | "backward-loop" => {
+            restack(window, wp, position);
+            None
+        }
+        _ => {
+            return Err(EdgeError::Message(format!("unknown position: {position}")).into());
+        }
+    };
+    if let Some((x, y)) = at
+        && (x, y) != (g.xoff, g.yoff)
+    {
+        let cell = window.layout.floating_cell_mut(wp).expect("floating");
+        cell.xoff = x;
+        cell.yoff = y;
+        server.model.fix_panes(w);
+    }
+    server.model.layout_changed(w);
+    server.model.redraw(crate::model::Redraw::Window(w));
+    Ok(())
+}
+
+/// The z-order moves of `move-pane -P` (cmd-join-pane.c:131-188):
+/// `w->z_index` is topmost first, floating panes before tiled ones.
+fn restack(window: &mut crate::model::Window, wp: PaneId, how: &str) {
+    let floating = |window: &crate::model::Window, p: PaneId| window.is_floating(p);
+    let z = window.panes.z_order.clone();
+    let Some(at) = z.iter().position(|&p| p == wp) else {
+        return;
+    };
+    // Panes with a cell (hidden ones under a zoom have none).
+    let has_cell = |p: PaneId| window.layout.root.find_pane(p).is_some();
+    let first_tiled = |list: &[PaneId], window: &crate::model::Window| {
+        list.iter().position(|&p| !floating(window, p))
+    };
+    let mut list = z.clone();
+    match how {
+        "front" => {
+            list.remove(at);
+            list.insert(0, wp);
+        }
+        "back" => {
+            list.remove(at);
+            let i = first_tiled(&list, window).unwrap_or(list.len());
+            list.insert(i, wp);
+        }
+        "forward" | "forward-loop" => {
+            let prev = z[..at].iter().rposition(|&p| has_cell(p));
+            match prev {
+                Some(i) => {
+                    list.remove(at);
+                    list.insert(i, wp);
+                }
+                None if how == "forward-loop" => {
+                    list.remove(at);
+                    let i = first_tiled(&list, window).unwrap_or(list.len());
+                    list.insert(i, wp);
+                }
+                None => {}
+            }
+        }
+        "backward" | "backward-loop" => {
+            let next = z[at + 1..]
+                .iter()
+                .position(|&p| has_cell(p))
+                .map(|i| at + 1 + i);
+            match next {
+                Some(i) if window.is_floating_now(z[i]) => {
+                    let other = z[i];
+                    list.remove(at);
+                    let j = list.iter().position(|&p| p == other).expect("in list");
+                    list.insert(j + 1, wp);
+                }
+                _ if how == "backward-loop" => {
+                    list.remove(at);
+                    list.insert(0, wp);
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    window.panes.z_order = list;
+}
+
+/// `cmd_join_pane_zindex` (cmd-join-pane.c:343-378): the pane goes before
+/// the floating pane that has z-index `z` (counting those with a cell).
+fn zindex(server: &mut Server, w: WindowId, wp: PaneId, s: &str) -> Result<(), CmdError> {
+    let z = vtmux_core::cmd::strtonum(s, 0, i64::from(u32::MAX))
+        .map_err(|e| EdgeError::Message(format!("z-index {e}")))?;
+    let window = server.model.windows.get_mut(&w).expect("target window");
+    window.panes.z_order.retain(|&p| p != wp);
+    let mut n = 0;
+    let mut at = window.panes.z_order.len();
+    for (i, &p) in window.panes.z_order.iter().enumerate() {
+        if !window.is_floating(p) {
+            at = i;
+            break;
+        }
+        if window.layout.root.find_pane(p).is_none() {
+            continue;
+        }
+        if n >= z {
+            at = i;
+            break;
+        }
+        n += 1;
+    }
+    window.panes.z_order.insert(at, wp);
+    server.model.layout_changed(w);
+    server.model.redraw(crate::model::Redraw::Window(w));
+    Ok(())
+}
+
+/// `cmd_join_pane_move` (cmd-join-pane.c:198-272): `-X -Y` set the
+/// position (inside the border), `-U -D -L -R` move by a count (1 without
+/// one).
+fn move_by(
+    server: &mut Server,
+    args: &Args,
+    found: Found,
+    w: WindowId,
+    wp: PaneId,
+) -> Result<(), CmdError> {
+    let border = i64::from(server.model.pane_has_border(w, wp));
+    let window = &server.model.windows[&w];
+    let (wsx, wsy) = (i64::from(window.sx()), i64::from(window.sy()));
+    let Some(g) = server
+        .model
+        .windows
+        .get_mut(&w)
+        .and_then(|x| x.layout.floating_cell_mut(wp))
+        .copied()
+    else {
+        return Ok(());
+    };
+    let (mut xoff, mut yoff) = (i64::from(g.xoff), i64::from(g.yoff));
+    let position = |e: NumError| EdgeError::Message(format!("position {e}"));
+    if let Some(v) = args.value('X') {
+        xoff = percentage_expanded(server, found, v, -wsx, wsx, wsx).map_err(position)? + border;
+    }
+    if let Some(v) = args.value('Y') {
+        yoff = percentage_expanded(server, found, v, -wsy, wsy, wsy).map_err(position)? + border;
+    }
+    for flag in ['U', 'D', 'L', 'R'] {
+        if !args.flag(flag) {
+            continue;
+        }
+        let v = args.value(flag).unwrap_or("1");
+        let adjust = vtmux_core::cmd::strtonum(v, i64::from(i32::MIN), i64::from(i32::MAX))
+            .map_err(|e| EdgeError::Message(format!("offset {e}")))?;
+        match flag {
+            'U' => yoff -= adjust,
+            'D' => yoff += adjust,
+            'L' => xoff -= adjust,
+            _ => xoff += adjust,
+        }
+    }
+    // The C stores these in ints, which wrap.
+    #[expect(clippy::cast_possible_truncation, reason = "int arithmetic as the C's")]
+    let (xoff, yoff) = (xoff as i32, yoff as i32);
+    if (xoff, yoff) != (g.xoff, g.yoff) {
+        let window = server.model.windows.get_mut(&w).expect("target window");
+        let cell = window.layout.floating_cell_mut(wp).expect("floating");
+        cell.xoff = xoff;
+        cell.yoff = yoff;
+        server.model.fix_panes(w);
+        server.model.layout_changed(w);
+        server.model.redraw(crate::model::Redraw::Window(w));
+    }
+    Ok(())
+}
+
+/// `cmd_join_pane_tile` (cmd-join-pane.c:380-418): the floating pane goes
+/// into the tiled layout next to its nearest neighbour and to the back of
+/// the z-order.
+fn tile(server: &mut Server, args: &Args, w: WindowId, wp: PaneId) -> Result<(), CmdError> {
+    if server.model.windows[&w].zoomed() {
+        return Err(EdgeError::Message("can't tile a pane while window is zoomed".into()).into());
+    }
+    let window = server.model.windows.get_mut(&w).expect("target window");
+    window
+        .layout
+        .tile_pane(wp)
+        .map_err(|_| EdgeError::Message("no space for a new pane".into()))?;
+    window.panes.z_order.retain(|&p| p != wp);
+    window.panes.z_order.push(wp);
+    if !args.flag('d') {
+        server.model.set_active(w, wp);
+    }
+    server.model.fix_panes(w);
+    server.model.layout_changed(w);
+    server.model.redraw(crate::model::Redraw::Window(w));
+    Ok(())
 }

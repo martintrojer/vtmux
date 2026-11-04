@@ -1,0 +1,46 @@
+# Floating panes and the mouse: C-MouseDrag1Pane and C-MouseDrag1Empty run
+# `new-pane -M`, which sizes the new pane from the drag's start to the
+# pointer (cmd_split_window_mouse_resize); MouseDrag1Border on a floating
+# pane runs `resize-pane -M` (cmd_resize_pane_mouse_resize_move_floating:
+# a corner resizes both ways, the top border moves it); M-MouseDrag1Pane
+# runs `move-pane -M`, which moves the pane with the pointer.
+name = "floating_mouse"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["set", "-g", "default-command", "cat"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set-hook", "-g", "after-split-window", "select-pane -T new"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # C-MouseDrag1Pane from 3,2 to 20,8 (1-based).
+  { keys = "\u001b[<16;3;2M\u001b[<48;10;5M\u001b[<48;20;8M\u001b[<16;20;8m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height} a#{pane_active}"] },
+  # Drag the bottom-right corner (border at 19,7 0-based) to 30,12.
+  { keys = "\u001b[<0;20;8M\u001b[<32;25;10M\u001b[<32;31;13M\u001b[<0;31;13m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  # Drag the top border (row 0, 0-based) right and down: it moves.
+  { keys = "\u001b[<0;10;1M\u001b[<32;14;3M\u001b[<32;16;4M\u001b[<0;16;4m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  # M-MouseDrag1Pane inside it moves it back left.
+  { keys = "\u001b[<8;15;6M\u001b[<40;12;6M\u001b[<40;9;5M\u001b[<8;9;5m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  # The left border: only the width changes.
+  { keys = "\u001b[<0;3;6M\u001b[<32;2;6M\u001b[<0;2;6m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  # A float of the only tiled pane, then C-MouseDrag1Empty up and left.
+  { run = ["kill-pane", "-t", "%1"] },
+  { run = ["break-pane", "-W", "-s", "%0", "-x", "10", "-y", "4", "-X", "0", "-Y", "0"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<16;50;15M\u001b[<48;45;12M\u001b[<48;40;10M\u001b[<16;40;10m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height} a#{pane_active}"] },
+]

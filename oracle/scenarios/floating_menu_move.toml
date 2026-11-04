@@ -1,0 +1,44 @@
+# The pane menu's Move and Move & Resize submenus (key-bindings.c
+# DEFAULT_PANE_MENU, DEFAULT_MOVE_MENU, DEFAULT_MOVE_RESIZE_MENU), shown
+# only on a floating pane: prefix > opens the pane menu, the empty-key
+# Move item opens its submenu at the menu's place (-xL -yL), whose items
+# run move-pane -P; Move & Resize resizes too. Tile (t) joins the pane
+# back into the tiled layout; Float (f) on a tiled pane is break-pane -W.
+name = "floating_menu_move"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["new-pane", "-x", "20", "-y", "5", "-X", "10", "-Y", "3", "cat"] },
+  { run = ["select-pane", "-t", "%1", "-T", "p1"] },
+  { attach = { session = "a" } },
+  { settle = { quiet_ms = 500 } },
+  { keys = "\u0002>" },
+  { screen = {} },
+  # Enter on Move (the first item): its submenu.
+  { keys = "\r" },
+  { screen = {} },
+  { keys = "4" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "%1", "#{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  { keys = "\u0002>" },
+  { screen = {} },
+  { keys = "\u001b[B\r" },
+  { screen = {} },
+  { keys = "t" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "%1", "#{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  { keys = "\u0002>" },
+  { screen = {} },
+  { keys = "t" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  { keys = "\u0002>" },
+  { screen = {} },
+  { keys = "f" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+]

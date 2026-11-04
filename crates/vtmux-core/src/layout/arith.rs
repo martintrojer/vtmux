@@ -1027,18 +1027,24 @@ impl Layout {
 
     /// `layout_clamp_floating_panes`.
     fn clamp_floating(&mut self, sx: u32, sy: u32) {
-        let pad: u32 = u32::from(self.opts.float_border);
-        clamp_walk(&mut self.root, sx, sy, pad);
+        clamp_walk(&mut self.root, sx, sy, &self.borderless);
     }
 
     /// `layout_floating_args_parse`: the geometry of a new floating pane.
     /// `Err` is the full message (`position too large`, `invalid width`...).
-    pub fn floating_geometry(&mut self, args: &FloatArgs) -> Result<Geometry, String> {
+    /// `border` is whether the pane will have one (`lines` is not `none`);
+    /// `start` is the cell's saved floating geometry (`lc->fg`), which a
+    /// pane floated before keeps, unset parts as tmux's sentinels.
+    pub fn floating_geometry(
+        &mut self,
+        args: &FloatArgs,
+        border: bool,
+        start: Option<Geometry>,
+    ) -> Result<Geometry, String> {
         let (wsx, wsy) = (i64::from(self.sx), i64::from(self.sy));
-        let border = self.opts.float_border;
         let pad = i32::from(border);
-        let mut sx = i64::from(self.sx / 2);
-        let mut sy = i64::from(self.sy / 4);
+        let mut sx = i64::from(start.map_or(self.sx / 2, |g| g.sx));
+        let mut sy = i64::from(start.map_or(self.sy / 4, |g| g.sy));
         let max = i64::from(PANE_MAXIMUM);
         let pos_err = |e: PercentError| format!("position {e}");
         if let Some(v) = &args.width {
@@ -1053,8 +1059,8 @@ impl Layout {
                 sy -= 2;
             }
         }
-        let mut ox = i32::MAX;
-        let mut oy = i32::MAX;
+        let mut ox = start.map_or(i32::MAX, |g| g.xoff);
+        let mut oy = start.map_or(i32::MAX, |g| g.yoff);
         if let Some(v) = &args.x {
             ox = percentage(v, -sx, wsx, wsx).map_err(pos_err)? as i32;
         }
@@ -1112,16 +1118,21 @@ impl Layout {
     pub fn split_floating(
         &mut self,
         target: PaneId,
-        horizontal: bool,
-        before: bool,
-        full: bool,
+        req: &SplitRequest,
+        border: bool,
     ) -> Result<Geometry, SplitError> {
+        let SplitRequest {
+            horizontal,
+            before,
+            full,
+            ..
+        } = *req;
         let path = self.root.find_pane(target).ok_or(SplitError::NoPane)?;
         let lc = self.root.get_mut(&path);
         let wsx = to_i32(self.sx);
         let wsy = to_i32(self.sy);
         let (tborder, bborder, lborder, rborder) = (1, wsy - 1, 3, wsx - 3);
-        let border = i32::from(self.opts.float_border);
+        let border = i32::from(border);
         let mut old = *lc.g();
         let (osx, osy) = (to_i32(old.sx), to_i32(old.sy));
         // First, move the target cell in-bounds.
@@ -1253,10 +1264,13 @@ impl Layout {
     /// `Err` is the message `cmdq_error` prints. `resized` counts the
     /// `layout_resize_layout` runs, each a window-layout-changed event in
     /// tmux (layout.c:1002), including those before an error.
+    /// `border`: the pane has one (`window_pane_get_pane_lines` is not
+    /// `none`), which a floating pane's absolute size includes.
     pub fn resize_pane_cmd(
         &mut self,
         pane: PaneId,
         req: &ResizeRequest,
+        border: bool,
         resized: &mut u32,
     ) -> Result<(), String> {
         let path = self.root.find_pane(pane).ok_or("pane not in the layout")?;
@@ -1266,7 +1280,7 @@ impl Layout {
         if let Some(v) = &req.x {
             let x = percentage(v, 0, max, wsx).map_err(|e| format!("width {e}"))?;
             if floating {
-                self.resize_floating_to(pane, Dir::LeftRight, x as u32)
+                self.resize_floating_to(pane, Dir::LeftRight, x as u32, border)
                     .map_err(|e| format!("size {e}"))?;
             } else {
                 *resized += u32::from(self.resize_pane_to(pane, Dir::LeftRight, x as u32));
@@ -1288,7 +1302,7 @@ impl Layout {
                 }
             }
             if floating {
-                self.resize_floating_to(pane, Dir::TopBottom, y as u32)
+                self.resize_floating_to(pane, Dir::TopBottom, y as u32, border)
                     .map_err(|e| format!("size {e}"))?;
             } else {
                 *resized += u32::from(self.resize_pane_to(pane, Dir::TopBottom, y as u32));
@@ -1324,8 +1338,13 @@ impl Layout {
     }
 
     /// `layout_resize_floating_pane_to`.
-    pub fn resize_floating_to(&mut self, pane: PaneId, dir: Dir, size: u32) -> Result<(), String> {
-        let border = self.opts.float_border;
+    pub fn resize_floating_to(
+        &mut self,
+        pane: PaneId,
+        dir: Dir,
+        size: u32,
+        border: bool,
+    ) -> Result<(), String> {
         let path = self.root.find_pane(pane).ok_or("pane not in the layout")?;
         let c = self.root.get_mut(&path);
         if !c.is_floating() {
@@ -1374,10 +1393,125 @@ impl Layout {
     }
 }
 
+impl Layout {
+    /// The geometry of `pane`'s cell if it is floating (`lc->g` of a
+    /// `LAYOUT_CELL_FLOATING` cell), for the commands that move it.
+    pub fn floating_cell_mut(&mut self, pane: PaneId) -> Option<&mut Geometry> {
+        let path = self.root.find_pane(pane)?;
+        match self.root.get_mut(&path) {
+            Cell::Floating(l) => Some(&mut l.g),
+            _ => None,
+        }
+    }
+
+    /// `break-pane -W` (cmd-break-pane.c `cmd_break_pane_float`): the tiled
+    /// cell of `pane` gives its space away (`layout_remove_tile`) and
+    /// floats at `g`. False when the pane is not tiled.
+    pub fn float_pane(&mut self, pane: PaneId, g: Geometry) -> bool {
+        let Some(path) = self.root.find_pane(pane) else {
+            return false;
+        };
+        if !self.root.get(&path).is_tiled() {
+            return false;
+        }
+        let env = self.env();
+        remove_tile(&mut self.root, &path, env);
+        let cell = self.root.get_mut(&path);
+        *cell = Cell::Floating(Leaf { pane, g });
+        self.saved_float.remove(&pane);
+        fix_offsets(&mut self.root);
+        true
+    }
+
+    /// Tiling a floating pane (cmd-join-pane.c `cmd_join_pane_tile`): its
+    /// geometry is kept for a later float (`lc->fg`), then
+    /// `layout_insert_tile` takes half its nearest neighbour's space.
+    /// `Err` is tmux's message; the cell stays floating then.
+    pub fn tile_pane(&mut self, pane: PaneId) -> Result<(), SplitError> {
+        let path = self.root.find_pane(pane).ok_or(SplitError::NoPane)?;
+        let Cell::Floating(leaf) = self.root.get(&path) else {
+            return Err(SplitError::NoPane);
+        };
+        let saved = leaf.g;
+        self.saved_float.insert(pane, saved);
+        let env = self.env();
+        if !insert_tile(&mut self.root, &path, self.sx, self.sy, env) {
+            return Err(SplitError::NoSpace);
+        }
+        let g = *self.root.get(&path).g();
+        *self.root.get_mut(&path) = Cell::Pane(Leaf { pane, g });
+        fix_offsets(&mut self.root);
+        Ok(())
+    }
+
+    /// The floating geometry `pane`'s cell had before it was tiled
+    /// (`lc->fg`), if any.
+    #[must_use]
+    pub fn saved_float(&self, pane: PaneId) -> Option<Geometry> {
+        self.saved_float.get(&pane).copied()
+    }
+}
+
+/// `layout_resize_set_size`.
+fn resize_set_size<L>(root: &mut Cell<L>, path: &[usize], dir: Dir, size: u32, env: Env) {
+    let change = to_i32(size).wrapping_sub(to_i32(root.get(path).g().size(dir)));
+    adjust_at(root, path, dir, change, env);
+}
+
+/// `layout_insert_tile` (layout.c:2003-2060) for the cell at `path`, not
+/// tiled yet: it takes half the space of its nearest neighbour, or its
+/// parent is tiled first when it has none. False when the neighbour has
+/// no room.
+fn insert_tile<L>(root: &mut Cell<L>, path: &[usize], sx: u32, sy: u32, env: Env) -> bool {
+    if root.get(path).is_tiled() {
+        return false;
+    }
+    let Some((&idx, pp)) = path.split_last() else {
+        // Only pane in the layout.
+        *root.g_mut() = Geometry::new(sx, sy, 0, 0);
+        return true;
+    };
+    let Cell::Node(parent) = root.get(pp) else {
+        return false;
+    };
+    let ty = parent.dir;
+    match neighbour(&parent.children, idx) {
+        None => {
+            insert_tile(root, pp, sx, sy, env);
+            let size1 = root.get(pp).g().size(ty);
+            resize_set_size(root, path, ty, size1, env);
+        }
+        Some(n) => {
+            let mut np = pp.to_vec();
+            np.push(n);
+            let g = *root.get(&np).g();
+            if !split_check_space(&g, ty, env, pos_at(root, &np)) {
+                return false;
+            }
+            let (size1, size2, _) = split_sizes(&g, -1, false, ty);
+            resize_set_size(root, path, ty, size1, env);
+            resize_set_size(root, &np, ty, size2, env);
+        }
+    }
+    let pg = *root.get(pp).g();
+    let (other, size) = match ty {
+        Dir::LeftRight => (Dir::TopBottom, pg.sy),
+        Dir::TopBottom => (Dir::LeftRight, pg.sx),
+    };
+    resize_set_size(root, path, other, size, env);
+    true
+}
+
 /// `layout_clamp_floating_panes` for one subtree.
-fn clamp_walk(c: &mut Cell<PaneId>, sx: u32, sy: u32, pad: u32) {
+fn clamp_walk(
+    c: &mut Cell<PaneId>,
+    sx: u32,
+    sy: u32,
+    borderless: &std::collections::BTreeSet<PaneId>,
+) {
     match c {
         Cell::Floating(l) => {
+            let pad = u32::from(!borderless.contains(&l.pane));
             let g = &mut l.g;
             let avail = sx.saturating_sub(2 * pad);
             if g.sx > avail {
@@ -1406,7 +1540,7 @@ fn clamp_walk(c: &mut Cell<PaneId>, sx: u32, sy: u32, pad: u32) {
         Cell::Node(n) => n
             .children
             .iter_mut()
-            .for_each(|c| clamp_walk(c, sx, sy, pad)),
+            .for_each(|c| clamp_walk(c, sx, sy, borderless)),
         Cell::Pane(_) => {}
     }
 }
@@ -1489,4 +1623,72 @@ fn shrink_step<L>(
     resize_adjust(&mut parent.children[add], dir, to_i32(size), env, pa);
     resize_adjust(&mut parent.children[remove], dir, -to_i32(size), env, pr);
     size
+}
+
+#[cfg(test)]
+mod float_tests {
+    use super::*;
+
+    /// Two panes side by side in an 80x24 window: %1 left, %2 right.
+    fn two() -> Layout {
+        let mut l = Layout::new(80, 24, PaneId(1));
+        let req = SplitRequest {
+            horizontal: true,
+            ..SplitRequest::default()
+        };
+        l.split(PaneId(1), PaneId(2), &req).unwrap();
+        l
+    }
+
+    /// break-pane -W: the floated pane's space goes to its neighbour, and
+    /// joining it to itself takes half back (the reference's layouts for
+    /// the same commands, `oracle/scenarios/floating_break_move.toml`).
+    #[test]
+    fn float_then_tile_gives_and_takes_space() {
+        let mut l = two();
+        assert!(l.float_pane(PaneId(2), Geometry::new(40, 6, 4, 2)));
+        assert_eq!(l.pane_rect(PaneId(1)), Some(Geometry::new(80, 24, 0, 0)));
+        assert_eq!(l.pane_rect(PaneId(2)), Some(Geometry::new(40, 6, 4, 2)));
+        assert!(
+            !l.float_pane(PaneId(2), Geometry::default()),
+            "already floating"
+        );
+        l.tile_pane(PaneId(2)).unwrap();
+        assert_eq!(l.pane_rect(PaneId(1)), Some(Geometry::new(39, 24, 0, 0)));
+        assert_eq!(l.pane_rect(PaneId(2)), Some(Geometry::new(40, 24, 40, 0)));
+        assert_eq!(l.saved_float(PaneId(2)), Some(Geometry::new(40, 6, 4, 2)));
+    }
+
+    /// A pane floated again starts from where it floated before, and
+    /// `-x` / `-y` (with the border taken off) override that.
+    #[test]
+    fn floating_again_starts_from_the_saved_geometry() {
+        let mut l = two();
+        l.float_pane(PaneId(2), Geometry::new(30, 8, 6, 6));
+        l.tile_pane(PaneId(2)).unwrap();
+        let start = l.saved_float(PaneId(2));
+        let g = l
+            .floating_geometry(&FloatArgs::default(), true, start)
+            .unwrap();
+        assert_eq!(g, Geometry::new(30, 8, 6, 6));
+        let args = FloatArgs {
+            width: Some("20".into()),
+            ..FloatArgs::default()
+        };
+        let g = l.floating_geometry(&args, true, start).unwrap();
+        assert_eq!(g, Geometry::new(18, 8, 6, 6));
+    }
+
+    /// A borderless floating pane is kept inside the window without the
+    /// one-cell pad (`layout_clamp_floating_panes`).
+    #[test]
+    fn clamp_pads_only_bordered_panes() {
+        let mut l = Layout::new(80, 24, PaneId(1));
+        l.add_floating(None, PaneId(2), Geometry::new(10, 4, 75, 22));
+        l.add_floating(Some(PaneId(2)), PaneId(3), Geometry::new(10, 4, 75, 22));
+        l.borderless.insert(PaneId(3));
+        l.resize_window(60, 20);
+        assert_eq!(l.pane_rect(PaneId(2)), Some(Geometry::new(10, 4, 49, 15)));
+        assert_eq!(l.pane_rect(PaneId(3)), Some(Geometry::new(10, 4, 50, 16)));
+    }
 }

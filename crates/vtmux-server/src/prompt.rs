@@ -169,6 +169,9 @@ pub struct Prompt {
     /// `PROMPT_NOFORMAT`: the input is not a format (`prompt_create`,
     /// `prompt_update`); the label still is (`prompt_expand1`).
     pub no_format: bool,
+    /// `PROMPT_EDITARROWS`: Left and Right edit an incremental prompt's
+    /// line instead of moving (switch-mode's search).
+    pub edit_arrows: bool,
     /// `pr->complete_display`: the matches Tab found and could not narrow
     /// down, a space before each, shown after the line until the next key.
     complete_display: Option<String>,
@@ -201,6 +204,7 @@ impl Prompt {
             is_pane: false,
             is_mode: false,
             no_format: false,
+            edit_arrows: false,
             complete_display: None,
         }
     }
@@ -287,6 +291,9 @@ impl Prompt {
         if self.is_mode {
             flags.push("ISMODE");
         }
+        if self.edit_arrows {
+            flags.push("EDITARROWS");
+        }
         flags.join(",")
     }
 
@@ -363,7 +370,9 @@ impl Prompt {
             Key::PPAGE,
             Key::NPAGE,
         ];
-        if self.kind == Kind::Incremental && !self.vi && moves.contains(&key) {
+        let edit_arrows = self.edit_arrows;
+        let side = |k: Key| edit_arrows && (k == Key::LEFT || k == Key::RIGHT);
+        if self.kind == Kind::Incremental && !self.vi && moves.contains(&key) && !side(key) {
             return KeyOutcome::Move;
         }
         let action = if self.vi {
@@ -381,12 +390,10 @@ impl Prompt {
         // In vi command mode h, j, k, l (and BSpace, a) are the arrow keys
         // by now; insert mode passes the arrows on as they are.
         let arrow = if was_command_mode {
-            matches!(
-                action,
-                Action::Left | Action::Right | Action::HistoryUp | Action::HistoryDown
-            )
+            matches!(action, Action::HistoryUp | Action::HistoryDown)
+                || (!self.edit_arrows && matches!(action, Action::Left | Action::Right))
         } else {
-            moves[..4].contains(&key)
+            moves[..4].contains(&key) && !side(key)
         };
         if self.kind == Kind::Incremental && self.vi && arrow {
             return KeyOutcome::Move;

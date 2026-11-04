@@ -172,7 +172,7 @@ status = "pass"
 
 [tests."display-panes.sh"]
 status = "xfail"
-reason = "panes-mode is done (entry, zoom, -Z, -s, keys, template, format, border-status); the script runs to its floating half (regress/display-panes.sh:258-297) and stops at new-pane -B none -X -Y, not implemented. Its scrollbar block (117-137) passes only because vtmux has no scrollbars: pane-scrollbars is accepted and ignored"
+reason = "panes-mode is done (entry, zoom, -Z, -s, keys, template, format, border-status) and new-pane runs; the floating half (regress/display-panes.sh:258-297) stops at `wait_capture '┌'`: panes-mode does not draw a frame round a floating pane (window-panes.c window_panes_draw_floating_border). Its scrollbar block (117-137) passes only because vtmux has no scrollbars: pane-scrollbars is accepted and ignored"
 
 [tests."environ-update.sh"]
 status = "pass"
@@ -184,24 +184,20 @@ status = "pass"
 status = "pass"
 
 [tests."floating-pane-covers-tiled-pane.sh"]
-status = "skip"
-reason = "M2: floating panes"
+status = "pass"
 
 [tests."floating-pane-geometry.sh"]
-status = "skip"
-reason = "M2: floating panes"
+status = "pass"
 
 [tests."floating-pane-scroll-behind-margins.sh"]
-status = "skip"
-reason = "M2: floating panes"
+status = "pass"
 
 [tests."floating-pane-top-border-drag.sh"]
-status = "skip"
-reason = "M2: floating panes"
+status = "pass"
 
 [tests."floating-pane-zoom.sh"]
-status = "skip"
-reason = "M2: floating panes"
+status = "xfail"
+reason = "needs new-pane -A (a floating pane over a zoomed window, PANE_FLOATOVERZOOM): `not implemented in vtmux yet: new-pane -A`"
 
 [tests."format-animation.sh"]
 status = "xfail"
@@ -212,7 +208,7 @@ status = "pass"
 
 [tests."format-modifiers.sh"]
 status = "xfail"
-reason = "format modifier N/s is wrong: `#{N/s:main}` gives 0, expected 1 (session-exists test); later the script uses new-pane"
+reason = "format modifier N/s is wrong: `#{N/s:main}` gives 0, expected 1 (session-exists test); its later new-pane is in"
 
 [tests."format-mouse.sh"]
 status = "pass"
@@ -337,7 +333,7 @@ reason = "capture-pane -N/-F are in; -F flags a line holding a wide character X 
 
 [tests."join-pane-modal.sh"]
 status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+reason = "needs modal panes: `not implemented in vtmux yet: new-pane -O`"
 
 [tests."json.sh"]
 status = "pass"
@@ -356,8 +352,7 @@ reason = "a control client that has not asked for new-layouts is dumped the v2 J
 status = "pass"
 
 [tests."layout-set.sh"]
-status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+status = "pass"
 
 [tests."lifecycle-deferred.sh"]
 status = "pass"
@@ -373,7 +368,7 @@ status = "pass"
 
 [tests."modal-pane.sh"]
 status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+reason = "needs modal panes: `not implemented in vtmux yet: new-pane -O`"
 
 [tests."mode-kill.sh"]
 status = "pass"
@@ -389,8 +384,7 @@ status = "xfail"
 reason = "Ctrl-drag from the status line: the `C-MouseDragEnd1Pane` binding is not dispatched, `got @drag-end '', expected 'done'` (no new-pane error; the script's new-pane use comes after)"
 
 [tests."new-pane-mouse.sh"]
-status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+status = "pass"
 
 [tests."new-session-base-index.sh"]
 status = "pass"
@@ -424,8 +418,7 @@ status = "xfail"
 reason = "OSC 11 (set background) is not tracked: `#{pane_bg}` is empty after a pane prints OSC 11 `rgb:ff/ff/ff`, expected `#ffffff`"
 
 [tests."pane-ops.sh"]
-status = "xfail"
-reason = "its split, break, join, swap, respawn (-E included), marked pane, empty pane (-E, -I, empty command) and resize-pane -T sections pass; it stops at new-pane (floating panes)"
+status = "pass"
 
 [tests."pipe-pane.sh"]
 status = "pass"
@@ -462,16 +455,15 @@ status = "xfail"
 reason = "scene after `rotate-window` differs (`scene cache-rotate-after differs`: pane columns/stale cells differ from the golden); earlier scenes of the script pass"
 
 [tests."screen-redraw-fill-character.sh"]
-status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+status = "pass"
 
 [tests."screen-redraw-floating.sh"]
 status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+reason = "its floating scenes (borders, -B, -T, clipping at every edge, overlap, border status) pass; scene floating-over-scrollbar differs: pane-scrollbars is accepted and ignored (no scrollbar column)"
 
 [tests."screen-redraw-indicators.sh"]
 status = "xfail"
-reason = "needs new-pane (floating panes); select-pane -m is in"
+reason = "its arrow, colour and floating (colour-two-plus-float) scenes pass; scene marked-pane-tb differs (the marked pane's reversed border on a top/bottom split)"
 
 [tests."screen-redraw-menus.sh"]
 status = "pass"
@@ -536,12 +528,10 @@ status = "pass"
 status = "pass"
 
 [tests."swap-pane-zoom-error.sh"]
-status = "xfail"
-reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
+status = "pass"
 
 [tests."switch-mode.sh"]
-status = "xfail"
-reason = "missing command switch-mode: `not implemented in vtmux yet: switch-mode`"
+status = "pass"
 
 [tests."sync-output-atomic.sh"]
 status = "xfail"

@@ -1,0 +1,44 @@
+# switch-mode (window-switch.c) from the default bindings: prefix Tab is
+# `new-pane -E -x75% -y30% -X0 -Y0; move-pane -P bottom-centre;
+# switch-mode -wk`, a floating empty pane at the bottom listing every
+# window by name; typing filters them fuzzily (the matched columns in
+# switch-mode-match-style), Down moves, Enter switches the client there
+# and -k kills the pane. prefix BTab lists sessions; Escape leaves and
+# kills the pane.
+name = "switch_mode_keys"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "alpha", "-n", "main", "-x", "80", "-y", "23", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-g", "default-command", "cat"] },
+  { run = ["set", "-s", "escape-time", "0"] },
+  { run = ["set-hook", "-g", "after-split-window", "select-pane -T new"] },
+  { run = ["select-pane", "-t", "alpha", "-T", "p0"] },
+  { run = ["neww", "-d", "-t", "alpha:1", "-n", "pick-one", "cat"] },
+  { run = ["select-pane", "-t", "alpha:1", "-T", "p1"] },
+  { run = ["new", "-d", "-s", "bravo", "-n", "pick-two", "cat"] },
+  { run = ["select-pane", "-t", "bravo", "-T", "p2"] },
+  { run = ["new", "-d", "-s", "charlie", "-n", "last", "cat"] },
+  { run = ["select-pane", "-t", "charlie", "-T", "p3"] },
+  { attach = { session = "alpha" } },
+  { settle = { quiet_ms = 500 } },
+  { keys = "\u0002\t" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "alpha", "#{pane_mode} #{pane_floating_flag} #{pane_left},#{pane_top} #{pane_width}x#{pane_height}"] },
+  { keys = "pick" },
+  { screen = {} },
+  { keys = "\u001b[B" },
+  { screen = {} },
+  { keys = "\r" },
+  { screen = {} },
+  { run = ["list-clients", "-F", "#{client_session}"] },
+  { run = ["list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_floating_flag}"] },
+  { keys = "\u0002\u001b[Z" },
+  { screen = {} },
+  { keys = "\u001b[A" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { screen = {} },
+  { run = ["list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_floating_flag}"] },
+]

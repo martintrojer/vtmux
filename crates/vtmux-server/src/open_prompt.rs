@@ -365,6 +365,22 @@ impl Server {
         !matches!(self.prompt_key(place, c, key), Taken::No)
     }
 
+    /// [`Self::prompt_key_at`] telling a movement key apart
+    /// (`PROMPT_KEY_MOVE`): `Some(true)` used up, `Some(false)` a move the
+    /// owner should act on, `None` not taken.
+    pub(crate) fn prompt_key_moving(
+        &mut self,
+        place: Place,
+        c: ClientId,
+        key: Key,
+    ) -> Option<bool> {
+        match self.prompt_key(place, c, key) {
+            Taken::Yes => Some(true),
+            Taken::Move => Some(false),
+            Taken::No => None,
+        }
+    }
+
     /// `mode_tree_set_prompt` (mode-tree.c:1130-1178): `editor` on pane
     /// `p`'s mode screen, opened by client `c`, for the mode on top of the
     /// pane's stack. Any prompt already there is cleared (its owner freed).

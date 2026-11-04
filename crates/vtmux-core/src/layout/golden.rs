@@ -139,7 +139,16 @@ impl Sim {
         let (horizontal, before, full) = (a.flag('h'), a.flag('b'), a.flag('f'));
         let new = PaneId(self.next);
         if self.is_floating(target) {
-            let g = match self.layout.split_floating(target, horizontal, before, full) {
+            let g = match self.layout.split_floating(
+                target,
+                &SplitRequest {
+                    horizontal,
+                    before,
+                    full,
+                    size: None,
+                },
+                true,
+            ) {
                 Ok(g) => g,
                 Err(e) => return self.errs.push(e.to_string()),
             };
@@ -213,7 +222,7 @@ impl Sim {
             x: a.value('X').map(str::to_owned),
             y: a.value('Y').map(str::to_owned),
         };
-        match self.layout.floating_geometry(&fa) {
+        match self.layout.floating_geometry(&fa, true, None) {
             Ok(g) => {
                 let new = PaneId(self.next);
                 self.layout.add_floating(Some(target), new, g);
@@ -240,7 +249,7 @@ impl Sim {
                 Err(e) => return self.errs.push(format!("adjustment {e}")),
             }
         }
-        if let Err(e) = self.layout.resize_pane_cmd(target, &req, &mut 0) {
+        if let Err(e) = self.layout.resize_pane_cmd(target, &req, true, &mut 0) {
             self.errs.push(e);
         }
     }

@@ -492,7 +492,7 @@ impl Server {
         formats.extend(payload);
         formats.insert("hook".into(), ev.name.clone());
         let state = Rc::new(StepState {
-            current: fs,
+            current: std::cell::Cell::new(fs),
             no_hooks: true,
             formats: formats.into_iter().collect(),
         });

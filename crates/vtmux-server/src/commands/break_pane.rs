@@ -1,7 +1,7 @@
 //! `break-pane` (cmd-break-pane.c:89-209): move a pane out to a new window
 //! of its own in the target session, or relink a one-pane window at the
-//! target index. `-W` (float the pane in place) and its `-x -y -X -Y` are
-//! not done yet.
+//! target index. `-W` floats the pane in place instead, sized and placed by
+//! `-x -y -X -Y` (or where it floated before).
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
@@ -24,14 +24,14 @@ pub fn exec(
     source: Found,
     found: Found,
 ) -> Result<(), CmdError> {
-    if args.flag('W') {
-        return Err(EdgeError::NotImplemented("break-pane -W".into()).into());
-    }
     let (Some(src_s), Some(mut src_idx), Some(w), Some(wp)) =
         (source.session, source.index, source.window, source.pane)
     else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
+    if args.flag('W') {
+        return float(server, args, source, w, wp);
+    }
     let Some(dst_s) = found.session else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
@@ -205,4 +205,45 @@ fn move_to_new_window(
     }
     m.fix_panes(new_w);
     new_w
+}
+
+/// `cmd_break_pane_float` (cmd-break-pane.c:49-87): the tiled pane floats
+/// where it is, on top of the z-order.
+fn float(
+    server: &mut Server,
+    args: &Args,
+    source: Found,
+    w: vtmux_core::ids::WindowId,
+    wp: vtmux_core::ids::PaneId,
+) -> Result<(), CmdError> {
+    let window = &server.model.windows[&w];
+    if window.is_floating_now(wp) {
+        return Err(EdgeError::Message("pane is already floating".into()).into());
+    }
+    if window.zoomed() {
+        return Err(EdgeError::Message("can't float a pane while window is zoomed".into()).into());
+    }
+    let border = server.model.window_has_border(w);
+    let fa = vtmux_core::layout::FloatArgs {
+        width: args.value('x').map(|v| expand(server, source, v)),
+        height: args.value('y').map(|v| expand(server, source, v)),
+        x: args.value('X').map(|v| expand(server, source, v)),
+        y: args.value('Y').map(|v| expand(server, source, v)),
+    };
+    let window = server.model.windows.get_mut(&w).expect("source window");
+    let start = window.layout.saved_float(wp);
+    let g = window
+        .layout
+        .floating_geometry(&fa, border, start)
+        .map_err(|e| EdgeError::Message(format!("failed to float pane: {e}")))?;
+    window.layout.float_pane(wp, g);
+    window.panes.z_order.retain(|&p| p != wp);
+    window.panes.z_order.insert(0, wp);
+    if !args.flag('d') {
+        server.model.set_active(w, wp);
+    }
+    server.model.fix_panes(w);
+    server.model.layout_changed(w);
+    server.model.redraw(crate::model::Redraw::Window(w));
+    Ok(())
 }

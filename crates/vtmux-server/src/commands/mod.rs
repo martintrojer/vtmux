@@ -185,6 +185,9 @@ pub struct Item {
     /// (`state->event.m` while valid): `send -M` and the `mouse_*`
     /// formats read it.
     pub mouse: Option<crate::mouse::MouseEvent>,
+    /// The running command moves the queue's current state here
+    /// (`cmd_find_from_*(cmdq_get_current(item), ...)`).
+    pub new_current: Option<Found>,
 }
 
 /// The client's stdout can be used once (`file_write_open` dups it and
@@ -227,6 +230,7 @@ impl Item {
             borrow_client: false,
             key: None,
             mouse: None,
+            new_current: None,
         }
     }
 
@@ -336,6 +340,10 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
     server.drain_events();
     if !item.no_hooks {
         let hook = match &result {
+            // new-pane fires split-window's hook (cmd-split-window.c:314).
+            Ok(()) if call.entry.name == "new-pane" && item.hook_target.is_some() => {
+                Some("after-split-window".to_owned())
+            }
             Ok(()) if call.entry.after_hook() || item.hook_target.is_some() => {
                 Some(format!("after-{}", call.entry.name))
             }
@@ -418,7 +426,7 @@ fn status_redraws(server: &mut Server, call: &CommandCall, source: Found, found:
         // select-window and friends ask themselves.
         "new-window" | "kill-session" => ask(session(found)),
         // cmd-split-window.c:293-298.
-        "split-window" => {
+        "split-window" | "new-pane" => {
             ask(window(found));
             ask(session(found));
         }
@@ -473,7 +481,8 @@ fn dispatch(
         }
         "list-clients" => list_clients::exec(server, item, args, found),
         "list-sessions" => list_sessions::exec(server, item, args),
-        "split-window" => split_window::exec(server, item, args, found),
+        "split-window" => split_window::exec(server, item, args, found, false),
+        "new-pane" => split_window::exec(server, item, args, found, true),
         "kill-pane" => kill_pane::exec(server, item, args, found),
         "select-pane" => select_pane::exec(server, item, args, found, false),
         "last-pane" => select_pane::exec(server, item, args, found, true),
@@ -499,9 +508,14 @@ fn dispatch(
         "previous-layout" => select_layout::exec(server, item, args, found, Some(false)),
         "swap-pane" => swap_pane::exec(server, args, source, found),
         "break-pane" => break_pane::exec(server, item, args, source, found),
-        "join-pane" | "move-pane" => {
-            join_pane::exec(server, args, source, found, call.entry.name == "move-pane")
-        }
+        "join-pane" | "move-pane" => join_pane::exec(
+            server,
+            item,
+            args,
+            source,
+            found,
+            call.entry.name == "move-pane",
+        ),
         "respawn-pane" => respawn_pane::exec(server, item, args, found),
         "respawn-window" => respawn_window::exec(server, item, args, found),
         "rotate-window" => rotate_window::exec(server, args, found),
@@ -515,6 +529,13 @@ fn dispatch(
         "choose-buffer" => choose_tree::exec_buffer(server, args, found),
         "choose-client" => choose_tree::exec_client(server, args, found),
         "customize-mode" => choose_tree::exec_customize(server, args, found),
+        // cmd_choose_tree_exec with window_switch_mode.
+        "switch-mode" => {
+            let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
+            let c = server.target_client(item.client, item.origin);
+            server.enter_switch_mode(p, c, args, found);
+            Ok(())
+        }
         "find-window" => find_window::exec(server, item, args, found),
         "set-buffer" => set_buffer::exec(server, item, args),
         "delete-buffer" => delete_buffer::exec(server, args),

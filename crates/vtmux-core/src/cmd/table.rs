@@ -163,7 +163,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("lock-session", Some("locks"), "t:", 0, Some(0), "[-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("move-pane", Some("movep"), "bdD::fhMvl:L::P:R::s:t:U::X:Y:z:", 0, Some(0), "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("move-window", Some("movew"), "abdkrs:t:", 0, Some(0), "[-abdkr] [-s src-window] [-t dst-window]", None, Some(slot('s', TargetKind::Window, FindFlags::NONE)), false, true),
-    cmd("new-pane", Some("newp"), "AbB:Cc:Dde:EfF:hIkl:KLMm:Op:PR:s:S:t:T:vWx:X:y:Y:Z", 0, None, "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("new-pane", Some("newp"), "AbB:Cc:Dde:EfF:hIkl:KLMm:Op:PR:s:S:t:T:vWx:X:y:Y:Z", 0, None, "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("new-session", Some("new"), "Ac:dDe:EF:f:n:Ps:t:x:Xy:", 0, None, "[-AdDEPX] [-c start-directory] [-e environment] [-F format] [-f flags] [-n window-name] [-s session-name] [-t target-session] [-x width] [-y height] [shell-command [argument ...]]", Some(slot('t', TargetKind::Session, FindFlags::CANFAIL)), None, true, true),
     cmd("new-window", Some("neww"), "abc:de:EF:kn:PSt:", 0, None, "[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]", Some(slot('t', TargetKind::Window, FindFlags::WINDOW_INDEX)), None, false, true),
     cmd("next-layout", Some("nextl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
@@ -207,7 +207,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("swap-pane", Some("swapp"), "dDs:t:UZ", 0, Some(0), "[-dDUZ] [-s src-pane] [-t dst-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), Some(slot('s', TargetKind::Pane, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("swap-window", Some("swapw"), "ds:t:", 0, Some(0), "[-d] [-s src-window] [-t dst-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), Some(slot('s', TargetKind::Window, FindFlags::DEFAULT_MARKED)), false, true),
     cmd("switch-client", Some("switchc"), "c:EFlnO:pt:rT:Z", 0, Some(0), "[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]", None, None, false, true),
-    cmd("switch-mode", None, "F:kst:wZ", 0, Some(1), "[-kswZ] [-F format] [-t target-pane] [command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("switch-mode", None, "F:kst:wZ", 0, Some(1), "[-kswZ] [-F format] [-t target-pane] [command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("unbind-key", Some("unbind"), "anqT:", 0, Some(1), "[-anq] [-T key-table] key", None, None, false, true),
     cmd("unlink-window", Some("unlinkw"), "kt:", 0, Some(0), "[-k] [-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("wait-for", Some("wait"), "EF:LSUlvw:", 1, Some(1), "[-ELSUlv] [-F format] [-w waiter] name", None, None, false, true),
@@ -427,6 +427,8 @@ mod tests {
             ("lock-session", Some("locks")),
             ("lock-client", Some("lockc")),
             ("server-access", None),
+            ("new-pane", Some("newp")),
+            ("switch-mode", None),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);
@@ -437,7 +439,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 90);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 92);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
