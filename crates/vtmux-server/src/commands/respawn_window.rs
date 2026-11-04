@@ -44,8 +44,9 @@ pub fn exec(
         server.close_pane_io(pane);
     }
     respawn(server, item, args, (s, w, wp), "window")?;
-    // spawn.c:381: session_select.
+    // spawn.c:228-238: session_select, then the group follows.
     server.model.set_current(s, index);
+    server.model.group_sync_from(s);
     server.model.redraw(Redraw::Window(w));
     server.recalculate_sizes();
     Ok(())

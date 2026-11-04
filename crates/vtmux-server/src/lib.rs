@@ -14,6 +14,7 @@ pub mod environ;
 pub mod events;
 pub mod format_ctx;
 pub mod format_jobs;
+pub mod groups;
 pub mod input;
 pub mod jobs;
 pub mod key_dispatch;

@@ -256,7 +256,8 @@ pub(super) fn quote_shell(s: &str) -> String {
 }
 
 /// `format_quote_shell_single` (format.c:4475): POSIX single quotes.
-pub(super) fn quote_shell_single(s: &str) -> String {
+#[must_use]
+pub fn quote_shell_single(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 

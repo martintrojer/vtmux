@@ -1,6 +1,7 @@
-//! `new-session` (cmd-new-session.c:67-380) for M0: one window with one
-//! pane. Without `-d` a client with a terminal is attached through the
-//! server's attach hook; session groups (`-t`) and `-A` are M1.
+//! `new-session` (cmd-new-session.c:67-380): one window with one pane.
+//! Without `-d` a client with a terminal is attached through the server's
+//! attach hook; `-t` makes the session part of a session group
+//! ([`crate::groups`]).
 
 use std::path::PathBuf;
 
@@ -10,7 +11,7 @@ use vtmux_core::options::TreeId;
 
 use super::{Item, expand};
 use crate::names::{check_name, clean_name};
-use crate::server::{NewSession, Server};
+use crate::server::{NewGroup, NewSession, Server};
 use crate::target::Found;
 
 /// `NEW_SESSION_TEMPLATE` (cmd-new-session.c:34).
@@ -35,6 +36,42 @@ fn size(
     vtmux_core::cmd::strtonum(v, 1, i64::from(u16::MAX))
         .map(|n| Some(u16::try_from(n).expect("in u16 range")))
         .map_err(|cause| EdgeError::BadNumber { what, cause })
+}
+
+/// The group `-t value` names (cmd-new-session.c:143-160): the group of
+/// the session found, or that session (grouped with the new one under its
+/// name), or a group called `value` that may not exist yet.
+fn group_for(
+    server: &Server,
+    value: &str,
+    with: Option<vtmux_core::ids::SessionId>,
+) -> Result<NewGroup, EdgeError> {
+    let m = &server.model;
+    if let Some(s) = with {
+        let name = match m.groups.name_of(s) {
+            Some(g) => g.to_owned(),
+            None => m.sessions[&s].name.clone(),
+        };
+        return Ok(NewGroup {
+            name,
+            with: Some(s),
+        });
+    }
+    if m.groups.named(value).is_some() {
+        return Ok(NewGroup {
+            name: value.to_owned(),
+            with: None,
+        });
+    }
+    if !check_name(value) {
+        return Err(EdgeError::Message(format!(
+            "invalid session group name: {value}"
+        )));
+    }
+    Ok(NewGroup {
+        name: clean_name(value),
+        with: None,
+    })
 }
 
 #[allow(clippy::too_many_lines)] // cmd_new_session_exec, in order
@@ -97,9 +134,13 @@ pub fn exec(
     {
         return Err(EdgeError::DuplicateSession(n.clone()).into());
     }
-    if args.flag('t') {
-        return Err(EdgeError::NotImplemented("session groups (new-session -t)".into()).into());
-    }
+    // cmd-new-session.c:143-160: is this going to be part of a session
+    // group? The target session's group, else the target session (whose
+    // name the group takes), else a group by the given name.
+    let group = match args.value('t') {
+        Some(t) => Some(group_for(server, t, found.session)?),
+        None => None,
+    };
     // A client-less run (config file) is always detached.
     let detached = args.flag('d') || item.client.is_none();
     let cwd = match args.value('c') {
@@ -170,6 +211,7 @@ pub fn exec(
         update_env: item.client.is_some() && !args.flag('E'),
         default_size: (args.flag('x') || args.flag('y'))
             .then(|| (x.unwrap_or(cols), y.unwrap_or(rows))),
+        group,
     };
     let s = server
         .create_session(spec)

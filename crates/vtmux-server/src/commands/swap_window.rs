@@ -1,11 +1,10 @@
 //! `swap-window` (cmd-swap-window.c:49-100): the two winlinks keep their
-//! indices, flags and place in their sessions and trade windows. Session
-//! groups do not exist yet.
+//! indices, flags and place in their sessions and trade windows; each
+//! session's group follows it.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
 
-use crate::model::Redraw;
 use crate::server::Server;
 use crate::target::Found;
 
@@ -20,6 +19,9 @@ pub fn exec(server: &mut Server, args: &Args, source: Found, found: Found) -> Re
     ) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
+    if server.model.grouped_together(src_s, dst_s) {
+        return Err(EdgeError::Message("can't move window, sessions are grouped".into()).into());
+    }
     if w_src == w_dst {
         return Ok(());
     }
@@ -41,9 +43,11 @@ pub fn exec(server: &mut Server, args: &Args, source: Found, found: Found) -> Re
             m.set_current(src_s, src_idx);
         }
     }
-    m.redraw(Redraw::Session(src_s));
+    m.group_sync_from(src_s);
+    m.redraw_group(src_s);
     if src_s != dst_s {
-        m.redraw(Redraw::Session(dst_s));
+        m.group_sync_from(dst_s);
+        m.redraw_group(dst_s);
     }
     server.recalculate_sizes();
     Ok(())

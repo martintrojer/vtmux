@@ -235,7 +235,7 @@ reason = "format modifier t/f with an out-of-range time: `#{t/f/zz:@huge}` gives
 
 [tests."format-variables.sh"]
 status = "xfail"
-reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
+reason = "the session group formats pass; the test then compares `#{version}` with `vtmux -V` (spec D21) and needs the `I/e`, `I/c` and `I/f` modifiers"
 
 [tests."has-session-return.sh"]
 status = "pass"
@@ -248,7 +248,7 @@ status = "pass"
 
 [tests."hooks-notify.sh"]
 status = "xfail"
-reason = "events up to session-window-changed pass; the test then needs session groups (new-session -t), then resize-window, copy-mode events beyond those, marked panes and title stacks"
+reason = "events up to pane-died pass (session groups included); the test then needs pane-title-changed from split-window -T, a pane's own OSC 0/2 title, title stacks, and later copy-mode and pane events"
 
 [tests."hooks.sh"]
 status = "pass"
@@ -515,12 +515,11 @@ reason = "missing command server-access: `not implemented in vtmux yet: server-a
 status = "pass"
 
 [tests."session-group-resize.sh"]
-status = "xfail"
-reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
+status = "pass"
 
 [tests."session-ops.sh"]
 status = "xfail"
-reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
+reason = "session groups pass; the test then needs detach-on-destroy previous and next moving an attached client (`Client session wrong`)"
 
 [tests."set-hook-B.sh"]
 status = "xfail"
@@ -610,4 +609,4 @@ status = "pass"
 
 [tests."window-ops.sh"]
 status = "xfail"
-reason = "missing feature session groups: `not implemented in vtmux yet: session groups (new-session -t)`"
+reason = "session groups pass; the test then needs kill-window -a killing the current window when it is linked into the session twice (`Session D survived kill-window -a on multiply-linked window`)"

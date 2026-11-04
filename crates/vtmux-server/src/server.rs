@@ -274,6 +274,19 @@ pub struct NewSession {
     pub update_env: bool,
     /// `-x`/`-y` given: the session's `default-size`.
     pub default_size: Option<(u16, u16)>,
+    /// `-t`: the session group to join.
+    pub group: Option<NewGroup>,
+}
+
+/// The group a new session joins (cmd-new-session.c:143-160, 313-327).
+#[derive(Debug)]
+pub struct NewGroup {
+    /// The group's name, which is also the prefix of a generated session
+    /// name.
+    pub name: String,
+    /// The session the target named, grouped with it first if it is in
+    /// no group yet.
+    pub with: Option<SessionId>,
 }
 
 /// What a new window needs ([`Server::new_window`]).
@@ -636,6 +649,7 @@ impl Server {
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
+            self.close_dropped();
             self.drain_events();
             self.cmdq_process();
             self.check_window_names();
@@ -3235,19 +3249,24 @@ impl Server {
 
     /// Create a session with one window and one pane.
     pub fn create_session(&mut self, spec: NewSession) -> io::Result<SessionId> {
-        let id = self.model.session_ids.allocate();
-        let name = spec.name.unwrap_or_else(|| {
-            // session_create (session.c:138-146): the ID, skipping names
-            // already taken.
-            let mut n = id.0;
+        let prefix = spec.group.as_ref().map(|g| g.name.as_str());
+        // session_create (session.c:135-147): a given name keeps one ID;
+        // otherwise the ID, after the group's name and a dash, with a new
+        // ID for each name already taken.
+        let (id, name) = if let Some(n) = spec.name.clone() {
+            (self.model.session_ids.allocate(), n)
+        } else {
             loop {
-                let name = n.to_string();
+                let id = self.model.session_ids.allocate();
+                let name = match prefix {
+                    Some(p) => format!("{p}-{}", id.0),
+                    None => id.0.to_string(),
+                };
                 if self.model.session_named(&name).is_none() {
-                    break name;
+                    break (id, name);
                 }
-                n += 1;
             }
-        });
+        };
         // cmd-new-session.c:282-283: update-environment from the global
         // session options, then `-e`.
         let mut env = Environ::default();
@@ -3320,6 +3339,17 @@ impl Server {
         }
         // spawn_window (spawn.c:233-235), then cmd-new-session.c:328.
         self.fire_spawned(id, index, window_id, false);
+        if let Some(g) = spec.group {
+            // cmd-new-session.c:317-326.
+            if let Some(with) = g.with {
+                self.model.group_add(&g.name, with);
+            }
+            self.model.group_add(&g.name, id);
+            self.model.group_sync_to(id);
+            if let Some(first) = self.model.sessions[&id].windows.keys().next().copied() {
+                self.model.set_current(id, first);
+            }
+        }
         self.model.fire_session("session-created", id, true);
         Ok(id)
     }
@@ -3511,6 +3541,8 @@ impl Server {
         self.model.fire_window("window-created", window_id);
         self.model
             .fire_winlink("window-linked", s, index, window_id);
+        // spawn.c:238.
+        self.model.group_sync_from(s);
         Ok(index)
     }
 
@@ -3673,6 +3705,7 @@ impl Server {
         for pane in panes {
             self.close_pane_io(pane);
         }
+        self.close_dropped();
     }
 
     /// `server_destroy_pane` with remain-on-exit off: hang up the pane,
@@ -3816,6 +3849,14 @@ impl Server {
                 rustix::process::Signal::HUP,
             );
             drop(io);
+        }
+    }
+
+    /// Close the panes of windows a group synchronisation destroyed
+    /// ([`crate::model::Model::group_sync1`]).
+    pub(crate) fn close_dropped(&mut self) {
+        for pane in std::mem::take(&mut self.model.dropped) {
+            self.close_pane_io(pane);
         }
     }
 

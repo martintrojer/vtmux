@@ -53,7 +53,13 @@ pub fn exec(
         }
         return Ok(());
     }
-    // -g: no session groups in M0, so it is the plain kill.
+    // -g: every member of the session's group, in the order they joined.
+    if args.flag('g') {
+        for x in server.model.group_peers(s) {
+            server.destroy_session(x);
+        }
+        return Ok(());
+    }
     server.destroy_session(s);
     Ok(())
 }

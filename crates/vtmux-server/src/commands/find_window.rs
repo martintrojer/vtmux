@@ -28,6 +28,7 @@ pub fn exec(
         command: None,
         hide_this_pane: false,
         accept: false,
+        squash_groups: true,
     };
     super::choose_tree::open(server, found, options, args.flag('Z'), false)
 }

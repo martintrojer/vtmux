@@ -94,6 +94,8 @@ pub struct WindowTree {
     hide_this_pane: bool,
     /// `-y` (`PROMPT_ACCEPT`).
     accept: bool,
+    /// Not `-G`: only one session of each group is listed.
+    squash_groups: bool,
     /// The target the mode started from (`data->fs`).
     start: Found,
     /// What to select on the first build; `None` after it.
@@ -175,6 +177,7 @@ impl Strip {
 }
 
 /// The `choose-tree` arguments the mode reads.
+#[allow(clippy::struct_excessive_bools, reason = "choose-tree's flags")]
 pub struct Options {
     pub start: Start,
     pub previews: usize,
@@ -186,6 +189,8 @@ pub struct Options {
     pub command: Option<String>,
     pub hide_this_pane: bool,
     pub accept: bool,
+    /// Not `-G`: one session per group (`data->squash_groups`).
+    pub squash_groups: bool,
 }
 
 /// The mode while it builds or draws: the tree's callbacks over the model.
@@ -262,7 +267,22 @@ impl View<'_> {
                 });
             }
         }
+        // window-tree.c:439-457: of a group, only the starting session if
+        // it is the starting session's group, else the group's first.
+        let current = self.mode.start.session.and_then(|s| m.groups.name_of(s));
         for s in sessions {
+            if self.mode.squash_groups
+                && let Some(g) = m.groups.name_of(s.id)
+            {
+                let skip = if Some(g) == current {
+                    Some(s.id) != self.mode.start.session
+                } else {
+                    m.groups.named(g).and_then(|x| x.first()) != Some(&s.id)
+                };
+                if skip {
+                    continue;
+                }
+            }
             let text = self.expand(Item::Session(s.id), &self.mode.format, None);
             let expanded = Some(self.mode.start_type != Some(Start::Session));
             let r = b.add(
@@ -485,6 +505,7 @@ impl WindowTree {
             command: o.command.unwrap_or_else(|| DEFAULT_COMMAND.to_owned()),
             hide_this_pane: o.hide_this_pane,
             accept: o.accept,
+            squash_groups: o.squash_groups,
             start,
             start_type: Some(o.start),
             offset: 0,
@@ -892,11 +913,7 @@ impl Server {
                 for item in items {
                     self.tree_kill(item);
                 }
-                // server_renumber_all.
-                let sessions: Vec<SessionId> = self.model.sessions.keys().copied().collect();
-                for s in sessions {
-                    self.model.renumber_if_set(s);
-                }
+                self.model.renumber_all();
                 self.recalculate_sizes();
                 self.tree_update(p);
             }
@@ -1026,7 +1043,8 @@ impl Server {
         } else if current == i2 {
             m.set_current(s1, i1);
         }
-        m.redraw(crate::model::Redraw::Session(s1));
+        m.group_sync_from(s1);
+        m.redraw_group(s1);
         self.recalculate_sizes();
         self.with_tree::<WindowTree, _>(p, |server, t| {
             if let Some(at) = t.tree.swap_partner(direction) {

@@ -311,6 +311,14 @@ pub struct Model {
     /// `marked_pane.s` (server-fn.c:335-336): the mark is invalid until a
     /// link back into the mark's session moves it home.
     pub(crate) marked_link_elsewhere: Option<SessionId>,
+    /// Session groups by name ([`crate::groups`]).
+    pub groups: crate::groups::Groups,
+    /// A window kept alive while it is being killed (`window_add_ref` in
+    /// `server_kill_window`): losing its last link does not destroy it.
+    pub(crate) held: Option<WindowId>,
+    /// Panes of windows a group synchronisation destroyed, for the server
+    /// to close ([`crate::server::Server::close_dropped`]).
+    pub(crate) dropped: Vec<Pane>,
 }
 
 impl Default for Model {
@@ -336,6 +344,9 @@ impl Default for Model {
             events: Vec::new(),
             marked: None,
             marked_link_elsewhere: None,
+            groups: crate::groups::Groups::default(),
+            held: None,
+            dropped: Vec::new(),
         }
     }
 }
@@ -820,6 +831,7 @@ impl Model {
         // window-unlinked for each winlink in the order the RB tree's root
         // is removed.
         self.fire_session("session-closed", id, false);
+        self.group_remove(id);
         let order = self.sessions[&id].link_tree.root_order();
         for index in order {
             let w = self.sessions[&id].windows[&index];
@@ -835,9 +847,7 @@ impl Model {
         self.by_name.remove(&session.name);
         let mut gone = Vec::new();
         for w in session.windows.values() {
-            if self.sessions_with(*w).next().is_none() {
-                gone.extend(self.remove_window(*w));
-            }
+            gone.extend(self.drop_if_unlinked(*w));
         }
         gone
     }
@@ -870,21 +880,29 @@ impl Model {
             .filter(|s| s.windows.values().any(|x| *x == w))
             .map(|s| s.id)
             .collect();
+        // window_add_ref: the window outlives its links until the end.
+        let held = self.held.replace(w);
         let mut gone = Vec::new();
         for s in linked {
-            // server-fn.c:255: server_redraw_session_group.
-            self.redraw(Redraw::Session(s));
+            // A group member already lost it (or went) with an earlier one.
+            if self.index_of(s, w).is_none() {
+                continue;
+            }
             self.unzoom(w);
             while let Some(index) = self.index_of(s, w) {
                 if self.detach_window(s, index) {
-                    gone.extend(self.remove_session(s));
+                    // server_destroy_session_group.
+                    gone.extend(self.remove_session_group(s));
                     break;
                 }
+                // server-fn.c:255: server_redraw_session_group.
+                self.redraw_group(s);
             }
-            if renumber {
+            if renumber && self.sessions.contains_key(&s) {
                 self.renumber_if_set(s);
             }
         }
+        self.held = held;
         gone.extend(self.remove_window(w));
         gone
     }
@@ -918,11 +936,7 @@ impl Model {
         session.link_seq.remove(&index);
         session.windows.remove(&index);
         session.sync_link_tree();
-        if self.sessions_with(w).next().is_none() {
-            self.remove_window(w)
-        } else {
-            Vec::new()
-        }
+        self.drop_if_unlinked(w)
     }
 
     /// `session_detach` (session.c:338-358): unlink `index` from `s`,
@@ -952,13 +966,14 @@ impl Model {
             session.windows.remove(&index);
             session.sync_link_tree();
         }
+        self.group_sync_from(s);
         false
     }
 
     /// Destroy window `w` if no session links it any more (the last
     /// `winlink_remove` dropping its reference).
     pub fn drop_if_unlinked(&mut self, w: WindowId) -> Vec<Pane> {
-        if self.sessions_with(w).next().is_none() {
+        if self.held != Some(w) && self.sessions_with(w).next().is_none() {
             self.remove_window(w)
         } else {
             Vec::new()
@@ -1070,11 +1085,25 @@ impl Model {
         self.set_current(s, prev)
     }
 
-    /// `server_renumber_session` (server-fn.c:265-277): renumber when the
-    /// session's `renumber-windows` is on.
+    /// `server_renumber_session` (server-fn.c:265-277): renumber the
+    /// session, or every member of its group, when the session's
+    /// `renumber-windows` is on.
     pub fn renumber_if_set(&mut self, s: SessionId) {
         if self.number_option(TreeId::Session(s), "renumber-windows") != 0 {
-            self.renumber(s);
+            for x in self.group_peers(s) {
+                self.renumber(x);
+            }
+        }
+    }
+
+    /// `server_renumber_all` (server-fn.c:279-286): every session in name
+    /// order.
+    pub fn renumber_all(&mut self) {
+        let all: Vec<SessionId> = self.by_name.values().copied().collect();
+        for s in all {
+            if self.sessions.contains_key(&s) {
+                self.renumber_if_set(s);
+            }
         }
     }
 
@@ -1217,6 +1246,7 @@ impl Model {
         session.link_seq.insert(index, stamp);
         session.sync_link_tree();
         self.fire_winlink("window-linked", s, index, w);
+        self.group_sync_from(s);
         Ok(index)
     }
 
