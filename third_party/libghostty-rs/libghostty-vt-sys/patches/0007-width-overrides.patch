@@ -1,0 +1,286 @@
+diff --git a/include/ghostty/vt/unicode.h b/include/ghostty/vt/unicode.h
+index e4d62c818..e6361602b 100644
+--- a/include/ghostty/vt/unicode.h
++++ b/include/ghostty/vt/unicode.h
+@@ -145,6 +145,30 @@ GHOSTTY_API size_t ghostty_unicode_grapheme_width(const uint32_t *cps,
+                                                   size_t len,
+                                                   uint8_t *width);
+ 
++/**
++ * A width given to the codepoints first to last, inclusive (vtmux).
++ */
++typedef struct {
++    uint32_t first;
++    uint32_t last;
++    uint8_t width;
++} GhosttyUnicodeWidthRange;
++
++/**
++ * Replace the process-wide width overrides (vtmux, tmux's
++ * `codepoint-widths`): text printed from now on, and
++ * ghostty_unicode_codepoint_width(), take these widths over the table's.
++ * Ranges must be sorted by first and not overlap, widths 0 to 2; len 0
++ * clears them. Cells already printed keep their width. Not safe while
++ * another thread prints.
++ *
++ * @return GHOSTTY_SUCCESS, GHOSTTY_INVALID_VALUE for bad ranges, or
++ *         GHOSTTY_OUT_OF_MEMORY
++ */
++GHOSTTY_API GhosttyResult ghostty_unicode_set_width_overrides(
++    const GhosttyUnicodeWidthRange *ranges,
++    size_t len);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 519f77f17..12687a6b3 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -251,6 +251,7 @@ comptime {
+         @export(&c.mode_report_encode, .{ .name = "ghostty_mode_report_encode" });
+         @export(&c.unicode_codepoint_width, .{ .name = "ghostty_unicode_codepoint_width" });
+         @export(&c.unicode_grapheme_width, .{ .name = "ghostty_unicode_grapheme_width" });
++        @export(&c.unicode_set_width_overrides, .{ .name = "ghostty_unicode_set_width_overrides" });
+         @export(&c.size_report_encode, .{ .name = "ghostty_size_report_encode" });
+         @export(&c.style_default, .{ .name = "ghostty_style_default" });
+         @export(&c.style_is_default, .{ .name = "ghostty_style_is_default" });
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index abd885603..0db4b4647 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -704,6 +704,8 @@ fn printSliceFast(
+     // immediately eligible for the narrow fill with no further
+     // checks.
+     const cp0 = cps[0];
++    // vtmux: an override below 0x100 makes 0x80-0xFF go through print().
++    if (cp0 > unicode.narrow_max and cp0 <= 0xFF) return 0;
+     if (cp0 <= 0xFF) {
+         // C0 control characters (0x00-0x0F) aren't printable. The
+         // stream never sends these (they're routed to execute), but
+@@ -770,7 +772,7 @@ fn printSliceFast(
+     // specialized at comptime by width class, so this switch selects
+     // between the two instantiations rather than passing the width
+     // through as an argument.
+-    return switch (unicode.table.get(@intCast(cp0)).width) {
++    return switch (unicode.printWidth(@intCast(cp0))) {
+         1 => self.printSliceFill(
+             .narrow,
+             cps,
+@@ -812,7 +814,7 @@ inline fn printSliceEligible(cp: u32, comptime width: PrintSliceWidth) bool {
+         if (cp == kitty.graphics.unicode.placeholder) return false;
+     }
+ 
+-    return unicode.table.get(@intCast(cp)).width == comptime @as(u2, switch (width) {
++    return unicode.printWidth(@intCast(cp)) == comptime @as(u2, switch (width) {
+         .narrow => 1,
+         .wide => 2,
+     });
+@@ -947,7 +949,7 @@ fn printSliceFill(
+             if (simd.lanes(u32)) |lanes| {
+                 const V = @Vector(lanes, u32);
+                 const lo: V = @splat(0x10);
+-                const hi: V = @splat(0xFF);
++                const hi: V = @splat(@as(u32, unicode.narrow_max));
+                 while (idx + lanes <= cps.len) {
+                     const v: V = cps[idx..][0..lanes].*;
+                     const in_range = (v >= lo) & (v <= hi);
+@@ -964,7 +966,7 @@ fn printSliceFill(
+         while (idx < cps.len) : (idx += 1) {
+             const cp = cps[idx];
+             if (comptime width == .narrow) {
+-                if (cp >= 0x10 and cp <= 0xFF) continue;
++                if (cp >= 0x10 and cp <= unicode.narrow_max) continue;
+             }
+             if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
+                 if (!grapheme_cluster) continue;
+@@ -1507,7 +1509,7 @@ pub fn print(self: *Terminal, c: u21) !void {
+     // non-single-width characters properly. We have a fast-path for
+     // byte-sized characters since they're so common. We can ignore
+     // control characters because they're always filtered prior.
+-    const width: usize = if (c <= 0xFF) 1 else @intCast(unicode.table.get(c).width);
++    const width: usize = @intCast(unicode.printWidth(c));
+ 
+     // Note: it is possible to have a width of "3" and a width of "-1" from
+     // uucode.x's wcwidth. We should look into those cases and handle them
+@@ -5709,6 +5711,39 @@ test "Terminal: print wide char" {
+     try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
+ }
+ 
++test "Terminal: width overrides (vtmux)" {
++    const ranges = [_]unicode.WidthRange{
++        .{ .first = 0xE9, .last = 0xE9, .width = 2 },
++        .{ .first = 0x1F600, .last = 0x1F600, .width = 1 },
++    };
++    try unicode.setWidthOverrides(&ranges);
++    defer unicode.setWidthOverrides(&.{}) catch unreachable;
++
++    var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 3 });
++    defer t.deinit(testing.allocator);
++
++    // The slice fast path: ten narrow smileys fill the row, then X wraps.
++    const s: u32 = 0x1F600;
++    const cps = [_]u32{ s, s, s, s, s, s, s, s, s, s, 'X' };
++    try t.printSlice(&cps);
++    try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.y);
++
++    // print(), and a codepoint below 0x100 made wide.
++    try t.print('a');
++    try t.print(0xE9);
++    try t.print('|');
++    try testing.expectEqual(@as(usize, 5), t.screens.active.cursor.x);
++    {
++        const cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 2, .y = 1 } }).?.cell;
++        try testing.expectEqual(@as(u21, 0xE9), cell.content.codepoint.data);
++        try testing.expectEqual(Cell.Wide.wide, cell.wide);
++    }
++    const slice = [_]u32{ 'b', 0xE9, 'c' };
++    try t.printSlice(&slice);
++    try testing.expectEqual(@as(usize, 9), t.screens.active.cursor.x);
++}
++
+ test "Terminal: print wide char at edge creates spacer head" {
+     var t = try init(testing.io, testing.allocator, .{ .cols = 10, .rows = 10 });
+     defer t.deinit(testing.allocator);
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index b250c7064..b7ae455c5 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -253,6 +253,7 @@ pub const type_json = types.get_json;
+ 
+ pub const unicode_codepoint_width = unicode.codepoint_width;
+ pub const unicode_grapheme_width = unicode.grapheme_width;
++pub const unicode_set_width_overrides = unicode.set_width_overrides;
+ 
+ pub const grid_ref_cell = grid_ref.grid_ref_cell;
+ pub const grid_ref_row = grid_ref.grid_ref_row;
+diff --git a/src/terminal/c/unicode.zig b/src/terminal/c/unicode.zig
+index 144513389..cac19be09 100644
+--- a/src/terminal/c/unicode.zig
++++ b/src/terminal/c/unicode.zig
+@@ -1,12 +1,52 @@
+ const std = @import("std");
+ const lib = @import("../lib.zig");
+ const unicode_pkg = @import("../../unicode/main.zig");
++const Result = @import("result.zig").Result;
+ 
+ pub fn codepoint_width(cp: u32) callconv(lib.calling_conv) u8 {
+     if (cp > 0x10FFFF) return 1;
+     return unicode_pkg.codepointWidth(@intCast(cp));
+ }
+ 
++/// vtmux: replace the width overrides (see `unicode.setWidthOverrides`).
++pub fn set_width_overrides(
++    ranges: ?[*]const unicode_pkg.WidthRange,
++    len: usize,
++) callconv(lib.calling_conv) Result {
++    const slice: []const unicode_pkg.WidthRange = if (len == 0) &.{} else (ranges orelse return .invalid_value)[0..len];
++    var prev: ?u32 = null;
++    for (slice) |r| {
++        if (r.first > r.last or r.width > 2) return .invalid_value;
++        if (prev) |p| if (r.first <= p) return .invalid_value;
++        prev = r.last;
++    }
++    unicode_pkg.setWidthOverrides(slice) catch return .out_of_memory;
++    return .success;
++}
++
++test "set_width_overrides" {
++    const testing = std.testing;
++    const ranges = [_]unicode_pkg.WidthRange{
++        .{ .first = 0xE9, .last = 0xE9, .width = 2 },
++        .{ .first = 0x3B1, .last = 0x3B3, .width = 2 },
++        .{ .first = 0x1F600, .last = 0x1F600, .width = 1 },
++    };
++    try testing.expectEqual(Result.success, set_width_overrides(&ranges, ranges.len));
++    try testing.expectEqual(2, codepoint_width(0xE9));
++    try testing.expectEqual(2, codepoint_width(0x3B3));
++    try testing.expectEqual(1, codepoint_width(0x3B4));
++    try testing.expectEqual(1, codepoint_width(0x1F600));
++    try testing.expectEqual(0x7F, unicode_pkg.narrow_max);
++    const bad = [_]unicode_pkg.WidthRange{
++        .{ .first = 5, .last = 9, .width = 1 },
++        .{ .first = 9, .last = 10, .width = 1 },
++    };
++    try testing.expectEqual(Result.invalid_value, set_width_overrides(&bad, bad.len));
++    try testing.expectEqual(Result.success, set_width_overrides(null, 0));
++    try testing.expectEqual(2, codepoint_width(0x1F600));
++    try testing.expectEqual(0xFF, unicode_pkg.narrow_max);
++}
++
+ pub fn grapheme_width(
+     cps: ?[*]const u32,
+     len: usize,
+diff --git a/src/unicode/main.zig b/src/unicode/main.zig
+index fb18b7d13..99a4fd6b0 100644
+--- a/src/unicode/main.zig
++++ b/src/unicode/main.zig
+@@ -24,9 +24,67 @@ pub const graphemeWidthEffect = grapheme.graphemeWidthEffect;
+ /// Summing per-codepoint widths is only correct when mode 2027 is
+ /// disabled.
+ pub fn codepointWidth(cp: u21) u2 {
++    if (widthOverride(cp)) |w| return w;
+     return table.get(cp).width;
+ }
+ 
++/// vtmux: a width given to a range of codepoints, `first` to `last`
++/// inclusive, that wins over the table (tmux's `codepoint-widths`).
++pub const WidthRange = extern struct {
++    first: u32,
++    last: u32,
++    width: u8,
++};
++
++/// vtmux: the width overrides, sorted and not overlapping, process-wide
++/// like tmux's width cache. Set with `setWidthOverrides`.
++pub var width_overrides: []const WidthRange = &.{};
++
++/// vtmux: the highest codepoint the printer may take as narrow without
++/// looking: 0xFF, or 0x7F while an override reaches below 0x100.
++pub var narrow_max: u21 = 0xFF;
++
++/// vtmux: the overridden width of `cp`, if any.
++pub inline fn widthOverride(cp: u21) ?u2 {
++    if (width_overrides.len == 0) return null;
++    return widthOverrideSlow(cp);
++}
++
++fn widthOverrideSlow(cp: u21) ?u2 {
++    var lo: usize = 0;
++    var hi: usize = width_overrides.len;
++    while (lo < hi) {
++        const mid = lo + (hi - lo) / 2;
++        const r = width_overrides[mid];
++        if (cp < r.first) {
++            hi = mid;
++        } else if (cp > r.last) {
++            lo = mid + 1;
++        } else {
++            return @intCast(@min(r.width, 2));
++        }
++    }
++    return null;
++}
++
++/// vtmux: replace the width overrides with a copy of `ranges` (sorted by
++/// `first`, not overlapping). Not safe while another thread prints.
++pub fn setWidthOverrides(ranges: []const WidthRange) !void {
++    const alloc = @import("std").heap.page_allocator;
++    const copy = try alloc.dupe(WidthRange, ranges);
++    const old = width_overrides;
++    width_overrides = copy;
++    narrow_max = if (copy.len != 0 and copy[0].first <= 0xFF) 0x7F else 0xFF;
++    if (old.len != 0) alloc.free(old);
++}
++
++/// vtmux: the width the printer gives `cp`: an override, else 1 for a
++/// codepoint up to 0xFF, else the table.
++pub inline fn printWidth(cp: u21) u2 {
++    if (widthOverride(cp)) |w| return w;
++    return if (cp <= 0xFF) 1 else table.get(cp).width;
++}
++
+ test "codepointWidth" {
+     const testing = @import("std").testing;
+ 

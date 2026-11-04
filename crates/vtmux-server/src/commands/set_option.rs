@@ -206,6 +206,7 @@ impl Server {
     pub(crate) fn update_width_cache(&self) {
         let items = self.array_option(vtmux_core::options::TreeId::Server, "codepoint-widths");
         vtmux_core::width::set_codepoint_widths(&items);
+        vtmux_vt::set_width_overrides(&vtmux_core::width::codepoint_width_ranges());
     }
 
     /// `options_push_changes` (options.c:1359-1475) for option `name`,

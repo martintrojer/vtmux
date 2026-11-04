@@ -20,6 +20,25 @@ pub fn codepoint_width(codepoint: char) -> u8 {
     unsafe { ffi::ghostty_unicode_codepoint_width(u32::from(codepoint)) }
 }
 
+/// vtmux: replace the process-wide width overrides that printing (and
+/// [`codepoint_width`]) use ahead of the table: `(first, last, width)`,
+/// inclusive, sorted by `first` and not overlapping, widths 0 to 2. An empty
+/// slice clears them. Cells already printed keep their width.
+///
+/// # Errors
+/// Ranges out of order, overlapping or with a width above 2.
+pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) -> crate::error::Result<()> {
+    let ranges: Vec<ffi::UnicodeWidthRange> = ranges
+        .iter()
+        .map(|&(first, last, width)| ffi::UnicodeWidthRange { first, last, width })
+        .collect();
+    // SAFETY: the pointer and length describe `ranges`, which outlives the
+    // call; the library copies them.
+    crate::error::from_result(unsafe {
+        ffi::ghostty_unicode_set_width_overrides(ranges.as_ptr(), ranges.len())
+    })
+}
+
 /// Measures the terminal display width of the first grapheme cluster in a sequence.
 ///
 /// This uses the exact same grapheme segmentation and cluster width rules the
