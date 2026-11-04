@@ -5983,6 +5983,86 @@ fn send_keys_reset_keeps_history_and_alternate() {
     });
 }
 
+/// What a program's output does to the grid where Ghostty, left alone,
+/// does something else (task `gap_emulator_triage`). Each case prints its
+/// bytes in a fresh pane and ends with `END`; the cursor, history size and
+/// the whole capture (`-e`, with history) are compared with tmux 3.8:
+/// clears into history under `scroll-on-clear` (screen-write.c:1936-1942,
+/// 2090-2096) and not with it off, RIS as `screen_write_reset`, OSC 133
+/// marking only (input.c `input_osc_133`), an OSC 8 tmux rejects
+/// (`input_osc_8`), DECAWM's cursor (`screen_write_cell`, `not_wrap`), the
+/// CSIs tmux lacks (CHT, HPR, VPR), DEL, tmux's UTF-8 decoder
+/// (`input_top_bit_set`), grapheme clusters (`screen_write_combine`) and
+/// C1 controls as zero-width characters (`utf8_width`).
+#[test]
+fn program_output_reaches_the_grid_as_in_tmux() {
+    compare("program_output_reaches_the_grid_as_in_tmux", |w| {
+        let cases: &[(&str, &str)] = &[
+            ("ed2", r"seq 1 7; printf '\033[2;4H\033[44m\033[2J\033[mX'"),
+            ("ed0home", r"seq 1 7; printf '\033[H\033[JX'"),
+            ("ed0mid", r"seq 1 7; printf '\033[2;4H\033[JX'"),
+            ("ed22", r"seq 1 7; printf '\033[2;4H\033[22JX'"),
+            ("ris", r"seq 1 7; printf '\033]2;kept\033\\\033[31m\033cX'"),
+            ("risalt", r"printf 'main\n\033[?1049halt\033cX'"),
+            ("osc133", r"printf 'xx\033]133;A\007p>\033]133;B\033\\cmd'"),
+            (
+                "osc8",
+                r"printf '\033]8;id=a:id=b;http://bad\007X\033]8;;http://ok/\007Y\033]8;;\007'",
+            ),
+            (
+                "nowrap",
+                r"printf '\033[?7labcdefghijklmnopqrstuvwxyzAB\033[6n\033[?7h\r\n'",
+            ),
+            (
+                "tabs",
+                r"printf 'ab\033[2Ix\033[1;9Ha\033[Zy\033[3ab\033[2;1Hq\033[2ez\033[2jw'",
+            ),
+            ("del", r"printf 'ab\177c'"),
+            (
+                "utf8",
+                r"printf 'x\355\240\200y\340\200\257z\303\303A\342\202\033[1C\254.'",
+            ),
+            (
+                "cluster",
+                r"printf 'x\360\237\207\254\360\237\207\247y\360\237\221\215\360\237\217\273z\342\235\244\357\270\217.'",
+            ),
+            ("c1", r"printf 'xa\302\205b\342\200\250c\342\200\213d'"),
+        ];
+        let state = "#{cursor_x},#{cursor_y} #{history_size} #{alternate_on} [#{pane_title}]";
+        let mut runs = vec![w.run(&["new", "-d", "-s", "a", "-x", "26", "-y", "5", "cat"])];
+        runs.push(w.run(&["set", "-g", "allow-rename", "off"]));
+        runs.push(w.run(&["rename-window", "-t", "a", "w"]));
+        for (name, script) in cases {
+            runs.push(w.run(&[
+                "respawnp",
+                "-k",
+                "-t",
+                "a",
+                "sh",
+                "-c",
+                &format!("printf '\\033]2;t\\033\\\\'; {script}; echo END; exec cat"),
+            ]));
+            w.wait_for_text("a", "END");
+            runs.push(w.run(&["display", "-p", "-t", "a", &format!("{name} {state}")]));
+            runs.push(w.run(&["capturep", "-p", "-e", "-t", "a", "-S", "-", "-E", "-"]));
+        }
+        // scroll-on-clear off: ED 2 only erases.
+        runs.push(w.run(&["set", "-p", "-t", "a", "scroll-on-clear", "off"]));
+        runs.push(w.run(&[
+            "respawnp",
+            "-k",
+            "-t",
+            "a",
+            "sh",
+            "-c",
+            r"seq 1 7; printf '\033[2JX'; echo END; exec cat",
+        ]));
+        w.wait_for_text("a", "END");
+        runs.push(w.run(&["display", "-p", "-t", "a", state]));
+        runs
+    });
+}
+
 /// Poll (max 5 s) until `path` exists and `done(contents)`; the contents.
 fn wait_file(path: &Path, done: impl Fn(&str) -> bool) -> String {
     let start = Instant::now();

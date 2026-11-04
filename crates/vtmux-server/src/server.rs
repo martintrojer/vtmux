@@ -4315,6 +4315,9 @@ impl Server {
         // synchronized output (input.c:922).
         pane.term.reset_input();
         pane.term.stop_sync();
+        // grid_clear_lines: an erase, never into history (scroll-on-clear
+        // is for the program's clears).
+        pane.term.set_scroll_on_clear(false);
         pane.term.feed(
             b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[20l\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
         );
@@ -4448,11 +4451,13 @@ impl Server {
             .model
             .number_option(TreeId::Server, "input-buffer-size");
         let extended_keys = self.model.extended_keys();
+        let scroll_on_clear = self.model.number_option(TreeId::Pane(p), "scroll-on-clear") != 0;
         let redraw_pending = self.model.redraw_panes.contains(&p);
         let Some(pane) = self.model.panes.get_mut(&p) else {
             return;
         };
         pane.term.set_cursor_style_option(cursor_style);
+        pane.term.set_scroll_on_clear(scroll_on_clear);
         let before = (pane.term.title(), pane.term.pwd());
         let alternate = pane.term.alternate_on();
         pane.term

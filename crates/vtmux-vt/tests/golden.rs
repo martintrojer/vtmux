@@ -214,9 +214,9 @@ golden! {
     cap_alt_history,
     fmt_alt_history_size,
     cap_cluster_truncated,
-    #[ignore = "D-pending: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
+    #[ignore = "D-032: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
     cap_region_scroll_history,
-    #[ignore = "D-pending: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
+    #[ignore = "D-032: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
     fmt_region_scroll_history_size,
     cap_reflow_narrow,
     fmt_reflow_narrow_history_size,
@@ -228,27 +228,18 @@ golden! {
     fmt_reflow_pending_wrap_wide_cursor_y,
     #[ignore = "D-pending: P2 tmux reflow of a pending-wrap wide line leaves the cursor at 4,3 with history_size 6; Ghostty at 2,4 with history_size 4"]
     fmt_reflow_pending_wrap_wide_history_size,
-    #[ignore = "D-pending: tmux clusters ZWJ sequences (cursor_x 4 for x+family+y); Ghostty without mode 2027 does not, like xterm"]
     fmt_zwj_cursor_x,
     cap_ed3_alt,
     fmt_ed3_alt,
     cap_ed3_alt_exit,
     fmt_ed3_alt_exit,
-    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
     cap_scroll_on_clear_ed2,
-    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
     fmt_scroll_on_clear_ed2,
-    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
     cap_scroll_on_clear_ctrl_l,
-    #[ignore = "D-pending: P6 tmux scroll-on-clear moves the screen into history on ED2 and ED0 at 0,0 (screen-write.c:1936-1942, 2094); Ghostty just clears"]
     fmt_scroll_on_clear_ctrl_l,
-    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     cap_ris,
-    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     fmt_ris,
-    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     cap_ris_alt,
-    #[ignore = "D-pending: P7 tmux RIS keeps history and the alternate screen (input.c:1407-1412 screen_write_reset, screen-write.c:423,2091 scroll-on-clear); Ghostty full reset drops scrollback"]
     fmt_ris_alt,
     reply_da1,
     reply_da2,

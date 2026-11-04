@@ -1,0 +1,191 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index a4fa13cad..0fc48494d 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -704,8 +704,10 @@ fn printSliceFast(
+     // immediately eligible for the narrow fill with no further
+     // checks.
+     const cp0 = cps[0];
+-    // vtmux: an override below 0x100 makes 0x80-0xFF go through print().
++    // vtmux: an override below 0x100 makes 0x80-0xFF go through print(),
++    // and so does a C1 control (zero width there).
+     if (cp0 > unicode.narrow_max and cp0 <= 0xFF) return 0;
++    if (cp0 >= 0x80 and cp0 <= 0x9F) return 0;
+     if (cp0 <= 0xFF) {
+         // C0 control characters (0x00-0x0F) aren't printable. The
+         // stream never sends these (they're routed to execute), but
+@@ -949,9 +951,11 @@ fn printSliceFill(
+             if (simd.lanes(u32)) |lanes| {
+                 const V = @Vector(lanes, u32);
+                 const lo: V = @splat(0x10);
+-                const hi: V = @splat(@as(u32, unicode.narrow_max));
++                const hi: V = @splat(@as(u32, @min(unicode.narrow_max, 0x7F)));
+                 while (idx + lanes <= cps.len) {
+                     const v: V = cps[idx..][0..lanes].*;
++                    // vtmux: stop at 0x80; the scalar loop below takes
++                    // 0xA0-0xFF and leaves C1 controls to print().
+                     const in_range = (v >= lo) & (v <= hi);
+                     if (!@reduce(.And, in_range)) {
+                         const bits: @Int(.unsigned, lanes) = @bitCast(in_range);
+@@ -966,7 +970,7 @@ fn printSliceFill(
+         while (idx < cps.len) : (idx += 1) {
+             const cp = cps[idx];
+             if (comptime width == .narrow) {
+-                if (cp >= 0x10 and cp <= unicode.narrow_max) continue;
++                if (cp >= 0x10 and cp <= unicode.narrow_max and !(cp >= 0x80 and cp <= 0x9F)) continue;
+             }
+             if (cp > 0xFF and allow_unicode and printSliceEligible(cp, width)) {
+                 if (!grapheme_cluster) continue;
+@@ -1509,7 +1513,12 @@ pub fn print(self: *Terminal, c: u21) !void {
+     // non-single-width characters properly. We have a fast-path for
+     // byte-sized characters since they're so common. We can ignore
+     // control characters because they're always filtered prior.
+-    const width: usize = @intCast(unicode.printWidth(c));
++    // vtmux: a C1 control is zero width, as in tmux (utf8_width): the
++    // stream prints it only when it came decoded from UTF-8.
++    const width: usize = if (c >= 0x80 and c <= 0x9F)
++        0
++    else
++        @intCast(unicode.printWidth(c));
+ 
+     // Note: it is possible to have a width of "3" and a width of "-1" from
+     // uucode.x's wcwidth. We should look into those cases and handle them
+@@ -5623,6 +5632,36 @@ test "Terminal: input glitch text" {
+     try testing.expect(page.capacity().grapheme_bytes > grapheme_cap);
+ }
+ 
++test "Terminal: C1 control joins the previous cell (vtmux)" {
++    var t = try init(testing.io, testing.allocator, .{ .rows = 5, .cols = 10 });
++    defer t.deinit(testing.allocator);
++
++    try t.print('a');
++    try t.print(0x85);
++    try t.print('b');
++    try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
++    const cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
++    try testing.expect(cell.cell.hasGrapheme());
++
++    // With grapheme clustering too.
++    t.modes.set(.grapheme_cluster, true);
++    try t.print(0x80);
++    try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
++}
++
++test "Terminal: zero-width character after grapheme cluster is kept (vtmux)" {
++    var t = try init(testing.io, testing.allocator, .{ .rows = 5, .cols = 10 });
++    defer t.deinit(testing.allocator);
++
++    t.modes.set(.grapheme_cluster, true);
++    try t.print('a');
++    try t.print(0x200B);
++    try t.print('b');
++    try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
++    const cell = t.screens.active.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
++    try testing.expect(cell.cell.hasGrapheme());
++}
++
+ test "Terminal: zero-width character at start" {
+     var t = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 80 });
+     defer t.deinit(testing.allocator);
+diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
+index 281d01295..d070ebb20 100644
+--- a/src/terminal/stream.zig
++++ b/src/terminal/stream.zig
+@@ -862,12 +862,11 @@ pub fn Stream(comptime H: type) type {
+                             // C0 controls execute rather than print.
+                             self.execute(@intCast(cp));
+                         } else {
+-                            // C1 controls decoded from UTF-8 are ignored.
+-                            logUnsupportedOnce(
+-                                "ignoring UTF-8-decoded C1 controls, first: 0x{x}",
+-                                .{cp},
+-                                0x80,
+-                            );
++                            // vtmux: a C1 control decoded from UTF-8 is a
++                            // zero-width character, as in tmux (wcwidth -1,
++                            // utf8_width makes C1 zero), so it joins the
++                            // previous cell. Upstream ignores it.
++                            self.print(@intCast(cp));
+                         }
+                         i += 1;
+                         continue;
+@@ -1354,13 +1353,10 @@ pub fn Stream(comptime H: type) type {
+                     return;
+                 }
+ 
+-                // Ignore C1 that came via UTF-8 decoding, matching xterm.
++                // vtmux: a C1 control decoded from UTF-8 is zero width and
++                // joins the previous cell, as in tmux. Upstream ignores it.
+                 if (c > 0x1F) {
+-                    logUnsupportedOnce(
+-                        "ignoring UTF-8-decoded C1 controls, first: 0x{x}",
+-                        .{c},
+-                        0x80,
+-                    );
++                    self.print(c);
+                     return;
+                 }
+ 
+@@ -3831,7 +3827,7 @@ test "stream: ground state C0 controls are executed, not printed" {
+     }
+ }
+ 
+-test "stream: ground state UTF-8-decoded C1 controls are ignored" {
++test "stream: ground state UTF-8-decoded C1 controls are printed (vtmux)" {
+     const H = struct {
+         buf: [128]u21 = undefined,
+         len: usize = 0,
+@@ -3855,9 +3851,10 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
+         }
+     };
+ 
+-    // Every C1 control that arrives as well-formed UTF-8 (a two byte
+-    // 0xC2-lead sequence) must be dropped: not printed and not
+-    // interpreted as a control (e.g. U+009B must not start a CSI).
++    // vtmux: every C1 control that arrives as well-formed UTF-8 (a two
++    // byte 0xC2-lead sequence) is printed, where the terminal makes it
++    // zero width (tmux's utf8_width), and never interpreted as a control
++    // (e.g. U+009B must not start a CSI).
+     for (0x80..0xA0) |c| {
+         const enc: [2]u8 = .{ 0xC2, @intCast(c) };
+ 
+@@ -3868,18 +3865,20 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
+             s.next(enc[0]);
+             s.next(enc[1]);
+             s.next('B');
+-            try testing.expectEqual(@as(usize, 2), s.handler.len);
++            try testing.expectEqual(@as(usize, 3), s.handler.len);
+             try testing.expectEqual(@as(u21, 'A'), s.handler.buf[0]);
+-            try testing.expectEqual(@as(u21, 'B'), s.handler.buf[1]);
++            try testing.expectEqual(@as(u21, @intCast(c)), s.handler.buf[1]);
++            try testing.expectEqual(@as(u21, 'B'), s.handler.buf[2]);
+         }
+ 
+         // Batched path.
+         {
+             var s: Stream(H) = .init(.{ .handler = .{} });
+             s.nextSlice(&.{ 'A', 'B', enc[0], enc[1], 'C', 'D' });
+-            try testing.expectEqual(@as(usize, 4), s.handler.len);
+-            for ("ABCD", 0..) |expected, i| {
+-                try testing.expectEqual(@as(u21, expected), s.handler.buf[i]);
++            try testing.expectEqual(@as(usize, 5), s.handler.len);
++            const want = [_]u21{ 'A', 'B', @intCast(c), 'C', 'D' };
++            for (want, 0..) |expected, i| {
++                try testing.expectEqual(expected, s.handler.buf[i]);
+             }
+         }
+ 
+@@ -3891,9 +3890,10 @@ test "stream: ground state UTF-8-decoded C1 controls are ignored" {
+             input[32] = enc[0];
+             input[33] = enc[1];
+             s.nextSlice(&input);
+-            try testing.expectEqual(@as(usize, 64), s.handler.len);
+-            for (s.handler.buf[0..s.handler.len]) |cp| {
+-                try testing.expectEqual(@as(u21, 'A'), cp);
++            try testing.expectEqual(@as(usize, 65), s.handler.len);
++            for (s.handler.buf[0..s.handler.len], 0..) |cp, i| {
++                const expected: u21 = if (i == 32) @intCast(c) else 'A';
++                try testing.expectEqual(expected, cp);
+             }
+         }
+     }
