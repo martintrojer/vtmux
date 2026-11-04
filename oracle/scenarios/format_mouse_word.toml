@@ -69,7 +69,11 @@ steps = [
   # The clicks' releases left copy mode (at the bottom with no
   # selection). copy_cursor_hyperlink: the cell under copy mode's cursor.
   { run = ["display", "-p", "-t", "a", "#{pane_mode}"] },
+  # Let the click timers (KEYC_CLICK_TIMEOUT, 300 ms) run out before the
+  # next mode starts: one firing late on a slow host must not meet it.
+  { settle = { quiet_ms = 600 } },
   { run = ["copy-mode", "-t", "a"] },
+  { settle = { react = true } },
   { run = ["send", "-t", "a", "-X", "top-line"] },
   { run = ["send", "-t", "a", "-X", "cursor-down"] },
   { run = ["send", "-t", "a", "-X", "cursor-down"] },

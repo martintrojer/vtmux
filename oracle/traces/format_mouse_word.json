@@ -339,11 +339,21 @@
         ]
       },
       {
+        "settle": {
+          "quiet_ms": 600
+        }
+      },
+      {
         "run": [
           "copy-mode",
           "-t",
           "a"
         ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
       },
       {
         "run": [
@@ -691,25 +701,7 @@
       }
     },
     {
-      "step": 57,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
       "step": 58,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 59,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -748,7 +740,7 @@
       "step": 63,
       "observation": {
         "kind": "cli",
-        "stdout": "[http://w/] 0,3\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -766,7 +758,7 @@
       "step": 65,
       "observation": {
         "kind": "cli",
-        "stdout": "[http://w/] 2,3\n",
+        "stdout": "[http://w/] 0,3\n",
         "stderr": "",
         "exit": 0
       }
@@ -782,6 +774,24 @@
     },
     {
       "step": 67,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[http://w/] 2,3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 68,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 69,
       "observation": {
         "kind": "cli",
         "stdout": "[] 6,3\n",
