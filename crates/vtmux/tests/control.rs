@@ -605,3 +605,64 @@ fn stalled_client_does_not_keep_the_server() {
         let _ = child.wait();
     }
 }
+
+/// A control client that reads steadily but is behind a flood when it is
+/// detached gets its exit at once: the pane output not yet sent is dropped
+/// (server-client.c `server_client_check_exit`, control.c
+/// `control_discard`), so it ends with `%exit` and status 0 within a
+/// moment, not after the exit timer with a lost server.
+#[test]
+fn slow_reader_detached_in_a_flood_exits_cleanly() {
+    for bin in bins() {
+        let w = World::new(&bin);
+        let mut child = w
+            .command(&[
+                "-C",
+                "new-session",
+                "-s",
+                "a",
+                "-x",
+                "80",
+                "-y",
+                "24",
+                "yes rvflood",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn control client");
+        let _stdin = child.stdin.take();
+        let mut stdout = child.stdout.take().expect("stdout");
+        thread::sleep(Duration::from_secs(3));
+        w.run(&["detach-client", "-s", "a"]);
+        let start = Instant::now();
+        let mut tail = Vec::new();
+        let mut buf = vec![0u8; 65536];
+        // 64 KB every 10 ms: slower than the flood, but always reading.
+        while let Ok(n) = stdout.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            tail.extend_from_slice(&buf[..n]);
+            let keep = tail.len().saturating_sub(200);
+            tail.drain(..keep);
+            // tmux: well under a second; draining the flood would take
+            // tens of seconds.
+            assert!(
+                start.elapsed() < Duration::from_secs(3),
+                "{}: still reading after detach",
+                bin.display()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        let status = child.wait().expect("wait");
+        let tail = String::from_utf8_lossy(&tail);
+        assert!(
+            tail.ends_with("%exit\n"),
+            "{}: tail {tail:?}",
+            bin.display()
+        );
+        assert_eq!(status.code(), Some(0), "{}", bin.display());
+    }
+}

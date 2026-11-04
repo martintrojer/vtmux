@@ -257,10 +257,10 @@ product reasons" category.
 - Evidence: vtmux has floating panes but no modal ones (`new-pane -O` is not implemented); a popup is modal for its client already.
 - Category: Deferred (modal floating panes).
 
-### D-029: a client that does not read its exit is dropped after 10 s, in one step
+### D-029: a client whose socket takes nothing for 10 s after its exit is dropped then
 
-- Test / assertion: regress `control-client-exit-stalled.sh`; control `stalled_client_does_not_keep_the_server`.
-- tmux behaviour: `server_client_check_exit` and `server_client_exit_timer` (server-client.c:2361-2440): a client told to exit whose output has not drained after 10 s has its queued output discarded and is sent `MSG_EXIT` alone; if it has still not closed 10 s later it is dropped.
-- vtmux behaviour: the client's messages share one byte stream with its output, which may stop part-way through a message, so the output cannot be cut back to the exit message. A client still not gone 10 s after it was told to exit is dropped at once.
-- Evidence: `control-client-exit-stalled.sh` passes on both, 12.1 s each (`cargo xtask regress --tmux reference --only control-client-exit-stalled.sh`): there the client closes once its exit message is sent alone, so the second step never runs. A client that also never closes is dropped by tmux 10 s later than by vtmux.
-- Category: Deferred (a framed exit message the client reads past stuck output).
+- Test / assertion: regress `control-client-exit-stalled.sh`; control `stalled_client_does_not_keep_the_server`, `slow_reader_detached_in_a_flood_exits_cleanly`.
+- tmux behaviour: `server_client_check_exit` and `server_client_exit_timer` (server-client.c:2361-2440): a control client told to exit first loses the pane output not yet written (`control_discard`); if what is left has not drained after 10 s, everything queued is dropped (`control_discard_all`) and `MSG_EXIT` sent alone, and a client that has still not closed 10 s later is dropped. A control client's output goes down its own stdout descriptor and `MSG_EXIT` down the server socket, so a stalled terminal never holds up the exit message.
+- vtmux behaviour: the same steps, but the output and the exit message share the one socket, and a message the socket has taken part of must be finished first. So at the first 10 s step a client whose socket has taken nothing for 10 s is dropped at once instead of being sent the exit alone; one still reading gets its exit after the part-written message.
+- Evidence: `control-client-exit-stalled.sh` passes on both, 12.1 s each (`cargo xtask regress --tmux reference --only control-client-exit-stalled.sh`). A reader 64 KB per 10 ms behind a `yes` flood and then detached: both exit 0 with `%exit` within 0.5 s (reviewer repro rv_det2.py).
+- Category: Deferred (the exit on a channel of its own).

@@ -78,14 +78,17 @@ pub struct ServerConfig {
 pub(crate) struct Client {
     stream: UnixStream,
     inbuf: Vec<u8>,
-    outbuf: Vec<u8>,
+    /// Messages not yet written to the socket, oldest first.
+    out: Outbox,
     /// Frames sent but not yet written to the client's terminal.
     unacked: Unacked,
     /// Exit has been queued; close once the output is flushed.
     pub(crate) closing: bool,
     /// `c->exit_timer` (server-client.c:2361-2387): when a closing client
-    /// whose output has not drained is given up on.
+    /// whose output has not drained is looked at again.
     exit_deadline: Option<Instant>,
+    /// When the socket last took a byte, for the exit timer.
+    last_write: Instant,
     /// `CLIENT_DEAD` (server-client.c:491): being dropped. Nothing more is
     /// sent to it, and a second drop (from a write that fails while its
     /// own lost-client hooks run) does nothing.
@@ -170,10 +173,11 @@ impl Client {
             peer,
             stream,
             inbuf: Vec::new(),
-            outbuf: Vec::new(),
+            out: Outbox::default(),
             unacked: Unacked::default(),
             closing: false,
             exit_deadline: None,
+            last_write: Instant::now(),
             dead: false,
             suspended: false,
             hello: None,
@@ -206,9 +210,91 @@ impl Client {
     }
 }
 
+/// What a queued message is, for what may be dropped when the client is
+/// told to exit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OutKind {
+    /// A control client's `%output` line: tmux keeps pane output in
+    /// blocks it has not written yet and drops them at exit
+    /// (control.c `control_discard`).
+    PaneOutput,
+    /// The `Exit` or `Exec` that tells the client to go: never dropped.
+    Last,
+    /// Anything else.
+    Other,
+}
+
+/// One encoded message and how much of it the socket has taken.
+#[derive(Debug)]
+struct Queued {
+    bytes: Vec<u8>,
+    written: usize,
+    kind: OutKind,
+}
+
+/// A client's unwritten messages. Kept as messages, not one byte stream,
+/// so whole messages can be dropped without cutting one in half.
+#[derive(Debug, Default)]
+struct Outbox {
+    queue: std::collections::VecDeque<Queued>,
+}
+
+impl Outbox {
+    fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
+    fn push(&mut self, bytes: Vec<u8>, kind: OutKind) {
+        self.queue.push_back(Queued {
+            bytes,
+            written: 0,
+            kind,
+        });
+    }
+
+    /// Drop every message not yet started that `drop` picks; a message
+    /// part-written stays, or the stream would be corrupt.
+    fn discard(&mut self, drop: impl Fn(OutKind) -> bool) {
+        self.queue.retain(|q| q.written != 0 || !drop(q.kind));
+    }
+
+    /// Write what the socket takes: `Ok(true)` if it took anything.
+    fn write_to(&mut self, stream: &mut UnixStream) -> io::Result<bool> {
+        let mut progress = false;
+        while !self.queue.is_empty() {
+            let slices: Vec<io::IoSlice<'_>> = self
+                .queue
+                .iter()
+                .take(64)
+                .map(|q| io::IoSlice::new(&q.bytes[q.written..]))
+                .collect();
+            let mut n = match stream.write_vectored(&slices) {
+                Ok(0) => return Ok(progress),
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(progress),
+                Err(e) => return Err(e),
+            };
+            progress = true;
+            while n > 0 {
+                let front = self.queue.front_mut().expect("written past the queue");
+                let left = front.bytes.len() - front.written;
+                if n >= left {
+                    n -= left;
+                    self.queue.pop_front();
+                } else {
+                    front.written += n;
+                    n = 0;
+                }
+            }
+        }
+        Ok(progress)
+    }
+}
+
 /// Frame bytes the client has not yet written to its terminal: in
-/// `outbuf`, the socket, or the client's own buffer. This is the queue
-/// `tty_block_maybe` measures (tty.c:219-245, `tty->out`); `outbuf` alone
+/// `out`, the socket, or the client's own buffer. This is the queue
+/// `tty_block_maybe` measures (tty.c:219-245, `tty->out`); `out` alone
 /// would miss the buffers in front of a slow terminal.
 #[derive(Default)]
 struct Unacked {
@@ -888,14 +974,11 @@ impl Server {
             return false;
         }
         if self.shutdown {
-            return self.clients.values().all(|c| c.outbuf.is_empty());
+            return self.clients.values().all(|c| c.out.is_empty());
         }
         self.exit_empty()
             && self.model.sessions.is_empty()
-            && self
-                .clients
-                .values()
-                .all(|c| c.closing && c.outbuf.is_empty())
+            && self.clients.values().all(|c| c.closing && c.out.is_empty())
     }
 
     /// `server_send_exit` (server.c:314-333), at once when `kill-server`
@@ -1180,6 +1263,16 @@ impl Server {
 
     /// Queue a message; write what the socket takes now.
     pub(crate) fn send(&mut self, id: ClientId, msg: &ServerMsg) {
+        let kind = if matches!(msg, ServerMsg::Exit { .. } | ServerMsg::Exec { .. }) {
+            OutKind::Last
+        } else {
+            OutKind::Other
+        };
+        self.send_as(id, msg, kind);
+    }
+
+    /// [`Self::send`] with what the message is.
+    pub(crate) fn send_as(&mut self, id: ClientId, msg: &ServerMsg, kind: OutKind) {
         let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead) else {
             return;
         };
@@ -1209,32 +1302,34 @@ impl Server {
                     c.unacked.sent(bytes.len());
                     c.written += bytes.len();
                 }
-                c.outbuf.extend_from_slice(&bytes);
+                c.out.push(bytes, kind);
             }
         }
         self.flush_client(id);
+    }
+
+    /// `control_discard` (control.c:1040-1048) when a control client is
+    /// told to exit: the pane output it has not been sent yet goes, so it
+    /// gets the rest of its lines and the exit at once.
+    pub(crate) fn discard_pane_output(&mut self, id: ClientId) {
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.out.discard(|k| k == OutKind::PaneOutput);
+        }
     }
 
     pub(crate) fn flush_client(&mut self, id: ClientId) {
         let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead) else {
             return;
         };
-        while !c.outbuf.is_empty() {
-            match c.stream.write(&c.outbuf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    c.outbuf.drain(..n);
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                Err(_) => {
-                    c.outbuf.clear();
-                    c.closing = true;
-                    break;
-                }
+        match c.out.write_to(&mut c.stream) {
+            Ok(true) => c.last_write = Instant::now(),
+            Ok(false) => {}
+            Err(_) => {
+                c.out = Outbox::default();
+                c.closing = true;
             }
         }
-        let interest = if c.outbuf.is_empty() {
+        let interest = if c.out.is_empty() {
             Interest::READABLE
         } else {
             Interest::READABLE | Interest::WRITABLE
@@ -1243,7 +1338,7 @@ impl Server {
             .poll
             .registry()
             .reregister(&mut c.stream, Token(CLIENT_BASE + id.0), interest);
-        if c.closing && c.outbuf.is_empty() {
+        if c.closing && c.out.is_empty() {
             self.drop_client(id);
         } else if c.closing {
             c.exit_deadline
@@ -1251,14 +1346,15 @@ impl Server {
         }
     }
 
-    /// `server_client_exit_timer`: a client still not gone
-    /// [`EXIT_TIMEOUT`] after it was told to go (its terminal or reader
-    /// stopped taking output) is dropped, so it cannot keep the server
-    /// alive. tmux takes two steps of ten seconds each: it first discards
-    /// the output and sends the exit message alone, then drops a client
-    /// that still has not closed. vtmux's output is one byte stream that
-    /// may end mid-message, so it cannot cut the output down to the exit
-    /// message and drops the client at the first step.
+    /// `server_client_exit_timer` and `server_client_check_exit(c, 1)`
+    /// (server-client.c:2361-2440): a client still not gone
+    /// [`EXIT_TIMEOUT`] after it was told to go has everything queued for
+    /// it dropped but its exit message (`control_discard_all`), and is
+    /// looked at again in another [`EXIT_TIMEOUT`]. One whose socket has
+    /// taken nothing for [`EXIT_TIMEOUT`] is dropped: tmux's client reads
+    /// its exit on a channel of its own and closes, but vtmux's reads it
+    /// after the output its stalled terminal will not take
+    /// (compat/DIVERGENCES.md D-029).
     fn exit_timers(&mut self, now: Instant) {
         let due: Vec<ClientId> = self
             .clients
@@ -1267,10 +1363,21 @@ impl Server {
             .map(|(&id, _)| id)
             .collect();
         for id in due {
-            if let Some(c) = self.clients.get_mut(&id) {
-                c.outbuf.clear();
+            let Some(c) = self.clients.get_mut(&id) else {
+                continue;
+            };
+            c.out.discard(|k| k != OutKind::Last);
+            c.exit_deadline = Some(now + EXIT_TIMEOUT);
+            self.flush_client(id);
+            let stalled = self.clients.get(&id).is_some_and(|c| {
+                !c.dead && !c.out.is_empty() && now.duration_since(c.last_write) >= EXIT_TIMEOUT
+            });
+            if stalled {
+                if let Some(c) = self.clients.get_mut(&id) {
+                    c.out = Outbox::default();
+                }
+                self.drop_client(id);
             }
-            self.drop_client(id);
         }
     }
 
