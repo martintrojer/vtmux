@@ -274,7 +274,11 @@ status = "pass"
 
 [tests."input-malformed.sh"]
 status = "xfail"
-reason = "remain-on-exit works now and capture-pane -C -e -J are in; re-triage after rebase (see regress run)"
+reason = "capture-pane -R is in; malformed OSC 8 (id=a:id=b, id without ;) still links the text in Ghostty, tmux drops the link; malformed UTF-8 differs too"
+
+[tests."input-modes.sh"]
+status = "xfail"
+reason = "capture-pane -R is in; needs OSC 133 B/D, P;k=s and the osc133= line data (prompt/command/output columns and exit status), which vtmux does not track"
 
 [tests."input-osc.sh"]
 status = "xfail"
@@ -595,7 +599,7 @@ status = "pass"
 
 [tests."utf8-test.sh"]
 status = "xfail"
-reason = "remain-on-exit works now and capture-pane -C -e -J are in; re-triage after rebase (see regress run)"
+reason = "runs to the end now (remain-on-exit, capture-pane -C -e -J -S-); the capture of the UTF-8 stress file differs from utf8-test.result (malformed and overlong sequences, Ghostty decodes them differently: D-013 and the input-malformed reason)"
 
 [tests."wait-for-E.sh"]
 status = "xfail"

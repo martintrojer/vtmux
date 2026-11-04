@@ -137,14 +137,17 @@ pub fn exec(
     Ok(())
 }
 
-/// `send-keys -R` (cmd-send-keys.c:236-240): the palette cleared and the
-/// pane's terminal reset (`input_reset(ictx, 1)`): the parser back to the
-/// ground state, then `screen_write_reset`, as RIS does it (input.c:1407).
+/// `send-keys -R` (cmd-send-keys.c:236-240): `colour_palette_clear` and
+/// `input_reset(ictx, 1)` ([`vtmux_vt::PaneTerm::reset`]), under the pane's
+/// `scroll-on-clear`, and a pane redraw.
 fn reset_pane(server: &mut Server, p: PaneId) {
+    let scroll = server
+        .model
+        .number_option(vtmux_core::options::TreeId::Pane(p), "scroll-on-clear")
+        != 0;
     if let Some(pane) = server.model.panes.get_mut(&p) {
-        pane.term.reset_input();
-        pane.term.feed(b"\x1bc");
-        let _ = pane.term.take_replies();
+        pane.term.reset(scroll);
+        pane.compress.observe(&pane.term, std::time::Instant::now());
     }
     server.model.redraw_panes.insert(p);
 }

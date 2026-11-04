@@ -5942,3 +5942,38 @@ fn marked_pane_across_sessions() {
         ]
     });
 }
+
+/// `send-keys -R` is `input_reset(ictx, 1)` (cmd-send-keys.c:236-240):
+/// `screen_write_reset` clears the screen with `scroll-on-clear` on, so the
+/// used rows go into history (grid_view_clear_history) and nothing already
+/// there is lost; an alternate screen stays up with the primary one saved.
+/// Modes and attributes go back to their defaults, the cursor home.
+#[test]
+fn send_keys_reset_keeps_history_and_alternate() {
+    compare("send_keys_reset_keeps_history_and_alternate", |w| {
+        let state = "#{history_size} #{alternate_on} #{cursor_x},#{cursor_y}";
+        let mut runs = vec![
+            w.run(&[
+                "new", "-d", "-s", "a", "-x", "20", "-y", "5", "sh", "-c",
+                "i=1; while [ $i -le 9 ]; do echo l$i; i=$((i+1)); done; printf '\\033[31mred'; exec cat",
+            ]),
+        ];
+        w.wait_for_text("a", "red");
+        runs.push(w.run(&["display", "-p", "-t", "a", state]));
+        runs.push(w.run(&["send-keys", "-R", "-t", "a"]));
+        runs.push(w.run(&["display", "-p", "-t", "a", state]));
+        runs.push(w.run(&["capturep", "-p", "-e", "-t", "a", "-S", "-", "-E", "-"]));
+        // Under an alternate screen.
+        runs.push(w.run(&[
+            "respawnp", "-k", "-t", "a", "sh", "-c",
+            "printf 'main\\n\\033[?1049h\\033[31malt text\\033[5;5Hx'; exec cat",
+        ]));
+        w.wait_for_text("a", "alt text");
+        runs.push(w.run(&["display", "-p", "-t", "a", state]));
+        runs.push(w.run(&["send-keys", "-R", "-t", "a"]));
+        runs.push(w.run(&["display", "-p", "-t", "a", state]));
+        runs.push(w.run(&["capturep", "-p", "-t", "a"]));
+        runs.push(w.run(&["capturep", "-p", "-a", "-t", "a"]));
+        runs
+    });
+}
