@@ -44,6 +44,7 @@ mod move_window;
 mod new_session;
 mod new_window;
 mod paste_buffer;
+mod pipe_pane;
 mod prompt_history;
 mod refresh_client;
 mod rename_session;
@@ -517,6 +518,7 @@ fn dispatch(
         "save-buffer" => save_buffer::exec(server, item, args, found, false),
         "load-buffer" => load_buffer::exec(server, item, args, found),
         "paste-buffer" => paste_buffer::exec(server, args, found),
+        "pipe-pane" => pipe_pane::exec(server, item, args, found),
         "list-buffers" => list_buffers::exec(server, item, args),
         "list-commands" => list_commands::exec(server, item, args),
         "show-messages" => {

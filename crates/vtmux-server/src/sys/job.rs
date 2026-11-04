@@ -148,6 +148,80 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
     })
 }
 
+/// Fork and exec a `pipe-pane` command (cmd-pipe-pane.c:120-161):
+/// `/bin/sh -c command` in its own process group, the socket on stdin when
+/// it reads the pane's output (`output`) and on stdout when its output goes
+/// into the pane (`input`), `/dev/null` (opened write-only, as tmux does)
+/// for the rest and for stderr. Unlike a job it gets the server's own
+/// environment and directory (no `environ_push`, no `chdir`).
+pub fn spawn_pipe(command: &str, input: bool, output: bool) -> io::Result<Spawned> {
+    let shell = cstring(b"/bin/sh")?;
+    let argv0 = cstring(b"sh")?;
+    let dash_c = cstring(b"-c")?;
+    let command = cstring(&vtmux_core::rawstr::to_bytes(command))?;
+    let argv = [
+        argv0.as_ptr(),
+        dash_c.as_ptr(),
+        command.as_ptr(),
+        std::ptr::null(),
+    ];
+    let devnull = cstring(b"/dev/null")?;
+    let fd_limit = super::pty::fd_limit();
+
+    let (ours, theirs) = cloexec_socketpair()?;
+    let child_fd = theirs.as_raw_fd();
+
+    // cmd-pipe-pane.c:121-122: every signal blocked across the fork.
+    // SAFETY: sigset_t is a plain C struct, all-zero is a valid value, and
+    // sigfillset/sigprocmask only read and write the two sets.
+    let old = unsafe {
+        let mut all: libc::sigset_t = std::mem::zeroed();
+        let mut old: libc::sigset_t = std::mem::zeroed();
+        libc::sigfillset(&raw mut all);
+        libc::sigprocmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
+        old
+    };
+    // SAFETY: the server is single-threaded; the child runs only
+    // async-signal-safe calls on memory built before the fork.
+    let pid = unsafe { libc::fork() };
+    let fork_error = io::Error::last_os_error();
+    if pid == 0 {
+        // SAFETY (whole block): the forked child of a single-threaded
+        // process, valid C strings, never returns.
+        unsafe {
+            super::pty::clear_signals();
+            if libc::setpgid(0, 0) == -1 {
+                libc::_exit(1);
+            }
+            let null = libc::open(devnull.as_ptr(), libc::O_WRONLY);
+            let stdin = if output { child_fd } else { null };
+            let stdout = if input { child_fd } else { null };
+            if libc::dup2(stdin, 0) == -1
+                || libc::dup2(stdout, 1) == -1
+                || libc::dup2(null, 2) == -1
+            {
+                libc::_exit(1);
+            }
+            super::pty::close_from(3, fd_limit);
+            libc::execv(shell.as_ptr(), argv.as_ptr());
+            libc::_exit(1)
+        }
+    }
+    // SAFETY: restores the mask saved above.
+    unsafe {
+        libc::sigprocmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
+    }
+    drop(theirs);
+    if pid == -1 {
+        return Err(fork_error);
+    }
+    rustix::fs::fcntl_setfl(&ours, rustix::fs::OFlags::NONBLOCK)?;
+    Ok(Spawned {
+        fd: ours,
+        pid: Pid::from_raw(pid).expect("fork returned a positive pid"),
+    })
+}
+
 /// A Unix stream socket pair, both ends close-on-exec. `SOCK_CLOEXEC` does not
 /// exist on macOS, so the flag is set with fcntl afterwards (the child dup2s
 /// its end onto 0/1/2, which clears it there).
