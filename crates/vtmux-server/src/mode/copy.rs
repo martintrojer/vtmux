@@ -844,6 +844,12 @@ impl CopyMode {
 
     // --- grid access ------------------------------------------------------
 
+    /// The mode's screen as `capture-pane -M` reads it.
+    #[must_use]
+    pub fn backing(&self) -> &Grid {
+        &self.backing
+    }
+
     fn hsize(&self) -> usize {
         self.backing.hsize()
     }

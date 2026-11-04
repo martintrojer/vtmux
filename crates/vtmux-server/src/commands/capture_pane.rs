@@ -1,10 +1,10 @@
 //! `capture-pane` (cmd-capture-pane.c:254-485): `-p` to stdout, else into a
-//! paste buffer (`-b`), with `-a -q -e -C -J -N -T -L -I -F -S -E`, and the
-//! `-R` grid dump.
+//! paste buffer (`-b`), with `-a -q -e -C -J -N -T -L -I -F -H -M -S -E`,
+//! the `-R` grid dump and the `-P` pending input.
 
 use vtmux_core::cmd::{Args, CmdError};
 use vtmux_core::error::EdgeError;
-use vtmux_vt::{CaptureOpts, LineRef, capture, capture_alternate, capture_grid};
+use vtmux_vt::{CaptureOpts, LineRef, capture, capture_alternate, capture_grid, capture_lines};
 
 use super::Item;
 use crate::server::Server;
@@ -28,17 +28,30 @@ fn line_ref(server: &Server, found: Found, value: Option<&str>) -> LineRef {
     }
 }
 
+/// `cmd_capture_pane_pending` (cmd-capture-pane.c:181-213): `-C` writes
+/// every byte below a space, and a backslash, as `\ooo`.
+fn pending(data: &[u8], octal: bool) -> Vec<u8> {
+    if !octal {
+        return data.to_vec();
+    }
+    let mut out = Vec::with_capacity(data.len());
+    for &b in data {
+        // tmux tests the byte as a signed char: 0x80-0xff are below ' '.
+        if (b' '..0x80).contains(&b) && b != b'\\' {
+            out.push(b);
+        } else {
+            out.extend_from_slice(format!("\\{b:03o}").as_bytes());
+        }
+    }
+    out
+}
+
 pub fn exec(
     server: &mut Server,
     item: &mut Item,
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    for flag in ['H', 'M', 'P'] {
-        if args.flag(flag) {
-            return Err(EdgeError::NotImplemented(format!("capture-pane -{flag}")).into());
-        }
-    }
     let p = found.pane.ok_or(EdgeError::NoCurrentTarget)?;
     let start = line_ref(server, found, args.value('S'));
     let end = match args.value('E') {
@@ -54,6 +67,7 @@ pub fn exec(
         numbers: args.flag('L'),
         times: args.flag('I'),
         flags: args.flag('F'),
+        hyperlinks: args.flag('H'),
         start,
         end,
     };
@@ -63,6 +77,8 @@ pub fn exec(
     // cmd-capture-pane.c:451-452: -R is the grid dump, before anything else.
     let mut buf = if args.flag('R') {
         capture_grid(&pane.term, pane.history_limit)
+    } else if args.flag('P') && !args.flag('H') {
+        pending(pane.term.pending_input(), args.flag('C'))
     } else if args.flag('a') {
         // cmd-capture-pane.c:268-276: no saved screen is an error unless -q.
         match capture_alternate(&pane.term, opts) {
@@ -70,6 +86,12 @@ pub fn exec(
             None if args.flag('q') => Vec::new(),
             None => return Err(EdgeError::Message("no alternate screen".into()).into()),
         }
+    } else if args.flag('M')
+        && let Some(copy) = pane.modes.first().and_then(|m| m.as_copy())
+    {
+        // cmd-capture-pane.c:277-285: the mode's screen, copy mode's being
+        // its backing grid; a mode without one, or none, is the pane's.
+        capture_lines(copy.backing(), usize::from(pane.term.cols()), opts)
     } else {
         capture(&pane.term, opts)
     };
@@ -91,4 +113,15 @@ pub fn exec(
     buf.push(b'\n');
     item.print_raw(buf);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pending;
+
+    #[test]
+    fn pending_octal() {
+        assert_eq!(pending(b"\x1b[3\\", false), b"\x1b[3\\");
+        assert_eq!(pending(b"\x1b[3\\\xe9", true), b"\\033[3\\134\\351");
+    }
 }

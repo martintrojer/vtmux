@@ -1,0 +1,19 @@
+name = "capture_mode_screen"
+size = [20, 5]
+# capture-pane -M (cmd-capture-pane.c:277-285): the mode's screen, copy
+# mode's being its own copy of the grid (window_copy_get_screen), so output
+# after copy mode began does not show in it; history and the line flags
+# follow the copy. Without a mode, the pane's grid.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "20", "-y", "4", "sh", "-c", "seq 1 30; printf 'ab\\033[1mcd\\033[m\\tz'; tmux wait-for -S ready; tmux wait-for go; printf 'after\\n'; tmux wait-for -S after; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pM"] },
+  { run = ["copy-mode", "-t", "%0"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "after" },
+  { run = ["capturep", "-p"] },
+  { run = ["capturep", "-pM"] },
+  { run = ["capturep", "-pMeN", "-S", "-3"] },
+  { run = ["capturep", "-pMLF", "-S", "-2"] },
+  { run = ["capturep", "-pMT", "-S", "-", "-E", "1"] },
+]

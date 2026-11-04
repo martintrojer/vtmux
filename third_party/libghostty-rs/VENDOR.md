@@ -146,6 +146,18 @@ Recorded per commit in git history; the list is kept current:
   -Doptimize=ReleaseSafe` (697 pass), `-Dtest-filter=Screen` (553 pass),
   `-Dtest-filter=compress` (191 pass, 6 skip).
 
+- `patches/0006-hyperlink-id.patch` (`c/grid_ref.zig`, `c/main.zig`,
+  `lib_vt.zig`, `include/ghostty/vt/grid_ref.h`): `ghostty_grid_ref_hyperlink_id`
+  reads the OSC 8 id of a cell's hyperlink (explicit bytes, or Ghostty's
+  implicit counter for a link opened without `id=`), wrapped as
+  `GridRef::hyperlink_id` / `screen::HyperlinkId` in `screen.rs` and
+  `bindings.rs`. `capture-pane` needs it to tell links apart as tmux does
+  (`hyperlinks_put`: same URI and id are one link): `-e` writes `id=` in
+  its OSC 8, `-H` lists each link once, `-R` prints `linkid=`. Read-only,
+  no layout change. Not run: ghostty's own `zig build test-lib-vt`
+  (`zig build` of the library with the patch passes and vtmux's
+  `cli.rs` `capture_pane_*` tests exercise it).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

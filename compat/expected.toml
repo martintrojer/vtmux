@@ -23,8 +23,7 @@ status = "pass"
 status = "pass"
 
 [tests."capture-pane-hyperlink.sh"]
-status = "xfail"
-reason = "capture-pane -e drops OSC 8 hyperlinks: captured `test1`, expected the same text wrapped in OSC 8 (`id=1;https://github.com`) open and close sequences"
+status = "pass"
 
 [tests."capture-pane-sgr0.sh"]
 status = "pass"
@@ -276,11 +275,11 @@ reason = "capture-pane -R is in; malformed OSC 8 (id=a:id=b, id without ;) still
 
 [tests."input-modes.sh"]
 status = "xfail"
-reason = "capture-pane -R is in; needs OSC 133 B/D, P;k=s and the osc133= line data (prompt/command/output columns and exit status), which vtmux does not track"
+reason = "capture-pane -R and the osc133= line data are in (task gap_capture_flags); fails on scene osc133: Ghostty does a fresh-line on `OSC 133;A` (Terminal.zig `semanticPrompt` `fresh_line_new_prompt`), tmux only flags the line, so the capture is `xx` / `p>cmd` where tmux has `xxp>cmd` and the -R line data lands one line down (DIVERGENCES-PENDING P10)"
 
 [tests."input-osc.sh"]
 status = "xfail"
-reason = "needs capture-pane -H (hyperlink URIs)"
+reason = "capture-pane -H is in (task gap_capture_flags); fails on scene rename: the screen title escape `ESC k renamed ESC \\` prints `renamed` in vtmux, tmux takes it as a title (input.c `input_exit_rename`); then osc52: `set-clipboard on` does not store OSC 52 into buffer0 (`no buffer buffer0`)"
 
 [tests."input-raw-controls.sh"]
 status = "pass"
@@ -304,8 +303,7 @@ status = "xfail"
 reason = "capture-pane -R is in; index differs: tmux moves the scroll region's top row into history on IND at the region bottom when the region starts at row 1, Ghostty does not"
 
 [tests."input-raw-sgr.sh"]
-status = "xfail"
-reason = "capture-pane -R is in; the hyperlink case needs the OSC 8 id (linkid), which Ghostty does not keep"
+status = "pass"
 
 [tests."input-raw-unicode.sh"]
 status = "xfail"
@@ -316,7 +314,7 @@ status = "pass"
 
 [tests."input-reflow-stress.sh"]
 status = "xfail"
-reason = "capture-pane -R is in; needs capture-pane -M (copy mode's screen)"
+reason = "every capture check passes now (-NJ, -R, -M: task gap_capture_flags); the live-client phase fails: after the outer `resize-window` sweep the inner vtmux client attached in the outer pane still shows its pre-resize content (`outer capture missing expected sentinel`: the outer pane shows the OPPRE lines, not SENT-POST); the reference passes"
 
 [tests."input-replies.sh"]
 status = "xfail"

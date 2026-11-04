@@ -12,10 +12,11 @@ pub mod snapshot;
 pub mod term;
 
 pub use capture::{
-    CaptureOpts, LineRef, Row, ScreenCopy, capture, capture_alternate, capture_grid,
+    CaptureOpts, LineRef, Lines, Row, ScreenCopy, capture, capture_alternate, capture_grid,
+    capture_lines,
 };
 pub use snapshot::{Cell, Color, ScreenView, Snapshot, Style, Underline, snapshot};
 pub use term::{
     Compression, CompressionActivity, ExtendedKeys, KeyMode, LineMark, MouseModes, MouseTracking,
-    PaneTerm, Passthrough, history_reads,
+    Osc133, PaneTerm, Passthrough, history_reads,
 };

@@ -1,0 +1,104 @@
+diff --git a/include/ghostty/vt/grid_ref.h b/include/ghostty/vt/grid_ref.h
+index e32833393..12ef52309 100644
+--- a/include/ghostty/vt/grid_ref.h
++++ b/include/ghostty/vt/grid_ref.h
+@@ -204,6 +204,26 @@ GHOSTTY_API GhosttyResult ghostty_grid_ref_hyperlink_uri(
+     size_t buf_len,
+     size_t *out_len);
+ 
++/**
++ * Get the OSC 8 id of the hyperlink of the cell at the grid reference's
++ * position (vtmux).
++ *
++ * out_kind is 0 when the cell has no hyperlink, 1 for an explicit id
++ * (written to buf, its length to out_len) and 2 for an implicit one
++ * (out_implicit receives a counter unique to the OSC 8 that opened it).
++ * If buf is too small for an explicit id, GHOSTTY_OUT_OF_SPACE is returned
++ * with the required length in out_len.
++ *
++ * @ingroup grid_ref
++ */
++GHOSTTY_API GhosttyResult ghostty_grid_ref_hyperlink_id(
++    const GhosttyGridRef *ref,
++    uint8_t *buf,
++    size_t buf_len,
++    size_t *out_len,
++    uint8_t *out_kind,
++    uint32_t *out_implicit);
++
+ /**
+  * Get the style of the cell at the grid reference's position.
+  *
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index b59b7ef09..519f77f17 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -419,6 +419,7 @@ comptime {
+             @export(&c.grid_ref_graphemes, .{ .name = "ghostty_grid_ref_graphemes" });
+             @export(&c.grid_ref_row_cells, .{ .name = "ghostty_grid_ref_row_cells" });
+             @export(&c.grid_ref_hyperlink_uri, .{ .name = "ghostty_grid_ref_hyperlink_uri" });
++            @export(&c.grid_ref_hyperlink_id, .{ .name = "ghostty_grid_ref_hyperlink_id" });
+             @export(&c.grid_ref_style, .{ .name = "ghostty_grid_ref_style" });
+             @export(&c.tracked_grid_ref_free, .{ .name = "ghostty_tracked_grid_ref_free" });
+             @export(&c.tracked_grid_ref_has_value, .{ .name = "ghostty_tracked_grid_ref_has_value" });
+diff --git a/src/terminal/c/grid_ref.zig b/src/terminal/c/grid_ref.zig
+index 4fd649b0b..bc661c8b9 100644
+--- a/src/terminal/c/grid_ref.zig
++++ b/src/terminal/c/grid_ref.zig
+@@ -146,6 +146,44 @@ pub fn grid_ref_hyperlink_uri(
+     return .success;
+ }
+ 
++/// vtmux: the OSC 8 id of the cell's hyperlink. `out_kind` is 0 when the
++/// cell has no hyperlink, 1 for an explicit id (its bytes go to `out_buf`,
++/// `out_len` gets the length) and 2 for an implicit one (`out_implicit`
++/// gets Ghostty's counter, which is unique per OSC 8 that opened a link
++/// without an id). OUT_OF_SPACE as for grid_ref_hyperlink_uri.
++pub fn grid_ref_hyperlink_id(
++    ref: *const CGridRef,
++    out_buf: ?[*]u8,
++    buf_len: usize,
++    out_len: *usize,
++    out_kind: *u8,
++    out_implicit: *u32,
++) callconv(lib.calling_conv) Result {
++    const p = ref.toPin() orelse return .invalid_value;
++    const terminal_page = p.node.page();
++    const rac = terminal_page.getRowAndCell(p.x, p.y);
++    out_len.* = 0;
++    out_kind.* = 0;
++    out_implicit.* = 0;
++    if (!rac.cell.hyperlink) return .success;
++    const link_id = terminal_page.lookupHyperlink(rac.cell) orelse return .success;
++    const entry = terminal_page.hyperlink_set.get(terminal_page.memory, link_id);
++    switch (entry.id) {
++        .implicit => |n| {
++            out_kind.* = 2;
++            out_implicit.* = @intCast(n);
++        },
++        .explicit => |slice| {
++            const id = slice.slice(terminal_page.memory);
++            out_len.* = id.len;
++            if (out_buf == null or buf_len < id.len) return .out_of_space;
++            @memcpy(out_buf.?[0..id.len], id);
++            out_kind.* = 1;
++        },
++    }
++    return .success;
++}
++
+ pub fn grid_ref_style(
+     ref: *const CGridRef,
+     out: ?*style_c.Style,
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index b32514a02..b250c7064 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -259,6 +259,7 @@ pub const grid_ref_row = grid_ref.grid_ref_row;
+ pub const grid_ref_graphemes = grid_ref.grid_ref_graphemes;
+ pub const grid_ref_row_cells = grid_ref.grid_ref_row_cells;
+ pub const grid_ref_hyperlink_uri = grid_ref.grid_ref_hyperlink_uri;
++pub const grid_ref_hyperlink_id = grid_ref.grid_ref_hyperlink_id;
+ pub const grid_ref_style = grid_ref.grid_ref_style;
+ pub const tracked_grid_ref_free = grid_ref_tracked.tracked_grid_ref_free;
+ pub const tracked_grid_ref_has_value = grid_ref_tracked.tracked_grid_ref_has_value;

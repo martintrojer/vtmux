@@ -164,6 +164,49 @@ impl GridRef<'_> {
         };
         from_result_with_len(result, len)
     }
+
+    /// The OSC 8 id of the cell's hyperlink (vtmux: patch 0006).
+    pub fn hyperlink_id(&self) -> Result<HyperlinkId> {
+        let mut buf = vec![0u8; 64];
+        loop {
+            let (mut len, mut kind, mut implicit) = (0usize, 0u8, 0u32);
+            let result = unsafe {
+                ffi::ghostty_grid_ref_hyperlink_id(
+                    std::ptr::from_ref(&self.inner),
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &raw mut len,
+                    &raw mut kind,
+                    &raw mut implicit,
+                )
+            };
+            match result {
+                ffi::Result::SUCCESS => {
+                    return Ok(match kind {
+                        1 => {
+                            buf.truncate(len);
+                            HyperlinkId::Explicit(buf)
+                        }
+                        2 => HyperlinkId::Implicit(implicit),
+                        _ => HyperlinkId::None,
+                    });
+                }
+                ffi::Result::OUT_OF_SPACE if len > buf.len() => buf.resize(len, 0),
+                other => return from_result(other).map(|()| HyperlinkId::None),
+            }
+        }
+    }
+}
+
+/// A hyperlink's OSC 8 id (vtmux: [`GridRef::hyperlink_id`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HyperlinkId {
+    /// The cell has no hyperlink.
+    None,
+    /// `id=` given by the program.
+    Explicit(Vec<u8>),
+    /// No `id=`: unique to the OSC 8 that opened the link.
+    Implicit(u32),
 }
 
 /// Owned grid references that move with the terminal.

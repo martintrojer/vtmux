@@ -86,6 +86,79 @@ pub enum LineMark {
     Output,
 }
 
+/// What an OSC 133 does to the cursor's line (`input_osc_133`,
+/// input.c:3264-3335), as `capture-pane -R` prints it: the line flags it
+/// sets, the column it records, and `D`'s exit status.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Osc133 {
+    /// tmux's `GRID_LINE_*` bits: `START_PROMPT` 0x8, `SECOND_PROMPT` 0x10,
+    /// `START_COMMAND` 0x20, `START_OUTPUT` 0x40, `END_OUTPUT` 0x80.
+    pub flags: u32,
+    pub prompt_col: u16,
+    pub cmd_col: u16,
+    pub out_start_col: u16,
+    pub out_end_col: u16,
+    pub exit_status: u8,
+}
+
+impl Osc133 {
+    /// Apply one OSC 133 payload (after `133;`) at column `cx`.
+    fn apply(&mut self, payload: &[u8], cx: u16) {
+        match payload.first() {
+            Some(b'A' | b'N') => {
+                // memset of osc133_data only: the line's flags stay.
+                *self = Self {
+                    flags: self.flags | 0x8,
+                    prompt_col: cx,
+                    ..Self::default()
+                };
+            }
+            Some(b'P') => {
+                self.flags |= if osc133_mark(payload).is_some() {
+                    0x8
+                } else {
+                    0x10
+                };
+                self.prompt_col = cx;
+            }
+            Some(b'B' | b'I') => {
+                self.flags |= 0x20;
+                self.cmd_col = cx;
+            }
+            Some(b'C') => {
+                self.flags |= 0x40;
+                self.out_start_col = cx;
+            }
+            Some(b'D') => {
+                self.flags |= 0x80;
+                self.out_end_col = cx;
+                self.exit_status = osc133_exit_status(payload);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `input_osc_133_exit_status` (input.c:3206-3230): `D;n`, 0 when absent
+/// or a key=value, 255 when not 0-255.
+fn osc133_exit_status(p: &[u8]) -> u8 {
+    if p.get(1) != Some(&b';') || p.len() < 3 || p[2] == b'=' {
+        return 0;
+    }
+    let rest = &p[2..];
+    let field = rest.split(|&b| b == b';').next().unwrap_or(b"");
+    if field.is_empty() || field.contains(&b'=') {
+        return 0;
+    }
+    // strtonum: an optional sign and digits, nothing else.
+    std::str::from_utf8(field)
+        .ok()
+        .and_then(|f| f.parse::<i64>().ok())
+        .filter(|n| (0..=255).contains(n))
+        .and_then(|n| u8::try_from(n).ok())
+        .unwrap_or(255)
+}
+
 /// The mark an OSC 133 payload (after `133;`) sets, if any.
 fn osc133_mark(payload: &[u8]) -> Option<LineMark> {
     match payload.first()? {
@@ -137,6 +210,10 @@ const CELLS_ALIGN: usize = 128;
 /// How long synchronized output may hold a pane (`screen_write_start_sync`'s
 /// `tv_sec = 1`, screen-write.c:1035).
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The most pending input [`PaneTerm::pending_input`] keeps: tmux keeps all
+/// of it, but a string is cut off at `input-buffer-size` anyway.
+const PENDING_MAX: usize = 1 << 20;
 
 /// tmux's ground timer (input.c `input_start_ground_timer`).
 const DCS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -253,9 +330,12 @@ pub struct PaneTerm {
     /// row so the mark follows scrolling and reflow as tmux's line flags
     /// follow the line. Ghostty's own semantic prompt state marks rows
     /// differently (a `C` then an `A` on one line keeps only the prompt).
-    marks: Vec<(TrackedGridRef, LineMark)>,
+    marks: Vec<(TrackedGridRef, Osc133)>,
     /// The marks of the history copied when the alternate screen came up.
-    frozen_marks: Vec<(usize, LineMark)>,
+    frozen_marks: Vec<(usize, Osc133)>,
+    /// The input since the parser last left the ground state, while it has
+    /// not returned to it (tmux's `since_ground`, input.c:1022-1024).
+    pending: Vec<u8>,
     /// tmux's own parser for DCS strings, which Ghostty never sees.
     dcs: Dcs,
     /// `input-buffer-size`, the most a DCS payload may hold.
@@ -403,6 +483,7 @@ impl PaneTerm {
             redraw: false,
             marks: Vec::new(),
             frozen_marks: Vec::new(),
+            pending: Vec::new(),
             dcs: Dcs::default(),
             input_buffer_size: dcs::DEFAULT_BUFFER_SIZE,
             passthrough: Vec::new(),
@@ -475,6 +556,7 @@ impl PaneTerm {
             let mut event = None;
             while j < bytes.len() && j - i < step {
                 let e = self.scan.push(bytes[j]);
+                self.note_pending(bytes[j], self.scan.state != ScanState::Ground);
                 // A palette OSC ended: tmux redraws the pane at once, ahead
                 // of whatever follows in this input.
                 self.redraw |= std::mem::take(&mut self.scan.palette_redraw);
@@ -520,7 +602,7 @@ impl PaneTerm {
                     ScanEvent::AltMode(b'h') if !self.alternate_on() => {
                         self.frozen = Some(Rc::new(self.freeze_history()));
                         self.saved = Some(Rc::new(self.freeze_visible()));
-                        self.frozen_marks = self.line_marks();
+                        self.frozen_marks = self.osc133_lines();
                         self.alt_entry = self.pin_oldest().map(|pin| (pin, self.retained_rows()));
                     }
                     // tmux's ED3 clears the grid's history, which under the
@@ -552,8 +634,10 @@ impl PaneTerm {
                     c.reset();
                     self.cursor.set(c);
                 }
-                if let ScanEvent::Osc133(mark) = e {
-                    self.mark_cursor_line(mark);
+                if e == ScanEvent::Osc133
+                    && let Some(payload) = self.scan.osc133.take()
+                {
+                    self.mark_cursor_line(&payload);
                 }
                 if matches!(e, ScanEvent::AltMode(_) | ScanEvent::Reset)
                     && (e == ScanEvent::Reset || self.alternate_on() != alternate)
@@ -589,7 +673,10 @@ impl PaneTerm {
     fn feed_dcs(&mut self, bytes: &[u8], mut i: usize) -> usize {
         while i < bytes.len() {
             match self.dcs.push(bytes[i], self.input_buffer_size) {
-                Step::Stay => i += 1,
+                Step::Stay => {
+                    self.note_pending(bytes[i], true);
+                    i += 1;
+                }
                 Step::End(dispatch) => {
                     match dispatch {
                         Dispatch::Passthrough(data) => {
@@ -600,10 +687,12 @@ impl PaneTerm {
                         Dispatch::Ignore => {}
                     }
                     self.scan.end_dcs();
+                    self.pending.clear();
                     return i + 1;
                 }
                 Step::Cancel => {
                     self.scan.end_dcs();
+                    self.pending.clear();
                     return i + 1;
                 }
                 Step::Escape => {
@@ -613,6 +702,30 @@ impl PaneTerm {
             }
         }
         i
+    }
+
+    /// Keep `b` in the pending input while the parser is out of the ground
+    /// state after it; back in the ground state the input is dropped
+    /// (`input_ground`).
+    fn note_pending(&mut self, b: u8, in_sequence: bool) {
+        if !in_sequence {
+            self.pending.clear();
+        } else if self.pending.len() < PENDING_MAX {
+            self.pending.push(b);
+        }
+    }
+
+    /// `capture-pane -P`: the start of an escape sequence the pane has not
+    /// finished yet (`input_pending`).
+    #[must_use]
+    pub fn pending_input(&self) -> &[u8] {
+        &self.pending
+    }
+
+    /// `history-limit` as the pane has it (`hlimit`).
+    #[must_use]
+    pub fn history_limit(&self) -> usize {
+        self.history_lines
     }
 
     /// The `extended-keys` option the next input is read under.
@@ -675,6 +788,7 @@ impl PaneTerm {
     /// Start from the ground state, as a fresh pane process does: nothing
     /// half-parsed is carried over (a respawned pane).
     pub fn reset_input(&mut self) {
+        self.pending.clear();
         self.scan.end_dcs();
         self.scan.state = ScanState::Ground;
         self.scan.palette_osc = None;
@@ -890,24 +1004,39 @@ impl PaneTerm {
         self.saved.clone()
     }
 
-    /// Pin `mark` to the cursor's line. Under the alternate screen the
-    /// mark would be on the alternate grid, which copy mode never reads
-    /// after the screen goes, so it is not kept.
-    fn mark_cursor_line(&mut self, mark: LineMark) {
+    /// Apply an OSC 133 payload to the cursor's line, pinned so the data
+    /// follows the line. Under the alternate screen the line is on the
+    /// alternate grid, which copy mode never reads after the screen goes,
+    /// so it is not kept.
+    fn mark_cursor_line(&mut self, payload: &[u8]) {
         if self.alternate_on() {
             return;
         }
-        let y = self.term.cursor_y().unwrap_or(0);
+        let (cx, cy) = tmux_cursor(&self.term);
+        let floor = self.hidden_rows();
+        let screen_y = self.retained_rows() + usize::from(cy);
+        // The cursor's line is one of the last few marked.
+        let line = self.marks.iter_mut().rev().take(16).find(|(pin, _)| {
+            pin.point(PointSpace::Screen)
+                .ok()
+                .flatten()
+                .is_some_and(|p| usize::try_from(p.y).is_ok_and(|y| y == screen_y))
+        });
+        if let Some((_, data)) = line {
+            data.apply(payload, cx);
+            return;
+        }
+        let mut data = Osc133::default();
+        data.apply(payload, cx);
         let point = Point::Active(PointCoordinate {
             x: 0,
-            y: u32::from(y),
+            y: u32::from(cy),
         });
         if let Ok(pin) = self.term.track_grid_ref(point) {
-            self.marks.push((pin, mark));
+            self.marks.push((pin, data));
         }
         // Drop the marks of rows gone from history now and then.
         if self.marks.len().is_power_of_two() && self.marks.len() >= 64 {
-            let floor = self.hidden_rows();
             self.marks.retain(|(pin, _)| {
                 pin.point(PointSpace::Screen)
                     .ok()
@@ -925,23 +1054,39 @@ impl PaneTerm {
             .saturating_sub(self.hsize)
     }
 
-    /// The lines OSC 133 marked, as rows of tmux's grid (see
-    /// [`PaneTerm::row`]), oldest first. Under the alternate screen, those
-    /// of the primary history copied on entry.
+    /// The lines OSC 133 marked as a prompt's or output's start, as rows
+    /// of tmux's grid (see [`PaneTerm::row`]), oldest first. Under the
+    /// alternate screen, those of the primary history copied on entry.
     #[must_use]
     pub fn line_marks(&self) -> Vec<(usize, LineMark)> {
+        let mut out = Vec::new();
+        for (y, data) in self.osc133_lines() {
+            if data.flags & 0x8 != 0 {
+                out.push((y, LineMark::Prompt));
+            }
+            if data.flags & 0x40 != 0 {
+                out.push((y, LineMark::Output));
+            }
+        }
+        out
+    }
+
+    /// Every line OSC 133 touched, with what it recorded, as rows of
+    /// tmux's grid, oldest first (see [`PaneTerm::line_marks`]).
+    #[must_use]
+    pub fn osc133_lines(&self) -> Vec<(usize, Osc133)> {
         if self.alternate_on() {
             return self.frozen_marks.clone();
         }
         let hidden = self.hidden_rows();
         let last = self.hsize + usize::from(self.rows());
-        let mut out: Vec<(usize, LineMark)> = self
+        let mut out: Vec<(usize, Osc133)> = self
             .marks
             .iter()
-            .filter_map(|(pin, mark)| {
+            .filter_map(|(pin, data)| {
                 let p = pin.point(PointSpace::Screen).ok().flatten()?;
                 let y = usize::try_from(p.y).ok()?.checked_sub(hidden)?;
-                (y < last).then_some((y, *mark))
+                (y < last).then_some((y, *data))
             })
             .collect();
         out.sort_by_key(|&(y, _)| y);
@@ -1494,6 +1639,8 @@ struct AltModeScanner {
     resync: bool,
     /// The start of the OSC being skipped, kept to find OSC 133.
     osc: Option<Vec<u8>>,
+    /// The payload of the OSC 133 that just ended.
+    osc133: Option<Vec<u8>>,
     /// An ESC inside an OSC: a backslash next ends it (ST).
     osc_esc: bool,
     /// The OSC in progress as tmux collects it (`input_input`), kept only
@@ -1695,8 +1842,8 @@ enum ScanEvent {
     Sync,
     /// Back in the ground state with [`AltModeScanner::take_resync`] due.
     Resync,
-    /// An `OSC 133` that marks the cursor's line ended.
-    Osc133(LineMark),
+    /// An `OSC 133` ended; `AltModeScanner::osc133` has its payload.
+    Osc133,
     /// `ESC P`: a DCS starts (on the `P`).
     DcsStart,
     /// A byte tmux ignores inside a CSI (0x7f-0xff, input.c:579, 597, 612,
@@ -1764,11 +1911,10 @@ impl AltModeScanner {
             if ends {
                 self.state = ScanState::Ground;
                 let osc = self.osc.take().unwrap_or_default();
-                return ControlFlow::Break(
-                    osc.strip_prefix(b"133;")
-                        .and_then(osc133_mark)
-                        .map(ScanEvent::Osc133),
-                );
+                let payload = osc.strip_prefix(b"133;").map(<[u8]>::to_vec);
+                let found = payload.is_some();
+                self.osc133 = payload;
+                return ControlFlow::Break(found.then_some(ScanEvent::Osc133));
             }
             match (self.state, b) {
                 (ScanState::Str, 0x1b) => self.osc_esc = true,
@@ -2719,7 +2865,7 @@ mod tests {
                     ScanEvent::ClearHistory => Some(b'J'),
                     ScanEvent::Resync
                     | ScanEvent::Reset
-                    | ScanEvent::Osc133(_)
+                    | ScanEvent::Osc133
                     | ScanEvent::DcsStart
                     | ScanEvent::Sync
                     | ScanEvent::Skip => None,

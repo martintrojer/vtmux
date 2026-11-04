@@ -12,6 +12,30 @@ use std::rc::Rc;
 
 use vtmux_vt::{LineMark, PaneTerm, Row, ScreenCopy};
 
+/// `capture-pane -M` reads the copy (`window_copy_get_screen` is
+/// `data->backing`).
+impl vtmux_vt::Lines for Grid {
+    fn history_size(&self) -> usize {
+        self.hsize
+    }
+
+    fn screen_rows(&self) -> usize {
+        self.sy
+    }
+
+    fn line(&self, y: usize) -> &Row {
+        self.row(y)
+    }
+
+    fn time(&self, y: usize) -> i64 {
+        Grid::time(self, y)
+    }
+
+    fn starts(&self, y: usize, output: bool) -> bool {
+        Grid::starts(self, y, output)
+    }
+}
+
 /// One line of the copy.
 #[derive(Clone, Debug, Default)]
 struct Line {
