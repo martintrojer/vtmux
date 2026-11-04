@@ -13,6 +13,9 @@ use std::rc::Rc;
 
 use crate::term::{HistoryRow, LineMark, PaneTerm};
 
+mod raw;
+pub use raw::capture_grid;
+
 /// One end of the captured range, as `-S` / `-E` give it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineRef {
@@ -151,14 +154,11 @@ pub fn capture(term: &PaneTerm, opts: CaptureOpts) -> Vec<u8> {
     out
 }
 
-/// `capture-pane -F` (cmd-capture-pane.c:390-410): the line's flags and a
-/// space. `X` is tmux's extended line (grid.c `grid_need_extended_cell`): a
-/// cell wider than one column or of more than one byte, an RGB colour, an
+/// tmux's `GRID_LINE_EXTENDED` (grid.c `grid_need_extended_cell`): a cell
+/// wider than one column or of more than one byte, an RGB colour, an
 /// attribute past the first eight, an underline colour, a link or a tab.
-/// vtmux has no dead lines (`D`).
-fn row_flags(cells: &[RowCell], wrapped: bool, mark: Option<LineMark>) -> String {
-    let link = cells.iter().any(|c| c.link);
-    let extended = cells.iter().any(|c| {
+fn row_extended(cells: &[RowCell]) -> bool {
+    cells.iter().any(|c| {
         let st = &c.style;
         c.link
             || c.tab != 0
@@ -170,7 +170,14 @@ fn row_flags(cells: &[RowCell], wrapped: bool, mark: Option<LineMark>) -> String
             || st.strikethrough
             || st.overline
             || !matches!(st.underline, Underline::None | Underline::Single)
-    });
+    })
+}
+
+/// `capture-pane -F` (cmd-capture-pane.c:390-410): the line's flags and a
+/// space (`X`: [`row_extended`]). vtmux has no dead lines (`D`).
+fn row_flags(cells: &[RowCell], wrapped: bool, mark: Option<LineMark>) -> String {
+    let link = cells.iter().any(|c| c.link);
+    let extended = row_extended(cells);
     let mut f = String::new();
     if link {
         f.push('H');
@@ -237,6 +244,8 @@ pub(crate) struct RowCell {
     wide: Width,
     acs: bool,
     link: bool,
+    /// The hyperlink's URI, read only for `capture-pane -R`.
+    uri: Option<String>,
     /// Ghostty's tab mark (`Cell.tab`, `patches/0002-tab-cell-mark.patch`):
     /// 0 none, 1..=32 the first cell of a tab that many columns wide,
     /// [`TAB_CONTINUATION`] for the other cells of it.
@@ -259,6 +268,13 @@ impl RowCell {
     /// the columns after the first of a tab (its PADDING cells).
     fn spacer(&self) -> bool {
         matches!(self.wide, Width::SpacerTail | Width::SpacerHead) || self.tab == TAB_CONTINUATION
+    }
+
+    /// A cell tmux writes along with the one before it: the second column
+    /// of a wide character, or any column of a tab. Not the blank left at
+    /// a line's end when a wide character wrapped, which tmux never writes.
+    fn padding(&self) -> bool {
+        self.wide == Width::SpacerTail || self.tab != 0
     }
 
     /// The cell as the renderer sees it (as [`crate::snapshot`] reads it).
@@ -633,13 +649,16 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
         } else {
             text
         };
+        let link = linked && cell.has_hyperlink().unwrap_or(false);
         cells.push(RowCell {
             empty: text.is_empty(),
             text,
             style,
             wide,
             acs: cell.is_protected().unwrap_or(false),
-            link: linked && cell.has_hyperlink().unwrap_or(false),
+            link,
+            // Links are rare: their URI is read as the cell is.
+            uri: link.then(|| hyperlink_uri(&gr)).flatten(),
             tab,
         });
     }
@@ -673,6 +692,21 @@ fn whole_tabs(cells: &mut [RowCell]) {
         let n = cells.len() - x;
         cells[x..x + n].iter_mut().for_each(blank);
     }
+}
+
+/// The URI of the hyperlink on the cell at `gr`.
+fn hyperlink_uri(gr: &GridRef<'_>) -> Option<String> {
+    let mut buf = vec![0u8; 256];
+    let n = loop {
+        match gr.hyperlink_uri(&mut buf) {
+            Ok(n) => break n,
+            Err(Error::OutOfSpace { required }) if required > buf.len() => {
+                buf.resize(required, 0);
+            }
+            Err(_) => return None,
+        }
+    };
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n]).into_owned())
 }
 
 /// tmux's cell data size: `UTF8_SIZE` (tmux.h:721).
@@ -800,12 +834,13 @@ fn escape_esc(line: &mut Vec<u8>, at: usize) {
 /// order, which keep their old allocation in tmux.
 fn tmux_cellsize(cells: &[RowCell], used: usize) -> usize {
     let width = cells.len();
+    // A wide character's padding and a tab's columns are written with it.
+    let written = |c: &RowCell| !c.empty || c.style.bg != Color::Default || c.padding();
     let extent = cells
         .iter()
-        .rposition(|c| !c.empty || c.style.bg != Color::Default)
+        .rposition(written)
         .map_or(0, |i| i + 1)
         .max(used);
-    let written = |c: &RowCell| !c.empty || c.style.bg != Color::Default;
     let mut size = 0;
     let mut i = 0;
     while i < extent {
@@ -813,8 +848,13 @@ fn tmux_cellsize(cells: &[RowCell], used: usize) -> usize {
             i += 1;
             continue;
         }
+        // A run is what one grid_set_cells writes: same style, charset
+        // and link.
+        let same = |a: &RowCell, b: &RowCell| {
+            b.spacer() || (a.style == b.style && a.acs == b.acs && a.uri == b.uri)
+        };
         let mut j = i + 1;
-        while j < extent && written(&cells[j]) && cells[j].style == cells[i].style {
+        while j < extent && written(&cells[j]) && same(&cells[j], &cells[i]) {
             j += 1;
         }
         if j > size {
