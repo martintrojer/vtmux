@@ -363,8 +363,7 @@ status = "xfail"
 reason = "missing command new-pane (floating/modal panes, M2): `not implemented in vtmux yet: new-pane`"
 
 [tests."lifecycle-deferred.sh"]
-status = "xfail"
-reason = "needs switch-client -c finding a control client by name (refresh-client -B is in); its choose-tree section passes"
+status = "pass"
 
 [tests."list-commands.sh"]
 status = "pass"
@@ -518,8 +517,7 @@ status = "pass"
 status = "pass"
 
 [tests."session-ops.sh"]
-status = "xfail"
-reason = "session groups pass; the test then needs detach-on-destroy previous and next moving an attached client (`Client session wrong`)"
+status = "pass"
 
 [tests."set-hook-B.sh"]
 status = "xfail"

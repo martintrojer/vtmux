@@ -827,6 +827,17 @@ impl Model {
         if !self.sessions.contains_key(&id) {
             return Vec::new();
         }
+        // server_destroy_session: the clients move on first.
+        let destroyed = crate::events::Destroyed {
+            session: id,
+            mode: self.number_option(TreeId::Session(id), "detach-on-destroy"),
+            sessions: self
+                .sessions_by_name()
+                .map(|s| (s.id, s.activity))
+                .collect(),
+        };
+        self.events
+            .push(crate::events::Queued::Destroyed(destroyed));
         // session_destroy (session.c:195-229): session-closed, then
         // window-unlinked for each winlink in the order the RB tree's root
         // is removed.

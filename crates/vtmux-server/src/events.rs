@@ -292,6 +292,22 @@ impl Model {
 pub enum Queued {
     Event(Event),
     Focus(PaneId),
+    /// A session went: its clients move on before its `session-closed`
+    /// ([`crate::server::Server::session_destroyed`]).
+    Destroyed(Destroyed),
+}
+
+/// What `server_destroy_session` (server-fn.c:486-527) reads when a session
+/// goes, kept for the server, which has the clients.
+#[derive(Clone, Debug)]
+pub struct Destroyed {
+    pub session: SessionId,
+    /// The session's `detach-on-destroy` (off, on, no-detached, previous,
+    /// next).
+    pub mode: i64,
+    /// Every session then, the destroyed one included, in name order with
+    /// its activity stamp.
+    pub sessions: Vec<(SessionId, u64)>,
 }
 
 /// A `wait-for -E` waiter (cmd-wait-for.c `struct wait_event_item`).
@@ -320,12 +336,22 @@ impl Server {
             if self.model.events.is_empty() {
                 return;
             }
-            for q in std::mem::take(&mut self.model.events) {
+            let mut queue: std::collections::VecDeque<Queued> =
+                std::mem::take(&mut self.model.events).into();
+            while let Some(q) = queue.pop_front() {
                 match q {
                     Queued::Event(ev) => self.fire_event(&ev),
                     Queued::Focus(p) => {
                         if let Some(ev) = self.pane_focus(p) {
                             self.fire_event(&ev);
+                        }
+                    }
+                    Queued::Destroyed(d) => {
+                        // The client-session-changed events this fires
+                        // come before the session's session-closed.
+                        self.session_destroyed(&d);
+                        for e in std::mem::take(&mut self.model.events).into_iter().rev() {
+                            queue.push_front(e);
                         }
                     }
                 }

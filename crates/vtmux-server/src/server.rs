@@ -3708,6 +3708,74 @@ impl Server {
         self.close_dropped();
     }
 
+    /// `server_destroy_session` (server-fn.c:486-527): the clients of a
+    /// session that went move to the session `detach-on-destroy` picks, or
+    /// are left to exit. A session it picks that went in the same command
+    /// (a group destroyed together) is only noted: that session's own
+    /// destruction moves them on again.
+    pub(crate) fn session_destroyed(&mut self, d: &crate::events::Destroyed) {
+        let attached = self.attached_sessions();
+        let activity =
+            |(s, a): (SessionId, u64)| self.model.sessions.get(&s).map_or(a, |x| x.activity);
+        // server_find_session: the most recently active session but this
+        // one, the first in name order on a tie.
+        let newest = |detached_only: bool| {
+            let mut out: Option<(SessionId, u64)> = None;
+            for &(s, a) in &d.sessions {
+                let a = activity((s, a));
+                if s == d.session || (detached_only && attached.contains(&s)) {
+                    continue;
+                }
+                if out.is_none_or(|(_, b)| a > b) {
+                    out = Some((s, a));
+                }
+            }
+            out.map(|(s, _)| s)
+        };
+        // session_previous_session / session_next_session by name.
+        let step = |forward: bool| {
+            let n = d.sessions.len();
+            let i = d.sessions.iter().position(|(s, _)| *s == d.session)?;
+            let j = if forward {
+                (i + 1) % n
+            } else {
+                (i + n - 1) % n
+            };
+            Some(d.sessions[j].0).filter(|s| *s != d.session)
+        };
+        let s_new = match d.mode {
+            0 => newest(false),
+            2 => newest(true),
+            3 => step(false),
+            4 => step(true),
+            _ => None,
+        };
+        let cs_new = if s_new.is_none() && matches!(d.mode, 1 | 2) {
+            newest(false)
+        } else {
+            None
+        };
+        let ids: Vec<ClientId> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.attached == Some(d.session))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            let use_s = s_new.or(cs_new.filter(|_| self.clients[&id].flags.no_detach_on_destroy));
+            let Some(to) = use_s else { continue };
+            let c = self.clients.get_mut(&id).expect("listed above");
+            // c->session = NULL, c->last_session = NULL first.
+            c.attached = None;
+            c.last_session = None;
+            if self.model.sessions.contains_key(&to) {
+                self.switch_session(id, to);
+            } else {
+                self.clients.get_mut(&id).expect("listed above").attached = Some(to);
+            }
+        }
+    }
+
     /// `server_destroy_pane` with remain-on-exit off: hang up the pane,
     /// take it out of its window; the window and an emptied session go
     /// with the last pane.
