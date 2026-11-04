@@ -92,12 +92,13 @@ impl Caps {
     }
     /// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424) for a
     /// VT100-like terminal, which every terminal vtmux knows is: DA, DA2,
-    /// XTVERSION and the synchronised-update DECRQM. `clear` is
-    /// `clear-on-attach`; `rows` the terminal's height.
+    /// XTVERSION, the synchronised-update DECRQM and the default colours.
+    /// `clear` is `clear-on-attach`; `rows` the terminal's height.
     #[must_use]
     pub fn startup(self, clear: bool, rows: u32) -> Vec<u8> {
         let mut out = self.restart(clear, rows);
         out.extend_from_slice(b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p");
+        out.extend_from_slice(crate::term_queries::COLOUR_QUERIES);
         out
     }
     /// `tty_start_tty` alone: a suspended client coming back.
@@ -116,7 +117,7 @@ impl Caps {
             let rows = rows.max(1);
             format!("\x1b[1;{rows}r\x1b[1;{rows}H\x1b[{}S", rows + 1)
         };
-        format!("{start}\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h").into_bytes()
+        format!("{start}\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h\x1b[?996n").into_bytes()
     }
     /// `server_lock_client`'s `tty_raw` calls (server-fn.c:211-213):
     /// `smcup`, `clear` and, where the terminal has it, `E3`.

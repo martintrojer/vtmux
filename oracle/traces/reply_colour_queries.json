@@ -1,0 +1,273 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "macmini",
+  "name": "reply_colour_queries",
+  "inputs": {
+    "name": "reply_colour_queries",
+    "size": [
+      60,
+      14
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "14",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "window-style",
+          "fg=#102030,bg=white"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "pane-colours[5]",
+          "#0a0b0c"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "cursor-colour",
+          "#a0b0c0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "set-clipboard",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "get-clipboard",
+          "buffer"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "Hello"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%0",
+          "#{pane_fg} #{pane_bg}"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "%0",
+          "sh",
+          "-c",
+          "stty raw -echo min 0 time 10; q() { printf \"$1\"; dd bs=1 count=64 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033]10;?\\007'; q '\\033]11;?\\033\\\\'; q '\\033]4;5;?\\007'; q '\\033]4;7;#ff8000\\033]4;7;?\\007'; q '\\033]12;?\\007'; q '\\033]12;green\\033]12;?\\033\\\\'; q '\\033]52;c;?\\007'; q '\\033[?996n'; q '\\033]11;#000000\\007\\033[?996n'; printf 'fg=%s\\r\\n' \"$(tmux display -p -t %0 '#{pane_fg} #{pane_bg}')\"; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "get-clipboard",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "respawn-pane",
+          "-k",
+          "-t",
+          "%0",
+          "sh",
+          "-c",
+          "stty raw -echo min 0 time 10; q() { printf \"$1\"; dd bs=1 count=64 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033]52;c;?\\007'; q '\\033]4;9;?\\007'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "%0"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "#102030 white\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "^[]10;rgb:1010/2020/3030^G\n^[]11;rgb:c0c0/c0c0/c0c0^[\\\n^[]4;5;rgb:0a0a/0b0b/0c0c^G\n^[]4;7;rgb:ffff/8080/0000^G\n^[]12;rgb:a0a0/b0b0/c0c0^G\n^[]12;rgb:0000/ffff/0000^[\\\n^[]52;c;SGVsbG8=^G\n^[[?997;2n\n^[[?997;1n\nfg=#102030 #000000\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

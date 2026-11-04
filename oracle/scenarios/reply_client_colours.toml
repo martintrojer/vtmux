@@ -1,0 +1,33 @@
+name = "reply_client_colours"
+size = [60, 14]
+# The attached client's terminal reports its colours (OSC 10/11 replies to
+# tty_send_requests) and its theme (CSI ? 997 ; Ps n); the scenario plays
+# the terminal by sending those as keys. A pane's OSC 10/11 queries are then
+# answered with the client's colours (window_pane_get_fg/_bg), DSR 996 with
+# a guess from its background until the terminal reports a theme
+# (window_pane_get_theme), and a pane with mode 2031 on is told when the
+# theme changes, once the colours come back (server_client_report_theme ->
+# tty_repeat_requests -> tty_keys_colours -> session_theme_changed).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "13", "cat"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set-hook", "-g", "client-light-theme", "set -g @t light"] },
+  { run = ["set-hook", "-g", "client-dark-theme", "set -g @t dark"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u001b]10;rgb:1111/2222/3333\u001b\\\u001b]11;rgb:eeee/eeee/eeee\u001b\\" },
+  { settle = { react = true } },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "stty raw -echo min 0 time 10; q() { printf \"$1\"; dd bs=1 count=64 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033]10;?\\007'; q '\\033]11;?\\007'; q '\\033[?996n'; printf '%s\\r\\n' \"$(tmux display -p -t %0 '#{pane_fg} #{pane_bg} [#{client_theme}] [#{@t}]')\"; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "%0", "-S", "0", "-E", "3"] },
+  { keys = "\u001b[?997;1n" },
+  { settle = { react = true } },
+  { run = ["display", "-p", "[#{client_theme}] [#{@t}]"] },
+  { run = ["respawn-pane", "-k", "-t", "%0", "sh", "-c", "stty raw -echo min 0 time 30; printf '\\033[?996n'; dd bs=1 count=9 2>/dev/null | cat -v; printf '\\r\\n\\033[?2031h'; tmux wait-for -S on; dd bs=1 count=9 2>/dev/null | cat -v; printf '\\r\\n'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "on" },
+  { keys = "\u001b[?997;2n\u001b]11;rgb:eeee/eeee/eeee\u001b\\" },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "%0", "-S", "0", "-E", "1"] },
+  { run = ["display", "-p", "[#{client_theme}] [#{@t}]"] },
+]

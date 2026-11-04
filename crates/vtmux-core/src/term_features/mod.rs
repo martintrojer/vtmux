@@ -973,7 +973,8 @@ fn expand_ss(template: &str, p1: &str, p2: &str) -> Vec<u8> {
 }
 
 /// `b64_ntop`: standard base64 with padding.
-fn base64(data: &[u8]) -> String {
+#[must_use]
+pub fn base64(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {

@@ -133,7 +133,7 @@ pub(crate) struct Client {
     pub(crate) pasting: bool,
     /// Mouse drag, click and outer-mode state (`c->tty.mouse_*`).
     pub(crate) mouse: crate::mouse::ClientMouse,
-    decoder: crate::input::Decoder,
+    pub(crate) decoder: crate::input::Decoder,
     caps: Option<crate::render::Caps>,
     /// The client's terminal once attached (`tty_open`): its features and
     /// capabilities after `terminal-features` and `terminal-overrides`.
@@ -157,6 +157,8 @@ pub(crate) struct Client {
     /// `TTY_OSC52QUERY`: a clipboard query (`refresh-client -l`) is out
     /// until this instant, and its reply becomes a paste buffer.
     pub(crate) clipboard_query: Option<Instant>,
+    /// What its terminal reported: colours and theme.
+    pub(crate) reported: crate::term_queries::Reported,
     /// `c->title`: the last title written to the terminal, so an
     /// unchanged one is not written again.
     title: Option<String>,
@@ -196,6 +198,7 @@ impl Client {
             popup: None,
             flags: crate::client_flags::ClientFlags::default(),
             clipboard_query: None,
+            reported: crate::term_queries::Reported::default(),
             title: None,
             written: 0,
             pasting: false,
@@ -765,6 +768,7 @@ impl Server {
             self.panes_timers(Instant::now());
             self.model.scrollbar_timers(Instant::now());
             self.sync_timers(Instant::now());
+            self.request_timers(Instant::now());
             self.subs_timers(Instant::now());
             self.lock_timer_fire(Instant::now());
             self.exit_timers(Instant::now());
@@ -778,6 +782,8 @@ impl Server {
             self.check_window_resizes();
             self.drain_events();
             self.cmdq_process();
+            // server_client_loop (server-client.c:1945-1949).
+            self.send_theme_updates();
             self.apply_redraws();
             self.tree_updates();
             self.switch_resizes();
@@ -898,6 +904,8 @@ impl Server {
                 .scrollbar_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.sync_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.request_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.subs_deadline()
                 .map(|d| d.saturating_duration_since(now)),
@@ -1155,6 +1163,8 @@ impl Server {
             self.cfg_client = None;
         }
         self.attached_lost(id);
+        // server-client.c:527.
+        self.cancel_requests(id);
         // server-client.c:564.
         self.recalculate_sizes();
         self.files.remove(&id);
@@ -1252,12 +1262,18 @@ impl Server {
     }
 
     pub(crate) fn set_selection(&mut self, id: ClientId, data: &[u8]) {
+        self.set_selection_clip(id, "", data);
+    }
+
+    /// [`Self::set_selection`] naming the clipboard (`tty_set_selection`'s
+    /// `clip`).
+    pub(crate) fn set_selection_clip(&mut self, id: ClientId, clip: &str, data: &[u8]) {
         let Some(bytes) = self
             .clients
             .get(&id)
             .filter(|c| c.attached.is_some() && c.caps.is_some())
             .and_then(|c| c.term.as_ref())
-            .and_then(|t| t.set_selection("", data))
+            .and_then(|t| t.set_selection(clip, data))
         else {
             return;
         };
@@ -1708,9 +1724,11 @@ impl Server {
         // tty_send_requests); tty_start_start_timer.
         client.decoder.query_sent(Instant::now());
         // server_client_set_session: the current window's latest client
-        // (server-client.c:465), then session_update_activity (468).
+        // (server-client.c:465), then session_update_activity (468) and
+        // session_theme_changed (469).
         self.set_latest(s, id);
         self.model.session_attached_now(s);
+        self.session_theme_changed(Some(s));
         self.arm_lock_timer(s);
         self.send(id, &ServerMsg::Ready);
         // tty.c tty_start_tty / tty_stop_tty; reference PTY probe pins the
@@ -2214,17 +2232,10 @@ impl Server {
                 crate::input::Event::Mouse(m, bytes) => {
                     self.handle_mouse_input(id, m, bytes, false);
                 }
-                crate::input::Event::Clipboard(data) => {
-                    // tty_keys_clipboard: with a query out, the reply
-                    // becomes a paste buffer.
-                    if c.clipboard_query
-                        .take()
-                        .is_some_and(|until| until > Instant::now())
-                    {
-                        let limit = crate::commands::buffer_limit(self);
-                        self.model.paste.add(data, limit);
-                    }
-                }
+                crate::input::Event::Clipboard(..)
+                | crate::input::Event::Colour(..)
+                | crate::input::Event::Palette(..)
+                | crate::input::Event::Theme(_) => self.client_report(id, event),
                 crate::input::Event::Sync(sync) => {
                     // tty_keys_sync: only a supported reply changes anything,
                     // and tty_update_features redraws the client.
@@ -3503,6 +3514,7 @@ impl Server {
                 .map(|t| t.term_type().to_owned())
                 .unwrap_or_default(),
             colours: c.caps.map(|caps| caps.colours),
+            theme: c.reported.theme,
             flags: c.flags.clone(),
             term: c
                 .term
@@ -4113,7 +4125,7 @@ impl Server {
         let history_limit =
             usize::try_from(self.model.number_option(session_tree, "history-limit")).unwrap_or(0);
         let mut term = PaneTerm::new(cols, rows, history_limit);
-        term.set_colour_names(vtmux_core::colour::is_x11_name);
+        term.set_colour_names(vtmux_core::colour::x11_rgb);
         // screen_init: the new screen's key mode follows `extended-keys`.
         term.set_extended_keys(self.model.extended_keys());
         term.reset_key_mode();
@@ -4173,6 +4185,7 @@ impl Server {
             capture_keys: false,
             close_on_click: false,
             close_on_cancel: false,
+            requests: crate::term_queries::PaneRequests::default(),
         })
     }
 
@@ -4318,6 +4331,8 @@ impl Server {
         // grid_clear_lines: an erase, never into history (scroll-on-clear
         // is for the program's clears).
         pane.term.set_scroll_on_clear(false);
+        // input_free: the old program's requests go.
+        pane.requests.clear();
         pane.term.feed(
             b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[20l\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
         );
@@ -4477,13 +4492,7 @@ impl Server {
         pane.unseen_changes |= !pane.modes.is_empty();
         let bells = pane.term.take_bells();
         let redraw = pane.term.take_redraw();
-        // An empty pane has no program to answer.
-        let replies = pane.term.take_replies();
-        if let Some(io) = pane.io.as_mut()
-            && !replies.is_empty()
-        {
-            io.write(&replies);
-        }
+        let answers = pane.term.take_answers();
         let toggled_alternate = alternate != pane.term.alternate_on();
         if entered_alternate {
             pane.flush_resizes();
@@ -4534,6 +4543,11 @@ impl Server {
         }
         for name in renames {
             self.pane_rename(p, window, &name);
+        }
+        // An empty pane has no program to answer (pane_reply writes
+        // nowhere).
+        if !answers.is_empty() {
+            self.pane_answers(p, answers);
         }
         self.control_output(p, bytes);
         self.pipe_write(p, bytes);

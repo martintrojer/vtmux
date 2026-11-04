@@ -521,6 +521,101 @@ fn pane_line(w: &World) -> String {
         .to_owned()
 }
 
+/// input.c `input_add_request` / `input_request_reply`: a palette entry
+/// nobody set, and the clipboard under `get-clipboard request` or `both`,
+/// are asked of the attached terminal (OSC 4 always with ST, OSC 52 through
+/// `Ms`), and its reply goes to the pane, ended as the query was; `both`
+/// also keeps it as a paste buffer, `request` does not.
+#[test]
+fn pane_requests_reach_the_terminal_and_back() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        let out = w.home.path().join("out");
+        let a = &mut w.attach(&["new", "-s", "a", "-n", "w", "cat"]);
+        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        let query = |a: &mut Attached,
+                     w: &World,
+                     setup: &str,
+                     q: &str,
+                     needle: &[u8],
+                     reply: &[u8]| {
+            let _ = std::fs::remove_file(&out);
+            let seen = a.text().len();
+            let script = format!(
+                "stty raw -echo min 0 time 20; printf '{q}'; dd bs=1 count=64 2>/dev/null | cat -v > {}; exec cat",
+                out.display()
+            );
+            for args in setup.split(';').filter(|c| !c.is_empty()) {
+                let args: Vec<&str> = args.split(' ').collect();
+                assert!(w.cli(&args).status.success());
+            }
+            assert!(
+                w.cli(&["respawn-pane", "-k", "-t", "a", &script])
+                    .status
+                    .success()
+            );
+            let needle = String::from_utf8_lossy(needle).into_owned();
+            a.wait_labelled(
+                &format!("{} {needle:?}", bin.display()),
+                Duration::from_secs(5),
+                |a| a.text()[seen..].contains(&needle),
+            );
+            a.keys(reply);
+            let end = Instant::now() + Duration::from_secs(5);
+            while std::fs::metadata(&out).map_or(true, |m| m.len() == 0) && Instant::now() < end {
+                thread::sleep(Duration::from_millis(20));
+            }
+            thread::sleep(Duration::from_millis(100));
+            std::fs::read_to_string(&out).unwrap_or_default()
+        };
+        assert_eq!(
+            query(
+                a,
+                &w,
+                "",
+                r"\033]4;99;?\007",
+                b"\x1b]4;99;?\x1b\\",
+                b"\x1b]4;99;rgb:0101/0202/0303\x1b\\"
+            ),
+            "^[]4;99;rgb:0101/0202/0303^G",
+            "{}",
+            bin.display()
+        );
+        assert_eq!(
+            query(
+                a,
+                &w,
+                "set -s set-clipboard on;set -s get-clipboard request",
+                r"\033]52;c;?\033\\",
+                b"\x1b]52;;?\x07",
+                b"\x1b]52;c;UmVxdWVzdA==\x1b\\"
+            ),
+            r"^[]52;c;UmVxdWVzdA==^[\",
+            "{}",
+            bin.display()
+        );
+        let buffers = |w: &World| {
+            String::from_utf8_lossy(&w.cli(&["list-buffers", "-F", "#{buffer_sample}"]).stdout)
+                .into_owned()
+        };
+        assert_eq!(buffers(&w), "", "{}", bin.display());
+        assert_eq!(
+            query(
+                a,
+                &w,
+                "set -s get-clipboard both",
+                r"\033]52;c;?\007",
+                b"\x1b]52;;?\x07",
+                b"\x1b]52;c;Qm90aA==\x07"
+            ),
+            "^[]52;c;Qm90aA==^G",
+            "{}",
+            bin.display()
+        );
+        assert_eq!(buffers(&w), "Both\n", "{}", bin.display());
+    }
+}
+
 /// tty-keys.c:990-1012: while terminal queries are outstanding a partial
 /// sequence waits at least 500ms, so a reply split over a slow link is
 /// still swallowed. DECRPM goes last: it ends vtmux's query window.
