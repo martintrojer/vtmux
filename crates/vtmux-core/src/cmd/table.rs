@@ -557,13 +557,18 @@ mod tests {
         );
     }
 
+    /// Every tmux 3.8 command runs now; an entry marked otherwise reports
+    /// `not implemented`.
     #[test]
-    fn non_m0_commands_are_not_implemented() {
-        let e = find("switch-mode").unwrap();
+    fn every_command_is_implemented() {
+        assert!(TMUX_COMMANDS.iter().all(|e| e.ensure_implemented().is_ok()));
+        let e = CmdEntry {
+            implemented: false,
+            ..*find("switch-mode").unwrap()
+        };
         assert_eq!(
             e.ensure_implemented().unwrap_err().to_string(),
             "not implemented in vtmux yet: switch-mode"
         );
-        assert!(find("new-session").unwrap().ensure_implemented().is_ok());
     }
 }
