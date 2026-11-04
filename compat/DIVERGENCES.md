@@ -223,3 +223,11 @@ product reasons" category.
 - vtmux behaviour: the inner read fails at once with `Bad file descriptor: -` (exit 1), the output of the commands before it printed, however stdout is connected; `source - </dev/null` returns 0 at once, as tmux.
 - Evidence: reference tmux 3.8 under `timeout -k 5 6`, six runs each: `printf 'display -p x\nsource -\n' | tmux source -` and the `load-buffer -` form time out every time with stdout a pipe; `>file` gives `x` and `Input/output error: -`, exit 1. vtmux: 0.01 s, `x` then `Bad file descriptor: -`, exit 1, every time.
 - Category: Do not copy tmux bug (tmux hangs).
+
+### D-025: a program's RIS (`ESC c`) drops the history and leaves the alternate screen
+
+- Test / assertion: none pins it; reproduction below. (`send-keys -R`, which tmux runs through the same `screen_write_reset`, does match: cli `send_keys_reset_keeps_history_and_alternate`, oracle `send_keys_reset_history`.)
+- tmux behaviour: `ESC c` is `screen_write_reset` (input.c:1407-1412, screen-write.c:423-437): the clear is `screen_write_clearscreen` with `scroll-on-clear`, so the screen's used rows scroll into history and the history stays; under an alternate screen the alternate screen stays up and the saved primary with it.
+- vtmux behaviour: the byte goes to Ghostty, whose RIS is a full reset: history erased, the alternate screen left. vtmux keeps the title, the key and mouse modes and the charsets as tmux does.
+- Evidence: 20x5 pane, `printf 'h1\nh2\nh3\nh4\nh5\nv1\nv2\n\033c'`: tmux `#{history_size}` 7, vtmux 0; `printf 'main\n\033[?1049halt\033c'`: tmux `#{alternate_on}` 1, vtmux 0 (reference tmux 3.8, under `timeout -k 5 20`).
+- Category: Deferred (handling RIS like `send-keys -R`, with `PaneTerm::reset` instead of Ghostty's full reset, needs the scanner to swallow the byte and the parser state around it; out of the send-keys -R fix's scope).

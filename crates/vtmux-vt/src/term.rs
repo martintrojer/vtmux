@@ -632,6 +632,46 @@ impl PaneTerm {
         self.scan.key_mode
     }
 
+    /// `input_reset(ictx, 1)` as `send-keys -R` calls it (input.c:929-949):
+    /// the parser back to the ground state, the cell, charsets and palette
+    /// to their defaults, then `screen_write_reset` (screen-write.c:
+    /// 423-437): default tabs, the whole screen as the scroll region, modes
+    /// back to cursor and wrap (and the `extended-keys always` key mode),
+    /// the screen cleared and the cursor home.
+    ///
+    /// tmux's clear is `screen_write_clearscreen` with `scroll-on-clear`
+    /// (`scroll_on_clear`): the screen's used rows scroll into history
+    /// (`grid_view_clear_history`), except under an alternate screen, which
+    /// has no history and is erased. History is kept and an alternate
+    /// screen stays up: unlike RIS in Ghostty, which drops both. Ghostty
+    /// does it as DECSTR (soft reset), the mode resets DECSTR leaves, tab
+    /// stops, then `CSI 22 J` (scroll the active area into scrollback) or
+    /// `CSI 2 J`.
+    pub fn reset(&mut self, scroll_on_clear: bool) {
+        self.reset_input();
+        self.scan.palette.clear();
+        self.scan.mouse.set(MouseModes::default());
+        self.scan.key_mode = self.scan.extended_keys.reset_mode();
+        self.scan.charset_op(CharsetOp::Reset);
+        let mut c = self.cursor.get();
+        c.reset();
+        self.cursor.set(c);
+        let clear: &[u8] = if scroll_on_clear && !self.alternate_on() {
+            b"\x1b[22J"
+        } else {
+            b"\x1b[2J"
+        };
+        // DECSTR, then what screen_write_reset turns off that DECSTR keeps:
+        // application keypad, mouse, focus, bracketed paste, LNM, origin;
+        // then default tab stops (DECST8C), the clear and the cursor home.
+        let mut bytes = b"\x1b[!p\x1b>\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[20l\x1b[?6l\x1b[?7h\x1b[?25h\x1b[?5W".to_vec();
+        bytes.extend_from_slice(clear);
+        bytes.extend_from_slice(b"\x1b[H");
+        self.feed(&bytes);
+        let _ = self.take_replies();
+        self.redraw = true;
+    }
+
     /// Start from the ground state, as a fresh pane process does: nothing
     /// half-parsed is carried over (a respawned pane).
     pub fn reset_input(&mut self) {
