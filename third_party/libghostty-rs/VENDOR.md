@@ -176,6 +176,33 @@ Recorded per commit in git history; the list is kept current:
   two failures as without the patch (`tabClear single`, and the kitty
   temp-file test noted under 0001) on this host.
 
+- `patches/0008-cluster-keeps-zero-width.patch` (`Terminal.zig` `print`):
+  vtmux runs every pane with grapheme clustering (mode 2027), which is
+  how tmux's `screen_write_combine` groups regional-indicator pairs, emoji
+  modifiers and ZWJ sequences. Upstream drops a zero-width character that
+  starts a new grapheme in that mode (U+200B, U+2028, U+2029); tmux and
+  Ghostty without the mode attach it to the previous cell, so this patch
+  removes the early return and it is attached in both modes. Test:
+  `Terminal: zero-width character after grapheme cluster is kept (vtmux)`
+  (in patch 0009's file, which adds it). Upstream candidate only as an
+  option: dropping is a deliberate choice there.
+
+- `patches/0009-c1-is-zero-width.patch` (`stream.zig` ground-state UTF-8
+  paths, `Terminal.zig` `print`, `printSliceFast`, `printSliceFill`): a C1
+  control decoded from UTF-8 (U+0080-U+009F) is printed as a zero-width
+  character that joins the previous cell, as tmux's `utf8_width` makes it
+  (wcwidth -1, a C1 control, 0). Upstream ignores it. `print` gives it
+  width 0, and the batched narrow run (its SIMD scan now stops at 0x7F, the
+  scalar loop takes 0xA0-0xFF) leaves it to `print`. The upstream test
+  `stream: ground state UTF-8-decoded C1 controls are ignored` is now
+  `... are printed (vtmux)`. Tests: `zig build test-lib-vt
+  -Dtest-filter=vtmux` (45/45 steps), `-Dtest-filter=stream` (597 pass),
+  `-Dtest-filter="Terminal: "`: 1011/1013, the same two `tabClear single`
+  failures as the unpatched tree (patch 0002 marks the tab cells and
+  dirties the row). Throughput: a 21.9 MB ASCII, 19.5 MB Latin-1 and 15 MB
+  CJK flood through one `PaneTerm` (80x24, release) take 0.10/0.13/0.13 s,
+  against 0.16/0.16/0.15 s on main before this and the scanner's ASCII run.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

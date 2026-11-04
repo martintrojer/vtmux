@@ -1,0 +1,50 @@
+name = "program_grid_edges"
+size = [30, 7]
+# What a program's output does to the grid where Ghostty, left alone, does
+# something else (task gap_emulator_triage), seen by an attached client:
+# Ctrl-L (`ESC[H ESC[J`) and ED 2 scroll the used rows into history under
+# scroll-on-clear (screen-write.c:1936-1942, 2090-2096), which copy mode then
+# shows; RIS is screen_write_reset (history kept); OSC 133;A only marks the
+# line (no fresh line); DECAWM off keeps the cursor on the last column;
+# grapheme clusters take one cell (screen_write_combine); CHT is ignored;
+# a C1 control joins the previous cell. The program prints each input
+# line's text as escapes (`printf %b`).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "6", "sh", "-c", "stty -echo; i=1; while [ $i -le 9 ]; do echo l$i; i=$((i+1)); done; tmux wait-for -S ready; while read -r l; do printf \"$l\"; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{scroll_position}/#{history_size}]"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "\\033[H\\033[Jprompt$ \r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["copy-mode", "-t", "%0"] },
+  { run = ["send-keys", "-t", "%0", "-X", "history-top"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "%0", "-X", "cancel"] },
+  { feed = { pane = "%0", bytes = "\\nab\\033[2J\\033[44mX\\033[m\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { feed = { pane = "%0", bytes = "\\033c\\033]133;A\\007p>\\033]133;B\\007cmd\\nxx\\033]133;A\\007q>\\n\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { feed = { pane = "%0", bytes = "\\033[?7labcdefghijklmnopqrstuvwxyz0123456789\\033[?7h\\n\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "x\\360\\237\\207\\254\\360\\237\\207\\247y\\360\\237\\221\\215\\360\\237\\217\\273z\\033[2I|a\\302\\205b\\n\r" } },
+  { wait_for = "fed" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capturep", "-p", "-S", "-", "-E", "-"] },
+]

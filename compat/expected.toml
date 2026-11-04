@@ -63,8 +63,7 @@ status = "pass"
 status = "pass"
 
 [tests."combine-test.sh"]
-status = "xfail"
-reason = "terminal-emulator diff (libghostty): line 7 (two emoji + skin-tone modifiers at columns 3/12) has the second cell 2 columns narrower than tmux; every other row matches (`👍🏻     👍🏻4` vs `👍🏻       👍🏻4`)"
+status = "pass"
 
 [tests."command-alias.sh"]
 status = "pass"
@@ -136,8 +135,7 @@ status = "pass"
 status = "pass"
 
 [tests."copy-mode-unicode-whitespace.sh"]
-status = "xfail"
-reason = "D-011: Ghostty prints U+0085 as a cell of its own where tmux combines it (wcwidth -1, C1, width 0) into the cell before, so next-word stops one column later (3,17 vs 2,17); every other assertion passes"
+status = "pass"
 
 [tests."cursor-test1.sh"]
 status = "pass"
@@ -245,12 +243,10 @@ status = "pass"
 status = "pass"
 
 [tests."input-malformed.sh"]
-status = "xfail"
-reason = "capture-pane -R is in; malformed OSC 8 (id=a:id=b, id without ;) still links the text in Ghostty, tmux drops the link; malformed UTF-8 differs too"
+status = "pass"
 
 [tests."input-modes.sh"]
-status = "xfail"
-reason = "capture-pane -R and the osc133= line data are in (task gap_capture_flags); fails on scene osc133: Ghostty does a fresh-line on `OSC 133;A` (Terminal.zig `semanticPrompt` `fresh_line_new_prompt`), tmux only flags the line, so the capture is `xx` / `p>cmd` where tmux has `xxp>cmd` and the -R line data lands one line down (DIVERGENCES-PENDING P10)"
+status = "pass"
 
 [tests."input-osc.sh"]
 status = "xfail"
@@ -263,33 +259,31 @@ status = "pass"
 status = "pass"
 
 [tests."input-raw-edit.sh"]
-status = "xfail"
-reason = "capture-pane -R is in; the tabs case differs: after TBC (CSI 2 g) and CBT tmux overwrites the TAB cell's first column with C, Ghostty keeps the tab and writes C before it"
+status = "pass"
 
 [tests."input-raw-history.sh"]
-status = "xfail"
-reason = "capture-pane -R is in; edhistory differs: tmux's ED 0 at home scrolls the screen into history (grid_view_clear_history, scroll-on-clear), Ghostty erases it in place"
+status = "pass"
 
 [tests."input-raw-reflow.sh"]
 status = "pass"
 
 [tests."input-raw-scroll.sh"]
 status = "xfail"
-reason = "capture-pane -R is in; index differs: tmux moves the scroll region's top row into history on IND at the region bottom when the region starts at row 1, Ghostty does not"
+reason = "expected divergence D-032: scene index, IND at the bottom of a region starting at row 1 moves the region's top row into history in tmux (grid_scroll_history_region), Ghostty only scrolls a region at row 0 into scrollback; every other scene passes"
 
 [tests."input-raw-sgr.sh"]
 status = "pass"
 
 [tests."input-raw-unicode.sh"]
 status = "xfail"
-reason = "capture-pane -R is in; Ghostty differs from tmux on regional-indicator pairs (two cells, not one wide cluster), U+FE0F widening, and overwriting half of a wide character (tmux leaves a plain space, Ghostty a CLEARED-looking blank with the line not EXTENDED)"
+reason = "expected divergence D-027: scenes overwrite-wide-left and overwrite-wide-pad, a wide character overwritten by half leaves tmux's other half an uncleared space on an EXTENDED line, Ghostty a cleared blank on a plain line (-R model); flag, variation and every other scene pass"
 
 [tests."input-raw-wrap.sh"]
 status = "pass"
 
 [tests."input-reflow-stress.sh"]
 status = "xfail"
-reason = "every capture check passes now (-NJ, -R, -M: task gap_capture_flags); the live-client phase fails: after the outer `resize-window` sweep the inner vtmux client attached in the outer pane still shows its pre-resize content (`outer capture missing expected sentinel`: the outer pane shows the OPPRE lines, not SENT-POST); the reference passes"
+reason = "live-client phase: the inner window stays 80x24 under an 80x12 client, tmux pans the view to follow the cursor (tty.c tty_window_offset1) so SENT-POST is on screen, vtmux draws from the window's origin and shows OPPRE lines (`outer capture missing expected sentinel`); the same missing view offset as screen-redraw-outside.sh and tty-clamp-area-status-top.sh; every capture check passes"
 
 [tests."input-replies.sh"]
 status = "xfail"
@@ -300,15 +294,14 @@ status = "xfail"
 reason = "terminal requests from a pane are not seen on the client output: `did not see terminal request` for the OSC 4 colour query (ESC ] 4;99;?); the script also respawns a remain-on-exit window, which works now"
 
 [tests."input-scroll.sh"]
-status = "xfail"
-reason = "capture-pane -N is in; fails on a cursor difference with autowrap off (DECAWM reset: tmux 4,0, vtmux 5,0)"
+status = "pass"
 
 [tests."input-sgr.sh"]
 status = "pass"
 
 [tests."input-unicode.sh"]
 status = "xfail"
-reason = "capture-pane -N/-F are in; -F flags a line holding a wide character X in tmux even after it is overwritten, vtmux reads Ghostty's current cells"
+reason = "expected divergence D-027: scenes wide and widepad, -F flags the line X (EXTENDED) in tmux after its wide character is overwritten, vtmux reads Ghostty's current cells and gives -; every other scene passes"
 
 [tests."join-pane-modal.sh"]
 status = "pass"
@@ -544,8 +537,7 @@ reason = "needs refresh-client -c/-L/-R (panning a window larger than the client
 status = "pass"
 
 [tests."utf8-test.sh"]
-status = "xfail"
-reason = "runs to the end now (remain-on-exit, capture-pane -C -e -J -S-); the capture of the UTF-8 stress file differs from utf8-test.result (malformed and overlong sequences, Ghostty decodes them differently: D-013 and the input-malformed reason)"
+status = "pass"
 
 [tests."wait-for-E.sh"]
 status = "pass"

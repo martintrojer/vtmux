@@ -111,13 +111,10 @@ product reasons" category.
 - Evidence: `cargo xtask oracle replay --only 'copy_*'`; cli.rs `copy_mode_formats` and `copy_selection_formats` equal tmux 3.8; attach.rs `owner_copy_mode_vi_bindings`, `owner_prompt_jumps`; regress `copy-mode-selection-mode.sh` passes.
 - Category: Deferred
 
-### D-011: word movement over a cell Ghostty stores differently (U+0085)
+### D-011: closed (U+0085 and TAB cells match tmux)
 
-- Test / assertion: regress `copy-mode-unicode-whitespace.sh` (`check_cursor 2,17` after next-word over `xa\302\205b c`), xfail; it passes with only that assertion changed.
-- tmux behaviour: U+0085 has no width (`utf8_width`: wcwidth -1, a C1 control, 0) and combines into the cell before it, so `xa\302\205b` is three cells.
-- vtmux behaviour: Ghostty prints U+0085 as a cell of its own (`#{cursor_x}` 6 vs tmux 5 after `xa\302\205b c`), so next-word over it stops one column later.
-- Evidence: `printf 'xa\302\205b c'` then `display -p '#{cursor_x}'`: tmux 5, vtmux 6.
-- Category: Deferred (grid-level, D4 arbiter not run). The TAB half of this entry is closed: `d_tab_capture` patches Ghostty to mark the cells an HT crosses (`third_party/libghostty-rs/VENDOR.md`, `0002-tab-cell-mark.patch`) and vtmux rebuilds tmux's TAB cell from them, so capture-pane and copy mode give `\t` and `copy-mode-test-emacs.sh` passes. Left over, folded into the P2 reflow entry of `crates/vtmux-vt/DIVERGENCES-PENDING.md`: narrowing a line that holds a tab wraps it in tmux (`grid_reflow` keeps the TAB cell whole) and not in vtmux.
+- Was: a C1 control written as UTF-8 (U+0085) took a cell of its own in Ghostty where tmux combines it into the cell before (`utf8_width`: wcwidth -1, C1, width 0), so next-word over `xa\302\205b` stopped one column later; and HT left no TAB cell.
+- Now: vendored patch `0009-c1-is-zero-width.patch` makes a decoded C1 control a zero-width character that joins the previous cell (Ghostty dropped it), and `0002-tab-cell-mark.patch` gives tmux's TAB cell. Regress `copy-mode-unicode-whitespace.sh`, `utf8-test.sh` and `copy-mode-test-emacs.sh` pass; cli `program_output_reaches_the_grid_as_in_tmux` (case `c1`) pins it. Left over, in the P2 reflow entry of `crates/vtmux-vt/DIVERGENCES-PENDING.md`: narrowing a line that holds a tab wraps it in tmux (`grid_reflow` keeps the TAB cell whole) and not in vtmux.
 
 ### D-012: a new window's first automatic-rename check waits one name interval
 
@@ -224,13 +221,10 @@ product reasons" category.
 - Evidence: reference tmux 3.8 under `timeout -k 5 6`, six runs each: `printf 'display -p x\nsource -\n' | tmux source -` and the `load-buffer -` form time out every time with stdout a pipe; `>file` gives `x` and `Input/output error: -`, exit 1. vtmux: 0.01 s, `x` then `Bad file descriptor: -`, exit 1, every time.
 - Category: Do not copy tmux bug (tmux hangs).
 
-### D-025: a program's RIS (`ESC c`) drops the history and leaves the alternate screen
+### D-025: closed (a program's RIS is tmux's `screen_write_reset`)
 
-- Test / assertion: none pins it; reproduction below. (`send-keys -R`, which tmux runs through the same `screen_write_reset`, does match: cli `send_keys_reset_keeps_history_and_alternate`, oracle `send_keys_reset_history`.)
-- tmux behaviour: `ESC c` is `screen_write_reset` (input.c:1407-1412, screen-write.c:423-437): the clear is `screen_write_clearscreen` with `scroll-on-clear`, so the screen's used rows scroll into history and the history stays; under an alternate screen the alternate screen stays up and the saved primary with it.
-- vtmux behaviour: the byte goes to Ghostty, whose RIS is a full reset: history erased, the alternate screen left. vtmux keeps the title, the key and mouse modes and the charsets as tmux does.
-- Evidence: 20x5 pane, `printf 'h1\nh2\nh3\nh4\nh5\nv1\nv2\n\033c'`: tmux `#{history_size}` 7, vtmux 0; `printf 'main\n\033[?1049halt\033c'`: tmux `#{alternate_on}` 1, vtmux 0 (reference tmux 3.8, under `timeout -k 5 20`).
-- Category: Deferred (handling RIS like `send-keys -R`, with `PaneTerm::reset` instead of Ghostty's full reset, needs the scanner to swallow the byte and the parser state around it; out of the send-keys -R fix's scope).
+- Was: `ESC c` went to Ghostty, whose full reset erased the history and left the alternate screen.
+- Now: the scanner keeps the `c` from Ghostty and runs the reset `send-keys -R` uses (`PaneTerm::reset_screen`): history kept, the used rows scrolled into it under `scroll-on-clear`, the alternate screen and the title kept (input.c:1407-1412, screen-write.c:423-437). Goldens `cap_ris`, `fmt_ris`, `cap_ris_alt`, `fmt_ris_alt`; cli `program_output_reaches_the_grid_as_in_tmux` (cases `ris`, `risalt`).
 
 ### D-026: `vtmux -V` is not `#{version}` (spec D21, D25)
 
@@ -264,3 +258,27 @@ product reasons" category.
 - vtmux behaviour: the same steps, but the output and the exit message share the one socket, and a message the socket has taken part of must be finished first. So at the first 10 s step a client whose socket has taken nothing for 10 s is dropped at once instead of being sent the exit alone; one still reading gets its exit after the part-written message.
 - Evidence: `control-client-exit-stalled.sh` passes on both, 12.1 s each (`cargo xtask regress --tmux reference --only control-client-exit-stalled.sh`). A reader 64 KB per 10 ms behind a `yes` flood and then detached: both exit 0 with `%exit` within 0.5 s (reviewer repro rv_det2.py).
 - Category: Deferred (the exit on a channel of its own).
+
+### D-030: DECAWM off with a wrap already pending reports the last column
+
+- Test / assertion: none fails (regress `input-scroll.sh` passes); cli `program_output_reaches_the_grid_as_in_tmux` pins the common case (`nowrap`).
+- tmux behaviour: with autowrap off a print that reaches the last column leaves `cx` on it (`screen_write_cell`, `not_wrap`); with it on, `cx` becomes the column count. A line filled under autowrap and then `ESC[?7l` keeps `cx` = width (10 on a 10-column pane, `#{cursor_x}` 10); filled under `?7l` and then `?7h`, `cx` stays 9.
+- vtmux behaviour: Ghostty keeps the last column and a pending-wrap flag in both cases; vtmux reports the column count only while the flag is set and DECAWM is on (`term.rs` `tmux_cursor`), so it matches every print made under one mode, and gives 9 and 10 for the two mode switches above. The next character also differs there: Ghostty wraps the second case (the flag survives `?7l`/`?7h`), tmux overwrites the last cell.
+- Evidence: 10x3 pane, reference tmux 3.8: `printf 'abcdefghij\033[?7l'` gives `#{cursor_x}` 10, vtmux 9; `printf '\033[?7labcdefghij\033[?7h'` 9, vtmux 10.
+- Category: Deferred (a mode switch between filling a line and the next print; Ghostty's flag would need setting through the API).
+
+### D-031: tmux's own character widths that Ghostty's clustering does not give
+
+- Test / assertion: none fails; reproductions below. (Grapheme clusters themselves match: vtmux runs Ghostty with mode 2027, `term.rs` `keep_clustering`; regress `combine-test.sh` passes; cli `program_output_reaches_the_grid_as_in_tmux` case `cluster`.)
+- tmux behaviour: `utf8_default_width_cache` (utf8.c:53-) makes a lone regional indicator one column; `screen_write_combine` attaches U+FE0F to any character and makes it two columns wide (`variation-selector-always-wide`), not only an emoji.
+- vtmux behaviour: Ghostty's widths: a lone regional indicator is two columns, and U+FE0F after a character that is not an emoji is dropped (the cell stays one column). Clusters (regional-indicator pairs, emoji modifiers, ZWJ sequences, VS16 after an emoji, Hangul) match.
+- Evidence: 20x3 pane, reference tmux 3.8: `printf 'x\360\237\207\254y'` gives `#{cursor_x}` 3, vtmux 4; `printf 'x\357\270\217y'` 3 with U+FE0F kept on `x`, vtmux 2.
+- Category: Deferred (tmux's table over Ghostty's, through the width override patch 0007 for the lone indicator; the VS16 rule needs a Ghostty change).
+
+### D-032: lines scrolled out of a scroll region that does not start at the top stay out of history
+
+- Test / assertion: regress `input-raw-scroll.sh` (scene `index`), xfail; goldens `cap_region_scroll_history`, `fmt_region_scroll_history_size` (ignored, `crates/vtmux-vt/DIVERGENCES-PENDING.md` P1).
+- tmux behaviour: `grid_view_scroll_region_up` (grid-view.c:107-117) moves the line scrolled off the top of any region into history (`grid_scroll_history_region`), whatever row the region starts on.
+- vtmux behaviour: Ghostty creates scrollback only for a region whose top margin is row 0 (Terminal.zig `index`), so the line is lost.
+- Evidence: 6x4 pane, `printf 'A\nB\nC\033[2;3r\033[2;1HX\033D\033DY'`: tmux `#{history_size}` 1 and capture `-S -` starts `X`; vtmux 0.
+- Category: Deferred (a Ghostty change: a region scroll that copies its top row into scrollback before rotating, about a day with its page bookkeeping).

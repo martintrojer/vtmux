@@ -260,6 +260,7 @@ impl ExtendedKeys {
 }
 
 /// One pane's terminal. Owns the libghostty terminal; `'static` for callers.
+#[allow(clippy::struct_excessive_bools)] // independent pane flags
 #[derive(Debug)]
 pub struct PaneTerm {
     pub(crate) term: Terminal<'static, 'static>,
@@ -354,6 +355,9 @@ pub struct PaneTerm {
     /// the only reader of Ghostty's render state, whose dirty flags one
     /// reader consumes.
     pub(crate) view: RefCell<crate::snapshot::ScreenView>,
+    /// The pane's `scroll-on-clear` option (default on): a clear of the
+    /// whole screen moves its used rows into history first.
+    scroll_on_clear: bool,
     /// tmux's `MODE_SYNC` ([`SyncHold`]).
     sync: SyncHold,
 }
@@ -459,6 +463,7 @@ impl PaneTerm {
         // feature is compiled out, which is the outcome we want anyway.
         let _ = term.set_kitty_image_storage_limit(0);
         let _ = term.set_glyph_protocol_enabled(false);
+        keep_clustering(&mut term);
 
         let mut pane = Self {
             term,
@@ -499,6 +504,7 @@ impl PaneTerm {
             rename: Rename::default(),
             reads: StdCell::new(0),
             view: RefCell::default(),
+            scroll_on_clear: true,
             sync: SyncHold::default(),
         };
         pane.retain();
@@ -573,6 +579,29 @@ impl PaneTerm {
             let mut j = i;
             let mut event = None;
             while j < bytes.len() && j - i < step {
+                if self.scan.state == ScanState::Ground && !self.scan.utf8.started() {
+                    // Printable ASCII changes nothing the scanner keeps.
+                    let end = i + step.min(bytes.len() - i);
+                    let run = bytes[j..end]
+                        .iter()
+                        .position(|b| !(0x20..0x7f).contains(b))
+                        .unwrap_or(end - j);
+                    if run > 0 {
+                        self.pending.clear();
+                        j += run;
+                        continue;
+                    }
+                    // A whole, valid UTF-8 character goes to Ghostty as it
+                    // is; anything else goes through tmux's decoder in the
+                    // scanner.
+                    if bytes[j] >= 0x80
+                        && let Some(n) = utf8_char_len(&bytes[j..])
+                    {
+                        self.pending.clear();
+                        j += n;
+                        continue;
+                    }
+                }
                 let e = self.scan.push(bytes[j]);
                 self.note_pending(bytes[j], self.scan.state != ScanState::Ground);
                 // A palette OSC ended: tmux redraws the pane at once, ahead
@@ -602,6 +631,13 @@ impl PaneTerm {
                 continue;
             }
             if event == Some(ScanEvent::Skip) {
+                i += 1;
+                continue;
+            }
+            if event == Some(ScanEvent::Utf8) {
+                if let Some(out) = self.scan.utf8_out.take() {
+                    self.feed_piece(&out);
+                }
                 i += 1;
                 continue;
             }
@@ -637,26 +673,53 @@ impl PaneTerm {
                     }
                     _ => {}
                 }
-                if matches!(e, ScanEvent::ClearHistory | ScanEvent::Reset) {
+                if e == ScanEvent::ClearHistory {
                     self.generation += 1;
                 }
-                // RIS clears the grid, its line flags with it.
-                if e == ScanEvent::Reset && !self.alternate_on() {
-                    self.marks.clear();
-                }
-                // tmux's RIS (input.c:1407-1412, screen_write_reset) keeps
-                // the title; Ghostty's full reset clears it.
-                let title = (e == ScanEvent::Reset).then(|| self.title());
-                self.feed_piece(&bytes[i..=i]);
-                if let Some(title) = title {
-                    self.titles.borrow_mut().server = Some(title);
+                match e {
+                    // RIS is tmux's (input.c:1407-1412): `screen_write_reset`,
+                    // the same reset as `send-keys -R`, which keeps history,
+                    // the alternate screen and the title. Ghostty's own RIS
+                    // is a full reset, so it never sees the `c`.
+                    ScanEvent::Reset => {
+                        self.term.vt_write(b"\x18");
+                        self.reset_screen(self.scroll_on_clear);
+                    }
+                    // OSC 133 only marks the line in tmux (input.c
+                    // `input_osc_133`): Ghostty's `133;A` would start a
+                    // fresh line, and its prompt rows are erased on resize
+                    // and change ED 2. Ghostty never sees it end; a BEL that
+                    // ended it is not a bell. The ESC that ended it starts a
+                    // new sequence, as in tmux.
+                    ScanEvent::Osc133 => {
+                        self.term.vt_write(b"\x18");
+                        if bytes[i] != 0x07 {
+                            self.feed_piece(&bytes[i..=i]);
+                        }
+                    }
+                    ScanEvent::EraseBelow | ScanEvent::EraseScreen
+                        if self.clear_into_history(e) => {}
+                    ScanEvent::Drop => {
+                        self.term.vt_write(b"\x18");
+                        // An ESC that ended an OSC starts a new sequence.
+                        if bytes[i] == 0x1b {
+                            self.feed_piece(&bytes[i..=i]);
+                        }
+                    }
+                    // input_stop_utf8: the unfinished character is one
+                    // U+FFFD, then the byte that ended it; CAN and SUB
+                    // first, as they may end a string Ghostty is in.
+                    ScanEvent::Utf8Stop if matches!(bytes[i], 0x18 | 0x1a) => {
+                        self.feed_piece(&bytes[i..=i]);
+                        self.feed_piece(REPLACEMENT);
+                    }
+                    ScanEvent::Utf8Stop => {
+                        self.feed_piece(REPLACEMENT);
+                        self.feed_piece(&bytes[i..=i]);
+                    }
+                    _ => self.feed_piece(&bytes[i..=i]),
                 }
                 i += 1;
-                if e == ScanEvent::Reset {
-                    let mut c = self.cursor.get();
-                    c.reset();
-                    self.cursor.set(c);
-                }
                 self.scanned_strings(e);
                 if matches!(e, ScanEvent::AltMode(_) | ScanEvent::Reset)
                     && (e == ScanEvent::Reset || self.alternate_on() != alternate)
@@ -665,6 +728,9 @@ impl PaneTerm {
                 }
                 if self.scan.take_resync() {
                     self.sync_charset();
+                }
+                if e == ScanEvent::Reset || std::mem::take(&mut self.scan.cluster_mode) {
+                    keep_clustering(&mut self.term);
                 }
             }
         }
@@ -858,6 +924,14 @@ impl PaneTerm {
     /// `CSI 2 J`.
     pub fn reset(&mut self, scroll_on_clear: bool) {
         self.reset_input();
+        self.reset_screen(scroll_on_clear);
+        let _ = self.take_replies();
+    }
+
+    /// `screen_write_reset` with the cell, charsets, palette, cursor style
+    /// and mouse modes as `input_reset` and RIS leave them (see
+    /// [`PaneTerm::reset`]).
+    fn reset_screen(&mut self, scroll_on_clear: bool) {
         self.scan.palette.clear();
         self.scan.mouse.set(MouseModes::default());
         self.scan.key_mode = self.scan.extended_keys.reset_mode();
@@ -865,7 +939,7 @@ impl PaneTerm {
         let mut c = self.cursor.get();
         c.reset();
         self.cursor.set(c);
-        let clear: &[u8] = if scroll_on_clear && !self.alternate_on() {
+        let clear: &[u8] = if scroll_on_clear && self.history && !self.alternate_on() {
             b"\x1b[22J"
         } else {
             b"\x1b[2J"
@@ -873,18 +947,64 @@ impl PaneTerm {
         // DECSTR, then what screen_write_reset turns off that DECSTR keeps:
         // application keypad, mouse, focus, bracketed paste, LNM, origin;
         // then default tab stops (DECST8C), the clear and the cursor home.
-        let mut bytes = b"\x1b[!p\x1b>\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[20l\x1b[?6l\x1b[?7h\x1b[?25h\x1b[?5W".to_vec();
-        bytes.extend_from_slice(clear);
-        bytes.extend_from_slice(b"\x1b[H");
-        self.feed(&bytes);
-        let _ = self.take_replies();
+        let bytes: &[u8] = b"\x1b[!p\x1b>\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[20l\x1b[?6l\x1b[?7h\x1b[?25h\x1b[?5W";
+        // Past the scanner, which would drop DECSTR and take the clear for a
+        // program's ED; its state was reset above.
+        self.feed_piece(bytes);
+        self.feed_piece(clear);
+        self.feed_piece(b"\x1b[H");
+        keep_clustering(&mut self.term);
+        if self.scan.take_resync() {
+            self.sync_charset();
+        }
         self.redraw = true;
+    }
+
+    /// Set the pane's `scroll-on-clear` option.
+    pub fn set_scroll_on_clear(&mut self, on: bool) {
+        self.scroll_on_clear = on;
+    }
+
+    /// ED 2, or ED 0 at the top left, under `scroll-on-clear`
+    /// (`screen_write_clearscreen`, `screen_write_clearendofscreen`,
+    /// screen-write.c:1936-1942, 2090-2096): the screen's used rows scroll
+    /// into history before the clear (`grid_view_clear_history`), where
+    /// Ghostty erases them. Only a pane with history (`GRID_HISTORY`), so
+    /// never the alternate screen. Returns whether it did the erase; if
+    /// not, the final byte is still to be fed.
+    ///
+    /// Ghostty has the sequence up to its final byte: CAN drops it, then
+    /// `CSI 22 J` scrolls the rows up to the last one used into
+    /// scrollback, the cursor goes back where it was (tmux does not move
+    /// it, Ghostty's scroll does), and `CSI 2 J` clears the rest in the
+    /// current background as tmux's clear does.
+    fn clear_into_history(&mut self, e: ScanEvent) -> bool {
+        if !(self.history && self.scroll_on_clear) || self.alternate_on() {
+            return false;
+        }
+        if e == ScanEvent::EraseBelow && tmux_cursor(&self.term) != (0, 0) {
+            return false;
+        }
+        let (x, y) = (
+            self.term.cursor_x().unwrap_or(0),
+            self.term.cursor_y().unwrap_or(0),
+        );
+        self.term.vt_write(b"\x18");
+        self.feed_piece(b"\x1b[22J");
+        // CUP is relative to the scroll region under origin mode.
+        let origin = self.term.mode(Mode::ORIGIN).unwrap_or(false);
+        let _ = self.term.set_mode(Mode::ORIGIN, false);
+        self.term
+            .vt_write(format!("\x1b[{};{}H\x1b[2J", y + 1, x + 1).as_bytes());
+        let _ = self.term.set_mode(Mode::ORIGIN, origin);
+        true
     }
 
     /// Start from the ground state, as a fresh pane process does: nothing
     /// half-parsed is carried over (a respawned pane).
     pub fn reset_input(&mut self) {
         self.pending.clear();
+        self.scan.utf8 = Utf8::default();
         self.scan.end_dcs();
         self.scan.state = ScanState::Ground;
         self.scan.palette_osc = None;
@@ -1986,8 +2106,6 @@ struct AltModeScanner {
     osc: Option<Vec<u8>>,
     /// The payload of the OSC 133 that just ended.
     osc133: Option<Vec<u8>>,
-    /// An ESC inside an OSC: a backslash next ends it (ST).
-    osc_esc: bool,
     /// The OSC in progress as tmux collects it (`input_input`), kept only
     /// while it can be a palette OSC; `osc_cap` is its size limit.
     palette_osc: Option<Vec<u8>>,
@@ -2016,6 +2134,14 @@ struct AltModeScanner {
     /// The title stack operations of the XTWINOPS that just ended, in
     /// order: `true` a push, `false` a pop.
     title_ops: Vec<bool>,
+    /// tmux's UTF-8 decoder state (`utf8started`, `utf8data`).
+    utf8: Utf8,
+    /// What a character the decoder finished turns into, for
+    /// [`PaneTerm::feed`] to write.
+    utf8_out: Option<Vec<u8>>,
+    /// A private mode sequence named `?2027`, which tmux does not have;
+    /// [`PaneTerm::feed`] turns Ghostty's grapheme clustering back on.
+    cluster_mode: bool,
 }
 
 /// Which mouse events the pane program asked for: tmux's mutually exclusive
@@ -2270,6 +2396,10 @@ enum ScanEvent {
     AltMode(u8),
     /// `CSI 3 J`.
     ClearHistory,
+    /// `CSI J` or `CSI 0 J`.
+    EraseBelow,
+    /// `CSI 2 J`.
+    EraseScreen,
     /// `ESC c` (RIS).
     Reset,
     /// `CSI ? 2026 h` or `l`: [`AltModeScanner::sync`] says which.
@@ -2284,6 +2414,15 @@ enum ScanEvent {
     TitleStack,
     /// `ESC k`: a screen-style window name starts (on the `k`).
     RenameStart,
+    /// The final byte of a CSI tmux ignores and Ghostty acts on, or the
+    /// end of an OSC tmux rejects: Ghostty gets CAN instead, which drops
+    /// it.
+    Drop,
+    /// A byte of a UTF-8 character tmux's decoder holds; Ghostty gets
+    /// [`AltModeScanner::utf8_out`] when one is ready, never the byte.
+    Utf8,
+    /// The byte ends an unfinished UTF-8 character (U+FFFD before it).
+    Utf8Stop,
     /// A byte tmux ignores inside a CSI (0x7f-0xff, input.c:579, 597, 612,
     /// 628) without leaving it: Ghostty must not see it.
     Skip,
@@ -2351,34 +2490,44 @@ impl AltModeScanner {
         }
     }
 
-    /// Track the OSC being skipped, to find OSC 133; `Some` at its end.
+    /// Track the OSC being skipped, to find OSC 133 and the OSC 8s tmux
+    /// rejects; `Some` at its end. tmux ends an OSC on BEL, and on CAN, SUB
+    /// or ESC where they stand (`input_set_state` runs `input_exit_osc`).
     fn push_osc(&mut self, b: u8) -> ControlFlow<Option<ScanEvent>> {
-        // An OSC's end: BEL, or ST (`ESC \`).
-        let osc_esc = std::mem::take(&mut self.osc_esc);
-        if self.osc.is_some() {
-            let ends = (self.state == ScanState::Str && b == 0x07)
-                || (osc_esc && self.state == ScanState::Esc && b == b'\\');
-            if ends {
-                self.state = ScanState::Ground;
+        let Some(osc) = self.osc.as_mut() else {
+            return ControlFlow::Continue(());
+        };
+        match b {
+            0x07 | 0x18 | 0x1a | 0x1b => {
+                self.state = if b == 0x1b {
+                    ScanState::Esc
+                } else {
+                    ScanState::Ground
+                };
                 let osc = self.osc.take().unwrap_or_default();
-                let payload = osc.strip_prefix(b"133;").map(<[u8]>::to_vec);
-                let found = payload.is_some();
-                self.osc133 = payload;
-                return ControlFlow::Break(found.then_some(ScanEvent::Osc133));
+                let event = if let Some(payload) = osc.strip_prefix(b"133;") {
+                    self.osc133 = Some(payload.to_vec());
+                    Some(ScanEvent::Osc133)
+                } else if osc.strip_prefix(b"8;").is_some_and(|p| !hyperlink_ok(p)) {
+                    Some(ScanEvent::Drop)
+                } else {
+                    None
+                };
+                ControlFlow::Break(event)
             }
-            match (self.state, b) {
-                (ScanState::Str, 0x1b) => self.osc_esc = true,
-                (ScanState::Str, 0x18 | 0x1a) => self.osc = None,
-                (ScanState::Str, _) => {
-                    let osc = self.osc.as_mut().expect("osc");
-                    if osc.len() < 32 {
-                        osc.push(b);
-                    }
-                }
-                _ => self.osc = None,
+            // `input_input` collects 0x20-0xff. An OSC 8 is kept through
+            // its parameters, to the `;` before the URI.
+            0x20..
+                if osc.len() < 32
+                    || (osc.starts_with(b"8;")
+                        && !(osc.len() > 2 && osc.ends_with(b";"))
+                        && osc.len() < self.osc_cap) =>
+            {
+                osc.push(b);
+                ControlFlow::Continue(())
             }
+            _ => ControlFlow::Continue(()),
         }
-        ControlFlow::Continue(())
     }
 
     #[expect(
@@ -2389,6 +2538,7 @@ impl AltModeScanner {
         if let ControlFlow::Break(end) = self.push_osc(b) {
             return end;
         }
+        let prior = self.state;
         match (self.state, b) {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
             (_, 0x1b) => self.state = ScanState::Esc,
@@ -2398,6 +2548,14 @@ impl AltModeScanner {
             // SO and SI are executed anywhere outside a string, even inside
             // an escape sequence.
             (_, 0x0e | 0x0f) => self.charset_op(CharsetOp::Shift(b == 0x0e)),
+            (ScanState::Ground, 0x80..) => {
+                self.utf8_out = self.utf8.push(b);
+                return Some(ScanEvent::Utf8);
+            }
+            // DEL does nothing in tmux's ground state (input.c
+            // `input_state_ground_table`); Ghostty prints it.
+            #[allow(clippy::match_same_arms)] // the CSI arm below, kept by state
+            (ScanState::Ground, 0x7f) => return Some(ScanEvent::Skip),
             // Ground, and other C0 controls inside a sequence (executed).
             (ScanState::Ground, _)
             | (ScanState::Csi | ScanState::Esc | ScanState::EscIntermediate(_), 0x00..=0x1f) => {}
@@ -2505,6 +2663,18 @@ impl AltModeScanner {
                 self.csi_ignored = true;
             }
         }
+        // `input_print` and `input_c0_dispatch` end an unfinished UTF-8
+        // character; an escape sequence does not (input.c:1235, 1315). A
+        // C0 control inside a sequence is left to the next printed byte:
+        // Ghostty would take U+FFFD there as part of the sequence.
+        let stops = match (prior, b) {
+            (_, 0x18 | 0x1a) => true,
+            (ScanState::Ground, 0x00..=0x7e) => b != 0x1b,
+            _ => false,
+        };
+        if stops && self.utf8.stop() {
+            return Some(ScanEvent::Utf8Stop);
+        }
         (self.resync && self.state == ScanState::Ground).then_some(ScanEvent::Resync)
     }
 
@@ -2562,7 +2732,39 @@ impl AltModeScanner {
         };
     }
 
+    /// Moves and edits Ghostty has and tmux's CSI table does not (input.c
+    /// `input_csi_table`): CHT, HPR, VPR, HPB (`j`), VPB (`k`) and
+    /// DECIC/DECDC (`'}`, `'~`). tmux ignores them; Ghostty would move the
+    /// cursor or the cells. And the EDs tmux ignores (ED 22 scrolls in
+    /// Ghostty), or does with history (ED 0, ED 2).
+    fn csi_tmux_lacks(&self, b: u8) -> Option<ScanEvent> {
+        if self.private || self.gt || self.csi_ignored {
+            return None;
+        }
+        let lacks = match self.intermediate {
+            None => matches!(b, b'I' | b'a' | b'e' | b'j' | b'k'),
+            Some(b'\'') => matches!(b, b'}' | b'~'),
+            _ => false,
+        };
+        if lacks {
+            return Some(ScanEvent::Drop);
+        }
+        if b != b'J' || self.intermediate.is_some() {
+            return None;
+        }
+        // `input_get(ictx, 0, 0, 0)` (input.c:1739-1765).
+        match parse_params(&self.params).map(|p| p.first().copied()) {
+            Some(None | Some(Param::Missing | Param::Num(0))) => Some(ScanEvent::EraseBelow),
+            Some(Some(Param::Num(2))) => Some(ScanEvent::EraseScreen),
+            Some(Some(Param::Num(1 | 3))) => None,
+            _ => Some(ScanEvent::Drop),
+        }
+    }
+
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
+        if let Some(e) = self.csi_tmux_lacks(b) {
+            return Some(e);
+        }
         if self.gt {
             if self.intermediate.is_none() && !self.csi_ignored && matches!(b, b'm' | b'n') {
                 self.key_mode_request(b == b'm');
@@ -2603,6 +2805,8 @@ impl AltModeScanner {
                         match p {
                             Param::Num(12) => c.set_blinking(b == b'h'),
                             Param::Num(2026) => self.sync = Some(b == b'h'),
+                            // Not a tmux mode: Ghostty's clustering stays on.
+                            Param::Num(2027) => self.cluster_mode = true,
                             Param::Num(n) => m.apply(n, b == b'h'),
                             _ => {}
                         }
@@ -2646,6 +2850,9 @@ impl AltModeScanner {
         if self.sync.is_some() {
             return Some(ScanEvent::Sync);
         }
+        if self.cluster_mode {
+            return Some(ScanEvent::Resync);
+        }
         self.resync.then_some(ScanEvent::Resync)
     }
 }
@@ -2668,8 +2875,120 @@ fn page_rows(cols: u16) -> usize {
     if rows == 0 { 215 } else { rows }
 }
 
+const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
+
+/// The length of the whole, valid UTF-8 character `bytes` starts with.
+fn utf8_char_len(bytes: &[u8]) -> Option<usize> {
+    let n = match bytes.first()? {
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => return None,
+    };
+    std::str::from_utf8(bytes.get(..n)?).ok().map(|_| n)
+}
+
+/// tmux's UTF-8 decoder (input.c `input_top_bit_set`, utf8.c `utf8_open`,
+/// `utf8_append`): the lead byte fixes the length, every top-bit byte up to
+/// it is taken, and a character that is not valid then (a byte that is not
+/// a continuation, an overlong form, a surrogate) is one U+FFFD. Ghostty
+/// gives one U+FFFD per bad byte. Only a character that is valid as tmux
+/// sees it but past U+10FFFF differs: tmux keeps the bytes as a cell
+/// (glibc `mbtowc`), Ghostty cannot, so it is U+FFFD too.
+#[derive(Clone, Copy, Debug, Default)]
+struct Utf8 {
+    buf: [u8; 4],
+    have: usize,
+    /// 0 when no character is started.
+    size: usize,
+    bad: bool,
+}
+
+impl Utf8 {
+    fn started(self) -> bool {
+        self.size != 0
+    }
+
+    /// Take a top-bit byte; the bytes for Ghostty once the character ends.
+    fn push(&mut self, b: u8) -> Option<Vec<u8>> {
+        if self.size == 0 {
+            self.size = match b {
+                0xc2..=0xdf => 2,
+                0xe0..=0xef => 3,
+                0xf0..=0xf4 => 4,
+                _ => return Some(REPLACEMENT.to_vec()),
+            };
+            self.buf[0] = b;
+            self.have = 1;
+            self.bad = false;
+            return None;
+        }
+        self.bad |= b & 0xc0 != 0x80;
+        self.buf[self.have] = b;
+        self.have += 1;
+        if self.have < self.size {
+            return None;
+        }
+        let seq = &self.buf[..self.size];
+        self.size = 0;
+        Some(if !self.bad && std::str::from_utf8(seq).is_ok() {
+            seq.to_vec()
+        } else {
+            REPLACEMENT.to_vec()
+        })
+    }
+
+    /// `input_stop_utf8`: drop an unfinished character; whether there was
+    /// one.
+    fn stop(&mut self) -> bool {
+        std::mem::take(&mut self.size) != 0
+    }
+}
+
+/// `input_osc_8` (input.c:2977-3014) takes the parameters `p` (after
+/// `8;`): the URI starts after the first `;`, with at most one `id=`.
+/// tmux ignores any other OSC 8 and the link stays as it was.
+fn hyperlink_ok(p: &[u8]) -> bool {
+    let mut id = false;
+    let mut start = 0;
+    while let Some(n) = p[start..].iter().position(|c| matches!(c, b':' | b';')) {
+        let end = start + n;
+        if end - start >= 4 && p[start..end].starts_with(b"id=") {
+            if id {
+                return false;
+            }
+            id = true;
+        }
+        if p[end] == b';' {
+            return true;
+        }
+        start = end + 1;
+    }
+    false
+}
+
+/// Ghostty's grapheme clustering (mode 2027), set on every pane terminal
+/// and after anything that may have reset it (RIS, `CSI ? 2027 l`). tmux
+/// clusters characters itself (`screen_write_combine`, screen-write.c:
+/// 2850-2960): regional-indicator pairs, emoji modifiers, ZWJ sequences
+/// and VS16 make one cell, which is what Ghostty does in this mode and not
+/// without it. tmux has no mode 2027 (DECRQM answers 0), so a program
+/// cannot turn it off.
+fn keep_clustering(term: &mut Terminal<'_, '_>) {
+    let _ = term.set_mode(Mode::GRAPHEME_CLUSTER, true);
+}
+
+/// tmux's `cx`, `cy` from Ghostty's cursor. A print that fills the last
+/// column leaves tmux's `cx` at the column count only under autowrap; with
+/// DECAWM reset it stays on the last column (screen-write.c
+/// `screen_write_cell`, `not_wrap`). Ghostty keeps the last column plus a
+/// pending-wrap flag either way, so the flag counts only while the mode is
+/// set. A wrap already pending when `?7l` arrives is the one case this gets
+/// wrong: tmux keeps the column count (`compat/DIVERGENCES.md` D-030).
 fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
-    let x = if term.is_cursor_pending_wrap().unwrap_or(false) {
+    let x = if term.is_cursor_pending_wrap().unwrap_or(false)
+        && term.mode(Mode::WRAPAROUND).unwrap_or(true)
+    {
         term.cols().unwrap_or(0)
     } else {
         term.cursor_x().unwrap_or(0)
@@ -3123,6 +3442,148 @@ mod tests {
         assert_eq!(t.cursor(), (1, 1));
     }
 
+    /// The whole capture (`-S - -E -`), trailing blank lines dropped.
+    fn captured(t: &PaneTerm) -> String {
+        let opts = crate::capture::CaptureOpts {
+            start: crate::capture::LineRef::Start,
+            end: crate::capture::LineRef::End,
+            ..Default::default()
+        };
+        let text = String::from_utf8_lossy(&crate::capture::capture(t, opts)).into_owned();
+        text.trim_end_matches('\n').to_owned()
+    }
+
+    /// Reference: 20x5 after `l0\nl1\nl2`, cursor at 4,2 (row 2 col 4):
+    /// ED 2 scrolls the three rows into history and leaves the cursor; ED 0
+    /// at home does the same; ED 0 elsewhere, ED 22 and a pane without
+    /// history only erase (`scroll-on-clear`, screen-write.c:1936, 2091).
+    #[test]
+    fn clears_scroll_into_history_like_tmux() {
+        let after = |limit: usize, clear: &[u8]| {
+            let mut t = PaneTerm::new(20, 5, limit);
+            t.feed(b"l0\r\nl1\r\nl2\x1b[2;4H");
+            t.feed(clear);
+            t.feed(b"X");
+            (t.history_size(), t.cursor(), captured(&t))
+        };
+        let kept = "l0\nl1\nl2\n\n   X".to_owned();
+        assert_eq!(after(100, b"\x1b[2J"), (3, (4, 1), kept));
+        let home = "l0\nl1\nl2\nX".to_owned();
+        assert_eq!(after(100, b"\x1b[H\x1b[J"), (3, (1, 0), home.clone()));
+        assert_eq!(after(100, b"\x1b[H\x1b[0J"), (3, (1, 0), home));
+        assert_eq!(after(100, b"\x1b[J"), (0, (4, 1), "l0\nl1 X".to_owned()));
+        assert_eq!(after(0, b"\x1b[2J"), (0, (4, 1), "\n   X".to_owned()));
+        let ed22 = "l0\nl1 X\nl2".to_owned();
+        assert_eq!(after(100, b"\x1b[22J"), (0, (4, 1), ed22));
+        let mut off = PaneTerm::new(20, 5, 100);
+        off.set_scroll_on_clear(false);
+        off.feed(b"l0\r\nl1\x1b[2J");
+        assert_eq!(off.history_size(), 0);
+    }
+
+    /// Reference: RIS is `screen_write_reset`: history kept, the used rows
+    /// scroll into it, the alternate screen stays (D-025 closed).
+    #[test]
+    fn ris_keeps_history_and_the_alternate_screen() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"h1\r\nh2\r\nh3\r\nh4\r\nh5\r\nv1\r\nv2\r\n\x1bc");
+        assert_eq!(t.history_size(), 7);
+        assert_eq!(t.cursor(), (0, 0));
+        let mut alt = PaneTerm::new(20, 5, 100);
+        alt.feed(b"main\r\n\x1b[?1049halt\x1bc");
+        assert!(alt.alternate_on());
+    }
+
+    /// Reference: OSC 133;A only marks the line (no fresh line), a BEL
+    /// ending an OSC 133 is no bell, and an OSC 8 tmux rejects links
+    /// nothing (input.c `input_osc_133`, `input_osc_8`).
+    #[test]
+    fn oscs_tmux_reads_differently() {
+        let mut t = PaneTerm::new(20, 3, 100);
+        t.feed(b"xx\x1b]133;A\x07p>\x1b]133;B\x1b\\cmd");
+        assert_eq!(captured(&t), "xxp>cmd");
+        assert_eq!(t.take_bells(), 0);
+        assert_eq!(t.line_marks(), [(0, LineMark::Prompt)]);
+        assert!(hyperlink_ok(b";http://x"));
+        assert!(hyperlink_ok(b"id=a;http://x"));
+        assert!(hyperlink_ok(b"a=b:id=c;"));
+        assert!(!hyperlink_ok(b"id=a:id=b;http://x"));
+        assert!(!hyperlink_ok(b"id=no-separator"));
+        let mut l = PaneTerm::new(20, 3, 100);
+        l.feed(b"\x1b]8;id=a:id=b;http://bad\x07X\x1b]8;;http://ok/\x07Y");
+        let cell = |x| {
+            let point = Point::Active(PointCoordinate { x, y: 0 });
+            l.term
+                .grid_ref(point)
+                .ok()
+                .and_then(|g| g.hyperlink_id().ok())
+        };
+        assert_eq!(
+            cell(0),
+            Some(libghostty_vt::screen::HyperlinkId::None),
+            "X is not linked"
+        );
+        assert_ne!(
+            cell(1),
+            Some(libghostty_vt::screen::HyperlinkId::None),
+            "Y is linked"
+        );
+    }
+
+    /// Reference: tmux's UTF-8 decoder makes one U+FFFD of a bad
+    /// sequence, where Ghostty makes one per byte; DEL and CHT do nothing.
+    #[test]
+    fn bytes_tmux_decodes_differently() {
+        let line = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 3, 100);
+            t.feed(bytes);
+            (captured(&t), t.cursor().0)
+        };
+        let r = "\u{FFFD}";
+        assert_eq!(line(b"x\xed\xa0\x80y"), (format!("x{r}y"), 3));
+        assert_eq!(line(b"x\xe0\x80\xafy"), (format!("x{r}y"), 3));
+        assert_eq!(line(b"x\xc3\xc3Ay"), (format!("x{r}Ay"), 4));
+        assert_eq!(line(b"x\xe2\x82y"), (format!("x{r}y"), 3));
+        assert_eq!(line(b"x\xc3\x1b[1CA"), (format!("x {r}A"), 4));
+        assert_eq!(line(b"x\xe2\x82\x1b[1C\xac"), ("x \u{20AC}".to_owned(), 3));
+        assert_eq!(line(b"x\xe2\x82"), ("x".to_owned(), 1));
+        assert_eq!(line(b"ab\x7fc"), ("abc".to_owned(), 3));
+        assert_eq!(line(b"ab\x1b[2Ix"), ("abx".to_owned(), 3));
+    }
+
+    /// Reference: 20x3, `x` + the cluster + `y`, `#{cursor_x}`.
+    #[test]
+    fn graphemes_cluster_like_tmux() {
+        let cursor_after = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 3, 100);
+            t.feed(bytes);
+            t.cursor().0
+        };
+        let flag = "x\u{1F1EC}\u{1F1E7}y".as_bytes();
+        assert_eq!(cursor_after(flag), 4);
+        assert_eq!(cursor_after("x\u{1F44D}\u{1F3FB}y".as_bytes()), 4);
+        assert_eq!(cursor_after("x\u{1F468}\u{200D}\u{1F469}y".as_bytes()), 4);
+        assert_eq!(cursor_after("x\u{2764}\u{FE0F}y".as_bytes()), 4);
+        // A program cannot turn it off: tmux has no mode 2027, and RIS
+        // keeps tmux's clustering too.
+        let mut off = b"\x1b[?2027l".to_vec();
+        off.extend_from_slice(flag);
+        assert_eq!(cursor_after(&off), 4);
+        let mut ris = b"\x1bc".to_vec();
+        ris.extend_from_slice(flag);
+        assert_eq!(cursor_after(&ris), 4);
+    }
+
+    #[test]
+    fn cursor_without_autowrap_stays_on_the_last_column() {
+        // Reference: 5x3, `printf '\033[?7labcdeF'`, `#{cursor_x}` 4.
+        let mut t = PaneTerm::new(5, 3, 100);
+        t.feed(b"\x1b[?7labcdeF");
+        assert_eq!(t.cursor(), (4, 0));
+        t.feed(b"\x1b[6n");
+        assert_eq!(t.take_replies(), b"\x1b[1;5R");
+    }
+
     #[test]
     fn cpr_ignores_origin_mode() {
         let mut t = PaneTerm::new(20, 5, 100);
@@ -3342,6 +3803,11 @@ mod tests {
                     ScanEvent::ClearHistory => Some(b'J'),
                     ScanEvent::Resync
                     | ScanEvent::Reset
+                    | ScanEvent::EraseBelow
+                    | ScanEvent::EraseScreen
+                    | ScanEvent::Drop
+                    | ScanEvent::Utf8
+                    | ScanEvent::Utf8Stop
                     | ScanEvent::Osc133
                     | ScanEvent::DcsStart
                     | ScanEvent::RenameStart

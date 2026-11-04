@@ -7,18 +7,10 @@ ignored golden in `tests/golden.rs`; un-ignore it when the entry is closed.
 Evidence is the reference tmux 3.8 run recorded in the golden's `command=` line
 and the probes from `review_vt_wrap`.
 
-## P1. Scroll regions that do not start at row 0 do not feed history
+## P1. Scroll regions that do not start at row 0 do not feed history: moved to D-032
 
 - Golden: `cap_region_scroll_history`, `fmt_region_scroll_history_size`
-- tmux: `grid_view_scroll_region_up` (grid-view.c:107-117) moves the line scrolled
-  out of *any* region into history when `GRID_HISTORY` is set
-  (`grid_scroll_history_region`, grid.c:529). 20x5, `l0..l3`, `ESC[2;4r`,
-  `ESC[4;1H`, three LF, `X` gives `#{history_size}` 3 and capture `-S - -E -`
-  `l1 l2 l3 l0 "" "" X`.
-- vtmux (Ghostty): only a region whose top margin is row 0 scrolls into history,
-  so `history_size` and the capture differ.
-- Visible: `#{history_size}`, `capture-pane -S`, copy mode, for programs that use
-  top/bottom margins on the main screen (tmux itself, some TUIs).
+  (ignored); regress `input-raw-scroll.sh`. See `compat/DIVERGENCES.md` D-032.
 
 ## P2. Reflow of a cursor at the end of a row
 
@@ -52,18 +44,17 @@ and the probes from `review_vt_wrap`.
 
 - Also (review_hist_limit_live, reviewer-63, `/tmp/rv/t7.sh`, `t6.sh`): after a reflow of a full history (limit set at creation or lowered live), vtmux's `history_size` is one higher than tmux's: limit 100, 300 styled 130-column lines at 50 columns, `resize-window -x 30` then `-x 50`: tmux 172 then 99, vtmux 173 then 100 (limit 200: 322/189 vs 323/190; 333-335 match). Same family: reflow and the history count differ around the limit.
 
-## P3. ZWJ sequences do not cluster
+## P3. Grapheme clusters: closed (`gap_emulator_triage`)
 
-- Golden: `fmt_zwj_cursor_x`
-- tmux: `screen_write_combine` (screen-write.c:2850) joins ZWJ sequences into one
-  cell: `x` + family emoji + `y` leaves `#{cursor_x}` at 4.
-- vtmux (Ghostty without mode 2027): does not cluster, `cursor_x` 8, which is what
-  xterm does.
-- Visible: `#{cursor_x}`, CPR and capture of emoji text.
-- Same for regional-indicator pairs and VS16 (regress `input-raw-unicode.sh`,
-  scenes flag and variation, `capture-pane -R`): tmux makes `\U0001F1EC\U0001F1E7`
-  one cell `data=(2,8,...)` and `*` + U+FE0F one width-2 cell; Ghostty keeps
-  two width-2 cells, and `*` width 1 with the selector dropped.
+- vtmux runs Ghostty with grapheme clustering (mode 2027, `term.rs`
+  `keep_clustering`, set again after RIS and `CSI ? 2027 l`, which tmux does
+  not have): ZWJ sequences, regional-indicator pairs, emoji modifiers and
+  VS16 after an emoji make one cell as `screen_write_combine` does. Golden
+  `fmt_zwj_cursor_x`; regress `combine-test.sh`; cli
+  `program_output_reaches_the_grid_as_in_tmux`. Ghostty's clustering drops a
+  zero-width character that starts a grapheme (U+200B, U+2028); patch
+  `0008-cluster-keeps-zero-width.patch` attaches it as before. What is left
+  (a lone regional indicator, VS16 after a non-emoji) is D-031.
 
 ## P4. Tab cells: closed (`d_tab_capture`)
 
@@ -94,44 +85,22 @@ and the probes from `review_vt_wrap`.
   limit can't go below one page.
 - Visible: memory only (one page per pane).
 
-## P6. Scroll-on-clear does not feed history
+## P6. Scroll-on-clear: closed (`gap_emulator_triage`, `history_parity`)
 
-- Golden: `cap_scroll_on_clear_ed2`, `fmt_scroll_on_clear_ed2`,
-  `cap_scroll_on_clear_ctrl_l`, `fmt_scroll_on_clear_ctrl_l` (follow-up
-  `history_parity`)
-- tmux: with the pane option `scroll-on-clear` (default on, options-table.c:1723),
-  ED2 (`screen_write_clearscreen`, screen-write.c:2094) and ED0 at 0,0
-  (`screen_write_clearendofscreen`, screen-write.c:1936-1942) call
-  `grid_view_clear_history`, which moves the screen's used rows into history
-  first. 20x5 after `l0..l9`: `ESC[2J` or `ESC[H ESC[J` (what bash/zsh Ctrl-L
-  sends) gives `#{history_size}` 10 and capture `-S - -E -` `l0..l9` then blank
-  rows (history was 6, the four used screen rows join it).
-- vtmux (Ghostty): clears the screen in place, `history_size` stays 6 and the
-  four screen rows are lost.
-- Visible: `#{history_size}`, `capture-pane -S`, copy mode after every Ctrl-L.
-  `ESC[3J` (ncurses `clear`) already matches.
+- ED 2, and ED 0 at the top left, scroll the used rows into history under the
+  pane's `scroll-on-clear` (`PaneTerm::clear_into_history`: the scanner keeps
+  the final byte from Ghostty, then `CSI 22 J`, the cursor put back, `CSI 2 J`).
+  Goldens `cap_scroll_on_clear_ed2`, `fmt_scroll_on_clear_ed2`,
+  `cap_scroll_on_clear_ctrl_l`, `fmt_scroll_on_clear_ctrl_l`; regress
+  `input-raw-history.sh`; cli `program_output_reaches_the_grid_as_in_tmux`.
+  Ghostty's own ED 22 and its prompt-aware ED 2 never run for a program
+  (tmux ignores ED 22).
 
-## P7. RIS (`ESC c`) drops history and leaves the alternate screen
+## P7. RIS: closed (`gap_emulator_triage`, D-025)
 
-- Golden: `cap_ris`, `fmt_ris`, `cap_ris_alt`, `fmt_ris_alt` (follow-up
-  `history_parity`)
-- tmux: `INPUT_ESC_RIS` (input.c:1407-1412) calls `screen_write_reset`
-  (screen-write.c:423-439), not `screen_reinit` (screen.c:109, which only
-  `screen_init`/spawn.c:329 reach). It resets `s->mode`, tabs and the scroll
-  region, then `screen_write_clearscreen` (screen-write.c:2073), which with
-  `scroll-on-clear` (default on) runs `grid_view_clear_history`: this is P6, the
-  used rows join history. It does not call `screen_alternate_off`, so the
-  alternate screen stays on. `ESC c` after `l0..l9` on 20x5 leaves
-  `#{history_size}` 10. After `ESC[?1049h ESC c` the pane is still on the
-  alternate screen: `#{alternate_on}` 1, DECRQM `?1049` 1, the primary history
-  6 (re-probed against the reference 3.8).
-- vtmux (Ghostty): a full reset drops scrollback (`history_size` 0), and
-  returns to the primary screen (`alternate_on` 0, DECRQM `?1049` 2).
-- Why not fixed with the mouse modes: both need RIS emulated outside Ghostty's
-  `fullReset` (keep screen and history, and P6's scroll-on-clear); the mouse
-  bits already match.
-- Visible: `#{history_size}`, `#{alternate_on}`, capture and copy mode after
-  `reset` / `tput reset`.
+- A program's RIS is tmux's `screen_write_reset` (`PaneTerm::reset_screen`,
+  shared with `send-keys -R`). Goldens `cap_ris`, `fmt_ris`, `cap_ris_alt`,
+  `fmt_ris_alt`.
 
 ## P8. Selective erase spares DEC-graphics cells
 
@@ -150,14 +119,9 @@ and the probes from `review_vt_wrap`.
 - From review_d_tab_capture (rv-d_tab_capture). (1) `printf 'a\t\033[41m \033[0m'`, `capture-pane -p -e`: tmux emits `a\t` ESC[41m, a space, ESC[49m; vtmux emits `a\t` ESC[41m with no blank. With two red spaces tmux emits no blank and vtmux one (3-6 match). (2) After DECLRMM (`?69h`, `3;10s`), a TAB is kept as spaces: vtmux's tab marking bails when left/right margins are set (patch 0002); tmux has no DECLRMM, so its cursor stop differs anyway.
 - Visible: `capture-pane -e` bytes after a TAB followed by one or two styled blanks; capture after DECLRMM. Rare.
 
-## P10. OSC 133;A starts a fresh line
+## P10. OSC 133: closed (`gap_emulator_triage`)
 
-- Golden: none; regress `input-modes.sh` (scene osc133) stays xfail on it.
-- tmux: `OSC 133;A` only flags the cursor's line `START_PROMPT` and records
-  the column (input.c `input_osc_133`): `printf 'xx\033]133;A\007p>'` gives
-  one line `xxp>`.
-- vtmux (Ghostty): `OSC 133;A` is `fresh_line_new_prompt` (Terminal.zig
-  `semanticPrompt`): with the cursor past column 0 it moves to a new line
-  first, so the capture is `xx` then `p>`, and the line data `capture-pane -R`
-  prints (`osc133=` and the flags) lands on the second line.
-- Visible: any prompt that sends `OSC 133;A` without a newline before it.
+- The scanner keeps every OSC 133 from Ghostty (CAN instead of its end), so
+  `133;A` only marks the line, as `input_osc_133` does, and Ghostty's prompt
+  rows (cleared on resize, ED 2 at a prompt) never exist. Regress
+  `input-modes.sh`; unit `oscs_tmux_reads_differently`.
