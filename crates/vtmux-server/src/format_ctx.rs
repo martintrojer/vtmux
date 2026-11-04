@@ -94,6 +94,8 @@ pub struct ClientView {
     /// `#{client_colours}`; `None` before the terminal is open
     /// (format.c `format_cb_client_colours` needs `TTY_STARTED`).
     pub colours: Option<u32>,
+    /// `#{client_theme}`: the theme the terminal reported.
+    pub theme: Option<vtmux_core::colour::Theme>,
     /// Frame bytes written (`c->written`).
     pub written: usize,
     /// The flags commands change (`c->flags`).
@@ -250,6 +252,7 @@ impl<'a> Ctx<'a> {
             "client_name" => c.name.clone(),
             "client_termfeatures" => c.termfeatures.clone(),
             "client_colours" => c.colours?.to_string(),
+            "client_theme" => c.theme?.name().to_owned(),
             "client_session" => self.model.sessions.get(&c.session?)?.name.clone(),
             "client_last_session" => self.model.sessions.get(&c.last_session?)?.name.clone(),
             "client_width" => c.width.to_string(),
@@ -670,6 +673,13 @@ impl<'a> Ctx<'a> {
                 yoff + sy == wsy
             }),
             "pane_title" => p.term.title(),
+            // format_cb_pane_fg / _bg: tty_default_colours.
+            "pane_fg" => crate::term_queries::default_colours(self.model, p.id, self)
+                .0
+                .to_string(),
+            "pane_bg" => crate::term_queries::default_colours(self.model, p.id, self)
+                .1
+                .to_string(),
             "pane_active" => flag(w.active() == p.id),
             "pane_last" => flag(w.panes.last.first() == Some(&p.id)),
             // window_pane_printable_flags (window.c:1389-1409).

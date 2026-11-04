@@ -288,6 +288,9 @@ pub struct Pane {
     pub close_on_click: bool,
     /// `PANE_CLOSEONCANCEL` (`new-pane -OD`): Escape or C-c kills it.
     pub close_on_cancel: bool,
+    /// Its queries waiting on a client terminal, and its theme reports
+    /// ([`crate::term_queries`]).
+    pub requests: crate::term_queries::PaneRequests,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its

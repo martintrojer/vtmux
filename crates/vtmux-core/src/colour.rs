@@ -157,6 +157,54 @@ impl Colour {
     }
 }
 
+/// A light or dark terminal theme (`enum client_theme` without
+/// `THEME_UNKNOWN`, which is `None`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Theme {
+    Light,
+    Dark,
+}
+
+impl Theme {
+    /// `#{client_theme}` (format.c `format_cb_client_theme`).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    /// The `Ps` of `CSI ? 997 ; Ps n` (input.c:3723-3745): 1 dark, 2 light.
+    #[must_use]
+    pub fn report(self) -> &'static [u8] {
+        match self {
+            Self::Dark => b"\x1b[?997;1n",
+            Self::Light => b"\x1b[?997;2n",
+        }
+    }
+}
+
+impl Colour {
+    /// `colour_totheme` (colour.c:345-383): a background's theme, by the
+    /// brightness of its RGB; `None` for `default`, `terminal` and the
+    /// theme slots.
+    #[must_use]
+    pub fn theme(self) -> Option<Theme> {
+        let (r, g, b) = match self {
+            Self::Ansi(0) | Self::Bright(0) => return Some(Theme::Dark),
+            Self::Ansi(7) | Self::Bright(7) => return Some(Theme::Light),
+            Self::Default | Self::Terminal | Self::Theme(_) => return None,
+            c => c.rgb()?,
+        };
+        Some(if u32::from(r) + u32::from(g) + u32::from(b) > 382 {
+            Theme::Light
+        } else {
+            Theme::Dark
+        })
+    }
+}
+
 /// `colour_256toRGB` (colour.c:466): xterm's 256-colour palette.
 #[must_use]
 pub fn palette_rgb(n: u8) -> (u8, u8, u8) {
@@ -211,12 +259,12 @@ fn by_name(name: &str) -> Option<Colour> {
         .map(|&(_, (r, g, b))| Colour::Rgb(r, g, b))
 }
 
-/// Whether `colour_byname` (colour.c:566) knows `name`: the `greyN` forms and
-/// the X11 names. `vtmux-vt` asks this to tell which OSC colour arguments
-/// tmux's `colour_parseX11` accepts.
+/// `colour_byname` (colour.c:566): the `greyN` forms and the X11 names, as
+/// RGB. `vtmux-vt` asks this for the names in OSC colour arguments
+/// (`colour_parseX11`).
 #[must_use]
-pub fn is_x11_name(name: &str) -> bool {
-    by_name(name).is_some()
+pub fn x11_rgb(name: &str) -> Option<(u8, u8, u8)> {
+    by_name(name).and_then(Colour::rgb)
 }
 
 impl fmt::Display for Colour {
@@ -1156,6 +1204,26 @@ mod tests {
             assert_eq!(Colour::parse(name), Some(want), "{name}");
             assert_eq!(Colour::parse(&name.to_uppercase()), Some(want), "{name}");
             assert_eq!(Colour::parse(&name.to_lowercase()), Some(want), "{name}");
+        }
+    }
+
+    #[test]
+    fn theme_follows_brightness() {
+        for (c, want) in [
+            (Colour::Ansi(0), Some(Theme::Dark)),
+            (Colour::Ansi(7), Some(Theme::Light)),
+            (Colour::Ansi(1), Some(Theme::Dark)),
+            (Colour::Bright(7), Some(Theme::Light)),
+            (Colour::Bright(3), Some(Theme::Light)),
+            (Colour::Rgb(0xc0, 0xc0, 0xc0), Some(Theme::Light)),
+            (Colour::Rgb(127, 127, 128), Some(Theme::Dark)),
+            (Colour::Rgb(127, 127, 129), Some(Theme::Light)),
+            (Colour::Palette(255), Some(Theme::Light)),
+            (Colour::Default, None),
+            (Colour::Terminal, None),
+            (Colour::Theme(1), None),
+        ] {
+            assert_eq!(c.theme(), want, "{c}");
         }
     }
 

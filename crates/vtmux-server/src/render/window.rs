@@ -100,9 +100,9 @@ impl Source<'_> {
         sy.cell
     }
 
-    /// `server_client_update_theme_colours`. The terminal's background is
-    /// never queried, so `detect` uses the dark theme, as tmux does while
-    /// the theme is unknown.
+    /// `server_client_update_theme_colours`. `detect` uses the dark theme,
+    /// as tmux does while the theme is unknown; the client's reported theme
+    /// ([`crate::term_queries`]) does not reach the theme colours yet.
     #[must_use]
     pub fn theme(&self, caps: Caps) -> Theme {
         // colour.c colour_theme_table: terminal colours per slot.

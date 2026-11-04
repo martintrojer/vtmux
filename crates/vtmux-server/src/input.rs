@@ -12,9 +12,18 @@ pub enum Event {
     Sync(bool),
     /// `KEYC_FOCUS_IN` / `KEYC_FOCUS_OUT` (`CSI I` / `CSI O`).
     Focus(bool),
-    /// An OSC 52 clipboard reply (`tty_keys_clipboard`), decoded; what a
-    /// `refresh-client -l` asked for.
-    Clipboard(Vec<u8>),
+    /// An OSC 52 clipboard reply (`tty_keys_clipboard`): the clipboard it
+    /// names (when it names one) and the decoded text; what a
+    /// `refresh-client -l` or a pane's OSC 52 query asked for.
+    Clipboard(Option<u8>, Vec<u8>),
+    /// An OSC 10 (`true`) or OSC 11 reply (`tty_keys_colours`): the
+    /// terminal's default foreground or background.
+    Colour(bool, vtmux_vt::Rgb),
+    /// An OSC 4 reply (`tty_keys_palette`): a palette entry.
+    Palette(u8, vtmux_vt::Rgb),
+    /// `CSI ? 997 ; 1|2 n`: the terminal's theme (`KEYC_REPORT_DARK_THEME`,
+    /// `KEYC_REPORT_LIGHT_THEME`).
+    Theme(vtmux_core::colour::Theme),
     /// The terminal's replies to the startup queries, each only while it
     /// is awaited: primary device attributes (`CSI ? Ps ; ... c`) with
     /// their parameters, secondary ones (`CSI > Pp ; ... c`) with the
@@ -188,6 +197,13 @@ pub struct Decoder {
     tilde_home_end: bool,
     /// `tty->mouse_last_x`, `_y`, `_b`: the previous mouse report.
     mouse_last: (u32, u32, u32),
+    /// `TTY_WAITFG|TTY_WAITBG`: the colour queries are out until this
+    /// instant (the start timer clears them), and which are answered.
+    colours_until: Option<Instant>,
+    colours_answered: (bool, bool),
+    /// A pane's request went to the terminal and is not answered yet
+    /// (`!TAILQ_EMPTY(&c->input_requests)`); the server keeps it current.
+    pub requests_out: bool,
 }
 impl Decoder {
     /// The startup queries went to the terminal (DA, DA2, XTVERSION and
@@ -197,6 +213,13 @@ impl Decoder {
     pub fn query_sent(&mut self, now: Instant) {
         self.queries_until = Some(now + QUERY_TIMEOUT);
         self.answered = 0;
+        self.colours_sent(now);
+    }
+    /// The OSC 10 and 11 queries went to the terminal (`tty_send_requests`,
+    /// `tty_repeat_requests`): `TTY_WAITFG|TTY_WAITBG`.
+    pub fn colours_sent(&mut self, now: Instant) {
+        self.colours_until = Some(now + QUERY_TIMEOUT);
+        self.colours_answered = (false, false);
     }
     /// When the start timer fires, while queries are unanswered.
     #[must_use]
@@ -210,6 +233,7 @@ impl Decoder {
         let none = self.answered & (QUERY_DA | QUERY_DA2 | QUERY_XDA) == 0;
         self.queries_until = None;
         self.answered = ALL_QUERIES;
+        self.colours_until = None;
         none
     }
     /// The client's terminal is known (`tty_keys_build` with its terminfo).
@@ -223,6 +247,8 @@ impl Decoder {
     pub fn deadline(&self) -> Option<Instant> {
         let start = self.pending?;
         let waiting = self.queries_until.is_some_and(|until| start < until)
+            || self.colours_until.is_some_and(|until| start < until)
+            || self.requests_out
             || (self.pasting && b"\x1b[201~".starts_with(&self.bytes) && self.bytes.len() < 6);
         Some(start + if waiting { REPLY_DELAY } else { ESCAPE_TIME })
     }
@@ -269,6 +295,17 @@ impl Decoder {
                     self.pasting = start;
                     0
                 }
+                Event::Colour(fg, _) => {
+                    if fg {
+                        self.colours_answered.0 = true;
+                    } else {
+                        self.colours_answered.1 = true;
+                    }
+                    if self.colours_answered == (true, true) {
+                        self.colours_until = None;
+                    }
+                    0
+                }
                 _ => 0,
             };
             if answers != 0 {
@@ -301,6 +338,8 @@ fn key(base: Base) -> Key {
 /// is the clipboard name, `;` and base64 text; no text, or text that does
 /// not decode, is no event.
 fn clipboard(body: &[u8]) -> Event {
+    // tty-keys.c:1412-1413: one name before the `;`.
+    let clip = (body.len() >= 2 && body[0] != b';' && body[1] == b';').then(|| body[0]);
     let Some(at) = body.iter().position(|&b| b == b';') else {
         return Event::Ignore;
     };
@@ -308,11 +347,38 @@ fn clipboard(body: &[u8]) -> Event {
     if text.len() <= 1 {
         return Event::Ignore;
     }
-    base64_decode(text).map_or(Event::Ignore, Event::Clipboard)
+    base64_decode(text).map_or(Event::Ignore, |data| Event::Clipboard(clip, data))
+}
+
+/// `tty_keys_colours` (tty-keys.c:1755-1826): the text of an OSC 10 or 11
+/// reply (127 bytes at most) as a colour; one that does not parse is no
+/// event.
+fn colour(fg: bool, body: &[u8]) -> Event {
+    if body.len() >= 127 {
+        return Event::Ignore;
+    }
+    vtmux_vt::palette::parse_x11(body, vtmux_core::colour::x11_rgb)
+        .map_or(Event::Ignore, |c| Event::Colour(fg, c))
+}
+
+/// `tty_keys_palette` (tty-keys.c:1830-1893): `index ; colour`.
+fn palette(body: &[u8]) -> Event {
+    let Some(at) = body.iter().position(|&b| b == b';') else {
+        return Event::Ignore;
+    };
+    let Some(index) = std::str::from_utf8(&body[..at])
+        .ok()
+        .and_then(|i| i.parse::<u8>().ok())
+    else {
+        return Event::Ignore;
+    };
+    vtmux_vt::palette::parse_x11(&body[at + 1..], vtmux_core::colour::x11_rgb)
+        .map_or(Event::Ignore, |c| Event::Palette(index, c))
 }
 
 /// `b64_pton`: padded standard base64.
-fn base64_decode(text: &[u8]) -> Option<Vec<u8>> {
+#[must_use]
+pub fn base64_decode(text: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let (mut acc, mut bits) = (0u32, 0u32);
     let mut pad = 0;
@@ -371,6 +437,9 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
                 let body = &bytes[prefix.len()..body_end];
                 let event = match prefix {
                     b"\x1b]52;" => clipboard(body),
+                    b"\x1b]10;" => colour(true, body),
+                    b"\x1b]11;" => colour(false, body),
+                    b"\x1b]4;" => palette(body),
                     // tty_keys_extended_device_attributes: the text up to
                     // ST (tmp[128]); BEL does not end it there, but no
                     // terminal sends one.
@@ -429,6 +498,18 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
                 || body.starts_with('<')
                 || matches!(final_byte, b'c' | b't' | b'n' | b'y')
             {
+                // tty-keys.c:220-221, the theme reports.
+                if final_byte == b'n' {
+                    match body {
+                        "?997;1" => {
+                            return Some((Event::Theme(vtmux_core::colour::Theme::Dark), end + 1));
+                        }
+                        "?997;2" => {
+                            return Some((Event::Theme(vtmux_core::colour::Theme::Light), end + 1));
+                        }
+                        _ => {}
+                    }
+                }
                 if final_byte == b'y' && body.starts_with("?2026;") {
                     return Some((
                         Event::Sync(matches!(body.as_bytes().get(6), Some(b'1' | b'2' | b'3'))),
@@ -753,9 +834,32 @@ mod tests {
         assert_eq!(
             d.drain(Instant::now()),
             vec![
-                Event::Clipboard(b"hello".to_vec()),
+                Event::Clipboard(Some(b'c'), b"hello".to_vec()),
                 Event::Ignore,
-                Event::Clipboard(b"foo".to_vec())
+                Event::Clipboard(None, b"foo".to_vec())
+            ]
+        );
+    }
+
+    /// tty-keys.c:1755-1893 and 220-221: colour, palette and theme
+    /// replies.
+    #[test]
+    fn colour_palette_and_theme_replies() {
+        use vtmux_core::colour::Theme;
+        let mut d = Decoder::default();
+        d.feed(b"\x1b]10;rgb:ffff/8080/0000\x1b\\\x1b]11;#102030\x07\x1b]4;99;rgb:0101/0202/0303\x1b\\");
+        d.feed(b"\x1b]4;300;red\x07\x1b]11;nope\x07\x1b[?997;2n\x1b[?997;1n\x1b[?997;3n");
+        assert_eq!(
+            d.drain(Instant::now()),
+            vec![
+                Event::Colour(true, (0xff, 0x80, 0)),
+                Event::Colour(false, (0x10, 0x20, 0x30)),
+                Event::Palette(99, (1, 2, 3)),
+                Event::Ignore,
+                Event::Ignore,
+                Event::Theme(Theme::Light),
+                Event::Theme(Theme::Dark),
+                Event::Ignore,
             ]
         );
     }
@@ -872,21 +976,30 @@ mod tests {
             assert_eq!(events.len(), 1);
             assert!(!matches!(events[0], Event::Key(_)), "{events:?}");
         }
-        // All four answered: back to escape-time (TTY_ALL_REQUEST_FLAGS).
+        // All four answered and both colours (TTY_ALL_REQUEST_FLAGS,
+        // TTY_WAITFG|TTY_WAITBG): back to escape-time.
         let mut d = Decoder::default();
         d.query_sent(now);
         d.feed(b"\x1b[?2026;2$y\x1b");
         assert_eq!(d.drain(now), vec![Event::Sync(true)]);
         assert_eq!(d.deadline(), Some(now + ms(500)));
-        d.feed(b"[?62;4c\x1b[>1;2c\x1bP>|xterm\x1b\\\x1b");
+        d.feed(b"[?62;4c\x1b[>1;2c\x1bP>|xterm\x1b\\\x1b]10;#ffffff\x07\x1b");
         assert_eq!(
             d.drain(now),
             vec![
                 Event::DeviceAttributes(vec![62, 4]),
                 Event::DeviceAttributes2(1),
                 Event::ExtendedDeviceAttributes("xterm".into()),
+                Event::Colour(true, (0xff, 0xff, 0xff)),
             ]
         );
+        assert_eq!(
+            d.deadline(),
+            Some(now + ms(500)),
+            "the background is still out"
+        );
+        d.feed(b"]11;#000000\x07\x1b");
+        assert_eq!(d.drain(now), vec![Event::Colour(false, (0, 0, 0))]);
         assert_eq!(d.deadline(), Some(now + ms(10)));
         assert_eq!(d.start_deadline(), None);
         // A second reply changes nothing.

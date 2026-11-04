@@ -249,8 +249,7 @@ status = "pass"
 status = "pass"
 
 [tests."input-osc.sh"]
-status = "xfail"
-reason = "capture-pane -H is in (task gap_capture_flags); fails on scene rename: the screen title escape `ESC k renamed ESC \\` prints `renamed` in vtmux, tmux takes it as a title (input.c `input_exit_rename`); then osc52: `set-clipboard on` does not store OSC 52 into buffer0 (`no buffer buffer0`)"
+status = "pass"
 
 [tests."input-raw-controls.sh"]
 status = "pass"
@@ -286,12 +285,10 @@ status = "xfail"
 reason = "live-client phase: the inner window stays 80x24 under an 80x12 client, tmux pans the view to follow the cursor (tty.c tty_window_offset1) so SENT-POST is on screen, vtmux draws from the window's origin and shows OPPRE lines (`outer capture missing expected sentinel`); the same missing view offset as screen-redraw-outside.sh and tty-clamp-area-status-top.sh; every capture check passes"
 
 [tests."input-replies.sh"]
-status = "xfail"
-reason = "remain-on-exit works now (each query respawns the dead window); the OSC 4/10/11/12 colour queries and the OSC 52 clipboard query get no answer (`FAIL: osc-10-query`, expected `^[]10;rgb:ffff/0000/0000^G`). The other replies (DSR, DA, DECRQM, DECRQSS) match tmux: goldens in crates/vtmux-vt/tests/golden/reply_*.case and oracle scenario reply_decrqss"
+status = "pass"
 
 [tests."input-requests.sh"]
-status = "xfail"
-reason = "terminal requests from a pane are not seen on the client output: `did not see terminal request` for the OSC 4 colour query (ESC ] 4;99;?); the script also respawns a remain-on-exit window, which works now"
+status = "pass"
 
 [tests."input-scroll.sh"]
 status = "pass"
@@ -384,8 +381,7 @@ status = "pass"
 status = "pass"
 
 [tests."osc-11colours.sh"]
-status = "xfail"
-reason = "OSC 11 (set background) is not tracked: `#{pane_bg}` is empty after a pane prints OSC 11 `rgb:ff/ff/ff`, expected `#ffffff`"
+status = "pass"
 
 [tests."pane-ops.sh"]
 status = "pass"
@@ -522,8 +518,7 @@ reason = "`-T utf8` sets client_utf8 (attach utf8_terminal_feature_sets_client_u
 flaky = true
 
 [tests."theme-report.sh"]
-status = "xfail"
-reason = "DSR 996 / mode 2031 theme report: a pane's DSR 996 query gets no answer (`expected ^[[?997;2n (light, from terminal), got ''`)"
+status = "pass"
 
 [tests."tty-clamp-area-status-top.sh"]
 status = "xfail"

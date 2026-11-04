@@ -235,6 +235,12 @@ impl Server {
             // options.c:1460-1461: utf8_update_width_cache.
             self.update_width_cache();
         }
+        if matches!(name, "window-style" | "window-active-style") {
+            // options.c:1425-1429: PANE_STYLECHANGED|PANE_THEMECHANGED.
+            for pane in self.model.panes.values_mut() {
+                pane.requests.theme_changed();
+            }
+        }
         if name == "monitor-silence" {
             // options.c:1422: alerts_reset_all.
             self.model.alerts_reset_all();

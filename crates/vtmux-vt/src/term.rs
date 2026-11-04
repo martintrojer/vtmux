@@ -21,7 +21,7 @@ use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
 use crate::dcs::{self, Dcs, Dispatch, Step};
-use crate::palette::{self, Palette};
+use crate::palette::{self, OscEnd, Palette, Reply};
 
 /// Where a history row is read from.
 pub(crate) enum HistoryRow<'a> {
@@ -264,7 +264,9 @@ impl ExtendedKeys {
 #[derive(Debug)]
 pub struct PaneTerm {
     pub(crate) term: Terminal<'static, 'static>,
-    replies: Rc<RefCell<Vec<u8>>>,
+    /// What the program's input asks back, in input order: Ghostty's
+    /// replies as tmux words them, and what only the server can answer.
+    replies: Rc<RefCell<Vec<Reply>>>,
     /// BELs seen since the last [`PaneTerm::take_bells`] (input.c
     /// `input_c0_dispatch`, `case '\007'`).
     bells: Rc<std::cell::Cell<u32>>,
@@ -397,6 +399,7 @@ impl PaneTerm {
     /// # Panics
     /// Only if libghostty fails to allocate.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // one registration per Ghostty effect
     pub fn new(cols: u16, rows: u16, history_lines: usize) -> Self {
         let (cols, rows) = (cols.max(1), rows.max(1));
         let mut term = Terminal::new(TerminalOptions {
@@ -406,8 +409,9 @@ impl PaneTerm {
         })
         .expect("libghostty terminal allocation");
 
-        let replies = Rc::new(RefCell::new(Vec::new()));
+        let replies: Rc<RefCell<Vec<Reply>>> = Rc::new(RefCell::new(Vec::new()));
         let sink = Rc::clone(&replies);
+        let theme_sink = Rc::clone(&replies);
         let cursor = Rc::new(StdCell::new(CursorState::default()));
         let cursor_seen = Rc::clone(&cursor);
         let cursor_scan = Rc::clone(&cursor);
@@ -422,8 +426,16 @@ impl PaneTerm {
             // Every reply Ghostty wants to send goes through `tmux_reply`.
             .on_pty_write(move |term, data| {
                 if let Some(reply) = tmux_reply(term, cursor_seen.get(), mouse_seen.get(), data) {
-                    sink.borrow_mut().extend_from_slice(&reply);
+                    push_bytes(&mut sink.borrow_mut(), &reply);
                 }
+            })
+            // DSR 996 (input.c:1631-1637): the server knows the theme, so
+            // Ghostty answers nothing.
+            .and_then(|t| {
+                t.on_color_scheme(move |_| {
+                    theme_sink.borrow_mut().push(Reply::Theme);
+                    None
+                })
             })
             .and_then(|t| {
                 // Registering the handler is what makes Ghostty ask; the
@@ -732,6 +744,8 @@ impl PaneTerm {
                 if e == ScanEvent::Reset || std::mem::take(&mut self.scan.cluster_mode) {
                     keep_clustering(&mut self.term);
                 }
+                // After the bytes before them, whose replies Ghostty gave.
+                self.replies.borrow_mut().append(&mut self.scan.answers);
             }
         }
     }
@@ -762,9 +776,7 @@ impl PaneTerm {
         } else {
             "\x1bP0$r\x1b\\".to_owned()
         };
-        self.replies
-            .borrow_mut()
-            .extend_from_slice(reply.as_bytes());
+        push_bytes(&mut self.replies.borrow_mut(), reply.as_bytes());
     }
 
     /// The bytes of a DCS from `bytes[i..]`, through its end; the index
@@ -1959,9 +1971,37 @@ impl PaneTerm {
         self.cursor.set(c);
     }
 
-    /// Take the bytes to write back to the pane program (tmux's replies).
+    /// Take the bytes to write back to the pane program (tmux's replies),
+    /// dropping what only the server could answer: for a pane that has no
+    /// program or no window (a popup, `input_osc_10` with no `wp`).
     pub fn take_replies(&mut self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for r in self.take_answers() {
+            if let Reply::Bytes(b) = r {
+                out.extend_from_slice(&b);
+            }
+        }
+        out
+    }
+
+    /// Take what the program asked back since the last call, in order:
+    /// bytes to write back and the queries the server answers.
+    pub fn take_answers(&mut self) -> Vec<Reply> {
         std::mem::take(&mut *self.replies.borrow_mut())
+    }
+
+    /// `MODE_THEME_UPDATES` (`CSI ? 2031 h`): the program wants a theme
+    /// report whenever the theme changes.
+    #[must_use]
+    pub fn theme_updates(&self) -> bool {
+        self.term.mode(Mode::COLOR_SCHEME_REPORT).unwrap_or(false)
+    }
+
+    /// The default colours OSC 10 and 11 set (`palette->fg`, `->bg`):
+    /// `None` is the default.
+    #[must_use]
+    pub fn default_colours(&self) -> (Option<palette::Rgb>, Option<palette::Rgb>) {
+        (self.scan.palette.fg, self.scan.palette.bg)
     }
 
     /// A history row was read out of Ghostty (see [`history_reads`]).
@@ -2111,8 +2151,12 @@ struct AltModeScanner {
     palette_osc: Option<Vec<u8>>,
     palette_discard: bool,
     osc_cap: usize,
-    /// tmux's palette, to tell which palette OSCs redraw the pane.
+    /// tmux's palette, to tell which palette OSCs redraw the pane and to
+    /// answer the colour queries.
     palette: Palette,
+    /// What the OSC or mode just ended asks back; [`PaneTerm::feed`] moves
+    /// it to the replies after Ghostty has the bytes before it.
+    answers: Vec<Reply>,
     /// A palette OSC just ended with a redraw ([`PaneTerm::feed`] takes it).
     palette_redraw: bool,
     /// Intermediate bytes (0x20-0x2f) in the CSI being scanned.
@@ -2426,6 +2470,9 @@ enum ScanEvent {
     /// A byte tmux ignores inside a CSI (0x7f-0xff, input.c:579, 597, 612,
     /// 628) without leaving it: Ghostty must not see it.
     Skip,
+    /// The sequence just ended asks something back
+    /// ([`AltModeScanner::answers`]).
+    Answer,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -2460,7 +2507,11 @@ impl AltModeScanner {
         if self.state == ScanState::Str {
             self.push_palette_osc(b);
         }
-        self.push_state(b)
+        let event = self.push_state(b);
+        if event.is_none() && !self.answers.is_empty() {
+            return Some(ScanEvent::Answer);
+        }
+        event
     }
 
     /// tmux's view of an OSC (`input_state_osc_string_table`): collected
@@ -2473,7 +2524,9 @@ impl AltModeScanner {
         match b {
             0x07 | 0x18 | 0x1a | 0x1b => {
                 let osc = self.palette_osc.take().unwrap_or_default();
-                if !self.palette_discard && self.palette.osc(&osc) {
+                // input_end_bel: only BEL; ST and the rest end as ST.
+                let end = if b == 0x07 { OscEnd::Bel } else { OscEnd::St };
+                if !self.palette_discard && self.palette.osc(&osc, end, &mut self.answers) {
                     self.palette_redraw = true;
                 }
             }
@@ -2807,6 +2860,7 @@ impl AltModeScanner {
                             Param::Num(2026) => self.sync = Some(b == b'h'),
                             // Not a tmux mode: Ghostty's clustering stays on.
                             Param::Num(2027) => self.cluster_mode = true,
+                            Param::Num(2031) => self.answers.push(Reply::ThemeUpdates(b == b'h')),
                             Param::Num(n) => m.apply(n, b == b'h'),
                             _ => {}
                         }
@@ -2873,6 +2927,15 @@ fn page_rows(cols: u16) -> usize {
         rows -= 1;
     }
     if rows == 0 { 215 } else { rows }
+}
+
+/// Append reply bytes, joining them to the bytes before.
+fn push_bytes(replies: &mut Vec<Reply>, bytes: &[u8]) {
+    if let Some(Reply::Bytes(last)) = replies.last_mut() {
+        last.extend_from_slice(bytes);
+    } else {
+        replies.push(Reply::Bytes(bytes.to_vec()));
+    }
 }
 
 const REPLACEMENT: &[u8] = "\u{FFFD}".as_bytes();
@@ -3014,11 +3077,13 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
 ///   14/16/18 t (input.c:2160-2183): produced by the registered effects
 ///
 /// Dropped, tmux does not answer: DA3, DECXCPR `CSI ? 6 n` and DSR ?998
-/// (tmux's private DSR knows only 996, input.c:1631-1637), DSR ?996 (needs a
-/// client theme), mode 2033/2048 reports, kitty keyboard `CSI ? u`, XTWINOPS
+/// (tmux's private DSR knows only 996, input.c:1631-1637), mode 2033/2048
+/// reports, kitty keyboard `CSI ? u`, XTWINOPS
 /// 21 t (input.c:2143-2149), every OSC query (colours, clipboard, OSC 5522,
-/// 7501; tmux answers colours only from client state), XTGETTCAP, Kitty
-/// graphics and Glyph Protocol APC.
+/// 7501: the colour and clipboard queries are [`Reply`]s from tmux's own
+/// palette model, `palette.rs`), XTGETTCAP, Kitty graphics and Glyph
+/// Protocol APC. DSR ?996 is [`Reply::Theme`], from the colour-scheme
+/// effect.
 fn tmux_reply(
     term: &Terminal<'_, '_>,
     cursor: CursorState,
@@ -3729,7 +3794,7 @@ mod tests {
     #[test]
     fn palette_oscs_ask_for_a_redraw() {
         let mut t = PaneTerm::new(20, 5, 100);
-        t.set_colour_names(|n| n == "red");
+        t.set_colour_names(|n| (n == "red").then_some((255, 0, 0)));
         for (bytes, redraw) in [
             (&b"\x1b]4;1;#ff0000\x07"[..], true),
             (b"\x1b]4;1;red\x1b\\", true),
@@ -3813,6 +3878,7 @@ mod tests {
                     | ScanEvent::RenameStart
                     | ScanEvent::Sync
                     | ScanEvent::TitleStack
+                    | ScanEvent::Answer
                     | ScanEvent::Skip => None,
                 })
                 .collect::<Vec<u8>>()
