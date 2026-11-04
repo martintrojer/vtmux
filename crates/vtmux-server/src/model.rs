@@ -259,6 +259,8 @@ pub struct Pane {
     pub compress: crate::compress::PaneCompress,
     /// `pipe-pane`'s pipe, while open.
     pub pipe: Option<crate::pipe::PanePipe>,
+    /// Its auto-hide scrollbar's state ([`crate::scrollbar`]).
+    pub sb: crate::scrollbar::AutoHide,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its
@@ -823,13 +825,26 @@ impl Model {
     ) {
         self.sync_borderless(w);
         let status = self.pane_status(w);
+        // layout_resize_check and layout_split_check_space: `on` scrollbars
+        // count in a pane's minimum width (the active pane's style).
+        let reserve = self
+            .windows
+            .get(&w)
+            .filter(|_| self.scrollbars(w) == crate::scrollbar::Scrollbars::On)
+            .map(|x| {
+                let s = self.scrollbar_style(x.active());
+                s.width + s.pad
+            });
         let Some(window) = self.windows.get_mut(&w) else {
             return;
         };
-        window.layout.opts.status = status;
-        if let Some(z) = &mut window.zoom {
-            z.saved.opts.status = status;
+        for opts in std::iter::once(&mut window.layout.opts)
+            .chain(window.zoom.as_mut().map(|z| &mut z.saved.opts))
+        {
+            opts.status = status;
+            opts.scrollbar_always = reserve;
         }
+        let window = &self.windows[&w];
         let hidden = window.zoom.as_ref().map(|z| z.pane).filter(|z| {
             // window_pane_get_pane_status (window.c:2936-2940): the
             // zoomed pane of a mode that hides it has no status line.
@@ -839,7 +854,7 @@ impl Model {
                     .is_some_and(crate::mode::Mode::hides_pane_status)
             })
         });
-        let mut resized = Vec::new();
+        let mut rects = Vec::new();
         for p in window.panes.panes.iter().filter(|p| Some(**p) != skip) {
             // Panes hidden by a zoom keep their last rectangle.
             let Some(mut rect) = window.layout.pane_rect(*p) else {
@@ -850,12 +865,16 @@ impl Model {
             {
                 rect = *window.layout.root.get(&path).g();
             }
-            if let Some(pane) = self.panes.get_mut(p)
+            rects.push((*p, self.reserve_scrollbar(*p, rect)));
+        }
+        let mut resized = Vec::new();
+        for (p, rect) in rects {
+            if let Some(pane) = self.panes.get_mut(&p)
                 && let Some(old) = pane.set_rect(rect)
             {
-                resized.push((*p, old));
+                resized.push((p, old));
             } else if let Some((c, old)) = created
-                && c == *p
+                && c == p
             {
                 resized.push((c, old));
             }
@@ -1585,6 +1604,7 @@ impl Model {
         let Some(rect) = self.windows.get(&w).map(|x| x.layout.cell_rect(path)) else {
             return;
         };
+        let rect = self.reserve_scrollbar(p, rect);
         let Some(pane) = self.panes.get_mut(&p) else {
             return;
         };
@@ -1673,15 +1693,15 @@ impl Model {
     /// `window_pane_find_up/down/left/right` (window.c:2220-2440): the panes
     /// whose edge touches `p`'s on that side (wrapping round the window),
     /// overlapping it along the edge; the most recently active wins
-    /// (`window_pane_choose_best`). Scrollbars are not modelled, so the
-    /// full-size offset is the pane's own.
+    /// (`window_pane_choose_best`), by their full size with a reserved
+    /// scrollbar (`window_pane_full_size_offset`).
     #[must_use]
     pub fn neighbour(&self, p: PaneId, side: Side) -> Option<PaneId> {
         let pane = self.panes.get(&p)?;
         let w = self.windows.get(&pane.window)?;
         let status = self.pane_status(w.id);
         let (wsx, wsy) = (to_i64(w.sx()), to_i64(w.sy()));
-        let r = Rect::of(pane);
+        let r = Rect::full(self, pane);
         // The edge the neighbour's opposite side must sit on, and the span
         // it must overlap.
         let (edge, lo, hi) = match side {
@@ -1721,7 +1741,7 @@ impl Model {
             .filter(|&&q| q != p)
             .filter_map(|q| self.panes.get(q))
             .filter(|q| {
-                let n = Rect::of(q);
+                let n = Rect::full(self, q);
                 let (at, start, len) = match side {
                     Side::Up => (n.y + n.h + 1, n.x, n.w),
                     Side::Down => (n.y, n.x, n.w),
@@ -1789,13 +1809,13 @@ impl Model {
         let in_border = |r: Rect| x >= r.x - 1 && x <= r.x + r.w && y >= r.y - 1 && y <= r.y + r.h;
         if let Some(p) = stack
             .iter()
-            .find(|p| floating(p) && visible(p) && in_border(Rect::of(p)))
+            .find(|p| floating(p) && visible(p) && in_border(Rect::full(self, p)))
         {
             return Some(p.id);
         }
         if status == PaneStatus::Top
             && let Some(p) = stack.iter().find(|p| {
-                let r = Rect::of(p);
+                let r = Rect::full(self, p);
                 visible(p) && !floating(p) && x >= r.x && x <= r.x + r.w && y == r.y - 1
             })
         {
@@ -1807,7 +1827,7 @@ impl Model {
                 if !visible(p) {
                     return false;
                 }
-                let r = Rect::of(p);
+                let r = Rect::full(self, p);
                 if floating(p) {
                     return in_border(r);
                 }
@@ -1856,6 +1876,15 @@ impl Rect {
             w: i64::from(p.rect.sx),
             h: i64::from(p.rect.sy),
         }
+    }
+
+    /// `window_pane_full_size_offset`: with its reserved scrollbar.
+    fn full(model: &Model, p: &Pane) -> Self {
+        let mut r = Self::of(p);
+        if let Some((x, w)) = model.full_columns(p.id) {
+            (r.x, r.w) = (x, w);
+        }
+        r
     }
 }
 

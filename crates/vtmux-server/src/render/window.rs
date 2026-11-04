@@ -15,7 +15,7 @@ use vtmux_core::time::WallClock as _;
 use vtmux_vt::{Color, Snapshot};
 
 use super::Caps;
-use super::compose::{Draw, PaneDraw, Theme, pane_status};
+use super::compose::{BarDraw, Draw, PaneDraw, Theme, pane_status};
 use super::scene::{Indicators, Lines, Scene, SceneCache, ScenePane, WindowView};
 use crate::environ::Environ;
 use crate::format_ctx::{Ctx, ServerInfo};
@@ -194,11 +194,13 @@ impl Source<'_> {
             let mut rect = pane.rect;
             rect.xoff += i32::from(offset);
             rect.yoff += i32::from(offset);
+            let placement = self.model.scrollbar_placement(p);
             panes.push(ScenePane {
                 id: p,
                 rect,
                 floating,
                 lines,
+                scrollbar: placement,
                 status: if hides {
                     PaneStatus::Off
                 } else {
@@ -230,6 +232,11 @@ impl Source<'_> {
                     border: self.style(TreeId::Pane(p), option, &ctx),
                     status: Vec::new(),
                     status_ranges: Vec::new(),
+                    scrollbar: placement.map(|placement| BarDraw {
+                        style: self.model.scrollbar_style(p),
+                        placement,
+                        slider: self.model.scrollbar_slider(p),
+                    }),
                 },
             );
         }

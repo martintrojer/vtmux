@@ -1,0 +1,33 @@
+name = "scrollbars_autohide"
+size = [40, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "12", "sh", "-c", "i=1; while [ $i -le 30 ]; do echo L$i; i=$((i+1)); done; exec cat"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars", "auto-hide"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-timeout", "600000"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-style", "bg=red,fg=blue,width=1,pad=0"] },
+  { attach = { session = "a" } },
+  # Hidden until something shows it; the pane keeps its width.
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_width}"] },
+  # The pointer moves onto the bar's column: it shows, over the pane.
+  { keys = "\u001b[<35;40;5M" },
+  { screen = {} },
+  # Away again with a short timeout: the timer restarts and it hides.
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-timeout", "1"] },
+  { keys = "\u001b[<35;5;5M" },
+  { settle = { react = true } },
+  { screen = {} },
+  # Copy mode scrolling shows it too.
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-timeout", "600000"] },
+  { run = ["copy-mode", "-H", "-t", "a:0.0"] },
+  { run = ["send", "-t", "a:0.0", "-X", "page-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # Setting pane-scrollbars hides every bar.
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars", "auto-hide"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

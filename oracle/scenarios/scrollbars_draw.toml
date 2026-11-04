@@ -1,0 +1,38 @@
+name = "scrollbars_draw"
+size = [40, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "12", "sh", "-c", "i=1; while [ $i -le 30 ]; do echo L$i; i=$((i+1)); done; exec cat"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars", "on"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-style", "bg=red,fg=blue,width=1,pad=0"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:0.0", "#{pane_width} #{pane_unzoomed_width}"] },
+  # Left, two wide with a pad between the bar and the content.
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-position", "left"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-style", "bg=red,fg=blue,width=2,pad=1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # A split: the shared border runs past the left pane's bar.
+  { run = ["splitw", "-h", "-t", "a:0.0", "cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a:0", "-F", "#{pane_left} #{pane_width} #{pane_unzoomed_width}"] },
+  # Copy mode at the top of history: the slider is at the top.
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-position", "right"] },
+  { run = ["copy-mode", "-H", "-t", "a:0.0"] },
+  { run = ["send", "-t", "a:0.0", "-X", "history-top"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # modal: only the pane in copy mode, over its last column, once moved.
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars-timeout", "600000"] },
+  { run = ["set", "-w", "-t", "a:0", "pane-scrollbars", "modal"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send", "-t", "a:0.0", "-X", "page-down"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a:0", "-F", "#{pane_left} #{pane_width}"] },
+]

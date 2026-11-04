@@ -758,6 +758,7 @@ impl Server {
             self.copy_drag_timers(Instant::now());
             self.clock_timers(Instant::now());
             self.panes_timers(Instant::now());
+            self.model.scrollbar_timers(Instant::now());
             self.sync_timers(Instant::now());
             self.subs_timers(Instant::now());
             self.lock_timer_fire(Instant::now());
@@ -887,6 +888,9 @@ impl Server {
             self.clock_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.panes_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.model
+                .scrollbar_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.sync_deadline()
                 .map(|d| d.saturating_duration_since(now)),
@@ -4093,6 +4097,7 @@ impl Server {
             mode_prompt_owner: None,
             compress: crate::compress::PaneCompress::default(),
             pipe: None,
+            sb: crate::scrollbar::AutoHide::default(),
         })
     }
 
@@ -4399,6 +4404,7 @@ impl Server {
         {
             io.write(&replies);
         }
+        let toggled_alternate = alternate != pane.term.alternate_on();
         if entered_alternate {
             pane.flush_resizes();
         }
@@ -4412,6 +4418,12 @@ impl Server {
             w.activity_secs = crate::model::now_epoch();
         }
         self.model.alerts_queue(window, alerts::ACTIVITY);
+        // screen_write_alternateon/off (screen-write.c:3162, 3191):
+        // layout_fix_panes, so a reserved scrollbar comes and goes.
+        if toggled_alternate && self.model.scrollbars(window) != crate::scrollbar::Scrollbars::Off {
+            self.model.fix_panes(window);
+            self.model.redraw(crate::model::Redraw::Window(window));
+        }
         if !flooding {
             self.burst_started.insert(p);
         }

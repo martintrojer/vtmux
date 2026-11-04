@@ -23,8 +23,8 @@
 //! `HIDE_PANE_STATUS` gives the zoomed pane the row its status line would
 //! have taken under `pane-border-status` (window.c:2936-2940 into
 //! `layout_fix_panes`: [`crate::model::Model::fix_panes`] and the scene).
-//! `FILL_WINDOW` and `HIDE_SCROLLBARS` are for scrollbars, which vtmux
-//! does not have.
+//! `HIDE_SCROLLBARS` is [`crate::mode::Mode::hides_scrollbars`];
+//! `FILL_WINDOW` is for drawing, where panes-mode's screen fills the pane.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;

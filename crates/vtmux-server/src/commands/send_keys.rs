@@ -214,10 +214,22 @@ fn mode_command(
     // `c` of `wme->mode->command`: the target client, whose read-only
     // flag a mode command checks itself (window-copy.c:3925-3933).
     let read_only = tc.is_some_and(|c| server.clients.get(&c).is_some_and(|c| c.flags.read_only));
+    // window_copy_cmd_scroll_to_mouse reads the client's slider grab and
+    // the event's row (cs->c, cs->m).
+    let slider = (name == "scroll-to-mouse")
+        .then(|| server.slider_input(tc, mouse, p))
+        .flatten();
+    // window_copy_scroll: the pane becomes the active one.
+    if slider.is_some()
+        && let Some(w) = server.model.panes.get(&p).map(|x| x.window)
+    {
+        server.model.set_active(w, p);
+    }
     let result = server
         .with_mode(p, |m, env| {
             let env = crate::mode::copy::Env {
                 mouse: mouse.is_some(),
+                slider,
                 ..env.clone()
             };
             m.command(&env, name, rest, read_only)

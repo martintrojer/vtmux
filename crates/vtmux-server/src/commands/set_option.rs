@@ -239,11 +239,21 @@ impl Server {
             // options.c:1422: alerts_reset_all.
             self.model.alerts_reset_all();
         }
+        if name == "pane-scrollbars" {
+            // options.c:1448-1451: every auto-hidden bar hides.
+            let panes: Vec<_> = self.model.panes.keys().copied().collect();
+            for p in panes {
+                self.model.scrollbar_hide(p);
+            }
+        }
         if matches!(
             name,
-            "pane-border-status" | "pane-scrollbars" | "pane-scrollbars-position"
+            "pane-border-status"
+                | "pane-scrollbars"
+                | "pane-scrollbars-position"
+                | "pane-scrollbars-style"
         ) {
-            // options.c:1437-1446: layout_fix_panes everywhere.
+            // options.c:1437-1446, 1452-1458: layout_fix_panes everywhere.
             for &w in &windows {
                 self.model.fix_panes(w);
             }

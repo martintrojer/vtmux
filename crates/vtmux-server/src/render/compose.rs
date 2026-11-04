@@ -149,6 +149,45 @@ pub struct PaneDraw {
     /// (`GRID_FLAG_SELECTED`), so never erased as part of an empty run.
     /// Empty without a selection.
     pub selected: Vec<bool>,
+    /// Its scrollbar, when one is drawn.
+    pub scrollbar: Option<BarDraw>,
+}
+
+/// How a pane's scrollbar draws (`redraw_draw_scrollbar_span`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BarDraw {
+    pub style: crate::scrollbar::BarStyle,
+    pub placement: crate::scrollbar::Placement,
+    /// The slider's first row and height.
+    pub slider: (u32, u32),
+}
+
+impl BarDraw {
+    /// Column `col`, row `row` of the bar: a padding cell in the pane's
+    /// default colours, else the style's colours, swapped on the slider.
+    fn cell(&self, theme: &Theme, col: u32, row: u32) -> Cell {
+        let (w, pad) = (self.style.width, self.style.pad);
+        let is_pad = if self.placement.left {
+            col >= w && col < w + pad
+        } else {
+            col < pad
+        };
+        let mut style = if is_pad {
+            Style::default()
+        } else {
+            theme.style(&self.style.cell)
+        };
+        let (y, h) = self.slider;
+        if !is_pad && row >= y && row < y + h {
+            std::mem::swap(&mut style.fg, &mut style.bg);
+        }
+        Cell {
+            text: " ".into(),
+            width: 1,
+            style,
+            ..Cell::default()
+        }
+    }
 }
 
 /// Everything [`compose`] needs besides the scene.
@@ -305,6 +344,7 @@ struct PaneKey {
     border: CellStyle,
     status: Vec<styled::Cell>,
     selected: Vec<bool>,
+    scrollbar: Option<BarDraw>,
 }
 
 /// Everything in a [`Draw`] but the panes' content, and the theme.
@@ -336,6 +376,7 @@ impl DrawKey {
                     border: p.border.clone(),
                     status: p.status.clone(),
                     selected: p.selected.clone(),
+                    scrollbar: p.scrollbar.clone(),
                 })
                 .collect(),
             active: d.active,
@@ -430,6 +471,11 @@ fn compose_row(
                     .get(pane)
                     .and_then(|p| p.status.get(usize::try_from(*offset).ok()?))
                     .map_or_else(Cell::default, |c| theme.cell(c)),
+                SceneCell::Scrollbar { pane, col, row } => d
+                    .panes
+                    .get(pane)
+                    .and_then(|p| p.scrollbar.as_ref())
+                    .map_or_else(Cell::default, |b| b.cell(theme, *col, *row)),
             };
             line[usize::from(x)] = cell;
         }
@@ -792,6 +838,7 @@ mod tests {
     /// to two side-by-side panes (echo, scroll, soft wrap, erase), and
     /// reports no change when nothing changed.
     #[test]
+    #[allow(clippy::too_many_lines, reason = "one scenario, step by step")]
     fn cached_compose_matches_a_full_one() {
         use super::super::scene::{Indicators, SceneCache, ScenePane, WindowView};
         use vtmux_core::layout::{Geometry, PaneStatus};
@@ -813,6 +860,7 @@ mod tests {
                     floating: false,
                     lines: Lines::Single,
                     status: PaneStatus::Off,
+                    scrollbar: None,
                 })
                 .collect(),
             indicators: Indicators::Colour,
@@ -850,6 +898,7 @@ mod tests {
                                 status: Vec::new(),
                                 status_ranges: Vec::new(),
                                 selected: Vec::new(),
+                                scrollbar: None,
                             },
                         )
                     })

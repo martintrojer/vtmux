@@ -74,13 +74,27 @@ pub fn exec(
     {
         server.reset_mode(p);
     }
-    // -S scrolls to the mouse on the scrollbar; with no mouse event (a key
-    // or a hook) the event's y is 0, the top of the bar. No client, nothing.
+    // -S scrolls to the mouse on the scrollbar (window_copy_scroll, which
+    // makes the pane active first); with no mouse event (a key or a hook)
+    // the event's y is 0, the top of the bar. No client, nothing.
     if args.flag('S')
-        && item.client.is_some()
-        && with_copy(server, p, |m, env| m.scroll_to_top(env, args.flag('e'))) == Some(true)
+        && let Some(slider) = server.slider_input(item.client, item.mouse.as_ref(), p)
     {
-        server.reset_mode(p);
+        if server
+            .model
+            .panes
+            .get(&p)
+            .is_some_and(|x| !x.modes.is_empty())
+            && let Some(w) = server.model.panes.get(&p).map(|x| x.window)
+        {
+            server.model.set_active(w, p);
+        }
+        if with_copy(server, p, |m, env| {
+            m.scroll_slider(env, slider, args.flag('e'))
+        }) == Some(true)
+        {
+            server.reset_mode(p);
+        }
     }
     Ok(())
 }

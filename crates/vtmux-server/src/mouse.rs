@@ -31,8 +31,9 @@
 //! pane with the pointer, and `resize-pane -M` on a floating pane resizes
 //! it by the border or corner grabbed (moves it by the top border).
 //!
-//! Not here: scrollbars (off by default) and pane-border control ranges
-//! (`window_pane_status_get_range`).
+//! Scrollbars: a click above or below the slider, or a drag of it, is a
+//! `Scrollbar*` location; motion shows and hides auto-hide bars
+//! ([`crate::scrollbar`]).
 
 use std::time::{Duration, Instant};
 
@@ -310,6 +311,7 @@ pub enum DragAction {
 /// A client's mouse state (`c->tty.mouse_*`, `c->click_*`, the
 /// `CLIENT_DOUBLECLICK` and `CLIENT_TRIPLECLICK` flags).
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools, reason = "tmux's mouse flags")]
 pub struct ClientMouse {
     /// `mouse_drag_flag`: the button of the drag in progress, plus one.
     drag_flag: u32,
@@ -319,6 +321,12 @@ pub struct ClientMouse {
     drag_y: u32,
     /// `mouse_last_pane`.
     last_pane: Option<PaneId>,
+    /// `mouse_scrolling_flag`: a drag of a scrollbar's slider is going on.
+    scrolling: bool,
+    /// `mouse_slider_mpos`: how far down the slider the drag grabbed it
+    /// (the status lines above the window added). As tmux's int: 0 for a
+    /// client that never ended a drag, -1 once one ended.
+    slider_mpos: i64,
     /// `mouse_drag_update` and `mouse_drag_release`.
     pub(crate) drag_action: Option<DragAction>,
     /// `CLIENT_DOUBLECLICK` / `CLIENT_TRIPLECLICK`.
@@ -465,9 +473,16 @@ impl Server {
         };
         let mut st = std::mem::take(&mut self.clients.get_mut(&id).expect("client").mouse);
         let mut released = None;
-        let located = self.check_mouse_with(&mut st, id, s, w, m, double, &mut released);
+        let mut hover = None;
+        let located =
+            self.check_mouse_with(&mut st, id, s, w, m, double, &mut released, &mut hover);
         if let Some(c) = self.clients.get_mut(&id) {
             c.mouse = st;
+        }
+        // server_client_update_scrollbar_hover: on a motion, the bar under
+        // the pointer shows and the others' timers restart.
+        if let Some((MouseKind::Move, at)) = hover {
+            self.model.scrollbar_hover(w, at, Instant::now());
         }
         // mouse_drag_release, with the event that ended the drag.
         if let Some((action, ev)) = released {
@@ -490,6 +505,7 @@ impl Server {
         report: MouseInput,
         double: bool,
         released: &mut Option<(DragAction, MouseEvent)>,
+        hover_out: &mut Option<(MouseKind, Option<(i64, i64)>)>,
     ) -> Located {
         // server_client_remove_pane: a drag whose pane has gone stops
         // calling back.
@@ -499,6 +515,7 @@ impl Server {
         {
             st.last_pane = None;
             st.drag_action = None;
+            st.scrolling = false;
         }
         let lwp = st.last_pane;
         let sgr_drag_motion = report.sgr.is_some_and(|g| drag(g.b) && release(g.b));
@@ -564,6 +581,7 @@ impl Server {
         };
         let mut loc = None;
         let (mut px, mut py) = (0, 0);
+        let mut sl_mpos = 0;
         // Is this on the status line?
         if let Some(at) = status_at
             && y >= at
@@ -610,9 +628,17 @@ impl Server {
             });
         }
 
-        // Not on the status line: the window area.
+        // Not on the status line: the window area. A slider drag stays on
+        // its slider wherever the pointer goes (server-client.c:1034-1039).
         let mut wp = None;
-        if loc.is_none() {
+        let mut hover = None;
+        if loc.is_none() && st.scrolling {
+            if let Some(l) = lwp {
+                loc = Some(MouseLocation::ScrollbarSlider);
+                ev.target.pane = Some(l);
+                ev.target.window = self.model.panes.get(&l).map(|x| x.window);
+            }
+        } else if loc.is_none() {
             px = x;
             py = if status_at == Some(0) && y >= status_lines {
                 y - status_lines
@@ -630,6 +656,7 @@ impl Server {
             ev.offset = u32::from(ring);
             let (sx, sy) = (win.sx() + 2 * ev.offset, win.sy() + 2 * ev.offset);
             if px > sx || py > sy {
+                *hover_out = Some((kind, None));
                 return Located::Nothing;
             }
             // Window coordinates: the ring's frame is one cell outside.
@@ -637,6 +664,7 @@ impl Server {
                 i64::from(px) - i64::from(ev.offset),
                 i64::from(py) - i64::from(ev.offset),
             );
+            hover = Some((wx, wy));
             // The ring's frame (the cells just outside the window, corners
             // included) is the border of the pane it frames: the pane at
             // the nearest window cell.
@@ -662,7 +690,7 @@ impl Server {
                     loc = if frame {
                         Some(MouseLocation::Border)
                     } else {
-                        self.mouse_in_pane(window, p, wx, wy)
+                        self.mouse_in_pane(window, p, wx, wy, &mut sl_mpos)
                     };
                     // server-client.c:1109-1114: a range on the pane's
                     // border status line is a control location.
@@ -678,6 +706,8 @@ impl Server {
                 }
             }
         }
+
+        *hover_out = Some((kind, hover));
 
         // Reset the click type or start a click timer.
         let mut kind = kind;
@@ -719,6 +749,8 @@ impl Server {
             *released = st.drag_action.take().map(|a| (a, ev.clone()));
             kind = MouseKind::DragEnd;
             st.drag_flag = 0;
+            st.scrolling = false;
+            st.slider_mpos = -1;
             st.last_pane = None;
         }
 
@@ -743,6 +775,15 @@ impl Server {
                     let off = i64::from(ev.offset);
                     self.model
                         .pane_at(window, i64::from(px) - off, i64::from(py) - off)
+                });
+            }
+            // server-client.c:1222-1231: grabbing the slider.
+            if !st.scrolling && loc == Some(MouseLocation::ScrollbarSlider) {
+                st.scrolling = true;
+                st.slider_mpos = i64::from(if status_at == Some(0) {
+                    sl_mpos + status_lines
+                } else {
+                    sl_mpos
                 });
             }
         }
@@ -782,32 +823,95 @@ impl Server {
         Located::Key(ev)
     }
 
-    /// `server_client_check_mouse_in_pane` (server-client.c:711-855) for a
-    /// tiled or floating pane without scrollbars: inside the pane, on a
-    /// border, or nowhere. `x`, `y` are window coordinates.
-    fn mouse_in_pane(&self, wid: WindowId, p: PaneId, x: i64, y: i64) -> Option<MouseLocation> {
+    /// `server_client_check_mouse_in_pane` (server-client.c:711-855): inside
+    /// the pane, on its scrollbar (with where in the slider, `sl_mpos`), on
+    /// a border, or nowhere. `x`, `y` are window coordinates.
+    #[allow(clippy::too_many_lines, reason = "one function, as tmux's")]
+    fn mouse_in_pane(
+        &self,
+        wid: WindowId,
+        p: PaneId,
+        x: i64,
+        y: i64,
+        sl_mpos: &mut u32,
+    ) -> Option<MouseLocation> {
         let window = self.model.windows.get(&wid)?;
         let pane = self.model.panes.get(&p)?;
         let rect = pane.rect;
         let (xoff, yoff) = (i64::from(rect.xoff), i64::from(rect.yoff));
         let (sx, sy) = (i64::from(rect.sx), i64::from(rect.sy));
         let status = self.model.pane_status(wid);
+        let left_bar = self.model.scrollbar_left(wid);
+        let overlay = self.model.scrollbar_overlay(p);
+        let (sb_w, sb_pad) = if self.model.scrollbar_visible(p) {
+            let style = self.model.scrollbar_style(p);
+            let w = if overlay {
+                i64::from(style.width).min(sx)
+            } else {
+                i64::from(style.width)
+            };
+            (w, i64::from(style.pad))
+        } else {
+            (0, 0)
+        };
+        // Where in the bar row `y` is, against the slider.
+        let on_bar = |sl_mpos: &mut u32| {
+            let (slider_y, slider_h) = self.model.scrollbar_slider(p);
+            let top = yoff + i64::from(slider_y);
+            let bottom = top + i64::from(slider_h) - 1;
+            if y < top {
+                MouseLocation::ScrollbarUp
+            } else if y <= bottom {
+                *sl_mpos = u32::try_from(y - top).unwrap_or(0);
+                MouseLocation::ScrollbarSlider
+            } else {
+                MouseLocation::ScrollbarDown
+            }
+        };
         let status_line = match status {
             vtmux_core::layout::PaneStatus::Top => yoff - 1,
             vtmux_core::layout::PaneStatus::Bottom => yoff + sy,
             vtmux_core::layout::PaneStatus::Off => -1,
         };
+        let mut bdr_left = xoff - 1;
+        if !overlay && left_bar {
+            bdr_left -= sb_pad + sb_w;
+        }
+        if overlay && sb_w != 0 && y >= yoff && y < yoff + sy && x >= xoff && x < xoff + sx {
+            let (start, end) = if left_bar {
+                (xoff, xoff + sb_w - 1)
+            } else {
+                (xoff + sx - sb_w, xoff + sx - 1)
+            };
+            if (start..=end).contains(&x) {
+                return Some(on_bar(sl_mpos));
+            }
+            return Some(MouseLocation::Pane);
+        }
         let off = status != vtmux_core::layout::PaneStatus::Off;
         let in_rows = (off && y != status_line && y != yoff + sy)
             || (yoff == 0 && y < sy)
             || (y >= yoff && y < yoff + sy);
-        if in_rows && x < xoff + sx {
+        let in_cols = if left_bar {
+            x < xoff + sx - sb_pad - sb_w
+        } else {
+            x < xoff + sx + sb_pad + sb_w
+        };
+        if in_rows && in_cols {
+            let in_bar = if left_bar {
+                x >= xoff - sb_pad - sb_w && x < xoff - sb_pad
+            } else {
+                x >= xoff + sx + sb_pad && x < xoff + sx + sb_pad + sb_w
+            };
+            if in_bar {
+                return Some(on_bar(sl_mpos));
+            }
             let floating = window.is_floating(p);
             let lines = self
                 .model
                 .number_option(TreeId::Pane(p), "pane-border-lines");
             // pane-border-lines none (6) on a floating pane: no border.
-            if floating && lines != 6 && (x == xoff - 1 || y == yoff - 1 || y == yoff + sy) {
+            if floating && lines != 6 && (x == bdr_left || y == yoff - 1 || y == yoff + sy) {
                 return Some(MouseLocation::Border);
             }
             return Some(MouseLocation::Pane);
@@ -832,9 +936,19 @@ impl Server {
             let r = other.rect;
             let (fx, fy) = (i64::from(r.xoff), i64::from(r.yoff));
             let (fsx, fsy) = (i64::from(r.sx), i64::from(r.sy));
-            let left = fx - 1;
+            let reserve = if self.model.scrollbar_reserve(q) {
+                let style = self.model.scrollbar_style(q);
+                i64::from(style.width + style.pad)
+            } else {
+                0
+            };
+            let (left, right) = if left_bar {
+                (fx - 1 - reserve, fx + fsx)
+            } else {
+                (fx - 1, fx + fsx + reserve)
+            };
             if y >= fy - 1 && y <= fy + fsy {
-                if x == fx + fsx {
+                if x == right {
                     return true;
                 }
                 if window.is_floating(p) && x == left {
@@ -1158,8 +1272,10 @@ impl Server {
         let (lx, ly) = ev.window_position((ev.input.lx, ev.input.ly));
         let (sx, sy) = (i64::from(rect.sx), i64::from(rect.sy));
         let (pxoff, pyoff) = (i64::from(rect.xoff), i64::from(rect.yoff));
-        let left = pxoff - 1;
-        let right = pxoff + sx;
+        // cmd-resize-pane.c:250-260: a reserved scrollbar is inside.
+        let (fx, fsx) = self.model.full_columns(p).unwrap_or((pxoff, sx));
+        let left = fx - 1;
+        let right = fx + fsx;
         let (gsx, gsy) = (i64::from(lc.sx), i64::from(lc.sy));
         let (gx, gy) = (i64::from(lc.xoff), i64::from(lc.yoff));
         let min = i64::from(vtmux_core::layout::PANE_MINIMUM);
@@ -1234,6 +1350,32 @@ impl Server {
                 m.start_drag(env, start, current, now);
             }
         });
+    }
+
+    /// `window_copy_scroll`'s inputs for client `id` and pane `p`: the
+    /// event's row (`m->y`; 0 with no event, the top of the bar) as a row
+    /// of the pane, where the drag grabbed the slider (`mouse_slider_mpos`)
+    /// and the slider's and bar's heights. tmux reads the slider as last
+    /// drawn (`wp->sb_slider_h`): with no bar shown, 0 here. `None` with no
+    /// client (`window_copy_cmd_scroll_to_mouse` and `copy-mode -S` need
+    /// one). vtmux pans no window, so `tty_oy` is 0; the focus ring's
+    /// offset is taken off.
+    pub(crate) fn slider_input(
+        &self,
+        id: Option<ClientId>,
+        ev: Option<&MouseEvent>,
+        p: PaneId,
+    ) -> Option<(i64, i64, u32, u32)> {
+        let c = self.clients.get(&id?)?;
+        let pane = self.model.panes.get(&p)?;
+        let my = ev.map_or(0, |e| i64::from(e.input.y) - i64::from(e.offset));
+        let mpos = c.mouse.slider_mpos;
+        let slider_h = if self.model.scrollbar_visible(p) {
+            self.model.scrollbar_slider(p).1
+        } else {
+            0
+        };
+        Some((my - i64::from(pane.rect.yoff), mpos, slider_h, pane.rect.sy))
     }
 
     /// `window_copy_move_mouse` (window-copy.c:7059-7082): before a copy
@@ -1339,7 +1481,10 @@ impl Server {
                     mode = MouseTracking::All;
                 }
             }
-            if self.model.number_option(tree, "focus-follows-mouse") != 0 {
+            // server-client.c:2302-2305: auto-hide bars need motion.
+            if self.model.number_option(tree, "focus-follows-mouse") != 0
+                || self.model.scrollbars(w).auto_hide()
+            {
                 mode = MouseTracking::All;
             } else if mode != MouseTracking::All {
                 mode = MouseTracking::Button;

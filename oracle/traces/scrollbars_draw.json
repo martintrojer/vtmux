@@ -1,0 +1,545 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "scrollbars_draw",
+  "inputs": {
+    "name": "scrollbars_draw",
+    "size": [
+      40,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "12",
+          "sh",
+          "-c",
+          "i=1; while [ $i -le 30 ]; do echo L$i; i=$((i+1)); done; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-style",
+          "bg=red,fg=blue,width=1,pad=0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_width} #{pane_unzoomed_width}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-position",
+          "left"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-style",
+          "bg=red,fg=blue,width=2,pad=1"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "a:0.0",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.1",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-panes",
+          "-t",
+          "a:0",
+          "-F",
+          "#{pane_left} #{pane_width} #{pane_unzoomed_width}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-position",
+          "right"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-H",
+          "-t",
+          "a:0.0"
+        ]
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a:0.0",
+          "-X",
+          "history-top"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-timeout",
+          "600000"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars",
+          "modal"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a:0.0",
+          "-X",
+          "page-down"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-panes",
+          "-t",
+          "a:0",
+          "-F",
+          "#{pane_left} #{pane_width}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L20                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL21                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL22                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL23                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL24                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL25                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL26                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL27                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL28                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL29                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL30                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49m                                       \\e[31m\\e[44m"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "39 39\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L20",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L21",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L22",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L23",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L24",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L25",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L26",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L27",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m L28",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m L29",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m L30",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m"
+        ],
+        "cursor": [
+          3,
+          11
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L20              \\e[37m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L21              \\e[37m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L22              \\e[37m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L23              \\e[37m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L24              \\e[37m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L25              \\e[37m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L26              \\e[37m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[34m\\e[41m  \\e[39m\\e[49m L27              \\e[32m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m L28              \\e[32m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m L29              \\e[32m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m L30              \\e[32m│\\e[31m\\e[44m  \\e[39m\\e[49m",
+          "\\e[31m\\e[44m  \\e[39m\\e[49m                  \\e[32m│\\e[31m\\e[44m  \\e[39m\\e[49m"
+        ],
+        "cursor": [
+          24,
+          0
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "3 17 17\n24 16 16\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L1                \\e[31m\\e[44m  \\e[37m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL2                \\e[31m\\e[44m  \\e[37m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL3                \\e[31m\\e[44m  \\e[37m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL4                \\e[31m\\e[44m  \\e[37m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL5                \\e[34m\\e[41m  \\e[37m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL6                \\e[34m\\e[41m  \\e[37m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL7                \\e[34m\\e[41m  \\e[37m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL8                \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL9                \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL10               \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL11               \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m                 \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL12               \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m                 \\e[31m\\e[44m"
+        ],
+        "cursor": [
+          21,
+          0
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L1                  \\e[37m│\\e[39m",
+          "L2                  \\e[37m│\\e[39m",
+          "L3                  \\e[37m│\\e[39m",
+          "L4                  \\e[37m│\\e[39m",
+          "L5                  \\e[37m│\\e[39m",
+          "L6                  \\e[37m│\\e[39m",
+          "L7                  \\e[37m│\\e[39m",
+          "L8                  \\e[32m│\\e[39m",
+          "L9                  \\e[32m│\\e[39m",
+          "L10                 \\e[32m│\\e[39m",
+          "L11                 \\e[32m│\\e[39m",
+          "L12                 \\e[32m│\\e[39m"
+        ],
+        "cursor": [
+          21,
+          0
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L11               \\e[34m\\e[41m  \\e[37m\\e[49m│\\e[39m",
+          "L12               \\e[34m\\e[41m  \\e[37m\\e[49m│\\e[39m",
+          "L13               \\e[34m\\e[41m  \\e[37m\\e[49m│\\e[39m",
+          "L14               \\e[34m\\e[41m  \\e[37m\\e[49m│\\e[39m",
+          "L15               \\e[31m\\e[44m  \\e[37m\\e[49m│\\e[39m",
+          "L16               \\e[31m\\e[44m  \\e[37m\\e[49m│\\e[39m",
+          "L17               \\e[31m\\e[44m  \\e[37m\\e[49m│\\e[39m",
+          "L18               \\e[31m\\e[44m  \\e[32m\\e[49m│\\e[39m",
+          "L19               \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m",
+          "L20               \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m",
+          "L21               \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m",
+          "L22               \\e[34m\\e[41m  \\e[32m\\e[49m│\\e[39m"
+        ],
+        "cursor": [
+          21,
+          0
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 20\n21 19\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

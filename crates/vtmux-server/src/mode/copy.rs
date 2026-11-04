@@ -85,6 +85,10 @@ pub struct Env {
     /// The command came with a valid mouse event (`cs->m`): `begin-selection`
     /// starts a mouse drag instead.
     pub mouse: bool,
+    /// What `scroll-to-mouse` needs ([`CopyMode::scroll_slider`]): the
+    /// pointer's row against the pane's top, where the slider was grabbed,
+    /// the slider's height and the bar's. `None` without a client.
+    pub slider: Option<(i64, i64, u32, u32)>,
 }
 
 /// How a cell in view is painted (`window_copy_update_style`,
@@ -293,6 +297,9 @@ pub struct CopyMode {
     /// When a mouse drag held at the top or bottom row scrolls again
     /// (`dragtimer`).
     drag_due: Option<Instant>,
+    /// The view moved since [`Self::take_scrolled`]: where tmux calls
+    /// `window_pane_scrollbar_show(wp, 1)`.
+    scrolled: bool,
 }
 
 /// How often a drag held at the top or bottom row scrolls
@@ -705,6 +712,7 @@ impl CopyMode {
             foreign: trim,
             refresh_due: None,
             drag_due: None,
+            scrolled: false,
         }
     }
 
@@ -763,6 +771,7 @@ impl CopyMode {
             separators: String::new(),
             wrap_search: false,
             mouse: false,
+            slider: None,
         };
         self.size_changed(&env);
     }
@@ -852,6 +861,18 @@ impl CopyMode {
 
     fn hsize(&self) -> usize {
         self.backing.hsize()
+    }
+
+    /// Whether the view moved since the last call.
+    pub fn take_scrolled(&mut self) -> bool {
+        std::mem::take(&mut self.scrolled)
+    }
+
+    /// `window_copy_get_current_offset`: the top of the view counted from
+    /// the top of history, and the history's size.
+    #[must_use]
+    pub fn current_offset(&self) -> (usize, usize) {
+        (self.hsize() - self.oy, self.hsize())
     }
 
     /// Last row of the backing grid (`hsize + sy - 1`).
@@ -1264,6 +1285,7 @@ impl CopyMode {
                 if self.lineflag == LineSel::LeftRight && self.abs(self.cy) == self.selpos.1 {
                     self.other_end(env);
                 }
+                self.scrolled |= self.oy != self.hsize();
                 (self.cx, self.cy, self.oy) = (0, 0, self.hsize());
                 self.refresh_marks();
                 self.update_selection(env, false);
@@ -1274,6 +1296,7 @@ impl CopyMode {
                 }
                 self.cy = self.sy - 1;
                 self.cx = self.cursor_limit(env, self.hsize() + self.cy, false);
+                self.scrolled |= self.oy != 0;
                 self.oy = 0;
                 self.refresh_marks();
                 self.update_selection(env, false);
@@ -1316,6 +1339,15 @@ impl CopyMode {
                 repeat(self, &mut |m| m.cursor_down(env, true));
                 if self.oy == 0 {
                     return Some(Action::Cancel.into());
+                }
+            }
+            "scroll-to-mouse" => {
+                // window_copy_cmd_scroll_to_mouse: needs a client.
+                if let Some(slider) = env.slider {
+                    let exit = args.flag('e');
+                    if self.scroll_slider(env, slider, exit) {
+                        return Some(Action::Cancel.into());
+                    }
                 }
             }
             "scroll-top" => self.scroll_to(env, 0),
@@ -1779,6 +1811,7 @@ impl CopyMode {
                 py + gap - sy
             };
             self.cy = py - offset;
+            self.scrolled |= self.oy != hsize - offset;
             self.oy = hsize - offset;
         }
         if !no_redraw {
@@ -2263,6 +2296,7 @@ impl CopyMode {
             return;
         }
         self.oy -= ny;
+        self.scrolled = true;
         self.refresh_marks();
         self.update_selection_view(env);
     }
@@ -2278,6 +2312,7 @@ impl CopyMode {
             return;
         }
         self.oy += ny;
+        self.scrolled = true;
         self.refresh_marks();
         self.update_selection_view(env);
     }
@@ -2534,6 +2569,7 @@ impl CopyMode {
             self.oy += n;
         }
         self.page_end(env);
+        self.scrolled = true;
         self.refresh_marks();
         self.update_selection(env, false);
     }
@@ -2553,22 +2589,73 @@ impl CopyMode {
         if scroll_exit && self.oy == 0 && self.sel.is_none() {
             return true;
         }
+        self.scrolled = true;
         self.refresh_marks();
         self.update_selection(env, false);
         false
     }
 
-    /// `copy-mode -S` without a mouse event (`window_copy_scroll1` with the
-    /// slider at the top): the view goes to the top of history, the cursor
-    /// keeps its row. Whether the mode should exit.
-    pub fn scroll_to_top(&mut self, env: &Env, scroll_exit: bool) -> bool {
+    /// `window_copy_scroll1` (window-copy.c:776-877): the slider of a bar
+    /// `sb_h` rows tall, grabbed at row `mpos` of it, follows the pointer
+    /// to row `my` of the pane (`slider_h` is its height). The view moves
+    /// by what that changes of the history offset, the cursor keeping its
+    /// row as far as it can. Whether the mode should exit.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        reason = "tmux's float arithmetic, truncated to u_int"
+    )]
+    pub fn scroll_slider(
+        &mut self,
+        env: &Env,
+        (my, mpos, slider_h, sb_h): (i64, i64, u32, u32),
+        scroll_exit: bool,
+    ) -> bool {
+        let (slider_h, sb_h) = (i64::from(slider_h), i64::from(sb_h));
+        let new_slider_y = if my <= mpos {
+            0
+        } else if my - mpos > sb_h - slider_h {
+            sb_h - slider_h
+        } else {
+            my - mpos
+        };
+        let (offset, size) = self.current_offset();
+        if sb_h == 0 {
+            return false;
+        }
+        // The inverse of the slider's position (redraw_draw_scrollbar_span),
+        // in tmux's float, stored in a u_int.
+        let ratio = (size as f32 + sb_h as f32) / sb_h as f32;
+        let new_offset = (new_slider_y as f32 * ratio) as u32;
+        let delta = offset as i64 - i64::from(new_offset);
         self.page_start();
-        self.oy = self.hsize();
+        let hsize = self.hsize();
+        if delta >= 0 {
+            let n = delta as usize;
+            if self.oy + n > hsize {
+                self.oy = hsize;
+                self.cy = self.cy.saturating_sub(n);
+            } else {
+                self.oy += n;
+            }
+        } else {
+            let n = (-delta) as usize;
+            if self.oy < n {
+                // As tmux: n less the old offset, after the offset is 0.
+                self.oy = 0;
+                self.cy = (self.cy + n).min(self.sy - 1);
+            } else {
+                self.oy -= n;
+            }
+        }
         self.drag = Drag::None;
         self.page_end(env);
         if scroll_exit && self.oy == 0 && self.sel.is_none() {
             return true;
         }
+        self.scrolled = true;
         self.refresh_marks();
         self.update_selection_view(env);
         false
@@ -3006,6 +3093,7 @@ mod tests {
             separators: String::new(),
             wrap_search: true,
             mouse: false,
+            slider: None,
         }
     }
 
@@ -3256,6 +3344,7 @@ mod selection_tests {
             separators: "-".into(),
             wrap_search: true,
             mouse: false,
+            slider: None,
         }
     }
 

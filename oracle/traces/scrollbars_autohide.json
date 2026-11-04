@@ -1,0 +1,422 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "scrollbars_autohide",
+  "inputs": {
+    "name": "scrollbars_autohide",
+    "size": [
+      40,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "12",
+          "sh",
+          "-c",
+          "i=1; while [ $i -le 30 ]; do echo L$i; i=$((i+1)); done; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mouse",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars",
+          "auto-hide"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-timeout",
+          "600000"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-style",
+          "bg=red,fg=blue,width=1,pad=0"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_width}"
+        ]
+      },
+      {
+        "keys": "\u001b[<35;40;5M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-timeout",
+          "1"
+        ]
+      },
+      {
+        "keys": "\u001b[<35;5;5M"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars-timeout",
+          "600000"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-H",
+          "-t",
+          "a:0.0"
+        ]
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a:0.0",
+          "-X",
+          "page-up"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-w",
+          "-t",
+          "a:0",
+          "pane-scrollbars",
+          "auto-hide"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L20",
+          "L21",
+          "L22",
+          "L23",
+          "L24",
+          "L25",
+          "L26",
+          "L27",
+          "L28",
+          "L29",
+          "L30",
+          ""
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "40\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L20                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL21                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL22                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL23                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL24                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL25                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL26                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL27                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL28                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL29                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL30                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49m                                       \\e[31m\\e[44m"
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L20",
+          "L21",
+          "L22",
+          "L23",
+          "L24",
+          "L25",
+          "L26",
+          "L27",
+          "L28",
+          "L29",
+          "L30",
+          ""
+        ],
+        "cursor": [
+          0,
+          11
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L10                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL11                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL12                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL13                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL14                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL15                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL16                                    \\e[31m\\e[44m",
+          "\\e[39m\\e[49mL17                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL18                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL19                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL20                                    \\e[34m\\e[41m",
+          "\\e[39m\\e[49mL21                                    \\e[34m\\e[41m"
+        ],
+        "cursor": [
+          3,
+          11
+        ]
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "L10",
+          "L11",
+          "L12",
+          "L13",
+          "L14",
+          "L15",
+          "L16",
+          "L17",
+          "L18",
+          "L19",
+          "L20",
+          "L21"
+        ],
+        "cursor": [
+          3,
+          11
+        ]
+      }
+    }
+  ]
+}

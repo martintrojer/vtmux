@@ -615,10 +615,29 @@ impl<'a> Ctx<'a> {
             "pane_width" => r.sx.to_string(),
             // format_cb_pane_unzoomed_width / _height (format.c:2704-2776):
             // the pane's cell in the full layout, the row of a pane status
-            // line not counted, scrollbars aside.
+            // line not counted, nor the columns of an `on` scrollbar (the
+            // option alone while zoomed, which may hide the bar).
             "pane_unzoomed_width" => {
                 let root = &w.full_layout().root;
-                root.get(&self.model.pane_cell(w, p.id)?).g().sx.to_string()
+                let sx = root.get(&self.model.pane_cell(w, p.id)?).g().sx;
+                let reserve = if w.zoomed() {
+                    !p.term.alternate_on()
+                        && self.model.scrollbars(w.id) == crate::scrollbar::Scrollbars::On
+                } else {
+                    self.model.scrollbar_reserve(p.id)
+                };
+                if reserve {
+                    let style = self.model.scrollbar_style(p.id);
+                    let total = style.width + style.pad;
+                    let min = vtmux_core::layout::PANE_MINIMUM;
+                    if i64::from(sx) - i64::from(total) < i64::from(min) {
+                        min.to_string()
+                    } else {
+                        (sx - total).to_string()
+                    }
+                } else {
+                    sx.to_string()
+                }
             }
             "pane_unzoomed_height" => {
                 let layout = w.full_layout();

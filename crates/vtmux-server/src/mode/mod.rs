@@ -258,6 +258,12 @@ impl Mode {
         matches!(self, Self::Panes(_))
     }
 
+    /// `mode->flags & WINDOW_MODE_HIDE_SCROLLBARS` (window-panes.c:39).
+    #[must_use]
+    pub fn hides_scrollbars(&self) -> bool {
+        matches!(self, Self::Panes(_))
+    }
+
     pub fn as_copy_mut(&mut self) -> Option<&mut CopyMode> {
         match self {
             Self::Copy(m) => Some(m),
@@ -321,6 +327,7 @@ impl Model {
             separators,
             wrap_search: self.number_option(w, "wrap-search") != 0,
             mouse: false,
+            slider: None,
         })
     }
 
@@ -688,6 +695,7 @@ impl Server {
         }
         let mut mode = pane.modes.remove(0);
         let result = self.model.copy_env(p).map(|env| f(&mut mode, &env));
+        let scrolled = mode.as_copy_mut().is_some_and(CopyMode::take_scrolled);
         if let Some(pane) = self.model.panes.get_mut(&p) {
             if let Some(m) = mode.as_copy() {
                 pane.search.clone_from(&m.pane_search);
@@ -695,6 +703,10 @@ impl Server {
             pane.modes.insert(0, mode);
         }
         self.model.redraw_panes.insert(p);
+        if scrolled {
+            self.model
+                .scrollbar_show(p, true, std::time::Instant::now());
+        }
         result
     }
 
