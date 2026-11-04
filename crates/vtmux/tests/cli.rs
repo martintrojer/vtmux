@@ -183,20 +183,27 @@ impl World {
     }
 
     /// Poll `list-panes -a` (max 10 s) until every pane's
-    /// `#{pane_current_command}` is `want`: `sh -c cat` is `sh` or `bash`
-    /// until it execs, and a rename (break-pane's, automatic-rename's) in
-    /// that window names a window after the shell, which is a race
-    /// between the server and the pane's process, not behaviour.
+    /// `#{pane_current_command}` is `want`. Run the panes as `cat -` (two
+    /// words: execvp'd, no shell): `sh -c cat` is `sh` or `bash` until it
+    /// execs, and for good under a dash that forks, and a rename
+    /// (break-pane's, automatic-rename's) in that time names a window
+    /// after the shell: a race between the server and the pane's process,
+    /// not behaviour.
     fn wait_all_running(&self, want: &str) {
         let start = Instant::now();
+        let mut last = String::new();
         while start.elapsed() < Duration::from_secs(10) {
             let r = self.run(&["lsp", "-a", "-F", "#{pane_current_command}"]);
             if r.stdout.lines().all(|l| l == want) {
                 return;
             }
+            last = format!("{r:?}");
             std::thread::sleep(Duration::from_millis(20));
         }
-        panic!("panes never all ran {want:?} ({})", self.bin.display());
+        panic!(
+            "panes never all ran {want:?} ({}): {last}",
+            self.bin.display()
+        );
     }
 
     /// The pane's `stty size` must come to agree with `#{pane_height}
@@ -3005,13 +3012,13 @@ fn panes_break_join() {
             w,
             &[
                 &[
-                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat",
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-",
                 ],
                 &[
-                    "new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat",
+                    "new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat", "-",
                 ],
-                &["splitw", "-t", "a", "-d", "cat"],
-                &["splitw", "-t", "a", "-d", "cat"],
+                &["splitw", "-t", "a", "-d", "cat", "-"],
+                &["splitw", "-t", "a", "-d", "cat", "-"],
             ],
         );
         w.wait_all_running("cat");
@@ -3042,9 +3049,9 @@ fn panes_break_join() {
                 &["breakp", "-n", "a:b", "-s", "a:1"],
                 &["breakp", "-s", "b:1", "-t", "a:", "-n", "back"],
                 lsw,
-                &["neww", "-d", "-t", "a:3", "-n", "three", "cat"],
-                &["splitw", "-t", "a:0", "-d", "cat"],
-                &["splitw", "-t", "a:0", "-d", "cat"],
+                &["neww", "-d", "-t", "a:3", "-n", "three", "cat", "-"],
+                &["splitw", "-t", "a:0", "-d", "cat", "-"],
+                &["splitw", "-t", "a:0", "-d", "cat", "-"],
                 &["breakp", "-s", "a:0.1", "-t", "a:3", "-a", "-n", "after"],
                 &[
                     "breakp", "-s", "a:0.1", "-t", "a:3", "-b", "-d", "-n", "before",
