@@ -161,8 +161,7 @@ status = "pass"
 status = "pass"
 
 [tests."display-panes.sh"]
-status = "xfail"
-reason = "panes-mode is done (entry, zoom, -Z, -s, keys, template, format, border-status) and new-pane runs; the floating half (regress/display-panes.sh:258-297) stops at `wait_capture '┌'`: panes-mode does not draw a frame round a floating pane (window-panes.c window_panes_draw_floating_border). Its scrollbar block (117-137) passes: pane_unzoomed_width leaves out an `on` scrollbar"
+status = "pass"
 
 [tests."environ-update.sh"]
 status = "pass"
@@ -186,8 +185,7 @@ status = "pass"
 status = "pass"
 
 [tests."floating-pane-zoom.sh"]
-status = "xfail"
-reason = "needs new-pane -A (a floating pane over a zoomed window, PANE_FLOATOVERZOOM): `not implemented in vtmux yet: new-pane -A`"
+status = "pass"
 
 [tests."format-animation.sh"]
 status = "pass"
@@ -316,8 +314,7 @@ status = "xfail"
 reason = "capture-pane -N/-F are in; -F flags a line holding a wide character X in tmux even after it is overwritten, vtmux reads Ghostty's current cells"
 
 [tests."join-pane-modal.sh"]
-status = "xfail"
-reason = "needs modal panes: `not implemented in vtmux yet: new-pane -O`"
+status = "pass"
 
 [tests."json.sh"]
 status = "pass"
@@ -352,7 +349,7 @@ status = "pass"
 
 [tests."modal-pane.sh"]
 status = "xfail"
-reason = "needs modal panes: `not implemented in vtmux yet: new-pane -O`"
+reason = "modal panes, -A/-O over zoom, -C/-D/-K, mouse and keys pass; stops at the buffer editor: choose-buffer `e` (and customize-mode `e`) opens $EDITOR in a modal floating pane (spawn.c spawn_editor), which vtmux does not do (lows_choose, gap_misc)"
 
 [tests."mode-kill.sh"]
 status = "pass"

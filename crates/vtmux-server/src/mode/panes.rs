@@ -16,9 +16,8 @@
 //! active pane, the pane screens and the format text). Panes made, killed,
 //! swapped or selected afterwards are not in it, as in tmux. The styles and
 //! colours are read at each frame, where tmux's are in the drawing already.
-//! The mouse (`KEYC_MOUSEDOWN1_PANE`) and
-//! the floating layer are not here yet, so neither the click areas nor the
-//! floating borders are.
+//! The mouse (`KEYC_MOUSEDOWN1_PANE`) is not here yet, so neither are the
+//! click areas.
 //!
 //! `HIDE_PANE_STATUS` gives the zoomed pane the row its status line would
 //! have taken under `pane-border-status` (window.c:2936-2940 into
@@ -63,6 +62,9 @@ pub struct Drawn {
     /// pane not yet reached still has its old one.
     pub cells: BTreeMap<PaneId, Path>,
     pub tiled: Vec<(PaneId, u32)>,
+    /// The floating panes (`window_panes_pane_floating`: floating in the
+    /// full layout) with their indexes, bottom of the z-order first.
+    pub floating: Vec<(PaneId, u32)>,
     pub active: PaneId,
     pub screens: BTreeMap<PaneId, Snapshot>,
     /// `display-panes-format` expanded for each tiled pane then (it shows
@@ -232,11 +234,25 @@ impl crate::model::Model {
         let Some(window) = self.windows.get(&m.source_window) else {
             return;
         };
+        // window_panes_pane_floating: the cell in the full layout.
+        let full = &window.full_layout().root;
+        let floats = |q: PaneId| {
+            full.find_pane(q)
+                .is_some_and(|at| full.get(&at).is_floating())
+        };
         let tiled: Vec<(PaneId, u32)> = window
             .panes
             .panes
             .iter()
-            .filter(|q| !window.is_floating(**q))
+            .filter(|q| !floats(**q))
+            .filter_map(|q| Some((*q, self.pane_index(*q)?)))
+            .collect();
+        let floating: Vec<(PaneId, u32)> = window
+            .panes
+            .z_order
+            .iter()
+            .rev()
+            .filter(|q| floats(**q))
             .filter_map(|q| Some((*q, self.pane_index(*q)?)))
             .collect();
         let screens = window
@@ -263,6 +279,7 @@ impl crate::model::Model {
         let formats = match (source_link(self, m), &self.format_base) {
             (Some((session, index)), Some(base)) if !format.is_empty() => tiled
                 .iter()
+                .chain(&floating)
                 .map(|(q, _)| {
                     let found = Found {
                         session: Some(session),
@@ -282,6 +299,7 @@ impl crate::model::Model {
             layout: layout.clone(),
             cells,
             tiled,
+            floating,
             active: window.active(),
             screens,
             formats,

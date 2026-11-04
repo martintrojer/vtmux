@@ -6,8 +6,10 @@
 //! one; `new-pane -M` sizes it by the mouse drag that ran it. `-E`, `-I` or
 //! one empty argument make an empty pane (no process); `-W` waits for the
 //! pane's process to exit; `-k -m` keep it once it exits (remain-on-exit).
-//! Modal (`-O` with `-C -D -K`) and float-over-zoom (`-A`) panes are not
-//! done yet.
+//! `-A` makes a floating pane that stays above a zoomed pane; `-O` a modal
+//! one (also above the zoom), which keeps the focus until it goes, with
+//! `-K` taking every key, `-C` closed by a click outside it and `-D` by
+//! Escape or C-c.
 
 use std::path::PathBuf;
 
@@ -55,26 +57,43 @@ pub fn exec(
     found: Found,
     new_pane: bool,
 ) -> Result<(), CmdError> {
-    if args.flag('O') {
-        return Err(EdgeError::NotImplemented("new-pane -O".into()).into());
-    }
-    if args.flag('A') {
-        return Err(EdgeError::NotImplemented("new-pane -A".into()).into());
-    }
     let (Some(w), Some(wp)) = (found.window, found.pane) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
-    // cmd-split-window.c:97-108: new-pane floats unless -L; a split floats
-    // when its target does.
+    // cmd-split-window.c:100-111: new-pane floats unless -L; a split floats
+    // when its target does, and unzooms unless the active pane floats over
+    // the zoom and the target is shown.
+    let mut restore_zoom = server.model.active_over_zoom(w);
     let floating = if new_pane {
         !args.flag('L')
     } else {
-        server.model.windows[&w].is_floating(wp)
+        if !server.model.windows[&w].is_visible(wp) {
+            restore_zoom = false;
+        }
+        if !restore_zoom {
+            server.model.unzoom(w);
+        }
+        server.model.windows[&w].is_floating_now(wp)
     };
+    // cmd-split-window.c:113-122.
+    let modal = args.flag('O');
+    if modal {
+        if !floating {
+            return Err(EdgeError::Message("modal pane must be floating".into()).into());
+        }
+        if server.model.windows[&w].panes.modal.is_some() {
+            return Err(EdgeError::Message("window already has a modal pane".into()).into());
+        }
+    }
     // cmd-split-window.c:124-127: -M needs the mouse event that ran it.
     let drag_client = item.mouse.as_ref().and(item.client);
     if new_pane && floating && args.flag('M') && drag_client.is_none() {
         return Ok(());
+    }
+    // cmd-split-window.c:142-147: a modal pane floats over the zoom too.
+    let over_zoom = modal || (floating && args.flag('A'));
+    if server.model.windows[&w].zoomed() && over_zoom {
+        restore_zoom = true;
     }
     // cmd-split-window.c:149-161: -I, or one empty argument, is an empty
     // pane like -E, and a command with one is an error.
@@ -101,10 +120,16 @@ pub fn exec(
     let (Some(s), Some(index)) = (found.session, found.index) else {
         return Err(EdgeError::NoCurrentTarget.into());
     };
-    // No float-over-zoom panes, so restore_zoom is always 0: the window is
-    // unzoomed before the split (cmd-split-window.c:102-108), or by
-    // window_push_zoom in layout_get_*_cell for new-pane.
-    server.model.unzoom(w);
+    // layout_get_*_cell (layout.c:1686-1689, 1716-1721): the window is
+    // unzoomed once the cell's size is known, to zoom again after a pane
+    // over the zoom, or with -Z.
+    let push = |server: &mut Server| {
+        if over_zoom || server.model.active_over_zoom(w) {
+            server.model.push_zoom(w, false, true)
+        } else {
+            server.model.push_zoom(w, true, args.flag('Z'))
+        }
+    };
     let window = &server.model.windows[&w];
     // cmd-split-window.c:163-173: -B, else the window's pane-border-lines.
     let border = lines.map_or_else(
@@ -119,6 +144,7 @@ pub fn exec(
     // The pane is numbered once its cell exists (window_pane_create runs
     // after layout_get_*_cell), so a split with no room uses no ID.
     let new = server.model.pane_ids.peek();
+    let was_zoomed;
     if floating {
         let window = server.model.windows.get_mut(&w).expect("target window");
         let g = if new_pane {
@@ -135,6 +161,8 @@ pub fn exec(
                 .floating_geometry(&fa, border, None)
                 .map_err(EdgeError::Message)?
         } else {
+            // A split of a pane shown over the zoom splits its cell there,
+            // which the unzoom copies back.
             // layout_split_floating_cell with SPAWN_SPLIT.
             window
                 .layout
@@ -150,6 +178,7 @@ pub fn exec(
                 )
                 .map_err(|e| EdgeError::Message(e.to_string()))?
         };
+        was_zoomed = push(server);
         let window = server.model.windows.get_mut(&w).expect("target window");
         window.layout.add_floating(Some(wp), new, g);
     } else {
@@ -183,11 +212,20 @@ pub fn exec(
             full,
             size,
         };
+        // layout_get_tiled_cell: a floating target is refused before the
+        // unzoom.
+        if server.model.windows[&w].is_floating_now(wp) {
+            return Err(EdgeError::Message("can't split a floating pane".into()).into());
+        }
+        was_zoomed = push(server);
         let window = server.model.windows.get_mut(&w).expect("target window");
-        window
-            .layout
-            .split(wp, new, &req)
-            .map_err(|e| EdgeError::Message(e.to_string()))?;
+        if let Err(e) = window.layout.split(wp, new, &req) {
+            // cmd-split-window.c:181-185.
+            if restore_zoom {
+                server.model.pop_zoom(w, was_zoomed);
+            }
+            return Err(EdgeError::Message(e.to_string()).into());
+        }
     }
 
     let new = server.model.pane_ids.allocate();
@@ -294,6 +332,11 @@ pub fn exec(
             );
         }
     }
+    // spawn.c:363-364, cmd-split-window.c:218-223.
+    pane.over_zoom = over_zoom;
+    pane.capture_keys = modal && args.flag('K');
+    pane.close_on_click = modal && args.flag('C');
+    pane.close_on_cancel = modal && args.flag('D');
     server.model.panes.insert(new, pane);
     // That resize is a window_pane_resize in layout_fix_panes, so it
     // fires pane-resized, in window order with the other panes'.
@@ -334,8 +377,18 @@ pub fn exec(
     // spawn_pane (spawn.c:590-612): pane-created, the new pane active
     // (window-pane-changed, above), then window-layout-changed.
     server.fire_pane_created(s, index, new, empty, false);
-    if !args.flag('d') {
+    // spawn.c:596-610: a modal pane is made active (even with -d) and
+    // raised, remembering the pane it took the focus from; no other pane
+    // takes the focus from a modal one.
+    let window = server.model.windows.get_mut(&w).expect("target window");
+    if modal {
+        window.panes.modal_last = window.panes.active;
+        window.panes.modal = Some(new);
+        server.model.switch_active(w, new);
+    } else if !args.flag('d') && window.panes.modal.is_none() {
         server.model.set_active(w, new);
+    }
+    if !args.flag('d') {
         // cmd-split-window.c:288-289.
         item.new_current = Some(new_found);
     }
@@ -350,9 +403,12 @@ pub fn exec(
             .text("new_title", title);
         server.model.push_event(ev);
     }
-    // window_pop_zoom: -Z zooms the (possibly new) active pane; never
-    // after a floating pane (cmd-split-window.c:288-294).
-    server.model.pop_zoom(w, zoom && !floating);
+    // cmd-split-window.c:291-297: window_pop_zoom after a pane over the
+    // zoom (zooming the pane zoomed before) or a tiled -Z split (zooming
+    // the new active pane); never after another floating pane.
+    if restore_zoom || (!floating && !modal) {
+        server.model.pop_zoom(w, was_zoomed);
+    }
     // cmd-split-window.c:300-304: the drag that ran new-pane -M sizes it.
     if new_pane
         && floating

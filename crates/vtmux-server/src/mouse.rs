@@ -105,7 +105,11 @@ impl MouseTarget {
             }
             f.pane = Some(p);
         }
-        f.pane?;
+        let p = f.pane?;
+        // cmd.c:835-836: no pane but the modal one.
+        if model.windows.get(&f.window?)?.modal_blocks(p) {
+            return None;
+        }
         Some(f)
     }
 }
@@ -365,6 +369,9 @@ pub enum Located {
     Key(MouseEvent),
     /// `KEYC_DRAGGING`: the drag's callback runs with the event, no binding.
     Dragging(DragAction, MouseEvent),
+    /// A press outside a `new-pane -OC` modal pane: it is killed
+    /// (`server_kill_pane`), nothing else.
+    CloseModal(PaneId),
 }
 
 impl Server {
@@ -673,7 +680,39 @@ impl Server {
                 && (-1..=wsx).contains(&wx)
                 && (-1..=wsy).contains(&wy)
                 && (wx < 0 || wy < 0 || wx >= wsx || wy >= wsy);
-            let found = if kind == MouseKind::Drag && lwp.is_some() {
+            // server-client.c:1058-1085: outside a modal pane only a drag
+            // the modal pane started goes on; anything else stops any drag
+            // and does nothing, and a press closes a `-C` modal pane.
+            let mut modal_drag = false;
+            if let Some(modal) = win.panes.modal
+                && !self.model.pane_contains(window, modal, wx, wy)
+            {
+                if lwp == Some(modal)
+                    && st.drag_flag != 0
+                    && matches!(kind, MouseKind::Drag | MouseKind::Up)
+                {
+                    modal_drag = true;
+                } else {
+                    st.drag_flag = 0;
+                    st.drag_action = None;
+                    st.last_pane = None;
+                    let press = matches!(
+                        kind,
+                        MouseKind::Down | MouseKind::SecondClick | MouseKind::TripleClick
+                    );
+                    if press
+                        && self
+                            .model
+                            .panes
+                            .get(&modal)
+                            .is_some_and(|p| p.close_on_click)
+                    {
+                        return Located::CloseModal(modal);
+                    }
+                    return Located::Nothing;
+                }
+            }
+            let found = if modal_drag || (kind == MouseKind::Drag && lwp.is_some()) {
                 lwp
             } else if frame {
                 self.model
@@ -687,7 +726,9 @@ impl Server {
                     ev.target.window = Some(window);
                 }
                 Some(p) => {
-                    loc = if frame {
+                    loc = if modal_drag {
+                        Some(MouseLocation::Pane)
+                    } else if frame {
                         Some(MouseLocation::Border)
                     } else {
                         self.mouse_in_pane(window, p, wx, wy, &mut sl_mpos)

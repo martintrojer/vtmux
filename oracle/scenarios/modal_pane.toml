@@ -1,0 +1,66 @@
+# new-pane -O (cmd-split-window.c:113-147, spawn.c:596-610): a modal
+# floating pane is drawn above a zoomed pane and keeps the focus: select-pane,
+# last-pane and a click elsewhere do nothing, keys go to it, and break-pane,
+# join-pane and swap-pane refuse it. The window and pane flags show O (and A,
+# F); window_modal_pane names it. When it goes the pane active before it is
+# active again and the zoom stays. -C closes it on a click outside, -D on
+# Escape, -K takes every key including the prefix.
+name = "modal_pane"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["select-pane", "-t", "%0", "-T", "p0"] },
+  { run = ["splitw", "-h", "-t", "%0", "cat"] },
+  { run = ["select-pane", "-t", "%1", "-T", "p1"] },
+  { run = ["select-pane", "-t", "%0"] },
+  { run = ["resize-pane", "-Z", "-t", "%0"] },
+  { attach = { session = "a" } },
+  { run = ["new-pane", "-O", "-PF", "#{pane_id}", "-t", "%1", "-T", "modal", "-x", "24", "-y", "6", "-X", "10", "-Y", "4", "cat"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_id} #{pane_flags} #{window_flags} #{window_modal_pane} #{window_zoomed_flag} #{pane_modal_flag}"] },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} m#{pane_modal_flag} a#{pane_active} z#{pane_z} #{pane_flags}"] },
+  { run = ["new-pane", "-O", "-x", "10", "-y", "4", "cat"] },
+  { run = ["new-pane", "-O", "-L", "cat"] },
+  { run = ["break-pane", "-s", "%2"] },
+  { run = ["join-pane", "-s", "%2", "-t", "%0"] },
+  { run = ["swap-pane", "-s", "%0", "-t", "%2"] },
+  { run = ["select-pane", "-t", "%1"] },
+  { run = ["last-pane", "-t", "a"] },
+  { run = ["display", "-p", "-t", "a", "#{pane_id}"] },
+  # A click on the zoomed pane outside the modal one: nothing.
+  { keys = "\u001b[<0;2;2M\u001b[<0;2;2m" },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id}"] },
+  { keys = "typed" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["kill-pane", "-t", "%2"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_id} #{window_flags} [#{window_modal_pane}] #{window_zoomed_flag}"] },
+  # -d still makes a modal pane active; -C closes on a click outside.
+  { run = ["new-pane", "-OdC", "-T", "click", "-x", "20", "-y", "5", "-X", "30", "-Y", "10", "cat"] },
+  { run = ["display", "-p", "-t", "a", "#{pane_id} #{pane_modal_flag}"] },
+  { keys = "\u001b[<0;2;2M\u001b[<0;2;2m" },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id} [#{window_modal_pane}] #{window_panes}"] },
+  # -D: Escape closes it.
+  { run = ["new-pane", "-OD", "-T", "cancel", "-x", "20", "-y", "5", "cat"] },
+  { settle = { react = true } },
+  { keys = "\u001b" },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "#{pane_id} [#{window_modal_pane}] #{window_panes}"] },
+  # -K: the prefix and the rest go to the pane.
+  { run = ["new-pane", "-OK", "-T", "keys", "-x", "20", "-y", "5", "-X", "4", "-Y", "2", "cat"] },
+  { settle = { react = true } },
+  { keys = "\u0002cx" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["kill-pane", "-t", "a"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
