@@ -36,6 +36,42 @@ pub struct Reported {
     pub bg: Option<Rgb>,
     /// `c->theme`: the last `CSI ? 997` report.
     pub theme: Option<Theme>,
+    /// Its OSC 4 replies for palette entries 0-15, which the pane blend
+    /// (D26) mixes from.
+    pub palette: [Option<Rgb>; BLEND_PALETTE as usize],
+    /// The entries [`colour_queries`] asked for that are not answered yet
+    /// (bit `n` for entry `n`): their replies are vtmux's own and answer
+    /// no pane's request.
+    palette_out: u16,
+}
+
+impl Reported {
+    /// `server_client_update_theme_colours` (server-client.c:1274-1310):
+    /// the theme the colours come from, `c->theme`, else the background's
+    /// (`colour_totheme(c->tty.bg)`); dark while neither is known.
+    #[must_use]
+    pub fn light(&self) -> bool {
+        let theme = self
+            .theme
+            .or_else(|| self.bg.and_then(|(r, g, b)| Colour::Rgb(r, g, b).theme()));
+        theme == Some(Theme::Light)
+    }
+
+    /// The colours the pane blend (D26) mixes from.
+    #[must_use]
+    pub fn blend_colours(&self) -> crate::render::blend::TermColours {
+        crate::render::blend::TermColours {
+            fg: self.fg,
+            bg: self.bg,
+            palette: self.palette,
+        }
+    }
+
+    /// [`colour_queries`] went to the terminal.
+    pub fn palette_sent(&mut self) {
+        // One bit per entry: BLEND_PALETTE is 16.
+        self.palette_out = u16::MAX;
+    }
 }
 
 /// One entry of a pane's `ictx->requests`.
@@ -553,8 +589,21 @@ impl Server {
         }
     }
 
-    /// An OSC 4 reply from client `id`'s terminal (`tty_keys_palette`).
+    /// An OSC 4 reply from client `id`'s terminal (`tty_keys_palette`):
+    /// entries 0-15 are kept for the pane blend; the reply to one of
+    /// [`colour_queries`]' own queries goes no further (tmux sends none, so
+    /// it must not answer, or drop, a pane's request).
     pub(crate) fn client_palette(&mut self, id: ClientId, index: u8, c: Rgb) {
+        if let Some(client) = self.clients.get_mut(&id)
+            && let Some(slot) = client.reported.palette.get_mut(usize::from(index))
+        {
+            *slot = Some(c);
+            let bit = 1u16 << index;
+            if client.reported.palette_out & bit != 0 {
+                client.reported.palette_out &= !bit;
+                return;
+            }
+        }
         self.request_reply(id, Some(index), |r| match r {
             Request::Palette { index, end, .. } => Some(colour_reply(4, Some(*index), c, *end)),
             _ => None,
@@ -593,6 +642,8 @@ impl Server {
             client.reported.fg = Some(c);
         } else {
             client.reported.bg = Some(c);
+            // tty-keys.c:833-834: server_client_update_theme_colours.
+            client.update_theme();
         }
         let s = client.attached;
         self.session_theme_changed(s);
@@ -607,6 +658,9 @@ impl Server {
             return;
         };
         let old = client.reported.theme.replace(theme);
+        // server-client.c:3303-3305: server_client_update_theme_colours,
+        // then the redraw below.
+        client.update_theme();
         self.fire_client(
             match theme {
                 Theme::Light => "client-light-theme",
@@ -620,7 +674,8 @@ impl Server {
         // tty_repeat_requests(tty, 1).
         if let Some(c) = self.clients.get_mut(&id).filter(|c| c.term.is_some()) {
             c.decoder.colours_sent(Instant::now());
-            self.send(id, &ServerMsg::Frame(COLOUR_QUERIES.to_vec()));
+            c.reported.palette_sent();
+            self.send(id, &ServerMsg::Frame(colour_queries()));
         }
     }
 
@@ -678,8 +733,21 @@ impl Server {
     }
 }
 
-/// `tty_send_requests` / `tty_repeat_requests`: the default colours.
-pub const COLOUR_QUERIES: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
+/// The terminal's colours asked for: OSC 10 and 11 as tmux does
+/// (`tty_send_requests`, `tty_repeat_requests`), then, vtmux-only (D-033),
+/// OSC 4 for palette entries 0-15, which themes change and the pane blend
+/// (D26) mixes from.
+#[must_use]
+pub fn colour_queries() -> Vec<u8> {
+    let mut out = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
+    for i in 0..BLEND_PALETTE {
+        out.extend_from_slice(format!("\x1b]4;{i};?\x1b\\").as_bytes());
+    }
+    out
+}
+
+/// How many palette entries [`colour_queries`] asks for.
+pub const BLEND_PALETTE: u8 = 16;
 
 /// `input_reply_clipboard` (input.c:3484-3509).
 fn clipboard_reply(clip: Option<u8>, data: &[u8], end: OscEnd) -> Vec<u8> {

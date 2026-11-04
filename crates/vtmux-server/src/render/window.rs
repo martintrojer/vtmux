@@ -15,6 +15,7 @@ use vtmux_core::time::WallClock as _;
 use vtmux_vt::{Color, Snapshot};
 
 use super::Caps;
+use super::blend::{TermColours, resolve};
 use super::compose::{BarDraw, Draw, PaneDraw, Theme, pane_status};
 use super::scene::{Indicators, Lines, Scene, SceneCache, ScenePane, WindowView};
 use crate::environ::Environ;
@@ -100,9 +101,9 @@ impl Source<'_> {
         sy.cell
     }
 
-    /// `server_client_update_theme_colours`. `detect` uses the dark theme,
-    /// as tmux does while the theme is unknown; the client's reported theme
-    /// ([`crate::term_queries`]) does not reach the theme colours yet.
+    /// `server_client_update_theme_colours` (server-client.c:1274-1310):
+    /// `detect` takes the client's theme ([`Caps::light_theme`], dark while
+    /// unknown), `light` and `dark` force one.
     #[must_use]
     pub fn theme(&self, caps: Caps) -> Theme {
         // colour.c colour_theme_table: terminal colours per slot.
@@ -123,7 +124,8 @@ impl Source<'_> {
         if option == 1 {
             return Theme(TERMINAL.map(Color::Palette));
         }
-        let prefix = if option == 2 { "light" } else { "dark" };
+        let light = option == 2 || (option != 3 && caps.light_theme);
+        let prefix = if light { "light" } else { "dark" };
         let values: Vec<String> = SLOTS
             .iter()
             .map(|slot| self.string(TreeId::Server, &format!("{prefix}-theme-{slot}")))
@@ -239,6 +241,7 @@ impl Source<'_> {
                         placement,
                         slider: self.model.scrollbar_slider(p),
                     }),
+                    blend: None,
                 },
             );
         }
@@ -339,6 +342,38 @@ impl Source<'_> {
             fg: pick(on.as_ref().map(|s| s.fg), style.fg),
             bg: pick(on.as_ref().map(|s| s.bg), style.bg),
             ..CellStyle::default()
+        }
+    }
+
+    /// D26: each pane's blend for a client with terminal colours
+    /// `colours`: the active pane of the window takes
+    /// `vtmux-pane-active-blend`, the others `vtmux-pane-inactive-blend`,
+    /// none of them while the window is zoomed (one pane shows, nothing to
+    /// tell apart).
+    pub fn blend(
+        &self,
+        s: SessionId,
+        draw: &mut Draw,
+        colours: &TermColours,
+        caps: Caps,
+        theme: &Theme,
+    ) {
+        let Some(w) = Found::from_session(self.model, s).window else {
+            return;
+        };
+        let tree = TreeId::Window(w);
+        let active = self.string(tree, "vtmux-pane-active-blend");
+        let inactive = self.string(tree, "vtmux-pane-inactive-blend");
+        if active.is_empty() && inactive.is_empty() {
+            return;
+        }
+        let zoomed = self.model.windows.get(&w).is_some_and(|w| w.zoom.is_some());
+        let on = resolve(&active, false, colours, caps, theme);
+        let off = (!zoomed)
+            .then(|| resolve(&inactive, true, colours, caps, theme))
+            .flatten();
+        for (&p, d) in &mut draw.panes {
+            d.blend = if Some(p) == draw.active { on } else { off };
         }
     }
 

@@ -231,6 +231,7 @@ pub(crate) mod tests {
             colours: 256,
             overlay: false,
             no_am: false,
+            light_theme: false,
         };
         let (_, draw) = source.window(s, 20, 5, caps, None, None).unwrap();
         let content = &draw.panes[&p].content;

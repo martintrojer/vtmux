@@ -1562,10 +1562,10 @@ fn options_owner_config() {
             .lines()
             .filter(|line| {
                 let command = line.split_whitespace().next().unwrap_or("");
-                // The `%if "#{vtmux_version}"` block (D23) sets an option
-                // tmux has not got: vtmux-only, so it is not compared.
+                // The `%if "#{vtmux_version}"` block (D23, D26) sets
+                // options tmux has not got: vtmux-only, so not compared.
                 !(matches!(command, "run" | "run-shell" | "if-shell")
-                    || line.contains("vtmux-focus-ring")
+                    || line.contains("vtmux-")
                     || command == "source-file" && line.contains("mu-crew.conf"))
             })
             .collect::<Vec<_>>()
@@ -3972,6 +3972,60 @@ fn vtmux_options_invisible_while_unset() {
     assert_eq!(out(&["show", "-wv", "vtmux-focus-ring"]), "");
     assert_eq!(out(&["show", "-wAv", "vtmux-focus-ring"]), "on\n");
     assert_eq!(out(&["display", "-p", "[#{vtmux-focus-ring}]"]), "[1]\n");
+}
+
+/// D26: the blend options are empty strings until set (and then invisible
+/// like the ring); `set` takes `fg=`/`bg=` parts, `bg`/`fg` keywords and a
+/// percent, and rejects anything else with tmux's style error, keeping
+/// the old value.
+#[test]
+fn vtmux_pane_blend_options() {
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a", "cat"]);
+    let out = |args: &[&str]| w.run(args).stdout;
+    for name in ["vtmux-pane-active-blend", "vtmux-pane-inactive-blend"] {
+        assert_eq!(out(&["show", "-gv", name]), "\n");
+        assert!(!out(&["show", "-gw"]).contains(name));
+        for good in [
+            "fg=bg/25,bg=bg/25",
+            "bg=#181825",
+            "fg=bg/35 bg=colour235/0",
+            "",
+        ] {
+            let r = w.run(&["set", "-g", name, good]);
+            assert_eq!((r.code, r.stderr.as_str()), (0, ""), "{good}");
+            assert_eq!(out(&["show", "-gv", name]), format!("{good}\n"));
+        }
+        w.run(&["set", "-g", name, "fg=bg/25"]);
+        for bad in ["fg=nope", "fg=bg/101", "bold", "fg=bg/"] {
+            let r = w.run(&["set", "-g", name, bad]);
+            assert_eq!(
+                (r.code, r.stderr.as_str()),
+                (1, format!("invalid style: {bad}\n").as_str())
+            );
+        }
+        assert_eq!(
+            out(&["show", "-gv", name]),
+            "fg=bg/25\n",
+            "the old value stays"
+        );
+        assert!(out(&["show", "-gw"]).contains(&format!("{name} fg=bg/25\n")));
+        w.run(&["set", "-gu", name]);
+        assert!(!out(&["show", "-gw"]).contains(name));
+    }
+    let r = w.run(&[
+        "set",
+        "-w",
+        "-t",
+        "a",
+        "vtmux-pane-inactive-blend",
+        "bg=bg/50",
+    ]);
+    assert_eq!(r.code, 0, "a window value");
+    assert_eq!(
+        out(&["show", "-wv", "-t", "a", "vtmux-pane-inactive-blend"]),
+        "bg=bg/50\n"
+    );
 }
 
 /// The D23 config guard: real tmux skips the vtmux option.

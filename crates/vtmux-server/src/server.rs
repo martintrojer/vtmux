@@ -165,6 +165,16 @@ pub(crate) struct Client {
 }
 
 impl Client {
+    /// `server_client_update_theme_colours` (server-client.c:1274): the
+    /// theme colours follow the terminal's theme
+    /// ([`crate::render::Caps::light_theme`]).
+    pub(crate) fn update_theme(&mut self) {
+        let light = self.reported.light();
+        if let Some(caps) = self.caps.as_mut() {
+            caps.light_theme = light;
+        }
+    }
+
     /// A client just accepted on `stream`, at model activity `activity`.
     fn new(stream: UnixStream, activity: u64) -> Self {
         let peer = {
@@ -1649,6 +1659,10 @@ impl Server {
         {
             h.flags.utf8 = true;
         }
+        let caps = crate::render::Caps {
+            light_theme: c.reported.light(),
+            ..caps
+        };
         let changed = c.caps != Some(caps);
         c.caps = Some(caps);
         if !out.is_empty() {
@@ -1706,6 +1720,8 @@ impl Server {
             })?;
         client.decoder.set_terminal(&term);
         client.caps = Some(caps);
+        // server-client.c:356: server_client_update_theme_colours.
+        client.update_theme();
         // tty_apply_features (tty-features.c:562-563): the utf8 feature
         // marks the client UTF-8 (`-T utf8` with a C locale).
         if term
@@ -1723,6 +1739,7 @@ impl Server {
         // Caps::startup ends with the terminal queries (tty.c
         // tty_send_requests); tty_start_start_timer.
         client.decoder.query_sent(Instant::now());
+        client.reported.palette_sent();
         // server_client_set_session: the current window's latest client
         // (server-client.c:465), then session_update_activity (468) and
         // session_theme_changed (469).
@@ -2984,7 +3001,7 @@ impl Server {
     ) -> bool {
         let source = self.render_source();
         let cache = self.clients.get(&id).map(|c| &c.window_cache);
-        let Some((scene, draw)) = source.window(
+        let Some((scene, mut draw)) = source.window(
             s,
             screen.cols,
             rows,
@@ -2994,6 +3011,10 @@ impl Server {
         ) else {
             return true;
         };
+        let theme = source.theme(caps);
+        if let Some(c) = self.clients.get(&id) {
+            source.blend(s, &mut draw, &c.reported.blend_colours(), caps, &theme);
+        }
         if let Some(c) = cache {
             *c.border_ranges.borrow_mut() = draw
                 .panes
@@ -3002,7 +3023,6 @@ impl Server {
                 .map(|(p, d)| (*p, d.status_ranges.clone()))
                 .collect();
         }
-        let theme = source.theme(caps);
         let composed = cache.map(|c| {
             crate::render::compose::compose_cached(
                 &mut c.compose.borrow_mut(),
@@ -4958,6 +4978,151 @@ mod tests {
             }
         }
         text
+    }
+
+    /// D26: with a pane blend on, the plain-frame skip still sends nothing
+    /// for a turn with no change, and a focus change (two panes' roles
+    /// swapped) is not skipped; the colours' arrival recomposes.
+    #[test]
+    fn pane_blend_keeps_the_frame_skip() {
+        use vtmux_core::options::{TreeId, Value};
+        let (mut server, p, s, _, dir) = setup();
+        server.reset_mode(p);
+        server
+            .model
+            .options
+            .set_table_value(TreeId::GlobalSession, "status", Value::Choice(0));
+        let run = |server: &mut super::Server, words: &[&str]| {
+            let argv: Vec<Vec<u8>> = words.iter().map(|w| w.as_bytes().to_vec()).collect();
+            let calls = vtmux_core::cmd::parse_argv_bytes(&argv).unwrap();
+            let item = crate::commands::Item::new(None, dir.clone());
+            let end = crate::cmdq::End::Quiet;
+            server.cmdq_append(None, crate::cmdq::NewBatch::new(item, calls, end));
+            server.cmdq_process();
+        };
+        run(
+            &mut server,
+            &[
+                "set",
+                "-g",
+                "vtmux-pane-inactive-blend",
+                "fg=bg/50,bg=#400000/50",
+            ],
+        );
+        let (id, mut peer) = attach_test_client(&mut server, s, &dir);
+        for _ in 0..3 {
+            server.render_clients();
+            frames(&mut server, id, &mut peer);
+        }
+        let (_, w, _) = server.model.current_of(s).unwrap();
+        run(&mut server, &["split-window", "-h", "-t", "a", "cat"]);
+        let q = *server.model.windows[&w]
+            .panes
+            .panes
+            .iter()
+            .find(|&&x| x != p)
+            .unwrap();
+        server.render_clients();
+        let plain = frames(&mut server, id, &mut peer);
+        assert!(!plain.is_empty(), "the split draws");
+        server.render_clients();
+        assert_eq!(frames(&mut server, id, &mut peer), b"", "settled");
+        // The colours arrive: the inactive pane is recomposed, blended.
+        server
+            .on_client_input(id, b"\x1b]10;#ffffff\x07\x1b]11;#000000\x07")
+            .unwrap();
+        server.render_clients();
+        let blended = String::from_utf8(frames(&mut server, id, &mut peer)).unwrap();
+        assert_eq!(server.model.windows[&w].panes.panes.len(), 2);
+        assert!(blended.contains("48;2;32;0;0m"), "blended: {blended:?}");
+        let skipped = |server: &super::Server| server.clients[&id].window_cache.skipped.get();
+        let before = skipped(&server);
+        server.render_clients();
+        assert_eq!(frames(&mut server, id, &mut peer), b"");
+        assert_eq!(skipped(&server), before + 1, "a repeat is still skipped");
+        let other = if server.model.windows[&w].active() == p {
+            q
+        } else {
+            p
+        };
+        assert!(server.model.set_active(w, other));
+        server.render_clients();
+        let swapped = frames(&mut server, id, &mut peer);
+        assert!(!swapped.is_empty(), "a focus change is not skipped");
+        assert_eq!(skipped(&server), before + 1);
+        server.render_clients();
+        assert_eq!(frames(&mut server, id, &mut peer), b"", "nothing after it");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// D-033: the replies to the OSC 4 queries vtmux sends at attach for
+    /// the pane blend are kept but answer no pane's OSC 4 request
+    /// (`input_request_reply` would answer or drop it); the terminal's
+    /// next reply for that entry answers the pane.
+    #[test]
+    fn blend_palette_replies_leave_a_pane_request_alone() {
+        let (mut server, p, s, _, dir) = setup();
+        let (id, _peer) = attach_test_client(&mut server, s, &dir);
+        server.pane_answers(
+            p,
+            vec![vtmux_vt::Reply::Palette {
+                index: 3,
+                end: vtmux_vt::OscEnd::Bel,
+            }],
+        );
+        let out = |server: &super::Server| server.model.panes[&p].requests.deadline();
+        assert!(out(&server).is_some(), "the pane's request went out");
+        let mut ours = Vec::new();
+        for i in 0..16 {
+            ours.extend_from_slice(
+                format!("\x1b]4;{i};rgb:0{i:x}0{i:x}/0000/0000\x1b\\").as_bytes(),
+            );
+        }
+        server.on_client_input(id, &ours).unwrap();
+        assert!(out(&server).is_some(), "still waiting for its own reply");
+        assert_eq!(
+            server.clients[&id].reported.palette[15],
+            Some((0x0f, 0, 0)),
+            "kept for the blend"
+        );
+        server
+            .on_client_input(id, b"\x1b]4;3;rgb:0303/0000/0000\x1b\\")
+            .unwrap();
+        assert_eq!(out(&server), None, "answered");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A 40x10 xterm-256color client attached to session `s`, and the peer
+    /// end its frames arrive at.
+    fn attach_test_client(
+        server: &mut super::Server,
+        s: vtmux_core::ids::SessionId,
+        dir: &std::path::Path,
+    ) -> (super::ClientId, mio::net::UnixStream) {
+        use vtmux_core::protocol::{ClientFlags, Hello, TtyInfo};
+        let (ours, peer) = mio::net::UnixStream::pair().unwrap();
+        let id = super::ClientId(server.next_client);
+        server.next_client += 1;
+        let mut client = super::Client::new(ours, 0);
+        client.hello = Some(Hello {
+            version: vtmux_core::protocol::PROTOCOL_VERSION,
+            invocation: vtmux_core::socket::Invocation::Vtmux,
+            pid: 1,
+            argv: Vec::new(),
+            cwd: dir.to_path_buf(),
+            env: vec![("COLORTERM".into(), "truecolor".into())],
+            tty: Some(TtyInfo {
+                name: "/dev/null".into(),
+                term: "xterm-256color".into(),
+                cols: 40,
+                rows: 10,
+                features: Vec::new(),
+            }),
+            flags: ClientFlags::default(),
+        });
+        server.clients.insert(id, client);
+        server.attach_client(id, s).unwrap();
+        (id, peer)
     }
 
     /// The plain-frame skip (a turn where no composed row or the cursor

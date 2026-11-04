@@ -282,3 +282,11 @@ product reasons" category.
 - vtmux behaviour: Ghostty creates scrollback only for a region whose top margin is row 0 (Terminal.zig `index`), so the line is lost.
 - Evidence: 6x4 pane, `printf 'A\nB\nC\033[2;3r\033[2;1HX\033D\033DY'`: tmux `#{history_size}` 1 and capture `-S -` starts `X`; vtmux 0.
 - Category: Deferred (a Ghostty change: a region scroll that copies its top row into scrollback before rotating, about a day with its page bookkeeping).
+
+### D-033: attach also asks the terminal for palette entries 0-15 (OSC 4)
+
+- Test / assertion: attach `colour_queries_at_attach_and_on_a_theme_report` (the OSC 4 queries are the one byte-level difference it allows); oracle `terminal_colour_replies` (the replies change nothing on screen).
+- tmux behaviour: `tty_send_requests` (tty.c:406-425) ends with `ESC]10;?ST ESC]11;?ST`; `tty_repeat_requests` (tty.c:428-451) sends the same two after a theme report. Palette replies are parsed (`tty_keys_palette`) only to answer a pane's own OSC 4 query.
+- vtmux behaviour: the same two, then `ESC]4;N;?ST` for N 0-15, both at attach and after a theme report. Their replies are kept with the client's other reported colours (`term_queries::Reported`) and, while one of these queries is out, answer no pane's OSC 4 request (tmux sends none, so it must not answer or drop one); nothing changes on screen unless `vtmux-pane-active-blend` or `vtmux-pane-inactive-blend` is set.
+- Evidence: the attach test above compares both binaries' startup bytes for OSC 10/11 and asserts the OSC 4 queries only for vtmux.
+- Category: Spec decision (D26: the pane blend mixes palette cells from the terminal's own palette, `docs/specs/2026-11-04-pane-blend.md`).

@@ -14,6 +14,7 @@ use vtmux_core::style::{Attrs, CellStyle};
 use vtmux_core::styled;
 use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
 
+use super::blend::PaneBlend;
 use super::scene::{Lines, Scene, SceneCell, Shape};
 
 /// A client's ten `theme*` colours (`c->theme_colours`,
@@ -156,6 +157,8 @@ pub struct PaneDraw {
     pub selected: Vec<bool>,
     /// Its scrollbar, when one is drawn.
     pub scrollbar: Option<BarDraw>,
+    /// D26: how its content cells are blended, if at all.
+    pub blend: Option<PaneBlend>,
 }
 
 /// How a pane's scrollbar draws (`redraw_draw_scrollbar_span`).
@@ -357,6 +360,7 @@ struct PaneKey {
     status: Vec<styled::Cell>,
     selected: Vec<bool>,
     scrollbar: Option<BarDraw>,
+    blend: Option<PaneBlend>,
 }
 
 /// Everything in a [`Draw`] but the panes' content, and the theme.
@@ -390,6 +394,7 @@ impl DrawKey {
                     status: p.status.clone(),
                     selected: p.selected.clone(),
                     scrollbar: p.scrollbar.clone(),
+                    blend: p.blend,
                 })
                 .collect(),
             active: d.active,
@@ -527,6 +532,13 @@ fn compose_row(
             let cells = &mut line[usize::from(x)..usize::from(end)];
             let keep = selected_span(d, scene, x, end, y);
             let written = draw_pane_span(scene.get(x, y), d, theme, cells, wrapped, &keep);
+            // D26: the pane blend goes over the span as drawn (after the
+            // window style).
+            if let SceneCell::Pane { pane, .. } = scene.get(x, y)
+                && let Some(blend) = d.panes.get(pane).and_then(|p| p.blend.as_ref())
+            {
+                blend.apply(cells);
+            }
             ended_written = full && written;
             x = end;
         }
@@ -962,6 +974,7 @@ mod tests {
                                 status_ranges: Vec::new(),
                                 selected: Vec::new(),
                                 scrollbar: None,
+                                blend: None,
                             },
                         )
                     })

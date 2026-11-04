@@ -7171,3 +7171,309 @@ fn clear_on_attach_off_scrolls_instead_of_the_alternate_screen() {
         }
     }
 }
+
+/// The inactive blend the D26 tests set: text half way to the terminal's
+/// background, backgrounds half way to white.
+const BLEND: &str = "fg=bg/50,bg=#ffffff/50";
+/// [`BLEND`]'s background over a black terminal.
+const GREY: vtmux_vt::Color = vtmux_vt::Color::Rgb(128, 128, 128);
+
+/// What a terminal answers to OSC 10 and 11: white text on black.
+const COLOUR_REPLY: &[u8] = b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\";
+
+/// D26: a 40x6 client (status off) on two side-by-side `cat` panes, each
+/// showing `RED` in `38;2;200;0;0`, the right one active; `cmds` run before
+/// it attaches, `env` is extra client environment. Waits for both panes.
+fn blend_world(cmds: &[&[&str]], env: &[(&str, &str)]) -> (World, Attached) {
+    let w = World::new(PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let pane = r"printf '\033[38;2;200;0;0mRED\033[0m'; exec cat";
+    let ok = |args: &[&str]| assert!(w.cli(args).status.success(), "{args:?}");
+    ok(&[
+        "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", pane,
+    ]);
+    ok(&["set", "-g", "status", "off"]);
+    ok(&["splitw", "-h", "-t", "a", "sh", "-c", pane]);
+    for cmd in cmds {
+        ok(cmd);
+    }
+    // Both panes have drawn before the client attaches, so its frames do
+    // not depend on when their output arrived.
+    let end = Instant::now() + Duration::from_secs(5);
+    for t in ["a:0.0", "a:0.1"] {
+        while !String::from_utf8_lossy(&w.cli(&["capture-pane", "-p", "-t", t]).stdout)
+            .starts_with("RED")
+        {
+            assert!(Instant::now() < end, "pane {t}");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let a = w.attach_env(&["attach", "-t", "a"], 40, 6, env);
+    a.wait(|a| blend_cell(a, 0).text == "R" && blend_cell(a, RIGHT).text == "R");
+    (w, a)
+}
+
+/// The right pane's first column (the left pane is 20 wide, then the border).
+const RIGHT: u16 = 21;
+
+fn blend_cell(a: &Attached, x: u16) -> vtmux_vt::Cell {
+    vtmux_vt::snapshot(&a.screen())
+        .cell(x, 0)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The foreground of `R` in the left and the right pane.
+fn blend_fgs(a: &Attached) -> (vtmux_vt::Color, vtmux_vt::Color) {
+    (blend_cell(a, 0).style.fg, blend_cell(a, RIGHT).style.fg)
+}
+
+fn settle_on<T: PartialEq + std::fmt::Debug>(a: &Attached, want: &T, got: impl Fn(&Attached) -> T) {
+    let end = Instant::now() + Duration::from_secs(5);
+    while got(a) != *want && Instant::now() < end {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(got(a), *want);
+}
+
+/// D26 on a truecolour client that told us its colours (white on black):
+/// the inactive pane's explicitly coloured text is blended toward black
+/// and its default background toward white, the active pane's are not; `select-pane` swaps
+/// them, the first frame after it showing the whole swap (no stale rows).
+#[test]
+fn pane_blend_dims_the_inactive_pane() {
+    use vtmux_vt::Color;
+    let (w, mut a) = blend_world(
+        &[&["set", "-g", "vtmux-pane-inactive-blend", BLEND]],
+        &[("COLORTERM", "truecolor")],
+    );
+    // No reply yet: no blend.
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        blend_fgs(&a),
+        (Color::Rgb(200, 0, 0), Color::Rgb(200, 0, 0))
+    );
+    a.keys(COLOUR_REPLY);
+    settle_on(
+        &a,
+        &(Color::Rgb(100, 0, 0), Color::Rgb(200, 0, 0)),
+        blend_fgs,
+    );
+    // Every row of the inactive pane, blank ones included, is grey;
+    // the active pane and the border keep the terminal's default.
+    let screen = vtmux_vt::snapshot(&a.screen());
+    for y in 0..6 {
+        assert_eq!(screen.cell(5, y).unwrap().style.bg, GREY, "row {y}");
+        assert_eq!(
+            screen.cell(RIGHT + 5, y).unwrap().style.bg,
+            Color::Default,
+            "row {y}"
+        );
+        assert_eq!(
+            screen.cell(20, y).unwrap().style.bg,
+            Color::Default,
+            "border row {y}"
+        );
+    }
+    let before = a.bytes.lock().unwrap().len();
+    assert!(w.cli(&["select-pane", "-t", "a:0.0"]).status.success());
+    settle_on(
+        &a,
+        &(Color::Rgb(200, 0, 0), Color::Rgb(100, 0, 0)),
+        blend_fgs,
+    );
+    // The first frame after select-pane: up to the next frame's start.
+    let bytes = a.bytes.lock().unwrap().clone();
+    let start = before + find(&bytes[before..], b"\x1b[?25l").expect("a frame");
+    let end = find(&bytes[start + 1..], b"\x1b[?25l").map_or(bytes.len(), |n| start + 1 + n);
+    let mut t = PaneTerm::new(40, 6, 0);
+    t.feed(&bytes[..end]);
+    let first = vtmux_vt::snapshot(&t);
+    for y in 0..6 {
+        assert_eq!(
+            first.cell(5, y).unwrap().style.bg,
+            Color::Default,
+            "row {y}"
+        );
+        assert_eq!(first.cell(RIGHT + 5, y).unwrap().style.bg, GREY, "row {y}");
+    }
+    assert_eq!(
+        first.cell(RIGHT, 0).unwrap().style.fg,
+        Color::Rgb(100, 0, 0)
+    );
+    // Zoomed, the one pane shown is the active one: not blended.
+    assert!(
+        w.cli(&["resize-pane", "-Z", "-t", "a:0.1"])
+            .status
+            .success()
+    );
+    settle_on(&a, &Color::Rgb(200, 0, 0), |a| blend_cell(a, 0).style.fg);
+    // An active-pane blend reaches the active pane.
+    assert!(
+        w.cli(&["resize-pane", "-Z", "-t", "a:0.1"])
+            .status
+            .success()
+    );
+    assert!(
+        w.cli(&["set", "-g", "vtmux-pane-active-blend", "fg=#000000/100"])
+            .status
+            .success()
+    );
+    settle_on(&a, &(Color::Rgb(100, 0, 0), Color::Rgb(0, 0, 0)), blend_fgs);
+}
+
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+
+/// D26 off state and no reply: with the options unset, or set on a client
+/// whose terminal never answered OSC 10/11, the client gets byte for byte
+/// what it gets with neither (the startup queries included); a reply alone
+/// changes nothing either.
+#[test]
+fn pane_blend_off_and_without_a_reply_is_byte_identical() {
+    let set: &[&str] = &["set", "-g", "vtmux-pane-inactive-blend", BLEND];
+    let mut outputs = Vec::new();
+    for (cmds, reply) in [(&[][..], false), (&[set][..], false), (&[][..], true)] {
+        let (_w, mut a) = blend_world(cmds, &[("COLORTERM", "truecolor")]);
+        if reply {
+            a.keys(COLOUR_REPLY);
+        }
+        thread::sleep(Duration::from_millis(500));
+        a.keys(b"\x02d");
+        a.exited(0);
+        outputs.push(a.text());
+    }
+    assert!(outputs[0].contains("\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b]4;0;?\x1b\\"));
+    assert_eq!(outputs[1], outputs[0], "set, no reply");
+    assert_eq!(outputs[2], outputs[0], "a reply, unset");
+}
+
+/// D26 colour depth: a 256-colour client gets the blended colour's nearest
+/// palette entry ((200,0,0) is 160, (100,0,0) is 52, grey 128 is 244);
+/// a 16-colour or smaller one gets SGR 2 on the inactive pane and no colour change.
+#[test]
+fn pane_blend_256_and_16_colour_fallbacks() {
+    use vtmux_vt::Color;
+    let set: &[&str] = &["set", "-g", "vtmux-pane-inactive-blend", BLEND];
+    let (_w, mut a) = blend_world(&[set], &[]);
+    a.keys(COLOUR_REPLY);
+    settle_on(&a, &(Color::Palette(52), Color::Palette(160)), blend_fgs);
+    assert_eq!(blend_cell(&a, 5).style.bg, Color::Palette(244), "grey");
+    for term in ["xterm", "xterm-16color"] {
+        let (_w, mut a) = blend_world(&[set], &[("TERM", term)]);
+        let faint = |a: &Attached| {
+            (
+                blend_cell(a, 0).style.faint,
+                blend_cell(a, RIGHT).style.faint,
+            )
+        };
+        assert_eq!(faint(&a), (false, false));
+        a.keys(COLOUR_REPLY);
+        settle_on(&a, &(true, false), faint);
+        assert_eq!(
+            blend_cell(&a, 0).style.fg,
+            blend_cell(&a, RIGHT).style.fg,
+            "{term}"
+        );
+        assert_eq!(blend_cell(&a, 5).style.bg, Color::Default, "{term}");
+    }
+}
+
+/// `tty_repeat_requests(force)` after a theme report (`CSI ? 997 ; 1 n`):
+/// the colours are asked for again, so the blend follows a theme change.
+#[test]
+fn pane_blend_follows_a_theme_change() {
+    use vtmux_vt::Color;
+    let set: &[&str] = &["set", "-g", "vtmux-pane-inactive-blend", "fg=bg/100"];
+    let (_w, mut a) = blend_world(&[set], &[("COLORTERM", "truecolor")]);
+    a.keys(COLOUR_REPLY);
+    settle_on(&a, &Color::Rgb(0, 0, 0), |a| blend_cell(a, 0).style.fg);
+    let before = a.bytes.lock().unwrap().len();
+    a.keys(b"\x1b[?997;2n");
+    a.wait(|a| find(&a.bytes.lock().unwrap()[before..], b"\x1b]11;?\x1b\\").is_some());
+    a.keys(b"\x1b]10;#000000\x1b\\\x1b]11;#ffffff\x1b\\");
+    settle_on(&a, &Color::Rgb(255, 255, 255), |a| {
+        blend_cell(a, 0).style.fg
+    });
+}
+
+/// `server_client_update_theme_colours` (server-client.c:1274): under
+/// `theme detect` the `theme*` colours come from the client's theme, its
+/// last `CSI ? 997 ; 1|2 n` report (`server_client_report_theme`, 3305,
+/// which redraws), else its OSC 11 background's brightness
+/// (`colour_totheme(c->tty.bg)`, tty-keys.c:834; no redraw of its own, so
+/// `refresh-client -S` shows it). Dark while neither is known.
+#[test]
+fn client_theme_reaches_the_theme_colours() {
+    use vtmux_vt::Color;
+    let status = |a: &Attached| {
+        vtmux_vt::snapshot(&a.screen())
+            .cell(0, 9)
+            .cloned()
+            .unwrap_or_default()
+            .style
+            .bg
+    };
+    let (dark, light) = (Color::Palette(100), Color::Palette(200));
+    for bin in bins() {
+        for report in [true, false] {
+            let w = World::new(bin.clone());
+            let mut v = vec!["new", "-d", "-s", "a", "-n", "w"];
+            v.extend(CAT);
+            assert!(w.cli(&v).status.success());
+            for set in [
+                ["set", "-g", "status-right", ""],
+                ["set", "-g", "status-style", "bg=themegreen"],
+                ["set", "-g", "dark-theme-green", "colour100"],
+                ["set", "-g", "light-theme-green", "colour200"],
+            ] {
+                assert!(w.cli(&set).status.success());
+            }
+            let mut a = w.attach(&["attach", "-t", "a"]);
+            settle_on(&a, &dark, status);
+            if report {
+                a.keys(b"\x1b[?997;2n");
+                settle_on(&a, &light, status);
+                a.keys(b"\x1b[?997;1n");
+                settle_on(&a, &dark, status);
+            } else {
+                a.keys(b"\x1b]10;#000000\x1b\\\x1b]11;#ffffff\x1b\\");
+                // The reply is in before the redraw.
+                thread::sleep(Duration::from_millis(200));
+                assert!(w.cli(&["refresh-client", "-S"]).status.success());
+                settle_on(&a, &light, status);
+            }
+            a.keys(b"\x02d");
+            a.exited(0);
+        }
+    }
+}
+
+/// tty.c `tty_send_requests` (tty.c:420): after the DECRQM 2026 query
+/// both ask for the default colours (OSC 10, 11); a theme report
+/// (`CSI ? 997 ; 1 n`) asks again (`server_client_report_theme` ->
+/// `tty_repeat_requests(force)`, server-client.c:3315). vtmux follows
+/// each with OSC 4 for palette entries 0-15 (the pane blend, D26).
+#[test]
+fn colour_queries_at_attach_and_on_a_theme_report() {
+    const COLOURS: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        let mut v = vec!["new", "-d", "-s", "a"];
+        v.extend(CAT);
+        assert!(w.cli(&v).status.success());
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        let mut wanted = b"\x1b[?2026$p".to_vec();
+        wanted.extend_from_slice(COLOURS);
+        a.wait(|a| find(&a.bytes.lock().unwrap(), &wanted).is_some());
+        let what = bin.display().to_string();
+        let vtmux = bin.as_path() == std::path::Path::new(env!("CARGO_BIN_EXE_vtmux"));
+        let palette = |a: &Attached| find(&a.bytes.lock().unwrap(), b"\x1b]4;15;?\x1b\\").is_some();
+        assert_eq!(palette(&a), vtmux, "{what}: OSC 4");
+        let before = a.bytes.lock().unwrap().len();
+        a.keys(b"\x1b[?997;1n");
+        a.wait(|a| find(&a.bytes.lock().unwrap()[before..], COLOURS).is_some());
+        a.keys(b"\x02d");
+        a.exited(0);
+    }
+}

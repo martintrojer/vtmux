@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 //! Pure core: parser, table, formats, IDs, protocol.
 
+pub mod blend;
 pub mod cmd;
 pub mod colour;
 pub mod error;
