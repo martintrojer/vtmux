@@ -160,6 +160,11 @@ fn mark(server: &mut Server, found: Found, wp: PaneId, clear: bool) {
             m.redraw(Redraw::WindowStatus(pw));
         }
     }
+    // cmd-select-pane.c:140-141: marking a floating pane raises it and
+    // makes it active.
+    if m.windows[&w].is_floating_now(wp) {
+        m.switch_active(w, wp);
+    }
 }
 
 /// `last-pane` / `select-pane -l` (cmd-select-pane.c:167-205).
@@ -197,7 +202,7 @@ fn last(server: &mut Server, w: WindowId, args: &Args, zflag: bool) -> Result<()
 fn activate(server: &mut Server, w: WindowId, wp: PaneId, zflag: bool) -> bool {
     let visible = server.model.windows[&w].is_visible(wp);
     let was = !visible && server.model.push_zoom(w, false, zflag);
-    let changed = server.model.set_active(w, wp);
+    let changed = server.model.switch_active(w, wp);
     if changed {
         // cmd_select_pane_redraw: every client of a session with the
         // window redraws its status.

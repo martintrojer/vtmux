@@ -1077,7 +1077,7 @@ impl Server {
         if !self.model.windows[&w].is_floating(p) {
             return;
         }
-        self.model.set_active(w, p);
+        self.model.switch_active(w, p);
         self.set_drag_action(id, Some(DragAction::MoveFloating));
         self.move_floating_drag(id, ev);
     }
@@ -1120,7 +1120,7 @@ impl Server {
         p: PaneId,
         ev: &MouseEvent,
     ) {
-        self.model.set_active(w, p);
+        self.model.switch_active(w, p);
         self.set_drag_action(id, Some(DragAction::ResizeFloating));
         self.resize_floating_drag(id, ev);
     }
