@@ -59,6 +59,7 @@ impl Server {
     /// pane goes, taking an emptied window with it.
     pub(crate) fn destroy_exited_pane(&mut self, p: PaneId, notify: bool) {
         self.hangup_pane(p);
+        self.pipe_close(p);
         let Some(pane) = self.model.panes.get(&p) else {
             return;
         };

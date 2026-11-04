@@ -683,6 +683,10 @@ impl Server {
                         self.popup_readable(id);
                     }
                 }
+                Token(t) if (crate::pipe::PIPE_BASE..crate::popup::POPUP_BASE).contains(&t) => {
+                    let p = PaneId(u32::try_from(t - crate::pipe::PIPE_BASE).unwrap_or(u32::MAX));
+                    self.pipe_event(p);
+                }
                 Token(t) if (crate::jobs::JOB_BASE..CLIENT_BASE).contains(&t) => {
                     let id = crate::jobs::JobId(t - crate::jobs::JOB_BASE);
                     self.job_writable(id);
@@ -3657,6 +3661,7 @@ impl Server {
             mode_prompt: None,
             mode_prompt_owner: None,
             compress: crate::compress::PaneCompress::default(),
+            pipe: None,
         })
     }
 
@@ -3682,7 +3687,7 @@ impl Server {
 
     /// `server_destroy_pane(wp, 1)` for a pane whose program went
     /// ([`Self::destroy_exited_pane`], remain-on-exit aside).
-    fn pane_exited(&mut self, p: PaneId) {
+    pub(crate) fn pane_exited(&mut self, p: PaneId) {
         self.destroy_exited_pane(p, true);
     }
 
@@ -3797,6 +3802,9 @@ impl Server {
         if let Some(owner) = pane.mode_prompt_owner.take() {
             owner.free(self);
         }
+        if let Some(pipe) = pane.pipe.take() {
+            self.pipe_drop(pipe);
+        }
         if let Some(io) = pane.io.take() {
             io.deregister(self.poll.registry());
             // window_pane_destroy closes the master; the kernel sends the
@@ -3909,6 +3917,7 @@ impl Server {
             self.model.alerts_queue(window, alerts::BELL);
         }
         self.control_output(p, bytes);
+        self.pipe_write(p, bytes);
         self.pane_passthrough(p, passthrough, redraw_pending);
     }
 
@@ -3942,8 +3951,11 @@ impl Server {
             // once the exit status is in (server_destroy_pane returns
             // early without PANE_STATUSREADY, server-fn.c:382), so its
             // pane-exited carries the status; until then the PTY is closed.
+            // A pipe still writing its output destroys it once drained.
             if self.model.panes.get(&p).is_some_and(|x| x.status.is_some()) {
-                self.pane_exited(p);
+                if self.pane_destroy_ready(p) {
+                    self.pane_exited(p);
+                }
             } else if let Some(io) = self.model.panes.get_mut(&p).and_then(|x| x.io.take()) {
                 io.deregister(self.poll.registry());
             }
@@ -4093,16 +4105,11 @@ impl Server {
                             self.model.panes.insert(p, pane);
                         }
                         // Drain what is left, then the read side reports
-                        // the close (EIO) and destroys the pane.
+                        // the close (EIO) and destroys the pane; a pipe
+                        // still writing its output does once it is drained.
                         let flooding = self.backlog.contains(&p);
                         self.pane_readable(p, flooding);
-                        let drained = self
-                            .model
-                            .panes
-                            .get(&p)
-                            .and_then(|x| x.io.as_ref())
-                            .is_none_or(|io| io.readable_bytes() == 0);
-                        if drained && self.model.panes.contains_key(&p) {
+                        if self.pane_destroy_ready(p) {
                             self.pane_exited(p);
                         }
                     }

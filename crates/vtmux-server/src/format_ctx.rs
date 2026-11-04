@@ -560,16 +560,19 @@ impl<'a> Ctx<'a> {
             "pane_zoomed_flag" => flag(w.zoom.as_ref().is_some_and(|z| z.pane == p.id)),
             "pane_input_off" => flag(p.input_off),
             "pane_synchronized" => flag(self.model.pane_synchronized(p.id)),
-            // format_cb_pane_marked, format_cb_pane_marked_set; no
-            // pipe-pane yet.
+            // format_cb_pane_marked, format_cb_pane_marked_set.
             "pane_marked" => flag(self.model.marked().is_some_and(|m| m.pane == Some(p.id))),
             "pane_marked_set" => flag(self.model.marked().is_some()),
-            "pane_pipe" => "0".to_owned(),
+            // format_cb_pane_pipe, format_cb_pane_pipe_pid (format.c:2587-2608).
+            "pane_pipe" => flag(p.pipe.is_some()),
+            "pane_pipe_pid" => p.pipe.as_ref()?.pid.to_string(),
             "pane_unseen_changes" => flag(p.unseen_changes),
             // format_cb_pane_dead* (format.c:2255-2311): the PTY closed
             // and the status in; the status or signal as it ended; when
             // remain-on-exit kept it.
-            "pane_dead" => flag(p.status.is_some() && io.is_none()),
+            // A pane whose pipe is still writing its output is not
+            // destroyed yet (tmux keeps its fd until server_destroy_pane).
+            "pane_dead" => flag(p.status.is_some() && io.is_none() && p.pipe.is_none()),
             "pane_dead_status" => match p.status? {
                 crate::jobs::JobStatus::Exited(code) => code.to_string(),
                 crate::jobs::JobStatus::Signaled(_) => return None,

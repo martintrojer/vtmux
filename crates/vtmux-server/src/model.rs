@@ -243,6 +243,8 @@ pub struct Pane {
     pub(crate) mode_prompt_owner: Option<crate::open_prompt::Owner>,
     /// When its idle history is compressed ([`crate::compress`]).
     pub compress: crate::compress::PaneCompress,
+    /// `pipe-pane`'s pipe, while open.
+    pub pipe: Option<crate::pipe::PanePipe>,
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its

@@ -26,6 +26,7 @@ pub mod names;
 pub mod open_prompt;
 pub mod pane_io;
 pub mod paste;
+pub mod pipe;
 pub mod popup;
 pub mod prompt;
 pub mod prompt_history;

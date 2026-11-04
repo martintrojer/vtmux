@@ -1,0 +1,39 @@
+name = "pipe_pane_attached"
+# pipe-pane from key bindings on an attached client (cmd-pipe-pane.c):
+# `pipep -o` toggles a pipe with one key; the pane's output, typed keys
+# echoed included, goes to an -O command; an -I command's output goes into
+# the pane as if typed, and its EOF closes the pipe; the command is
+# format-expanded with the binding's pane.
+size = [60, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "12", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["selectp", "-t", "a:w.0", "-T", "t0"] },
+  { run = ["bind", "P", "pipep", "-o", "cat >/dev/null"] },
+  { run = ["bind", "I", "pipep", "-I", "echo 'from #{pane_id}'"] },
+  { run = ["bind", "M", "pipep", "grep -q MARK; tmux -S '#{socket_path}' wait-for -S seen"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002P" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_pipe}"] },
+  { keys = "\u0002P" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_pipe}"] },
+  { keys = "\u0002P" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_pipe}"] },
+  # A new pipe replaces the open one.
+  { keys = "\u0002M" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_pipe}"] },
+  { keys = "one MARK\r" },
+  { wait_for = "seen" },
+  { settle = {} },
+  { screen = {} },
+  { keys = "\u0002I" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_pipe}"] },
+  { run = ["kill-server"] },
+]

@@ -50,7 +50,7 @@ status = "pass"
 
 [tests."clear-on-attach.sh"]
 status = "xfail"
-reason = "needs pipe-pane (the script captures the outer client's output with `pipe-pane -O`), not clear-history; it fails with `not implemented in vtmux yet: pipe-pane`"
+reason = "clear-on-attach is not implemented: with it off vtmux still enters the alternate screen on attach (`clear-on-attach off used smcup`); pipe-pane captures the outer client fine"
 
 [tests."client-key-order-focus.sh"]
 status = "pass"
@@ -434,8 +434,7 @@ status = "xfail"
 reason = "its split, break, join, swap, respawn (-E included), marked pane, empty pane (-E, -I, empty command) and resize-pane -T sections pass; it stops at new-pane (floating panes)"
 
 [tests."pipe-pane.sh"]
-status = "xfail"
-reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
+status = "pass"
 
 [tests."prompt-keys.sh"]
 status = "xfail"
@@ -555,15 +554,14 @@ reason = "missing command switch-mode: `not implemented in vtmux yet: switch-mod
 
 [tests."sync-output-atomic.sh"]
 status = "xfail"
-reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
+reason = "frame encoding: vtmux sends a frame as a diff with a cursor move per cell under TERM=screen, so the marker `FRAME_000001_ROW_23` never appears contiguously in the outer client's bytes (`client did not receive both synchronized frames`); pipe-pane captures them fine"
 
 [tests."sync-output-copy-cursor.sh"]
 status = "xfail"
-reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
+reason = "a copy-mode command (`send-keys -X cursor-left`) redraws the pane, which ends the program's synchronized output (`application synchronized output ended unexpectedly`); tmux draws copy mode on its own screen and keeps MODE_SYNC"
 
 [tests."sync-output-cursor.sh"]
-status = "xfail"
-reason = "missing command pipe-pane: `not implemented in vtmux yet: pipe-pane`"
+status = "pass"
 
 [tests."sync-output-wrapped.sh"]
 status = "pass"

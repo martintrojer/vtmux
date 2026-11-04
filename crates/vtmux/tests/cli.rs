@@ -5982,3 +5982,203 @@ fn send_keys_reset_keeps_history_and_alternate() {
         runs
     });
 }
+
+/// Poll (max 5 s) until `path` exists and `done(contents)`; the contents.
+fn wait_file(path: &Path, done: impl Fn(&str) -> bool) -> String {
+    let start = Instant::now();
+    loop {
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        if path.exists() && done(&text) || start.elapsed() > Duration::from_secs(5) {
+            return text;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `pipe-pane` (cmd-pipe-pane.c): `-O` (the default) sends the pane's
+/// output to the command from now on; `-I` sends the command's output into
+/// the pane; `-o` only opens when no pipe was open (a toggle); an empty
+/// command or none only closes; the command is format- and
+/// strftime-expanded; `#{pane_pipe}` and `#{pane_pipe_pid}`. The pipe
+/// closes when its command goes: EOF from a `-I` command, a write to an
+/// `-O` command that has exited. A dead pane cannot be piped.
+#[test]
+fn pipe_pane_cli() {
+    compare("pipe_pane_cli", |w| {
+        let dir = w.dir().to_owned();
+        let piped = |w: &World| w.run(&["display", "-p", "-t", "a", "#{pane_pipe}"]);
+        let wait_piped = |w: &World, want: &str| {
+            let start = Instant::now();
+            while piped(w).stdout.trim() != want && start.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            piped(w)
+        };
+        let out = dir.join("out");
+        let o = out.to_str().expect("utf-8 path").to_owned();
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "a", "-x", "40", "-y", "10", "cat"]),
+            w.run(&["display", "-p", "-t", "a", "#{pane_pipe}[#{pane_pipe_pid}]"]),
+            w.run(&["pipe-pane", "-t", "a", &format!("cat >'{o}'")]),
+            w.run(&[
+                "display",
+                "-p",
+                "-t",
+                "a",
+                "#{pane_pipe} #{!=:#{pane_pipe_pid},}",
+            ]),
+            w.run(&["send-keys", "-t", "a", "-l", "abc"]),
+            w.run(&["send-keys", "-t", "a", "Enter"]),
+        ];
+        // The echo and cat's copy: the bytes the pane read.
+        runs.push(Run::seen(wait_file(&out, |t| t.len() >= 10)));
+        // -o closes an open pipe and opens nothing; again it opens.
+        let o2 = dir.join("out2");
+        let o2 = o2.to_str().expect("utf-8 path");
+        runs.push(w.run(&["pipep", "-o", "-t", "a", &format!("cat >'{o2}'")]));
+        runs.push(piped(w));
+        runs.push(w.run(&["pipep", "-o", "-t", "a", &format!("cat >'{o2}'")]));
+        runs.push(piped(w));
+        // No command and an empty one only close.
+        runs.push(w.run(&["pipep", "-t", "a"]));
+        runs.push(piped(w));
+        runs.push(w.run(&["pipep", "-O", "-t", "a", "cat >/dev/null"]));
+        runs.push(w.run(&["pipep", "-t", "a", ""]));
+        runs.push(piped(w));
+        // Formats and strftime in the command.
+        let fmt = dir.join("fmt");
+        let f = fmt.to_str().expect("utf-8 path");
+        runs.push(w.run(&[
+            "pipep",
+            "-t",
+            "a",
+            &format!("echo '#{{session_name}} #{{pane_index}} 100%%' >'{f}'"),
+        ]));
+        runs.push(Run::seen(wait_file(&fmt, |t| t.ends_with('\n'))));
+        // -I: the command's output goes into the pane as typed; its EOF
+        // closes the pipe.
+        runs.push(w.run(&["pipep", "-I", "-t", "a", "echo hello"]));
+        w.wait_for_text("a", "hello\nhello");
+        runs.push(wait_piped(w, "0"));
+        runs.push(w.run(&["capture-pane", "-p", "-t", "a"]));
+        // -I -O: both ways. It answers once it has the echo and cat's
+        // copy, so its line cannot land between them.
+        runs.push(w.run(&["pipep", "-IO", "-t", "a", "read l; read l; echo got"]));
+        runs.push(w.run(&["send-keys", "-t", "a", "-l", "x\n"]));
+        w.wait_for_text("a", "got\ngot");
+        runs.push(wait_piped(w, "0"));
+        // An -O command that exited: the next output closes the pipe.
+        runs.push(w.run(&["pipep", "-t", "a", "exit 0"]));
+        runs.push(piped(w));
+        std::thread::sleep(Duration::from_millis(200));
+        runs.push(w.run(&["send-keys", "-t", "a", "-l", "y"]));
+        runs.push(wait_piped(w, "0"));
+        // Errors.
+        runs.push(w.run(&["set", "-g", "remain-on-exit", "on"]));
+        runs.push(w.run(&["new", "-d", "-s", "dead", "exit 0"]));
+        let start = Instant::now();
+        while w
+            .run(&["display", "-p", "-t", "dead", "#{pane_dead}"])
+            .stdout
+            != "1\n"
+            && start.elapsed() < Duration::from_secs(5)
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        runs.push(w.run(&["pipep", "-t", "dead", "cat"]));
+        runs.push(w.run(&["pipep", "-t", "nosuch", "cat"]));
+        runs.push(w.run(&["pipep", "-t", "a", "x", "y"]));
+        runs.push(w.run(&["pipep", "-x"]));
+        runs
+    });
+}
+
+/// The pipe goes with its pane: when the pane's program exits, the
+/// command gets all its output and then EOF, and the pane is destroyed
+/// once the command has taken it all (`window_pane_destroy_ready`); when
+/// the pane is killed the command gets EOF too. Opening and closing pipes
+/// leaks no descriptor in the server: a job started after many pipes gets
+/// the same descriptor as one started before them (`show-messages -J`).
+#[test]
+fn pipe_pane_closes_with_the_pane() {
+    compare("pipe_pane_closes_with_the_pane", |w| {
+        let dir = w.dir().to_owned();
+        let job_fd = |w: &World| {
+            let r = w.run(&["show-messages", "-J"]);
+            r.stdout
+                .lines()
+                .filter_map(|l| l.split("fd=").nth(1))
+                .filter_map(|s| s.split(',').next()?.parse::<i32>().ok())
+                .max()
+                .unwrap_or(-1)
+        };
+        let mut runs = vec![w.run(&["new", "-d", "-s", "keep", "cat"])];
+        runs.push(w.run(&["run-shell", "-b", "exec sleep 30"]));
+        let before = job_fd(w);
+        // The pane exits with output the command has not read yet (more
+        // than any socket buffer holds): the pane waits for it, then the
+        // command sees EOF.
+        let out = dir.join("out");
+        let o = out.to_str().expect("utf-8 path");
+        let me = w.bin.to_str().expect("utf-8 path");
+        let label = w.label.clone();
+        runs.push(w.run(&[
+            "new",
+            "-d",
+            "-s",
+            "a",
+            &format!("'{me}' -L {label} wait-for go; seq 1 200000"),
+        ]));
+        runs.push(w.run(&[
+            "pipep",
+            "-t",
+            "a",
+            &format!("sleep 1; cat >'{o}'; echo done >'{o}.done'"),
+        ]));
+        runs.push(w.run(&["wait-for", "-S", "go"]));
+        std::thread::sleep(Duration::from_millis(300));
+        runs.push(w.run(&["ls", "-F", "#S #{pane_dead} #{pane_pipe}"]));
+        runs.push(Run::seen(wait_file(&dir.join("out.done"), |t| {
+            !t.is_empty()
+        })));
+        runs.push(Run::seen(format!(
+            "{}\n",
+            std::fs::read_to_string(&out)
+                .unwrap_or_default()
+                .lines()
+                .count()
+        )));
+        runs.push(w.run(&["ls", "-F", "#S"]));
+        // A killed pane closes its pipe.
+        let killed = dir.join("killed");
+        let k = killed.to_str().expect("utf-8 path");
+        runs.push(w.run(&["new", "-d", "-s", "b", "cat"]));
+        runs.push(w.run(&[
+            "pipep",
+            "-I",
+            "-O",
+            "-t",
+            "b",
+            &format!("cat >/dev/null; echo eof >'{k}'"),
+        ]));
+        runs.push(w.run(&["kill-pane", "-t", "b"]));
+        runs.push(Run::seen(wait_file(&killed, |t| !t.is_empty())));
+        // Many pipes, closed every way.
+        for _ in 0..5 {
+            w.run(&["pipep", "-t", "keep", "cat >/dev/null"]);
+            w.run(&["pipep", "-t", "keep", "-I", "cat"]);
+            w.run(&["pipep", "-t", "keep", "-I", "true"]);
+            w.run(&["pipep", "-t", "keep"]);
+        }
+        runs.push(w.run(&["pipep", "-t", "keep", "exit 0"]));
+        std::thread::sleep(Duration::from_millis(200));
+        runs.push(w.run(&["send-keys", "-t", "keep", "-l", "z"]));
+        std::thread::sleep(Duration::from_millis(200));
+        runs.push(w.run(&["display", "-p", "-t", "keep", "#{pane_pipe}"]));
+        // The first job still holds its descriptor, so 1: the next free
+        // one. Each leaked pipe would add one.
+        runs.push(w.run(&["run-shell", "-b", "exec sleep 30"]));
+        runs.push(Run::seen(format!("{}\n", job_fd(w) - before)));
+        runs
+    });
+}

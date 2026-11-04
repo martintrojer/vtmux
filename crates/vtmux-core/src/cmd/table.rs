@@ -169,7 +169,7 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("next-layout", Some("nextl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("next-window", Some("next"), "at:", 0, Some(0), "[-a] [-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("paste-buffer", Some("pasteb"), "db:prSs:t:", 0, Some(0), "[-dprS] [-s separator] [-b buffer-name] [-t target-pane]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
-    cmd("pipe-pane", Some("pipep"), "IOot:", 0, Some(1), "[-IOo] [-t target-pane] [shell-command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, false),
+    cmd("pipe-pane", Some("pipep"), "IOot:", 0, Some(1), "[-IOo] [-t target-pane] [shell-command]", Some(slot('t', TargetKind::Pane, FindFlags::NONE)), None, false, true),
     cmd("previous-layout", Some("prevl"), "t:", 0, Some(0), "[-t target-window]", Some(slot('t', TargetKind::Window, FindFlags::NONE)), None, false, true),
     cmd("previous-window", Some("prev"), "at:", 0, Some(0), "[-a] [-t target-session]", Some(slot('t', TargetKind::Session, FindFlags::NONE)), None, false, true),
     cmd("refresh-client", Some("refresh"), "A:B:cC:Df:r:F:lLRSt:U", 0, Some(1), "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-f flags] [-r pane:report] [-t target-client] [adjustment]", None, None, false, true),
@@ -421,6 +421,7 @@ mod tests {
             ("find-window", Some("findw")),
             ("suspend-client", Some("suspendc")),
             ("display-menu", Some("menu")),
+            ("pipe-pane", Some("pipep")),
         ];
         for (name, alias) in m0 {
             assert_eq!(found(name), name);
@@ -431,7 +432,7 @@ mod tests {
                 assert_eq!(found(alias), name, "alias {alias}");
             }
         }
-        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 84);
+        assert_eq!(TMUX_COMMANDS.iter().filter(|e| e.implemented).count(), 85);
     }
 
     /// cmd.c:469-506: an exact alias beats prefix matching, so `lsw` is
