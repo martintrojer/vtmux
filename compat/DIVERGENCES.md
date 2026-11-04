@@ -231,3 +231,12 @@ product reasons" category.
 - vtmux behaviour: the byte goes to Ghostty, whose RIS is a full reset: history erased, the alternate screen left. vtmux keeps the title, the key and mouse modes and the charsets as tmux does.
 - Evidence: 20x5 pane, `printf 'h1\nh2\nh3\nh4\nh5\nv1\nv2\n\033c'`: tmux `#{history_size}` 7, vtmux 0; `printf 'main\n\033[?1049halt\033c'`: tmux `#{alternate_on}` 1, vtmux 0 (reference tmux 3.8, under `timeout -k 5 20`).
 - Category: Deferred (handling RIS like `send-keys -R`, with `PaneTerm::reset` instead of Ghostty's full reset, needs the scanner to swallow the byte and the parser state around it; out of the send-keys -R fix's scope).
+
+### D-026: `vtmux -V` is not `#{version}` (spec D21, D25)
+
+- Test / assertion: regress `format-variables.sh`, `test_var version "$VER"` with `VER` from `$TMUX -V | sed 's/^tmux //'`.
+- tmux behaviour: `-V` prints `tmux 3.8` and `#{version}` is `3.8`, so stripping `tmux ` from one gives the other.
+- vtmux behaviour: invoked as `vtmux`, `-V` prints vtmux's own version (`vtmux 0.0.0 (tmux 3.8)` today, `vtmux 3.8-beta1` under D25), while `#{version}` stays the tmux version `3.8` so plugins' version gates see tmux. Invoked as `tmux`, `-V` prints `tmux 3.8` as tmux does. The regress harness runs the binary as `vtmux`.
+- Evidence: `vtmux -V` gives `vtmux 0.0.0 (tmux 3.8)`; `vtmux display -p '#{version}'` gives `3.8`.
+- Category: Spec decision (D21, amended by D25).
+- Patch: `compat/patches/0002-format-variables-version.patch` (the script takes the tmux version out of a `vtmux` `-V` line too; a no-op under tmux).

@@ -235,7 +235,7 @@ reason = "format modifier t/f with an out-of-range time: `#{t/f/zz:@huge}` gives
 
 [tests."format-variables.sh"]
 status = "xfail"
-reason = "the session group formats pass; the test then compares `#{version}` with `vtmux -V` (spec D21) and needs the `I/e`, `I/c` and `I/f` modifiers"
+reason = "the session group formats pass; the test then needs the `I/e`, `I/c` and `I/f` modifiers (`#{I/e:TERM}` is empty; lows_choose)"
 
 [tests."has-session-return.sh"]
 status = "pass"
