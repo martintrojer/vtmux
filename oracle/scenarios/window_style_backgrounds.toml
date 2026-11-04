@@ -1,0 +1,29 @@
+name = "window_style_backgrounds"
+size = [40, 10]
+# window-style and window-active-style are the default colours of a pane's
+# cells (tty.c tty_default_colours, screen-redraw.c redraw_draw_pane_span):
+# the active pane takes window-active-style's where it sets them, the others
+# window-style's; select-pane -P sets the pane's own. Blank cells and the
+# cleared rest of a row take the background too.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { attach = { session = "a" } },
+  { feed = { pane = "%0", bytes = "abc" } },
+  { run = ["setw", "-t", "a", "window-style", "bg=blue"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { run = ["setw", "-t", "a", "window-active-style", "bg=red,fg=yellow"] },
+  { run = ["selectp", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["selectp", "-t", "%1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["selectp", "-t", "%0", "-P", "bg=green"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

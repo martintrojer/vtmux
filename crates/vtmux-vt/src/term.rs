@@ -354,12 +354,21 @@ pub struct PaneTerm {
     /// the only reader of Ghostty's render state, whose dirty flags one
     /// reader consumes.
     pub(crate) view: RefCell<crate::snapshot::ScreenView>,
-    /// tmux's `MODE_SYNC` hold (screen-write.c:211-240): the screen as it
-    /// was when the program last entered synchronized output (`?2026h`),
-    /// which is what the clients keep showing while the mode is on, and
-    /// when the 1 s sync timer was last armed (`screen_write_start_sync`
-    /// re-arms it on every `?2026h`).
-    sync_hold: Option<(crate::Snapshot, std::time::Instant)>,
+    /// tmux's `MODE_SYNC` ([`SyncHold`]).
+    sync: SyncHold,
+}
+
+/// tmux's `MODE_SYNC` (screen-write.c:211-240).
+#[derive(Debug, Default)]
+struct SyncHold {
+    /// The screen as it was when the program last entered synchronized
+    /// output (`?2026h`), which is what the clients keep showing while the
+    /// mode is on, and when the 1 s sync timer was last armed
+    /// (`screen_write_start_sync` re-arms it on every `?2026h`).
+    hold: Option<(crate::Snapshot, std::time::Instant)>,
+    /// The hold that synchronized output last ended with (`?2026l`, the
+    /// timer, [`PaneTerm::stop_sync`]), until [`PaneTerm::take_sync_flush`].
+    ended: Option<crate::Snapshot>,
 }
 
 /// A `DCS tmux;` payload (input.c `input_dcs_dispatch`), unescaped, for the
@@ -490,7 +499,7 @@ impl PaneTerm {
             rename: Rename::default(),
             reads: StdCell::new(0),
             view: RefCell::default(),
-            sync_hold: None,
+            sync: SyncHold::default(),
         };
         pane.retain();
         pane
@@ -601,13 +610,13 @@ impl PaneTerm {
                     Some(true) => self.start_sync(),
                     // input.c:1981: screen_write_end_sync; the clients
                     // show the screen as it is now.
-                    Some(false) => self.sync_hold = None,
+                    Some(false) => self.end_sync_hold(),
                     None => {}
                 }
                 // RIS: screen_write_reset leaves only MODE_CURSOR|MODE_WRAP
                 // (screen-write.c:430), and the pane is redrawn whole.
                 if e == ScanEvent::Reset {
-                    self.sync_hold = None;
+                    self.sync.hold = None;
                 }
                 let alternate = self.alternate_on();
                 match e {
@@ -1226,9 +1235,39 @@ impl PaneTerm {
             let _ = self.term.set_scrollback_max_lines(None);
             self.line_limit = None;
         }
-        self.term
-            .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
-            .expect("libghostty resize");
+        // A cursor at or past the new width: Ghostty's reflow gives it a
+        // row of its own, which tmux's does not (grid_unwrap_position
+        // leaves `cx` past the end), so that row would push one more into
+        // history. Left to Ghostty's trimming then.
+        let reflow = cols.max(1) != self.cols() && self.cursor().0 < cols.max(1);
+        if reflow && on_primary {
+            // grid_reflow (grid.c:1528-1608) keeps every line, the blank
+            // ones below the cursor too: the rows a narrowing splits off go
+            // into history, and the rows a widening joins come back from
+            // it, the screen's bottom staying put. Ghostty's reflow drops
+            // trailing blank rows unless a pin is on them: pin the bottom
+            // row for the column change. The height changes first, as
+            // screen_resize_y does before the reflow, and without the pin,
+            // which would stop Ghostty trimming blank rows there.
+            if rows.max(1) != self.rows() {
+                self.term
+                    .resize(self.cols(), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                    .expect("libghostty resize");
+            }
+            let bottom = PointCoordinate {
+                x: 0,
+                y: u32::from(rows.max(1) - 1),
+            };
+            let pin = self.term.track_grid_ref(Point::Active(bottom)).ok();
+            self.term
+                .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                .expect("libghostty resize");
+            drop(pin);
+        } else {
+            self.term
+                .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                .expect("libghostty resize");
+        }
         self.page_rows = page_rows(cols.max(1));
         if on_primary {
             // Reflow moves rows in and out of history: tmux's history
@@ -1555,9 +1594,9 @@ impl PaneTerm {
     /// 1 s timer. A second `?2026h` keeps the first hold.
     fn start_sync(&mut self) {
         let now = std::time::Instant::now();
-        match self.sync_hold.as_mut() {
+        match self.sync.hold.as_mut() {
             Some((_, since)) => *since = now,
-            None => self.sync_hold = Some((crate::snapshot(self), now)),
+            None => self.sync.hold = Some((crate::snapshot(self), now)),
         }
     }
 
@@ -1566,14 +1605,15 @@ impl PaneTerm {
     /// nothing of the pane is drawn until it ends); `None` when it is off.
     #[must_use]
     pub fn sync_held(&self) -> Option<&crate::Snapshot> {
-        self.sync_hold.as_ref().map(|(s, _)| s)
+        self.sync.hold.as_ref().map(|(s, _)| s)
     }
 
     /// When the sync timer ends the hold (`screen_write_sync_callback`,
     /// one second after the last `?2026h`), if it is on.
     #[must_use]
     pub fn sync_deadline(&self) -> Option<std::time::Instant> {
-        self.sync_hold
+        self.sync
+            .hold
             .as_ref()
             .map(|(_, since)| *since + SYNC_TIMEOUT)
     }
@@ -1582,11 +1622,41 @@ impl PaneTerm {
     /// output ends without the program asking (the timer, a resize, a full
     /// redraw); DECRQM reports it off from now on. Whether it was on.
     pub fn stop_sync(&mut self) -> bool {
-        if self.sync_hold.take().is_none() {
+        if self.sync.hold.is_none() {
             return false;
         }
+        self.end_sync_hold();
         let _ = self.term.set_mode(Mode::SYNC_OUTPUT, false);
         true
+    }
+
+    fn end_sync_hold(&mut self) {
+        if let Some((held, _)) = self.sync.hold.take() {
+            self.sync.ended = Some(held);
+        }
+    }
+
+    /// `screen_write_flush_dirty` (screen-write.c:1267-1290): when
+    /// synchronized output ends, the lines written under it are drawn
+    /// whole, not as a diff. Per visible row, whether it differs from the
+    /// held screen (every row after a size change); `None` when no hold
+    /// ended since the last call.
+    pub fn take_sync_flush(&mut self) -> Option<Vec<bool>> {
+        let held = self.sync.ended.take()?;
+        let view = self.screen();
+        let now = view.snapshot();
+        let rows = usize::from(now.rows);
+        if (held.cols, held.rows) != (now.cols, now.rows) {
+            return Some(vec![true; rows]);
+        }
+        let width = usize::from(now.cols).max(1);
+        Some(
+            now.cells
+                .chunks(width)
+                .zip(held.cells.chunks(width))
+                .map(|(a, b)| a != b)
+                .collect(),
+        )
     }
 
     /// Whether the program asked for a full pane redraw since the last call
@@ -2653,6 +2723,17 @@ mod tests {
         assert_eq!(t.take_replies(), b"\x1b[?2026;1$y");
         assert!(t.stop_sync());
         assert!(!t.stop_sync(), "already off");
+        // screen_write_flush_dirty: the rows that differ from the held
+        // screen when it ends, once.
+        let mut t = PaneTerm::new(10, 3, 100);
+        t.feed(b"a\r\nb\r\nc");
+        assert_eq!(t.take_sync_flush(), None, "no hold ended");
+        t.feed(b"\x1b[?2026h\x1b[2;1HB\x1b[?2026l");
+        assert_eq!(t.take_sync_flush(), Some(vec![false, true, false]));
+        assert_eq!(t.take_sync_flush(), None, "taken");
+        t.feed(b"\x1b[?2026h\x1b[1;1HA");
+        assert!(t.stop_sync());
+        assert_eq!(t.take_sync_flush(), Some(vec![true, false, false]));
         t.feed(b"[?2026$p");
         assert_eq!(
             t.take_replies(),
@@ -3563,6 +3644,43 @@ mod tests {
             t.feed(&lines(0, 3000, styled));
             assert_retention(&t, &format!("then output styled={styled}"));
         }
+    }
+
+    /// `grid_reflow` keeps the blank lines below the cursor: narrowing a
+    /// pane whose wrapped lines no longer fit pushes its top rows into
+    /// history and keeps the cursor on its line (the regress scene
+    /// cache-rotate-after: a 19-column pane rotated into a 9-column cell);
+    /// widening joins them back out of history.
+    #[test]
+    fn reflow_keeps_blank_rows_below_the_cursor() {
+        let mut t = PaneTerm::new(19, 13, 2000);
+        for i in 0..5 {
+            t.feed(format!("PANE{i:02} abcdefghij\r\n").as_bytes());
+        }
+        t.resize(9, 13);
+        assert_eq!((t.history_size(), t.cursor()), (5, (0, 5)));
+        assert_eq!(t.row(0).text(), "PANE00 ab");
+        assert_eq!(t.row(5).text(), "cdefghij");
+        assert_eq!(t.row(6).text(), "PANE03 ab");
+        assert_eq!(t.row(10).text(), "");
+        // Narrower and shorter at once: the height goes first.
+        let mut t = PaneTerm::new(19, 13, 2000);
+        for i in 0..5 {
+            t.feed(format!("PANE{i:02} abcdefghij\r\n").as_bytes());
+        }
+        t.resize(9, 8);
+        assert_eq!(t.cursor(), (0, 5));
+        assert_eq!(t.row(t.history_size()).text(), "cdefghij");
+        // Wider again, by one: the lines still split, now after column 10,
+        // and the history keeps its rows.
+        t.resize(10, 13);
+        assert_eq!((t.history_size(), t.cursor()), (5, (0, 5)));
+        assert_eq!(t.row(5).text(), "defghij");
+        // Wide enough for the lines to join: the joined rows come back
+        // from history, the cursor stays on its line.
+        t.resize(30, 13);
+        assert_eq!((t.history_size(), t.cursor()), (0, (0, 5)));
+        assert_eq!(t.row(4).text(), "PANE04 abcdefghij");
     }
 
     #[test]

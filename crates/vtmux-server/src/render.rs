@@ -244,6 +244,10 @@ pub struct Compositor {
     /// The next frame carries a change that is not flood output, so the
     /// flood's pacing does not hold it back.
     expedited: bool,
+    /// Cells the next frame writes even where the terminal already shows
+    /// them, as (row, first column, count): the lines of a pane whose
+    /// synchronized output ended ([`Self::force`]).
+    forced: Vec<(u16, u16, u16)>,
 }
 impl Compositor {
     /// Whether a frame may be composed `now`, with a pane flooding or not.
@@ -265,6 +269,15 @@ impl Compositor {
     pub fn expedite(&mut self) {
         self.expedited = true;
     }
+    /// `screen_write_flush_dirty` (screen-write.c:1267-1290): the next
+    /// frame writes `n` cells of row `y` from column `x` whole, not as a
+    /// diff against what the terminal shows, as tmux redraws each line of
+    /// a pane written under synchronized output when it ends.
+    pub fn force(&mut self, y: u16, x: u16, n: u16) {
+        if n != 0 {
+            self.forced.push((y, x, n));
+        }
+    }
     /// When a held-back frame is due: the loop wakes then.
     #[must_use]
     pub fn due(&self) -> Option<std::time::Instant> {
@@ -272,6 +285,7 @@ impl Compositor {
     }
     pub fn invalidate(&mut self) {
         self.spare = self.last.take();
+        self.forced.clear();
     }
     /// The last frame sent is still what the terminal shows, at this size.
     #[must_use]
@@ -346,12 +360,17 @@ impl Compositor {
             return Some(vec![true; usize::from(screen.rows)]);
         };
         let width = usize::from(screen.cols).max(1);
-        let rows: Vec<bool> = screen
+        let mut rows: Vec<bool> = screen
             .cells
             .chunks(width)
             .zip(last.cells.chunks(width))
             .map(|(a, b)| a != b)
             .collect();
+        for &(y, _, _) in &self.forced {
+            if let Some(r) = rows.get_mut(usize::from(y)) {
+                *r = true;
+            }
+        }
         let same = (last.cursor, last.cursor_visible, &last.wrapped)
             == (screen.cursor, screen.cursor_visible, &screen.wrapped);
         (rows.contains(&true) || !same).then_some(rows)
@@ -367,6 +386,12 @@ impl Compositor {
             self.spare = Some(screen);
             return Vec::new();
         };
+        let forced = std::mem::take(&mut self.forced);
+        let is_forced = |x: u16, y: u16| {
+            forced
+                .iter()
+                .any(|&(fy, fx, n)| fy == y && (fx..fx.saturating_add(n)).contains(&x))
+        };
         let mut out = String::new();
         if caps.sync {
             out.push_str("\x1b[?2026h");
@@ -374,6 +399,11 @@ impl Compositor {
         out.push_str("\x1b[?25l");
         let mut style = Style::default();
         out.push_str("\x1b[0m");
+        // Where the terminal's cursor is, when known: a cell written there
+        // needs no cursor move (tty_cursor skips one to where it already
+        // is, tty.c:2468), so a changed run goes out as its text. Unknown
+        // after the last column (the pending wrap) and after an erase.
+        let mut at: Option<(u16, u16)> = None;
         for y in 0..screen.rows {
             if !changed_rows[usize::from(y)] {
                 continue;
@@ -381,8 +411,9 @@ impl Compositor {
             let mut x = 0;
             while x < screen.cols {
                 let cell = screen.cell(x, y).expect("screen cell");
-                let changed =
-                    !same_size || self.last.as_ref().and_then(|s| s.cell(x, y)) != Some(cell);
+                let changed = !same_size
+                    || is_forced(x, y)
+                    || self.last.as_ref().and_then(|s| s.cell(x, y)) != Some(cell);
                 if !changed || cell.width == 0 {
                     x += 1;
                     continue;
@@ -391,7 +422,10 @@ impl Compositor {
                 if caps.no_am && y + 1 == screen.rows && x + 1 == screen.cols {
                     break;
                 }
-                let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
+                if at != Some((x, y)) {
+                    let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
+                }
+                at = None;
                 // tty-draw.c tty_draw_line_clear: a run of ten or more empty
                 // cells is erased (EL to the end of the line, else ECH), not
                 // written: erased cells keep only the background and hold no
@@ -399,14 +433,14 @@ impl Compositor {
                 // compose::draw_line has already decided which pane and pane
                 // status cells tmux erases (empty text, background only);
                 // borders and fill keep their text, so they never join a run.
+                // An erased cell the terminal already shows erased in the
+                // same style joins the run (erasing it again changes
+                // nothing): one changed cell in an erased row is erased with
+                // the rest, as tmux's EL leaves it, not written as a space.
                 let run = (x..screen.cols)
                     .take_while(|&cx| {
                         screen.cell(cx, y).is_some_and(|c| {
-                            c.text.is_empty()
-                                && c.width == 1
-                                && c.style == cell.style
-                                && (!same_size
-                                    || self.last.as_ref().and_then(|s| s.cell(cx, y)) != Some(c))
+                            c.text.is_empty() && c.width == 1 && c.style == cell.style
                         })
                     })
                     .count();
@@ -447,6 +481,7 @@ impl Compositor {
                     &cell.text
                 });
                 x += u16::from(cell.width.max(1));
+                at = (x < screen.cols).then_some((x, y));
             }
         }
         place_cursor(&mut out, &mut style, &screen, caps);
@@ -581,6 +616,83 @@ mod tests {
         let frame = compositor.frame(screen, caps);
         assert!(frame.contains(&b'X'));
         assert!(!frame.contains(&b'O'));
+    }
+
+    fn test_caps() -> Caps {
+        Caps {
+            rgb: false,
+            palette_colours: 256,
+            theme_palette: false,
+            sync: true,
+            bce: true,
+            xterm: true,
+            colours: 256,
+            overlay: false,
+            no_am: false,
+        }
+    }
+
+    /// A blank `cols` x 1 screen of erased cells (no text).
+    fn erased(cols: u16) -> Snapshot {
+        let mut s = blank(None, cols, 1);
+        for c in &mut s.cells {
+            c.width = 1;
+        }
+        s
+    }
+
+    /// One changed cell in a run the terminal shows erased is erased with
+    /// the rest of the run (EL), as tmux's `tty_draw_line_clear` leaves it,
+    /// not written as a space (the regress scene marked-pane-tb, on a
+    /// terminal without BCE: tmux-256color).
+    #[test]
+    fn a_changed_cell_in_an_erased_run_is_erased() {
+        let caps = Caps {
+            bce: false,
+            ..test_caps()
+        };
+        let mut c = Compositor::default();
+        let mut first = erased(20);
+        first.cells[3].text = " ".into();
+        first.cells[3].width = 1;
+        let _ = c.frame(first, caps);
+        let frame = String::from_utf8(c.frame(erased(20), caps)).unwrap();
+        assert!(frame.contains("\x1b[1;4H\x1b[K"), "{frame:?}");
+        assert!(!frame.contains("H "), "no space written: {frame:?}");
+    }
+
+    /// A changed run is written as its text: the cursor is moved once, not
+    /// before every cell (`tty_cursor` skips a move to where it already is).
+    #[test]
+    fn a_changed_run_needs_one_cursor_move() {
+        let caps = test_caps();
+        let mut c = Compositor::default();
+        let _ = c.frame(erased(20), caps);
+        let mut pane = vtmux_vt::PaneTerm::new(20, 1, 0);
+        pane.feed(b"\x1b[3Gabc def");
+        let frame = String::from_utf8(c.frame(vtmux_vt::snapshot(&pane), caps)).unwrap();
+        assert!(frame.contains("\x1b[1;3Habc def"), "{frame:?}");
+    }
+
+    /// `screen_write_flush_dirty`: forced cells are written even where the
+    /// terminal already shows them, so a line drawn under synchronized
+    /// output arrives whole; once only.
+    #[test]
+    fn forced_cells_are_written_whole_once() {
+        let caps = test_caps();
+        let mut pane = vtmux_vt::PaneTerm::new(20, 2, 0);
+        pane.feed(b"FRAME_0_ROW\r\nother");
+        let mut c = Compositor::default();
+        let _ = c.frame(vtmux_vt::snapshot(&pane), caps);
+        pane.feed(b"\x1b[1;7H1");
+        c.force(0, 0, 20);
+        let frame = String::from_utf8(c.frame(vtmux_vt::snapshot(&pane), caps)).unwrap();
+        assert!(frame.contains("FRAME_1_ROW"), "{frame:?}");
+        assert!(
+            !frame.contains("other"),
+            "an unforced row is a diff: {frame:?}"
+        );
+        assert_eq!(c.frame(vtmux_vt::snapshot(&pane), caps), b"", "used up");
     }
 
     /// Under a flood a frame waits out `FRAME_INTERVAL` since the last one and

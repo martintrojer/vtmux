@@ -684,6 +684,13 @@ impl Server {
 
     /// Run `f` on pane `p`'s shown mode, out of the pane while it runs so
     /// it can read the pane's terminal. `None` when the pane is in no mode.
+    ///
+    /// Copy and view mode redraw their lines straight to the terminal
+    /// (`window_copy_redraw_lines` through `screen_write_start_pane`,
+    /// window-copy.c:5535-5568), which is not `PANE_REDRAW` and so does not
+    /// end the program's synchronized output underneath; only with line
+    /// numbers do they draw on their own screen and set `PANE_REDRAW`.
+    /// Other modes redraw the pane (`mode_tree_draw` callers).
     pub(crate) fn with_mode<R>(
         &mut self,
         p: PaneId,
@@ -694,15 +701,24 @@ impl Server {
             return None;
         }
         let mut mode = pane.modes.remove(0);
-        let result = self.model.copy_env(p).map(|env| f(&mut mode, &env));
+        let env = self.model.copy_env(p);
+        let result = env.as_ref().map(|env| f(&mut mode, env));
         let scrolled = mode.as_copy_mut().is_some_and(CopyMode::take_scrolled);
+        let direct = mode.as_copy().is_some_and(|m| {
+            env.as_ref()
+                .is_some_and(|e| !m.line_numbers_active(e.line_numbers))
+        });
         if let Some(pane) = self.model.panes.get_mut(&p) {
             if let Some(m) = mode.as_copy() {
                 pane.search.clone_from(&m.pane_search);
             }
             pane.modes.insert(0, mode);
         }
-        self.model.redraw_panes.insert(p);
+        if direct {
+            self.mode_drawn.insert(p);
+        } else {
+            self.model.redraw_panes.insert(p);
+        }
         if scrolled {
             self.model
                 .scrollbar_show(p, true, std::time::Instant::now());
