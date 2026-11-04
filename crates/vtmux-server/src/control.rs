@@ -401,6 +401,7 @@ impl Server {
             };
             cs.finished = true;
             cs.deferred.clear();
+            self.discard_pane_output(id);
             if let Some(c) = self.clients.get_mut(&id) {
                 c.left_session = c.attached.or(c.left_session);
                 c.attached = None;
@@ -506,9 +507,35 @@ impl Server {
                     .is_some_and(|cs| !cs.panes.contains_key(&pane))
                 && c.attached.is_some_and(|s| linking.contains(&s));
             if wanted {
-                self.control_notify_one(id, true, line.clone());
+                self.control_pane_line(id, &line);
             }
         }
+    }
+
+    /// One `%output` line to client `id`. Outside a guard it goes as a
+    /// message of its own, which an exit can drop as tmux drops pane
+    /// output it has not written (`control_discard`); inside one it waits
+    /// with the notifications.
+    fn control_pane_line(&mut self, id: ClientId, line: &[u8]) {
+        let Some(cs) = self.control_mut(id) else {
+            return;
+        };
+        if !cs.wants_notifications() {
+            return;
+        }
+        if cs.guard_depth != 0 {
+            cs.notify(line.to_vec());
+            self.control_flush(id);
+            return;
+        }
+        self.control_flush(id);
+        let mut out = line.to_vec();
+        out.push(b'\n');
+        self.send_as(
+            id,
+            &ServerMsg::Stdout(out),
+            crate::server::OutKind::PaneOutput,
+        );
     }
 
     /// `control_set_pane_off`, `control_set_pane_on`, `control_pause_pane`
