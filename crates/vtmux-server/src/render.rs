@@ -41,6 +41,9 @@ pub struct Caps {
     /// An overlay (a popup) is up: `tty_draw_line_clear` writes spaces,
     /// never erases (`overlay_check != NULL`, tty-draw.c:61).
     pub overlay: bool,
+    /// `TERM_NOAM`: the terminal has no `am`, so the bottom-right cell is
+    /// never written (`tty_cell`, tty.c:2259).
+    pub no_am: bool,
 }
 impl Caps {
     /// How [`compose::draw_line_by`] may clear a run of empty cells.
@@ -84,6 +87,7 @@ impl Caps {
             xterm: term.is_xterm(),
             colours: term.colours(),
             overlay: false,
+            no_am: !term.has_name("am"),
         }
     }
     /// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424) for a
@@ -363,6 +367,10 @@ impl Compositor {
                     x += 1;
                     continue;
                 }
+                // tty_cell: a terminal without `am` would scroll.
+                if caps.no_am && y + 1 == screen.rows && x + 1 == screen.cols {
+                    break;
+                }
                 let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
                 // tty-draw.c tty_draw_line_clear: a run of ten or more empty
                 // cells is erased (EL to the end of the line, else ECH), not
@@ -537,6 +545,7 @@ mod tests {
             xterm: true,
             colours: 256,
             overlay: false,
+            no_am: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -568,6 +577,7 @@ mod tests {
             xterm: true,
             colours: 256,
             overlay: false,
+            no_am: false,
         };
         let mut c = Compositor::default();
         let t0 = std::time::Instant::now();
@@ -603,6 +613,7 @@ mod tests {
             xterm: true,
             colours: 256,
             overlay: false,
+            no_am: false,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");

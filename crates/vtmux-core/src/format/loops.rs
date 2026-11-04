@@ -257,6 +257,14 @@ impl FormatContext for Overlay<'_> {
         self.parent.session_name_exists(name)
     }
 
+    fn client_query(&self, query: super::ClientQuery, name: &str) -> Option<String> {
+        self.parent.client_query(query, name)
+    }
+
+    fn cycle_clock(&self, animate: bool) -> Option<u64> {
+        self.parent.cycle_clock(animate)
+    }
+
     fn search_pane(&self, pattern: &str, flags: SearchFlags) -> Option<u32> {
         self.parent.search_pane(pattern, flags)
     }

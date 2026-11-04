@@ -614,6 +614,7 @@ impl Server {
             .and_then(|exe| crate::shim::Shim::create(&server.socket, &exe).ok());
         // server_start: the hourly tidy (server.c:157-172, `evtimer_add`).
         server.format_jobs_start_tidy();
+        server.update_width_cache();
         Ok(server)
     }
 
@@ -1516,6 +1517,8 @@ impl Server {
             })?;
         client.decoder.set_terminal(&term);
         client.caps = Some(caps);
+        let mut term = term;
+        term.set_utf8(client.hello.as_ref().is_some_and(|h| h.flags.utf8));
         client.term = Some(term);
         client.compositor.invalidate();
         client.attached = Some(s);
@@ -3240,6 +3243,12 @@ impl Server {
                 .unwrap_or_default(),
             colours: c.caps.map(|caps| caps.colours),
             flags: c.flags.clone(),
+            term: c
+                .term
+                .as_ref()
+                .filter(|_| !c.dead && !c.closing && !c.suspended)
+                .map(|t| std::rc::Rc::new(t.clone())),
+            environ: hello.map_or_else(|| std::rc::Rc::from([]), |h| h.env.clone().into()),
         }
     }
 

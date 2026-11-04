@@ -112,9 +112,28 @@ const MONTHS: [&str; 12] = [
 ];
 
 impl Tm {
-    /// `epoch` in `tz`; `None` outside the range the zone code supports.
+    /// `epoch` in `tz`. A time past the years jiff handles (-9999..=9999) is moved
+    /// by whole 400-year cycles (which repeat the calendar and the weekdays) into
+    /// 2000-2399 and the years are added back, as glibc's `localtime_r` handles
+    /// them with the zone's final rule; `None` where glibc fails too, when the
+    /// year does not fit `tm_year` (an `int` counting from 1900).
     #[must_use]
     pub fn in_zone(tz: &TimeZone, epoch: i64) -> Option<Self> {
+        // 2000-01-01T00:00:00Z and the seconds of 146097 days.
+        const BASE: i64 = 946_684_800;
+        const CYCLE: i64 = 12_622_780_800;
+        if Timestamp::from_second(epoch).is_ok() {
+            return Self::in_range(tz, epoch);
+        }
+        let cycles = epoch.checked_sub(BASE)?.div_euclid(CYCLE);
+        let mut tm = Self::in_range(tz, epoch - cycles * CYCLE)?;
+        tm.year = tm.year.checked_add(cycles.checked_mul(400)?)?;
+        i32::try_from(tm.year - 1900).ok()?;
+        tm.epoch = epoch;
+        Some(tm)
+    }
+
+    fn in_range(tz: &TimeZone, epoch: i64) -> Option<Self> {
         let zoned = Timestamp::from_second(epoch).ok()?.to_zoned(tz.clone());
         let info = tz.to_offset_info(zoned.timestamp());
         Some(Self {

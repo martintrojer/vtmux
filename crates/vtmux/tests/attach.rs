@@ -6860,3 +6860,61 @@ fn a_client_leaving_while_locked_exits_with_its_reason() {
         }
     }
 }
+
+/// choose-client's info view (`i`, window-client.c
+/// `window_client_draw_info`): each line is the client's own expansion, so
+/// the feature list and the mouse, clipboard, focus-events and
+/// extended-keys lines are what `#{I/f:...}` and `#{I/c:...}` say about its
+/// terminal (format.c:6304-6327). The lines above Features hold the pid,
+/// times and byte counts, which vary per run; from Features down the view
+/// is compared, styles included, for terminals with different features.
+#[test]
+fn choose_client_info_view_shows_the_terminal() {
+    for term in ["xterm-256color", "screen", "tmux-256color"] {
+        let mut views = Vec::new();
+        for bin in bins() {
+            let mut w = World::new(bin);
+            w.term = term;
+            assert!(
+                w.cli(&[
+                    "new", "-d", "-s", "a", "-n", "w", "-x", "100", "-y", "59", "cat"
+                ])
+                .status
+                .success()
+            );
+            w.cli(&["select-pane", "-t", "%0", "-T", "t0"]);
+            w.cli(&["set", "-g", "status-right", "R"]);
+            w.cli(&["set", "-g", "extended-keys", "on"]);
+            w.cli(&["set", "-g", "mouse", "on"]);
+            w.cli(&["set", "-g", "focus-events", "on"]);
+            let mut a = w.attach_sized(&["attach", "-t", "a"], 100, 60);
+            a.wait(|_| !w.cli(&["lsc", "-F", "x"]).stdout.is_empty());
+            // The terminal answers none of the startup queries: wait them out.
+            thread::sleep(Duration::from_millis(1500));
+            assert!(
+                w.cli(&["choose-client", "-t", "a:0.0", "-F", "x"])
+                    .status
+                    .success()
+            );
+            a.wait(|a| pane_text(a).contains("(sort: name)"));
+            a.keys(b"i");
+            a.wait(|a| pane_text(a).contains("escape-time"));
+            thread::sleep(Duration::from_millis(200));
+            let rows = String::from_utf8(capture(
+                &a.screen(),
+                CaptureOpts {
+                    escapes: true,
+                    ..CaptureOpts::default()
+                },
+            ))
+            .unwrap();
+            let from = rows.find("Features").expect("a Features line");
+            let to = rows.find("escape-time").expect("an escape-time line");
+            views.push(rows[from..to].to_owned());
+        }
+        assert_eq!(
+            views[0], views[1],
+            "{term}: vtmux (left) vs tmux 3.8 (right)"
+        );
+    }
+}

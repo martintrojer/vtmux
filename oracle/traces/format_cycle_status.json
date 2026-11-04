@@ -1,0 +1,193 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "format_cycle_status",
+  "inputs": {
+    "name": "format_cycle_status",
+    "size": [
+      40,
+      4
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "3",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-format[0]",
+          "[#{A:ONE}][#{A/3:X,X,X}][#{A/0:Q,Q}][#{A/x:Z}][#{A:}][#{A:,,}][#{A;l:#{session_name}}]"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "[#{A:ONE}][#{A/3:X,X}]"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-F",
+          "[#{A:ONE}][#{E:#{A:Y}}]"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-format[0]",
+          "#(echo \"[#{A:Z,Y}]\")<#{?#{A:1},yes,no}><#{=2:#{A:LONGER}}>"
+        ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 1200,
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "refresh-client",
+          "-S"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[][]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[][]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[ONE][X][Q][Z][][][#{session_name}]"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[]<yes><LO>\\e[39m"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

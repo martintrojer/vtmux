@@ -29,7 +29,7 @@
 //!   unused (`format_tidy_jobs`).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -111,6 +111,11 @@ pub struct FormatJobs {
     index: BTreeMap<Key, FjId>,
     next: u64,
     pub(crate) actions: Vec<Action>,
+    /// Clients whose status line showed an animation (`#{A:...}` with more
+    /// than one frame) since the last flush (`format_cycle_start_timer`).
+    cycle_wanted: BTreeSet<ClientId>,
+    /// Clients whose `c->cycle_timer` is pending.
+    cycle_armed: BTreeSet<ClientId>,
 }
 
 impl FormatJobs {
@@ -225,6 +230,8 @@ impl FormatJobs {
 
     /// `format_lost_client`: all of the client's.
     pub(crate) fn lost_client(&mut self, c: ClientId) -> Vec<JobId> {
+        self.cycle_wanted.remove(&c);
+        self.cycle_armed.remove(&c);
         self.remove_where(|fj| fj.client == Some(c))
     }
 
@@ -326,6 +333,23 @@ impl JobHandle {
         self
     }
 
+    /// `format_cycle`'s clock (`es->start_time`, monotonic milliseconds) for a
+    /// status format, `None` for any other; an animation with more than one
+    /// frame arms the client's cycle timer (format.c:5987-6005).
+    pub(crate) fn cycle_clock(&self, animate: bool) -> Option<u64> {
+        // get_timer (tmux.c:289) is CLOCK_MONOTONIC; only the frame period
+        // shows, so any monotonic origin will do.
+        static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        if self.flags & STATUS == 0 {
+            return None;
+        }
+        if animate && let Some(c) = self.client {
+            self.state.borrow_mut().cycle_wanted.insert(c);
+        }
+        let start = START.get_or_init(Instant::now);
+        Some(u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX))
+    }
+
     /// The text for `#(raw)` whose command expanded to `expanded`.
     pub(crate) fn get(&self, raw: &str, expanded: &str) -> String {
         self.state.borrow_mut().get(
@@ -350,6 +374,37 @@ impl Server {
                 Action::Free(job) => self.job_free(job),
                 Action::Start(start) => self.format_job_start(start),
             }
+        }
+        self.cycle_timers_start();
+    }
+
+    /// `format_cycle_start_timer` for each client an animation asked for: a
+    /// timer `FORMAT_CYCLE_PERIOD` from now unless one is pending, which
+    /// redraws the status line when no message or prompt covers it
+    /// (`format_cycle_callback`).
+    fn cycle_timers_start(&mut self) {
+        let wanted = {
+            let mut jobs = self.format_jobs.borrow_mut();
+            let wanted: Vec<ClientId> = std::mem::take(&mut jobs.cycle_wanted)
+                .into_iter()
+                .filter(|c| !jobs.cycle_armed.contains(c))
+                .collect();
+            jobs.cycle_armed.extend(wanted.iter().copied());
+            wanted
+        };
+        for c in wanted {
+            self.timer_add(
+                Instant::now() + Duration::from_millis(vtmux_core::format::CYCLE_PERIOD_MS),
+                Box::new(move |server: &mut Server| {
+                    server.format_jobs.borrow_mut().cycle_armed.remove(&c);
+                    let covered = server.clients.get(&c).is_none_or(|cl| {
+                        cl.status.message().is_some() || cl.status.prompt().is_some()
+                    });
+                    if !covered {
+                        server.status_redraw_client(c);
+                    }
+                }),
+            );
         }
     }
 

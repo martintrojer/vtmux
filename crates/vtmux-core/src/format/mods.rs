@@ -12,7 +12,8 @@ use super::{CmpOp, CondArm, Format, Post, Reexpand, Value, VarMods};
 /// the whole `#{...}` a [`super::Node::Deferred`].
 pub(super) const SUPPORTED: &[&str] = &[
     "E", "T", "||", "&&", "==", "!=", "<", ">", "<=", ">=", "!", "!!", "e", "l", "a", "b", "d",
-    "n", "w", "=", "p", "c", "q", "R", "V", "N", "C", "t", "m", "s", "S", "W", "P", "L", "O",
+    "n", "w", "=", "p", "c", "q", "R", "V", "N", "C", "t", "m", "s", "S", "W", "P", "L", "O", "I",
+    "A",
 ];
 
 /// An argument as a template (`format_unescape` then `format_expand1`, at expansion).
@@ -39,10 +40,47 @@ pub(super) fn build(
     inner: usize,
     deferred: &mut Vec<String>,
 ) -> Option<(Value, Post)> {
-    let has = |n: &str| list.iter().any(|m| m.name == n);
     let post = post(list, inner, deferred);
     let vm = var_mods(list, inner, deferred);
-    let value = if has("l") {
+    let value = if list.iter().any(|m| m.name == "I" && !m.args.is_empty()) {
+        // format.c:6304: the client lookups come first; the body is the raw name.
+        // Which flags apply is only known once the arguments are expanded, so the
+        // value without them is kept to fall back on.
+        Value::ClientInfo {
+            flags: list
+                .iter()
+                .filter(|m| m.name == "I")
+                .filter_map(|m| first_arg(m, inner, deferred))
+                .collect(),
+            name: body.to_owned(),
+            fallback: rest(list, &vm, body, inner, &mut Vec::new()).map(Box::new),
+        }
+    } else {
+        rest(list, &vm, body, inner, deferred)?
+    };
+    Some((value, post))
+}
+
+/// [`build`] after the `I` lookups: `A`, `l`, `a`, `c`, then [`chain`].
+fn rest(
+    list: &[RawMod],
+    vm: &VarMods,
+    body: &str,
+    inner: usize,
+    deferred: &mut Vec<String>,
+) -> Option<Value> {
+    let has = |n: &str| list.iter().any(|m| m.name == n);
+    Some(if has("A") {
+        // format.c:6329: the frames are the raw body, neither unescaped nor
+        // expanded; the count is the last `A` argument.
+        Value::Cycle {
+            count: list
+                .iter()
+                .rfind(|m| m.name == "A" && !m.args.is_empty())
+                .and_then(|m| first_arg(m, inner, deferred)),
+            frames: body.to_owned(),
+        }
+    } else if has("l") {
         // format.c:6334: the raw body, unescaped.
         Value::Literal(unescape(body))
     } else if has("a") {
@@ -57,9 +95,8 @@ pub(super) fn build(
             body: template(body, inner, deferred),
         }
     } else {
-        chain(list, &vm, body, inner, deferred, true)?
-    };
-    Some((value, post))
+        chain(list, vm, body, inner, deferred, true)?
+    })
 }
 
 /// The rules from loops onward. `with_names` is false when rebuilding the fallback of

@@ -7,8 +7,7 @@
 //! client is left.
 //!
 //! Not here yet: `z`/`Z` (`server_client_suspend`: vtmux has no
-//! suspend-client), the `#{I/f:...}` and `#{I/c:...}` modifiers the
-//! information lines use, and the mouse menu.
+//! suspend-client) and the mouse menu.
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::keys::Key;

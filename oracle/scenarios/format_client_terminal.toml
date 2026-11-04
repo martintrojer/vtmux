@@ -1,0 +1,23 @@
+# The client lookups of format.c:6304-6327 on an attached client: #{I/e:...} its environment, #{I/c:...} its terminal's capabilities (tty_term_has_name) and #{I/f:...} its features (tty_feature_present), through list-clients, display (the best client), a client loop and with no client at all. terminal-overrides `*:am@` (set before the attach) removes `am`, so the bottom-right cell is never drawn (tty_cell, tty.c:2259), and `#{I/c:am}` is 0.
+name = "format_client_terminal"
+size = [20, 3]
+steps = [
+  { run = ["start", ";", "set", "-s", "exit-empty", "off"] },
+  { run = ["display", "-p", "[#{I/e:TERM}][#{I/c:am}][#{I/f:mouse}]"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "2", "exec cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["set", "-g", "status-left", "LLL"] },
+  { run = ["set", "-g", "status-right", "RRR"] },
+  { run = ["set", "-g", "window-status-current-format", "WWW"] },
+  { run = ["set", "-as", "terminal-overrides", ",*:am@:Smol:Rect:colors=x:U8=1"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["lsc", "-F", "[#{I/e:TERM}][#{I/e:NOPE}][#{I/e:HOME}][#{I/ec:TERM}][#{I/x:session_name}][#{I/c:session_name}]"] },
+  { run = ["lsc", "-F", "c=#{I/c:am}#{I/c:colors}#{I/c:U8}#{I/c:Ms}#{I/c:kmous}#{I/c:Smol}#{I/c:Rect}#{I/c:setab}#{I/c:XT}#{I/c:kf1}#{I/c:Tc}#{I/c:bogus}#{I/c:}"] },
+  { run = ["lsc", "-F", "f=#{I/f:256}#{I/f:mouse}#{I/f:clipboard}#{I/f:utf8}#{I/f:sync}#{I/f:overline}#{I/f:rectfill}#{I/f:focus}#{I/f:title}#{I/f:ignorefkeys}#{I/f:RGB}#{I/f:bogus}#{I/fc:Ms}#{I/cf:Ms}"] },
+  { run = ["display", "-p", "[#{I/e:TERM}][#{I/c:am}][#{I/f:clipboard}]"] },
+  { run = ["display", "-p", "#{L:[#{I/e:TERM}#{I/c:Ss}]}"] },
+  { run = ["set", "-g", "status-right", "R#{I/c:am}#{I/f:mouse}"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
