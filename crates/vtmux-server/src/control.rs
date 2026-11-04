@@ -459,6 +459,7 @@ impl Server {
         // %session-changed to the client itself.
         self.set_latest(s, id);
         self.model.session_attached_now(s);
+        self.arm_lock_timer(s);
         self.session_attached_alerts(s);
         self.fire_session_changed(id, old);
         self.control_flush(id);

@@ -1,0 +1,948 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "lock_client",
+  "inputs": {
+    "name": "lock_client",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "lock-server"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "v",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "pa"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "b:0.0",
+          "-T",
+          "pb"
+        ]
+      },
+      {
+        "run": [
+          "lock-client"
+        ]
+      },
+      {
+        "run": [
+          "lock-client",
+          "-t",
+          "nosuch"
+        ]
+      },
+      {
+        "run": [
+          "lock-session",
+          "-t",
+          "nosuch"
+        ]
+      },
+      {
+        "run": [
+          "lock-server"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "lock-command",
+          "printf 'LOCK %s' ok; read x"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "zebra\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lock-client"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsc"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{session_attached}"
+        ]
+      },
+      {
+        "feed": {
+          "pane": "%0",
+          "bytes": "yak"
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 300
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}"
+        ]
+      },
+      {
+        "attach": {
+          "session": "b",
+          "id": "b"
+        }
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      },
+      {
+        "run": [
+          "lock-session",
+          "-t",
+          "b"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "b",
+          "keys": "\r"
+        }
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      },
+      {
+        "run": [
+          "lock-server"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      },
+      {
+        "run": [
+          "lsc"
+        ]
+      },
+      {
+        "keys": "\r"
+      },
+      {
+        "keys_to": {
+          "id": "b",
+          "keys": "\r"
+        }
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "lock-command",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "lock-server"
+        ]
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "lock-command",
+          "printf 'IDLE'; read x"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-t",
+          "b",
+          "lock-after-time",
+          "1"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "b",
+          "keys": "q"
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 2500,
+          "react": true
+        }
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-t",
+          "b",
+          "lock-after-time",
+          "0"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "b",
+          "keys": "\r"
+        }
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {
+          "id": "b"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "error connecting to <SOCKET> (No such file or directory)\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no current client\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find client: nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "can't find session: nosuch\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "zebra",
+          "zebra",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "LOCK ok",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          7,
+          0
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "LOCK ok",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          7,
+          0
+        ]
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "zebra",
+          "zebra",
+          "yak",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[b] \\e[4m0:v*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "LOCK ok",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          7,
+          0
+        ]
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "zebra",
+          "zebra",
+          "yak",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[b] \\e[4m0:v*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "LOCK ok",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          7,
+          0
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "LOCK ok",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          7,
+          0
+        ]
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "zebra",
+          "zebra",
+          "yak",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[b] \\e[4m0:v*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a\nb\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "IDLE",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          4,
+          0
+        ]
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "zebra",
+          "zebra",
+          "yak",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "q",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[b] \\e[4m0:v*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          1,
+          0
+        ]
+      }
+    }
+  ]
+}

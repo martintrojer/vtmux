@@ -379,7 +379,8 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
                 | ServerMsg::WriteOpen { .. }
                 | ServerMsg::WriteData(_)
                 | ServerMsg::WriteClose
-                | ServerMsg::Suspend,
+                | ServerMsg::Suspend
+                | ServerMsg::Lock { .. },
             )) => {}
             Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
         }
@@ -438,8 +439,8 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
                 let _ = protocol::write_msg(stream, &ClientMsg::FileDone { error });
             }
             Ok(Some(ServerMsg::ReadOpen { path })) => files::read(stream, path.as_deref()),
-            // Only an attached client is suspended.
-            Ok(Some(ServerMsg::Suspend)) => {}
+            // Only an attached client is suspended or locked.
+            Ok(Some(ServerMsg::Suspend | ServerMsg::Lock { .. })) => {}
             Ok(None) | Err(_) => {
                 // client.c: CLIENT_EXIT_LOST_SERVER.
                 write_err(b"server exited unexpectedly");

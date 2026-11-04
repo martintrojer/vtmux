@@ -101,6 +101,18 @@ impl Caps {
         let title = if self.xterm { "\x1b[22;0;0t" } else { "" };
         format!("\x1b[?1049h{title}\x1b[H\x1b[2J\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h").into_bytes()
     }
+    /// `server_lock_client`'s `tty_raw` calls (server-fn.c:211-213):
+    /// `smcup`, `clear` and, where the terminal has it, `E3`.
+    #[must_use]
+    pub fn lock_screen(self, e3: bool) -> Vec<u8> {
+        let (smcup, clear) = if self.xterm {
+            ("\x1b[?1049h\x1b[22;0;0t", "\x1b[H\x1b[2J")
+        } else {
+            ("\x1b[?1049h", "\x1b[H\x1b[J")
+        };
+        let e3 = if e3 { "\x1b[3J" } else { "" };
+        format!("{smcup}{clear}{e3}").into_bytes()
+    }
     /// `tty_stop_tty` (tty.c:470-520); `dseks` is the terminal's `Dseks`
     /// (empty without it).
     #[must_use]

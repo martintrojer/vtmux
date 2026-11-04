@@ -14,7 +14,11 @@ use crate::target;
 
 /// `CMD_CLIENT_TFLAG` (cmd-queue.c:604-609): the target client is found
 /// before anything else, and a miss is an error.
-fn target_client(server: &Server, item: &Item, args: &Args) -> Result<ClientId, CmdError> {
+pub(super) fn target_client(
+    server: &Server,
+    item: &Item,
+    args: &Args,
+) -> Result<ClientId, CmdError> {
     Ok(match args.value('t') {
         None => server
             .target_client(item.client, item.origin)

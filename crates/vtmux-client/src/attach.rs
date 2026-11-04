@@ -290,6 +290,34 @@ fn suspend(out: &mut Output, raw: &RawTty) -> io::Result<()> {
     Ok(())
 }
 
+/// `MSG_LOCK` (client.c:797-803): the teardown and the lock screen the
+/// server sent are written, the terminal gets its modes back and
+/// `command` runs in the foreground (`system`: `/bin/sh -c`, the client
+/// waiting). Then the terminal is raw again, the server is told
+/// (`MSG_UNLOCK`) and redraws, and what was typed meanwhile and not read
+/// by the command goes to the server.
+fn lock(
+    stream: &mut UnixStream,
+    out: &mut Output,
+    raw: &RawTty,
+    command: &str,
+) -> io::Result<Option<Leave>> {
+    out.finish()?;
+    raw.suspend();
+    // system(3) ignores its result here; so does tmux.
+    let _ = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(command)
+        .status();
+    raw.resume()?;
+    // The server went away meanwhile (kill-server drops a locked client):
+    // client.c CLIENT_EXIT_LOST_SERVER.
+    if send(stream, &ClientMsg::Unlock).is_err() {
+        return Ok(Some(Leave::exit(1, "server exited unexpectedly")));
+    }
+    read_stdin(stream)
+}
+
 fn relay(
     stream: &mut UnixStream,
     poll: &mut Poll,
@@ -370,6 +398,11 @@ fn relay(
             socket.suspend_now = false;
             suspend(out, raw)?;
         }
+        if let Some(command) = socket.lock.take()
+            && let Some(exit) = lock(stream, out, raw, &command)?
+        {
+            return Ok(exit);
+        }
         out.ack(stream);
     }
 }
@@ -385,6 +418,8 @@ struct Socket {
     suspended: bool,
     /// `Suspend` arrived: stop once this read is dispatched.
     suspend_now: bool,
+    /// `Lock` arrived: run its command once this read is dispatched.
+    lock: Option<String>,
 }
 
 impl Socket {
@@ -431,6 +466,7 @@ impl Socket {
                                 self.suspended = true;
                                 self.suspend_now = true;
                             }
+                            ServerMsg::Lock { command } => self.lock = Some(command),
                             // File requests go to command clients only: an
                             // attached client's I/O is the server's.
                             ServerMsg::Ready

@@ -562,6 +562,13 @@ impl Term {
     }
 
     /// The terminal is xterm-derived: it has `XT` and `bce` in terminfo.
+    /// terminfo's `E3` (clear the scrollback): every terminal vtmux knows
+    /// has it but screen's entries.
+    #[must_use]
+    pub fn clears_scrollback(&self) -> bool {
+        !self.name.starts_with("screen")
+    }
+
     #[must_use]
     pub fn is_xterm(&self) -> bool {
         self.base.xterm

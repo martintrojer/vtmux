@@ -21,7 +21,7 @@ use crate::error::EdgeError;
 use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
@@ -122,6 +122,9 @@ pub enum ClientMsg {
     /// `MSG_WAKEUP`: the client was continued (SIGCONT) after a
     /// [`ServerMsg::Suspend`] and has its raw terminal back.
     Wakeup,
+    /// `MSG_UNLOCK`: the [`ServerMsg::Lock`] command has exited and the
+    /// client has its raw terminal back.
+    Unlock,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -164,6 +167,13 @@ pub enum ServerMsg {
     /// sent; the client restores its terminal and stops itself with
     /// SIGTSTP (client.c:784-795).
     Suspend,
+    /// `MSG_LOCK` (`lock-client` and friends): the terminal teardown has
+    /// been sent; the client restores its terminal, runs `command` with
+    /// `/bin/sh -c` in the foreground and answers [`ClientMsg::Unlock`]
+    /// (client.c:797-803).
+    Lock {
+        command: String,
+    },
 }
 
 #[derive(Debug)]
@@ -543,7 +553,7 @@ impl Message for ClientMsg {
             Self::Input(b) | Self::Stdin(b) | Self::ReadData(b) => 4 + b.len(),
             Self::Resize { .. } | Self::FrameAck { .. } => 8,
             Self::FileDone { .. } => 4,
-            Self::StdinEof | Self::Detach | Self::Wakeup => 0,
+            Self::StdinEof | Self::Detach | Self::Wakeup | Self::Unlock => 0,
         }
     }
 
@@ -581,6 +591,7 @@ impl Message for ClientMsg {
                 out.extend_from_slice(&error.to_le_bytes());
             }
             Self::Wakeup => out.push(9),
+            Self::Unlock => out.push(10),
         }
     }
 
@@ -599,6 +610,7 @@ impl Message for ClientMsg {
             7 => Self::ReadData(r.bytes()?),
             8 => Self::FileDone { error: r.i32()? },
             9 => Self::Wakeup,
+            10 => Self::Unlock,
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -610,6 +622,7 @@ impl Message for ServerMsg {
             Self::Stdout(b) | Self::Stderr(b) | Self::Frame(b) | Self::WriteData(b) => 4 + b.len(),
             Self::Exit { message, .. } => 4 + option_len(message.as_ref(), |m| 4 + m.len()) + 1,
             Self::Exec { command, shell } => 4 + command.len() + 4 + shell.as_os_str().len(),
+            Self::Lock { command } => 4 + command.len(),
             Self::Ready | Self::WriteClose | Self::Suspend => 0,
             Self::ReadOpen { path } => option_len(path.as_ref(), |p| 4 + p.as_os_str().len()),
             Self::WriteOpen { path, .. } => 4 + path.as_os_str().len() + 1,
@@ -659,6 +672,10 @@ impl Message for ServerMsg {
             }
             Self::WriteClose => out.push(8),
             Self::Suspend => out.push(10),
+            Self::Lock { command } => {
+                out.push(11);
+                put_bytes(out, command.as_bytes());
+            }
         }
     }
 
@@ -687,6 +704,9 @@ impl Message for ServerMsg {
                 shell: r.path()?,
             },
             10 => Self::Suspend,
+            11 => Self::Lock {
+                command: r.string()?,
+            },
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -751,6 +771,7 @@ mod tests {
             ClientMsg::FileDone { error: 0 },
             ClientMsg::FileDone { error: 32 },
             ClientMsg::Wakeup,
+            ClientMsg::Unlock,
         ]
     }
 
@@ -790,6 +811,9 @@ mod tests {
             ServerMsg::WriteData(vec![0, 1, 2]),
             ServerMsg::WriteClose,
             ServerMsg::Suspend,
+            ServerMsg::Lock {
+                command: "printf locked >/tmp/x".into(),
+            },
         ]
     }
 
@@ -977,7 +1001,7 @@ mod tests {
         // client.c:659-668 shape, vtmux numbers.
         assert_eq!(
             err.to_string(),
-            "protocol version mismatch (client 0, server 6)"
+            "protocol version mismatch (client 0, server 7)"
         );
     }
 }

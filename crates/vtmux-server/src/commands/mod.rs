@@ -40,6 +40,7 @@ mod list_panes;
 mod list_sessions;
 mod list_windows;
 mod load_buffer;
+mod lock_server;
 mod move_window;
 mod new_session;
 mod new_window;
@@ -61,6 +62,7 @@ mod select_layout;
 mod select_pane;
 mod select_window;
 mod send_keys;
+mod server_access;
 mod set_buffer;
 mod set_environment;
 pub(crate) mod set_option;
@@ -645,6 +647,10 @@ fn dispatch(
         }
         "detach-client" => detach_client::exec(server, item, args),
         "suspend-client" => detach_client::suspend(server, item, args),
+        "server-access" => server_access::exec(server, item, args, found),
+        "lock-server" | "lock-session" | "lock-client" => {
+            lock_server::exec(server, item, call.entry.name, args, found)
+        }
         "command-prompt" => command_prompt::exec(server, item, args),
         "confirm-before" => confirm_before::exec(server, item, args),
         "display-menu" => display_menu::exec(server, item, args, found),
