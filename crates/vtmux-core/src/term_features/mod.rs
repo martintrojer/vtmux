@@ -69,7 +69,8 @@ impl Feature {
         1 << FEATURES.iter().position(|(f, _)| *f == self).unwrap_or(0)
     }
 
-    /// The capabilities of `tty_feature_*_capabilities` that [`Cap`] models.
+    /// The capabilities of `tty_feature_*_capabilities` that [`Cap`] models;
+    /// the rest are [`Feature::other_caps`].
     fn caps(self) -> &'static [Cap] {
         match self {
             Self::Clipboard => &[Cap::Ms],
@@ -82,6 +83,43 @@ impl Feature {
             Self::UnderlineStyles => &[Cap::Smulx, Cap::Setulc],
             _ => &[],
         }
+    }
+
+    /// The other capability names `tty_feature_*_capabilities` add (`kf0@` ...
+    /// remove), the ones [`Cap`] does not model; `#{I/c:...}` sees them.
+    fn other_caps(self) -> &'static [&'static str] {
+        match self {
+            Self::Colours256 | Self::Rgb => &["AX", "setab", "setaf"],
+            Self::AppEsc => &["Enesc", "Dsesc"],
+            Self::BracketedPaste => &["Enbp", "Dsbp"],
+            Self::CursorColour => &["Cs", "Cr"],
+            Self::Hyperlinks => &["Hls"],
+            Self::Focus => &["Enfcs", "Dsfcs"],
+            Self::Margins => &["Enmg", "Dsmg", "Clmg", "Cmg"],
+            Self::Osc7 => &["Swd"],
+            Self::Overline => &["Smol"],
+            Self::ProgressBar => &["Spb"],
+            Self::RectFill => &["Rect"],
+            Self::Sixel => &["Sxl"],
+            Self::Strikethrough => &["smxx"],
+            Self::UnderlineStyles => &["Setulc1", "ol"],
+            _ => &[],
+        }
+    }
+
+    /// The names of every capability the feature sets, for
+    /// `tty_feature_present`.
+    fn cap_names(self) -> impl Iterator<Item = &'static str> {
+        self.caps()
+            .iter()
+            .map(|c| c.name())
+            .chain(self.other_caps().iter().copied())
+            .chain((self == Self::Mouse).then_some("kmous"))
+    }
+
+    /// `#{I/f:name}`'s table entry (`tty_features`, by exact name).
+    fn named(name: &str) -> Option<Self> {
+        FEATURES.iter().find(|(_, n)| *n == name).map(|(f, _)| *f)
     }
 }
 
@@ -258,6 +296,8 @@ struct Base {
     xterm: bool,
     /// terminfo's `tsl` (`fsl` is BEL where there is one).
     tsl: Option<&'static str>,
+    /// The terminfo names of `tty_term_codes` the entry has beyond `caps`.
+    other: &'static [&'static str],
 }
 
 impl Base {
@@ -283,6 +323,7 @@ impl Base {
                 ]),
                 xterm: true,
                 tsl: Some("\x1b]2;"),
+                other: terminfo::XTERM_GHOSTTY,
             });
         }
         if name.starts_with("xterm") {
@@ -300,21 +341,32 @@ impl Base {
             } else {
                 8
             };
+            // xterm-color and xterm-mono are older, smaller entries; the
+            // others (16color, 88color, 256color, direct) are `xterm`'s.
+            // They have no `Ss`, `Se` or `Ms` either (the default
+            // `terminal-features` add them).
+            let (other, own) = match name {
+                "xterm-color" => (terminfo::XTERM_COLOR, &[][..]),
+                "xterm-mono" => (terminfo::XTERM_MONO, &[][..]),
+                _ => (terminfo::XTERM, &xterm_caps[..]),
+            };
             return Some(Self {
                 colours,
-                caps: caps(&xterm_caps) | if direct { Cap::Rgb.bit() } else { 0 },
+                caps: caps(own) | if direct { Cap::Rgb.bit() } else { 0 },
                 xterm: true,
                 tsl: None,
+                other,
             });
         }
-        let (colours, caps, tsl) = match name {
+        let (colours, caps, tsl, other) = match name {
             "tmux-256color" => (
                 256,
                 caps(&[Cap::Smulx, Cap::Ss, Cap::Se, Cap::Ms, Cap::Tsl, Cap::Fsl]),
                 Some("\x1b]0;"),
+                terminfo::TMUX_256COLOR,
             ),
-            "screen" => (8, caps(&[]), None),
-            "screen-256color" => (256, caps(&[]), None),
+            "screen" => (8, caps(&[]), None, terminfo::SCREEN),
+            "screen-256color" => (256, caps(&[]), None, terminfo::SCREEN),
             _ => return None,
         };
         Some(Self {
@@ -322,6 +374,7 @@ impl Base {
             caps,
             xterm: false,
             tsl,
+            other,
         })
     }
 }
@@ -347,6 +400,11 @@ pub struct Term {
     /// `TERM_RGBCOLOURS`.
     rgb: bool,
     overrides: Vec<String>,
+    /// The terminfo names it has that [`Cap`] does not model, after
+    /// features and overrides (`term->codes` for them).
+    other: std::collections::BTreeSet<&'static str>,
+    /// `CLIENT_UTF8`, which `tty_feature_present` reads for `utf8`.
+    utf8: bool,
 }
 
 impl Term {
@@ -378,6 +436,8 @@ impl Term {
             colours256: false,
             rgb: false,
             overrides: overrides.to_vec(),
+            other: base.other.iter().copied().collect(),
+            utf8: false,
         };
         for item in features {
             if let Some((pattern, rest)) = split_entry(item)
@@ -530,6 +590,48 @@ impl Term {
         self.features
     }
 
+    /// `CLIENT_UTF8`: the client said it is UTF-8 (`-u`, or its locale).
+    pub fn set_utf8(&mut self, utf8: bool) {
+        self.utf8 = utf8;
+    }
+
+    /// `tty_term_has_name` (tty-term.c:809), for `#{I/c:name}`: the terminal
+    /// has that `tty_term_codes` capability.
+    #[must_use]
+    pub fn has_name(&self, name: &str) -> bool {
+        match Cap::ALL.into_iter().find(|c| c.name() == name) {
+            Some(cap) => self.has(cap),
+            None => self.other.contains(name),
+        }
+    }
+
+    /// `tty_feature_present` (tty-features.c:490), for `#{I/f:name}`: the
+    /// feature was applied, or the terminal has every capability it sets and
+    /// the flags it gives (`ignorefkeys` and `utf8` aside).
+    #[must_use]
+    pub fn feature_present(&self, name: &str) -> bool {
+        if name == "utf8" {
+            // tty_apply_features sets CLIENT_UTF8 for the feature too.
+            return self.utf8 || self.applied & Feature::Utf8.bit() != 0;
+        }
+        let Some(feature) = Feature::named(name) else {
+            return false;
+        };
+        if self.applied & feature.bit() != 0 {
+            return true;
+        }
+        // tf->flags: `TERM_256COLOURS` comes only from a feature, and so do
+        // `TERM_SIXEL` and, never set, `TERM_NOREPLACE` (`cstyle`);
+        // `TERM_RGBCOLOURS`, `TERM_DECSLRM` and `TERM_DECFRA` follow the
+        // capabilities checked below.
+        let flags = match feature {
+            Feature::IgnoreFunctionKeys | Feature::Sixel | Feature::CursorStyle => false,
+            Feature::Colours256 | Feature::Rgb => self.colours256,
+            _ => true,
+        };
+        flags && feature.cap_names().all(|c| self.has_name(c))
+    }
+
     #[must_use]
     pub fn has(&self, cap: Cap) -> bool {
         self.caps & cap.bit() != 0
@@ -639,6 +741,13 @@ impl Term {
                 }
                 self.set(cap, cap.feature_value());
             }
+            if feature == Feature::Mouse {
+                self.caps |= Cap::Kmous.bit();
+            }
+            if feature == Feature::IgnoreFunctionKeys {
+                self.other.retain(|c| !is_function_key(c));
+            }
+            self.other.extend(feature.other_caps());
             if matches!(feature, Feature::Colours256 | Feature::Rgb) {
                 self.colours256 = true;
             }
@@ -709,6 +818,14 @@ impl Term {
                 (token.as_str(), Some(String::new()), false)
             };
             let Some(cap) = Cap::ALL.into_iter().find(|c| c.name() == name) else {
+                if let Some(&known) = terminfo::ALL.iter().find(|&&n| n == name) {
+                    if remove {
+                        self.other.remove(known);
+                    } else if !is_number(known) || value.as_deref().is_some_and(is_int) {
+                        // A number that does not parse changes nothing.
+                        self.other.insert(known);
+                    }
+                }
                 continue;
             };
             if remove {
@@ -719,6 +836,23 @@ impl Term {
             }
         }
     }
+}
+
+/// `kf0` to `kf63`, which the `ignorefkeys` feature removes.
+fn is_function_key(name: &str) -> bool {
+    name.strip_prefix("kf")
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| n <= 63)
+}
+
+/// The two `TTYCODE_NUMBER` capabilities of `tty_term_codes`.
+fn is_number(name: &str) -> bool {
+    matches!(name, "colors" | "U8")
+}
+
+/// `strtonum(value, 0, INT_MAX)` succeeds.
+fn is_int(value: &str) -> bool {
+    value.parse::<i32>().is_ok_and(|n| n >= 0)
 }
 
 /// `tty_term_override_next`: the next `:`-separated token of `s` from `*at`,
@@ -942,6 +1076,7 @@ fn ctrl(c: u8, base: u8) -> u8 {
 
 #[cfg(test)]
 mod golden;
+mod terminfo;
 
 #[cfg(test)]
 mod selection_tests {

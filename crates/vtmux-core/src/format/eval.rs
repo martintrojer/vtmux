@@ -4,8 +4,8 @@
 use super::loops::Overlay;
 use super::text;
 use super::{
-    CmpOp, EnvScope, Eval, Format, LOOP_LIMIT, Node, Post, Reexpand, SearchFlags, Value, VarMods,
-    colour, is_true, num, parse,
+    ClientQuery, CmpOp, EnvScope, Eval, Format, LOOP_LIMIT, Node, Post, Reexpand, SearchFlags,
+    Value, VarMods, colour, is_true, num, parse,
 };
 use std::fmt::Write as _;
 
@@ -297,6 +297,37 @@ impl Eval<'_> {
                     return self.value(fallback.as_deref()?, inner);
                 }
             }
+            Value::ClientInfo {
+                flags,
+                name,
+                fallback,
+            } => {
+                let (mut termcap, mut feature, mut environ) = (false, false, false);
+                for f in flags {
+                    let f = self.expand(f, inner);
+                    feature |= f.contains('f');
+                    termcap |= f.contains('c');
+                    environ |= f.contains('e');
+                }
+                // format.c:6309-6326: each lookup overwrites the one before.
+                let query = if environ {
+                    ClientQuery::Environ
+                } else if feature {
+                    ClientQuery::Feature
+                } else if termcap {
+                    ClientQuery::Termcap
+                } else {
+                    return self.value(fallback.as_deref()?, inner);
+                };
+                self.ctx.client_query(query, name).unwrap_or_default()
+            }
+            Value::Cycle { count, frames } => {
+                let count = count.as_ref().map_or(1, |c| {
+                    let c = self.expand(c, inner);
+                    num::strtonum(&c, 1, 100).unwrap_or(1)
+                });
+                self.cycle(frames, count.unsigned_abs())
+            }
             Value::Search { flags, body } => {
                 let flags = flags.as_ref().map(|f| self.expand(f, inner));
                 let pattern = self.expand(body, inner);
@@ -368,6 +399,23 @@ impl Eval<'_> {
                 num::expression(&args, &l, &r).unwrap_or_default()
             }
         })
+    }
+}
+
+impl Eval<'_> {
+    /// `format_cycle` (format.c:5976-6015): only in a status format and never
+    /// inside `#()`; frame `start / (count * period) % n`.
+    fn cycle(&self, frames: &str, count: u64) -> String {
+        if self.nocycle || frames.is_empty() {
+            return String::new();
+        }
+        let frames: Vec<&str> = frames.split(',').collect();
+        let Some(start) = self.ctx.cycle_clock(frames.len() > 1) else {
+            return String::new();
+        };
+        let n = frames.len() as u64;
+        let index = start / (count * super::CYCLE_PERIOD_MS) % n;
+        frames[usize::try_from(index).unwrap_or(0)].to_owned()
     }
 }
 

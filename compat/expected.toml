@@ -13,8 +13,7 @@ status = "pass"
 status = "pass"
 
 [tests."am-terminal.sh"]
-status = "xfail"
-reason = "terminal-overrides `*:am@` (no auto-margin) not honoured by the client tty: last status line is `LLLWWW           RRR`, expected `LLLWWW           RR` (the inner client still draws the last column)"
+status = "pass"
 
 [tests."border-arrows.sh"]
 status = "pass"
@@ -63,8 +62,7 @@ flaky = true
 status = "pass"
 
 [tests."codepoint-widths.sh"]
-status = "xfail"
-reason = "option codepoint-widths is accepted but not applied: `#{w:@text}` with U+03B1-U+03B3=2 is 4, expected 7"
+status = "pass"
 
 [tests."combine-test.sh"]
 status = "xfail"
@@ -149,19 +147,18 @@ reason = "D-011: Ghostty prints U+0085 as a cell of its own where tmux combines 
 
 [tests."cursor-test1.sh"]
 status = "xfail"
-reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
+reason = "P2 (`crates/vtmux-vt/DIVERGENCES-PENDING.md`): narrowing `resizew -x10` reflows without pushing the top rows into history, so the capture after it starts one row early (`4 7 t` vs `4 6 t`) and `-x50` then keeps one row less; cursor_character matches"
 
 [tests."cursor-test2.sh"]
 status = "xfail"
-reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
+reason = "P2 (`crates/vtmux-vt/DIVERGENCES-PENDING.md`): narrowing `resizew -x5` reflows without pushing the top rows into history, so the capture after it starts one row early (`4 7 a` vs `4 6 a`) and `-x50` then keeps one row less; cursor_character matches"
 
 [tests."cursor-test3.sh"]
-status = "xfail"
-reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
+status = "pass"
 
 [tests."cursor-test4.sh"]
 status = "xfail"
-reason = "missing format variable cursor_character (empty, e.g. `14 8 ` vs `14 8 t`); tests 1, 2 and 4 also show capture differences after `resizew` (reflow of a manual-size window) that cannot be judged until the variable exists"
+reason = "P2 (`crates/vtmux-vt/DIVERGENCES-PENDING.md`): `resizew -x3` splits `abcdef` without pushing `abc` into history, so the cursor is `0 2` (`abc`/`def` on screen) where tmux has `0 1` and `def` alone; cursor_character matches"
 
 [tests."customize-mode.sh"]
 status = "xfail"
@@ -200,22 +197,19 @@ status = "xfail"
 reason = "needs new-pane -A (a floating pane over a zoomed window, PANE_FLOATOVERZOOM): `not implemented in vtmux yet: new-pane -A`"
 
 [tests."format-animation.sh"]
-status = "xfail"
-reason = "missing format modifier A (format_cycle): `#{A/7:AAAA,BBBB,CCCC}` expands to empty, the status line stays blank (`status line is '', not a frame`)"
+status = "pass"
 
 [tests."format-fuzzy.sh"]
 status = "pass"
 
 [tests."format-modifiers.sh"]
-status = "xfail"
-reason = "format modifier N/s is wrong: `#{N/s:main}` gives 0, expected 1 (session-exists test); its later new-pane is in"
+status = "pass"
 
 [tests."format-mouse.sh"]
 status = "pass"
 
 [tests."format-no-current-window.sh"]
-status = "xfail"
-reason = "session-level formats read empty without a current client: `#{active_window_index}` is `` (expected 0); also last_window_index, session_stack, window_active_clients(_list)"
+status = "pass"
 
 [tests."format-render-contexts.sh"]
 status = "pass"
@@ -224,12 +218,10 @@ status = "pass"
 status = "pass"
 
 [tests."format-time-range.sh"]
-status = "xfail"
-reason = "format modifier t/f with an out-of-range time: `#{t/f/zz:@huge}` gives `[]`, tmux prints the format literally `[zz]`; the in-range cases pass"
+status = "pass"
 
 [tests."format-variables.sh"]
-status = "xfail"
-reason = "the session group formats pass; the test then needs the `I/e`, `I/c` and `I/f` modifiers (`#{I/e:TERM}` is empty; lows_choose)"
+status = "pass"
 
 [tests."has-session-return.sh"]
 status = "pass"

@@ -1,0 +1,304 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "linuxpc",
+  "name": "format_client_terminal",
+  "inputs": {
+    "name": "format_client_terminal",
+    "size": [
+      20,
+      3
+    ],
+    "steps": [
+      {
+        "run": [
+          "start",
+          ";",
+          "set",
+          "-s",
+          "exit-empty",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "[#{I/e:TERM}][#{I/c:am}][#{I/f:mouse}]"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "2",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-left",
+          "LLL"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "RRR"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "window-status-current-format",
+          "WWW"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-as",
+          "terminal-overrides",
+          ",*:am@:Smol:Rect:colors=x:U8=1"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "[#{I/e:TERM}][#{I/e:NOPE}][#{I/e:HOME}][#{I/ec:TERM}][#{I/x:session_name}][#{I/c:session_name}]"
+        ]
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "c=#{I/c:am}#{I/c:colors}#{I/c:U8}#{I/c:Ms}#{I/c:kmous}#{I/c:Smol}#{I/c:Rect}#{I/c:setab}#{I/c:XT}#{I/c:kf1}#{I/c:Tc}#{I/c:bogus}#{I/c:}"
+        ]
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "f=#{I/f:256}#{I/f:mouse}#{I/f:clipboard}#{I/f:utf8}#{I/f:sync}#{I/f:overline}#{I/f:rectfill}#{I/f:focus}#{I/f:title}#{I/f:ignorefkeys}#{I/f:RGB}#{I/f:bogus}#{I/fc:Ms}#{I/cf:Ms}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "[#{I/e:TERM}][#{I/c:am}][#{I/f:clipboard}]"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{L:[#{I/e:TERM}#{I/c:Ss}]}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R#{I/c:am}#{I/f:mouse}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[][][]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "\\e[30m\\e[42mLLL\\e[4mWWW\\e[0m\\e[42m           \\e[30mRR\\e[39m\\e[49m"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[xterm-256color][][<TMP>/home][xterm-256color][a][0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "c=0111111111000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "f=01110111100000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[xterm-256color][0][1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[xterm-256color1]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "\\e[30m\\e[42mLLL\\e[4mWWW\\e[0m\\e[42m           \\e[30mR0\\e[39m\\e[49m"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

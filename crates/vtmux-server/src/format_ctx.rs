@@ -4,7 +4,8 @@
 use std::rc::Rc;
 
 use vtmux_core::format::{
-    FormatContext, LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop, SearchFlags,
+    ClientQuery, FormatContext, LoopItem, LoopKeys, LoopOption, OptionScope, OptionsLoop,
+    SearchFlags,
 };
 use vtmux_core::ids::{SessionId, WindowId};
 use vtmux_core::layout::PaneStatus;
@@ -34,6 +35,8 @@ pub struct ServerInfo {
     /// merged into every format tree of the item by `cmdq_merge_formats`).
     /// Set by the queue while such a command fires.
     pub current_file: Option<String>,
+    /// `start_time` (tmux.c): when the server started, epoch seconds.
+    pub start_secs: i64,
 }
 
 impl ServerInfo {
@@ -49,12 +52,13 @@ impl ServerInfo {
             host,
             config_files: String::new(),
             current_file: None,
+            start_secs: crate::model::now_epoch(),
         }
     }
 }
 
 /// An attached client as formats see it (`#{L:...}`, `ft->c`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ClientView {
     /// Connection order (tmux's `clients` list is in creation order).
     pub order: u32,
@@ -94,6 +98,11 @@ pub struct ClientView {
     pub written: usize,
     /// The flags commands change (`c->flags`).
     pub flags: crate::client_flags::ClientFlags,
+    /// `c->tty.term` while the client can be asked about it (format.c:6307:
+    /// not before the terminal is open, nor once it is dead or suspended).
+    pub term: Option<Rc<vtmux_core::term_features::Term>>,
+    /// `c->environ`: what the client sent.
+    pub environ: Rc<[(String, String)]>,
 }
 
 impl ClientView {
@@ -299,6 +308,14 @@ impl<'a> Ctx<'a> {
             "session_windows" => s.windows.len().to_string(),
             // format_cb_last_window_index: the highest index.
             "last_window_index" => s.windows.keys().next_back()?.to_string(),
+            // format_cb_active_window_index.
+            "active_window_index" => s.current.to_string(),
+            // format_cb_session_stack: the current window, then `s->lastw`.
+            "session_stack" => std::iter::once(&s.current)
+                .chain(&s.last)
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
             "session_created" => s.created.to_string(),
             "session_activity" => s.activity_secs.to_string(),
             "session_last_attached" => s.last_attached.map(|t| t.to_string()).unwrap_or_default(),
@@ -505,7 +522,72 @@ impl<'a> Ctx<'a> {
             }
             "window_layout" => w.full_layout().dump_v2(&self.layout_panes(w))?,
             "window_visible_layout" => w.layout.dump_v2(&self.layout_panes(w))?,
+            _ => return self.winlink_value(w, wl, name),
+        })
+    }
+
+    /// The winlink callbacks that walk the session's stack, the window's
+    /// winlinks or the clients; empty without a winlink.
+    fn winlink_value(
+        &self,
+        w: &crate::model::Window,
+        wl: Option<(&crate::model::Session, u32)>,
+        name: &str,
+    ) -> Option<String> {
+        let (s, i) = wl?;
+        Some(match name {
+            // format_cb_window_stack_index: the 1-based place in
+            // `s->lastw`, 0 when not there.
+            "window_stack_index" => s
+                .last
+                .iter()
+                .position(|&x| x == i)
+                .map_or(0, |p| p + 1)
+                .to_string(),
+            // format_cb_window_active_sessions(_list): the winlinks of the
+            // window that are their session's current one.
+            "window_active_sessions" => self.active_sessions(w.id).count().to_string(),
+            "window_active_sessions_list" => {
+                let names: Vec<_> = self
+                    .active_sessions(w.id)
+                    .map(|s| s.name.as_str())
+                    .collect();
+                if names.is_empty() {
+                    return None;
+                }
+                names.join(",")
+            }
+            // format_cb_window_active_clients(_list): clients whose
+            // session's current window is this window.
+            "window_active_clients" => self.active_clients(w.id).count().to_string(),
+            "window_active_clients_list" => {
+                let names: Vec<_> = self.active_clients(w.id).map(|c| c.name.as_str()).collect();
+                if names.is_empty() {
+                    return None;
+                }
+                names.join(",")
+            }
             _ => return None,
+        })
+    }
+
+    /// The sessions whose current winlink shows `w`, in the window's
+    /// winlink order.
+    fn active_sessions(&self, w: WindowId) -> impl Iterator<Item = &crate::model::Session> {
+        self.model
+            .window_links(w)
+            .into_iter()
+            .filter(|(s, i)| s.current == *i)
+            .map(|(s, _)| s)
+    }
+
+    /// The clients whose session's current window is `w`, in client order.
+    fn active_clients(&self, w: WindowId) -> impl Iterator<Item = &ClientView> {
+        self.clients.iter().filter(move |c| {
+            c.session
+                .and_then(|s| self.model.sessions.get(&s))
+                .and_then(|s| s.windows.get(&s.current))
+                == Some(&w)
         })
     }
 
@@ -650,6 +732,18 @@ impl<'a> Ctx<'a> {
                 .unwrap_or_default(),
             "cursor_x" => p.term.cursor().0.to_string(),
             "cursor_y" => p.term.cursor().1.to_string(),
+            // format_cb_cursor_character: the cell under the cursor, nothing
+            // on the second half of a wide character; a blank or a cell past
+            // the line's end is the default cell's space.
+            "cursor_character" => {
+                let (cx, cy) = p.term.cursor();
+                let row = p.term.row(p.term.history_size() + usize::from(cy));
+                match row.cells.get(usize::from(cx)) {
+                    Some(c) if c.width == 0 => return None,
+                    Some(c) if !c.text.is_empty() => c.text.clone(),
+                    _ => " ".to_owned(),
+                }
+            }
             "alternate_on" => flag(p.term.alternate_on()),
             // format_cb_synchronized_output_flag (format.c:2143-2150).
             "synchronized_output_flag" => flag(p.term.sync_held().is_some()),
@@ -753,6 +847,7 @@ impl Ctx<'_> {
         let server = match name {
             "socket_path" => Some(self.info.socket_path.clone()),
             "pid" => Some(self.info.pid.to_string()),
+            "start_time" => Some(self.info.start_secs.to_string()),
             "uid" => Some(rustix::process::getuid().as_raw().to_string()),
             "user" => sys::user::current_user().map(|p| p.name),
             "version" => Some("3.8".to_owned()),
@@ -816,6 +911,44 @@ impl FormatContext for Ctx<'_> {
             })
     }
 
+    /// `format_window_name` (format.c:5295).
+    fn window_name_exists(&self, name: &str) -> Option<bool> {
+        let s = self.session()?;
+        Some(
+            s.windows
+                .values()
+                .any(|w| self.model.windows.get(w).is_some_and(|w| w.name == name)),
+        )
+    }
+
+    /// `#{I/c:...}`, `#{I/f:...}` and `#{I/e:...}` (format.c:6304-6327).
+    fn client_query(&self, query: ClientQuery, name: &str) -> Option<String> {
+        let c = self.client.as_ref()?;
+        let term = c.term.as_ref()?;
+        let flag = |b: bool| u8::from(b).to_string();
+        Some(match query {
+            ClientQuery::Termcap => flag(term.has_name(name)),
+            ClientQuery::Feature => flag(term.feature_present(name)),
+            ClientQuery::Environ => c
+                .environ
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default(),
+        })
+    }
+
+    /// `format_cycle`'s `FORMAT_STATUS` test and clock: only a status line's
+    /// expansion (its job handle says so) animates.
+    fn cycle_clock(&self, animate: bool) -> Option<u64> {
+        self.jobs.as_ref()?.cycle_clock(animate)
+    }
+
+    /// `format_session_name` (format.c:5214).
+    fn session_name_exists(&self, name: &str) -> bool {
+        self.model.session_named(name).is_some()
+    }
+
     /// Not for `t` lookups: format.c:4666 skips the environment then.
     fn get_without_environ(&self, name: &str) -> Option<String> {
         self.find_before_environ(name)
@@ -847,6 +980,8 @@ impl FormatContext for Ctx<'_> {
 
     fn time(&self, name: &str) -> Option<i64> {
         match name {
+            // format_cb_start_time.
+            "start_time" => Some(self.info.start_secs),
             "session_created" => self.session().map(|s| s.created),
             "session_activity" => self.session().map(|s| s.activity_secs),
             "session_last_attached" => self.session().and_then(|s| s.last_attached),

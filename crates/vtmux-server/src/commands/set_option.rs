@@ -201,6 +201,13 @@ pub(crate) fn with_option_host<R>(
 }
 
 impl Server {
+    /// `utf8_update_width_cache` (utf8.c:412): the server's widths follow
+    /// `codepoint-widths` (server.c:212 at start, then on every change).
+    pub(crate) fn update_width_cache(&self) {
+        let items = self.array_option(vtmux_core::options::TreeId::Server, "codepoint-widths");
+        vtmux_core::width::set_codepoint_widths(&items);
+    }
+
     /// `options_push_changes` (options.c:1359-1475) for option `name`,
     /// the parts vtmux has.
     pub(crate) fn options_push_changes(&mut self, name: &str) {
@@ -222,6 +229,10 @@ impl Server {
         if name == "status" || name == "status-interval" {
             // options.c:1409-1411.
             self.status_timer_start_all();
+        }
+        if name == "codepoint-widths" {
+            // options.c:1460-1461: utf8_update_width_cache.
+            self.update_width_cache();
         }
         if name == "monitor-silence" {
             // options.c:1422: alerts_reset_all.

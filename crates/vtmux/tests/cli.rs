@@ -6396,3 +6396,190 @@ fn capture_pane_raw_grid() {
         runs
     });
 }
+
+/// `#{N/s:...}` (`format_session_name`, format.c:5214) and `#{N/w:...}`
+/// (`format_window_name`, 5295): any session by name, a window of the target
+/// session by name; with no session the window test ends the expansion.
+#[test]
+fn format_name_exists() {
+    compare("format_name_exists", |w| {
+        vec![
+            w.run(&["start", ";", "set", "-s", "exit-empty", "off"]),
+            w.run(&["display", "-p", "[#{N/s:main}][#{N/w:w}]x"]),
+            w.run(&["new", "-d", "-s", "main", "-n", "knownwin", "cat"]),
+            w.run(&["new", "-d", "-s", "other", "-n", "o", "cat"]),
+            w.run(&[
+                "display",
+                "-t",
+                "other",
+                "-p",
+                "#{N/s:main} #{N/s:nosuch} #{N/s:#{session_name}} #{N/s:mai}",
+            ]),
+            w.run(&[
+                "display",
+                "-t",
+                "main:",
+                "-p",
+                "#{N/w:knownwin} #{N/w:o} #{N:knownwin} #{N:nosuch} #{N/x:knownwin}",
+            ]),
+            w.run(&["lsw", "-a", "-F", "#{N/w:o}#{N/s:other}"]),
+        ]
+    });
+}
+
+/// format.c `format_cb_active_window_index`, `format_cb_last_window_index`,
+/// `format_cb_session_stack`, `format_cb_window_stack_index`,
+/// `format_cb_window_active_sessions(_list)` and
+/// `format_cb_window_active_clients(_list)`: session-level values with no
+/// client, through `display`, the `list-*` forms and a hook after
+/// `new-window -k` and `link-window -k`.
+#[test]
+fn format_session_window_stack() {
+    const F: &str = "[#{active_window_index}][#{last_window_index}][#{session_stack}]\
+         [#{window_stack_index}][#{window_active_sessions}][#{window_active_sessions_list}]\
+         [#{window_active_clients}][#{window_active_clients_list}]";
+    compare("format_session_window_stack", |w| {
+        vec![
+            w.run(&[
+                "start",
+                ";",
+                "set",
+                "-s",
+                "exit-empty",
+                "off",
+                ";",
+                "display",
+                "-p",
+                F,
+            ]),
+            w.run(&["new", "-d", "-s", "src", "-n", "one", "cat"]),
+            w.run(&["display", "-t", "src", "-p", F]),
+            w.run(&["neww", "-d", "-t", "src", "-n", "two", "cat"]),
+            w.run(&["neww", "-t", "src:5", "-n", "five", "cat"]),
+            w.run(&["selectw", "-t", "src:1"]),
+            w.run(&["display", "-t", "src", "-p", F]),
+            w.run(&["lsw", "-t", "src", "-F", F]),
+            w.run(&["new", "-d", "-s", "dst", "-n", "only", "cat"]),
+            w.run(&[
+                "set-hook",
+                "-g",
+                "window-linked",
+                &format!("run -C 'display -p \"{F}\"'"),
+            ]),
+            w.run(&["neww", "-k", "-t", "src:0", "-n", "replaced", "cat"]),
+            w.run(&["linkw", "-k", "-s", "src:1", "-t", "dst:0"]),
+            w.run(&["set-hook", "-gu", "window-linked"]),
+            w.run(&["lsw", "-a", "-F", F]),
+            w.run(&["ls", "-F", F]),
+        ]
+    });
+}
+
+/// `#{t:...}` and `#{t/f/...}` past the years jiff handles: glibc's
+/// `localtime_r` still breaks them down (ctime's buffer has no room for a
+/// five-digit year, so plain `t` is empty), and a time `tm_year` cannot hold
+/// is not found (format.c:4691-4705).
+#[test]
+fn format_time_out_of_range() {
+    compare("format_time_out_of_range", |w| {
+        let mut runs = vec![w.run(&["new", "-d", "-s", "s", "cat"])];
+        for (name, v) in [
+            ("@ok", "1700000000"),
+            ("@huge", "3093527980800"),
+            ("@y9999", "253402300799"),
+            ("@y10000", "253402300800"),
+            ("@max", "67767976233532799"),
+            ("@over", "67767976233532800"),
+            ("@bad", "9223372036854775807"),
+        ] {
+            runs.push(w.run(&["set", "-g", name, v]));
+        }
+        for name in ["@ok", "@huge", "@y9999", "@y10000", "@max", "@over", "@bad"] {
+            let f = format!(
+                "[#{{t:{name}}}][#{{t/f/zz:{name}}}][#{{t/f/%Y-%m-%d %H%%M%%S %a %j:{name}}}]\
+                 [#{{t/p:{name}}}]"
+            );
+            runs.push(w.raw_env(
+                &["-L", &w.label, "-f", "/dev/null", "display", "-p", &f],
+                &[("TZ", "UTC")],
+            ));
+        }
+        runs
+    });
+}
+
+/// `codepoint-widths` (utf8.c `utf8_add_to_width_cache`,
+/// `utf8_update_width_cache`): items replace each other's widths, ranges
+/// include both ends, items that do not parse are skipped, and unsetting
+/// the option goes back to the built-in widths.
+#[test]
+fn codepoint_widths_option() {
+    compare("codepoint_widths_option", |w| {
+        let width = |w: &World| w.run(&["display", "-p", "#{w:@text} #{n:@text} #{p/-8:@one}|"]);
+        let mut runs = vec![
+            w.run(&["new", "-d", "-s", "s", "cat"]),
+            w.run(&["set", "-g", "@text", "αβγδ😀x"]),
+            w.run(&["set", "-g", "@one", "β"]),
+            width(w),
+        ];
+        for items in [
+            &["U+03B1-U+03B3=2"][..],
+            &["U+03B1-U+03B3=2", "U+03B2=0"],
+            &["U+1F600=1", "δ=2"],
+            &[
+                "U+03B3-U+03B1=2",
+                "U+=2",
+                "U+0=2",
+                "U+zz=2",
+                "U+3B1=3",
+                "αβ=2",
+                "U+3B1x=2",
+            ],
+            &["U+03b1=2", "U+0x3B2=2", "U+ 3B3=2", "U+-3B4=2"],
+            &["U+7FFFFFFF=1", "U+80000000=1", "U+FFFFFFFFFFFFFFFFFF=1"],
+            &["U+03B1=2", "U+03B2=  1", "U+03B3=+2"],
+        ] {
+            runs.push(w.run(&["set", "-gu", "codepoint-widths"]));
+            for (i, item) in items.iter().enumerate() {
+                runs.push(w.run(&["set", "-g", &format!("codepoint-widths[{i}]"), item]));
+            }
+            runs.push(width(w));
+        }
+        runs.push(w.run(&["set", "-gu", "codepoint-widths"]));
+        runs.push(width(w));
+        runs
+    });
+}
+
+/// `cursor_character` (format.c `format_cb_cursor_character`): the cell
+/// under the cursor, a space past the line's end or on a blank, nothing on
+/// the second half of a wide character.
+#[test]
+fn format_cursor_character() {
+    compare("format_cursor_character", |w| {
+        let mut runs = Vec::new();
+        // Over each cell in turn: a, b, é, 漢 (both halves), d, past the end.
+        for col in 1..=7 {
+            let s = format!("c{col}");
+            let prog = format!("printf 'ab\\303\\251\\346\\274\\242d\\n\\033[1;{col}H'; exec cat");
+            runs.push(w.run(&[
+                "new", "-d", "-s", &s, "-x", "20", "-y", "5", "sh", "-c", &prog,
+            ]));
+            let start = Instant::now();
+            let f = "#{cursor_x},#{cursor_y}";
+            while w.run(&["display", "-p", "-t", &s, f]).stdout != format!("{},0\n", col - 1)
+                && start.elapsed() < Duration::from_secs(5)
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            runs.push(w.run(&[
+                "display",
+                "-p",
+                "-t",
+                &s,
+                "[#{cursor_x} #{cursor_character}]",
+            ]));
+        }
+        runs
+    });
+}

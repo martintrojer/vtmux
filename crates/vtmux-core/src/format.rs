@@ -12,7 +12,8 @@
 //! literals/characters (`l`, `a`), paths (`b`, `d`), length/width (`n`, `w`),
 //! trimming/padding (`=`, `p`), colours/quoting (`c`, `q`), repeats (`R`),
 //! environment loops (`V`), session/window/pane/client/option loops (`S`, `W`, `P`,
-//! `L`, `O`, see [`loops`]), name tests (`N`) and pane-search hooks (`C`).
+//! `L`, `O`, see [`loops`]), name tests (`N`), pane-search hooks (`C`), client
+//! lookups (`I`) and status-line animation frames (`A`).
 //! `E` re-expands; `T` re-expands after a strftime pass.
 //! Bare `t` formats a time variable as `ctime` text. [`expand_time`] runs
 //! strftime over the template first. Escapes and `#[style]` pass through.
@@ -43,8 +44,6 @@ pub mod trim {
 }
 /// `format_quote_shell_single`, for `#{pane_start_command_list}`.
 pub use text::quote_shell_single;
-mod wcwidth;
-mod wcwidth_tables;
 
 pub use crate::time::{FixedWallClock, SystemWallClock, Tm, WallClock};
 
@@ -133,6 +132,23 @@ pub trait FormatContext {
         false
     }
 
+    /// `#{I/c:name}`, `#{I/f:name}`, `#{I/e:name}` (format.c:6304-6327): the
+    /// client's terminal capability or feature (`1` or `0`), or its environment
+    /// variable. `None` when there is no client with an open terminal, which
+    /// expands to nothing.
+    fn client_query(&self, _query: ClientQuery, _name: &str) -> Option<String> {
+        None
+    }
+
+    /// `#{A:...}` (`format_cycle`, format.c:5976): the animation clock in
+    /// milliseconds (tmux's monotonic `es->start_time`) when the expansion is for a
+    /// status line (`FORMAT_STATUS`), `None` otherwise. `animate` (more than one
+    /// frame) asks for the status line to be drawn again in
+    /// [`CYCLE_PERIOD_MS`].
+    fn cycle_clock(&self, _animate: bool) -> Option<u64> {
+        None
+    }
+
     /// `#{C:pattern}`: the 1-based number of the first line of the target pane that
     /// matches, `None` (shown as 0) when nothing matches or there is no pane
     /// (`window_pane_search`, window.c:2123).
@@ -202,6 +218,12 @@ impl<T: FormatContext + ?Sized> FormatContext for &T {
     fn session_name_exists(&self, name: &str) -> bool {
         (**self).session_name_exists(name)
     }
+    fn client_query(&self, query: ClientQuery, name: &str) -> Option<String> {
+        (**self).client_query(query, name)
+    }
+    fn cycle_clock(&self, animate: bool) -> Option<u64> {
+        (**self).cycle_clock(animate)
+    }
     fn search_pane(&self, pattern: &str, flags: SearchFlags) -> Option<u32> {
         (**self).search_pane(pattern, flags)
     }
@@ -223,6 +245,22 @@ impl<T: FormatContext + ?Sized> FormatContext for &T {
     fn job(&self, raw: &str, expanded: &str) -> String {
         (**self).job(raw, expanded)
     }
+}
+
+/// `FORMAT_CYCLE_PERIOD` (format.c:146): an `A` frame lasts this many
+/// milliseconds times its count.
+pub const CYCLE_PERIOD_MS: u64 = 100;
+
+/// What `#{I/x:name}` asks of the client (format.c:6139-6147). With several
+/// flags the last one tmux looks up wins: environment, then feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientQuery {
+    /// `c`: a terminfo capability (`tty_term_has_name`).
+    Termcap,
+    /// `f`: a terminal feature (`tty_feature_present`).
+    Feature,
+    /// `e`: a variable of the client's environment.
+    Environ,
 }
 
 /// Which environment `#{V/x:...}` loops over (format.c:5692).
@@ -384,6 +422,19 @@ enum Value {
         body: Format,
         fallback: Option<Box<Value>>,
     },
+    /// `I`: ask the client (`flags` are the arguments of every `I`); without a
+    /// recognised flag the value is that of `fallback`.
+    ClientInfo {
+        flags: Vec<Format>,
+        name: String,
+        fallback: Option<Box<Value>>,
+    },
+    /// `A`: one of the comma-separated `frames`, by the clock; `count` is the
+    /// argument of the last `A` that has one.
+    Cycle {
+        count: Option<Format>,
+        frames: String,
+    },
     /// `C`: search the pane.
     Search {
         flags: Option<Format>,
@@ -537,7 +588,6 @@ struct Eval<'a> {
     nojobs: bool,
     /// `FORMAT_EXPAND_NOCYCLE` (format.c:151): no `A:` animation frames inside a
     /// job's command or output.
-    #[allow(dead_code)] // read by the `A:` modifier, which is not implemented yet
     nocycle: bool,
 }
 
@@ -629,6 +679,18 @@ mod tests {
             assert_eq!(e(empty), "", "{empty}");
         }
         assert_eq!(e("#{t:#{@t}}"), "86400");
+        // Reference (format-time-range.sh): past year 9999 ctime has no room
+        // and gives nothing, strftime still runs; past tm_year nothing does.
+        let ctx = Times(map(&[
+            ("@huge", "3093527980800"),
+            ("@bad", "9223372036854775807"),
+        ]));
+        let e = |f: &str| expand_at(&parse(f).ast, &ctx, &wall);
+        assert_eq!(
+            e("[#{t:@huge}][#{t/f/zz:@huge}][#{t/f/%Y-%j:@huge}]"),
+            "[][zz][100000-001]"
+        );
+        assert_eq!(e("[#{t:@bad}][#{t/f/zz:@bad}][#{t/p:@bad}]"), "[][][]");
         assert_eq!(parse("#{t:@t}").deferred, Vec::<String>::new());
     }
 
@@ -799,6 +861,95 @@ mod tests {
         }
         let ctx = Loop(Jobs::new(&[("session_name", "s")]));
         assert_eq!(expand_str("#{S:#(echo #S)}", &ctx), "s");
+    }
+
+    /// A context with a status clock and a client, as the server gives one.
+    struct Status {
+        vars: Map,
+        clock: Option<u64>,
+        animated: std::cell::Cell<u32>,
+    }
+
+    impl FormatContext for Status {
+        fn get(&self, name: &str) -> Option<String> {
+            self.vars.get(name)
+        }
+        fn cycle_clock(&self, animate: bool) -> Option<u64> {
+            if animate {
+                self.animated.set(self.animated.get() + 1);
+            }
+            self.clock
+        }
+        fn client_query(&self, query: ClientQuery, name: &str) -> Option<String> {
+            Some(format!("{query:?}:{name}"))
+        }
+        /// The command's text is its output.
+        fn job(&self, _raw: &str, expanded: &str) -> String {
+            expanded.to_owned()
+        }
+    }
+
+    fn status(clock: Option<u64>) -> Status {
+        Status {
+            vars: map(&[("@x", "X"), ("session_name", "s")]),
+            clock,
+            animated: std::cell::Cell::new(0),
+        }
+    }
+
+    /// `format_cycle` (format.c:5976): frame `clock / (count * 100) % n` of
+    /// the raw body; nothing outside a status format or inside `#()`; a bad
+    /// count is 1. Reference (status-format[0], one frame each so the screen is
+    /// fixed): `[#{A:ONE}][#{A/0:Q,Q}][#{A/x:Z}][#{A:}][#{A:,,}][#{A;l:#{session_name}}]`
+    /// draws `[ONE][Q][Z][][][#{session_name}]` (oracle `format_cycle_status`).
+    #[test]
+    fn cycle_modifier() {
+        let e = |ctx: &Status, f: &str| expand_str(f, ctx);
+        let ctx = status(Some(0));
+        assert_eq!(
+            e(&ctx, "[#{A:a,b,c}][#{A:ONE}][#{A:}][#{A:,,}]"),
+            "[a][ONE][][]"
+        );
+        assert_eq!(
+            e(&ctx, "#{A;l:#{session_name}}|#{A:#{@x},y}"),
+            "#{session_name}|#{@x}"
+        );
+        assert_eq!(ctx.animated.get(), 3);
+        for (ms, want) in [(99, "a"), (100, "b"), (250, "c"), (300, "a")] {
+            assert_eq!(e(&status(Some(ms)), "#{A:a,b,c}"), want, "{ms}");
+        }
+        for (ms, want) in [(299, "a"), (300, "b"), (900, "a")] {
+            assert_eq!(e(&status(Some(ms)), "#{A/3:a,b,c}"), want, "{ms}");
+        }
+        assert_eq!(
+            e(&status(Some(100)), "#{A/0:a,b}#{A/x:a,b}#{A/101:a,b}"),
+            "bbb"
+        );
+        assert_eq!(e(&status(None), "[#{A:a,b}]"), "[]");
+        // NOCYCLE inside #(): the command and the output.
+        let ctx = status(Some(0));
+        assert_eq!(e(&ctx, "#(x#{A:a,b}y)|#(#{@x})"), "xy|X");
+        assert_eq!(parse("#{A:a}").deferred, Vec::<String>::new());
+    }
+
+    /// format.c:6304-6327: `I` asks the client with the raw name; the
+    /// environment beats a feature, which beats a capability; without a
+    /// recognised flag the rest of the modifiers decide.
+    #[test]
+    fn client_query_modifier() {
+        let ctx = status(None);
+        let e = |f: &str| expand_str(f, &ctx);
+        assert_eq!(e("#{I/c:am}"), "Termcap:am");
+        assert_eq!(e("#{I/f:mouse}"), "Feature:mouse");
+        assert_eq!(e("#{I/e:TERM}"), "Environ:TERM");
+        assert_eq!(
+            e("#{I/ec:x}#{I/cf:y}#{I/c;I/f:z}"),
+            "Environ:xFeature:yFeature:z"
+        );
+        assert_eq!(e("#{I/c:#{@x}}"), "Termcap:#{@x}");
+        assert_eq!(e("#{I/x:@x}#{I:@x}"), "XX");
+        // Without a client, nothing.
+        assert_eq!(expand_str("[#{I/e:TERM}]", &map(&[])), "[]");
     }
 
     #[test]

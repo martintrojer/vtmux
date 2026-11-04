@@ -1,0 +1,17 @@
+# The A modifier (format_cycle, format.c:5976): a frame in a status format, nothing in display, list-panes or the command and output of #(). Frames are the raw body (no unescaping, no expansion); a bad or zero count is 1. Frames whose text is the same show the same whatever the clock, so the screens are deterministic; format-animation.sh pins the redraw timer.
+name = "format_cycle_status"
+size = [40, 4]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "3", "exec cat"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["set", "-g", "status-format[0]", "[#{A:ONE}][#{A/3:X,X,X}][#{A/0:Q,Q}][#{A/x:Z}][#{A:}][#{A:,,}][#{A;l:#{session_name}}]"] },
+  { run = ["display", "-p", "[#{A:ONE}][#{A/3:X,X}]"] },
+  { run = ["lsp", "-F", "[#{A:ONE}][#{E:#{A:Y}}]"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["set", "-g", "status-format[0]", "#(echo \"[#{A:Z,Y}]\")<#{?#{A:1},yes,no}><#{=2:#{A:LONGER}}>"] },
+  { settle = { react = true, quiet_ms = 1200 } },
+  { run = ["refresh-client", "-S"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

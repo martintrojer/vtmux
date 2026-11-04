@@ -805,10 +805,103 @@ fn in_ranges(table: &[(u32, u32)], c: u32) -> bool {
         .is_ok()
 }
 
+thread_local! {
+    /// The `codepoint-widths` items in force, as inclusive ranges with their
+    /// width; a later item wins. tmux keeps one width cache per process
+    /// (`utf8_width_cache`, utf8.c), and the server is one thread.
+    static CODEPOINT_WIDTHS: std::cell::RefCell<Vec<(u32, u32, u8)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `utf8_update_width_cache` (utf8.c:412): the `codepoint-widths` option's
+/// items replace the widths set before; each `U+X=W`, `U+X-U+Y=W` or `C=W`
+/// that does not parse is skipped (`utf8_add_to_width_cache`, utf8.c:317).
+/// Ranges are kept as ranges, where tmux adds every code point of one to its
+/// cache.
+pub fn set_codepoint_widths<S: AsRef<str>>(items: &[S]) {
+    let ranges = items
+        .iter()
+        .filter_map(|s| parse_codepoint_width(s.as_ref()))
+        .collect();
+    CODEPOINT_WIDTHS.with(|w| *w.borrow_mut() = ranges);
+}
+
+/// `WCHAR_MAX` on glibc and macOS: `wchar_t` is a signed 32-bit int.
+const WCHAR_MAX: u64 = 0x7fff_ffff;
+
+/// One `codepoint-widths` item (`utf8_add_to_width_cache`).
+fn parse_codepoint_width(s: &str) -> Option<(u32, u32, u8)> {
+    let (cps, width) = s.split_once('=')?;
+    // strtonum(cp, 0, 2): base 10, leading blanks and a sign allowed.
+    let width = u8::try_from(width.trim_start().parse::<i64>().ok()?)
+        .ok()
+        .filter(|w| *w <= 2)?;
+    let Some(hex) = cps.strip_prefix("U+") else {
+        // A single character (utf8_fromcstr must give exactly one).
+        let mut chars = cps.chars();
+        let c = chars.next()?;
+        return chars
+            .next()
+            .is_none()
+            .then(|| (u32::from(c), u32::from(c), width));
+    };
+    let (start, rest) = strtoull_hex(hex)?;
+    let end = match rest.strip_prefix('-') {
+        None if rest.is_empty() => start,
+        None => return None,
+        Some(rest) => {
+            let (end, rest) = strtoull_hex(rest.strip_prefix("U+")?)?;
+            if !rest.is_empty() || end < start {
+                return None;
+            }
+            end
+        }
+    };
+    Some((start, end, width))
+}
+
+/// `strtoull(s, &end, 16)` for a code point: leading blanks, a sign and a `0x`
+/// prefix allowed; `None` for 0 (nothing parsed, or zero), a negative number or
+/// one above `WCHAR_MAX`. The text after the digits is returned.
+fn strtoull_hex(s: &str) -> Option<(u32, &str)> {
+    let t = s.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
+    let (negative, t) = match t.as_bytes().first() {
+        Some(b'-') => (true, &t[1..]),
+        Some(b'+') => (false, &t[1..]),
+        _ => (false, t),
+    };
+    let t = match t.get(..2) {
+        Some("0x" | "0X") if t[2..].starts_with(|c: char| c.is_ascii_hexdigit()) => &t[2..],
+        _ => t,
+    };
+    let digits = t.len() - t.trim_start_matches(|c: char| c.is_ascii_hexdigit()).len();
+    // Overflow saturates (ERANGE, ULLONG_MAX), past WCHAR_MAX either way.
+    let n = u64::from_str_radix(&t[..digits], 16).unwrap_or(u64::MAX);
+    if digits == 0 || n == 0 || negative || n > WCHAR_MAX {
+        return None;
+    }
+    Some((u32::try_from(n).ok()?, &t[digits..]))
+}
+
+fn codepoint_width(cp: u32) -> Option<u8> {
+    CODEPOINT_WIDTHS.with(|w| {
+        w.borrow()
+            .iter()
+            .rev()
+            .find(|(lo, hi, _)| (*lo..=*hi).contains(&cp))
+            .map(|r| r.2)
+    })
+}
+
 /// The width tmux gives `c`: 0, 1 or 2.
 #[must_use]
 pub fn char_width(c: char) -> u8 {
     let cp = u32::from(c);
+    if cp >= 0x80
+        && let Some(w) = codepoint_width(cp)
+    {
+        return w;
+    }
     if let Ok(i) = OVERRIDES.binary_search_by_key(&cp, |&(wc, _)| wc) {
         return OVERRIDES[i].1;
     }
@@ -1431,6 +1524,43 @@ mod tests {
         for &(text, want) in STRINGS {
             assert_eq!(text_width(text), want, "{text:?}");
         }
+    }
+
+    /// `utf8_add_to_width_cache` (utf8.c:317); the cli test
+    /// `codepoint_widths_option` pins the same items against the reference.
+    #[test]
+    fn codepoint_width_items() {
+        let p = parse_codepoint_width;
+        assert_eq!(p("U+03B1-U+03B3=2"), Some((0x3b1, 0x3b3, 2)));
+        assert_eq!(p("U+1F600=0"), Some((0x1f600, 0x1f600, 0)));
+        assert_eq!(p("U+0x3b2=  1"), Some((0x3b2, 0x3b2, 1)));
+        assert_eq!(p("U+ 3B3=+2"), Some((0x3b3, 0x3b3, 2)));
+        assert_eq!(p("δ=2"), Some((0x3b4, 0x3b4, 2)));
+        assert_eq!(p("U+7FFFFFFF=1"), Some((0x7fff_ffff, 0x7fff_ffff, 1)));
+        for bad in [
+            "U+03B3-U+03B1=2",
+            "U+=2",
+            "U+0=2",
+            "U+zz=2",
+            "U+3B1=3",
+            "αβ=2",
+            "U+3B1x=2",
+            "U+-3B4=2",
+            "U+80000000=1",
+            "U+3B1",
+            "U+3B1-3B2=1",
+            "=1",
+        ] {
+            assert_eq!(p(bad), None, "{bad}");
+        }
+        set_codepoint_widths(&["U+03B1-U+03B3=2", "U+03B2=0", "A=2"]);
+        assert_eq!(
+            ['α', 'β', 'γ', 'δ', 'A'].map(char_width),
+            [2, 0, 2, 1, 1],
+            "a later item wins; ASCII never asks"
+        );
+        set_codepoint_widths::<&str>(&[]);
+        assert_eq!(char_width('α'), 1);
     }
 
     #[test]

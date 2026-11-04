@@ -3,9 +3,13 @@
 //! them (the reference tmux is built against glibc's libgen), and the quoting functions.
 
 use super::parse::skip;
-use super::wcwidth::char_width;
 use crate::rawstr::{Unit, unit_at};
 use std::fmt::Write as _;
+
+/// The width tmux gives one character (`utf8_width`), `codepoint-widths` included.
+fn char_width(c: char) -> usize {
+    usize::from(crate::width::char_width(c))
+}
 
 /// `format_leading_hashes` (format-draw.c:648): the run of `#`s at `i`, its drawn
 /// width, and where scanning resumes. A run before `[` that is odd-sized resumes at
