@@ -248,3 +248,19 @@ product reasons" category.
 - vtmux behaviour: Ghostty keeps none of that, so it is derived from the cells as they are now (`capture.rs` `tmux_cellsize`, `capture/raw.rs`): `EXTENDED` and `HYPERLINK` when a cell on the line needs them now; `cellsize` from the runs of written cells with one style, charset and link; palette 0-15 in the short form. A line whose wide character was overwritten (tmux keeps `EXTENDED`, and the other half as an uncleared cell), a line erased and rewritten shorter, a line whose run tmux flushed in two pieces (plain text with an escape sequence in it that changes nothing, `zz ESC[m out`: tmux allocates up to the second piece's end, 5/5 on a 20-column line, vtmux one run, 5/10), and `ESC[38;5;1m` show differently; under `-N` the trailing blanks follow the same model.
 - Evidence: reference tmux 3.8, 10x3 pane, `printf '\343\201\202B\rX'`: `capture-pane -pR` line 0 `flags=EXTENDED[2] 3/5`, cell 0,1 `flags=NONE[0]`; vtmux `flags=NONE[0] 3/5` and `flags=CLEARED[40]`. 20x3, `printf 'zz\033[mout'`: tmux `capture-pane -pN` gives `zzout`, vtmux `zzout` and five spaces.
 - Category: Ghostty grid (the state does not exist in Ghostty's grid).
+
+### D-028: the editor `e` opens runs in a popup, not a modal floating pane
+
+- Test / assertion: regress `customize-mode.sh` `test_editor`, `test_editor_invalidation` (they check the values, not where the editor is drawn); oracle `customize_edit`.
+- tmux behaviour: `spawn_editor` (spawn.c:703-800) runs `editor file` in a floating pane nine tenths of the window, centred, with `SPAWN_MODAL|SPAWN_FLOATOVERZOOM`: the window's other panes take no input until it exits, and the pane is listed (`list-panes`, `#{window_panes}`) while it runs.
+- vtmux behaviour: the same command, size and placement (of the client's terminal, not the window) in a popup over the client whose key pressed `e`, closed when the editor exits; the file is read back at that point as in `spawn_editor_finish`. The popup is not a pane, so `list-panes` does not show it, and the other clients see only `WAITING FOR EDITOR`.
+- Evidence: vtmux has floating panes but no modal ones (`new-pane -O` is not implemented); a popup is modal for its client already.
+- Category: Deferred (modal floating panes).
+
+### D-029: a client that does not read its exit is dropped after 10 s, in one step
+
+- Test / assertion: regress `control-client-exit-stalled.sh`; control `stalled_client_does_not_keep_the_server`.
+- tmux behaviour: `server_client_check_exit` and `server_client_exit_timer` (server-client.c:2361-2440): a client told to exit whose output has not drained after 10 s has its queued output discarded and is sent `MSG_EXIT` alone; if it has still not closed 10 s later it is dropped.
+- vtmux behaviour: the client's messages share one byte stream with its output, which may stop part-way through a message, so the output cannot be cut back to the exit message. A client still not gone 10 s after it was told to exit is dropped at once.
+- Evidence: `control-client-exit-stalled.sh` passes on both, 12.1 s each (`cargo xtask regress --tmux reference --only control-client-exit-stalled.sh`): there the client closes once its exit message is sent alone, so the second step never runs. A client that also never closes is dropped by tmux 10 s later than by vtmux.
+- Category: Deferred (a framed exit message the client reads past stuck output).

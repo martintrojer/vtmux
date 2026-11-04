@@ -2,10 +2,10 @@
 //! redraws, `-f`/`-F` client flags, `-A` pane output state, `-C` control
 //! client sizes and `-l` the clipboard query.
 //!
-//! `-B` control subscriptions are [`crate::control_subs`]. Not here yet:
-//! `-c -D -L -R -U` (panning a window larger than the terminal: no client
-//! offsets in the compositor) and `-r` (colour reports for panes; accepted
-//! and ignored).
+//! `-B` control subscriptions are [`crate::control_subs`]. `-c` (stop
+//! panning) only redraws: vtmux never pans. Not here yet: `-D -L -R -U`
+//! (panning a window larger than the terminal: the compositor has no view
+//! offset) and `-r` (colour reports for panes; accepted and ignored).
 
 use vtmux_core::cmd::{Args, CmdError, strtonum};
 use vtmux_core::error::EdgeError;
@@ -27,11 +27,17 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
                 cause,
             })?;
         }
-        let flag = ['c', 'L', 'R', 'U', 'D']
-            .into_iter()
-            .find(|&f| args.flag(f))
-            .unwrap_or('c');
-        return Err(EdgeError::NotImplemented(format!("refresh-client -{flag}")).into());
+        if !args.flag('c') {
+            let flag = ['L', 'R', 'U', 'D']
+                .into_iter()
+                .find(|&f| args.flag(f))
+                .unwrap_or('L');
+            return Err(EdgeError::NotImplemented(format!("refresh-client -{flag}")).into());
+        }
+        // -c: back to following the cursor (`tc->pan_window = NULL`),
+        // which is all vtmux does, then server_redraw_client.
+        server.redraw_client(tc);
+        return Ok(());
     }
 
     if args.flag('l') {

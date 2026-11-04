@@ -483,7 +483,8 @@ impl Socket {
                             | ServerMsg::ReadOpen { .. }
                             | ServerMsg::WriteOpen { .. }
                             | ServerMsg::WriteData(_)
-                            | ServerMsg::WriteClose => {}
+                            | ServerMsg::WriteClose
+                            | ServerMsg::Flags { .. } => {}
                         }
                     }
                     Err(ProtocolError::Truncated) => break,

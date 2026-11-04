@@ -1,0 +1,593 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "customize_edit",
+  "inputs": {
+    "name": "customize_edit",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@cm",
+          "old"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "editor",
+          "sh -c 'tmux wait-for -S opened; tmux wait-for go; printf \"%s\\n\" \"$(cat \"$1\")-new\" >\"$1\"' x"
+        ]
+      },
+      {
+        "run": [
+          "bind-key",
+          "-T",
+          "prefix",
+          "User2",
+          "display-message old"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "a:0.0",
+          "-f",
+          "#{==:#{option_name},@cm}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "\u001b[C"
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@cm"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "a:0.0",
+          "-f",
+          "#{==:#{key},User2}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "jjjjjjjjjj"
+      },
+      {
+        "keys": "\u001b[C"
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "\u001b[C"
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "list-keys",
+          "-T",
+          "prefix",
+          "User2"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ @cm: old\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ @cm (filter: active) ────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mold\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ @cm: old-new\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ @cm (filter: active) ────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mold-new\\e[39m                                                        \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "old-new\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[31m-\\e[37m \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) └─→ \\e[31m-\\e[37m \\e[39mUser2",
+          "\\e[30m\\e[43m(M-c)     ├─→ Command: display-message old\\e[39m",
+          "\\e[37m\\e[40m┌ User2 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the prefix table.                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message old\\e[39m                                                 \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(2)     \\e[39mWindow & Pane Options",
+          "\\e[37m(3)     \\e[39mSession Hooks",
+          "\\e[37m(4)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(5)     \\e[39mGlobal Environment",
+          "\\e[37m(6)     \\e[39mSession Environment",
+          "\\e[37m(7)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(9)     \\e[39mKey Table - move",
+          "\\e[37m(M-a) \\e[31m-\\e[37m \\e[39mKey Table - prefix",
+          "\\e[37m(M-b) └─→ \\e[31m-\\e[37m \\e[39mUser2",
+          "\\e[30m\\e[43m(M-c)     ├─→ Command: display-message old-new\\e[39m",
+          "\\e[37m\\e[40m┌ User2 (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m There is no note for this key.                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This key is in the prefix table.                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Repeat: \\e[37moff\\e[39m                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Command: \\e[37mdisplay-message old-new\\e[39m                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bind-key  -T prefix User2 display-message old-new\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,692 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "customize_edit_cancel",
+  "inputs": {
+    "name": "customize_edit_cancel",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@cm",
+          "old"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "editor",
+          "sh -c 'tmux wait-for -S opened; tmux wait-for go; printf bad >\"$1\"; exit 1' x"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "a:0.0",
+          "-f",
+          "#{==:#{option_name},@cm}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "\u001b[C"
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@cm"
+        ]
+      },
+      {
+        "keys": "k"
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "editor",
+          "sh -c 'tmux wait-for -S opened; tmux wait-for go; printf edited >\"$1\"' x"
+        ]
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "set",
+          "-gu",
+          "@cm"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@cm"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@cm",
+          "old"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "a:0.0",
+          "-f",
+          "#{==:#{option_name},@cm}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "\u001b[C"
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:0.0",
+          "q"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@cm"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "editor",
+          "sh -c 'tmux set -g @started 1' x"
+        ]
+      },
+      {
+        "run": [
+          "customize-mode",
+          "-t",
+          "a:0.0",
+          "-f",
+          "#{==:#{option_name},mouse}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "\u001b[C"
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "settle": {
+          "quiet_ms": 500,
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gqv",
+          "@started"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "old\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ @cm: old\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ @cm (filter: active) ────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m This option doesn't have a description.                                      \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a user option.                                                       \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mold\\e[39m                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: @cm\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "old\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0)     \\e[39mServer Options",
+          "\\e[37m(1)   \\e[31m-\\e[37m \\e[39mSession Options",
+          "\\e[30m\\e[43m(2)   └─→ mouse: on\\e[39m",
+          "\\e[37m\\e[49m(3)     \\e[39mWindow & Pane Options",
+          "\\e[37m(4)     \\e[39mSession Hooks",
+          "\\e[37m(5)     \\e[39mWindow & Pane Hooks",
+          "\\e[37m(6)     \\e[39mGlobal Environment",
+          "\\e[37m(7)     \\e[39mSession Environment",
+          "\\e[37m(8)     \\e[39mKey Table - copy-mode",
+          "\\e[37m(9)     \\e[39mKey Table - copy-mode-vi",
+          "\\e[37m(M-a)   \\e[39mKey Table - move",
+          "\\e[37m\\e[40m┌ mouse (filter: active) ──────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m Whether the mouse is recognised and mouse key bindings are executed.         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Applications inside panes can use the mouse even when 'off'.                 \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m This is a session option.                                                    \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m Option value: \\e[37mon\\e[39m                                                             \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

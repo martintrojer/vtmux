@@ -44,6 +44,9 @@ const PANE_BASE: usize = 16;
 
 /// `NAME_INTERVAL` (tmux.h:119): automatic-rename runs at most this often.
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
+/// How long a client told to go may take to read the rest of its output
+/// (`server_client_start_exit_timer`, server-client.c:2365).
+const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A connected client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -80,6 +83,9 @@ pub(crate) struct Client {
     unacked: Unacked,
     /// Exit has been queued; close once the output is flushed.
     pub(crate) closing: bool,
+    /// `c->exit_timer` (server-client.c:2361-2387): when a closing client
+    /// whose output has not drained is given up on.
+    exit_deadline: Option<Instant>,
     /// `CLIENT_DEAD` (server-client.c:491): being dropped. Nothing more is
     /// sent to it, and a second drop (from a write that fails while its
     /// own lost-client hooks run) does nothing.
@@ -167,6 +173,7 @@ impl Client {
             outbuf: Vec::new(),
             unacked: Unacked::default(),
             closing: false,
+            exit_deadline: None,
             dead: false,
             suspended: false,
             hello: None,
@@ -412,6 +419,8 @@ pub struct Server {
     /// Each session's `lock-after-time` timer (`s->lock_timer`), armed by
     /// its activity while it has a client ([`Server::arm_lock_timer`]).
     lock_timers: BTreeMap<SessionId, Instant>,
+    /// The monitor hooks' last values and timers (`set-hook -B`).
+    pub(crate) hook_monitors: crate::control_subs::HookMonitors,
     /// Who may connect (server-acl.c, `server-access`).
     pub(crate) acl: crate::acl::Acl,
 }
@@ -608,6 +617,7 @@ impl Server {
             compress: crate::compress::Rotation::default(),
             shim: None,
             lock_timers: BTreeMap::new(),
+            hook_monitors: crate::control_subs::HookMonitors::default(),
             acl: crate::acl::Acl::new(rustix::process::getuid().as_raw()),
         };
         server.shim = crate::shim::own_exe()
@@ -615,6 +625,8 @@ impl Server {
         // server_start: the hourly tidy (server.c:157-172, `evtimer_add`).
         server.format_jobs_start_tidy();
         server.update_width_cache();
+        // The parser's aliases are this server's (the default option).
+        vtmux_core::cmd::set_command_aliases(server.array_option(TreeId::Server, "command-alias"));
         Ok(server)
     }
 
@@ -663,6 +675,7 @@ impl Server {
             self.sync_timers(Instant::now());
             self.subs_timers(Instant::now());
             self.lock_timer_fire(Instant::now());
+            self.exit_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -683,6 +696,8 @@ impl Server {
             // early compression-only path above is a quiet turn.
             self.compress_turn(Instant::now(), false);
             self.control_tick();
+            // A monitor hook set or removed this turn: its timer.
+            self.hook_monitors_sync();
             if self.wants_flush() {
                 // server_loop / server_send_exit: release every waiter.
                 for c in self.waits.flush() {
@@ -793,6 +808,11 @@ impl Server {
                 .map(|d| d.saturating_duration_since(now)),
             self.lock_timers
                 .values()
+                .min()
+                .map(|d| d.saturating_duration_since(now)),
+            self.clients
+                .values()
+                .filter_map(|c| c.exit_deadline)
                 .min()
                 .map(|d| d.saturating_duration_since(now)),
             self.clients
@@ -1129,9 +1149,12 @@ impl Server {
         let no_output = c.flags.no_output;
         c.flags.set(control, flags);
         let reset = c.flags.no_output && !no_output;
+        let wait_exit = c.flags.wait_exit;
         if reset {
             self.control_reset_panes(id);
         }
+        // server_client_set_flags ends with MSG_FLAGS.
+        self.send(id, &ServerMsg::Flags { wait_exit });
         // Flags can change which clients size a window (`ignore-size`).
         self.recalculate_sizes();
     }
@@ -1221,6 +1244,32 @@ impl Server {
             .registry()
             .reregister(&mut c.stream, Token(CLIENT_BASE + id.0), interest);
         if c.closing && c.outbuf.is_empty() {
+            self.drop_client(id);
+        } else if c.closing {
+            c.exit_deadline
+                .get_or_insert_with(|| Instant::now() + EXIT_TIMEOUT);
+        }
+    }
+
+    /// `server_client_exit_timer`: a client still not gone
+    /// [`EXIT_TIMEOUT`] after it was told to go (its terminal or reader
+    /// stopped taking output) is dropped, so it cannot keep the server
+    /// alive. tmux takes two steps of ten seconds each: it first discards
+    /// the output and sends the exit message alone, then drops a client
+    /// that still has not closed. vtmux's output is one byte stream that
+    /// may end mid-message, so it cannot cut the output down to the exit
+    /// message and drops the client at the first step.
+    fn exit_timers(&mut self, now: Instant) {
+        let due: Vec<ClientId> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.exit_deadline.is_some_and(|d| d <= now))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in due {
+            if let Some(c) = self.clients.get_mut(&id) {
+                c.outbuf.clear();
+            }
             self.drop_client(id);
         }
     }
@@ -1552,7 +1601,13 @@ impl Server {
         // set of modes, not their ordering. Focus reports and extended
         // keys are asked for once the terminal answers or the start timer
         // fires ([`Server::update_features`]).
-        self.send(id, &ServerMsg::Frame(caps.startup()));
+        let rows = self
+            .clients
+            .get(&id)
+            .and_then(|c| c.hello.as_ref()?.tty.as_ref())
+            .map_or(24, |t| t.rows);
+        let clear = self.clear_on_attach();
+        self.send(id, &ServerMsg::Frame(caps.startup(clear, rows)));
         if let Some(tty) = self
             .clients
             .get(&id)
@@ -1923,7 +1978,9 @@ impl Server {
         // tty_start_tty: the startup modes without the terminal queries,
         // which tty_send_requests sends only once.
         if let Some(caps) = caps {
-            self.send(id, &ServerMsg::Frame(caps.restart()));
+            let rows = self.tty_size(id).map_or(24, |(_, r)| u32::from(r));
+            let clear = self.clear_on_attach();
+            self.send(id, &ServerMsg::Frame(caps.restart(clear, rows)));
         }
         self.redraw_client(id);
         self.recalculate_sizes();
@@ -1959,9 +2016,15 @@ impl Server {
                 .as_ref()
                 .and_then(vtmux_core::term_features::Term::disable_extended_keys)
                 .unwrap_or_default();
-            let bytes = caps.teardown(dseks);
+            let bytes = caps.teardown(dseks, self.clear_on_attach());
             self.send(id, &ServerMsg::Frame(bytes));
         }
+    }
+
+    /// `clear-on-attach`: whether a client's terminal is started on the
+    /// alternate screen (tty.c:357, 487, 512).
+    fn clear_on_attach(&self) -> bool {
+        self.model.number_option(TreeId::Server, "clear-on-attach") != 0
     }
 
     fn exit_attached_with(&mut self, id: ClientId, last: &ServerMsg) {
@@ -4210,6 +4273,7 @@ impl Server {
         pane.term.set_extended_keys(extended_keys);
         pane.term.feed(bytes);
         let passthrough = pane.term.take_passthrough();
+        let renames = pane.term.take_renames();
         pane.compress.observe(&pane.term, Instant::now());
         let entered_alternate = !alternate && pane.term.alternate_on();
         // input.c:2725-2740: a new title (OSC 0/2) or path
@@ -4269,9 +4333,44 @@ impl Server {
             }
             self.model.alerts_queue(window, alerts::BELL);
         }
+        for name in renames {
+            self.pane_rename(p, window, &name);
+        }
         self.control_output(p, bytes);
         self.pipe_write(p, bytes);
         self.pane_passthrough(p, passthrough, redraw_pending);
+    }
+
+    /// `input_exit_rename` (input.c:2825-2855): `ESC k name ST` from pane
+    /// `p` names its window `w`, if the pane's `allow-rename` lets it and
+    /// the name is valid UTF-8 (printable ASCII). A name turns
+    /// `automatic-rename` off on the window; an empty one unsets it there
+    /// and empties the name unless the option is still on. Either way the
+    /// name is cleaned as a program's (`window_set_name(w, name, 1)`).
+    fn pane_rename(&mut self, p: PaneId, w: WindowId, name: &[u8]) {
+        if self.model.number_option(TreeId::Pane(p), "allow-rename") == 0 {
+            return;
+        }
+        let name = vtmux_core::rawstr::from_bytes(name);
+        if !crate::names::check_name(&name) {
+            return;
+        }
+        let tree = TreeId::Window(w);
+        if name.is_empty() {
+            self.model.options.unset(tree, "automatic-rename", None);
+            if self.model.number_option(tree, "automatic-rename") == 0 {
+                self.model.set_window_name(w, "");
+            }
+        } else {
+            self.model
+                .options
+                .set_table_value(tree, "automatic-rename", Value::Flag(false));
+            self.model
+                .set_window_name(w, &crate::names::clean_untrusted(&name));
+        }
+        // server_redraw_window_borders, server_status_window.
+        self.model.redraw(crate::model::Redraw::Window(w));
+        self.model.redraw(crate::model::Redraw::WindowStatus(w));
     }
 
     /// Read a bounded amount from pane `p` (tmux reads once per libevent

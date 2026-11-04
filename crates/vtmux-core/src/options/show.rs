@@ -26,9 +26,7 @@ pub fn apply_show(
     let window_cmd = call.entry.name == "show-window-options";
     let hooks_cmd = call.entry.name == "show-hooks";
     let quiet = args.flag('q');
-    if hooks_cmd && args.flag('B') {
-        return Err(OptionError::Unsupported("show-hooks -B"));
-    }
+    let monitors = hooks_cmd && args.flag('B');
     let printer = Printer {
         template: args.value('F'),
         value_only: args.flag('v'),
@@ -41,6 +39,13 @@ pub fn apply_show(
             Err(_) if quiet => return Ok(out),
             Err(e) => return Err(e),
         };
+        if monitors {
+            // cmd-show-options.c:112-119: every entry of the tree.
+            for (name, _) in store.tree(tree).iter() {
+                print_monitor(store, tree, name, args.value('F'), host, &mut out);
+            }
+            return Ok(out);
+        }
         show_all(
             store, tree, level, hooks_cmd, args, &printer, host, &mut out,
         );
@@ -77,6 +82,9 @@ pub fn apply_show(
         None => (None, false),
     };
     match entry {
+        Some(_) if monitors => {
+            print_monitor(store, tree, &name, args.value('F'), host, &mut out);
+        }
         Some(entry) => {
             let empty_array = matches!(&entry.value, OptionValue::Array(items) if items.is_empty());
             let parent = parent && !(key.is_none() && entry.is_array() && empty_array);
@@ -119,7 +127,7 @@ fn show_all(
         if entry.def.is_some() {
             continue;
         }
-        let user_hook = store.is_hook_event(name);
+        let user_hook = store.is_hook_event(name) || store.monitor(tree, name).is_some();
         let shown = if hooks_cmd {
             user_hook
         } else {
@@ -151,6 +159,43 @@ fn show_all(
             store, tree, def.name, entry, None, parent, hooks_cmd, printer, host, out,
         );
     }
+}
+
+/// `cmd_show_hooks_print_monitor` (cmd-show-options.c:263-336): the entry's
+/// monitor, if it has one, as `name:what:format` or through `-F`.
+fn print_monitor(
+    store: &OptionsStore,
+    tree: TreeId,
+    name: &str,
+    template: Option<&str>,
+    host: &mut dyn OptionHost,
+    out: &mut Vec<String>,
+) {
+    let Some(m) = store.monitor(tree, name) else {
+        return;
+    };
+    let template =
+        template.unwrap_or("#{option_name}:#{hook_monitor_target}:#{hook_monitor_format}");
+    let mut vars = vec![
+        ("option_name", name.to_owned()),
+        ("option_value", m.describe(name)),
+        ("option_value_only", "0".to_owned()),
+        ("option_is_parent", "0".to_owned()),
+        ("option_is_array", "0".to_owned()),
+        ("option_is_string", "1".to_owned()),
+        ("option_is_hook", "1".to_owned()),
+        ("option_is_user", "1".to_owned()),
+        ("option_has_value", "1".to_owned()),
+        ("option_array_key", String::new()),
+        ("option_has_array_key", "0".to_owned()),
+        ("hook_monitor_target", m.what.to_string()),
+        ("hook_monitor_format", m.format.clone()),
+        ("hook_fire_count", m.fires.0.to_string()),
+    ];
+    if m.fires.1 != 0 {
+        vars.push(("hook_fire_time", m.fires.1.to_string()));
+    }
+    out.push(host.expand(store, template, &vars));
 }
 
 /// `cmd_show_options_print` (cmd-show-options.c:200): one line, or one per

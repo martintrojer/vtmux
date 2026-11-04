@@ -1,0 +1,21 @@
+# A monitor hook (set-hook -B) in customize-mode (window-customize.c window_customize_build_option, window_customize_draw_option): it is listed with the hooks, not the options; option_is_monitor and option_monitor in -F; the preview says it runs when a monitor changes, shows `Monitor: name:what:format`, its command and how many times it has fired. The monitor watches a format nothing changes, so it never fires.
+name = "customize_monitor_hook"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "exec cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["set-hook", "-g", "-B", "@mon:%*:#{pane_id}", "display-message changed"] },
+  { run = ["set", "-g", "@plain", "x"] },
+  { attach = { session = "a" } },
+  { run = ["customize-mode", "-t", "a:0.0", "-F", "#{option_name} m=#{option_is_monitor} [#{option_monitor}]", "-f", "#{||:#{==:#{option_name},@mon},#{==:#{option_name},@plain}}"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u001b+" },
+  { screen = {} },
+  { keys = "jjjjj" },
+  { screen = {} },
+  { keys = "q" },
+  { settle = { react = true } },
+  { screen = {} },
+]
