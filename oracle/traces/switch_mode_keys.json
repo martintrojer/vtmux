@@ -204,6 +204,30 @@
         "screen": {}
       },
       {
+        "keys": "\u000e"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\n"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0010"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u000b\u000b"
+      },
+      {
+        "screen": {}
+      },
+      {
         "keys": "\u001b"
       },
       {
@@ -602,6 +626,150 @@
           "",
           "",
           "",
+          "          \\e[33m┌──────────────────────────────────────────────────────────┐\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43malpha \\e[2m2 windows\\e[0m\\e[30m\\e[43m \\e[2mdetached\\e[0m\\e[30m\\e[43m \\e[2mmain\\e[0m\\e[43m                             \\e[33m\\e[49m│\\e[39m",
+          "          \\e[33m│\\e[39mbravo \\e[2m1 windows\\e[0m attached \\e[2mpick-two\\e[0m                         \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[39mcharlie \\e[2m1 windows\\e[0m \\e[2mdetached\\e[0m \\e[2mlast\\e[0m                           \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43m(search) \\e[39m\\e[49m                                                 \\e[33m│\\e[39m",
+          "          \\e[33m└──────────────────────────────────────────────────────────┘\\e[39m",
+          "\\e[30m\\e[42m[bravo] \\e[4m0:pick-two*\\e[0m\\e[42m                                                            \\e[30mR"
+        ],
+        "cursor": [
+          20,
+          21
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "          \\e[33m┌──────────────────────────────────────────────────────────┐\\e[39m",
+          "          \\e[33m│\\e[39malpha \\e[2m2 windows\\e[0m \\e[2mdetached\\e[0m \\e[2mmain\\e[0m                             \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43mbravo \\e[2m1 windows\\e[0m\\e[30m\\e[43m attached \\e[2mpick-two\\e[0m\\e[43m                         \\e[33m\\e[49m│\\e[39m",
+          "          \\e[33m│\\e[39mcharlie \\e[2m1 windows\\e[0m \\e[2mdetached\\e[0m \\e[2mlast\\e[0m                           \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43m(search) \\e[39m\\e[49m                                                 \\e[33m│\\e[39m",
+          "          \\e[33m└──────────────────────────────────────────────────────────┘\\e[39m",
+          "\\e[30m\\e[42m[bravo] \\e[4m0:pick-two*\\e[0m\\e[42m                                                            \\e[30mR"
+        ],
+        "cursor": [
+          20,
+          21
+        ]
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "          \\e[33m┌──────────────────────────────────────────────────────────┐\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43malpha \\e[2m2 windows\\e[0m\\e[30m\\e[43m \\e[2mdetached\\e[0m\\e[30m\\e[43m \\e[2mmain\\e[0m\\e[43m                             \\e[33m\\e[49m│\\e[39m",
+          "          \\e[33m│\\e[39mbravo \\e[2m1 windows\\e[0m attached \\e[2mpick-two\\e[0m                         \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[39mcharlie \\e[2m1 windows\\e[0m \\e[2mdetached\\e[0m \\e[2mlast\\e[0m                           \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43m(search) \\e[39m\\e[49m                                                 \\e[33m│\\e[39m",
+          "          \\e[33m└──────────────────────────────────────────────────────────┘\\e[39m",
+          "\\e[30m\\e[42m[bravo] \\e[4m0:pick-two*\\e[0m\\e[42m                                                            \\e[30mR"
+        ],
+        "cursor": [
+          20,
+          21
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "          \\e[33m┌──────────────────────────────────────────────────────────┐\\e[39m",
+          "          \\e[33m│\\e[39malpha \\e[2m2 windows\\e[0m \\e[2mdetached\\e[0m \\e[2mmain\\e[0m                             \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43mbravo \\e[2m1 windows\\e[0m\\e[30m\\e[43m attached \\e[2mpick-two\\e[0m\\e[43m                         \\e[33m\\e[49m│\\e[39m",
+          "          \\e[33m│\\e[39mcharlie \\e[2m1 windows\\e[0m \\e[2mdetached\\e[0m \\e[2mlast\\e[0m                           \\e[33m│\\e[39m",
+          "          \\e[33m│\\e[30m\\e[43m(search) \\e[39m\\e[49m                                                 \\e[33m│\\e[39m",
+          "          \\e[33m└──────────────────────────────────────────────────────────┘\\e[39m",
+          "\\e[30m\\e[42m[bravo] \\e[4m0:pick-two*\\e[0m\\e[42m                                                            \\e[30mR"
+        ],
+        "cursor": [
+          20,
+          21
+        ]
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
           "",
           "",
           "",
@@ -617,7 +785,7 @@
       }
     },
     {
-      "step": 32,
+      "step": 40,
       "observation": {
         "kind": "cli",
         "stdout": "alpha:0.0 0\nalpha:1.0 0\nbravo:0.0 0\ncharlie:0.0 0\n",
