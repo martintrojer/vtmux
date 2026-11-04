@@ -1,8 +1,8 @@
 //! `split-window` (cmd-split-window.c:73-345, layout.c
 //! `layout_get_tiled_cell`): a new pane next to the target, or next to the
 //! whole layout with `-f`; `-E`, `-I` or one empty argument make an empty
-//! pane (no process); `-W` waits for the pane's process to exit. `-k -m`
-//! and `-M` are not done yet.
+//! pane (no process); `-W` waits for the pane's process to exit; `-k -m`
+//! keep it once it exits (remain-on-exit). `-M` is not done yet.
 
 use std::path::PathBuf;
 
@@ -49,10 +49,8 @@ pub fn exec(
     args: &Args,
     found: Found,
 ) -> Result<(), CmdError> {
-    for flag in ['M'] {
-        if args.flag(flag) {
-            return Err(EdgeError::NotImplemented(format!("split-window -{flag}")).into());
-        }
+    if args.flag('M') {
+        return Err(EdgeError::NotImplemented("split-window -M".into()).into());
     }
     // cmd-split-window.c:149-161: -I, or one empty argument, is an empty
     // pane like -E, and a command with one is an error.

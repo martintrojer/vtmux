@@ -5890,7 +5890,7 @@ fn marked_pane() {
     });
 }
 
-/// server_link_window (server-fn.c:335-336) and cmd-swap-window.c:80-81
+/// `server_link_window` (server-fn.c:335-336) and cmd-swap-window.c:80-81
 /// point the mark at the new winlink but keep its session: a link or move
 /// within the session moves the mark to the new index, one into another
 /// session leaves it invalid (`cmd_find_valid_state`: no mark, `~` is `no
@@ -5945,7 +5945,7 @@ fn marked_pane_across_sessions() {
 
 /// `send-keys -R` is `input_reset(ictx, 1)` (cmd-send-keys.c:236-240):
 /// `screen_write_reset` clears the screen with `scroll-on-clear` on, so the
-/// used rows go into history (grid_view_clear_history) and nothing already
+/// used rows go into history (`grid_view_clear_history`) and nothing already
 /// there is lost; an alternate screen stays up with the primary one saved.
 /// Modes and attributes go back to their defaults, the cursor home.
 #[test]
@@ -5965,7 +5965,12 @@ fn send_keys_reset_keeps_history_and_alternate() {
         runs.push(w.run(&["capturep", "-p", "-e", "-t", "a", "-S", "-", "-E", "-"]));
         // Under an alternate screen.
         runs.push(w.run(&[
-            "respawnp", "-k", "-t", "a", "sh", "-c",
+            "respawnp",
+            "-k",
+            "-t",
+            "a",
+            "sh",
+            "-c",
             "printf 'main\\n\\033[?1049h\\033[31malt text\\033[5;5Hx'; exec cat",
         ]));
         w.wait_for_text("a", "alt text");
