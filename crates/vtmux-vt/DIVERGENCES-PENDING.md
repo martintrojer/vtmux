@@ -20,17 +20,22 @@ and the probes from `review_vt_wrap`.
 - Visible: `#{history_size}`, `capture-pane -S`, copy mode, for programs that use
   top/bottom margins on the main screen (tmux itself, some TUIs).
 
-## P2. Narrowing reflow does not push rows into history
+## P2. Reflow of a cursor at the end of a row
 
-- Golden: `cap_reflow_narrow`, `fmt_reflow_narrow_history_size`,
-  `fmt_reflow_narrow_cursor_y`, `fmt_reflow_pending_wrap_wide_cursor_x`,
+- Golden: `fmt_reflow_pending_wrap_wide_cursor_x`,
   `fmt_reflow_pending_wrap_wide_cursor_y`,
   `fmt_reflow_pending_wrap_wide_history_size`
-- tmux: `screen_reflow` / `grid_reflow` on resize pushes the top row into history
-  when narrowing 20->10 with `hello world` on row 0 (`hello worl` goes to history,
-  `#{history_size}` 1, `#{cursor_y}` 0, CPR `1;2R`).
-- vtmux (Ghostty): both rows stay on screen (`history_size` 0, cursor row 1,
-  CPR `2;2R`).
+- Closed (`gap_render_styles`): narrowing now pushes the split rows into
+  history and widening joins them back, the blank rows below the cursor kept,
+  as `grid_reflow` does (`PaneTerm::resize`; goldens `cap_reflow_narrow`,
+  `fmt_reflow_narrow_*`, regress `cursor-test4.sh`, oracle
+  `reflow_footer_under_cursor`).
+- Left: a cursor that ends a row after the reflow (waiting to wrap, or its
+  column a multiple of the new width): tmux leaves `cx` past the end of that
+  row (`grid_unwrap_position`), Ghostty starts the next row with it, so that
+  step's `#{history_size}` is one more and the cursor is at column 0 of the
+  row below (30 lines, prompt of 24 columns, `resize-window -x 12`: tmux
+  `102 12,19`, vtmux `103 0,19`; a later resize agrees again).
 - Pending-wrap cursor: 20x5, `0123456789abcdefghij0123`, `short`, then ten
   wide `漢字` cells filling the row (wrap pending), resized to 7x5: tmux puts
   the cursor at 4,3 with `#{history_size}` 6. Ghostty 3bd54e025 gives 2,4
@@ -38,7 +43,7 @@ and the probes from `review_vt_wrap`.
   The ASCII case (20 chars at 20x5, resize 7x5) now matches tmux's
   `cursor_x` 6 (`fmt_reflow_pending_wrap_cursor_x`; a887df42c gave 7).
 - Visible: `#{history_size}`, `#{cursor_x}`, `#{cursor_y}`, CPR and
-  `capture-pane` after any narrowing resize with content in the top rows.
+  `capture-pane` after a resize that leaves the cursor at the end of a row.
 
 - Tab cells (`d_tab_capture`, golden `cap_tab_resize_narrow`): narrowing 20 -> 12 columns a line `ab<tab>c`
   (the tab covers 6 columns, so the line is 9 wide and fits): tmux wraps it (`ab<tab>` then `c`, one row into

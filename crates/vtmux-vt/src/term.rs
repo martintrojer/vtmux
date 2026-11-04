@@ -1235,34 +1235,32 @@ impl PaneTerm {
             let _ = self.term.set_scrollback_max_lines(None);
             self.line_limit = None;
         }
-        // A cursor at or past the new width: Ghostty's reflow gives it a
-        // row of its own, which tmux's does not (grid_unwrap_position
-        // leaves `cx` past the end), so that row would push one more into
-        // history. Left to Ghostty's trimming then.
-        let reflow = cols.max(1) != self.cols() && self.cursor().0 < cols.max(1);
-        if reflow && on_primary {
-            // grid_reflow (grid.c:1528-1608) keeps every line, the blank
-            // ones below the cursor too: the rows a narrowing splits off go
-            // into history, and the rows a widening joins come back from
-            // it, the screen's bottom staying put. Ghostty's reflow drops
-            // trailing blank rows unless a pin is on them: pin the bottom
-            // row for the column change. The height changes first, as
-            // screen_resize_y does before the reflow, and without the pin,
-            // which would stop Ghostty trimming blank rows there.
+        if on_primary {
+            self.eat_below_cursor(rows.max(1));
+            self.grow_pulling_history(rows.max(1));
+        }
+        // A cursor waiting to wrap, or one the reflow puts at the end of a
+        // row (its column a nonzero multiple of the new width): Ghostty
+        // gives it a row of its own, which tmux does not
+        // (grid_unwrap_position leaves `cx` past the end of the row). Left
+        // to Ghostty: the blank-row fix-up would count that row.
+        let (cx, new_cols) = (self.cursor().0, cols.max(1));
+        let fits =
+            !self.term.is_cursor_pending_wrap().unwrap_or(false) && (cx == 0 || cx % new_cols != 0);
+        if cols.max(1) != self.cols() && on_primary && fits {
+            // The height first, as screen_resize_y does before the reflow.
             if rows.max(1) != self.rows() {
                 self.term
                     .resize(self.cols(), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
                     .expect("libghostty resize");
             }
-            let bottom = PointCoordinate {
-                x: 0,
-                y: u32::from(rows.max(1) - 1),
-            };
-            let pin = self.term.track_grid_ref(Point::Active(bottom)).ok();
+            let blank = self.trailing_blank_rows();
             self.term
                 .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
                 .expect("libghostty resize");
-            drop(pin);
+            if blank < rows.max(1) {
+                self.reflow_blank_rows(blank, oldest.as_ref());
+            }
         } else {
             self.term
                 .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
@@ -1310,6 +1308,147 @@ impl PaneTerm {
             self.clamp_history_to_retained();
         }
         self.generation += 1;
+    }
+
+    /// `screen_resize_y` (screen.c:430-445) with `eat_empty`: a shorter
+    /// screen first deletes the lines below the cursor, whatever they hold,
+    /// as many as it gets shorter by; only the rest of the shrink pushes
+    /// lines into history. Ghostty trims only blank rows, so the lines are
+    /// erased first and the resize trims them (the cursor's row is pinned,
+    /// so nothing above it goes). A cursor waiting to wrap keeps its
+    /// lines: moving it back would lose the wrap.
+    fn eat_below_cursor(&mut self, rows: u16) {
+        let old = self.rows();
+        if rows >= old || self.term.is_cursor_pending_wrap().unwrap_or(false) {
+            return;
+        }
+        let (cx, cy) = self.cursor();
+        let eat = (old - 1 - cy.min(old - 1)).min(old - rows);
+        if eat == 0 {
+            return;
+        }
+        self.write_screen_moves(&format!(
+            "\x1b[{};1H\x1b[J\x1b[{};{}H",
+            old - eat + 1,
+            cy + 1,
+            cx + 1
+        ));
+    }
+
+    /// `screen_resize_y` (screen.c:466-487): a taller screen pulls as many
+    /// lines as it can back out of history, wherever the cursor is, and
+    /// the cursor moves down with its line. Ghostty pulls only with the
+    /// cursor on the last row, so it goes there for the resize. A cursor
+    /// waiting to wrap is left to Ghostty: moving it would lose the wrap.
+    fn grow_pulling_history(&mut self, rows: u16) {
+        let old = self.rows();
+        let (cx, cy) = self.cursor();
+        if rows <= old
+            || cy + 1 >= old
+            || self.hsize == 0
+            || self.term.is_cursor_pending_wrap().unwrap_or(false)
+        {
+            return;
+        }
+        let before = self.term.scrollback_rows().unwrap_or(0);
+        self.write_screen_moves(&format!("\x1b[{old};1H"));
+        self.term
+            .resize(self.cols(), rows, CELL_WIDTH_PX, CELL_HEIGHT_PX)
+            .expect("libghostty resize");
+        let pulled = before.saturating_sub(self.term.scrollback_rows().unwrap_or(0));
+        let cy = usize::from(cy) + pulled;
+        self.write_screen_moves(&format!("\x1b[{};{}H", cy + 1, cx + 1));
+    }
+
+    /// Write `seq` (cursor moves in screen coordinates) with origin mode
+    /// off, so CUP is not relative to the scroll region, and back on after.
+    fn write_screen_moves(&mut self, seq: &str) {
+        let origin = self.term.mode(Mode::ORIGIN).unwrap_or(false);
+        if origin {
+            let _ = self.term.set_mode(Mode::ORIGIN, false);
+        }
+        self.term.vt_write(seq.as_bytes());
+        if origin {
+            let _ = self.term.set_mode(Mode::ORIGIN, true);
+        }
+    }
+
+    /// How many rows at the bottom of the screen hold no text, below the
+    /// cursor's (its line is content, however empty: both reflows keep it).
+    fn trailing_blank_rows(&self) -> u16 {
+        let below = self.rows().saturating_sub(1 + self.cursor().1);
+        let view = self.screen();
+        let snap = view.snapshot();
+        let width = usize::from(snap.cols).max(1);
+        let blank = snap
+            .cells
+            .rchunks(width)
+            .take_while(|row| row.iter().all(|c| c.text.is_empty()))
+            .count();
+        u16::try_from(blank).unwrap_or(u16::MAX).min(below)
+    }
+
+    /// After Ghostty reflowed the screen to a new width: give it the blank
+    /// rows at the bottom tmux's reflow leaves. `grid_reflow`
+    /// (grid.c:1528-1608) keeps every line, so the `blank` rows that ended
+    /// the screen before still end it, and a grid shorter than the screen
+    /// gets blank rows added at the bottom (`grid_reflow_add`); the rest is
+    /// history. Ghostty's reflow instead drops trailing blank rows when
+    /// narrowing and keeps the cursor's screen row when widening. Too few
+    /// blank rows: more are added, scrolling the top rows into history.
+    /// Too many: they go and as many history rows come back. The cursor
+    /// stays on its line. `oldest` is the pin on tmux's oldest history row.
+    fn reflow_blank_rows(&mut self, blank: u16, oldest: Option<&TrackedGridRef>) {
+        let rows = self.rows();
+        let have = self.trailing_blank_rows();
+        let hidden = oldest
+            .and_then(|pin| pin.point(PointSpace::Screen).ok().flatten())
+            .and_then(|p| usize::try_from(p.y).ok())
+            .unwrap_or(0);
+        let history = self.retained_rows().saturating_sub(hidden);
+        let content = history + usize::from(rows - have);
+        let short = u16::try_from(usize::from(rows).saturating_sub(content)).unwrap_or(rows);
+        let want = blank.max(short).min(rows);
+        let (cx, cy) = self.cursor();
+        let resize = |t: &mut Self, r: u16| {
+            t.term
+                .resize(t.cols(), r, CELL_WIDTH_PX, CELL_HEIGHT_PX)
+                .expect("libghostty resize");
+        };
+        if want > have {
+            // Blank rows at the bottom (Ghostty grows the screen with blank
+            // rows while the cursor is off its last row, else it pulls
+            // history back), then a shorter screen with the bottom row
+            // pinned, so Ghostty trims none of them: the top rows go into
+            // history and the cursor goes up with its line.
+            let n = want - have;
+            self.write_screen_moves("\x1b[H");
+            resize(self, rows + n);
+            let bottom = PointCoordinate {
+                x: 0,
+                y: u32::from(rows + n - 1),
+            };
+            let pin = self.term.track_grid_ref(Point::Active(bottom)).ok();
+            resize(self, rows);
+            drop(pin);
+            // screen_resize_cursor: a cursor line now in history leaves the
+            // cursor at the top left.
+            if cy >= n {
+                self.write_screen_moves(&format!("\x1b[{};{}H", cy - n + 1, cx + 1));
+            }
+        } else if want < have {
+            // Ghostty trims the blank rows when the screen gets shorter,
+            // and pulls history back when it grows with the cursor on the
+            // last row. The cursor's own line stays.
+            let n = (have - want).min(rows - 1 - cy);
+            if n == 0 {
+                return;
+            }
+            resize(self, rows - n);
+            self.write_screen_moves(&format!("\x1b[{};1H", rows - n));
+            resize(self, rows);
+            self.write_screen_moves(&format!("\x1b[{};{}H", cy + n + 1, cx + 1));
+        }
     }
 
     /// `resize-pane -T` (cmd-resize-pane.c:71-81, `grid_remove_history`):
@@ -3671,16 +3810,68 @@ mod tests {
         t.resize(9, 8);
         assert_eq!(t.cursor(), (0, 5));
         assert_eq!(t.row(t.history_size()).text(), "cdefghij");
-        // Wider again, by one: the lines still split, now after column 10,
-        // and the history keeps its rows.
+        // Wider by one and taller: the taller screen pulls the history
+        // back first (screen_resize_y), so the blank rows stay below the
+        // cursor (tmux 3.8: hsize 0, cursor 0,10).
         t.resize(10, 13);
-        assert_eq!((t.history_size(), t.cursor()), (5, (0, 5)));
-        assert_eq!(t.row(5).text(), "defghij");
+        assert_eq!((t.history_size(), t.cursor()), (0, (0, 10)));
+        assert_eq!(t.row(1).text(), "defghij");
         // Wide enough for the lines to join: the joined rows come back
         // from history, the cursor stays on its line.
         t.resize(30, 13);
         assert_eq!((t.history_size(), t.cursor()), (0, (0, 5)));
         assert_eq!(t.row(4).text(), "PANE04 abcdefghij");
+    }
+
+    /// A primary-screen program with a footer under its input line (the
+    /// cursor above the last content row): a narrowing splits the lines
+    /// into history, the widening joins them back, and the screen and the
+    /// cursor are where they were (tmux 3.8; the review repro of
+    /// `gap_render_styles`).
+    #[test]
+    fn reflow_keeps_a_footer_under_the_cursor() {
+        let mut t = PaneTerm::new(60, 20, 2000);
+        t.feed(b"L1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nL2 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\r\nfooter\x1b[1A\x1b[2G");
+        t.resize(30, 20);
+        assert_eq!((t.history_size(), t.cursor()), (2, (1, 0)));
+        assert_eq!(t.row(4).text(), "footer");
+        for _ in 0..3 {
+            t.resize(60, 20);
+            assert_eq!((t.history_size(), t.cursor()), (0, (1, 1)));
+            assert_eq!(t.row(0).text(), "L1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            assert_eq!(t.row(2).text(), "footer");
+            t.resize(30, 20);
+        }
+    }
+
+    /// `screen_resize_y` with `eat_empty`: a shorter screen deletes the
+    /// lines below the cursor first, text or not, before pushing any into
+    /// history.
+    #[test]
+    fn a_shorter_screen_eats_the_lines_below_the_cursor() {
+        let mut t = PaneTerm::new(20, 6, 100);
+        t.feed(b"top\r\ncur\r\nf1\r\nf2\r\nf3\x1b[2;1H");
+        t.resize(20, 4);
+        assert_eq!((t.history_size(), t.cursor()), (0, (0, 1)));
+        assert_eq!(t.row(0).text(), "top");
+        assert_eq!(t.row(2).text(), "f1");
+        assert_eq!(t.row(3).text(), "f2");
+        t.resize(20, 1);
+        assert_eq!((t.history_size(), t.cursor()), (1, (0, 0)));
+        assert_eq!(t.row(1).text(), "cur");
+    }
+
+    /// `screen_resize_y`: a taller screen pulls history back wherever the
+    /// cursor is, and the cursor moves down with its line (tmux 3.8).
+    #[test]
+    fn a_taller_screen_pulls_history_above_the_cursor() {
+        let mut t = PaneTerm::new(20, 4, 100);
+        t.feed(b"h1\r\nh2\r\nh3\r\na\r\nb\r\nc\r\nfoot\x1b[2;1H");
+        assert_eq!((t.history_size(), t.cursor()), (3, (0, 1)));
+        t.resize(20, 6);
+        assert_eq!((t.history_size(), t.cursor()), (1, (0, 3)));
+        assert_eq!(t.row(1).text(), "h2");
+        assert_eq!(t.row(6).text(), "foot");
     }
 
     #[test]
