@@ -826,6 +826,42 @@ pub fn set_codepoint_widths<S: AsRef<str>>(items: &[S]) {
     CODEPOINT_WIDTHS.with(|w| *w.borrow_mut() = ranges);
 }
 
+/// The `codepoint-widths` in force as the pane grid takes them: sorted,
+/// not overlapping (a later item wins where items overlap), at or above
+/// U+0080 (ASCII never asks) and at most U+10FFFF.
+#[must_use]
+pub fn codepoint_width_ranges() -> Vec<(u32, u32, u8)> {
+    CODEPOINT_WIDTHS.with(|w| flatten(&w.borrow()))
+}
+
+fn flatten(items: &[(u32, u32, u8)]) -> Vec<(u32, u32, u8)> {
+    let mut out: Vec<(u32, u32, u8)> = Vec::new();
+    for &(lo, hi, width) in items {
+        let (lo, hi) = (lo.max(0x80), hi.min(0x10_ffff));
+        if lo > hi {
+            continue;
+        }
+        // Cut what this item covers out of the earlier ones.
+        let mut kept = Vec::with_capacity(out.len() + 2);
+        for (a, b, w) in out {
+            if b < lo || a > hi {
+                kept.push((a, b, w));
+                continue;
+            }
+            if a < lo {
+                kept.push((a, lo - 1, w));
+            }
+            if b > hi {
+                kept.push((hi + 1, b, w));
+            }
+        }
+        kept.push((lo, hi, width));
+        out = kept;
+    }
+    out.sort_unstable();
+    out
+}
+
 /// `WCHAR_MAX` on glibc and macOS: `wchar_t` is a signed 32-bit int.
 const WCHAR_MAX: u64 = 0x7fff_ffff;
 
@@ -1559,8 +1595,21 @@ mod tests {
             [2, 0, 2, 1, 1],
             "a later item wins; ASCII never asks"
         );
+        assert_eq!(
+            codepoint_width_ranges(),
+            [(0x3b1, 0x3b1, 2), (0x3b2, 0x3b2, 0), (0x3b3, 0x3b3, 2)]
+        );
         set_codepoint_widths::<&str>(&[]);
         assert_eq!(char_width('α'), 1);
+        assert_eq!(
+            flatten(&[(0x10, 0x200, 1), (0x100, 0x7fff_ffff, 2), (0x150, 0x160, 0)]),
+            [
+                (0x80, 0xff, 1),
+                (0x100, 0x14f, 2),
+                (0x150, 0x160, 0),
+                (0x161, 0x10_ffff, 2)
+            ]
+        );
     }
 
     #[test]

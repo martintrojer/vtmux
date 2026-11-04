@@ -16,6 +16,18 @@ pub use capture::{
     capture_lines,
 };
 pub use snapshot::{Cell, Color, ScreenView, Snapshot, Style, Underline, snapshot};
+
+/// tmux's `codepoint-widths` for every pane: from now on printed text takes
+/// these widths over Ghostty's table (`utf8_update_width_cache`; cells
+/// already printed keep theirs, as tmux's grid does). `(first, last,
+/// width)`, inclusive, sorted and not overlapping, widths 0 to 2; empty
+/// clears them. Process-wide, like tmux's width cache.
+///
+/// # Panics
+/// When the ranges are not sorted, overlap or have a width above 2.
+pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) {
+    libghostty_vt::unicode::set_width_overrides(ranges).expect("valid width ranges");
+}
 pub use term::{
     Compression, CompressionActivity, ExtendedKeys, KeyMode, LineMark, MouseModes, MouseTracking,
     Osc133, PaneTerm, Passthrough, history_reads,

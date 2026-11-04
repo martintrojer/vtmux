@@ -6583,3 +6583,45 @@ fn format_cursor_character() {
         runs
     });
 }
+
+/// `codepoint-widths` reaches the pane grid (`utf8_update_width_cache`
+/// feeds every later `utf8_width`, screen-write.c): what a pane prints
+/// after the option is set wraps and moves the cursor by the given widths,
+/// for a wide character made narrow, characters below U+0100 made wide or
+/// zero-width (the printer's batched narrow run), and after unsetting it.
+#[test]
+fn codepoint_widths_reach_the_pane_grid() {
+    compare("codepoint_widths_reach_the_pane_grid", |w| {
+        let s = "\u{1f600}".repeat(10);
+        let cases: [(&[&str], String); 5] = [
+            (&["U+1F600=1"], format!("{s}XY")),
+            (&["U+1F600=1"], format!("ab{s}")),
+            (
+                &["U+00E9=2"],
+                "a\u{e9}|X\u{e9}\u{e9}\u{e9}\u{e9}Z".to_owned(),
+            ),
+            (
+                &["U+00C0-U+00FF=0", "U+00E9=2"],
+                "ab\u{e0}c\u{e9}d\u{ff}e".to_owned(),
+            ),
+            (&[], format!("a\u{e9}|{s}")),
+        ];
+        let mut runs = vec![w.run(&["new", "-d", "-s", "keep", "-x", "10", "-y", "4", "cat"])];
+        for (i, (items, text)) in cases.iter().enumerate() {
+            runs.push(w.run(&["set", "-gu", "codepoint-widths"]));
+            for (j, item) in items.iter().enumerate() {
+                runs.push(w.run(&["set", "-g", &format!("codepoint-widths[{j}]"), item]));
+            }
+            let name = format!("w{i}");
+            // The text, then a marker on the last row once it is all out
+            // (DECSC/DECRC keep the cursor where the text left it).
+            let prog = format!("printf '%s\\0337\\033[4;1Hdone\\0338' '{text}'; exec cat");
+            runs.push(w.run(&["neww", "-d", "-t", "keep:", "-n", &name, "sh", "-c", &prog]));
+            let t = format!("keep:{name}");
+            w.wait_for_text(&t, "done");
+            runs.push(w.run(&["display", "-p", "-t", &t, "#{cursor_x},#{cursor_y}"]));
+            runs.push(w.run(&["capturep", "-p", "-t", &t]));
+        }
+        runs
+    });
+}

@@ -158,6 +158,24 @@ Recorded per commit in git history; the list is kept current:
   (`zig build` of the library with the patch passes and vtmux's
   `cli.rs` `capture_pane_*` tests exercise it).
 
+- `patches/0007-width-overrides.patch` (`unicode/main.zig`,
+  `terminal/Terminal.zig` `print`/`printSliceFast`/`printSliceFill`,
+  `c/unicode.zig`, `c/main.zig`, `lib_vt.zig`,
+  `include/ghostty/vt/unicode.h`): tmux's `codepoint-widths` for the pane
+  grid. `ghostty_unicode_set_width_overrides` sets process-wide ranges
+  (sorted, not overlapping, widths 0 to 2; binary-searched, a no-op check
+  while empty) that the printer and `codepointWidth` take over the table,
+  as tmux's one width cache does. The printer's "0x00-0xFF is narrow"
+  shortcuts (`print`, the batched narrow run and its SIMD scan) stop at
+  0x7F while an override reaches below 0x100. Cells already printed keep
+  their width. Wrapped as `unicode::set_width_overrides` in
+  `libghostty-vt/src/unicode.rs`, the binding added by hand to
+  `bindings.rs`. Tests: new `Terminal: width overrides (vtmux)` and
+  `set_width_overrides` (`zig build test-lib-vt -Dtest-filter=width`);
+  the full `zig build test-lib-vt` gives 3247 pass, 37 skip and the same
+  two failures as without the patch (`tabClear single`, and the kitty
+  temp-file test noted under 0001) on this host.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
