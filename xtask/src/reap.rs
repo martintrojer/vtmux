@@ -393,7 +393,6 @@ mod tests {
             .args(["-c", &fake(&live)])
             .spawn()
             .unwrap();
-        thread::sleep(Duration::from_millis(300));
         let mine = |args: &str| args.contains(&format!("-L{tag}"));
         let picked = |procs: &[Proc]| -> Vec<String> {
             let own = std::process::id();
@@ -404,8 +403,16 @@ mod tests {
                 .map(|p| p.args.clone())
                 .collect()
         };
-        let procs = parse_procs(&ps_full());
-        let got = picked(&procs);
+        // Poll: under load the orphan takes a while to be adopted and exec.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let (procs, got) = loop {
+            thread::sleep(Duration::from_millis(100));
+            let procs = parse_procs(&ps_full());
+            let got = picked(&procs);
+            if got.len() == 1 || std::time::Instant::now() >= deadline {
+                break (procs, got);
+            }
+        };
         assert_eq!(got.len(), 1, "{got:?}");
         assert!(got[0].contains(&orphan), "{got:?}");
         // Reap only ours (other worktrees' servers may be running).
