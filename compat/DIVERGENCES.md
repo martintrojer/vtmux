@@ -215,3 +215,11 @@ product reasons" category.
 - vtmux behaviour: Ghostty marks a row wrapped only when a print wraps, so vtmux prints at the line's last column to get the mark (`remain.rs` `mark_wrapped`): rewriting the cell that was there, or clearing a blank one with ICH. `capture-pane -J` then matches tmux, except when that cell is one it cannot write back as it was (a wide character's half, a hyperlink, a line-drawing character, a TAB, a blank with attributes beyond its background): that line is not marked and `-J` prints it on a line of its own. A wider pane reflows the joined line with its blank cells (Ghostty's rows are full width): `last` then 16 blanks then `DEAD 2`, cursor 20,3; narrower, Ghostty splits it where tmux keeps it.
 - Evidence: the reproduction above against tmux 3.8 and vtmux.
 - Category: Ghostty grid (rows are full width and carry no settable wrap flag, D4).
+
+### D-024: a second stdin read from inside `source-file -` fails at once
+
+- Test / assertion: `crates/vtmux/tests/cli.rs` `source_file_stdin` (the cases tmux finishes: `source - -`, a file then `-`, `-` alone).
+- tmux behaviour: a `source -` or `load-buffer -` among the commands read from stdin by `source-file -` (`printf 'display -p x\nsource -\n' | tmux source -`) waits for ever when the client's stdout is a pipe: the inner `file_read` of `-` needs the client's stdin, which the outer read already has, and the client never answers. With stdout redirected to a file it ends with `Input/output error: -`; when the inner `source -` is the first command it fails at once with `Bad file descriptor: -`. `tmux source - </dev/null` (stdin empty) returns 0 at once.
+- vtmux behaviour: the inner read fails at once with `Bad file descriptor: -` (exit 1), the output of the commands before it printed, however stdout is connected; `source - </dev/null` returns 0 at once, as tmux.
+- Evidence: reference tmux 3.8 under `timeout -k 5 6`, six runs each: `printf 'display -p x\nsource -\n' | tmux source -` and the `load-buffer -` form time out every time with stdout a pipe; `>file` gives `x` and `Input/output error: -`, exit 1. vtmux: 0.01 s, `x` then `Bad file descriptor: -`, exit 1, every time.
+- Category: Do not copy tmux bug (tmux hangs).
