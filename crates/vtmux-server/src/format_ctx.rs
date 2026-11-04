@@ -288,6 +288,8 @@ impl<'a> Ctx<'a> {
             // s->attached: the clients attached to it (format.c
             // format_cb_session_attached, recalculate_sizes).
             "session_attached" => self.attached_to(s.id).count().to_string(),
+            // format_cb_session_active: the client's session is this one.
+            "session_active" => flag(self.client.as_ref()?.session == Some(s.id)),
             // format_cb_session_many_attached.
             "session_many_attached" => flag(self.attached_to(s.id).count() > 1),
             // format_cb_session_attached_list: their names, in client order.
@@ -660,7 +662,8 @@ impl<'a> Ctx<'a> {
             "search_count_partial" => u8::from(m.search_info().2?.1).to_string(),
             "search_match" => m.search_match(),
             "refresh_active" => u8::from(m.refresh_active()).to_string(),
-            "copy_cursor_hyperlink" => String::new(),
+            // window_copy_cursor_hyperlink_cb: the view's cell.
+            "copy_cursor_hyperlink" => m.hyperlink_at(cx, cy).unwrap_or_default(),
             _ => return None,
         })
     }

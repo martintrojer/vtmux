@@ -131,6 +131,11 @@ pub struct WindowCache {
     /// What the last frame was drawn from, when it was a plain one (see
     /// [`PlainFrame`]); `None` otherwise.
     pub plain: std::cell::Cell<Option<PlainFrame>>,
+    /// Each pane's border status line ranges as last drawn
+    /// (`wp->border_status_line.ranges`), for the mouse.
+    pub border_ranges: std::cell::RefCell<
+        std::collections::BTreeMap<vtmux_core::ids::PaneId, Vec<vtmux_core::styled::StyleRange>>,
+    >,
     /// Plain frames [`crate::server::Server`] skipped outright, for tests
     /// to tell the skip from the compositor's own empty diff.
     #[cfg(test)]

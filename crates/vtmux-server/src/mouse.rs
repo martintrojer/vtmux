@@ -172,8 +172,7 @@ impl MouseEvent {
     }
 
     /// The `mouse_*` formats (format.c:1310-1440, 2032-2125) for a client
-    /// whose terminal has started (`started`). `mouse_word`, `mouse_line`
-    /// and `mouse_hyperlink` are not here yet: empty, as with no event.
+    /// whose terminal has started (`started`).
     #[must_use]
     pub fn formats(&self, model: &Model, started: bool) -> Vec<(&'static str, String)> {
         let mut out = Vec::new();
@@ -186,6 +185,9 @@ impl MouseEvent {
             Some((x, y)) => {
                 out.push(("mouse_x", x.to_string()));
                 out.push(("mouse_y", y.to_string()));
+                if let Some(p) = pane.and_then(|p| model.panes.get(&p)) {
+                    out.extend(grid_formats(model, p, x, y));
+                }
             }
             None => {
                 if let Some(line) = on_status {
@@ -227,6 +229,61 @@ impl MouseEvent {
             None
         }
     }
+}
+
+/// `mouse_word`, `mouse_line` and `mouse_hyperlink` at `(x, y)` in pane
+/// `p` (format.c:1310-1381): from copy or view mode's view when the pane
+/// is in one, nothing in any other mode, else from the pane's grid.
+/// `word-separators` is the global session option, as `format_grid_word`
+/// reads it. Empty values are left out (`NULL`).
+fn grid_formats(
+    model: &Model,
+    p: &crate::model::Pane,
+    x: u32,
+    y: u32,
+) -> Vec<(&'static str, String)> {
+    let (x, y) = (
+        usize::try_from(x).unwrap_or(usize::MAX),
+        usize::try_from(y).unwrap_or(usize::MAX),
+    );
+    let separators = model
+        .options
+        .get(TreeId::GlobalSession, "word-separators")
+        .map(|e| e.value.to_text(e.def, None, false))
+        .unwrap_or_default();
+    let (word, text, uri) = if let Some(mode) = p.modes.first() {
+        let Some(m) = mode.as_copy() else {
+            return Vec::new();
+        };
+        (
+            m.word_at(x, y, &separators),
+            m.line_at(y),
+            m.hyperlink_at(x, y),
+        )
+    } else {
+        let t = &p.term;
+        let row = t.history_size() + y;
+        let last = t.history_size() + usize::from(t.rows()) - 1;
+        let word = crate::mode::reader::grid_word(
+            &|y| t.row(y),
+            last,
+            usize::from(t.cols()),
+            (x, row),
+            &separators,
+        );
+        (word, t.row(row).text(), t.hyperlink(x, row))
+    };
+    let mut out = Vec::new();
+    if !word.is_empty() {
+        out.push(("mouse_word", word));
+    }
+    if let Some(uri) = uri {
+        out.push(("mouse_hyperlink", uri));
+    }
+    if !text.is_empty() {
+        out.push(("mouse_line", text));
+    }
+    out
 }
 
 /// What a drag in progress does with each motion (`mouse_drag_update`)
@@ -338,6 +395,50 @@ impl Server {
             .get(usize::try_from(line).ok()?)?
             .iter()
             .find(|r| x >= r.start && x < r.end)
+            .map(|r| r.kind.clone())
+    }
+
+    /// `window_pane_status_get_range` (window.c:2870-2894): the range of
+    /// pane `p`'s border status line, as client `id` last drew it, at
+    /// window position `(x, y)`. The line's columns start two in from the
+    /// pane's left edge.
+    fn border_status_range(
+        &self,
+        id: ClientId,
+        w: WindowId,
+        p: PaneId,
+        x: i64,
+        y: i64,
+    ) -> Option<RangeKind> {
+        let window = self.model.windows.get(&w)?;
+        let rect = self.model.panes.get(&p)?.rect;
+        let floating = window.is_floating(p);
+        let status = if floating {
+            match self
+                .model
+                .number_option(TreeId::Pane(p), "pane-border-status")
+            {
+                1 | 3 => vtmux_core::layout::PaneStatus::Top,
+                2 | 4 => vtmux_core::layout::PaneStatus::Bottom,
+                _ => vtmux_core::layout::PaneStatus::Off,
+            }
+        } else {
+            self.model.border_status(w)
+        };
+        let line = match status {
+            vtmux_core::layout::PaneStatus::Top => i64::from(rect.yoff) - 1,
+            vtmux_core::layout::PaneStatus::Bottom => i64::from(rect.yoff) + i64::from(rect.sy),
+            vtmux_core::layout::PaneStatus::Off => return None,
+        };
+        if y != line {
+            return None;
+        }
+        let at = usize::try_from(x - i64::from(rect.xoff) - 2).ok()?;
+        let cache = self.clients.get(&id)?.window_cache.border_ranges.borrow();
+        cache
+            .get(&p)?
+            .iter()
+            .find(|r| at >= r.start && at < r.end)
             .map(|r| r.kind.clone())
     }
 
@@ -552,6 +653,14 @@ impl Server {
                     } else {
                         self.mouse_in_pane(window, p, wx, wy)
                     };
+                    // server-client.c:1109-1114: a range on the pane's
+                    // border status line is a control location.
+                    if loc == Some(MouseLocation::Border)
+                        && let Some(RangeKind::Control(n)) =
+                            self.border_status_range(id, window, p, wx, wy)
+                    {
+                        loc = Some(MouseLocation::control(n));
+                    }
                     ev.target.pane = Some(p);
                     ev.target.window = Some(window);
                     wp = Some(p);

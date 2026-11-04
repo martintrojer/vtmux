@@ -199,7 +199,19 @@ pub fn exec(
     let now = Instant::now();
     let at = now.checked_add(delay.unwrap_or_default()).unwrap_or(now);
     if args.flag('C') {
-        let value = args.positionals.first().cloned();
+        // args_make_commands_prepare(..., expand 1): a string is expanded
+        // now, for the target and its best client
+        // (`format_single_from_target`); a block stays as it is.
+        let value = args.positionals.first().map(|v| {
+            if let ArgValue::Commands(_) = v {
+                return v.clone();
+            }
+            let tc = server.target_client(item.client, item.origin);
+            ArgValue::Str(vtmux_core::format::expand_str(
+                &v.text(),
+                &server.format_ctx(found, tc),
+            ))
+        });
         server.timer_add(
             at,
             Box::new(move |server| {

@@ -220,8 +220,7 @@ status = "xfail"
 reason = "format modifier N/s is wrong: `#{N/s:main}` gives 0, expected 1 (session-exists test); later the script uses new-pane"
 
 [tests."format-mouse.sh"]
-status = "xfail"
-reason = "missing format variable mouse_word/mouse_line: `x=2 y=0 word= line= pane=%0` (mouse_x, mouse_y and mouse_pane work)"
+status = "pass"
 
 [tests."format-no-current-window.sh"]
 status = "xfail"

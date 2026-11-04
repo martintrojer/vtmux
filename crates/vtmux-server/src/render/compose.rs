@@ -142,6 +142,9 @@ pub struct PaneDraw {
     pub border: CellStyle,
     /// The drawn status line, empty when there is none.
     pub status: Vec<styled::Cell>,
+    /// The status line's `range=` ranges (`wp->border_status_line.ranges`),
+    /// in its own columns.
+    pub status_ranges: Vec<styled::StyleRange>,
     /// Per content cell, row-major: in copy mode's selection
     /// (`GRID_FLAG_SELECTED`), so never erased as part of an empty run.
     /// Empty without a selection.
@@ -613,6 +616,7 @@ fn draw_line_keeping<T: PartialEq + Clone>(
 /// `under` is [`Scene::status_line`]. Under the focus ring (D23) the line
 /// cells on the active pane's rectangle take `ring` (the active border
 /// style), so the rectangle stays one colour behind another pane's label.
+/// The line comes with its ranges.
 #[must_use]
 pub fn pane_status(
     under: &[Option<Shape>],
@@ -621,9 +625,12 @@ pub fn pane_status(
     lines: Lines,
     index: Option<u32>,
     expanded: &str,
-) -> Vec<styled::Cell> {
+) -> styled::Line {
     if under.is_empty() {
-        return Vec::new();
+        return styled::Line {
+            cells: Vec::new(),
+            ranges: Vec::new(),
+        };
     }
     let row = under
         .iter()
@@ -640,7 +647,7 @@ pub fn pane_status(
         attrs: border.attrs.without(Attrs::ACS),
         ..border.clone()
     };
-    styled::draw_onto(&base, row, expanded, false, false).cells
+    styled::draw_onto(&base, row, expanded, true, false)
 }
 
 #[cfg(test)]
@@ -664,7 +671,8 @@ mod tests {
             Lines::Single,
             None,
             "#[reverse]0#[default] x",
-        );
+        )
+        .cells;
         let text: String = cells.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(text, "0 x───");
         assert!(cells[0].style.attrs.contains(Attrs::REVERSE));
@@ -824,6 +832,7 @@ mod tests {
                                 lines: Lines::Single,
                                 border: CellStyle::default(),
                                 status: Vec::new(),
+                                status_ranges: Vec::new(),
                                 selected: Vec::new(),
                             },
                         )

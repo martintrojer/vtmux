@@ -2498,6 +2498,14 @@ impl Server {
         ) else {
             return true;
         };
+        if let Some(c) = cache {
+            *c.border_ranges.borrow_mut() = draw
+                .panes
+                .iter()
+                .filter(|(_, d)| !d.status_ranges.is_empty())
+                .map(|(p, d)| (*p, d.status_ranges.clone()))
+                .collect();
+        }
         let theme = source.theme(caps);
         let composed = cache.map(|c| {
             crate::render::compose::compose_cached(

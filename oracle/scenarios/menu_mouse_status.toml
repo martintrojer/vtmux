@@ -1,0 +1,88 @@
+# The default status-line menus by mouse (key-bindings.c): a right-click
+# on a window's name opens the window menu above it (MouseDown3Status,
+# -xW -yW), on the session name the session menu (MouseDown3StatusLeft,
+# `run -C` expands the menu's items first, -xM -yW), and with Meta on a
+# pane the pane menu, even where the click would go to the pane
+# (M-MouseDown3Pane). Each opens with the target of the click (-t=): its
+# items act on that window or session. The menu belongs to the target's
+# window (menu.c menu_display, fs->w), so a right-click on another
+# window's name opens a menu that shows only once that window is
+# current. Releases on the status line are outside the menu
+# (server_client_handle_menu_key: UINT_MAX) and close it.
+name = "menu_mouse_status"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "one", "-x", "60", "-y", "19", "cat"] },
+  { run = ["new", "-d", "-s", "b", "-n", "bw", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["select-pane", "-t", "b", "-T", "pb"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "two", "cat"] },
+  { run = ["select-pane", "-t", "a:1", "-T", "p1"] },
+  { run = ["neww", "-d", "-t", "a:2", "-n", "three", "cat"] },
+  { run = ["select-pane", "-t", "a:2", "-T", "p2"] },
+  { attach = { session = "a" } },
+  { settle = { quiet_ms = 1000 } },
+  # Right-click "0:one": the window menu over its name; the release on
+  # the status line closes it.
+  { keys = "\u001b[<2;7;20M" },
+  { screen = {} },
+  { keys = "\u001b[<2;7;20m" },
+  { screen = {} },
+  # Again, drag up to "Swap Right" and release.
+  { keys = "\u001b[<2;7;20M" },
+  { settle = {} },
+  { keys = "\u001b[<34;9;9M" },
+  { screen = {} },
+  { keys = "\u001b[<2;9;9m" },
+  { screen = {} },
+  { run = ["list-windows", "-t", "a", "-F", "#{window_index}:#{window_name} #{window_active}"] },
+  # Right-click "2:three": its window gets the menu, not shown here.
+  # A click selects window 2; its menu then takes the release, which is
+  # on the status line, so it closes.
+  { keys = "\u001b[<2;22;20M" },
+  { screen = {} },
+  { keys = "\u001b[<2;22;20m" },
+  { settle = {} },
+  { keys = "\u001b[<0;22;20M" },
+  { screen = {} },
+  { keys = "\u001b[<0;22;20m" },
+  { screen = {} },
+  { run = ["select-window", "-t", "a:0"] },
+  { settle = { react = true } },
+  # The session menu from the session name: switch to b with a click.
+  { keys = "\u001b[<2;2;20M" },
+  { screen = {} },
+  { keys = "\u001b[<34;4;11M" },
+  { screen = {} },
+  { keys = "\u001b[<2;4;11m" },
+  { screen = {} },
+  { run = ["list-clients", "-F", "#{client_session}"] },
+  { run = ["switch-client", "-t", "a"] },
+  { settle = { react = true } },
+  # M-right-click on the pane in copy mode: the pane menu, not the mode.
+  # Its release closes it (nothing was highlighted). Again, drag with
+  # Meta to "Horizontal Split" and release.
+  { run = ["copy-mode", "-t", "a"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<10;30;10M" },
+  { screen = {} },
+  { keys = "\u001b[<10;30;10m" },
+  { screen = {} },
+  { keys = "\u001b[<10;30;10M" },
+  { settle = {} },
+  { keys = "\u001b[<42;25;9M" },
+  { screen = {} },
+  { keys = "\u001b[<10;25;9m" },
+  { settle = {} },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "q1"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_index} #{pane_mode}"] },
+  # M-right-click on a window name: the window menu too.
+  { keys = "\u001b[<10;10;20M" },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+]

@@ -2090,6 +2090,12 @@ fn run_shell_cli() {
             &["run", "-C", "display -p hi"],
             &["run", "-C", "nosuch"],
             &["run", "-C", "{"],
+            // args_make_commands_prepare: the string is expanded first.
+            &[
+                "run",
+                "-C",
+                "display -p '#{session_name}' '##{session_name}'",
+            ],
             &[
                 "run",
                 "-C",

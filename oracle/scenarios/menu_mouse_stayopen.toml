@@ -1,0 +1,116 @@
+# Menus that stay open (-O, MENU_STAYOPEN) and keyboard menus by mouse
+# (menu.c menu_key). The default MouseDown1Control9 binding (the [x] of
+# pane-border-format with mouse on, server-client.c:1109-1114
+# window_pane_status_get_range) opens a kill confirmation with -O at the
+# mouse, over the border status line, which is drawn only as wide as the
+# menu leaves it (redraw_pane_status_width), so its right-aligned
+# controls move left. The click's release (on the top border, outside)
+# leaves it open. Moves and the wheel highlight. A press chooses the item
+# already highlighted: menu.c:375-380 sets the choice only after the
+# `goto chosen`, so a press with nothing highlighted closes the menu, and
+# a press on a highlighted disabled item keeps it open. "Yes" kills the
+# pane of the click. A menu opened with no mouse event (a key or the
+# CLI) takes a button 1 press and closes on anything else
+# (MENU_NOMOUSE); with -M it is driven by the mouse.
+name = "menu_mouse_stayopen"
+size = [60, 20]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["set", "-g", "pane-border-status", "top"] },
+  { run = ["select-pane", "-t", "a", "-T", "p0"] },
+  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["select-pane", "-t", "a:0.1", "-T", "p1"] },
+  { run = ["select-pane", "-t", "a:0.0"] },
+  { attach = { session = "a" } },
+  { settle = { quiet_ms = 1000 } },
+  { screen = {} },
+  { keys = "\u001b[<0;58;1M" },
+  { screen = {} },
+  { keys = "\u001b[<0;58;1m" },
+  { screen = {} },
+  { keys = "\u001b[<35;50;2M" },
+  { screen = {} },
+  { keys = "\u001b[<64;50;3M" },
+  { screen = {} },
+  { keys = "\u001b[<35;10;10M" },
+  { screen = {} },
+  # A press with nothing highlighted closes without running anything.
+  { keys = "\u001b[<0;50;2M" },
+  { screen = {} },
+  { keys = "\u001b[<0;50;2m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_index} #{pane_title}"] },
+  # A press outside closes too.
+  { keys = "\u001b[<0;58;1M\u001b[<0;58;1m" },
+  { screen = {} },
+  { keys = "\u001b[<0;10;10M" },
+  { screen = {} },
+  { keys = "\u001b[<0;10;10m" },
+  { settle = {} },
+  # "No", highlighted then pressed: closes, the pane stays.
+  { keys = "\u001b[<0;58;1M\u001b[<0;58;1m" },
+  { settle = {} },
+  { keys = "\u001b[<35;50;3M" },
+  { settle = {} },
+  { keys = "\u001b[<0;50;3M" },
+  { screen = {} },
+  { keys = "\u001b[<0;50;3m" },
+  { settle = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_index} #{pane_title}"] },
+  # "Yes": kills the pane of the click, not the active one.
+  { keys = "\u001b[<0;58;1M\u001b[<0;58;1m" },
+  { settle = {} },
+  { keys = "\u001b[<35;50;2M" },
+  { settle = {} },
+  { keys = "\u001b[<0;50;2M" },
+  { screen = {} },
+  { keys = "\u001b[<0;50;2m" },
+  { screen = {} },
+  { run = ["list-panes", "-t", "a", "-F", "#{pane_index} #{pane_title}"] },
+  # A CLI menu with -O -M: the disabled item, highlighted and pressed,
+  # stays open; "Two" runs.
+  { run = ["display-menu", "-O", "-M", "-x", "2", "-y", "8", "One", "1", "set -g @c one", "-Off", "o", "", "Two", "2", "set -g @c two"] },
+  { screen = {} },
+  { keys = "\u001b[<35;5;6M" },
+  { screen = {} },
+  { keys = "\u001b[<0;5;6M" },
+  { screen = {} },
+  { keys = "\u001b[<0;5;6m" },
+  { screen = {} },
+  { keys = "\u001b[<35;5;7M" },
+  { settle = {} },
+  { keys = "\u001b[<0;5;7M" },
+  { screen = {} },
+  { run = ["show", "-gv", "@c"] },
+  # -M without -O: a press highlights, the release runs.
+  { run = ["display-menu", "-M", "-x", "2", "-y", "8", "One", "1", "set -g @c one", "Two", "2", "set -g @c two"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<0;5;6M" },
+  { screen = {} },
+  { keys = "\u001b[<0;5;6m" },
+  { screen = {} },
+  { run = ["show", "-gv", "@c"] },
+  # No -M: a button 1 press inside or out leaves the choice; its release
+  # closes, as do a move and another button.
+  { run = ["display-menu", "-x", "2", "-y", "8", "One", "1", "set -g @c one", "Two", "2", "set -g @c two"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<0;5;7M" },
+  { screen = {} },
+  { keys = "\u001b[<0;30;15M" },
+  { screen = {} },
+  { keys = "\u001b[<0;30;15m" },
+  { screen = {} },
+  { run = ["display-menu", "-x", "2", "-y", "8", "One", "1", "set -g @c one", "Two", "2", "set -g @c two"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<35;5;7M" },
+  { screen = {} },
+  { run = ["display-menu", "-x", "2", "-y", "8", "One", "1", "set -g @c one", "Two", "2", "set -g @c two"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<2;30;15M" },
+  { screen = {} },
+  { keys = "\u001b[<2;30;15m" },
+  { screen = {} },
+  { run = ["show", "-gv", "@c"] },
+]
