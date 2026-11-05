@@ -241,12 +241,23 @@
       },
       {
         "run": [
+          "set-hook",
+          "-g",
+          "window-unlinked",
+          "wait-for -S gone"
+        ]
+      },
+      {
+        "run": [
           "respawnw",
           "-k",
           "-t",
           "a:0",
           "exit 0"
         ]
+      },
+      {
+        "wait_for": "gone"
       },
       {
         "run": [
@@ -492,6 +503,24 @@
     },
     {
       "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
       "observation": {
         "kind": "cli",
         "stdout": "a: 2 windows (created <DATE>)\nkeep: 1 windows (created <DATE>)\n",
