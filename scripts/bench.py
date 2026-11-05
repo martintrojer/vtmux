@@ -4,7 +4,7 @@
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
 Scenarios: idle scale history startup throughput owner_idle owner_startup throughput_attached render many_clients
-           (default: all), and trickle (by name only: about 22 min).
+           agent_panes (default: all), and trickle (by name only: about 22 min).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
@@ -27,7 +27,8 @@ per case; `fill` is 150k lines at once), TRICKLE_SECS (1200), TRICKLE_IDLE_SECS 
 TRICKLE_LIMIT (100000), TRICKLE_PREFILL (1: every rate case first writes the 150k lines of `fill`, so the history starts at
 the limit; 0: the trickle alone), BLEND=1 (the attached scenarios
 with `vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'` set and the reader answering OSC 10/11, D26;
-tmux ignores the option). Run cargo through `mise exec --`.
+tmux ignores the option), AGENT_PANES ("5 10 20"),
+AGENT_CLIENTS ("1 2"), AGENT_SECS (10). Run cargo through `mise exec --`.
 """
 import ctypes
 import fcntl
@@ -915,7 +916,73 @@ def scenario_many_clients(env):
             "rows": {f"sync {'on' if y else 'off'}": v for y, v in out.items()}}
 
 
-ATTACHED = {"throughput_attached": scenario_throughput_attached, "render": scenario_render, "many_clients": scenario_many_clients}
+AGENT_PANES = [int(n) for n in os.environ.get("AGENT_PANES", "5 10 20").split()]
+AGENT_CLIENTS = [int(n) for n in os.environ.get("AGENT_CLIENTS", "1 2").split()]
+AGENT_SECS = float(os.environ.get("AGENT_SECS", "10"))
+
+
+def scenario_agent_panes(env):
+    """N panes running scripts/agent_tui.py (pi-like synchronized redraws at real speed),
+    2 panes per window; AGENT_CLIENTS attached 200x50 clients (sync on), the first on
+    window 0, the second on a session that has window 1 linked. Server CPU over AGENT_SECS
+    of steady state."""
+    emitter = os.path.join(ROOT, "scripts", "agent_tui.py")
+    out = {}
+    for n in AGENT_PANES:
+        for nc in AGENT_CLIENTS:
+            def one(which, n=n, nc=nc):
+                s = env.server(which)
+                cmd = lambda i: f"exec python3 '{emitter}' {i + 1}"  # noqa: E731
+                s.run("new", "-d", "-s", "a", "-n", "w0", "-x", str(CLIENT_COLS), "-y", str(CLIENT_ROWS - 1), cmd(0))
+                s.find_pid()
+                clients = []
+                try:
+                    pin_terminal(s)
+                    s.run("set", "-g", "default-size", f"{CLIENT_COLS}x{CLIENT_ROWS - 1}", ";", "set", "-g", "automatic-rename", "off")
+                    s.run("set", "-g", "pane-border-format", "agent")
+                    for i in range(1, n):
+                        if i % 2:
+                            s.run("splitw", "-d", "-h", "-t", f"a:w{i // 2}", cmd(i))
+                        else:
+                            s.run("neww", "-d", "-t", "a:", "-n", f"w{i // 2}", cmd(i))
+                    panes = len(s.run("list-panes", "-a", "-F", "x").split())
+                    if panes != n:
+                        raise RuntimeError(f"agent_panes: {panes} panes, expected {n}")
+                    # session b shows window 1 (a linked window, not a session group: the old vtmux has no groups)
+                    w = "w1" if n > 2 else "w0"
+                    s.run("new", "-d", "-s", "b", "-n", "x", "cat", ";", "link-window", "-s", f"a:{w}", "-t", "b:9", ";",
+                          "kill-window", "-t", "b:x", ";", "select-window", "-t", "b:9")
+                    # not attach_all: the panes never go quiet
+                    clients = [Client(s, sess, CLIENT_COLS, CLIENT_ROWS, True) for sess in ("a", "b")[:nc]]
+                    deadline = time.monotonic() + 15
+                    while len(s.run("list-clients", "-F", "x").split()) < nc:
+                        if time.monotonic() > deadline:
+                            raise RuntimeError("agent_panes: clients did not attach")
+                        time.sleep(0.05)
+                    time.sleep(2)  # first full frames, then steady state
+                    with Attached(s, clients) as a:
+                        time.sleep(AGENT_SECS)
+                        a.client_cpu = sum(cpu_ms(c.pid, fine=True) for c in clients) - a.cc0
+                        a.term_bytes = sum(c.bytes for c in clients) - a.b0
+                        a.bsu = sum(c.bsu for c in clients) - a.f0
+                    if nc and not all(c.replied for c in clients):
+                        raise RuntimeError("agent_panes: the DECRQM 2026 query never arrived")
+                    return {"server_cpu_pct": a.p.cpu / 10 / a.p.wall, "client_cpu_pct": a.client_cpu / 10 / a.p.wall,
+                            "term_kb_per_s": a.term_bytes / 1024 / a.p.wall, "frames_per_s": a.bsu / a.p.wall,
+                            "wakeups_per_s": None if a.p.wakeups is None else a.p.wakeups / a.p.wall,
+                            "rss_mb": rss_kb(s.pid) / 1024}
+                finally:
+                    s.kill()
+                    for c in clients:
+                        c.close()
+            out[(n, nc)] = env.per_binary(one)
+    return {"title": f"agent_panes (N panes of scripts/agent_tui.py, pi-like synchronized redraws, 2 panes per window; "
+                     f"{'/'.join(map(str, AGENT_CLIENTS))} {CLIENT_COLS}x{CLIENT_ROWS} clients with sync on, the second on window 1; {AGENT_SECS:g} s)",
+            "rows": {f"{n} panes / {nc} clients": v for (n, nc), v in out.items()}}
+
+
+ATTACHED = {"throughput_attached": scenario_throughput_attached, "render": scenario_render, "many_clients": scenario_many_clients,
+            "agent_panes": scenario_agent_panes}
 ALL += list(ATTACHED)
 
 
@@ -1030,10 +1097,14 @@ def render_attached(name, res):
         "many_clients": [("wall s", "wall_s", 2), ("server CPU s", "server_cpu_s", 2), ("clients CPU s (sum)", "client_cpu_s", 2), ("total CPU s", "total_cpu_s", 2),
                          ("terminal MB (sum)", "term_mb", 1), ("RSS MB (idle, attached)", "rss_attached_mb", 1),
                          ("RSS MB (after)", "rss_mb", 1), ("peak RSS MB", "peak_rss_mb", 1)],
+        "agent_panes": [("server CPU %", "server_cpu_pct", 1), ("clients CPU % (sum)", "client_cpu_pct", 1),
+                        ("terminal KB/s (sum)", "term_kb_per_s", 1), ("sync frames/s (sum)", "frames_per_s", 0),
+                        ("server wakeups/s", "wakeups_per_s", 0), ("RSS MB", "rss_mb", 1)],
     }[name]
     for per in res["rows"].values():
         for m in per.values():
-            m["total_cpu_s"] = m["server_cpu_s"] + m["client_cpu_s"]
+            if "server_cpu_s" in m:
+                m["total_cpu_s"] = m["server_cpu_s"] + m["client_cpu_s"]
     rows = [[k, b, *[fmt(m[key], nd) for _, key, nd in cols]] for k, per in res["rows"].items() for b, m in per.items()]
     return f"### {res['title']}\n\n" + table(["case", "binary", *[c[0] for c in cols]], rows) + "\n"
 
