@@ -1,0 +1,58 @@
+# A button-1 press on the prompt's line (status.c status_prompt_key,
+# window.c window_pane_prompt_key, prompt.c prompt_mouse): on a match Tab
+# listed it replaces the word with the match and a space
+# (prompt_mouse_complete); on the space between two matches it does
+# nothing; elsewhere on the line it moves the cursor, the label and
+# anything left of the input to its first shown column. A click on
+# another row goes on to the pane. The same for a pane prompt
+# (command-prompt -P) on the pane's last line.
+name = "prompt_mouse"
+size = [60, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "cat"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["bind", "-n", "M-p", "command-prompt", "-P"] },
+  { attach = { session = "a" } },
+  { keys = "\u0002:" },
+  { settle = {} },
+  { keys = "ne\t" },
+  { screen = {} },
+  { keys = "\u001b[<0;19;6M\u001b[<0;19;6m" },
+  { screen = {} },
+  { keys = "-d" },
+  { screen = {} },
+  { keys = "\u001b[<0;3;6M\u001b[<0;3;6m" },
+  { keys = "X" },
+  { screen = {} },
+  { keys = "\u001b[<0;1;6M\u001b[<0;1;6m" },
+  { keys = "Y" },
+  { screen = {} },
+  { keys = "\u001b[<0;50;6M\u001b[<0;50;6m" },
+  { keys = "Z" },
+  { screen = {} },
+  { keys = "\u0015ne\t" },
+  { screen = {} },
+  { keys = "\u001b[<0;13;6M\u001b[<0;13;6m" },
+  { screen = {} },
+  { keys = "\u001b[<32;20;6M" },
+  { screen = {} },
+  { keys = "\u001b[<0;9;6M\u001b[<0;9;6m" },
+  { screen = {} },
+  { keys = "\u001b[<0;9;2M\u001b[<0;9;2m" },
+  { screen = {} },
+  { keys = "\u0003" },
+  { settle = {} },
+  { keys = "\u001bp" },
+  { settle = {} },
+  { keys = "ne\t" },
+  { screen = {} },
+  { keys = "\u001b[<0;30;5M\u001b[<0;30;5m" },
+  { screen = {} },
+  { keys = "\u001b[<0;2;5M\u001b[<0;2;5m" },
+  { keys = "W" },
+  { screen = {} },
+  { keys = "\u0003" },
+  { screen = {} },
+]

@@ -448,12 +448,8 @@ impl Server {
         if !read_only && self.menu_key(id, core, mouse.as_ref()) {
             return None;
         }
-        if core == Key::MOUSE {
-            // status_prompt_key and window_pane_prompt_key: only a press
-            // on the prompt's line, to move its cursor (not here yet); a
-            // visible pane prompt uses every mouse event up
-            // (server-client.c:1855-1857).
-            if !read_only && self.client_has_pane_prompt(id) {
+        if let Some(m) = &mouse {
+            if !read_only && self.prompts_mouse(id, m) {
                 return None;
             }
         } else if !read_only && self.prompts_key(id, core) {

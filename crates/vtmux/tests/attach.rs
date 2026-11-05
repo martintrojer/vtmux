@@ -3651,6 +3651,47 @@ fn history_file_is_saved_at_exit_and_loaded_after_the_config() {
     }
 }
 
+/// `prompt_load_history` (prompt-history.c:79-106) reads lines as bytes:
+/// a line that is not UTF-8 is listed as it is by `show-prompt-history`
+/// and written back unchanged when the server exits, on both servers.
+#[test]
+fn history_file_keeps_lines_that_are_not_utf8() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let file = w.home.path().join("hist");
+        let data: &[u8] = b"command:display \xff\xfe\nsearch:caf\xe9\n";
+        std::fs::write(&file, data).unwrap();
+        let conf = w.home.path().join("c.conf");
+        std::fs::write(&conf, format!("set -g history-file {}\n", file.display())).unwrap();
+        let conf = conf.to_str().unwrap();
+        let out = w.cli(&[
+            "-f",
+            conf,
+            "new",
+            "-d",
+            "-s",
+            "b",
+            "cat",
+            ";",
+            "show-prompt-history",
+        ]);
+        assert_eq!(
+            out.stdout,
+            b"History for command:\n\n1: display \xff\xfe\n\nHistory for search:\n\n1: caf\xe9\n\n",
+            "{}",
+            w.bin.display()
+        );
+        std::fs::remove_file(&file).unwrap();
+        assert!(w.cli(&["kill-server"]).status.success());
+        let end = Instant::now() + Duration::from_secs(10);
+        while !std::fs::read(&file).is_ok_and(|t| t.ends_with(b"\n") && t.len() == data.len()) {
+            assert!(Instant::now() < end, "history file not written");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(std::fs::read(&file).unwrap(), data, "{}", w.bin.display());
+    }
+}
+
 /// A command client running `confirm-before` waits for the answer on the
 /// attached client and exits 0 when it confirmed, 1 when not
 /// (cmd-confirm-before.c:143-149). `command-prompt` waits too, and the
