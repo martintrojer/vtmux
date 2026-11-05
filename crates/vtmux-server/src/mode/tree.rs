@@ -229,6 +229,13 @@ pub enum Action {
     /// Swap the current item with the next (1) or previous (-1) at its
     /// depth (`J`, `K`).
     Swap(isize),
+    /// Open the menu for line `line` at `at` in the pane: the mode's, or
+    /// mode-tree's own when `outside` the list (`mode_tree_display_menu`).
+    Menu {
+        line: usize,
+        at: (u32, u32),
+        outside: bool,
+    },
 }
 
 /// What the tree needs from the mode while handling keys: building the
@@ -947,8 +954,9 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
     /// `mode_tree_key`'s mouse branch (mode-tree.c:1582-1617) after the
     /// prompt: `at` is the event's position in the pane (`cmd_mouse_at`),
     /// `None` outside it. A press or double click on a row selects it;
-    /// the double click is then Enter. Everything else is used up (the
-    /// menu of `MouseDown3Pane` is not here). The help screen takes the
+    /// the double click is then Enter. A right-click opens the menu
+    /// (`mode_tree_display_menu`): the mode's own on the list, mode-tree's
+    /// outside it. Everything else is used up. The help screen takes the
     /// key too.
     pub fn mouse_key(&mut self, key: Key, at: Option<(u32, u32)>) -> Action {
         use vtmux_core::keys::{MouseKind, MouseLocation};
@@ -961,23 +969,56 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
         let Some((x, y)) = at else {
             return Action::Key(None);
         };
-        let (x, y) = (x as usize, y as usize);
-        if x > self.width || y > self.height {
-            return Action::Key(None);
-        }
         let k = key.key_and_modifiers();
         let down1 = Key::mouse(MouseKind::Down, 1, MouseLocation::Pane);
         let down3 = Key::mouse(MouseKind::Down, 3, MouseLocation::Pane);
         let double1 = Key::mouse(MouseKind::DoubleClick, 1, MouseLocation::Pane);
-        if self.offset + y < self.lines.len() {
+        let row = y as usize;
+        // mode_tree_display_menu: the row's line, or the current one below
+        // the last.
+        let menu = |t: &Self, outside: bool| Action::Menu {
+            line: if t.offset + row > t.lines.len() - 1 {
+                t.current
+            } else {
+                t.offset + row
+            },
+            at: (x, y),
+            outside,
+        };
+        if x as usize > self.width || row > self.height {
+            if k == down3 {
+                return menu(self, true);
+            }
+            return Action::Key(None);
+        }
+        if self.offset + row < self.lines.len() {
             if k == down1 || k == down3 || k == double1 {
-                self.current = self.offset + y;
+                self.current = self.offset + row;
             }
             if k == double1 {
                 return Action::Key(Some(Key::ascii(b'\r')));
             }
         }
+        if k == down3 {
+            return menu(self, false);
+        }
         Action::Key(None)
+    }
+
+    /// The name of line `line`'s item (`mti->name`), for its menu's title.
+    #[must_use]
+    pub fn line_name(&self, line: usize) -> Option<&str> {
+        Some(self.items[self.lines.get(line)?.item].name.as_str())
+    }
+
+    /// `mode_tree_menu_callback`: line `line` becomes the current one, if
+    /// it is still there; `false` if not.
+    pub fn set_current_line(&mut self, line: usize) -> bool {
+        if line >= self.lines.len() {
+            return false;
+        }
+        self.current = line;
+        true
     }
 
     /// `mode_tree_clear_tagged` on `id`'s children.

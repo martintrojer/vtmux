@@ -7,7 +7,7 @@
 //! client is left.
 //!
 //! Not here yet: `z`/`Z` (`server_client_suspend`: vtmux has no
-//! suspend-client) and the mouse menu.
+//! suspend-client).
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::keys::Key;
@@ -293,6 +293,18 @@ impl TreeMode for ClientMode {
     ];
     const HELP_WIDTH: usize = 0;
     const HELP_ITEM: &'static str = "client";
+    /// `window_client_menu_items` (window-client.c); `Tag All` sends
+    /// `\024`, as tmux does.
+    const MENU: &'static [(&'static str, Key)] = &[
+        ("Detach", Key::ascii(b'd')),
+        ("Detach Tagged", Key::ascii(b'D')),
+        ("", Key::NONE),
+        ("Tag", Key::ascii(b't')),
+        ("Tag All", Key::ascii(0x14)),
+        ("Tag None", Key::ascii(b'T')),
+        ("", Key::NONE),
+        ("Cancel", Key::ascii(b'q')),
+    ];
 
     fn tree(&self) -> &ModeTree<ClientId, Item> {
         &self.tree

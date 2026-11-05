@@ -145,6 +145,18 @@ pub struct Menu {
     /// The opening event (`md->key`, `md->m`), given to the commands.
     pub key: Option<Key>,
     pub mouse: Option<MouseEvent>,
+    /// A tree mode's menu (`mode_tree_display_menu`): choosing an item
+    /// hands its key to the mode instead of running a command.
+    pub tree: Option<TreeMenu>,
+}
+
+/// Whose tree-mode menu it is (`struct mode_tree_menu`).
+#[derive(Clone, Copy, Debug)]
+pub struct TreeMenu {
+    pub pane: vtmux_core::ids::PaneId,
+    /// The mode's [`crate::mode::tree_mode::Common::serial`].
+    pub serial: u64,
+    pub line: usize,
 }
 
 impl Menu {
@@ -468,12 +480,26 @@ impl Server {
             Action::Stay => {}
             Action::Close => self.menu_close(w),
             Action::Run(i) => {
-                let Entry::Item { command, .. } = menu.items.entries[i].clone() else {
+                let Entry::Item {
+                    command,
+                    key: item_key,
+                    ..
+                } = menu.items.entries[i].clone()
+                else {
                     return true;
                 };
-                let (found, key, mouse) = (menu.found, menu.key, menu.mouse.clone());
+                let (found, key, mouse, tree) =
+                    (menu.found, menu.key, menu.mouse.clone(), menu.tree);
                 self.menu_close(w);
-                self.menu_run(c, &command, found, key, mouse);
+                match tree {
+                    // menu_key: `md->cb` with the item's key.
+                    Some(t) => {
+                        if let Some(k) = item_key {
+                            self.tree_menu_choose(c, t, k);
+                        }
+                    }
+                    None => self.menu_run(c, &command, found, key, mouse),
+                }
             }
         }
         true
@@ -594,6 +620,7 @@ mod tests {
             found: Found::default(),
             key: None,
             mouse: None,
+            tree: None,
         }
     }
 

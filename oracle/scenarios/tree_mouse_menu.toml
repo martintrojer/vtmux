@@ -1,0 +1,67 @@
+# Right-click menus in tree modes (mode-tree.c mode_tree_key's mouse
+# branch, mode_tree_display_menu, mode_tree_menu_callback): a right-click
+# on a row makes it current and opens the mode's menu titled with the
+# item's name, centred on the pointer with its top border on the pointer's
+# row; a shortcut key chooses an item, whose key the mode then takes
+# (t tags the row and does not move down: no mouse event goes with it).
+# C-t typed in the menu is not Tag All's key (\024, shown [DC4]), so the
+# menu stays open; Escape closes it. A drag onto an item and the release there choose it (Expand). In
+# the preview the menu is mode-tree's untitled one; its top border is on
+# the pointer's row unless pushed up to fit, and a release with nothing
+# highlighted closes it; its Cancel ends the mode. choose-buffer's menu deletes the right-clicked buffer. A settle
+# follows each right-click: the menu opens from the MouseDown3Pane
+# binding's send -M, after the key.
+name = "tree_mouse_menu"
+size = [60, 24]
+steps = [
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "60", "-y", "23", "cat -"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-g", "mouse", "on"] },
+  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "cat -"] },
+  { run = ["new", "-d", "-s", "bbb", "-n", "x0", "-x", "60", "-y", "23", "cat -"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t1"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t2"] },
+  { attach = { session = "aaa" } },
+  { settle = { quiet_ms = 500 } },
+  { run = ["choose-tree", "-t", "aaa:0.0", "-s", "-F", "#{session_name}"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u001b[<2;10;2M" },
+  { screen = {} },
+  { keys = "t" },
+  { screen = {} },
+  { keys = "\u001b[<2;10;1M" },
+  { screen = {} },
+  { keys = "\u0014" },
+  { screen = {} },
+  { keys = "\u001b" },
+  { screen = {} },
+  { keys = "\u001b[<2;10;1M" },
+  { settle = {} },
+  { keys = "\u001b[<34;10;3M" },
+  { screen = {} },
+  { keys = "\u001b[<2;10;3m" },
+  { screen = {} },
+  { keys = "\u001b[<2;20;18M" },
+  { screen = {} },
+  { keys = "\u001b[<2;20;18m" },
+  { screen = {} },
+  { keys = "\u001b[<2;20;18M" },
+  { screen = {} },
+  { keys = "q" },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "aaa:0.0", "#{pane_in_mode}"] },
+  { screen = {} },
+  { run = ["set-buffer", "-b", "b1", "one"] },
+  { run = ["set-buffer", "-b", "b2", "two"] },
+  { run = ["choose-buffer", "-t", "aaa:0.0", "-O", "name", "-F", "#{buffer_name}"] },
+  { settle = { react = true } },
+  { keys = "\u001b[<2;30;2M" },
+  { screen = {} },
+  { keys = "d" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["list-buffers", "-F", "#{buffer_name}"] },
+]

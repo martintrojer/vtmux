@@ -1,6 +1,7 @@
 //! What every tree mode shares (mode-tree.c's paths through a mode's
 //! callbacks): building over the server, keys, the search and filter
-//! prompts, running the template, and the frame `mode_tree_draw` leaves.
+//! prompts, running the template, the right-click menus
+//! (`mode_tree_display_menu`), and the frame `mode_tree_draw` leaves.
 //! `choose-tree` ([`super::window_tree`]), `choose-buffer`
 //! ([`super::window_buffer`]), `choose-client` ([`super::window_client`])
 //! and `customize-mode` ([`super::window_customize`]) each implement
@@ -40,6 +41,8 @@ pub struct Common {
     /// The screen as last drawn (`mtd->screen`); `None` when the mode is
     /// to be drawn again (`mode_tree_draw`) before the pane is next shown.
     pub frame: Option<Frame>,
+    /// Which mode this is (`wme->data`), for a menu that outlives it.
+    pub serial: u64,
 }
 
 impl Common {
@@ -51,9 +54,20 @@ impl Common {
             kill: false,
             unzoom: None,
             frame: None,
+            serial: NEXT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
+
+static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `mode_tree_menu_items`: the menu of a right-click outside the list.
+const MODE_TREE_MENU: &[(&str, Key)] = &[
+    ("Scroll Left", Key::ascii(b'<')),
+    ("Scroll Right", Key::ascii(b'>')),
+    ("", Key::NONE),
+    ("Cancel", Key::ascii(b'q')),
+];
 
 /// Which tree mode a [`Mode`] is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,6 +87,9 @@ pub(crate) trait TreeMode: Sized + 'static {
     const HELP: &'static [(&'static str, &'static str)];
     const HELP_WIDTH: usize;
     const HELP_ITEM: &'static str;
+    /// The mode's menu (`menu`, `window_*_menu_items`): names and the keys
+    /// they send the mode; an empty name is a separator.
+    const MENU: &'static [(&'static str, Key)];
 
     fn tree(&self) -> &ModeTree<Self::Tag, Self::Data>;
     fn tree_mut(&mut self) -> &mut ModeTree<Self::Tag, Self::Data>;
@@ -493,6 +510,105 @@ impl Server {
         self.tree_action::<M>(p, Some(c), action, item);
     }
 
+    /// `mode_tree_display_menu` (mode-tree.c:1380-1425): the mode's menu
+    /// titled with line `line`'s name, or mode-tree's untitled one when
+    /// `outside` the list, centred on `at` in pane `p`, over client `c`'s
+    /// window.
+    fn tree_display_menu<M: TreeMode>(
+        &mut self,
+        p: PaneId,
+        c: ClientId,
+        line: usize,
+        (px, py): (u32, u32),
+        outside: bool,
+    ) {
+        let Some(window) = self.client_window(c) else {
+            return;
+        };
+        let Some(Some((name, serial))) = self.with_tree::<M, _>(p, |_, t| {
+            let name = t.tree().line_name(line)?.to_owned();
+            Some((name, t.common().serial))
+        }) else {
+            return;
+        };
+        let (title, list) = if outside {
+            (String::new(), MODE_TREE_MENU)
+        } else {
+            (format!("#[align=centre]{name}"), M::MENU)
+        };
+        // menu_add_item: `c->tty.sx`.
+        let cols = self.tty_size(c).map_or(80, |(cols, _)| u32::from(cols));
+        let mut items = crate::menu::Items::new(title);
+        for (text, key) in list {
+            if text.is_empty() {
+                items.separator();
+            } else {
+                items.item(text, Some(*key), String::new(), cols);
+            }
+        }
+        let half = u32::try_from(usize::midpoint(items.width, 4)).unwrap_or(u32::MAX);
+        let px = px.saturating_sub(half);
+        let (xoff, yoff) = self
+            .model
+            .panes
+            .get(&p)
+            .map_or((0, 0), |pane| (pane.rect.xoff, pane.rect.yoff));
+        let menu = crate::menu::Menu {
+            items,
+            px: px.saturating_add_signed(xoff),
+            py: py.saturating_add_signed(yoff),
+            choice: None,
+            lines: crate::render::popup::BoxLines::from_choice(self.model.number_option(
+                vtmux_core::options::TreeId::Window(window),
+                "menu-border-lines",
+            )),
+            style: None,
+            selected_style: None,
+            border_style: None,
+            stay_open: false,
+            no_mouse: false,
+            found: Found::from_window(&self.model, window),
+            key: None,
+            mouse: None,
+            tree: Some(crate::menu::TreeMenu {
+                pane: p,
+                serial,
+                line,
+            }),
+        };
+        self.menu_display(window, menu);
+    }
+
+    /// `mode_tree_menu_callback` and `window_*_menu`: an item of a tree
+    /// mode's menu was chosen; if the mode is still there and so is the
+    /// line, the line becomes current and the mode takes the item's key
+    /// (with no mouse event).
+    pub(crate) fn tree_menu_choose(&mut self, c: ClientId, menu: crate::menu::TreeMenu, key: Key) {
+        match self.top_tree(menu.pane) {
+            Some(TreeKind::Window) => self.tree_menu_choose_as::<super::WindowTree>(c, menu, key),
+            Some(TreeKind::Buffer) => self.tree_menu_choose_as::<super::BufferMode>(c, menu, key),
+            Some(TreeKind::Client) => self.tree_menu_choose_as::<super::ClientMode>(c, menu, key),
+            Some(TreeKind::Customize) => {
+                self.tree_menu_choose_as::<super::CustomizeMode>(c, menu, key);
+            }
+            None => {}
+        }
+    }
+
+    fn tree_menu_choose_as<M: TreeMode>(
+        &mut self,
+        c: ClientId,
+        menu: crate::menu::TreeMenu,
+        key: Key,
+    ) {
+        let ok = self.with_tree::<M, _>(menu.pane, |_, t| {
+            t.common().serial == menu.serial && t.tree_mut().set_current_line(menu.line)
+        });
+        if ok == Some(true) {
+            self.tree_key_as::<M>(menu.pane, Some(c), key, false);
+        }
+    }
+
     /// `window_buffer_key`, `window_customize_key`: while the mode's
     /// editor runs, the keys skip mode-tree; q, Escape and C-c end the
     /// mode, others do nothing. `false` if no editor runs.
@@ -533,6 +649,12 @@ impl Server {
             }
             Action::Swap(d) => {
                 M::swap(self, p, d);
+                false
+            }
+            Action::Menu { line, at, outside } => {
+                if let Some(c) = c {
+                    self.tree_display_menu::<M>(p, c, line, at, outside);
+                }
                 false
             }
             Action::Key(None) => false,
