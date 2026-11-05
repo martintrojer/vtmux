@@ -253,14 +253,46 @@ Recorded per commit in git history; the list is kept current:
   region scrolled up without scrollback (the alternate screen) unwraps
   the row above it (`grid_view_scroll_region_up`), and entering the
   alternate screen unwraps the primary's last scrollback row
-  (`screen_alternate_on`). Continuation flags are recomputed after a
-  move. Four upstream tests that assert the xterm behaviour now assert
+  (`screen_alternate_on`). After a move, the continuation flag of each
+  row whose neighbour above changed follows that neighbour's wrap flag
+  (`tmuxFixContinuations`, `tmuxFixContinuationAt`): IL/SD/RI over the
+  region, DL and SU (`deleteLines`) the first moved row and the row
+  below the region, LF/IND at a region's bottom on the primary screen
+  (`cursorScrollRegionUp`) the region's top row and the row below it,
+  and a region from the top scrolled into history (`cursorScrollAbove`)
+  the row below it. Without that, a stale continuation made Ghostty's
+  reflow drop a blank line (task medium_dl_wrap_flag_resize: DL moving
+  an erased continuation under an unwrapped line). The blank row a
+  scroll adds keeps its unset flag: patch 0012 reads that as tmux's
+  empty line. The alternate screen does not reflow, so its LF skips
+  this. Four upstream tests that assert the xterm behaviour now assert
   tmux's ("insertLines resets wrap", "deleteLines resets wrap",
   "deleteLines wide character spacer head", "eraseLine resets pending
-  wrap"); new test `Terminal: tmux wrap bookkeeping (vtmux)`. The full
-  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` gives
-  3252 pass, 37 skip and the known `tabClear single` failure. Not an
-  upstream candidate (it is tmux's model, not a terminal's).
+  wrap"), and "deleteLines count over region blanks row metadata" runs
+  CSI M (`deleteLinesTmux`); new tests `Terminal: tmux wrap bookkeeping
+  (vtmux)` and `Terminal: tmux wrap continuations follow moved rows
+  (vtmux)`. Not an upstream candidate (it is tmux's model, not a
+  terminal's).
+
+- `patches/0012-reflow-blank-continuation.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`, new field `prev_wrap`): a blank row under a
+  wrapped line reflows as tmux's `grid_reflow_join` does. A blank
+  continuation (a continuation row erased with ECH or EL 1, where tmux
+  keeps the erased cells in `cellused`) joins the wrapped line as one
+  blank cell and ends it, so the next line stays a line of its own;
+  upstream dropped the row and the line break with it, so a wider pane
+  joined the line after it. A blank row that is not a continuation
+  under a wrapped line (the empty line a region scroll adds,
+  `grid_empty_line`, `cellused` 0) stops the join: it stays a blank
+  line and the line above keeps its wrap flag. Tests: `Terminal: reflow
+  keeps the line break after a blank continuation (vtmux)`, `Terminal:
+  reflow keeps an empty line under a wrapped line (vtmux)`; oracle
+  `wrap_flag_resize`. With 0011 and 0012 the full `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` gives 3254 pass,
+  37 skip and the known `tabClear single` failure, plus the kitty
+  temporary-file test of 0001 when the tree is under `/tmp`. Upstream
+  candidate for the first half (a blank continuation keeping its line
+  break); the empty-line half is tmux's model.
 
 ## Bumping ghostty
 
