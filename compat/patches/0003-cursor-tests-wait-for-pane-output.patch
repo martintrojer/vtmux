@@ -1,0 +1,64 @@
+--- a/regress/cursor-test1.sh
++++ b/regress/cursor-test1.sh
+@@ -13,6 +13,13 @@
+ $TMUX -f/dev/null new -d -x40 -y10 \
+       "cat cursor-test.txt; printf '\e[9;15H'; cat" || exit 1
+ $TMUX set -g window-size manual || exit 1
++# vtmux (compat/tmux-3.8/README.md, Test races): the pane program may not
++# have printed yet; wait (max 10 s) for the first state compared.
++n=0
++while [ "$($TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}')" != \
++    "$(head -1 cursor-test1.result)" ] && [ $n -lt 100 ]; do
++	sleep 0.1; n=$((n+1))
++done
+ 
+ $TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}' >>$TMP
+ $TMUX capturep -p|awk '{print NR-1,$0}' >>$TMP
+--- a/regress/cursor-test2.sh
++++ b/regress/cursor-test2.sh
+@@ -13,6 +13,13 @@
+ $TMUX -f/dev/null new -d -x10 -y10 \
+       "cat cursor-test.txt; printf '\e[8;10H'; cat" || exit 1
+ $TMUX set -g window-size manual || exit 1
++# vtmux (compat/tmux-3.8/README.md, Test races): the pane program may not
++# have printed yet; wait (max 10 s) for the first state compared.
++n=0
++while [ "$($TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}')" != \
++    "$(head -1 cursor-test2.result)" ] && [ $n -lt 100 ]; do
++	sleep 0.1; n=$((n+1))
++done
+ 
+ $TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}' >>$TMP
+ $TMUX capturep -p|awk '{print NR-1,$0}' >>$TMP
+--- a/regress/cursor-test3.sh
++++ b/regress/cursor-test3.sh
+@@ -13,6 +13,13 @@
+ $TMUX -f/dev/null new -d -x7 -y2 \
+       "printf 'abcdefabcdefab'; printf '\e[2;7H'; cat" || exit 1
+ $TMUX set -g window-size manual || exit 1
++# vtmux (compat/tmux-3.8/README.md, Test races): the pane program may not
++# have printed yet; wait (max 10 s) for the first state compared.
++n=0
++while [ "$($TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}')" != \
++    "$(head -1 cursor-test3.result)" ] && [ $n -lt 100 ]; do
++	sleep 0.1; n=$((n+1))
++done
+ 
+ $TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}' >>$TMP
+ $TMUX capturep -p|awk '{print NR-1,$0}' >>$TMP
+--- a/regress/cursor-test4.sh
++++ b/regress/cursor-test4.sh
+@@ -12,6 +12,13 @@
+ 
+ $TMUX -f/dev/null new -d -x10 -y3 "printf 'abcdef\n'; cat" || exit 1
+ $TMUX set -g window-size manual || exit 1
++# vtmux (compat/tmux-3.8/README.md, Test races): the pane program may not
++# have printed yet; wait (max 10 s) for the first state compared.
++n=0
++while [ "$($TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}')" != \
++    "$(head -1 cursor-test4.result)" ] && [ $n -lt 100 ]; do
++	sleep 0.1; n=$((n+1))
++done
+ 
+ $TMUX display -pF '#{cursor_x} #{cursor_y} #{cursor_character}' >>$TMP
+ $TMUX capturep -p|awk '{print NR-1,$0}' >>$TMP

@@ -7,7 +7,8 @@ taken with `git archive <commit> regress | tar -x -C compat/tmux-3.8/`.
 - License: ISC (tmux's `COPYING`: "Copyright (c) Various Authors"), same as vtmux.
 - **Never edit `regress/`.** Divergences go in `compat/patches/*.patch` (applied
   to a temp copy by the runner, `git apply -p1`, paths `a/regress/<test>.sh`)
-  and are recorded in `compat/DIVERGENCES.md`.
+  and are recorded in `compat/DIVERGENCES.md`; waits that fix a test's own
+  race go there too, listed under *Test races* below.
 - Run with `cargo xtask regress [--tmux vtmux|reference|<path>] [--only <glob>] [--update] [--json <file>]`.
   Expected outcomes live in `compat/expected.toml`.
 - Environment per test is tmux's Makefile one: `env -i PATH=/usr/bin:/bin
@@ -38,3 +39,20 @@ Isolated re-runs (`--only`, no parallel load): `prompt-words-history` failed 4 o
 - No test failed in all four runs, so there is no stable failure. In
   `expected.toml`: `prompt-words-history.sh` is `skip` ("fails against reference
   tmux 3.8", it fails most runs); the other two are `flaky = true`.
+
+## Test races
+
+A few tests race their own pane program on the reference too. Where a wait
+for the state the test then compares removes the race, it goes in
+`compat/patches/` (applied for every `--tmux`, so the reference runs it too)
+and is listed here; it is not a divergence, so it has no `D-NNN`.
+
+- `cursor-test1.sh` … `cursor-test4.sh`
+  (`0003-cursor-tests-wait-for-pane-output.patch`): each starts the pane with
+  `new -d "cat …; printf '\e[…H'; cat"` and runs `display` at once, so the
+  first `#{cursor_x} #{cursor_y}` can be from before the printf (`0 9` for
+  `14 8 t` in `cursor-test1`). Under 8 parallel runs plus 4 busy loops on
+  `taskset -c 0-3`, unpatched: `cursor-test1` failed 4/40 and 8/80 on the
+  reference, 1/40 and 3/80 on vtmux; `cursor-test2` 2/40 on vtmux. The patch
+  polls `display` (max 10 s) until it prints the result file's first line;
+  patched, 40/40 each on both. Seen once in CI (GitHub run 42048753774).
