@@ -48,9 +48,15 @@ pub struct ThemeCache(std::cell::RefCell<Option<ThemeInputs>>);
 
 #[derive(Debug)]
 struct ThemeInputs {
+    /// [`vtmux_core::options::OptionsStore::generation`] when last checked:
+    /// while it stays, so do the option values.
+    generation: u64,
     option: i64,
     values: Vec<String>,
     colours: u32,
+    /// The client's reported theme ([`Caps::light_theme`]) when `option`
+    /// is `auto`: it picks the dark or the light slot options.
+    light: bool,
     theme: Theme,
 }
 
@@ -120,6 +126,12 @@ impl Source<'_> {
             "cyan",
             "magenta",
         ];
+        let generation = self.model.options.generation();
+        if let Some(t) = self.themes.0.borrow().as_ref()
+            && (t.generation, t.colours, t.light) == (generation, caps.colours, caps.light_theme)
+        {
+            return t.theme;
+        }
         let option = self.model.number_option(TreeId::Server, "theme");
         if option == 1 {
             return Theme(TERMINAL.map(Color::Palette));
@@ -130,9 +142,11 @@ impl Source<'_> {
             .iter()
             .map(|slot| self.string(TreeId::Server, &format!("{prefix}-theme-{slot}")))
             .collect();
-        if let Some(t) = self.themes.0.borrow().as_ref()
-            && (t.option, &t.values, t.colours) == (option, &values, caps.colours)
+        if let Some(t) = self.themes.0.borrow_mut().as_mut()
+            && (t.option, &t.values, t.colours, t.light)
+                == (option, &values, caps.colours, caps.light_theme)
         {
+            t.generation = generation;
             return t.theme;
         }
         let ctx = self.ctx(Found::default(), caps);
@@ -147,9 +161,11 @@ impl Source<'_> {
             }
         }));
         *self.themes.0.borrow_mut() = Some(ThemeInputs {
+            generation,
             option,
             values,
             colours: caps.colours,
+            light: caps.light_theme,
             theme,
         });
         theme
@@ -307,6 +323,12 @@ impl Source<'_> {
             (d.status, d.status_ranges) = (line.cells, line.ranges);
         }
         let ctx = self.ctx(found, caps);
+        // Never drawn: a scene without such cells.
+        let unused = || styled::Cell {
+            text: String::new(),
+            width: 1,
+            style: CellStyle::default(),
+        };
         let marked = found
             .index
             .and_then(|i| {
@@ -322,8 +344,17 @@ impl Source<'_> {
             offset,
             border: self.style(wtree, "pane-border-style", &ctx),
             lines: Lines::from_choice(self.model.number_option(wtree, "pane-border-lines")),
-            outside: self.fill(w, false, caps),
-            inside: self.fill(w, true, caps),
+            // Expanded only when drawn: `fill-character` is a format.
+            outside: if scene.fills().0 {
+                self.fill(w, false, caps)
+            } else {
+                unused()
+            },
+            inside: if scene.fills().1 {
+                self.fill(w, true, caps)
+            } else {
+                unused()
+            },
             clear: caps.clear(),
         };
         Some((scene, draw))
@@ -400,10 +431,10 @@ impl Source<'_> {
         }
         if pane.modes.is_empty() && !pane.mode_prompt.as_ref().is_some_and(|m| m.shown(pane)) {
             // MODE_SYNC (screen-write.c:211-240): while the program has
-            // synchronized output on, nothing new of it is drawn. No row
-            // stamps: the held copy is not the live view they describe.
+            // synchronized output on, nothing new of it is drawn. The held
+            // grid keeps the stamps it had, so its rows stay cached.
             if let Some(held) = pane.term.sync_held() {
-                return (Rc::new(held.clone()), Vec::new(), Vec::new());
+                return (Rc::clone(&held.screen), held.stamps.to_vec(), Vec::new());
             }
             let view = pane.term.screen();
             return (view.shared(), view.row_stamps().to_vec(), Vec::new());
@@ -426,10 +457,10 @@ impl Source<'_> {
             }
             // A mode prompt over a plain pane (a held pane drew above).
             _ => (
-                pane.term
-                    .sync_held()
-                    .cloned()
-                    .unwrap_or_else(|| vtmux_vt::snapshot(&pane.term)),
+                pane.term.sync_held().map_or_else(
+                    || vtmux_vt::snapshot(&pane.term),
+                    |h| h.screen.as_ref().clone(),
+                ),
                 Vec::new(),
             ),
         };

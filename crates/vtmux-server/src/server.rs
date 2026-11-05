@@ -137,7 +137,10 @@ pub(crate) struct Client {
     caps: Option<crate::render::Caps>,
     /// The client's terminal once attached (`tty_open`): its features and
     /// capabilities after `terminal-features` and `terminal-overrides`.
-    pub(crate) term: Option<vtmux_core::term_features::Term>,
+    pub(crate) term: Option<std::rc::Rc<vtmux_core::term_features::Term>>,
+    /// The hello's environment (`c->environ`), shared with every
+    /// [`ClientView`] of the client instead of copied into each.
+    environ: std::rc::Rc<[(String, String)]>,
     pub(crate) compositor: crate::render::Compositor,
     /// The scene and composed rows of the client's last frame, reused
     /// where nothing under them changed.
@@ -222,6 +225,7 @@ impl Client {
             decoder: crate::input::Decoder::default(),
             caps: None,
             term: None,
+            environ: std::rc::Rc::from([]),
             compositor: crate::render::Compositor::default(),
             window_cache: crate::render::WindowCache::default(),
             passthrough: Vec::new(),
@@ -1260,7 +1264,7 @@ impl Server {
         let Some(bytes) = c
             .attached
             .and(c.caps.as_ref())
-            .and(c.term.as_ref())
+            .and(c.term.as_deref())
             .and_then(vtmux_core::term_features::Term::clipboard_query)
         else {
             return;
@@ -1567,6 +1571,7 @@ impl Server {
         let control = hello.flags.control != vtmux_core::protocol::ControlMode::None;
         let terminal = hello.tty.is_some();
         if let Some(c) = self.clients.get_mut(&id) {
+            c.environ = hello.env.clone().into();
             c.hello = Some(hello);
         }
         // server-client.c:3042-3043.
@@ -1756,7 +1761,7 @@ impl Server {
         }
         let mut term = term;
         term.set_utf8(client.hello.as_ref().is_some_and(|h| h.flags.utf8));
-        client.term = Some(term);
+        client.term = Some(std::rc::Rc::new(term));
         client.compositor.invalidate();
         client.attached = Some(s);
         // Caps::startup ends with the terminal queries (tty.c
@@ -2187,7 +2192,7 @@ impl Server {
         {
             let dseks = c
                 .term
-                .as_ref()
+                .as_deref()
                 .and_then(vtmux_core::term_features::Term::disable_extended_keys)
                 .unwrap_or_default();
             let bytes = caps.teardown(dseks, self.clear_on_attach());
@@ -2280,25 +2285,25 @@ impl Server {
                     // tty_keys_sync: only a supported reply changes anything,
                     // and tty_update_features redraws the client.
                     if let (true, Some(term)) = (sync, &mut c.term) {
-                        term.sync_supported();
+                        std::rc::Rc::make_mut(term).sync_supported();
                         self.update_features(id);
                     }
                 }
                 crate::input::Event::DeviceAttributes(params) => {
                     if let Some(term) = &mut c.term {
-                        term.device_attributes(&params);
+                        std::rc::Rc::make_mut(term).device_attributes(&params);
                     }
                     self.update_features(id);
                 }
                 crate::input::Event::DeviceAttributes2(first) => {
                     if let Some(term) = &mut c.term {
-                        term.secondary_device_attributes(first);
+                        std::rc::Rc::make_mut(term).secondary_device_attributes(first);
                     }
                     self.update_features(id);
                 }
                 crate::input::Event::ExtendedDeviceAttributes(text) => {
                     if let Some(term) = &mut c.term {
-                        term.extended_device_attributes(&text);
+                        std::rc::Rc::make_mut(term).extended_device_attributes(&text);
                     }
                     self.update_features(id);
                 }
@@ -2657,13 +2662,13 @@ impl Server {
             let repeat = !redrawing
                 && !frozen
                 && self.repeats_plain_frame(id, s, caps, (cols, rows), (scene_y, area));
-            let client = self.clients.get_mut(&id).expect("client");
-            let mut screen = client.compositor.buffer(cols, rows);
+            let (mut screen, mut tags, plain) =
+                self.frame_buffer(id, s, caps, (cols, rows), (scene_y, area), frozen);
             let drawn = self.draw_window(
                 id,
                 s,
                 caps,
-                &mut screen,
+                (&mut screen, &mut tags, plain),
                 scene_y,
                 area,
                 held.as_deref(),
@@ -2672,7 +2677,7 @@ impl Server {
             );
             if !drawn {
                 let client = self.clients.get_mut(&id).expect("client");
-                client.compositor.recycle(screen);
+                client.compositor.recycle(screen, tags);
                 let mut frame = Vec::new();
                 self.add_outer_mouse_modes(id, &mut frame);
                 if !frame.is_empty() {
@@ -2690,7 +2695,7 @@ impl Server {
                 .get_mut(&id)
                 .expect("client")
                 .compositor
-                .frame(screen, caps);
+                .frame_tagged(screen, tags, caps);
             self.add_outer_mouse_modes(id, &mut frame);
             if redrawing && let Some(title) = self.client_title(id, s) {
                 frame.splice(0..0, title);
@@ -2727,6 +2732,29 @@ impl Server {
                 pane.term.release_screen();
             }
         }
+    }
+
+    /// Client `id`'s buffer for the next frame, its row tags, and whether
+    /// the frame is plain ([`Self::plain_frame`], not frozen): then its
+    /// window rows are the composed rows alone, so the buffer keeps those
+    /// it already has ([`crate::render::Compositor::buffer`]).
+    fn frame_buffer(
+        &mut self,
+        id: ClientId,
+        s: SessionId,
+        caps: crate::render::Caps,
+        (cols, rows): (u16, u16),
+        (y, area): (u16, u16),
+        frozen: bool,
+    ) -> (vtmux_vt::Snapshot, Vec<u64>, bool) {
+        let plain = !frozen
+            && self
+                .plain_frame(id, s, caps, (cols, rows), (y, area))
+                .is_some();
+        let keep = if plain { y..y + area } else { 0..0 };
+        let client = self.clients.get_mut(&id).expect("client");
+        let (screen, tags) = client.compositor.buffer(cols, rows, keep);
+        (screen, tags, plain)
     }
 
     /// Whether client `id`'s next frame has nothing over the window but the
@@ -3036,14 +3064,17 @@ impl Server {
     /// Session `s`'s current window composed into rows
     /// `y..y + rows` of `screen`, with the active pane's cursor. `held` is
     /// what the terminal shows in those rows while pane output is frozen:
-    /// pane content cells keep it.
+    /// pane content cells keep it. `screen` comes with its row tags
+    /// ([`crate::render::Compositor::buffer`]) and whether the frame is
+    /// plain (nothing drawn over the window), in which case its window rows
+    /// still hold an earlier frame's and only the changed ones are copied.
     #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
     fn draw_window(
         &self,
         id: ClientId,
         s: SessionId,
         caps: crate::render::Caps,
-        screen: &mut vtmux_vt::Snapshot,
+        (screen, tags, plain): (&mut vtmux_vt::Snapshot, &mut [u64], bool),
         y: u16,
         rows: u16,
         held: Option<&[vtmux_vt::Cell]>,
@@ -3060,6 +3091,8 @@ impl Server {
             Some(jobs),
             cache.map(|c| &c.scene),
         ) else {
+            // Nothing to draw: the rows are blank, as from a fresh buffer.
+            crate::render::compose::ComposeCache::default().copy_rows(screen, y, rows, tags);
             return true;
         };
         let theme = source.theme(caps);
@@ -3096,6 +3129,19 @@ impl Server {
                 c.skipped.set(c.skipped.get() + 1);
             }
             return false;
+        }
+        if let Some(c) = cache.filter(|_| plain) {
+            c.compose.borrow().copy_rows(screen, y, rows, tags);
+            if let Some(mut p) = c.plain.get() {
+                p.cursor = cursor;
+                c.plain.set(Some(p));
+            }
+            screen.cursor = cursor.0.map(|(x, cy)| (x, cy + y));
+            screen.cursor_visible = cursor.1;
+            return true;
+        }
+        for tag in tags.iter_mut().skip(usize::from(y)).take(usize::from(rows)) {
+            *tag = 0;
         }
         let cols = usize::from(screen.cols);
         let kept = cache.and_then(|c| c.buffer.borrow_mut().take());
@@ -3591,8 +3637,8 @@ impl Server {
                 .term
                 .as_ref()
                 .filter(|_| !c.dead && !c.closing && !c.suspended)
-                .map(|t| std::rc::Rc::new(t.clone())),
-            environ: hello.map_or_else(|| std::rc::Rc::from([]), |h| h.env.clone().into()),
+                .map(std::rc::Rc::clone),
+            environ: std::rc::Rc::clone(&c.environ),
         }
     }
 
@@ -5290,6 +5336,84 @@ mod tests {
         assert_eq!(skipped(&server), before, "a changed row is not skipped");
         server.render_clients();
         assert_eq!(frames(&mut server, id, &mut peer), b"", "nothing after it");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A plain frame's buffer is the frame before last: its window rows
+    /// are copied again only where the composed row changed since, and the
+    /// diff skips rows tagged alike. Rows changed one and two frames back
+    /// must still reach the screen, and each frame draws only its change.
+    #[test]
+    fn plain_frames_copy_and_diff_only_changed_rows() {
+        use vtmux_core::options::{TreeId, Value};
+        use vtmux_core::protocol::{ClientFlags, Hello, TtyInfo};
+        let (mut server, p, s, _, dir) = setup();
+        server.reset_mode(p);
+        server
+            .model
+            .options
+            .set_table_value(TreeId::GlobalSession, "status", Value::Choice(0));
+        let (ours, mut peer) = mio::net::UnixStream::pair().unwrap();
+        let id = super::ClientId(server.next_client);
+        server.next_client += 1;
+        let mut client = super::Client::new(ours, 0);
+        client.hello = Some(Hello {
+            version: vtmux_core::protocol::PROTOCOL_VERSION,
+            invocation: vtmux_core::socket::Invocation::Vtmux,
+            pid: 1,
+            argv: Vec::new(),
+            cwd: dir.clone(),
+            env: Vec::new(),
+            tty: Some(TtyInfo {
+                name: "/dev/null".into(),
+                term: "xterm-256color".into(),
+                cols: 40,
+                rows: 10,
+                features: Vec::new(),
+            }),
+            flags: ClientFlags::default(),
+        });
+        server.clients.insert(id, client);
+        server.attach_client(id, s).unwrap();
+        for _ in 0..4 {
+            server.render_clients();
+            frames(&mut server, id, &mut peer);
+        }
+        let row_text = |server: &super::Server, y: usize| -> String {
+            let (screen, _) = server.clients[&id].compositor.last().unwrap();
+            let cols = usize::from(screen.cols);
+            screen.cells[y * cols..(y + 1) * cols]
+                .iter()
+                .map(|c| c.text.as_str())
+                .collect::<String>()
+        };
+        let mut want = [String::new(), String::new(), String::new()];
+        for (i, letter) in ('A'..='H').enumerate() {
+            let row = i % 3;
+            want[row] = format!("{letter}{letter}");
+            let pane = server.model.panes.get_mut(&p).unwrap();
+            pane.term
+                .feed(format!("\x1b[{};1H{letter}{letter}\x1b[9;1H", row + 1).as_bytes());
+            server.render_clients();
+            let frame = String::from_utf8(frames(&mut server, id, &mut peer)).unwrap();
+            assert_eq!(
+                drawn_text(&frame),
+                format!("{letter}{letter}"),
+                "frame {i}: {frame:?}"
+            );
+            for (y, want) in want.iter().enumerate() {
+                let text = row_text(&server, y);
+                assert!(
+                    text.starts_with(want.as_str()),
+                    "frame {i}, row {y}: {text:?}"
+                );
+            }
+            let (_, tags) = server.clients[&id].compositor.last().unwrap();
+            assert!(
+                tags.iter().all(|&t| t != 0),
+                "plain frames tag every row: {tags:?}"
+            );
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

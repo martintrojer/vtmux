@@ -490,6 +490,32 @@ pub fn parse(template: &str) -> Parsed {
     Parsed { ast, deferred }
 }
 
+/// [`parse`], remembered: the status line, borders and fill expand the
+/// same few templates every frame, and parsing is pure. At most
+/// [`PARSED_CACHE_LIMIT`] templates are kept; past that the cache starts
+/// over (`display -p` and friends expand one-off text).
+fn parse_cached(template: &str) -> std::rc::Rc<Parsed> {
+    thread_local! {
+        static PARSED: std::cell::RefCell<std::collections::HashMap<Box<str>, std::rc::Rc<Parsed>>> =
+            std::cell::RefCell::default();
+    }
+    PARSED.with(|cache| {
+        if let Some(p) = cache.borrow().get(template) {
+            return std::rc::Rc::clone(p);
+        }
+        let parsed = std::rc::Rc::new(parse(template));
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= PARSED_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(template.into(), std::rc::Rc::clone(&parsed));
+        parsed
+    })
+}
+
+/// How many templates [`parse_cached`] keeps.
+const PARSED_CACHE_LIMIT: usize = 256;
+
 /// Expand a parsed template against the real clocks.
 #[must_use]
 pub fn expand(ast: &Format, ctx: &dyn FormatContext) -> String {
@@ -510,7 +536,7 @@ pub fn expand_nojobs(ast: &Format, ctx: &dyn FormatContext) -> String {
 /// [`expand_nojobs`] on template text.
 #[must_use]
 pub fn expand_str_nojobs(template: &str, ctx: &dyn FormatContext) -> String {
-    expand_nojobs(&parse(template).ast, ctx)
+    expand_nojobs(&parse_cached(template).ast, ctx)
 }
 
 /// Expand a parsed template; `clock` drives the [`TIME_LIMIT_MS`] cut-off.
@@ -559,13 +585,13 @@ pub fn expand_time_with(
     clock: &dyn Clock,
     wall: &dyn WallClock,
 ) -> String {
-    Eval::new(ctx, clock, wall, true).expand(&parse(template).ast, 0)
+    Eval::new(ctx, clock, wall, true).expand(&parse_cached(template).ast, 0)
 }
 
 /// Parse and expand in one go.
 #[must_use]
 pub fn expand_str(template: &str, ctx: &dyn FormatContext) -> String {
-    expand(&parse(template).ast, ctx)
+    expand(&parse_cached(template).ast, ctx)
 }
 
 /// tmux's `format_true` (format.c:4893): neither empty nor `0`.

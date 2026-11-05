@@ -212,7 +212,30 @@ pub struct OptionsStore {
     monitor_serial: u64,
     /// `TMUX_TERM`, the default `-u` restores to `default-terminal`.
     term: String,
+    /// Bumped by every change to any tree ([`Self::generation`]).
+    generation: Generation,
 }
+
+/// A change stamp that is no part of the store's value: two stores with
+/// the same options are equal however they got there. Stamps are unique
+/// across stores, so a new store never repeats an old one's.
+#[derive(Clone, Copy, Debug)]
+struct Generation(u64);
+
+impl Generation {
+    fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+impl PartialEq for Generation {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Generation {}
 
 static EMPTY: Options = Options {
     entries: BTreeMap::new(),
@@ -235,6 +258,7 @@ impl OptionsStore {
             monitors: HashMap::new(),
             monitor_serial: 0,
             term: defaults.term.clone(),
+            generation: Generation::next(),
         };
         for def in table::table() {
             match def.scope {
@@ -268,38 +292,57 @@ impl OptionsStore {
 
     /// A new session's tree, empty, under the global session options.
     pub fn add_session(&mut self, id: SessionId) {
+        self.changed();
         self.sessions.insert(id, Options::default());
     }
 
     pub fn remove_session(&mut self, id: SessionId) {
+        self.changed();
         self.sessions.remove(&id);
         self.monitors.retain(|(t, _), _| *t != TreeId::Session(id));
     }
 
     pub fn add_window(&mut self, id: WindowId) {
+        self.changed();
         self.windows.insert(id, Options::default());
     }
 
     pub fn remove_window(&mut self, id: WindowId) {
+        self.changed();
         self.windows.remove(&id);
         self.monitors.retain(|(t, _), _| *t != TreeId::Window(id));
     }
 
     /// A new pane's tree, under its window's.
     pub fn add_pane(&mut self, id: PaneId, window: WindowId) {
+        self.changed();
         self.panes.insert(id, Options::default());
         self.pane_window.insert(id, window);
     }
 
     /// The pane moved to another window; its tree now inherits from there.
     pub fn move_pane(&mut self, id: PaneId, window: WindowId) {
+        self.changed();
         self.pane_window.insert(id, window);
     }
 
     pub fn remove_pane(&mut self, id: PaneId) {
+        self.changed();
         self.panes.remove(&id);
         self.pane_window.remove(&id);
         self.monitors.retain(|(t, _), _| *t != TreeId::Pane(id));
+    }
+
+    /// A count that changes whenever any option of any tree may have: a
+    /// value read while it stays the same is still the value. Renderers
+    /// key per-frame work on it.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        self.generation.0
+    }
+
+    fn changed(&mut self) {
+        self.generation = Generation::next();
     }
 
     /// A tree; one the store does not know is empty.
@@ -316,6 +359,7 @@ impl OptionsStore {
     }
 
     fn tree_mut(&mut self, id: TreeId) -> &mut Options {
+        self.changed();
         match id {
             TreeId::Server => &mut self.server,
             TreeId::GlobalSession => &mut self.global_session,
@@ -454,16 +498,44 @@ impl OptionsStore {
     #[must_use]
     pub fn format_value(&self, name: &str, target: &Target) -> Option<String> {
         let (base, key) = table::parse_name(name)?;
-        let mut trees = vec![TreeId::Server];
-        trees.extend(target.pane.map(TreeId::Pane));
-        trees.extend(target.window.map(TreeId::Window));
-        trees.push(TreeId::GlobalWindow);
-        trees.extend(target.session.map(TreeId::Session));
-        trees.push(TreeId::GlobalSession);
-        trees.into_iter().find_map(|t| {
-            self.get_set(t, base)
-                .map(|e| e.value.to_text(e.def, key.as_ref(), true))
-        })
+        // format_find's order: the server, the pane, the window, the
+        // global window, the session and the global session trees, each
+        // with its parents (options_get). A tree seen once is not looked
+        // in again: it would miss again. Every format variable lookup comes
+        // here first, mostly for names that are no option at all.
+        let mapped = table::map_name(base);
+        let mut seen: [Option<TreeId>; 8] = [None; 8];
+        let mut n = 0;
+        let starts = [
+            Some(TreeId::Server),
+            target.pane.map(TreeId::Pane),
+            target.window.map(TreeId::Window),
+            Some(TreeId::GlobalWindow),
+            target.session.map(TreeId::Session),
+            Some(TreeId::GlobalSession),
+        ];
+        for start in starts.into_iter().flatten() {
+            let mut at = Some(start);
+            while let Some(t) = at {
+                if seen[..n].contains(&Some(t)) {
+                    break;
+                }
+                if n < seen.len() {
+                    seen[n] = Some(t);
+                    n += 1;
+                }
+                let tree = self.tree(t);
+                let found = tree
+                    .entries
+                    .get(base)
+                    .or_else(|| (mapped != base).then(|| tree.entries.get(mapped)).flatten());
+                if let Some(e) = found {
+                    return Some(e.value.to_text(e.def, key.as_ref(), true));
+                }
+                at = self.parent(t);
+            }
+        }
+        None
     }
 }
 
@@ -613,5 +685,71 @@ fn resolve_tree(
         Some(Scope::Session) => session(),
         Some(Scope::WindowPane) if args.flag('p') => pane(),
         Some(Scope::Window | Scope::WindowPane) => window(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `format_find`'s order (format.c): the pane's tree before the window's,
+    /// the session's after both, the server's first; an option the pane
+    /// does not set comes from its window, and a name no tree holds is
+    /// `None`.
+    #[test]
+    fn format_value_order() {
+        let mut store = OptionsStore::new(&Defaults::default());
+        let (s, w, p) = (SessionId(1), WindowId(1), PaneId(1));
+        store.add_session(s);
+        store.add_window(w);
+        store.add_pane(p, w);
+        store.add_user(TreeId::Session(s), "@v", "session", false);
+        store.add_user(TreeId::Window(w), "@v", "window", false);
+        store.add_user(TreeId::Window(w), "@w", "window", false);
+        store.add_user(TreeId::Pane(p), "@v", "pane", false);
+        let target = Target {
+            session: Some(s),
+            window: Some(w),
+            pane: Some(p),
+        };
+        assert_eq!(store.format_value("@v", &target).as_deref(), Some("pane"));
+        assert_eq!(store.format_value("@w", &target).as_deref(), Some("window"));
+        let no_pane = Target {
+            pane: None,
+            ..target
+        };
+        assert_eq!(
+            store.format_value("@v", &no_pane).as_deref(),
+            Some("window")
+        );
+        let session_only = Target {
+            session: Some(s),
+            ..Target::default()
+        };
+        assert_eq!(
+            store.format_value("@v", &session_only).as_deref(),
+            Some("session")
+        );
+        store.add_user(TreeId::Server, "@v", "server", false);
+        assert_eq!(store.format_value("@v", &target).as_deref(), Some("server"));
+        assert_eq!(store.format_value("pane_in_mode", &target), None);
+    }
+
+    /// Every change moves the generation; reading does not.
+    #[test]
+    fn generation_follows_changes() {
+        let mut store = OptionsStore::new(&Defaults::default());
+        let g = store.generation();
+        let _ = store.get(TreeId::Server, "escape-time");
+        assert_eq!(store.generation(), g);
+        store.set_table_value(TreeId::Server, "escape-time", Value::Number(5));
+        let g2 = store.generation();
+        assert_ne!(g2, g);
+        store.add_window(WindowId(3));
+        assert_ne!(store.generation(), g2);
+        assert_ne!(
+            OptionsStore::new(&Defaults::default()).generation(),
+            store.generation()
+        );
     }
 }

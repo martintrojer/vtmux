@@ -32,6 +32,6 @@ pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) {
     libghostty_vt::unicode::set_width_overrides(ranges).expect("valid width ranges");
 }
 pub use term::{
-    Compression, CompressionActivity, ExtendedKeys, KeyMode, LineMark, MouseModes, MouseTracking,
-    Osc133, PaneTerm, Passthrough, history_reads,
+    Compression, CompressionActivity, ExtendedKeys, HeldScreen, KeyMode, LineMark, MouseModes,
+    MouseTracking, Osc133, PaneTerm, Passthrough, history_reads,
 };

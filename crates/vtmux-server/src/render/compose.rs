@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use vtmux_core::colour::Colour;
 use vtmux_core::ids::PaneId;
@@ -307,6 +308,7 @@ pub fn compose_cached(
                 sig: None,
                 above: false,
                 ended: false,
+                version: 0,
                 cells: vec![Cell::default(); usize::from(cols)],
             });
         }
@@ -316,10 +318,19 @@ pub fn compose_cached(
         row.sig = sig;
         row.above = above;
         row.ended = ended_written;
+        row.version = ROW_VERSION.fetch_add(1, Ordering::Relaxed);
         changed = true;
     }
     changed
 }
+
+/// [`CachedRow::version`]s are unique across every cache, so a screen row
+/// tagged with one ([`ComposeCache::copy_rows`]) holds exactly that row.
+static ROW_VERSION: AtomicU64 = AtomicU64::new(1);
+
+/// The tag of a screen row [`ComposeCache::copy_rows`] left blank; no
+/// [`CachedRow::version`] reaches it. Tag 0 is a row anything else drew.
+pub const BLANK_ROW: u64 = u64::MAX;
 
 /// What [`compose_cached`] composed last, per client.
 #[derive(Debug, Default)]
@@ -337,6 +348,34 @@ impl ComposeCache {
             row.clone_from_slice(&cached.cells);
         }
     }
+
+    /// [`Self::copy_to`] straight into rows `y..y + rows` of `screen`,
+    /// which still holds an earlier frame: `tags` has, per screen row, the
+    /// [`CachedRow::version`] it holds (0 when unknown, [`BLANK_ROW`] when
+    /// blank), and only rows whose tag differs are copied (or blanked,
+    /// below the composed rows). A frame where one pane row changed copies
+    /// one row, not the window.
+    pub fn copy_rows(&self, screen: &mut Snapshot, y: u16, rows: u16, tags: &mut [u64]) {
+        let cols = usize::from(screen.cols).max(1);
+        let lines = screen.cells.chunks_mut(cols).zip(tags.iter_mut());
+        for (i, (row, tag)) in lines
+            .skip(usize::from(y))
+            .take(usize::from(rows))
+            .enumerate()
+        {
+            match self.rows.get(i) {
+                Some(cached) if *tag != cached.version => {
+                    row.clone_from_slice(&cached.cells);
+                    *tag = cached.version;
+                }
+                None if *tag != BLANK_ROW => {
+                    super::clear_cells(row);
+                    *tag = BLANK_ROW;
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -346,6 +385,8 @@ struct CachedRow {
     /// The row above ended written (see [`compose`]'s `wrapped`).
     above: bool,
     ended: bool,
+    /// Unique per composition of the row ([`ROW_VERSION`]).
+    version: u64,
     cells: Vec<Cell>,
 }
 
@@ -416,20 +457,14 @@ impl DrawKey {
 /// `None` if a pane's stamps are unknown.
 fn row_signature(scene: &Scene, d: &Draw, y: u16) -> Option<Vec<(PaneId, u32, u64, u64)>> {
     let mut sig: Vec<(PaneId, u32, u64, u64)> = Vec::new();
-    for x in 0..scene.cols {
-        let SceneCell::Pane { pane, py, .. } = scene.get(x, y) else {
-            continue;
-        };
-        if sig.last().is_some_and(|l| (l.0, l.1) == (*pane, *py)) {
-            continue;
-        }
-        let stamps = &d.panes.get(pane)?.stamps;
-        let at = usize::try_from(*py).ok()?;
+    for &(pane, py) in scene.row_panes(y) {
+        let stamps = &d.panes.get(&pane)?.stamps;
+        let at = usize::try_from(py).ok()?;
         let stamp = *stamps.get(at)?;
         let above = at
             .checked_sub(1)
             .map_or(Some(0), |a| stamps.get(a).copied())?;
-        sig.push((*pane, *py, stamp, above));
+        sig.push((pane, py, stamp, above));
     }
     Some(sig)
 }

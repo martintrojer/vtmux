@@ -97,6 +97,19 @@ pub struct StatusLine {
     ignore_keys: bool,
     /// `c->status.timer`: the next `status-interval` tick.
     timer: Option<Instant>,
+    /// Bumped whenever `screen` or `active` is drawn again.
+    drawn: u64,
+    /// The rows a frame last showed, as terminal cells, and what they were
+    /// made from: frames between two status redraws copy them as they are.
+    shown: Option<ShownRows>,
+}
+
+#[derive(Debug)]
+struct ShownRows {
+    /// `drawn`, whether `active` was shown (a message or prompt), the
+    /// theme and how runs are cleared.
+    key: (u64, bool, super::compose::Theme, super::compose::Clear),
+    rows: Vec<Vec<vtmux_vt::Cell>>,
 }
 
 impl Default for StatusLine {
@@ -115,6 +128,8 @@ impl Default for StatusLine {
             message_timer: None,
             ignore_keys: false,
             timer: None,
+            drawn: 0,
+            shown: None,
         }
     }
 }
@@ -345,6 +360,7 @@ impl StatusLine {
         let lines = usize::from(lines);
         if self.needs_redraw(cols, lines) {
             self.redraw = false;
+            self.drawn += 1;
             if let Some(m) = &self.message {
                 self.active = message_rows(source, ctx, s, &self.screen, m, cols, lines);
             } else if let Some(p) = &self.prompt {
@@ -358,7 +374,8 @@ impl StatusLine {
         if self.nocursor {
             screen.cursor_visible = false;
         }
-        let rows = if self.message.is_some() || self.prompt.is_some() {
+        let over = self.message.is_some() || self.prompt.is_some();
+        let rows = if over {
             &self.active
         } else if lines == 0 {
             return;
@@ -382,14 +399,29 @@ impl StatusLine {
             screen.cursor_visible = !self.nocursor;
         }
         let theme = source.theme(caps);
-        for (row, drawn) in (y..screen.rows).zip(rows) {
-            let cells = &mut screen.cells[usize::from(row) * cols..][..cols];
-            for (cell, drawn) in cells.iter_mut().zip(drawn) {
-                *cell = theme.cell(drawn);
-            }
-            let bgs: Vec<Colour> = drawn.iter().map(|c| c.style.bg).collect();
-            draw_line_by(cells, &bgs, Colour::Default, caps.clear(), false);
+        let key = (self.drawn, over, theme, caps.clear());
+        let shown = match self.shown.take() {
+            Some(shown) if shown.key == key && shown.rows.iter().all(|r| r.len() == cols) => shown,
+            _ => ShownRows {
+                key,
+                rows: rows
+                    .iter()
+                    .map(|drawn| {
+                        let mut cells = vec![vtmux_vt::Cell::default(); cols];
+                        for (cell, drawn) in cells.iter_mut().zip(drawn) {
+                            *cell = theme.cell(drawn);
+                        }
+                        let bgs: Vec<Colour> = drawn.iter().map(|c| c.style.bg).collect();
+                        draw_line_by(&mut cells, &bgs, Colour::Default, caps.clear(), false);
+                        cells
+                    })
+                    .collect(),
+            },
+        };
+        for (row, cells) in (y..screen.rows).zip(&shown.rows) {
+            screen.cells[usize::from(row) * cols..][..cols].clone_from_slice(cells);
         }
+        self.shown = Some(shown);
     }
 
     /// Whether the next frame must draw the status again: asked for, or the
