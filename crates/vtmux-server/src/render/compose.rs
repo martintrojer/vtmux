@@ -29,7 +29,9 @@ impl Theme {
     pub fn colour(&self, c: Colour) -> Color {
         match c {
             Colour::Default | Colour::Terminal => Color::Default,
-            Colour::Ansi(n) | Colour::Palette(n) => Color::Palette(n),
+            Colour::Ansi(n) => Color::Palette(n),
+            // `colourN` keeps COLOUR_FLAG_256 (colour.c `colour_fromstring`).
+            Colour::Palette(n) => Color::Palette(n).in_form(true),
             Colour::Bright(n) => Color::Palette(8 + n),
             Colour::Rgb(r, g, b) => Color::Rgb(r, g, b),
             Colour::Theme(i) => self.0.get(usize::from(i)).copied().unwrap_or_default(),

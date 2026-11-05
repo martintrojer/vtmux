@@ -16,9 +16,36 @@ use crate::text::CellText;
 pub enum Color {
     #[default]
     Default,
-    /// Palette index 0-255.
+    /// Palette index 0-255; 0-15 as `30-37`/`90-97` set them.
     Palette(u8),
+    /// Palette index 0-15 set in its 256-colour form (`38;5;N`): tmux keeps
+    /// `COLOUR_FLAG_256` on it (input.c `input_csi_dispatch_sgr_256_do`),
+    /// so `capture-pane -e` writes it back as `38;5;N` and an 8- or
+    /// 16-colour terminal maps it through `colour_256to16` (tty.c
+    /// `tty_check_fg`) rather than as an aixterm colour.
+    Palette256(u8),
     Rgb(u8, u8, u8),
+}
+
+impl Color {
+    /// The palette index, whichever form set it.
+    #[must_use]
+    pub fn palette_index(self) -> Option<u8> {
+        match self {
+            Self::Palette(n) | Self::Palette256(n) => Some(n),
+            _ => None,
+        }
+    }
+
+    /// `self` with a low-16 palette index in its 256-colour form when
+    /// `long` (Ghostty's `fg_palette_256`/`bg_palette_256`).
+    #[must_use]
+    pub fn in_form(self, long: bool) -> Self {
+        match self {
+            Self::Palette(n) if long && n < 16 => Self::Palette256(n),
+            other => other,
+        }
+    }
 }
 
 /// Underline shape.
@@ -154,8 +181,8 @@ impl From<style::Underline> for Underline {
 impl From<style::Style> for Style {
     fn from(s: style::Style) -> Self {
         Self {
-            fg: s.fg_color.into(),
-            bg: s.bg_color.into(),
+            fg: Color::from(s.fg_color).in_form(s.fg_palette_256),
+            bg: Color::from(s.bg_color).in_form(s.bg_palette_256),
             underline_color: s.underline_color.into(),
             bold: s.bold,
             faint: s.faint,
@@ -346,7 +373,8 @@ fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String
         match raw.content_tag() {
             Ok(CellContentTag::BgColorPalette) => {
                 if let Ok(i) = raw.bg_color_palette() {
-                    style.bg = Color::Palette(i.0);
+                    let long = raw.bg_color_palette_256().unwrap_or(false);
+                    style.bg = Color::Palette(i.0).in_form(long);
                 }
             }
             Ok(CellContentTag::BgColorRgb) => {

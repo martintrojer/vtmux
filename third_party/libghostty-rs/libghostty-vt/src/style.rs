@@ -41,6 +41,11 @@ pub struct Style {
     pub strikethrough: bool,
     pub overline: bool,
     pub underline: Underline,
+    /// vtmux: the foreground was set by `38;5;N` rather than `30-37` or
+    /// `90-97` (`patches/0010-palette-256-form.patch`).
+    pub fg_palette_256: bool,
+    /// vtmux: the background was set by `48;5;N`.
+    pub bg_palette_256: bool,
 }
 
 impl Style {
@@ -150,6 +155,8 @@ impl TryFrom<ffi::Style> for Style {
             #[expect(clippy::cast_sign_loss, reason = "bindgen ain't perfect")]
             underline: Underline::try_from(value.underline as u32)
                 .map_err(|_| Error::InvalidValue)?,
+            fg_palette_256: value.fg_palette_256,
+            bg_palette_256: value.bg_palette_256,
         })
     }
 }
@@ -171,6 +178,8 @@ impl From<Style> for ffi::Style {
             overline: value.overline,
             #[expect(clippy::cast_possible_wrap, reason = "bindgen ain't perfect")]
             underline: u32::from(value.underline) as i32,
+            fg_palette_256: value.fg_palette_256,
+            bg_palette_256: value.bg_palette_256,
         }
     }
 }

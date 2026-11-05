@@ -2729,7 +2729,9 @@ mod tests {
     }
 
     /// The colour as the terminal's cell would carry it. `terminal` and
-    /// `default` are the terminal default, shown as `Color::Default`.
+    /// `default` are the terminal default, shown as `Color::Default`; a
+    /// `colourN` below 16 reaches the terminal through `setaf` as 30-37 or
+    /// 90-97 (tty.c `tty_try_colour`).
     fn to_vt(c: Colour) -> Color {
         match c {
             Colour::Default | Colour::Terminal => Color::Default,

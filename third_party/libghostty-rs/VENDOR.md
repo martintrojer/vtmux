@@ -209,6 +209,29 @@ Recorded per commit in git history; the list is kept current:
   `cell_bits_match_the_getters` checks the decoding against the getters, so
   a bump that moves a field fails there.
 
+- `patches/0010-palette-256-form.patch` (`style.zig` `Style.Flags`,
+  `bgCell`, `Screen.zig` `setAttribute`, `page.zig` `Cell.content`,
+  `c/style.zig`, `c/cell.zig`, `include/ghostty/vt/{style,screen}.h`):
+  tmux keeps `COLOUR_FLAG_256` on a colour set by `38;5;N`/`48;5;N`
+  (input.c `input_csi_dispatch_sgr_256_do`), so `capture-pane -e` writes
+  `38;5;1` back apart from `31`, and an 8-colour terminal gets `38;5;9` as
+  plain red where `91` is bold (tty.c `tty_check_fg`). Ghostty kept one
+  palette index. Two spare `Style.Flags` bits (`fg_palette_256`,
+  `bg_palette_256`) record the form; any other foreground or background
+  change clears its bit. A cell erased with such a background carries the
+  bit in its `color_palette` content (`palette_256`). C: two `bool`s at
+  the end of the sized `GhosttyStyle` (offsets 68 and 69, the size stays
+  72) and `GHOSTTY_CELL_DATA_COLOR_PALETTE_256`; Rust: `Style::fg_palette_256`
+  / `bg_palette_256` and `Cell::bg_color_palette_256` (`style.rs`,
+  `screen.rs`, `bindings.rs` by hand). The VT formatter still writes every
+  palette colour as `38;5;N`, so its two round-trip tests ("Screen vt
+  with style", "Terminal vt restores gaps and cells that only have a
+  background") compare styles without the bits; the snapshot codec drops
+  them. Tests: new `Terminal: 256-colour SGR keeps its form (vtmux)`;
+  the full `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none`
+  gives 3251 pass, 37 skip and the known `tabClear single` failure (see
+  0009). Upstream candidate only for a consumer that needs the SGR form.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

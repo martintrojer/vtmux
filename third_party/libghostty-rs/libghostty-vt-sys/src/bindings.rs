@@ -904,6 +904,8 @@ pub mod CellData {
     pub const COLOR_RGB: Type = 11;
     #[doc = " The tab mark of the cell (vtmux): 0 for none, 1-32 for the first\n cell of a horizontal tab covering that many columns, 255 for the\n other cells of a tab.\n\n Output type: uint8_t *"]
     pub const TAB: Type = 12;
+    #[doc = " vtmux: whether a GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE cell's colour\n was set by 48;5;N.\n\n Output type: bool *"]
+    pub const COLOR_PALETTE_256: Type = 13;
     #[doc = " The tab mark of the cell (vtmux): 0 for none, 1-32 for the first\n cell of a horizontal tab covering that many columns, 255 for the\n other cells of a tab.\n\n Output type: uint8_t *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
@@ -1058,6 +1060,10 @@ pub struct Style {
     pub overline: bool,
     #[doc = "< One of GHOSTTY_SGR_UNDERLINE_* values"]
     pub underline: ::std::os::raw::c_int,
+    #[doc = "< vtmux: fg set by 38;5;N"]
+    pub fg_palette_256: bool,
+    #[doc = "< vtmux: bg set by 48;5;N"]
+    pub bg_palette_256: bool,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -1078,6 +1084,10 @@ const _: () = {
         [::std::mem::offset_of!(Style, strikethrough) - 62usize];
     ["Offset of field: Style::overline"][::std::mem::offset_of!(Style, overline) - 63usize];
     ["Offset of field: Style::underline"][::std::mem::offset_of!(Style, underline) - 64usize];
+    ["Offset of field: Style::fg_palette_256"]
+        [::std::mem::offset_of!(Style, fg_palette_256) - 68usize];
+    ["Offset of field: Style::bg_palette_256"]
+        [::std::mem::offset_of!(Style, bg_palette_256) - 69usize];
 };
 impl Default for Style {
     fn default() -> Self {

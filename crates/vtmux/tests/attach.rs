@@ -1694,12 +1694,21 @@ fn terminal_features_apply_at_attach() {
 /// `tty_check_fg`/`tty_check_bg`: a client with fewer than 256 colours gets
 /// `colour_256to16`, aixterm colours only from 16, bold for bright foregrounds
 /// at 8 (reviewer-26 raw.py). The observer's screen is the same under both.
+/// A palette colour 0-15 set as `38;5;N` (or `colourN` in a style) keeps
+/// `COLOUR_FLAG_256`: plain red for `38;5;9` at 8 colours where `91` is bold;
+/// at 256 colours `setaf` writes it as `91` (task `d_sgr_256_low16`).
 #[test]
 fn colours_below_256_are_downgraded_like_tmux() {
     // fg 38;5;200 on default, 38;5;16 on 48;5;200, rgb 1;2;3, aixterm 91 on 101,
-    // 38;5;244 on 47 (grey on white).
-    let pane = r"printf '\033[38;5;200mA\033[0m \033[38;5;16;48;5;200mB\033[0m \033[38;2;1;2;3mC\033[0m \033[91;101mD\033[0m \033[38;5;244;47mE\033[0m'; exec cat";
-    for term in ["xterm", "screen", "xterm-16color", "xterm-88color"] {
+    // 38;5;244 on 47 (grey on white), 38;5;9 on 48;5;12, 31.
+    let pane = r"printf '\033[38;5;200mA\033[0m \033[38;5;16;48;5;200mB\033[0m \033[38;2;1;2;3mC\033[0m \033[91;101mD\033[0m \033[38;5;244;47mE\033[0m \033[38;5;9;48;5;12mF\033[0m \033[31mG\033[0m'; exec cat";
+    for term in [
+        "xterm",
+        "screen",
+        "xterm-16color",
+        "xterm-88color",
+        "xterm-256color",
+    ] {
         let mut screens = Vec::new();
         for bin in bins() {
             let w = World::new(bin);
@@ -1710,16 +1719,25 @@ fn colours_below_256_are_downgraded_like_tmux() {
                 .status
                 .success()
             );
+            // The status line in a `colourN` style (colour.c `colour_fromstring`).
+            for (opt, value) in [
+                ("status-style", "fg=colour9,bg=colour12"),
+                ("status-right", ""),
+            ] {
+                assert!(w.cli(&["set", "-g", opt, value]).status.success());
+            }
             let mut a = w.attach_env(&["attach", "-t", "a"], 40, 10, &[("TERM", term)]);
             a.wait(|a| {
                 vtmux_vt::snapshot(&a.screen())
-                    .cell(8, 0)
-                    .is_some_and(|c| c.text == "E")
+                    .cell(12, 0)
+                    .is_some_and(|c| c.text == "G")
             });
             let screen = vtmux_vt::snapshot(&a.screen());
-            let row: Vec<_> = (0..9)
-                .map(|x| {
-                    let c = screen.cell(x, 0).unwrap();
+            let row: Vec<_> = (0..13)
+                .map(|x| (x, 0))
+                .chain([(0, 9)])
+                .map(|(x, y)| {
+                    let c = screen.cell(x, y).unwrap();
                     (c.text.clone(), c.style.fg, c.style.bg, c.style.bold)
                 })
                 .collect();
@@ -1729,7 +1747,9 @@ fn colours_below_256_are_downgraded_like_tmux() {
         }
         assert_eq!(screens[0], screens[1], "{term}: vtmux vs reference");
         // 200 is bright magenta in 16 colours: aixterm or plain, never 38;5;n.
-        assert_ne!(screens[0][0].1, vtmux_vt::Color::Palette(200), "{term}");
+        if term != "xterm-256color" {
+            assert_ne!(screens[0][0].1, vtmux_vt::Color::Palette(200), "{term}");
+        }
     }
 }
 

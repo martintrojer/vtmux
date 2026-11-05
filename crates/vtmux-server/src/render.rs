@@ -625,13 +625,14 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
     *current = wanted;
 }
 /// A cell colour as `tty_check_fg`/`tty_check_bg` take it: palette 0-7 and
-/// 8-15 are the plain and aixterm colours.
+/// 8-15 are the plain and aixterm colours, unless set as `38;5;N`
+/// (`COLOUR_FLAG_256`).
 fn core_colour(c: Color) -> Colour {
     match c {
         Color::Default => Colour::Default,
         Color::Palette(n @ 0..=7) => Colour::Ansi(n),
         Color::Palette(n @ 8..=15) => Colour::Bright(n - 8),
-        Color::Palette(n) => Colour::Palette(n),
+        Color::Palette(n) | Color::Palette256(n) => Colour::Palette(n),
         Color::Rgb(r, g, b) => Colour::Rgb(r, g, b),
     }
 }
@@ -639,11 +640,13 @@ fn core_colour(c: Color) -> Colour {
 fn color(out: &mut String, c: Colour, bg: bool) {
     let base = if bg { 40 } else { 30 };
     match c {
-        Colour::Ansi(n) => {
+        // `tty_try_colour` writes a `COLOUR_FLAG_256` colour through
+        // `setaf`/`setab`, which gives 30-37 and 90-97 below 16.
+        Colour::Ansi(n) | Colour::Palette(n @ 0..=7) => {
             let _ = write!(out, "\x1b[{}m", base + u16::from(n));
         }
-        Colour::Bright(n) => {
-            let _ = write!(out, "\x1b[{}m", base + 60 + u16::from(n));
+        Colour::Bright(n) | Colour::Palette(n @ 8..=15) => {
+            let _ = write!(out, "\x1b[{}m", base + 60 + u16::from(n & 7));
         }
         Colour::Palette(n) => {
             let _ = write!(out, "\x1b[{};5;{n}m", base + 8);

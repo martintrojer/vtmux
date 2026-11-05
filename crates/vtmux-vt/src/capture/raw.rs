@@ -66,7 +66,9 @@ fn colour(c: Color) -> (String, u32) {
             format!("bright{}", NAMES[usize::from(i - 8)]),
             90 + u32::from(i - 8),
         ),
-        Color::Palette(i) => (format!("colour{i}"), 0x0100_0000 | u32::from(i)),
+        Color::Palette(i) | Color::Palette256(i) => {
+            (format!("colour{i}"), 0x0100_0000 | u32::from(i))
+        }
         Color::Rgb(r, g, b) => (
             format!("#{r:02x}{g:02x}{b:02x}"),
             0x0200_0000 | u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b),

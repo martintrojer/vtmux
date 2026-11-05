@@ -490,6 +490,12 @@ impl Cell {
     pub fn tab(self) -> Result<u8> {
         self.get(ffi::CellData::TAB)
     }
+    /// vtmux: whether the background of a
+    /// [`CellContentTag::BgColorPalette`] cell was set by `48;5;N`
+    /// (`patches/0010-palette-256-form.patch`).
+    pub fn bg_color_palette_256(self) -> Result<bool> {
+        self.get(ffi::CellData::COLOR_PALETTE_256)
+    }
 }
 
 /// Row semantic prompt state.

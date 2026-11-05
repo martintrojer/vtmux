@@ -278,7 +278,7 @@ fn grid_colour(c: Color) -> Colour {
         Color::Default => Colour::Default,
         Color::Palette(n @ 0..=7) => Colour::Ansi(n),
         Color::Palette(n @ 8..=15) => Colour::Bright(n - 8),
-        Color::Palette(n) => Colour::Palette(n),
+        Color::Palette(n) | Color::Palette256(n) => Colour::Palette(n),
         Color::Rgb(r, g, b) => Colour::Rgb(r, g, b),
     }
 }

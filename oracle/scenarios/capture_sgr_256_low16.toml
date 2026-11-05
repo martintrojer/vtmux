@@ -1,0 +1,15 @@
+name = "capture_sgr_256_low16"
+size = [40, 5]
+# A palette colour 0-15 set as `38;5;N`/`48;5;N` keeps COLOUR_FLAG_256
+# (input.c `input_csi_dispatch_sgr_256_do`), so `capture-pane -e` writes it
+# back in that form (grid.c `grid_string_cells_fg`/`_bg`), apart from
+# 30-37, 90-97, 40-47 and 100-107; a line erased with `48;5;3` keeps it too.
+# `-R` shows the flag as FG256/BG256 and `colourN` (cmd-capture-pane.c
+# `cmd_capture_pane_grid`).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-x", "40", "-y", "5", "sh", "-c", "printf '\\033[38;5;1mA\\033[31mB\\033[38;5;9mC\\033[91mD\\033[48;5;2mE\\033[42mF\\033[48;5;10mG\\033[102mH\\033[m\\n\\033[48;5;3m\\033[K\\033[43mx\\033[m\\n'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-t", "%0"] },
+  { run = ["capture-pane", "-p", "-e", "-N", "-t", "%0", "-S", "1", "-E", "1"] },
+  { run = ["capture-pane", "-p", "-R", "-t", "%0", "-S", "0", "-E", "1"] },
+]
