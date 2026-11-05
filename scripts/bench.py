@@ -4,7 +4,7 @@
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
 Scenarios: idle scale history startup throughput owner_idle owner_startup throughput_attached render many_clients
-           (default: all).
+           (default: all), and trickle (by name only: about 22 min).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
@@ -22,8 +22,12 @@ Env: RUNS (3), IDLE_SECS (60), VTMUX (target/release/vtmux), VTMUX_REFERENCE_TMU
 (default target/bench/bench-<utc>), NO_BUILD=1 (skip cargo build), STARTUP_N (100),
 THROUGHPUT_MB (100), OWNER_STARTUP_N (20), OWNER_TMUX_CONF / OWNER_PLUGINS / OWNER_MUCREW (the
 owner's config, plugin and mu-crew dirs that owner_* copy; default ~/.tmux.conf, ~/.tmux/plugins,
-~/.local/share/mu-crew-dotfiles), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s). Run cargo through `mise exec --`.
+~/.local/share/mu-crew-dotfiles), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s), TRICKLE_RATES ("10 1000 fill": lines/s
+per case; `fill` is 150k lines at once), TRICKLE_SECS (1200), TRICKLE_IDLE_SECS (120), TRICKLE_SAMPLE (10 s),
+TRICKLE_LIMIT (100000), TRICKLE_PREFILL (1: every rate case first writes the 150k lines of `fill`, so the history starts at
+the limit; 0: the trickle alone). Run cargo through `mise exec --`.
 """
+import ctypes
 import fcntl
 import hashlib
 import json
@@ -88,6 +92,26 @@ def _proc_status(pid, key):
 
 def rss_kb(pid):
     return _proc_status(pid, "VmRSS") if LINUX else _ps(pid)[0]
+
+
+class _RUsageInfoV0(ctypes.Structure):
+    _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [(n, ctypes.c_uint64) for n in (
+        "user_time", "system_time", "pkg_idle_wkups", "interrupt_wkups", "pageins", "wired_size",
+        "resident_size", "phys_footprint", "proc_start_abstime", "proc_exit_abstime")]
+
+
+def footprint_kb(pid):
+    """macOS only: the physical footprint (what Activity Monitor calls Memory), from proc_pid_rusage.
+    Darwin's resident size keeps counting pages released with MADV_FREE_REUSABLE (how Ghostty gives
+    compressed history pages back, mem.zig) until the kernel reuses them; the footprint drops at once.
+    On Linux, VmRSS already drops (MADV_DONTNEED): None."""
+    if LINUX:
+        return None
+    r = _RUsageInfoV0()
+    libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    if libc.proc_pid_rusage(int(pid), 0, ctypes.byref(r)) != 0:
+        return None
+    return r.phys_footprint // 1024
 
 
 def cpu_ms(pid, fine=False):
@@ -883,6 +907,108 @@ ATTACHED = {"throughput_attached": scenario_throughput_attached, "render": scena
 ALL += list(ATTACHED)
 
 
+# ---- trickle: scrollback memory of a pane that never goes idle ---------------
+
+TRICKLE_GEN = r'''
+import sys, time
+rate, secs = float(sys.argv[1]), float(sys.argv[2])
+tick = max(0.01, 1.0 / rate)          # 1000 lines/s: 10 lines every 10 ms; 10 lines/s: one every 100 ms
+per = max(1, round(rate * tick))
+t0 = time.monotonic()
+i = n = 0
+out = sys.stdout
+while True:
+    now = time.monotonic()
+    if now - t0 >= secs:
+        break
+    for _ in range(per):
+        out.write("2026-10-31T12:%02d:%02d.%03dZ INFO  worker[%d] handled request id=%08x path=/api/v1/items/%d status=200 bytes=%d\n"
+                  % ((i // 60000) % 60, (i // 1000) % 60, i % 1000, i % 16, i * 2654435761 % 4294967296, i, (i * 37) % 100000))
+        i += 1
+    out.flush()
+    n += 1
+    time.sleep(max(0.0, t0 + n * tick - time.monotonic()))  # absolute schedule: no drift
+'''
+
+
+def scenario_trickle(env):
+    """Server RSS while one pane writes log lines at a steady rate, so its history never goes idle
+    (docs/specs/2026-10-31-history-memory.md, compress.rs `STARVE`). Every case (binary x rate, plus `fill`:
+    150k lines at once, then idle; with TRICKLE_PREFILL the rate cases write those 150k lines first too) runs on
+    its own server at the same time. RSS, #{history_size} and the server's CPU time (and on macOS the footprint,
+    see footprint_kb) are sampled every TRICKLE_SAMPLE s for TRICKLE_SECS of output and TRICKLE_IDLE_SECS after."""
+    rates = os.environ.get("TRICKLE_RATES", "10 1000 fill").split()
+    secs = float(os.environ.get("TRICKLE_SECS", "1200"))
+    idle = float(os.environ.get("TRICKLE_IDLE_SECS", "120"))
+    every = float(os.environ.get("TRICKLE_SAMPLE", "10"))
+    limit = os.environ.get("TRICKLE_LIMIT", "100000")
+    prefill = os.environ.get("TRICKLE_PREFILL", "1") != "0"
+    gen = os.path.join(env.work, "trickle.py")
+    with open(gen, "w") as f:
+        f.write(TRICKLE_GEN)
+    fill = os.path.join(env.work, "fill.txt")
+    with open(fill, "w") as f:
+        for i in range(150000):
+            f.write("2026-10-31T12:%02d:%02d.%03dZ INFO  worker[%d] handled request id=%08x path=/api/v1/items/%d status=200 bytes=%d\n"
+                    % ((i // 60000) % 60, (i // 1000) % 60, i % 1000, i % 16, i * 2654435761 % 4294967296, i, (i * 37) % 100000))
+    py = shutil.which("python3") or sys.executable
+    cases, servers = [], []
+    try:
+        for which in env.bins:
+            for rate in rates:
+                s = env.server(which)
+                pre = f"cat '{fill}'; " if rate == "fill" or prefill else ""
+                cmd = pre + ("exec cat" if rate == "fill" else f"'{py}' '{gen}' {rate} {secs}; exec cat")
+                s.run("new", "-d", "-s", "keep", "cat", ";", "set", "-g", "history-limit", limit, ";",
+                      "new", "-d", "-s", "t", "-x", "120", "-y", "40", cmd)
+                s.find_pid()
+                servers.append(s)
+                cases.append({"binary": which, "rate": rate, "samples": []})
+        t0 = time.monotonic()
+        k = 0
+        while True:
+            t = k * every
+            time.sleep(max(0.0, t0 + t - time.monotonic()))
+            for s, c in zip(servers, cases):
+                hs = s.run("display", "-p", "-t", "t", "#{history_size}", check=False).strip()
+                c["samples"].append([round(time.monotonic() - t0, 1), rss_kb(s.pid), int(hs or -1), footprint_kb(s.pid),
+                                     round(cpu_ms(s.pid), 1)])
+            print(f"trickle t={t:.0f}s load {os.getloadavg()[0]:.1f} " +
+                  " ".join(f"{c['binary']}/{c['rate']}={_mem(c['samples'][-1])}" for c in cases),
+                  file=sys.stderr, flush=True)
+            if t >= secs + idle:
+                break
+            k += 1
+    finally:
+        for s in servers:
+            s.kill()
+    return {"title": f"trickle (120x40, history-limit {limit}, {'150k lines then ' if prefill else ''}{secs:g} s of output then {idle:g} s idle, "
+                     f"RSS every {every:g} s)", "secs": secs, "cases": cases}
+
+
+OPTIONAL = ["trickle"]  # long (about 22 min): run by name only
+
+
+def _mem(sample):
+    """RSS MB, with the macOS footprint after a slash."""
+    fp = "" if sample[3] is None else f"/{sample[3] / 1024:.1f}"
+    return f"{sample[1] / 1024:.1f}{fp}"
+
+
+def render_trickle(res):
+    cases = res["cases"]
+    what = "RSS MB (hsize)" if LINUX else "RSS/footprint MB (hsize)"
+    header = ["t s"] + [f"{c['binary']} {c['rate']} {what}" for c in cases]
+    rows = []
+    n = min(len(c["samples"]) for c in cases)
+    step = max(1, n // 40)  # about 40 rows; the JSON has every sample
+    for i in sorted(set(range(0, n, step)) | {n - 1}):
+        rows.append([f"{cases[0]['samples'][i][0]:.0f}"] +
+                    [f"{_mem(c['samples'][i])} ({c['samples'][i][2]})" for c in cases])
+    rows.append(["server CPU s"] + [f"{c['samples'][n - 1][4] / 1000:.1f}" for c in cases])
+    return f"### {res['title']}\n\n" + table(header, rows) + "\n"
+
+
 def render_attached(name, res):
     cols = {
         "throughput_attached": [("wall s", "wall_s", 2), ("server CPU s", "server_cpu_s", 2), ("client CPU s", "client_cpu_s", 2), ("total CPU s", "total_cpu_s", 2),
@@ -917,6 +1043,8 @@ def render(name, res):
         return OWNER_RENDER[name](res)
     if name in ATTACHED:
         return render_attached(name, res)
+    if name == "trickle":
+        return render_trickle(res)
     out = [f"### {res['title']}", ""]
     if name == "idle":
         rows = [[b, fmt(m["rss_mb"]), fmt(m["cpu_ms"], 2), fmt(m["wakeups_per_s"], 2)] for b, m in res["results"].items()]
@@ -966,8 +1094,8 @@ def main():
         sys.exit(bench_smoke.main())
     scenarios = sys.argv[1:] or ALL
     for s in scenarios:
-        if s not in ALL:
-            sys.exit(f"unknown scenario {s} (one of: {' '.join(ALL)})")
+        if s not in ALL + OPTIONAL:
+            sys.exit(f"unknown scenario {s} (one of: {' '.join(ALL + OPTIONAL)})")
     if not os.environ.get("NO_BUILD"):
         subprocess.run(["cargo", "build", "--release", "-q", "-p", "vtmux", "--bin", "vtmux"], cwd=ROOT, check=True)
         if "history" in scenarios:
@@ -988,6 +1116,7 @@ def main():
              "startup": scenario_startup, "throughput": scenario_throughput}
     funcs.update(OWNER_FUNCS)
     funcs.update(ATTACHED)
+    funcs["trickle"] = scenario_trickle
     results, md = {}, []
     try:
         for name in scenarios:

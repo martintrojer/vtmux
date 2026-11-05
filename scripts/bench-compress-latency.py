@@ -26,8 +26,10 @@ started inside it are compared with WITHOUT samples started in the same
 seconds after the fill, and with WITH samples from before it.
 `pooled` compares whole runs (samples from 0.5 s on, whether or not
 compression ran): the p50/p95 over all of each side's runs and, run by
-run, the p95 of each. With GAP_MS=2 a pane is never quiet, so nothing is
-compressed and this is the cost of the compression-capable build alone.
+run, the p95 of each. With GAP_MS=2 the loop is never quiet: the history
+panes compress only once starved (compress.rs `STARVE`, 10 s from the start
+of the fill), in busy turns; before that the runs show the cost of the
+compression-capable build alone. Use SECONDS of 30 to cover the whole pass.
 """
 
 import json

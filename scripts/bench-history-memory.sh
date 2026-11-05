@@ -28,8 +28,9 @@
 #   latency [scenario...]  busy-pane PTY-to-client latency, alternating
 #           NOCOMPRESS (a build without compression: scripts/bench-nocompress.patch)
 #           and VTMUX, PAIRS pairs (default 4), for GAP_MS 2 (the gate command;
-#           the pane is never quiet, so nothing compresses and the cost is
-#           the build's alone) and 60 (compression runs meanwhile); see
+#           the loop is never quiet, so the history panes compress only once
+#           starved, from about 8 s after the fill: compress.rs `STARVE`) and
+#           60 (quiet gaps: compression runs in them); see
 #           scripts/bench-compress-latency.py. Criterion 6 bounds the p95 rise
 #           at 10%. Scenarios spec, narrow (default spec).
 #
@@ -41,7 +42,8 @@
 # compare, e.g. a build of the previous commit; shown as `base`), DEADLINE (default 600:
 # seconds to wait for one run's DONE marker before failing), SETTLE (default 60:
 # seconds to wait for the RSS to stop moving), COPIES (default 3: servers, hence
-# copy-mode entries per state), PAIRS, NOCOMPRESS. Run cargo through
+# copy-mode entries per state), PAIRS, NOCOMPRESS, LAT_SECS (default 30: seconds per
+# latency run; GAP_MS 2 compresses from about 8 s on). Run cargo through
 # `mise exec --`: the script builds the release binaries first.
 #
 # The script can be sourced (it then only defines functions); scripts/bench.sh's
@@ -240,12 +242,12 @@ mode_latency() {
           side=with
           [ "$bin" = "$NOCOMPRESS" ] && side=without
           echo "== $s GAP_MS=$gap pair $n $side load $(cut -d' ' -f1 /proc/loadavg 2>/dev/null || uptime)" >&2
-          GAP_MS=$gap python3 "$lat" "$bin" "$s" 2 16 > "$work/lat-$s-$gap-$side-$n.json"
+          GAP_MS=$gap python3 "$lat" "$bin" "$s" 2 "${LAT_SECS:-30}" > "$work/lat-$s-$gap-$side-$n.json"
         done
       done
-      echo "--- $s GAP_MS=$gap, $pairs alternating pairs, 2 panes, 16 s"
+      echo "--- $s GAP_MS=$gap, $pairs alternating pairs, 2 panes, ${LAT_SECS:-30} s"
       python3 "$lat" pooled "$work"/lat-"$s"-"$gap"-with-*.json -- "$work"/lat-"$s"-"$gap"-without-*.json
-      [ "$gap" = 2 ] || python3 "$lat" compare "$work"/lat-"$s"-"$gap"-with-*.json -- "$work"/lat-"$s"-"$gap"-without-*.json
+      python3 "$lat" compare "$work"/lat-"$s"-"$gap"-with-*.json -- "$work"/lat-"$s"-"$gap"-without-*.json
       [ -z "${KEEP_RAW:-}" ] || cp "$work"/lat-"$s"-"$gap"-*.json "$KEEP_RAW"/
     done
   done
