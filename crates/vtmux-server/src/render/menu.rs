@@ -156,7 +156,7 @@ mod tests {
 
     fn text(rows: &[Vec<styled::Cell>], theme: &Theme) -> Vec<String> {
         rows.iter()
-            .map(|r| r.iter().map(|c| theme.cell(c).text).collect())
+            .map(|r| r.iter().map(|c| String::from(theme.cell(c).text)).collect())
             .collect()
     }
 

@@ -7,7 +7,9 @@
 //! height moves the history boundary, a change of width reflows the lines
 //! (`grid_reflow`, grid.c:1318-1611).
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
+use std::collections::VecDeque;
+use std::ops::Deref;
 use std::rc::Rc;
 
 use vtmux_vt::{LineMark, PaneTerm, Row, ScreenCopy};
@@ -75,6 +77,29 @@ pub struct WrapPos {
     y: usize,
 }
 
+/// A line as [`Grid::peek`] gives it.
+pub enum RowRef<'a> {
+    /// The line's own row, read before.
+    Kept(&'a Row),
+    /// Read from the entry copy for this look only.
+    Read(Rc<Row>),
+}
+
+impl Deref for RowRef<'_> {
+    type Target = Row;
+
+    fn deref(&self) -> &Row {
+        match self {
+            Self::Kept(row) => row,
+            Self::Read(row) => row,
+        }
+    }
+}
+
+/// Lines [`Grid::peek`] keeps read without keeping them in the copy: a
+/// search looks at a line and the few it wraps onto several times over.
+const PEEKED: usize = 4;
+
 /// The copy: history first, then the screen rows.
 #[derive(Clone, Debug)]
 pub struct Grid {
@@ -88,6 +113,9 @@ pub struct Grid {
     hscrolled: usize,
     sx: usize,
     sy: usize,
+    /// The last lines [`Grid::peek`] read from `source` (by line number;
+    /// emptied when the lines move).
+    peeked: RefCell<VecDeque<(usize, Rc<Row>)>>,
 }
 
 static EMPTY: Row = Row {
@@ -97,7 +125,9 @@ static EMPTY: Row = Row {
 
 /// Drop the trailing cells nothing wrote (Ghostty's empty cells with the
 /// default style), keeping written spaces and coloured blanks as tmux's
-/// `cellused` does.
+/// `cellused` does. The row keeps no room for the dropped cells: a copy
+/// whose every line is read (a search, a reflow) holds only what tmux's
+/// grid holds, not a pane width of cells per line.
 fn used_cells(mut row: Row) -> Row {
     while row.cells.last().is_some_and(|c| {
         c.text.is_empty()
@@ -108,6 +138,7 @@ fn used_cells(mut row: Row) -> Row {
     }) {
         row.cells.pop();
     }
+    row.cells.shrink_to_fit();
     row
 }
 
@@ -168,6 +199,7 @@ impl Grid {
             hscrolled: hsize,
             sx: usize::from(src.cols()),
             sy: gsy,
+            peeked: RefCell::default(),
         };
         let (cx, cy) = grid.resize_keeping(sx, sy, cx, hsize + cy);
         (grid, cx, cy)
@@ -179,6 +211,7 @@ impl Grid {
     /// and only scrolled since, so the lines before `from` (above the
     /// cursor where it wrote) are as they were.
     pub fn extend_from(&mut self, src: &PaneTerm, from: usize) {
+        self.peeked.get_mut().clear();
         let hsize = src.history_size();
         let n = hsize + usize::from(src.rows());
         let from = from.min(self.lines.len()).min(n);
@@ -232,6 +265,34 @@ impl Grid {
         self.lines.get(y).map_or(&EMPTY, |l| self.line_row(l))
     }
 
+    /// Line `y` as [`Grid::row`] gives it, but a line not read yet is read
+    /// without keeping it: a search over all of history (`search_marks`
+    /// counts every match) would otherwise keep a row of cells for every
+    /// line, several times what tmux's grid holds, and take as long again
+    /// to allocate them.
+    #[must_use]
+    pub fn peek(&self, y: usize) -> RowRef<'_> {
+        let Some(line) = self.lines.get(y) else {
+            return RowRef::Kept(&EMPTY);
+        };
+        if let Some(row) = line.row.get() {
+            return RowRef::Kept(row);
+        }
+        let (Some(src), Some(source)) = (line.src, &self.source) else {
+            return RowRef::Kept(&EMPTY);
+        };
+        let mut peeked = self.peeked.borrow_mut();
+        if let Some((_, row)) = peeked.iter().rev().find(|(py, _)| *py == y) {
+            return RowRef::Read(Rc::clone(row));
+        }
+        let row = Rc::new(source.used_row(src));
+        if peeked.len() == PEEKED {
+            peeked.pop_front();
+        }
+        peeked.push_back((y, Rc::clone(&row)));
+        RowRef::Read(row)
+    }
+
     /// The hyperlink of the cell at `(x, y)`: from the pane's grid as it
     /// was on entry, while the line is still that grid's (a reflowed line
     /// has none).
@@ -243,7 +304,7 @@ impl Grid {
 
     fn line_row<'a>(&self, line: &'a Line) -> &'a Row {
         line.row.get_or_init(|| match (line.src, &self.source) {
-            (Some(y), Some(source)) => used_cells(source.row(y)),
+            (Some(y), Some(source)) => source.used_row(y),
             _ => Row::default(),
         })
     }
@@ -264,6 +325,12 @@ impl Grid {
             line.src = None;
         }
         self.lines = lines;
+    }
+
+    /// Lines whose row the copy keeps.
+    #[cfg(test)]
+    pub(in crate::mode) fn kept_lines(&self) -> usize {
+        self.lines.iter().filter(|l| l.row.get().is_some()).count()
     }
 
     /// When line `y` scrolled into history (`grid_line_time`), 0 if never.
@@ -292,6 +359,7 @@ impl Grid {
 
     /// `screen_resize_cursor(s, sx, sy, 1, 0, 0)`.
     fn resize(&mut self, sx: usize, sy: usize) {
+        self.peeked.get_mut().clear();
         let (sx, sy) = (sx.max(1), sy.max(1));
         let reflow = sx != self.sx;
         self.sx = sx;
@@ -561,7 +629,7 @@ pub(super) mod tests {
             cells: s
                 .chars()
                 .map(|c| Cell {
-                    text: c.to_string(),
+                    text: c.into(),
                     width: 1,
                     ..Cell::default()
                 })
@@ -582,6 +650,7 @@ pub(super) mod tests {
             hscrolled: hsize,
             sx,
             sy,
+            peeked: RefCell::default(),
         }
     }
 

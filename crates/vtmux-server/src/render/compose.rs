@@ -12,7 +12,7 @@ use vtmux_core::colour::Colour;
 use vtmux_core::ids::PaneId;
 use vtmux_core::style::{Attrs, CellStyle};
 use vtmux_core::styled;
-use vtmux_vt::{Cell, Color, Snapshot, Style, Underline};
+use vtmux_vt::{Cell, CellText, Color, Snapshot, Style, Underline};
 
 use super::blend::PaneBlend;
 use super::scene::{Lines, Scene, SceneCell, Shape};
@@ -78,7 +78,7 @@ impl Theme {
             c.text.clone()
         };
         Cell {
-            text,
+            text: text.into(),
             width: c.width,
             style: self.style(&c.style),
             acs: c.style.attrs.contains(Attrs::ACS),
@@ -478,7 +478,7 @@ fn compose_row(
                         style.inverse = !style.inverse;
                     }
                     Cell {
-                        text,
+                        text: text.into(),
                         width: 1,
                         style,
                         ..Cell::default()
@@ -720,7 +720,7 @@ fn draw_line_keeping<T: PartialEq + Clone>(
         written = !erase;
         let cell = if erase {
             Cell {
-                text: String::new(),
+                text: CellText::new(),
                 width: 1,
                 style: Style {
                     bg: last.bg,

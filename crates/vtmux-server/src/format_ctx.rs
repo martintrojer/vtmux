@@ -775,7 +775,7 @@ impl<'a> Ctx<'a> {
                 let row = p.term.row(p.term.history_size() + usize::from(cy));
                 match row.cells.get(usize::from(cx)) {
                     Some(c) if c.width == 0 => return None,
-                    Some(c) if !c.text.is_empty() => c.text.clone(),
+                    Some(c) if !c.text.is_empty() => c.text.to_string(),
                     _ => " ".to_owned(),
                 }
             }

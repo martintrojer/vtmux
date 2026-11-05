@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::term::PaneTerm;
+use crate::text::CellText;
 
 /// A colour as the grid stores it. Palette indices are unresolved so the
 /// compositor can encode them for each client's terminal.
@@ -57,7 +58,7 @@ pub struct Style {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Cell {
     /// Grapheme cluster; empty for a blank cell.
-    pub text: String,
+    pub text: CellText,
     /// Columns covered: 1, 2 for a wide character, 0 for the spacer after one
     /// (do not draw it).
     pub width: u8,
@@ -366,7 +367,7 @@ fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String
         || slot.tab
         || slot.text != *scratch;
     if changed {
-        slot.text.clone_from(scratch);
+        slot.text = CellText::from(scratch.as_str());
         slot.width = width;
         slot.style = style;
         slot.acs = acs;

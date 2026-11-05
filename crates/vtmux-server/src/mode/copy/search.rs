@@ -5,6 +5,7 @@
 use std::time::{Duration, Instant};
 
 use vtmux_core::regex::Regex;
+use vtmux_vt::{Cell, CellText};
 
 use super::super::grid::Grid;
 use super::{CopyMode, Env};
@@ -103,6 +104,19 @@ impl Pattern {
     }
 }
 
+/// A cell's string and width as `window_copy_cellstring` gives them: a
+/// space for a blank or past the line's end, `\t` for a TAB cell, nothing
+/// for padding.
+fn cell_data(cell: Option<&Cell>) -> (&str, u8) {
+    match cell {
+        None => (" ", 1),
+        Some(c) if c.width == 0 => ("", 0),
+        Some(c) if c.tab => ("\t", c.width),
+        Some(c) if c.text.is_empty() => (" ", 1),
+        Some(c) => (&c.text, c.width),
+    }
+}
+
 /// tmux's `"^$*+()?[].\\"`: a search with none of these is plain text.
 fn has_regex_chars(s: &str) -> bool {
     s.chars().any(|c| "^$*+()?[].\\".contains(c))
@@ -114,29 +128,25 @@ impl Grid {
         self.last() + 1 - self.hsize()
     }
 
-    /// A cell's string and width as `window_copy_cellstring` gives them: a
-    /// space for a blank, `\t` for a TAB cell, nothing for padding.
-    fn data(&self, x: usize, y: usize) -> (&str, u8) {
-        match self.row(y).cells.get(x) {
-            None => (" ", 1),
-            Some(c) if c.width == 0 => ("", 0),
-            Some(c) if c.tab => ("\t", c.width),
-            Some(c) if c.text.is_empty() => (" ", 1),
-            Some(c) => (&c.text, c.width),
-        }
+    /// [`cell_data`] of the cell at `(x, y)`.
+    fn data(&self, x: usize, y: usize) -> (CellText, u8) {
+        let row = self.peek(y);
+        let (text, width) = cell_data(row.cells.get(x));
+        (text.into(), width)
     }
 
     /// `window_copy_search_compare`: a TAB cell matches a tab in the
     /// pattern; otherwise the cell's own data is compared (the spaces of a
     /// TAB cell).
     fn compare(&self, x: usize, y: usize, (text, width): &(String, u8), cis: bool) -> bool {
-        let cell = self.row(y).cells.get(x);
+        let row = self.peek(y);
+        let cell = row.cells.get(x);
         if text == "\t" && cell.is_some_and(|c| c.tab) {
             return true;
         }
         let (d, w) = match cell {
             Some(c) if c.width != 0 && c.tab => (c.text.as_str(), c.width),
-            _ => self.data(x, y),
+            _ => cell_data(cell),
         };
         if d.len() != text.len() || w != *width {
             return false;
@@ -155,14 +165,14 @@ impl Grid {
         let mut padding = 0;
         for (bx, cell) in pat.cells.iter().enumerate() {
             let (mut px, mut y) = (ax + bx + padding, py);
-            while px >= sx && y < endline && self.wrapped(y) {
+            while px >= sx && y < endline && self.peek(y).wrapped {
                 px -= sx;
                 y += 1;
             }
             if px - padding.min(px) >= sx {
                 return false;
             }
-            if let Some(c) = self.row(y).cells.get(px)
+            if let Some(c) = self.peek(y).cells.get(px)
                 && c.tab
             {
                 padding += usize::from(c.width) - 1;
@@ -190,8 +200,9 @@ impl Grid {
         if py > self.last() {
             return;
         }
+        let row = self.peek(py);
         for x in first..last {
-            buf.push_str(self.data(x, py).0);
+            buf.push_str(cell_data(row.cells.get(x)).0);
         }
     }
 
@@ -199,11 +210,11 @@ impl Grid {
     /// and how many cells that is.
     fn wrapped_text(&self, py: usize, first: usize) -> (String, usize) {
         let sx = self.sx();
-        let mut buf = String::new();
+        let mut buf = String::with_capacity(sx);
         self.stringify(&mut buf, py, first, sx);
         let mut len = sx - first;
         let mut y = py;
-        while y < self.last() && len < SEARCH_MAX_LINE && self.wrapped(y) {
+        while y < self.last() && len < SEARCH_MAX_LINE && self.peek(y).wrapped {
             y += 1;
             self.stringify(&mut buf, y, 0, sx);
             len += sx;
@@ -218,15 +229,19 @@ impl Grid {
         if py > self.last() {
             return (px, py);
         }
-        let mut cells = Vec::with_capacity(ncells);
-        let (mut x, mut y) = (px, py);
+        // The lines the cells are on, then the cells.
+        let rows: Vec<_> = (py..=self.last().min(py + (px + ncells).div_ceil(sx)))
+            .map(|y| self.peek(y))
+            .collect();
+        let mut cells: Vec<&[u8]> = Vec::with_capacity(ncells);
+        let (mut x, mut y) = (px, 0);
         while cells.len() < ncells {
-            cells.push(self.data(x, y).0.as_bytes());
+            cells.push(cell_data(rows[y].cells.get(x)).0.as_bytes());
             x += 1;
             if x >= sx {
                 x = 0;
                 y += 1;
-                if y > self.last() {
+                if y == rows.len() {
                     break;
                 }
             }
@@ -354,7 +369,7 @@ impl Grid {
         let old = wrap(px0 + sx0, py0 - 1);
         let (mut ppx, mut ppy) = (px0, py0);
         let (mut px, mut py, mut end) = (px0, py0, old);
-        while px == 0 && py - 1 > endline && self.wrapped(py - 2) && end == old {
+        while px == 0 && py - 1 > endline && self.peek(py - 2).wrapped && end == old {
             py -= 1;
             let Some((x, w)) = self.search_rl_regex(re, py - 1, 0, sx) else {
                 break;
@@ -795,7 +810,7 @@ impl CopyMode {
         for at in start..=end {
             let (x, y) = (at % sx, top + at / sx);
             if !self.backing.padding(x, y) {
-                buf.push_str(self.backing.data(x, y).0);
+                buf.push_str(&self.backing.data(x, y).0);
             }
         }
         Some(buf)
@@ -854,6 +869,28 @@ mod tests {
         assert_eq!(g.search_rl(&pat, 2, 0, 6), Some(4));
         assert!(Pattern::new("abc").cis && !Pattern::new("Abc").cis);
         assert_eq!(g.search_lr(&Pattern::new("Abc"), 2, 0, 6), None);
+    }
+
+    /// A search over all of history reads every line but keeps none
+    /// (task `low_copy_mode_entry_clone_keeps_full`: copy mode kept a pane
+    /// width of cells for each line a search passed, 25 -> 153 MB for
+    /// 10000 short lines at 200 columns, tmux 7 -> 10 MB).
+    #[test]
+    fn searching_history_keeps_no_lines() {
+        let mut t = PaneTerm::new(40, 4, 1000);
+        for i in 0..500 {
+            t.feed(format!("line {i}\x1b[31m red\x1b[m\tx\r\n").as_bytes());
+        }
+        let g = Grid::clone_of(&t, 40, 4, false).0;
+        let last = g.last();
+        assert_eq!(g.kept_lines(), 0);
+        let pat = Pattern::new("nowhere");
+        assert_eq!(g.search_from(&pat, None, (0, 0), last, false, true), None);
+        let re = Regex::new("^line 4.*red", false).unwrap();
+        let found = g.search_from(&pat, Some(&re), (0, last), 0, false, false);
+        assert_eq!(found, Some((0, 499)));
+        assert_eq!(g.row(499).text().trim_end(), "line 499 red\tx");
+        assert_eq!(g.kept_lines(), 1, "only the line read for itself is kept");
     }
 
     #[test]
