@@ -254,11 +254,12 @@ impl View<'_> {
                     sessions.reverse();
                 }
             } else {
-                // sort_session_cmp.
+                // sort_session_cmp. `creation_time` has microseconds and
+                // is set with the id (session_create), so creation order
+                // is id order; `created` is whole seconds and would tie.
                 sessions.sort_by(|a, b| {
                     let o = match order {
-                        SortOrder::Index => a.id.cmp(&b.id),
-                        SortOrder::Creation => a.created.cmp(&b.created),
+                        SortOrder::Index | SortOrder::Creation => a.id.cmp(&b.id),
                         SortOrder::Activity => b.activity.cmp(&a.activity),
                         _ => std::cmp::Ordering::Equal,
                     }
