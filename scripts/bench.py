@@ -4,7 +4,7 @@
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
 Scenarios: idle scale history startup throughput owner_idle owner_startup throughput_attached render many_clients
-           agent_panes (default: all), and trickle (by name only: about 22 min).
+           agent_panes key_echo (default: all), and trickle (by name only: about 22 min).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
@@ -28,7 +28,7 @@ TRICKLE_LIMIT (100000), TRICKLE_PREFILL (1: every rate case first writes the 150
 the limit; 0: the trickle alone), BLEND=1 (the attached scenarios
 with `vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'` set and the reader answering OSC 10/11, D26;
 tmux ignores the option), AGENT_PANES ("5 10 20"),
-AGENT_CLIENTS ("1 2"), AGENT_SECS (10). Run cargo through `mise exec --`.
+AGENT_CLIENTS ("1 2"), AGENT_SECS (10), KEY_ECHO_N (200). Run cargo through `mise exec --`.
 """
 import ctypes
 import fcntl
@@ -981,8 +981,116 @@ def scenario_agent_panes(env):
             "rows": {f"{n} panes / {nc} clients": v for (n, nc), v in out.items()}}
 
 
+KEY_ECHO_N = int(os.environ.get("KEY_ECHO_N", "200"))
+KEY_ECHO_GAP = 0.03
+# The echo pane: raw mode, each key byte k ('a'..'x') answered with `\r ESC[K` and a Greek letter
+# (U+03B1 + k - 'a'), whose UTF-8 bytes appear nowhere in the flood, the status line or escape sequences.
+KEY_ECHO_PROG = r'''
+import os, sys, tty
+tty.setraw(0)
+while True:
+    b = os.read(0, 1)
+    if not b:
+        break
+    os.write(1, b"\r\x1b[K" + chr(0x3B1 + b[0] - 97).encode())
+'''
+
+
+class EchoClient(Client):
+    """A Client whose reader thread stamps the arrival of an expected byte string."""
+
+    def __init__(self, *a, **kw):
+        self.want, self.sent, self.lat, self.got = None, 0.0, [], threading.Event()
+        self._tail = b""
+        super().__init__(*a, **kw)
+
+    def _drain(self):
+        while True:
+            try:
+                b = os.read(self.master, 65536)
+            except OSError:
+                break
+            if not b:
+                break
+            now = time.monotonic()
+            self.bytes += len(b)
+            self.bsu += (self._tail[-(len(BSU) - 1):] + b).count(BSU)
+            data = self._tail + b
+            self._tail = data[-8:]
+            if self.reply and not self.replied and QUERY in data:
+                self.replied = True
+                os.write(self.master, b"\x1b[?2026;2$y")
+            w = self.want
+            if w is not None and w in data:
+                self.want = None
+                self.lat.append((now - self.sent) * 1000)
+                self.got.set()
+
+    def key(self, k):
+        """Type one key and wait (up to 1 s) for its echo; None if it never came."""
+        self._tail = b""
+        self.got.clear()
+        self.want = chr(0x3B1 + ord(k) - 97).encode()
+        self.sent = time.monotonic()
+        os.write(self.master, k.encode())
+        if not self.got.wait(1.0):
+            self.want = None
+            return None
+        return self.lat[-1]
+
+
+def scenario_key_echo(env):
+    """Key-to-echo latency with a 200x50 client attached (sync on): window split -h, the right
+    (active) pane a raw echo program, the left `yes` or idle `cat`; KEY_ECHO_N keys 30 ms apart,
+    each echo's arrival stamped in the reader thread. p50 / p90 / max ms of each run."""
+    prog = os.path.join(env.work, "echo.py")
+    with open(prog, "w") as f:
+        f.write(KEY_ECHO_PROG)
+    py = shutil.which("python3") or sys.executable
+    out = {}
+    for flood in ("none", "yes"):
+        def one(which, flood=flood):
+            s = env.server(which)
+            s.run("new", "-d", "-s", "k", "-x", str(CLIENT_COLS), "-y", str(CLIENT_ROWS - 1), "exec yes" if flood == "yes" else "exec cat")
+            s.find_pid()
+            clients = []
+            try:
+                pin_terminal(s)
+                s.run("set", "-s", "escape-time", "0", ";", "set", "-g", "automatic-rename", "off")
+                s.run("splitw", "-h", "-t", "k:0", f"exec '{py}' '{prog}'")
+                time.sleep(0.5)  # the echo program is in raw mode
+                clients = [EchoClient(s, "k", CLIENT_COLS, CLIENT_ROWS, True)]
+                deadline = time.monotonic() + 15
+                while len(s.run("list-clients", "-F", "x").split()) < 1:
+                    if time.monotonic() > deadline:
+                        raise RuntimeError("key_echo: the client did not attach")
+                    time.sleep(0.05)
+                time.sleep(1)
+                c = clients[0]
+                lat, lost = [], 0
+                for i in range(KEY_ECHO_N):
+                    v = c.key(chr(97 + i % 24))
+                    if v is None:
+                        lost += 1
+                    else:
+                        lat.append(v)
+                    time.sleep(KEY_ECHO_GAP)
+                if len(lat) < KEY_ECHO_N * 0.9:
+                    raise RuntimeError(f"key_echo: {lost} of {KEY_ECHO_N} echoes never arrived")
+                lat.sort()
+                return {"p50_ms": lat[len(lat) // 2], "p90_ms": lat[int(len(lat) * 0.9)], "max_ms": lat[-1], "lost": lost}
+            finally:
+                s.kill()
+                for c in clients:
+                    c.close()
+        out[flood] = env.per_binary(one)
+    return {"title": f"key_echo ({KEY_ECHO_N} keys 30 ms apart into a raw echo pane, one {CLIENT_COLS}x{CLIENT_ROWS} client, sync on, "
+                     f"the other pane idle or running `yes`; arrival stamped in the reader thread)",
+            "rows": {f"flood {k}": v for k, v in out.items()}}
+
+
 ATTACHED = {"throughput_attached": scenario_throughput_attached, "render": scenario_render, "many_clients": scenario_many_clients,
-            "agent_panes": scenario_agent_panes}
+            "agent_panes": scenario_agent_panes, "key_echo": scenario_key_echo}
 ALL += list(ATTACHED)
 
 
@@ -1100,6 +1208,7 @@ def render_attached(name, res):
         "agent_panes": [("server CPU %", "server_cpu_pct", 1), ("clients CPU % (sum)", "client_cpu_pct", 1),
                         ("terminal KB/s (sum)", "term_kb_per_s", 1), ("sync frames/s (sum)", "frames_per_s", 0),
                         ("server wakeups/s", "wakeups_per_s", 0), ("RSS MB", "rss_mb", 1)],
+        "key_echo": [("p50 ms", "p50_ms", 2), ("p90 ms", "p90_ms", 2), ("max ms", "max_ms", 2), ("lost", "lost", 0)],
     }[name]
     for per in res["rows"].values():
         for m in per.values():
