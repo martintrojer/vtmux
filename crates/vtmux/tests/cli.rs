@@ -6063,9 +6063,13 @@ fn program_output_reaches_the_grid_as_in_tmux() {
                 "osc8",
                 r"printf '\033]8;id=a:id=b;http://bad\007X\033]8;;http://ok/\007Y\033]8;;\007'",
             ),
+            // The DSR reply is echoed by the tty when the server writes it,
+            // after the server has read this output: `dd` waits for it, so
+            // its echo lands before END rather than racing a capture that
+            // has seen END (once under CI load).
             (
                 "nowrap",
-                r"printf '\033[?7labcdefghijklmnopqrstuvwxyzAB\033[6n\033[?7h\r\n'",
+                r"stty -icanon min 1 time 0; printf '\033[?7labcdefghijklmnopqrstuvwxyzAB\033[6n\033[?7h\r\n'; dd bs=64 count=1 >/dev/null 2>&1",
             ),
             (
                 "tabs",
