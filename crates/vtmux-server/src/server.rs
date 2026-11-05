@@ -175,6 +175,12 @@ impl Client {
         }
     }
 
+    /// Bytes queued for the socket and not yet written: a control
+    /// client's `EVBUFFER_LENGTH(cs->write_event->output)`.
+    pub(crate) fn unwritten(&self) -> usize {
+        self.out.bytes
+    }
+
     /// A client just accepted on `stream`, at model activity `activity`.
     fn new(stream: UnixStream, activity: u64) -> Self {
         let peer = {
@@ -250,6 +256,8 @@ struct Queued {
 #[derive(Debug, Default)]
 struct Outbox {
     queue: std::collections::VecDeque<Queued>,
+    /// Bytes not yet written, over the whole queue.
+    bytes: usize,
 }
 
 impl Outbox {
@@ -258,6 +266,7 @@ impl Outbox {
     }
 
     fn push(&mut self, bytes: Vec<u8>, kind: OutKind) {
+        self.bytes += bytes.len();
         self.queue.push_back(Queued {
             bytes,
             written: 0,
@@ -269,6 +278,7 @@ impl Outbox {
     /// part-written stays, or the stream would be corrupt.
     fn discard(&mut self, drop: impl Fn(OutKind) -> bool) {
         self.queue.retain(|q| q.written != 0 || !drop(q.kind));
+        self.bytes = self.queue.iter().map(|q| q.bytes.len() - q.written).sum();
     }
 
     /// Write what the socket takes: `Ok(true)` if it took anything.
@@ -289,6 +299,7 @@ impl Outbox {
                 Err(e) => return Err(e),
             };
             progress = true;
+            self.bytes -= n;
             while n > 0 {
                 let front = self.queue.front_mut().expect("written past the queue");
                 let left = front.bytes.len() - front.written;
@@ -469,6 +480,8 @@ pub struct Server {
     /// edge-triggered, so they are read again on the next turn instead of
     /// waiting for an event that will not come.
     backlog: std::collections::BTreeSet<PaneId>,
+    /// Pane output some control client has not been sent yet.
+    pub(crate) control_streams: crate::control_queue::Streams,
     /// Panes whose output this turn started a burst (they were not in the
     /// backlog): a key's echo or a prompt, not more of a flood. A frame
     /// that shows one is not paced ([`crate::render::FRAME_INTERVAL`]).
@@ -704,6 +717,7 @@ impl Server {
             key_after: None,
             jobs: crate::jobs::Jobs::default(),
             backlog: std::collections::BTreeSet::new(),
+            control_streams: crate::control_queue::Streams::default(),
             burst_started: std::collections::BTreeSet::new(),
             mode_drawn: std::collections::BTreeSet::new(),
             pending_exits: Vec::new(),
@@ -803,6 +817,8 @@ impl Server {
             // Full turns process timers/queues/rendering too; only the
             // early compression-only path above is a quiet turn.
             self.compress_turn(Instant::now(), false);
+            self.control_buffers();
+            self.pane_reads();
             self.control_tick();
             // A monitor hook set or removed this turn: its timer.
             self.hook_monitors_sync();
@@ -854,6 +870,7 @@ impl Server {
                     }
                     if event.is_writable() {
                         self.flush_client(id);
+                        self.control_pump(id);
                     }
                 }
                 Token(t) => {
@@ -1491,11 +1508,17 @@ impl Server {
     }
 
     pub(crate) fn finish_client(&mut self, id: ClientId, code: i32) {
+        self.finish_client_with(id, code, None);
+    }
+
+    /// [`Self::finish_client`] with a reason the client prints
+    /// (`c->exit_message`).
+    pub(crate) fn finish_client_with(&mut self, id: ClientId, code: i32, message: Option<String>) {
         self.send(
             id,
             &ServerMsg::Exit {
                 code,
-                message: None,
+                message,
                 hup: false,
             },
         );
@@ -4332,6 +4355,9 @@ impl Server {
     pub fn respawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<()> {
         let p = ps.pane;
         self.hangup_pane(p);
+        // spawn.c:343-346: output the control clients still had queued
+        // from the old process goes.
+        self.control_reset_pane(p);
         // spawn.c:328: the pane leaves its modes.
         self.reset_mode_all(p);
         if !self.model.panes.contains_key(&p) {
@@ -4574,6 +4600,33 @@ impl Server {
         self.pane_passthrough(p, passthrough, redraw_pending);
     }
 
+    /// `server_client_check_pane_buffer`'s end (server-client.c:2113-2124),
+    /// each loop turn: a pane is read unless only control clients that
+    /// are behind would get its output, so its program blocks on its
+    /// terminal instead of the server holding what it writes.
+    fn pane_reads(&mut self) {
+        let panes: Vec<(PaneId, WindowId)> = self
+            .model
+            .panes
+            .iter()
+            .filter(|(_, x)| x.io.is_some())
+            .map(|(&p, x)| (p, x.window))
+            .collect();
+        for (p, w) in panes {
+            let on = !self.control_holds_pane(p, w);
+            let Some(io) = self.model.panes.get(&p).and_then(|x| x.io.as_ref()) else {
+                continue;
+            };
+            if io.set_reading(on) {
+                let _ = io.reregister(self.poll.registry(), Token(PANE_BASE + p.0 as usize));
+                if on {
+                    // What arrived while it was not read.
+                    self.backlog.insert(p);
+                }
+            }
+        }
+    }
+
     /// `input_exit_rename` (input.c:2825-2855): `ESC k name ST` from pane
     /// `p` names its window `w`, if the pane's `allow-rename` lets it and
     /// the name is valid UTF-8 (printable ASCII). A name turns
@@ -4612,6 +4665,17 @@ impl Server {
     /// a flood rather than the start of a burst.
     fn pane_readable(&mut self, p: PaneId, flooding: bool) {
         const READS_PER_TURN: usize = 1;
+        // Not read while only control clients that are behind would get
+        // its output ([`Self::pane_reads`]).
+        if self
+            .model
+            .panes
+            .get(&p)
+            .and_then(|x| x.io.as_ref())
+            .is_some_and(|io| !io.reading())
+        {
+            return;
+        }
         let mut closed = false;
         for turn in 0.. {
             if turn == READS_PER_TURN {

@@ -1,6 +1,7 @@
 //! A pane's PTY master: non-blocking reads into the terminal, queued
 //! writes (keys, terminal replies) flushed when the PTY is writable.
 
+use std::cell::Cell;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 
@@ -11,6 +12,13 @@ use mio::{Interest, Registry, Token};
 pub struct PaneIo {
     master: std::fs::File,
     out: Vec<u8>,
+    /// The pane is read (`EV_READ` on `wp->event`): off while every
+    /// attached client is a control client that is behind
+    /// (server-client.c `server_client_check_pane_buffer`).
+    reading: Cell<bool>,
+    /// The master is in the poll set: it leaves it while neither read
+    /// nor written.
+    registered: Cell<bool>,
 }
 
 /// What a read produced.
@@ -28,6 +36,8 @@ impl PaneIo {
         Self {
             master: std::fs::File::from(master),
             out: Vec::new(),
+            reading: Cell::new(true),
+            registered: Cell::new(false),
         }
     }
 
@@ -46,21 +56,47 @@ impl PaneIo {
             &mut SourceFd(&self.master.as_raw_fd()),
             token,
             Interest::READABLE,
-        )
+        )?;
+        self.registered.set(true);
+        Ok(())
     }
 
     pub fn deregister(&self, registry: &Registry) {
-        let _ = registry.deregister(&mut SourceFd(&self.master.as_raw_fd()));
+        if self.registered.replace(false) {
+            let _ = registry.deregister(&mut SourceFd(&self.master.as_raw_fd()));
+        }
     }
 
-    /// Re-arm with WRITABLE while output is queued.
+    /// Re-arm: READABLE while the pane is read, WRITABLE while output is
+    /// queued; out of the poll set while neither.
     pub fn reregister(&self, registry: &Registry, token: Token) -> io::Result<()> {
-        let interest = if self.out.is_empty() {
-            Interest::READABLE
-        } else {
-            Interest::READABLE | Interest::WRITABLE
+        let interest = match (self.reading.get(), !self.out.is_empty()) {
+            (true, false) => Interest::READABLE,
+            (true, true) => Interest::READABLE | Interest::WRITABLE,
+            (false, true) => Interest::WRITABLE,
+            (false, false) => {
+                self.deregister(registry);
+                return Ok(());
+            }
         };
-        registry.reregister(&mut SourceFd(&self.master.as_raw_fd()), token, interest)
+        let fd = &mut SourceFd(&self.master.as_raw_fd());
+        if self.registered.replace(true) {
+            registry.reregister(fd, token, interest)
+        } else {
+            registry.register(fd, token, interest)
+        }
+    }
+
+    /// Whether the pane is read.
+    #[must_use]
+    pub fn reading(&self) -> bool {
+        self.reading.get()
+    }
+
+    /// Turn reading on or off (`bufferevent_enable`/`_disable` of
+    /// `EV_READ`); [`Self::reregister`] makes it so. Whether it changed.
+    pub fn set_reading(&self, on: bool) -> bool {
+        self.reading.replace(on) != on
     }
 
     pub fn read(&mut self) -> ReadResult {

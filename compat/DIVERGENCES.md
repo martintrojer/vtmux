@@ -298,3 +298,11 @@ product reasons" category.
 - vtmux behaviour: the same rule; a line costs more to read (decoded from Ghostty's page, about 1.2 µs a line against tmux's grid) and to stringify, so a match on each of 100000 lines runs out the 200 ms and counts `1000+`. Searches matching a few lines in ten count exactly on the same history (`^5`, `^5.*0.some` below, 0.25 s with the search itself).
 - Evidence: release build, 80x24, history-limit 200000, `seq 1 100000 | sed 's/$/ some filler text here/'`, `copy-mode`, `send -X search-backward RE`, `display '#{search_count}#{?search_count_partial,+,}'`: tmux `filler` 100000, `some f` 100000, `^5` 11111, `^5.*0.some` 1111; vtmux `1000+`, `1000+`, 11111, 1111.
 - Category: Deferred (a faster row read: keep a text-only form of each line for searching, or decode a page's rows in one call).
+
+### D-035: control output backpressure works on whole flushes and one queue
+
+- Test / assertion: control `reply_buffer_cap_lets_a_stalled_client_go`, `pause_after_pauses_a_pane_the_client_is_behind_on`, `slow_reader_keeps_server_memory_bounded`, which compare only what both sides do the same.
+- tmux behaviour: `control_check_reply_buffer` (control.c:429-451) runs for each `control_write` line, so the stream before `%exit too far behind` can stop in the middle of a command's guard. `control_write_callback` (control.c:925-958) takes the pending panes in turn, each up to its share. The buffer it measures is the client's own stdout descriptor.
+- vtmux behaviour: the cap applies to each flush of a command's lines (its `%begin`, output and `%end` together), so the stream stops at a flush boundary. Pane output goes out in the order it was read, cut to the same per-pane share. The buffer measured is the server's queue for the socket, with the socket and the relaying client in front of the reader.
+- Evidence: a stalled client sent 80 `show-buffer` of 1 MiB: both exit 0 with `%exit too far behind` after about 66 MB; tmux ends after a `%begin`, vtmux after an `%end`. Each pane's bytes arrive complete and in order on both, but how panes interleave under a backlog already depends on buffer timing in tmux.
+- Category: Deferred (per-line cap and round-robin pane order; nothing known depends on either).
