@@ -61,9 +61,30 @@ pub(super) struct Nfa {
     /// `subexp_map`: `((x))` reports the outer group for the inner one.
     group_map: Vec<usize>,
     ignore_case: bool,
+    /// Every path from `init` crosses `^` before it consumes or ends: a
+    /// match can only start at the text's start (no `REG_NEWLINE`).
+    anchored: bool,
 }
 
 // ---- compilation -------------------------------------------------------
+
+/// Whether no path from `init` reaches a consuming node or the end without
+/// crossing a `^` (`Assert::Start`).
+fn anchored(nodes: &[Node], init: usize) -> bool {
+    let mut seen = vec![false; nodes.len()];
+    let mut stack = vec![init];
+    while let Some(n) = stack.pop() {
+        if std::mem::replace(&mut seen[n], true) {
+            continue;
+        }
+        match nodes[n].kind {
+            Kind::Assert(Assert::Start) => {}
+            Kind::Literal(_) | Kind::Any | Kind::Bracket(_) | Kind::End => return false,
+            _ => stack.extend(nodes[n].edests.iter().copied()),
+        }
+    }
+    true
+}
 
 #[derive(Debug, Clone, Copy)]
 enum TKind {
@@ -343,8 +364,10 @@ impl Nfa {
                 rev[d].push(i);
             }
         }
+        let init = idx(root);
         Ok(Self {
-            init: idx(root),
+            anchored: anchored(&nodes, init),
+            init,
             nodes,
             rev,
             brackets: b.brackets,
@@ -378,11 +401,15 @@ impl Nfa {
         let Kind::Assert(a) = self.nodes[node].kind else {
             return true;
         };
+        match a {
+            Assert::Start => return pos == 0 && !not_bol,
+            Assert::End => return pos == text.len(),
+            _ => {}
+        }
         let before = unit_before(text, pos).is_some_and(is_word);
         let after = unit_at(text, pos).is_some_and(|(u, _)| is_word(u));
         match a {
-            Assert::Start => pos == 0 && !not_bol,
-            Assert::End => pos == text.len(),
+            Assert::Start | Assert::End => unreachable!("handled above"),
             Assert::WordFirst => !before && after,
             Assert::WordLast => before && !after,
             Assert::InsideWord => before && after,
@@ -400,7 +427,8 @@ impl Nfa {
         let mut pos = 0;
         loop {
             cur.clear();
-            let fresh = best.is_none().then_some((self.init, pos));
+            let fresh =
+                (best.is_none() && (pos == 0 || !self.anchored)).then_some((self.init, pos));
             for (node, start) in seeds.iter().copied().chain(fresh) {
                 if best.is_some_and(|(s, _)| start > s) {
                     continue;
@@ -437,7 +465,9 @@ impl Nfa {
                     })
                     .map(|&(n, start)| (self.nodes[n].next, start)),
             );
-            if seeds.is_empty() && best.is_some() {
+            // Nothing alive and nothing can start later: an anchored
+            // pattern starts only at 0.
+            if seeds.is_empty() && (best.is_some() || self.anchored) {
                 break;
             }
             pos += len;

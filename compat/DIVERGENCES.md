@@ -290,3 +290,11 @@ product reasons" category.
 - vtmux behaviour: the same two, then `ESC]4;N;?ST` for N 0-15, both at attach and after a theme report. Their replies are kept with the client's other reported colours (`term_queries::Reported`) and, while one of these queries is out, answer no pane's OSC 4 request (tmux sends none, so it must not answer or drop one); nothing changes on screen unless `vtmux-pane-active-blend` or `vtmux-pane-inactive-blend` is set.
 - Evidence: the attach test above compares both binaries' startup bytes for OSC 10/11 and asserts the OSC 4 queries only for vtmux.
 - Category: Spec decision (D26: the pane blend mixes palette cells from the terminal's own palette, `docs/specs/2026-11-04-pane-blend.md`).
+
+### D-034: a search matching almost every line of a long history counts partially
+
+- Test / assertion: none (timing); reproduction below.
+- tmux behaviour: `window_copy_search_marks` (window-copy.c:4876-5003) counts the matches over all of history unless that takes over 200 ms (`WINDOW_COPY_SEARCH_ALL_TIMEOUT`), then shows `1000+`-style counts (`#{search_count_partial}`). tmux's grid reads fast enough that 100000 lines with a match on each count exactly (0.11 s).
+- vtmux behaviour: the same rule; a line costs more to read (decoded from Ghostty's page, about 1.2 µs a line against tmux's grid) and to stringify, so a match on each of 100000 lines runs out the 200 ms and counts `1000+`. Searches matching a few lines in ten count exactly on the same history (`^5`, `^5.*0.some` below, 0.25 s with the search itself).
+- Evidence: release build, 80x24, history-limit 200000, `seq 1 100000 | sed 's/$/ some filler text here/'`, `copy-mode`, `send -X search-backward RE`, `display '#{search_count}#{?search_count_partial,+,}'`: tmux `filler` 100000, `some f` 100000, `^5` 11111, `^5.*0.some` 1111; vtmux `1000+`, `1000+`, 11111, 1111.
+- Category: Deferred (a faster row read: keep a text-only form of each line for searching, or decode a page's rows in one call).
