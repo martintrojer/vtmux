@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm51629.rva0.facebook.com",
   "name": "switch_mode_keys",
   "inputs": {
     "name": "switch_mode_keys",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "23",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -81,7 +82,8 @@
           "alpha:1",
           "-n",
           "pick-one",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -101,7 +103,8 @@
           "bravo",
           "-n",
           "pick-two",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -121,7 +124,8 @@
           "charlie",
           "-n",
           "last",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
