@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "mtrojer-mac",
   "name": "attach_keys",
   "inputs": {
     "name": "attach_keys",
@@ -23,8 +23,11 @@
           "9",
           "sh",
           "-c",
-          "printf '\\033]2;t\\033\\\\'; stty -echo; exec cat -v"
+          "printf '\\033]2;t\\033\\\\'; stty -echo; tmux wait-for -S ready; exec cat -v"
         ]
+      },
+      {
+        "wait_for": "ready"
       },
       {
         "attach": {
@@ -71,7 +74,16 @@
       }
     },
     {
-      "step": 4,
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
       "observation": {
         "kind": "cli",
         "stdout": "^[[A\n\n\n\n\n\n\n\n\n",
@@ -80,7 +92,7 @@
       }
     },
     {
-      "step": 7,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "",

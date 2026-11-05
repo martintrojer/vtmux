@@ -1,7 +1,8 @@
 name = "attach_keys"
 size = [40, 10]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "printf '\\033]2;t\\033\\\\'; stty -echo; exec cat -v"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "printf '\\033]2;t\\033\\\\'; stty -echo; tmux wait-for -S ready; exec cat -v"] },
+  { wait_for = "ready" },
   { attach = { session = "a" } },
   { keys = "\u001b[A\r" },
   { settle = {} },
