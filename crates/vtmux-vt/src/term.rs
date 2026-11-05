@@ -1343,6 +1343,20 @@ impl PaneTerm {
         self.view.borrow()
     }
 
+    /// Drop the view [`Self::screen`] keeps (the copied grid and Ghostty's
+    /// render state) for a pane no client shows; the next
+    /// [`Self::screen`] reads every row again. A 100x50 pane's view is
+    /// about 0.7 MB (`docs/PERFORMANCE.md`, *Hidden panes*).
+    ///
+    /// # Panics
+    /// Only while a view returned by [`Self::screen`] is still held.
+    pub fn release_screen(&self) {
+        let mut view = self.view.borrow_mut();
+        if view.is_live() {
+            *view = crate::snapshot::ScreenView::default();
+        }
+    }
+
     /// Resize the pane. Primary-screen content reflows (Ghostty).
     ///
     /// # Panics

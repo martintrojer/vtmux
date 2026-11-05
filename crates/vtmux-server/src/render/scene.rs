@@ -405,10 +405,9 @@ fn int(n: u32) -> i32 {
 }
 
 impl Scene {
-    /// `redraw_build_cells` for a `cols` x `rows` area at the window origin.
-    #[must_use]
     /// [`Self::build`], or the scene `cache` holds when it was built
     /// from the same view at the same size.
+    #[must_use]
     pub fn cached(cache: &SceneCache, win: WindowView, cols: u16, rows: u16) -> Rc<Self> {
         let mut slot = cache.0.borrow_mut();
         if let Some((view, scene)) = slot.as_ref()
@@ -422,6 +421,7 @@ impl Scene {
         scene
     }
 
+    /// `redraw_build_cells` for a `cols` x `rows` area at the window origin.
     #[must_use]
     pub fn build(win: &WindowView, cols: u16, rows: u16) -> Self {
         let mut cells = Vec::with_capacity(usize::from(cols) * usize::from(rows));

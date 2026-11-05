@@ -89,6 +89,18 @@ The history rows come from `scripts/bench-history-memory.sh` (details in [`test-
 - **With the owner's config the idle server is not idle, and the cause is outside it.** The mu-crew poller wakes about once a second and runs `tmux show-options -g` (and `set-option` when a value changes) as clients of the server, so the server's 187 ms (tmux) and 48 ms (vtmux) over 60 s are the cost of answering those clients: about 3 ms against 0.8 ms per wake-up round. vtmux does less server work per request here (0.26x); the RSS gap is the same 3 MB as for a bare server (1.7x). The poller's own CPU (a Python process plus the `tmux` client processes it starts, counted from `/proc/<pid>/stat` with children) is 180 ms and 220 ms: it is outside the server. The 40 ms difference between the two was not investigated (3 runs, shared host). Only the cheapest probe (`uptime`, a `/proc` read every 60 s) is on; the owner's real list adds `murmur_remote memory cpu uptime muzzle`, which starts `murmur status` and `muzzle status` every 5 to 10 s and is not measured here because it needs a network and the owner's state.
 - **Sourcing the owner's config takes 62 ms for both.** A bare `new -d` takes 7 to 9 ms (table above), so the rest is the config; where it goes (the config's synchronous `run-shell` calls, such as `mu-crew-bind`, each start a shell and several `tmux` clients) was not profiled. The 20 runs overlap for the two binaries (58 to 74 ms and 58 to 80 ms).
 
+### Hidden panes
+
+Run of 2026-11-05 on a CentOS Stream 9 devserver (96 cpus), load 1.7 to 3.0, release builds, 4 runs per binary alternating: `scripts/bench-hidden-panes.py <binary> <label>` attaches a 100x51 client, opens 100 more windows (each pane prints 60 lines of 85 characters, so its 100x50 screen is full) one after another so each is drawn once, goes back to window 0, then times 40 `C-b n` switches from the key to the client's last output byte. Before is the commit before `lows_render`, after is `lows_render`.
+
+| | tmux 3.8 | vtmux before | vtmux after |
+|---|---|---|---|
+| server RSS, 101 windows | 9.8 MB | 89.7 MB | 19.2 MB |
+| RSS per hidden pane | 48 KB | 778 KB | 74-77 KB |
+| `C-b n` to the last byte, median | 5.2 ms | 2.9-3.0 ms | 3.3-3.5 ms |
+
+Each pane kept its screen view (the copied grid and Ghostty's render state, [`ScreenView`](../crates/vtmux-vt/src/snapshot.rs)) once drawn, about 0.7 MB for a full 100x50 screen, whether a client still showed it or not. Now the views of panes no attached client's window shows are dropped after each turn's frames (`release_hidden_screens`), and a pane's view is read again whole when it is next drawn. That read is the 0.4-0.5 ms a switch now costs more (still under tmux's). A choose-tree or display-panes preview reads the panes it shows again for each frame it draws.
+
 ## Scenarios
 
 `scripts/bench.py` runs each scenario against both binaries (and `BASE=<binary>`, shown as `base`, to compare against an earlier build).
