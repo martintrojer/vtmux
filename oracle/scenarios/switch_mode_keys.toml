@@ -6,21 +6,25 @@
 # and -k kills the pane. prefix BTab lists sessions; C-n and C-j move
 # down, C-p and C-k up (wrapping), before the search prompt sees them
 # (window_switch_key); Escape leaves and kills the pane.
+# The panes run `cat -`: two words are execvp'd (spawn.c
+# spawn_pane), so the tree's #{pane_current_command} is `cat` at once;
+# one word runs `$SHELL -c cat`, which stays `sh` under a dash that forks
+# (Ubuntu CI) and is `sh` until the exec under bash.
 name = "switch_mode_keys"
 size = [80, 24]
 steps = [
-  { run = ["new", "-d", "-s", "alpha", "-n", "main", "-x", "80", "-y", "23", "cat"] },
+  { run = ["new", "-d", "-s", "alpha", "-n", "main", "-x", "80", "-y", "23", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["set", "-g", "default-command", "cat"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["set-hook", "-g", "after-split-window", "select-pane -T new"] },
   { run = ["select-pane", "-t", "alpha", "-T", "p0"] },
-  { run = ["neww", "-d", "-t", "alpha:1", "-n", "pick-one", "cat"] },
+  { run = ["neww", "-d", "-t", "alpha:1", "-n", "pick-one", "cat", "-"] },
   { run = ["select-pane", "-t", "alpha:1", "-T", "p1"] },
-  { run = ["new", "-d", "-s", "bravo", "-n", "pick-two", "cat"] },
+  { run = ["new", "-d", "-s", "bravo", "-n", "pick-two", "cat", "-"] },
   { run = ["select-pane", "-t", "bravo", "-T", "p2"] },
-  { run = ["new", "-d", "-s", "charlie", "-n", "last", "cat"] },
+  { run = ["new", "-d", "-s", "charlie", "-n", "last", "cat", "-"] },
   { run = ["select-pane", "-t", "charlie", "-T", "p3"] },
   { attach = { session = "alpha" } },
   { settle = { quiet_ms = 500 } },
