@@ -207,6 +207,21 @@ mod tests {
             format!("X {tail}")
         );
     }
+    /// regsub.c `start += m[0].rm_eo + 1`: an empty match moves on one byte,
+    /// so a replacement lands between the bytes of a character. Reference
+    /// tmux 3.8, `display -p '#{s/x*/-/:#{l:aéb}}|#{s/b*/-/:#{l:é世}}'`.
+    #[test]
+    fn empty_matches_step_one_byte_as_regsub_does() {
+        use crate::rawstr::to_bytes;
+        let cases: [(&str, &str, &[u8]); 2] = [
+            ("x*", "aéb", b"a-\xc3-\xa9-b-"),
+            ("b*", "é世", b"\xc3-\xa9-\xe4-\xb8-\x96-"),
+        ];
+        for (pattern, text, want) in cases {
+            let got = super::regsub(pattern, "-", text, false);
+            assert_eq!(&*to_bytes(&got), want, "{pattern} {text}");
+        }
+    }
     #[test]
     fn format_matching_reference_goldens() {
         for (fmt, expected) in rows() {
