@@ -351,13 +351,30 @@ fn missing_socket_dir() {
 fn stale_socket() {
     compare("stale_socket", |w| {
         let path = w.dir().join("stale");
-        drop(std::os::unix::net::UnixListener::bind(&path).expect("bind"));
+        make_stale_socket(&path);
         let p = path.to_str().expect("utf-8 path");
         vec![
             w.raw(&["-f", "/dev/null", "-S", p, "ls"]),
             w.raw(&["-f", "/dev/null", "-S", p, "has"]),
         ]
     });
+}
+
+/// Bind `path` and close it, so the file stays and nothing listens. A child
+/// another test thread is spawning copies the listener's descriptor until it
+/// execs; while it holds it, a client connects to the socket and then loses
+/// it ("server exited unexpectedly", client.c `CLIENT_EXIT_LOST_SERVER`), so
+/// wait until a connection is refused.
+fn make_stale_socket(path: &Path) {
+    drop(std::os::unix::net::UnixListener::bind(path).expect("bind"));
+    let start = Instant::now();
+    while std::os::unix::net::UnixStream::connect(path).is_ok() {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "socket stays live"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 /// (4) has-session on an existing and a missing session.
