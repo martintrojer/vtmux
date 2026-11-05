@@ -189,3 +189,28 @@ fn not_bol() {
     let r = Regex::new("b$", false).unwrap();
     assert!(r.find_with("ab", true).unwrap().is_some());
 }
+
+/// A pattern every branch of which starts with `^` is tried at the text's
+/// start only; one with a branch that does not is tried everywhere.
+#[test]
+fn regex_anchored_patterns_start_only_at_zero() {
+    let span = |p: &str, t: &str, not_bol: bool| {
+        Regex::new(p, false)
+            .unwrap()
+            .find_with(t, not_bol)
+            .unwrap()
+            .and_then(|m| m.captures[0].clone())
+    };
+    assert_eq!(span("^5", "15 some", false), None);
+    assert_eq!(span("^5", "5x", false), Some(0..1));
+    assert_eq!(span("^5", "5x", true), None);
+    assert_eq!(span("^5.*0.some", "50 some", false), Some(0..7));
+    assert_eq!(span("(^a|^b)c", "xbc", false), None);
+    assert_eq!(span("(^a|^b)c", "bc", false), Some(0..2));
+    assert_eq!(span("a|^b", "xb", false), None);
+    assert_eq!(span("a|^b", "xa", false), Some(1..2));
+    assert_eq!(span("(^a)|b", "xb", false), Some(1..2));
+    let long = "a".repeat(100_000) + "b";
+    assert_eq!(span("^b", &long, false), None);
+    assert_eq!(span("^a*b", &long, false), Some(0..100_001));
+}
