@@ -95,7 +95,8 @@ pages took 5–7 ms, and a single new line restarted a traversal of compressed
 history. The new schedule requires 50 ms of whole-loop quiet, with no starvation
 override; input always wins. A completed pane pass is rearmed only after a
 standard page of new scrollback, or a history read/resize. Continuous activity
-may therefore defer memory reclamation indefinitely.
+may therefore defer memory reclamation indefinitely (superseded by the
+starvation override below).
 
 Grid pages are not split. Standard pages still use a single LZ4 step; larger
 pages encode an owned immutable snapshot in 128 KiB blocks. Snapshot allocation,
@@ -106,6 +107,38 @@ Encoded allocations use Ghostty's page allocator, not the general malloc heap,
 so retaining compressed history does not perturb transient render allocations.
 No process-wide allocator tuning or worker thread is introduced. Measurements
 and any unmet criteria are recorded in `docs/test-health/` and task notes.
+
+## Starvation override (hist_compress_busy, 2026-11-05)
+
+The owner's case is a pane that streams all day (agent logs, `tail -f`, builds):
+under the round-2 schedule its history never shrinks. Measured: a pane at the
+100k limit writing 10 or 1000 lines/s held 107-110 MB for 20 minutes, against
+18.5 MB once idle and tmux's 66 MB.
+
+A pane is *starved* once its history has kept changing (gaps under `IDLE`, 5 s)
+or kept wanting a pass (one a busy loop holds off) for `STARVE` (10 s). A new
+run starts only from rest: no pass pending and no change for `IDLE`. A starved
+pane's steps also run at the end of busy turns, after the turn's frames are
+written, one step per turn under the same `REST_FACTOR` rest, and in quiet
+turns without waiting out `IDLE`. Ghostty's traversal takes the oldest pages
+first, farthest from the active area; it never touches the viewport or the
+page holding the active area's top row. The pane stays starved until its pass
+completes and its history is quiet for `IDLE`, so each new page of a streaming
+pane is compressed soon after it scrolls off.
+
+| Decision | Why |
+|---|---|
+| Starvation counts history changes, not the pane's own deadline | Output postpones the deadline every time; the start of the run does not move |
+| Stays starved across completed passes while the run goes on | Resetting at each pass would let a streaming pane gather another `STARVE` of pages (about 10 MB at 1000 lines/s) every cycle |
+| `STARVE` 10 s, longer than `IDLE` | A shell someone types in, with pauses of 5 s, never meets a step in a busy turn; the step is the same bounded work as in quiet turns |
+| Steps after rendering, one per turn, same rest | Keeps the work bound and the gate below unchanged; a step delays at most the next turn, by at most one step |
+
+Gate (criterion 6, run 2026-11-05, `docs/test-health/2026-11-05-history-compression-busy.md`):
+busy-pane p95 against a build without the override, GAP_MS 2 (the loop is never
+quiet; with the override the history panes compress meanwhile): spec +0.5%,
+narrow -1.6% inside the compression window. Steps are unchanged (worst 0.8 ms).
+Streaming RSS: 18.5-19.8 MB at 10 and 1000 lines/s for 20 minutes, against
+106.6-109.8 MB before and tmux's 65.7-66.7 MB.
 
 ## Implementation checklist
 
