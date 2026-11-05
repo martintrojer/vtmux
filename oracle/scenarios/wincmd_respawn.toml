@@ -32,6 +32,10 @@ steps = [
   { run = ["display", "-p", "-t", "a:1", "#{window_layout}"] },
   # -c and -e.
   { run = ["respawnw", "-k", "-c", "/tmp", "-e", "FOO=bar", "-t", "a:1", "printf '%s:' \"$FOO\"; pwd; exec cat"] },
+  # The window closes when the pane's command has exited: wait for the
+  # unlink before listing (oracle/README.md, Races under load).
+  { run = ["set-hook", "-g", "window-unlinked", "wait-for -S gone"] },
   { run = ["respawnw", "-k", "-t", "a:0", "exit 0"] },
+  { wait_for = "gone" },
   { run = ["ls"] },
 ]
