@@ -1,0 +1,10 @@
+name = "osc133_mid_line"
+# OSC 133;A, A with options and N in the middle of a line only mark it
+# (input.c input_osc_133); Ghostty's own handling starts a fresh line
+# (task low_osc_133_a_n_mid_line_inserts_a_line).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "printf 'aa\\nmid \\033]133;A\\007$ x\\nzz\\n'; printf 'q\\033]133;A;cl=m\\007r\\n'; printf 'w\\033]133;N\\007v\\n'; printf 'p\\033]133;P;k=i\\007s\\n'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "%0"] },
+  { run = ["display", "-p", "-t", "%0", "#{cursor_x},#{cursor_y} #{history_size}"] },
+]
