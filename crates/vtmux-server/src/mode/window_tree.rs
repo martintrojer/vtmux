@@ -9,7 +9,8 @@
 //! is `render::tree`.
 //!
 //! Not here yet: session groups (`-G`) and the marked pane (`m`/`M` do
-//! nothing), and the mouse.
+//! nothing), and the mouse in the preview (`window_tree_mouse`); a
+//! right-click opens the mode's menu ([`super::tree_mode`]).
 
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::keys::Key;
@@ -625,6 +626,22 @@ impl TreeMode for WindowTree {
     /// `window_tree_help`'s width.
     const HELP_WIDTH: usize = 51;
     const HELP_ITEM: &'static str = "item";
+    /// `window_tree_menu_items` (window-tree.c); `Tag All` sends
+    /// `\024`, as tmux does.
+    const MENU: &'static [(&'static str, Key)] = &[
+        ("Select", Key::ascii(b'\r')),
+        ("Expand", Key::RIGHT),
+        ("Mark", Key::ascii(b'm')),
+        ("", Key::NONE),
+        ("Tag", Key::ascii(b't')),
+        ("Tag All", Key::ascii(0x14)),
+        ("Tag None", Key::ascii(b'T')),
+        ("", Key::NONE),
+        ("Kill", Key::ascii(b'x')),
+        ("Kill Tagged", Key::ascii(b'X')),
+        ("", Key::NONE),
+        ("Cancel", Key::ascii(b'q')),
+    ];
 
     fn tree(&self) -> &ModeTree<Tag, Item> {
         &self.tree

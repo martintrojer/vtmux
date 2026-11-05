@@ -13,9 +13,8 @@
 //! tmux runs the editor in a modal floating pane, vtmux in a popup over
 //! the client ([`crate::popup::Editor`], compat/DIVERGENCES.md D-028);
 //! while it runs the mode shows `WAITING FOR EDITOR` and takes only `q`,
-//! Escape and C-c, which end it.
-//!
-//! Not here yet: the mouse menu.
+//! Escape and C-c, which end it. A right-click opens the mode's menu
+//! ([`super::tree_mode`]).
 
 use vtmux_core::colour::Colour;
 use vtmux_core::ids::{PaneId, SessionId};
@@ -376,6 +375,21 @@ impl TreeMode for CustomizeMode {
     ];
     const HELP_WIDTH: usize = 52;
     const HELP_ITEM: &'static str = "item";
+    /// `window_customize_menu_items` (window-customize.c); `Tag All` sends
+    /// `\024`, as tmux does.
+    const MENU: &'static [(&'static str, Key)] = &[
+        ("Select", Key::ascii(b'\r')),
+        ("Edit", Key::ascii(b'e')),
+        ("Expand", Key::RIGHT),
+        ("", Key::NONE),
+        ("Tag", Key::ascii(b't')),
+        ("Tag All", Key::ascii(0x14)),
+        ("Tag None", Key::ascii(b'T')),
+        ("", Key::NONE),
+        ("Changed Only", Key::ascii(b'C')),
+        ("", Key::NONE),
+        ("Cancel", Key::ascii(b'q')),
+    ];
 
     fn tree(&self) -> &ModeTree<Tag, Item> {
         &self.tree

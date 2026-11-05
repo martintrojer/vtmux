@@ -104,6 +104,7 @@ pub fn exec(
         found,
         key: item.key,
         mouse: item.mouse.clone(),
+        tree: None,
     };
     if no_mouse {
         menu.start_at(start);

@@ -180,6 +180,7 @@ mod tests {
             found: Found::default(),
             key: None,
             mouse: None,
+            tree: None,
         }
     }
 

@@ -8,9 +8,8 @@
 //! in a popup over the client as customize-mode's `e` does
 //! ([`crate::popup::Editor`], compat/DIVERGENCES.md D-028); while it runs
 //! the mode shows `WAITING FOR EDITOR` and takes only `q`, Escape and
-//! C-c, which end it.
-//!
-//! Not here yet: the mouse menu.
+//! C-c, which end it. A right-click opens the mode's menu
+//! ([`super::tree_mode`]).
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::keys::Key;
@@ -166,6 +165,21 @@ impl TreeMode for BufferMode {
     ];
     const HELP_WIDTH: usize = 0;
     const HELP_ITEM: &'static str = "buffer";
+    /// `window_buffer_menu_items` (window-buffer.c); `Tag All` sends
+    /// `\024`, as tmux does.
+    const MENU: &'static [(&'static str, Key)] = &[
+        ("Paste", Key::ascii(b'p')),
+        ("Paste Tagged", Key::ascii(b'P')),
+        ("", Key::NONE),
+        ("Tag", Key::ascii(b't')),
+        ("Tag All", Key::ascii(0x14)),
+        ("Tag None", Key::ascii(b'T')),
+        ("", Key::NONE),
+        ("Delete", Key::ascii(b'd')),
+        ("Delete Tagged", Key::ascii(b'D')),
+        ("", Key::NONE),
+        ("Cancel", Key::ascii(b'q')),
+    ];
 
     fn tree(&self) -> &ModeTree<u64, Item> {
         &self.tree
