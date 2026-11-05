@@ -186,6 +186,12 @@ fn system_ncurses_free(bin: &Path) -> Result<()> {
 /// `ncursesw` (tmux's configure tries `tinfow`, `tinfo`, then `ncursesw`
 /// with pkg-config before the system library): Homebrew's keg-only
 /// ncurses is added when the given path does not already have one.
+///
+/// Homebrew's pkg-config also searches its own `ncursesw.pc` for the macOS
+/// SDK (`Library/Homebrew/os/mac/pkgconfig/<os>`): version 6.0.20150808,
+/// `libdir` `/usr/lib`, `-lncurses`, i.e. the system's 5.4 dylib and its
+/// 2015 terminfo. It passes a version check, so an `ncursesw` whose `libdir`
+/// is `/usr/lib` does not count.
 fn pkg_config_path() -> Result<Option<std::ffi::OsString>> {
     let given = std::env::var_os("PKG_CONFIG_PATH");
     if !cfg!(target_os = "macos") {
@@ -193,14 +199,13 @@ fn pkg_config_path() -> Result<Option<std::ffi::OsString>> {
     }
     let has_ncurses6 = |path: Option<&std::ffi::OsString>| {
         let mut cmd = Command::new("pkg-config");
-        cmd.args(["--atleast-version=6", "ncursesw"]);
+        cmd.args(["--atleast-version=6", "--variable=libdir", "ncursesw"]);
         if let Some(p) = path {
             cmd.env("PKG_CONFIG_PATH", p);
         }
-        cmd.stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+        cmd.stderr(Stdio::null())
+            .output()
+            .is_ok_and(|o| o.status.success() && !is_system_libdir(&o.stdout))
     };
     if has_ncurses6(given.as_ref()) {
         return Ok(given);
@@ -222,6 +227,11 @@ fn pkg_config_path() -> Result<Option<std::ffi::OsString>> {
         }
     }
     err(MACOS_NCURSES_HINT)
+}
+
+/// Whether pkg-config's `libdir` output names macOS's own `/usr/lib`.
+fn is_system_libdir(libdir: &[u8]) -> bool {
+    String::from_utf8_lossy(libdir).trim().trim_end_matches('/') == "/usr/lib"
 }
 
 /// Removes a file or directory tree when dropped, on every exit path.
@@ -401,6 +411,16 @@ mod tests {
         let tmux = bin.join("tmux");
         fs::write(&tmux, format!("#!/bin/sh\necho '{version_line}'\n")).unwrap();
         fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn homebrews_sdk_ncursesw_is_the_system_library() {
+        // `pkg-config --variable=libdir ncursesw` through Homebrew's
+        // os/mac/pkgconfig shim, then through a keg or a local build.
+        assert!(is_system_libdir(b"/usr/lib\n"));
+        assert!(is_system_libdir(b"/usr/lib/"));
+        assert!(!is_system_libdir(b"/opt/homebrew/Cellar/ncurses/6.6/lib\n"));
+        assert!(!is_system_libdir(b"/usr/local/lib\n"));
     }
 
     #[test]
