@@ -24,7 +24,8 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/vtmux/tmux-3.8
-        # Keyed on the pinned tarball sha256 (xtask/src/ref_tmux.rs) and the runner.
-        key: ref-tmux-${{ runner.os }}-${{ runner.arch }}-e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e
+        # Keyed on the pinned tarball sha256 (xtask/src/ref_tmux.rs), the runner,
+        # and a build revision (2: macOS links Homebrew's ncurses 6, not the system's 5.4).
+        key: ref-tmux-${{ runner.os }}-${{ runner.arch }}-e79c699c7e949dccd0a4a125e17b8d1261e311b16979dbc8eb34542f3966d82e-2
     - run: cargo xtask ref-tmux
       shell: bash

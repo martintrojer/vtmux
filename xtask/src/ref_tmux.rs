@@ -40,6 +40,17 @@ configure failed. tmux needs libevent, ncurses, pkg-config and yacc (bison); ins
   Debian/Ubuntu: apt install libevent-dev libncurses-dev bison
   macOS:         brew install libevent ncurses pkg-config bison utf8proc jemalloc (tmux requires both on macOS)";
 
+/// macOS's own libncurses is 5.4 and reads a terminfo database from 2015:
+/// its `xterm-256color` has no `smxx` and a `smcup` without the title
+/// push, so a reference linked to it answers terminfo-dependent tests
+/// differently from Linux, where vtmux's built-in terminal tables come from
+/// (`tests/terminfo_names.sh`). The reference links an ncurses 6 instead.
+const MACOS_NCURSES_HINT: &str = "\
+the macOS reference tmux needs ncurses 6 (macOS's 5.4 reads a 2015 terminfo database):
+  brew install ncurses (keg-only; its pkg-config files are found through `brew --prefix ncurses`),
+  or put an ncurses 6 build's lib/pkgconfig (ncursesw.pc, configured --enable-widec --enable-pc-files)
+  on PKG_CONFIG_PATH";
+
 #[derive(Debug)]
 pub struct RefTmuxError(String);
 
@@ -140,7 +151,7 @@ fn check_version(bin: &Path) -> Result<()> {
     };
     let got = String::from_utf8_lossy(&out.stdout);
     if out.status.success() && got.trim_end_matches('\n') == VERSION_LINE {
-        Ok(())
+        system_ncurses_free(bin)
     } else {
         err(format!(
             "{}: `-V` printed {:?}, expected {VERSION_LINE:?}",
@@ -148,6 +159,69 @@ fn check_version(bin: &Path) -> Result<()> {
             got.trim_end()
         ))
     }
+}
+
+/// On macOS, a reference linked to the system's ncurses 5.4 is stale (see
+/// [`MACOS_NCURSES_HINT`]): it is rebuilt against ncurses 6.
+fn system_ncurses_free(bin: &Path) -> Result<()> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let libs = Command::new("otool")
+        .arg("-L")
+        .arg(bin)
+        .output()
+        .or_else(|e| err(format!("otool -L {}: {e}", bin.display())))?;
+    if String::from_utf8_lossy(&libs.stdout).contains("/usr/lib/libncurses") {
+        err(format!(
+            "{} links macOS's ncurses 5.4; rebuild it against ncurses 6",
+            bin.display()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// The `PKG_CONFIG_PATH` for configure. On macOS, it must find an ncurses 6
+/// `ncursesw` (tmux's configure tries `tinfow`, `tinfo`, then `ncursesw`
+/// with pkg-config before the system library): Homebrew's keg-only
+/// ncurses is added when the given path does not already have one.
+fn pkg_config_path() -> Result<Option<std::ffi::OsString>> {
+    let given = std::env::var_os("PKG_CONFIG_PATH");
+    if !cfg!(target_os = "macos") {
+        return Ok(given);
+    }
+    let has_ncurses6 = |path: Option<&std::ffi::OsString>| {
+        let mut cmd = Command::new("pkg-config");
+        cmd.args(["--atleast-version=6", "ncursesw"]);
+        if let Some(p) = path {
+            cmd.env("PKG_CONFIG_PATH", p);
+        }
+        cmd.stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    if has_ncurses6(given.as_ref()) {
+        return Ok(given);
+    }
+    let brew = Command::new("brew")
+        .args(["--prefix", "ncurses"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()).join("lib/pkgconfig"));
+    if let Some(dir) = brew.filter(|d| d.is_dir()) {
+        let mut path = dir.into_os_string();
+        if let Some(g) = given.filter(|g| !g.is_empty()) {
+            path.push(":");
+            path.push(g);
+        }
+        if has_ncurses6(Some(&path)) {
+            return Ok(Some(path));
+        }
+    }
+    err(MACOS_NCURSES_HINT)
 }
 
 /// Removes a file or directory tree when dropped, on every exit path.
@@ -172,6 +246,7 @@ fn build(root: &Path, url: &str, _lock: &File) -> Result<()> {
     let build = build_root.join("work");
     let _scratch = RemoveOnDrop(build.clone());
     fs::create_dir_all(&build).map_err(|e| io("create build dir", e))?;
+    let pkg_config = pkg_config_path()?;
 
     let tarball = fetch(&dl, url)?;
     eprintln!("ref-tmux: extracting into {}", build.display());
@@ -186,14 +261,14 @@ fn build(root: &Path, url: &str, _lock: &File) -> Result<()> {
     let src = build.join("tmux-3.8");
 
     eprintln!("ref-tmux: configure (prefix {})", prefix.display());
-    if run_cmd(
-        Command::new("./configure")
-            .arg(format!("--prefix={}", prefix.display()))
-            .current_dir(&src),
-        "configure",
-    )
-    .is_err()
-    {
+    let mut configure = Command::new("./configure");
+    configure
+        .arg(format!("--prefix={}", prefix.display()))
+        .current_dir(&src);
+    if let Some(path) = pkg_config {
+        configure.env("PKG_CONFIG_PATH", path);
+    }
+    if run_cmd(&mut configure, "configure").is_err() {
         eprintln!("{MISSING_DEPS_HINT}");
         return err("configure failed");
     }
