@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::DirBuilderExt;
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -452,8 +452,19 @@ impl<'a> Runner<'a> {
     }
 
     fn stale_socket(&self) -> Result<()> {
-        // Bound then closed: the file stays, nothing listens.
+        // Bound then closed: the file stays, nothing listens. A child another
+        // scenario's thread is spawning holds a copy of the listener until it
+        // execs, and a client that connects meanwhile loses the socket
+        // ("server exited unexpectedly"), so wait until a connection is
+        // refused.
         drop(UnixListener::bind(&self.socket).map_err(|e| e.to_string())?);
+        let start = Instant::now();
+        while UnixStream::connect(&self.socket).is_ok() {
+            if start.elapsed() > Duration::from_secs(5) {
+                return Err("stale socket stays live".into());
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
         Ok(())
     }
 
