@@ -106,6 +106,8 @@ Scripts and plugins inside vtmux call plain `tmux`. So that they reach this serv
 
 Control-mode clients (`vtmux -C`) use the same socket. They send command lines on stdin and get tmux's `%begin`/`%end`/`%error` guards, `%output`, and the other notifications instead of frames.
 
+Pane output for control clients is applied backpressure the way tmux's `control.c` does it (`control_queue.rs`). The server keeps a pane's bytes once, for as long as some control client is still owed them. Each client keeps an ordered queue of lines and byte ranges, each range stamped with the time it was read. Output is escaped into `%output` lines only when the client's socket has room, at most 8 KB unwritten at a time. A pane is not read while every attached client is a control client that is behind, so its program blocks on its terminal. `pause-after` pauses a pane whose oldest unsent output is too old (`%pause`). Without it, a client 300 s behind, or one holding 64 MB of unread replies, exits `too far behind`.
+
 ## Where libghostty sits
 
 libghostty-vt runs **inside the server, once per pane**, holding the screen state that tmux's own emulator would hold. This is the "grid follows Ghostty" half of D4. Anything a script can read is still shaped like tmux, even when the cells underneath came from Ghostty: `capture-pane` output, `#{cursor_x}`, history size, query replies. Where the two genuinely differ, the difference is recorded with evidence in [`compat/DIVERGENCES.md`](../compat/DIVERGENCES.md).

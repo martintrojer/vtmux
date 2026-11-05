@@ -11,7 +11,7 @@ mod common;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -47,6 +47,8 @@ struct World {
     bin: PathBuf,
     dir: tempfile::TempDir,
     label: String,
+    /// Extra environment for every command (and so the server).
+    env: Vec<(String, String)>,
 }
 
 impl World {
@@ -60,6 +62,7 @@ impl World {
                 std::process::id(),
                 SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ),
+            env: Vec::new(),
         }
     }
 
@@ -73,7 +76,8 @@ impl World {
             .env("TMUX_TMPDIR", self.dir.path())
             .env("SHELL", "/bin/sh")
             .env("TERM", "xterm-256color")
-            .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .envs(self.env.iter().map(|(k, v)| (k, v)));
         cmd
     }
 
@@ -87,6 +91,14 @@ impl World {
     }
 
     fn control(&self, args: &[&str]) -> Control {
+        let mut c = self.control_stalled(args);
+        c.start_reading();
+        c
+    }
+
+    /// A control client whose output nobody reads until
+    /// [`Control::start_reading`]: it fills its pipe and stays behind.
+    fn control_stalled(&self, args: &[&str]) -> Control {
         let mut child = self
             .command(&[&["-C"], args].concat())
             .stdin(Stdio::piped())
@@ -94,20 +106,28 @@ impl World {
             .stderr(Stdio::piped())
             .spawn()
             .expect("spawn control client");
-        let out = Arc::new(Mutex::new(Vec::new()));
-        let sink = Arc::clone(&out);
-        let mut stdout = child.stdout.take().expect("stdout");
-        thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            while let Ok(n) = stdout.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                sink.lock().unwrap().extend_from_slice(&buf[..n]);
-            }
-        });
+        let stdout = child.stdout.take();
         let stdin = child.stdin.take();
-        Control { child, stdin, out }
+        Control {
+            child,
+            stdin,
+            stdout,
+            out: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// The server's pid.
+    fn server_pid(&self) -> rustix::process::Pid {
+        common::parse_pid(&self.run(&["display", "-p", "#{pid}"]).0).expect("server pid")
+    }
+
+    /// Wait until `n` clients are attached.
+    fn wait_clients(&self, n: usize) {
+        let end = Instant::now() + WAIT;
+        while self.run(&["lsc", "-F", "x"]).0.lines().count() < n {
+            assert!(Instant::now() < end, "never {n} clients");
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// Socket dir -> `SOCKDIR`.
@@ -134,10 +154,29 @@ impl Drop for World {
 struct Control {
     child: Child,
     stdin: Option<ChildStdin>,
+    /// Not read yet ([`World::control_stalled`]).
+    stdout: Option<ChildStdout>,
     out: Arc<Mutex<Vec<u8>>>,
 }
 
 impl Control {
+    /// Read the client's output into `out` from now on.
+    fn start_reading(&mut self) {
+        let Some(mut stdout) = self.stdout.take() else {
+            return;
+        };
+        let sink = Arc::clone(&self.out);
+        thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = stdout.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                sink.lock().unwrap().extend_from_slice(&buf[..n]);
+            }
+        });
+    }
+
     fn send(&mut self, line: &str) {
         let stdin = self.stdin.as_mut().expect("stdin open");
         stdin.write_all(line.as_bytes()).unwrap();
@@ -428,12 +467,12 @@ fn refresh_client_flags_and_sizes() {
                 "refresh-client -C @0:",
                 size,
                 "refresh-client -C @0:0x10",
-                "refresh-client -A %0:off",
-                "refresh-client -A %0:on",
-                "refresh-client -A %0:pause",
-                "refresh-client -A %0:pause",
-                "refresh-client -A %0:continue",
-                "refresh-client -A %0:continue",
+                "refresh-client -A '%0:off'",
+                "refresh-client -A '%0:on'",
+                "refresh-client -A '%0:pause'",
+                "refresh-client -A '%0:pause'",
+                "refresh-client -A '%0:continue'",
+                "refresh-client -A '%0:continue'",
                 "refresh-client -A '%9:pause' -A '%0:off'",
                 "refresh-client -A nonsense",
                 "refresh-client -S",
@@ -468,10 +507,10 @@ fn refresh_client_pane_output_states() {
             let _ = w;
         };
         step(&mut c, w, "display -p one", "AAA");
-        step(&mut c, w, "refresh-client -A %0:off", "BBB");
-        step(&mut c, w, "refresh-client -A %0:on", "CCC");
-        step(&mut c, w, "refresh-client -A %0:pause", "DDD");
-        step(&mut c, w, "refresh-client -A %0:continue", "EEE");
+        step(&mut c, w, "refresh-client -A '%0:off'", "BBB");
+        step(&mut c, w, "refresh-client -A '%0:on'", "CCC");
+        step(&mut c, w, "refresh-client -A '%0:pause'", "DDD");
+        step(&mut c, w, "refresh-client -A '%0:continue'", "EEE");
         step(&mut c, w, "refresh-client -f no-output", "FFF");
         step(&mut c, w, "refresh-client -f '!no-output'", "GGG");
         let (out, _, code) = c.close();
@@ -665,4 +704,203 @@ fn slow_reader_detached_in_a_flood_exits_cleanly() {
         );
         assert_eq!(status.code(), Some(0), "{}", bin.display());
     }
+}
+
+/// The server's resident set in KB (`ps -o rss=`: no /proc on macOS).
+fn rss_kb(pid: rustix::process::Pid) -> u64 {
+    let out = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid.as_raw_nonzero().to_string()])
+        .output()
+        .expect("ps");
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0)
+}
+
+/// A control client reading slower than its pane writes costs the server
+/// a bounded amount, not a copy of everything the pane wrote: pane output
+/// is held once and formatted as the client takes it, and the pane is not
+/// read while its only consumers are behind (control.c
+/// `control_write_callback`, server-client.c
+/// `server_client_check_pane_buffer`). Before, vtmux grew past 200 MB in
+/// 10 s here; tmux stays at a few MB.
+#[test]
+fn slow_reader_keeps_server_memory_bounded() {
+    const BOUND_KB: u64 = 64 * 1024;
+    for bin in bins() {
+        let w = World::new(&bin);
+        let mut child = w
+            .command(&[
+                "-C",
+                "new-session",
+                "-s",
+                "a",
+                "-x",
+                "80",
+                "-y",
+                "24",
+                "yes rvflood",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn control client");
+        let _stdin = child.stdin.take();
+        let mut stdout = child.stdout.take().expect("stdout");
+        w.wait_clients(1);
+        let pid = w.server_pid();
+        let mut buf = vec![0u8; 65536];
+        let (mut peak, mut read) = (0, 0);
+        let end = Instant::now() + Duration::from_secs(5);
+        // 64 KB every 10 ms: slower than the flood, but always reading.
+        while Instant::now() < end {
+            read += stdout.read(&mut buf).expect("read");
+            thread::sleep(Duration::from_millis(10));
+            peak = peak.max(rss_kb(pid));
+        }
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "{}: client left",
+            bin.display()
+        );
+        assert!(read > 1 << 20, "{}: read only {read} bytes", bin.display());
+        assert!(
+            peak < BOUND_KB,
+            "{}: server RSS peaked at {peak} KB",
+            bin.display()
+        );
+        drop(w);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// `yes` in session `a`, a control client that reads everything (to
+/// /dev/null) so the pane keeps being read, and a stalled control client
+/// attached with `args`: its output ages while it does not read.
+fn flood_with_a_stalled_client(w: &World, args: &[&str]) -> (Child, Control) {
+    w.run(&[
+        "new",
+        "-d",
+        "-s",
+        "a",
+        "-x",
+        "80",
+        "-y",
+        "24",
+        "yes rvflood",
+    ]);
+    let fast = w
+        .command(&["-C", "attach", "-t", "a"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn fast control client");
+    w.wait_clients(1);
+    let stalled = w.control_stalled(&[&["attach", "-t", "a"], args].concat());
+    w.wait_clients(2);
+    (fast, stalled)
+}
+
+/// `pause-after=1` (control.c `control_check_age`): a pane whose oldest
+/// output not yet sent to the client is over a second old is paused,
+/// `%pause %0`, its output dropped until `refresh-client -A %0:continue`
+/// (`%continue %0`), and output is `%extended-output %0 <age> : ` meanwhile
+/// (`control_append_data`).
+#[test]
+fn pause_after_pauses_a_pane_the_client_is_behind_on() {
+    compare("pause_after_pauses_a_pane_the_client_is_behind_on", |w| {
+        let (mut fast, mut c) = flood_with_a_stalled_client(w, &["-f", "pause-after=1"]);
+        thread::sleep(Duration::from_secs(3));
+        c.start_reading();
+        c.wait("%pause", |t| t.contains("%pause %0\n"));
+        c.send("refresh-client -A '%0:continue'");
+        c.wait("output after %continue", |t| {
+            t.split_once("%continue %0\n")
+                .is_some_and(|(_, after)| after.contains("\n%extended-output %0 "))
+        });
+        let _ = fast.kill();
+        let _ = fast.wait();
+        let (out, _, code) = c.close();
+        let lines: Vec<&str> = out.lines().collect();
+        let at = |what: &str| lines.iter().position(|l| *l == what);
+        let (pause, cont) = (at("%pause %0").unwrap(), at("%continue %0").unwrap());
+        let extended = |l: &&str| {
+            l.strip_prefix("%extended-output %0 ")
+                .and_then(|r| r.split_once(" : "))
+                .is_some_and(|(age, _)| age.parse::<u64>().is_ok())
+        };
+        (
+            lines.iter().filter(|l| l.starts_with("%pause")).count(),
+            lines.iter().filter(|l| l.starts_with("%continue")).count(),
+            lines.iter().any(|l| l.starts_with("%output")),
+            lines[..pause].iter().any(extended),
+            lines[pause..cont].iter().any(extended),
+            lines[cont..].iter().any(extended),
+            code,
+        )
+    });
+}
+
+/// Without `pause-after`, a client whose oldest unsent output is
+/// `CONTROL_MAXIMUM_AGE` old is let go: `%exit too far behind`, status 0
+/// (control.c `control_check_age`). The age is 300 s in tmux; a debug
+/// vtmux takes `VTMUX_CONTROL_MAXIMUM_AGE` (ms) so this takes seconds, so
+/// only vtmux runs it.
+#[test]
+fn too_far_behind_lets_a_stalled_client_go() {
+    let mut w = World::new(&bins()[0]);
+    w.env
+        .push(("VTMUX_CONTROL_MAXIMUM_AGE".into(), "1000".into()));
+    let (mut fast, mut c) = flood_with_a_stalled_client(&w, &[]);
+    thread::sleep(Duration::from_secs(3));
+    c.start_reading();
+    c.wait("%exit", |t| t.contains("%exit"));
+    let _ = fast.kill();
+    let _ = fast.wait();
+    let (out, _, code) = c.close();
+    assert!(
+        out.ends_with("\n%exit too far behind\n"),
+        "{:?}",
+        &out[out.len().saturating_sub(300)..]
+    );
+    assert_eq!(code, 0);
+    // The session and the other clients are not touched.
+    assert_eq!(w.run(&["has", "-t", "a"]).2, 0);
+}
+
+/// `control_check_reply_buffer` (control.c:429-451): a client that does
+/// not read while its replies pass 64 MB is let go, `too far behind`.
+#[test]
+fn reply_buffer_cap_lets_a_stalled_client_go() {
+    compare("reply_buffer_cap_lets_a_stalled_client_go", |w| {
+        let big = w.dir.path().join("big");
+        // 1 MiB: 16384 lines of 64 bytes.
+        let line = format!("{}\n", "x".repeat(63));
+        std::fs::write(&big, line.repeat(1 << 14)).unwrap();
+        w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]);
+        let mut c = w.control_stalled(&["attach", "-t", "a"]);
+        w.wait_clients(1);
+        c.send(&format!("load-buffer -b big {}", big.display()));
+        // 80 MB of replies, none read.
+        for _ in 0..80 {
+            c.send("show-buffer -b big");
+        }
+        thread::sleep(Duration::from_secs(2));
+        c.start_reading();
+        let end = Instant::now() + Duration::from_secs(30);
+        while c.child.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < end, "client still running");
+            thread::sleep(Duration::from_millis(50));
+        }
+        let (out, _, code) = c.close();
+        (
+            out.ends_with("\n%exit too far behind\n"),
+            out.len() < 70 << 20,
+            code,
+        )
+    });
 }
