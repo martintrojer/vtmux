@@ -129,6 +129,14 @@ impl Parser {
                         vec![Item::Class(Class::Space)]
                     },
                 }),
+                // glibc's `peek_token` takes the escaped byte before the
+                // REG_ICASE translation that the text goes through, so an
+                // escaped lowercase letter is compared with an uppercased
+                // text and never matches (`\A` does).
+                Unit::Char('a'..='z') if self.ignore_case => Expr::Bracket(Bracket {
+                    negated: false,
+                    items: vec![Item::Never],
+                }),
                 Unit::Char(c) => Expr::Literal(Unit::Char(c)),
             },
             c => Expr::Literal(Unit::Char(c)),

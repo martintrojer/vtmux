@@ -17,6 +17,10 @@ enum Item {
     Char(char),
     Range(char, char),
     Class(Class),
+    /// A range that ends in a character or equivalence class
+    /// (`[a-[:digit:]]`): glibc's bracket loop gives up on reaching it, so
+    /// the bracket fails unless an earlier item already matched.
+    Fail,
 }
 
 /// Match an entire string, with glibc's UTF-8 then byte fallback semantics.
@@ -78,32 +82,17 @@ fn run(pattern: &[char], text: &[char], icase: bool, wide: bool) -> bool {
                         Token::Literal(a) => fold(*a, icase, wide) == fold(c, icase, wide),
                         Token::Any => true,
                         Token::Bracket { negated, items } => {
-                            let found = items.iter().any(|item| match item {
-                                Item::Char(a) => fold(*a, icase, wide) == fold(c, icase, wide),
-                                Item::Class(class) => {
-                                    if wide || c.is_ascii() {
-                                        class.contains(c)
-                                    } else {
-                                        false
-                                    }
-                                }
-                                Item::Range(a, b) => {
-                                    let (a, b, c) = (
-                                        fold(*a, icase, wide),
-                                        fold(*b, icase, wide),
-                                        fold(c, icase, wide),
-                                    );
-                                    // Builtin C LC_COLLATE has wide sequence values only
-                                    // through Latin-1. An unknown high endpoint retains
-                                    // the ASCII interval, or the exact known low endpoint.
-                                    if wide && b > '\u{ff}' {
-                                        c <= '\u{ff}' && a <= c && (c <= '\u{7f}' || c == a)
-                                    } else {
-                                        (!wide || c <= '\u{ff}') && a <= c && c <= b
-                                    }
-                                }
+                            // Items in order: the first that matches decides,
+                            // a `Fail` reached before it fails the bracket.
+                            let hit = items.iter().find_map(|item| match item {
+                                Item::Fail => Some(false),
+                                item => item_matches(item, c, icase, wide).then_some(true),
                             });
-                            found != *negated
+                            match hit {
+                                Some(true) => !*negated,
+                                Some(false) => false,
+                                None => *negated,
+                            }
                         }
                         Token::Fail | Token::Star => false,
                     };
@@ -112,6 +101,36 @@ fn run(pattern: &[char], text: &[char], icase: bool, wide: bool) -> bool {
         previous = next;
     }
     previous[text.len()]
+}
+
+/// Whether one bracket item matches `c`.
+fn item_matches(item: &Item, c: char, icase: bool, wide: bool) -> bool {
+    match item {
+        Item::Char(a) => fold(*a, icase, wide) == fold(c, icase, wide),
+        Item::Class(class) => {
+            if wide || c.is_ascii() {
+                class.contains(c)
+            } else {
+                false
+            }
+        }
+        Item::Range(a, b) => {
+            let (a, b, c) = (
+                fold(*a, icase, wide),
+                fold(*b, icase, wide),
+                fold(c, icase, wide),
+            );
+            // Builtin C LC_COLLATE has wide sequence values only
+            // through Latin-1. An unknown high endpoint retains
+            // the ASCII interval, or the exact known low endpoint.
+            if wide && b > '\u{ff}' {
+                c <= '\u{ff}' && a <= c && (c <= '\u{7f}' || c == a)
+            } else {
+                (!wide || c <= '\u{ff}') && a <= c && c <= b
+            }
+        }
+        Item::Fail => false,
+    }
 }
 
 fn tokenize(pattern: &[char]) -> Vec<Token> {
@@ -152,26 +171,36 @@ fn bracket(pattern: &[char], mut at: usize) -> Option<(Token, usize)> {
         if c == ']' && !items.is_empty() {
             return Some((Token::Bracket { negated, items }, at + 1));
         }
+        // `[=a=]` starts no range (`[[=a=]-z]` is `a`, `-` and `z`); `[.a.]`
+        // does.
+        let equivalence = class_opener(pattern, at) == Some('=');
         let (item, end) = bracket_item(pattern, at)?;
         at = end;
         if let Item::Char(a) = item
+            && !equivalence
             && pattern.get(at) == Some(&'-')
             && pattern.get(at + 1) != Some(&']')
         {
+            let ends_in_class = matches!(class_opener(pattern, at + 1), Some(':' | '='));
             let (b, end) = bracket_item(pattern, at + 1)?;
-            if let Item::Char(b) = b {
-                items.push(Item::Range(a, b));
-            } else {
-                items.push(Item::Char(a));
-                items.push(Item::Char('-'));
-                items.push(b);
-            }
+            items.push(match b {
+                Item::Char(b) if !ends_in_class => Item::Range(a, b),
+                _ => Item::Fail,
+            });
             at = end;
         } else {
             items.push(item);
         }
     }
     None
+}
+
+/// The `:`, `.` or `=` of a `[:`, `[.` or `[=` at `at`.
+fn class_opener(pattern: &[char], at: usize) -> Option<char> {
+    (pattern.get(at) == Some(&'['))
+        .then(|| pattern.get(at + 1).copied())
+        .flatten()
+        .filter(|c| matches!(c, ':' | '.' | '='))
 }
 
 fn bracket_item(pattern: &[char], at: usize) -> Option<(Item, usize)> {

@@ -4777,7 +4777,7 @@ fn plane16_characters_are_ordinary_text() {
             steps.push(w.run_bytes(&[
                 b"display",
                 b"-p",
-                // s/x*/-/ steps one byte into the character (D-003) and runs
+                // s/x*/-/ steps one byte into the character (regsub.c) and runs
                 // regexec on the rest, which Darwin's refuses (D-019).
                 if GLIBC_REFERENCE {
                     b"#{s/./Z/:@p}|#{s/x*/-/:@p}|#{m/r:^a.b$,#{@p}}|#{m:a?b,#{@p}}|#{q:@p}"
