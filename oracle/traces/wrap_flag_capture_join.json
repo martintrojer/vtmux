@@ -1,0 +1,1636 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "devvm51629.rva0.facebook.com",
+  "name": "wrap_flag_capture_join",
+  "inputs": {
+    "name": "wrap_flag_capture_join",
+    "size": [
+      10,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "el2",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[2Kzz'; tmux wait-for -S el2; exec cat"
+        ]
+      },
+      {
+        "wait_for": "el2"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "el2:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "el0col0",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[Kzz'; tmux wait-for -S el0col0; exec cat"
+        ]
+      },
+      {
+        "wait_for": "el0col0"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "el0col0:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "el1last",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;10H\\033[1K\\033[2;1Hzz'; tmux wait-for -S el1last; exec cat"
+        ]
+      },
+      {
+        "wait_for": "el1last"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "el1last:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "el0pend",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaa\\033[Kb'; tmux wait-for -S el0pend; exec cat"
+        ]
+      },
+      {
+        "wait_for": "el0pend"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "el0pend:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ed0col0",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[Jzz'; tmux wait-for -S ed0col0; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ed0col0"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "ed0col0:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ed0mid",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[1;4H\\033[J\\033[1;4Hxxxxxxx\\033[2;1Hzz'; tmux wait-for -S ed0mid; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ed0mid"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "ed0mid:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "il",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[Lzz'; tmux wait-for -S il; exec cat"
+        ]
+      },
+      {
+        "wait_for": "il"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "il:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ilabove",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[1;1H\\033[L'; tmux wait-for -S ilabove; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ilabove"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "ilabove:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ilcur",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[L'; tmux wait-for -S ilcur; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ilcur"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "ilcur:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "il2cur",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[2L'; tmux wait-for -S il2cur; exec cat"
+        ]
+      },
+      {
+        "wait_for": "il2cur"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "il2cur:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ilregion",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[1;3r\\033[2;1H\\033[Lzz\\033[r'; tmux wait-for -S ilregion; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ilregion"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "ilregion:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "riregion",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[2;4r\\033[2;1H\\033M\\033[r'; tmux wait-for -S riregion; exec cat"
+        ]
+      },
+      {
+        "wait_for": "riregion"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "riregion:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "sd",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[T'; tmux wait-for -S sd; exec cat"
+        ]
+      },
+      {
+        "wait_for": "sd"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "sd:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "sd2",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2T'; tmux wait-for -S sd2; exec cat"
+        ]
+      },
+      {
+        "wait_for": "sd2"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "sd2:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "su",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[S'; tmux wait-for -S su; exec cat"
+        ]
+      },
+      {
+        "wait_for": "su"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "su:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "dl",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[M'; tmux wait-for -S dl; exec cat"
+        ]
+      },
+      {
+        "wait_for": "dl"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "dl:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "dlabove",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\ny\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[1;1H\\033[M'; tmux wait-for -S dlabove; exec cat"
+        ]
+      },
+      {
+        "wait_for": "dlabove"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "dlabove:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "dlbelow",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\r\\naaaaaaaaaabbbbb\\033[1;1H\\033[2M'; tmux wait-for -S dlbelow; exec cat"
+        ]
+      },
+      {
+        "wait_for": "dlbelow"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "dlbelow:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "dlregion",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\ny\\r\\naaaaaaaaaabbbbb\\r\\nqq\\033[1;3r\\033[1;1H\\033[M\\033[r\\033[3;1Hzz'; tmux wait-for -S dlregion; exec cat"
+        ]
+      },
+      {
+        "wait_for": "dlregion"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "dlregion:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "dlregion2",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'x\\r\\ny\\r\\naaaaaaaaaabbbbb\\r\\nqq\\033[1;3r\\033[2;1H\\033[M\\033[r\\033[3;1Hzz'; tmux wait-for -S dlregion2; exec cat"
+        ]
+      },
+      {
+        "wait_for": "dlregion2"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "dlregion2:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ed1hist",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[3;10H\\033[1J\\033[1;1Hzz'; tmux wait-for -S ed1hist; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ed1hist"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "ed1hist:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "ilhist",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033[Lzz'; tmux wait-for -S ilhist; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ilhist"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "ilhist:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "rihist",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033Mzz'; tmux wait-for -S rihist; exec cat"
+        ]
+      },
+      {
+        "wait_for": "rihist"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "rihist:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "dlhist",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033[M'; tmux wait-for -S dlhist; exec cat"
+        ]
+      },
+      {
+        "wait_for": "dlhist"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "dlhist:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "el2hist",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033[2Kzz'; tmux wait-for -S el2hist; exec cat"
+        ]
+      },
+      {
+        "wait_for": "el2hist"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "el2hist:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "althist",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[?1049h\\033[?1049l'; tmux wait-for -S althist; exec cat"
+        ]
+      },
+      {
+        "wait_for": "althist"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "althist:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "alt47hist",
+          "-x",
+          "10",
+          "-y",
+          "4",
+          "sh",
+          "-c",
+          "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[?47h\\033[?47l'; tmux wait-for -S alt47hist; exec cat"
+        ]
+      },
+      {
+        "wait_for": "alt47hist"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-S",
+          "-",
+          "-t",
+          "alt47hist:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "altlf",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '\\033[?1049hx\\r\\naaaaaaaaaabbbbb\\r\\nccc\\r\\nd\\033[3;6r\\033[6;1H\\nzz\\033[r'; tmux wait-for -S altlf; exec cat"
+        ]
+      },
+      {
+        "wait_for": "altlf"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-t",
+          "altlf:"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "altsu",
+          "-x",
+          "10",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '\\033[?1049hx\\r\\naaaaaaaaaabbbbb\\r\\nccc\\r\\nd\\033[3;6r\\033[S\\033[3;1Hzz\\033[r'; tmux wait-for -S altsu; exec cat"
+        ]
+      },
+      {
+        "wait_for": "altsu"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-J",
+          "-t",
+          "altsu:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa\nzz\nccc\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa\nzz\nccc\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa\nzz\nccc\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaab\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa\nzz\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaxxxxxxx\nzz\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa\nzz\nbbbbb\nccc\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\nx\naaaaaaaaaabbbbb\nccc\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\n\naaaaaaaaaa\nbbbbb\nccc\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\n\n\naaaaaaaaaa\nbbbbb\nccc\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa\nzz\nbbbbb\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\n\naaaaaaaaaa\nbbbbb\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\nx\naaaaaaaaaabbbbb\nccc\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 39,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 41,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n\naaaaaaaaaa\nbbbbb\nccc\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 42,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\naaaaaaaaaabbbbb\nccc\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa\nccc\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 48,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 49,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "cli",
+        "stdout": "y\naaaaaaaaaabbbbb\nccc\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 51,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 52,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 53,
+      "observation": {
+        "kind": "cli",
+        "stdout": "bbbbb\nccc\naaaaaaaaaabbbbb\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "y\naaaaaaaaaa\nzz\nbbbbb\nqq\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 58,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 59,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\naaaaaaaaaa\nzz\nbbbbb\nqq\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 60,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 61,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 62,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\naaaaaaaaaa\nzz\n\n\n8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 63,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 64,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 65,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\naaaaaaaaaa\nzz\nbbbbb\n6\n7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 66,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 67,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 68,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\naaaaaaaaaa\nzz\nbbbbb\n6\n7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 69,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 70,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 71,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\naaaaaaaaaa\n6\n7\n8\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 72,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 73,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 74,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\naaaaaaaaaa\nzz\n6\n7\n8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 75,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 76,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 77,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\naaaaaaaaaa\nbbbbb\n6\n7\n8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 78,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 79,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 80,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n2\naaaaaaaaaa\nbbbbb\n6\n7\n8\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 81,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 82,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 83,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\naaaaaaaaaa\nccc\nd\n\nzz\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 84,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 85,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 86,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\naaaaaaaaaa\nzzc\nd\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
