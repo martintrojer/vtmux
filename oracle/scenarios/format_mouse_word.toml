@@ -7,6 +7,12 @@
 # of the line there is none. A line is the grid line, not joined with
 # the next. A link is found from a wide character's second column. In
 # copy mode, the view's (window_copy_get_word, window_copy_get_line).
+# Clicks come about 200 ms apart, so whether one is a down, a second or
+# a triple click depends on load; all three are bound alike, and the
+# default DoubleClick1Pane bindings (key-bindings.c:520, 608), which
+# enter or leave copy mode when the 300 ms click timer
+# (server_client_click_timer) runs out after a second click, are
+# unbound, so no click changes the mode.
 name = "format_mouse_word"
 size = [20, 10]
 steps = [
@@ -18,6 +24,8 @@ steps = [
   { run = ["bind", "-n", "MouseDown1Pane", "set", "-gF", "@m", "[#{mouse_word}] [#{mouse_line}] [#{mouse_hyperlink}] #{mouse_x},#{mouse_y}"] },
   { run = ["bind", "-n", "SecondClick1Pane", "set", "-gF", "@m", "[#{mouse_word}] [#{mouse_line}] [#{mouse_hyperlink}] #{mouse_x},#{mouse_y}"] },
   { run = ["bind", "-n", "TripleClick1Pane", "set", "-gF", "@m", "[#{mouse_word}] [#{mouse_line}] [#{mouse_hyperlink}] #{mouse_x},#{mouse_y}"] },
+  { run = ["unbind", "-n", "DoubleClick1Pane"] },
+  { run = ["unbind", "-T", "copy-mode", "DoubleClick1Pane"] },
   { attach = { session = "a" } },
   { settle = { quiet_ms = 500 } },
   { keys = "\u001b[<0;1;1M" },
@@ -66,14 +74,9 @@ steps = [
   { keys = "\u001b[<0;3;1M" },
   { settle = {} },
   { run = ["show", "-gv", "@m"] },
-  # The clicks' releases left copy mode (at the bottom with no
-  # selection). copy_cursor_hyperlink: the cell under copy mode's cursor.
+  # The clicks left the pane in copy mode. copy_cursor_hyperlink: the
+  # cell under copy mode's cursor.
   { run = ["display", "-p", "-t", "a", "#{pane_mode}"] },
-  # Let the click timers (KEYC_CLICK_TIMEOUT, 300 ms) run out before the
-  # next mode starts: one firing late on a slow host must not meet it.
-  { settle = { quiet_ms = 600 } },
-  { run = ["copy-mode", "-t", "a"] },
-  { settle = { react = true } },
   { run = ["send", "-t", "a", "-X", "top-line"] },
   { run = ["send", "-t", "a", "-X", "cursor-down"] },
   { run = ["send", "-t", "a", "-X", "cursor-down"] },
