@@ -862,7 +862,7 @@ fn read_screen_cells(
                 .unwrap_or_default(),
             CellContentTag::CodepointGrapheme => cell_text(&gr).into(),
             CellContentTag::BgColorPalette => {
-                style.bg = Color::Palette(cell.palette());
+                style.bg = Color::Palette(cell.palette()).in_form(cell.palette_256());
                 CellText::new()
             }
             CellContentTag::BgColorRgb => {
@@ -900,7 +900,8 @@ fn read_screen_cells(
 /// the least significant bit: `content_tag` (2 bits), `content` (24: a
 /// codepoint in the low 21, a palette index in the low 8, or r, g, b),
 /// `style_id` (16), `wide` (2), `protected`, `hyperlink`,
-/// `semantic_content` (2), `tab` (8, patch 0002). The test
+/// `semantic_content` (2), `tab` (8, patch 0002); a palette cell's index
+/// is followed by its `palette_256` bit (patch 0010). The test
 /// `cell_bits_match_the_getters` holds it to the getters.
 #[derive(Clone, Copy)]
 struct CellBits(u64);
@@ -929,6 +930,11 @@ impl CellBits {
 
     fn palette(self) -> u8 {
         self.byte(2)
+    }
+
+    /// The `palette_256` bit after the palette index (patch 0010).
+    fn palette_256(self) -> bool {
+        self.field(10, 1) != 0
     }
 
     fn rgb(self) -> (u8, u8, u8) {
@@ -1281,15 +1287,14 @@ fn attr_bits(s: &Style) -> u32 {
 
 /// `grid_string_cells_fg`/`_bg` (grid.c:859-968). `base` is 30 for fg, 40 for bg.
 ///
-/// Ghostty keeps one palette index where tmux distinguishes `31`, `91` and
-/// `38;5;1`; indices 0-7 and 8-15 are emitted in the short forms and
-/// 16-255 as `38;5;n`.
+/// `31`, `91` and `38;5;1` stay apart as tmux's `COLOUR_FLAG_256` keeps
+/// them ([`Color::Palette256`]).
 fn colour_values(c: Color, base: i32, ext: i32) -> Vec<i32> {
     match c {
         Color::Default => vec![base + 9],
         Color::Palette(i) if i < 8 => vec![base + i32::from(i)],
         Color::Palette(i) if i < 16 => vec![base + 60 + i32::from(i) - 8],
-        Color::Palette(i) => vec![ext, 5, i32::from(i)],
+        Color::Palette(i) | Color::Palette256(i) => vec![ext, 5, i32::from(i)],
         Color::Rgb(r, g, b) => vec![ext, 2, i32::from(r), i32::from(g), i32::from(b)],
     }
 }
@@ -1298,7 +1303,7 @@ fn colour_values(c: Color, base: i32, ext: i32) -> Vec<i32> {
 fn underline_values(c: Color) -> Vec<i32> {
     match c {
         Color::Default => vec![],
-        Color::Palette(i) => vec![58, 5, i32::from(i)],
+        Color::Palette(i) | Color::Palette256(i) => vec![58, 5, i32::from(i)],
         Color::Rgb(r, g, b) => vec![58, 2, i32::from(r), i32::from(g), i32::from(b)],
     }
 }
@@ -1426,6 +1431,9 @@ mod tests {
                 assert_eq!(bits.codepoint(), cell.codepoint().unwrap(), "{at}");
                 if tag == CellContentTag::BgColorPalette {
                     assert_eq!(bits.palette(), cell.bg_color_palette().unwrap().0, "{at}");
+                    let long = cell.bg_color_palette_256().unwrap();
+                    assert_eq!(bits.palette_256(), long, "{at}");
+                    seen |= 1 << (12 + u32::from(long));
                 }
                 if tag == CellContentTag::BgColorRgb {
                     let c = cell.bg_color_rgb().unwrap();
@@ -1444,7 +1452,7 @@ mod tests {
                 seen |= u32::from(bits.has_styling()) << 11;
             }
         }
-        assert_eq!(seen, 0xfff, "every kind of cell was read: {seen:#b}");
+        assert_eq!(seen, 0x3fff, "every kind of cell was read: {seen:#b}");
     }
 
     /// `used_row` is `row` with the trailing cells copy mode drops (blank,

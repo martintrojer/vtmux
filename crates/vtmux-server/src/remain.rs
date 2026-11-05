@@ -235,7 +235,7 @@ fn cell_sgr(style: &vtmux_vt::Style) -> String {
             Color::Default => return None,
             Color::Palette(n @ 0..8) if base != 50 => (base + u16::from(n)).to_string(),
             Color::Palette(n @ 8..16) if base != 50 => (base + 52 + u16::from(n)).to_string(),
-            Color::Palette(n) => format!("{};5;{n}", base + 8),
+            Color::Palette(n) | Color::Palette256(n) => format!("{};5;{n}", base + 8),
             Color::Rgb(r, g, b) => format!("{};2;{r};{g};{b}", base + 8),
         })
     };

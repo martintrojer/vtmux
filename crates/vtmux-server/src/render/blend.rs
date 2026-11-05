@@ -104,7 +104,7 @@ pub fn resolve(
 fn colour_rgb(c: Color, default: Rgb, colours: &TermColours) -> Rgb {
     match c {
         Color::Default => default,
-        Color::Palette(n) => colours.palette_rgb(n),
+        Color::Palette(n) | Color::Palette256(n) => colours.palette_rgb(n),
         Color::Rgb(r, g, b) => (r, g, b),
     }
 }

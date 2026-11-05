@@ -1,0 +1,295 @@
+diff --git a/include/ghostty/vt/screen.h b/include/ghostty/vt/screen.h
+index 73d501676..a3592975b 100644
+--- a/include/ghostty/vt/screen.h
++++ b/include/ghostty/vt/screen.h
+@@ -233,6 +233,13 @@ typedef enum GHOSTTY_ENUM_TYPED {
+    * Output type: uint8_t *
+    */
+   GHOSTTY_CELL_DATA_TAB = 12,
++  /**
++   * vtmux: whether a GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE cell's colour
++   * was set by 48;5;N.
++   *
++   * Output type: bool *
++   */
++  GHOSTTY_CELL_DATA_COLOR_PALETTE_256 = 13,
+   GHOSTTY_CELL_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttyCellData;
+ 
+diff --git a/include/ghostty/vt/style.h b/include/ghostty/vt/style.h
+index b6bf860eb..93f5e2460 100644
+--- a/include/ghostty/vt/style.h
++++ b/include/ghostty/vt/style.h
+@@ -105,6 +105,8 @@ typedef struct {
+   bool strikethrough;
+   bool overline;
+   int underline; /**< One of GHOSTTY_SGR_UNDERLINE_* values */
++  bool fg_palette_256; /**< vtmux: fg set by 38;5;N */
++  bool bg_palette_256; /**< vtmux: bg set by 48;5;N */
+ } GhosttyStyle;
+ 
+ /**
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index b1b6b13cd..900359205 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -2545,6 +2545,7 @@ pub fn setAttribute(
+         },
+ 
+         .direct_color_fg => |rgb| {
++            self.cursor.style.flags.fg_palette_256 = false;
+             self.cursor.style.fg_color = .{
+                 .rgb = .{
+                     .r = rgb.r,
+@@ -2555,6 +2556,7 @@ pub fn setAttribute(
+         },
+ 
+         .direct_color_bg => |rgb| {
++            self.cursor.style.flags.bg_palette_256 = false;
+             self.cursor.style.bg_color = .{
+                 .rgb = .{
+                     .r = rgb.r,
+@@ -2565,30 +2567,44 @@ pub fn setAttribute(
+         },
+ 
+         .@"8_fg" => |n| {
++            self.cursor.style.flags.fg_palette_256 = false;
+             self.cursor.style.fg_color = .{ .palette = @backingInt(n) };
+         },
+ 
+         .@"8_bg" => |n| {
++            self.cursor.style.flags.bg_palette_256 = false;
+             self.cursor.style.bg_color = .{ .palette = @backingInt(n) };
+         },
+ 
+-        .reset_fg => self.cursor.style.fg_color = .none,
++        .reset_fg => {
++            self.cursor.style.flags.fg_palette_256 = false;
++            self.cursor.style.fg_color = .none;
++        },
+ 
+-        .reset_bg => self.cursor.style.bg_color = .none,
++        .reset_bg => {
++            self.cursor.style.flags.bg_palette_256 = false;
++            self.cursor.style.bg_color = .none;
++        },
+ 
+         .@"8_bright_fg" => |n| {
++            self.cursor.style.flags.fg_palette_256 = false;
+             self.cursor.style.fg_color = .{ .palette = @backingInt(n) };
+         },
+ 
+         .@"8_bright_bg" => |n| {
++            self.cursor.style.flags.bg_palette_256 = false;
+             self.cursor.style.bg_color = .{ .palette = @backingInt(n) };
+         },
+ 
++        // vtmux: tmux keeps COLOUR_FLAG_256 on a `38;5;N` colour
++        // (input.c input_csi_dispatch_sgr_256_do).
+         .@"256_fg" => |idx| {
++            self.cursor.style.flags.fg_palette_256 = true;
+             self.cursor.style.fg_color = .{ .palette = idx };
+         },
+ 
+         .@"256_bg" => |idx| {
++            self.cursor.style.flags.bg_palette_256 = true;
+             self.cursor.style.bg_color = .{ .palette = idx };
+         },
+ 
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 0fc48494d..8fca1c61d 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -14806,6 +14806,34 @@ test "Terminal: eraseLine resets wrap" {
+     }
+ }
+ 
++test "Terminal: 256-colour SGR keeps its form (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
++    defer t.deinit(alloc);
++
++    try t.setAttribute(.{ .@"256_fg" = 1 });
++    try t.print('A');
++    try t.setAttribute(.{ .@"8_fg" = .red });
++    try t.print('B');
++    try t.setAttribute(.{ .@"256_bg" = 2 });
++    t.eraseLine(.right, false);
++
++    const a = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?;
++    const b = t.screens.active.pages.getCell(.{ .active = .{ .x = 1, .y = 0 } }).?;
++    const c = t.screens.active.pages.getCell(.{ .active = .{ .x = 2, .y = 0 } }).?;
++    try testing.expect(a.style().flags.fg_palette_256);
++    try testing.expect(!b.style().flags.fg_palette_256);
++    try testing.expectEqual(a.style().fg_color, b.style().fg_color);
++    try testing.expect(c.cell.content_tag == .bg_color_palette);
++    try testing.expect(c.cell.content.color_palette.palette_256);
++
++    try t.setAttribute(.{ .@"8_bg" = .green });
++    t.eraseLine(.right, false);
++    const d = t.screens.active.pages.getCell(.{ .active = .{ .x = 2, .y = 0 } }).?;
++    try testing.expect(!d.cell.content.color_palette.palette_256);
++}
++
+ test "Terminal: eraseLine right preserves background sgr" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+diff --git a/src/terminal/c/cell.zig b/src/terminal/c/cell.zig
+index d6256fb0c..918e71cc1 100644
+--- a/src/terminal/c/cell.zig
++++ b/src/terminal/c/cell.zig
+@@ -94,6 +94,10 @@ pub const CellData = enum(c_int) {
+     /// 255 for the other cells of a tab.
+     tab = 12,
+ 
++    /// vtmux: whether a bg_color_palette cell's colour was set by
++    /// `48;5;N` (bool).
++    color_palette_256 = 13,
++
+     /// Output type expected for querying the data of the given kind.
+     pub fn OutType(comptime self: CellData) type {
+         return switch (self) {
+@@ -107,6 +111,7 @@ pub const CellData = enum(c_int) {
+             .color_palette => u8,
+             .color_rgb => color.RGB.C,
+             .tab => u8,
++            .color_palette_256 => bool,
+         };
+     }
+ };
+@@ -176,6 +181,7 @@ fn getTyped(
+             out.* = .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
+         },
+         .tab => out.* = cell.tab,
++        .color_palette_256 => out.* = cell.content.color_palette.palette_256,
+     }
+ 
+     return .success;
+diff --git a/src/terminal/c/style.zig b/src/terminal/c/style.zig
+index 259fccc99..385409146 100644
+--- a/src/terminal/c/style.zig
++++ b/src/terminal/c/style.zig
+@@ -70,6 +70,9 @@ pub const Style = extern struct {
+     strikethrough: bool,
+     overline: bool,
+     underline: c_int,
++    /// vtmux: the colour was set by `38;5;N` / `48;5;N`.
++    fg_palette_256: bool,
++    bg_palette_256: bool,
+ 
+     /// The default (empty) style in C representation. C
+     pub const default: Style = .{
+@@ -85,6 +88,8 @@ pub const Style = extern struct {
+         .strikethrough = false,
+         .overline = false,
+         .underline = 0,
++        .fg_palette_256 = false,
++        .bg_palette_256 = false,
+     };
+ 
+     // fromStyle writes the eight bool fields as one 8-byte store,
+@@ -136,6 +141,8 @@ pub const Style = extern struct {
+         };
+ 
+         out.underline = @backingInt(s.flags.underline);
++        out.fg_palette_256 = s.flags.fg_palette_256;
++        out.bg_palette_256 = s.flags.bg_palette_256;
+     }
+ 
+     pub fn fromStyle(s: style.Style) Style {
+diff --git a/src/terminal/formatter.zig b/src/terminal/formatter.zig
+index 137cdce02..c3e4c25fb 100644
+--- a/src/terminal/formatter.zig
++++ b/src/terminal/formatter.zig
+@@ -5891,8 +5891,10 @@ test "Screen vt with style" {
+ 
+     s2.nextSlice(output);
+ 
+-    // Verify styles match
+-    try testing.expect(t.screens.active.cursor.style.eql(t2.screens.active.cursor.style));
++    // Verify styles match. vtmux: the formatter writes every palette
++    // colour as 38;5;N, so the 256-colour form flags are not compared.
++    try testing.expect(withoutPaletteForm(t.screens.active.cursor.style)
++        .eql(withoutPaletteForm(t2.screens.active.cursor.style)));
+ 
+     // Verify pin map
+     try testing.expectEqual(output.len, pin_map.count());
+@@ -8033,18 +8035,28 @@ test "Terminal vt restores gaps and cells that only have a background" {
+                 b.cell.codepoint(),
+             ),
+             .bg_color_palette => try testing.expectEqual(
+-                a.cell.content.color_palette,
+-                b.cell.content.color_palette,
++                a.cell.content.color_palette.data,
++                b.cell.content.color_palette.data,
+             ),
+             .bg_color_rgb => try testing.expectEqual(
+                 a.cell.content.color_rgb,
+                 b.cell.content.color_rgb,
+             ),
+         }
+-        try testing.expect(a.style().eql(b.style()));
++        try testing.expect(withoutPaletteForm(a.style())
++            .eql(withoutPaletteForm(b.style())));
+     };
+ }
+ 
++/// vtmux: a style without the 256-colour form flags, which the VT
++/// formatter does not preserve (it writes 38;5;N for every palette colour).
++fn withoutPaletteForm(s: Style) Style {
++    var copy = s;
++    copy.flags.fg_palette_256 = false;
++    copy.flags.bg_palette_256 = false;
++    return copy;
++}
++
+ test "Page HTML with hyperlinks" {
+     const testing = std.testing;
+     const alloc = testing.allocator;
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+index 63fe56a9c..1f26a2c3c 100644
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -2190,7 +2190,10 @@ pub const Cell = packed struct(u64) {
+         /// The content is an empty cell with a background color.
+         color_palette: packed struct(u24) {
+             data: u8,
+-            _pad: u16 = 0,
++            /// vtmux: the background was set by `48;5;N` (the style's
++            /// `bg_palette_256`).
++            palette_256: bool = false,
++            _pad: u15 = 0,
+         },
+         color_rgb: RGB,
+     } = .{ .codepoint = .{ .data = 0 } },
+diff --git a/src/terminal/style.zig b/src/terminal/style.zig
+index 70f141f65..06a1c30b4 100644
+--- a/src/terminal/style.zig
++++ b/src/terminal/style.zig
+@@ -38,7 +38,12 @@ pub const Style = struct {
+         strikethrough: bool = false,
+         overline: bool = false,
+         underline: sgr.Attribute.Underline = .none,
+-        _padding: u5 = 0,
++        /// vtmux: the palette colour was set by `38;5;N` / `48;5;N`
++        /// rather than `30-37`, `90-97` (tmux's COLOUR_FLAG_256, which
++        /// `capture-pane -e` and 8/16-colour terminals tell apart).
++        fg_palette_256: bool = false,
++        bg_palette_256: bool = false,
++        _padding: u3 = 0,
+     };
+ 
+     /// The color for an SGR attribute. A color can come from multiple
+@@ -232,7 +237,10 @@ pub const Style = struct {
+             .none => null,
+             .palette => |idx| .{
+                 .content_tag = .bg_color_palette,
+-                .content = .{ .color_palette = .{ .data = idx } },
++                .content = .{ .color_palette = .{
++                    .data = idx,
++                    .palette_256 = self.flags.bg_palette_256,
++                } },
+             },
+             .rgb => |rgb| .{
+                 .content_tag = .bg_color_rgb,
