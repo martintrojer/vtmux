@@ -262,9 +262,7 @@ fn build(root: &Path, url: &str, _lock: &File) -> Result<()> {
 
     eprintln!("ref-tmux: configure (prefix {})", prefix.display());
     let mut configure = Command::new("./configure");
-    configure
-        .arg(format!("--prefix={}", prefix.display()))
-        .current_dir(&src);
+    configure.args(configure_args(&prefix)).current_dir(&src);
     if let Some(path) = pkg_config {
         configure.env("PKG_CONFIG_PATH", path);
     }
@@ -289,6 +287,17 @@ fn build(root: &Path, url: &str, _lock: &File) -> Result<()> {
     )?;
     let staged = stage.join(prefix.strip_prefix("/").unwrap_or(&prefix));
     publish(&staged, &prefix)
+}
+
+/// tmux's configure arguments. configure.ac makes `lock-command` default to
+/// `vlock` on Linux when it finds one on PATH, else `lock -np`; the cache
+/// variable pins the not-found answer, so the reference is the same on every
+/// host, with the default vtmux implements (`lock -np`).
+fn configure_args(prefix: &Path) -> Vec<String> {
+    vec![
+        format!("--prefix={}", prefix.display()),
+        "ac_cv_prog_found_vlock=no".into(),
+    ]
 }
 
 /// Move a finished install tree to `prefix`, replacing whatever is there (the
@@ -392,6 +401,12 @@ mod tests {
         let tmux = bin.join("tmux");
         fs::write(&tmux, format!("#!/bin/sh\necho '{version_line}'\n")).unwrap();
         fs::set_permissions(&tmux, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn configure_ignores_a_host_vlock() {
+        let args = configure_args(Path::new("/x/tmux-3.8"));
+        assert_eq!(args, ["--prefix=/x/tmux-3.8", "ac_cv_prog_found_vlock=no"]);
     }
 
     #[test]
