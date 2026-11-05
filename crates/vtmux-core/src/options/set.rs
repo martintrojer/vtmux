@@ -386,6 +386,7 @@ impl OptionsStore {
                 .get(tree, def.name)
                 .map(|e| e.value.to_text(e.def, None, false))
                 .unwrap_or_default();
+            let before = self.tree(tree).get_only(def.name).cloned();
             self.set_string(tree, def.name, Some(def), value, append);
             let new = self
                 .tree(tree)
@@ -393,8 +394,18 @@ impl OptionsStore {
                 .map(|e| e.value.to_text(e.def, None, false))
                 .unwrap_or_default();
             if let Err(e) = value::check_string(check, &new, &Shell(host)) {
-                // The old (possibly inherited) value is put back *here*.
-                self.set_string(tree, def.name, Some(def), &old, false);
+                // tmux puts the old (possibly inherited) value back *here*,
+                // so a failed set leaves it set. A vtmux option stays
+                // invisible while unset (docs/PAPERCUTS.md): put the tree
+                // back exactly as it was.
+                if super::vtmux::is_extension(def) {
+                    match before {
+                        Some(entry) => self.tree_mut(tree).insert(def.name, entry),
+                        None => self.tree_mut(tree).remove(def.name),
+                    }
+                } else {
+                    self.set_string(tree, def.name, Some(def), &old, false);
+                }
                 return Err(e);
             }
             return Ok(());

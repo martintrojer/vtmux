@@ -3955,11 +3955,33 @@ fn vtmux_options_invisible_while_unset() {
             w.run(&["show", "-g", "vtm"]),
             w.run(&["set", "-gw", "vtmux", "on"]),
             w.run(&["source", &guarded_config(w)]),
+            // A failed set of a tmux string option: tmux writes the old
+            // value back, so it is listed afterwards (options.c:1286).
+            w.run(&["set", "-w", "window-status-style", "garbage"]),
+            w.run(&["show", "-w"]),
         ]
     });
     let w = World::new(&vtmux_bin());
     w.run(&["new", "-d", "-s", "a", "cat"]);
     let out = |args: &[&str]| w.run(args).stdout;
+    // A failed set leaves a vtmux option unset, at every scope, and keeps
+    // a value that was set.
+    let blend = "vtmux-pane-inactive-blend";
+    for flags in ["-g", "-gw", "-w", "-gwa"] {
+        let r = w.run(&["set", flags, blend, "garbage"]);
+        assert_eq!(
+            (r.code, r.stderr.as_str()),
+            (1, "invalid style: garbage\n"),
+            "{flags}"
+        );
+        assert!(!out(&["show", "-gw"]).contains(blend), "{flags}");
+        assert!(!out(&["show", "-w"]).contains(blend), "{flags}");
+    }
+    w.run(&["set", "-g", blend, "fg=bg/25"]);
+    w.run(&["set", "-g", blend, "garbage"]);
+    assert_eq!(out(&["show", "-gv", blend]), "fg=bg/25\n");
+    w.run(&["set", "-gu", blend]);
+    assert!(!out(&["show", "-gw"]).contains(blend));
     w.run(&["source", &guarded_config(&w)]);
     assert_eq!(out(&["show", "-gv", "vtmux-focus-ring"]), "on\n");
     w.run(&["set", "-gwu", "vtmux-focus-ring"]);
