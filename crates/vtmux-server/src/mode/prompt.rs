@@ -243,7 +243,7 @@ pub(crate) mod tests {
                         if c.is_empty() {
                             " ".to_owned()
                         } else {
-                            c.clone()
+                            c.to_string()
                         }
                     })
                     .collect::<String>()

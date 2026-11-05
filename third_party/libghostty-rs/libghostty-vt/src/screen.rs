@@ -425,6 +425,13 @@ impl Cell {
         Ok(unsafe { value.assume_init() })
     }
 
+    /// The cell's 64 bits: ghostty's `page.zig` `Cell`, a `packed
+    /// struct(u64)`. (vtmux: `vtmux-vt` reads a row's cells from them, where
+    /// each getter is a call.)
+    pub fn bits(self) -> u64 {
+        self.0
+    }
+
     /// The codepoint of the cell (0 if empty or bg-color-only).
     pub fn codepoint(self) -> Result<u32> {
         self.get(ffi::CellData::CODEPOINT)

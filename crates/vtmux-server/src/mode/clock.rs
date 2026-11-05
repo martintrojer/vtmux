@@ -144,7 +144,7 @@ impl ClockMode {
                 let (x, y) = (sx / 2 - len / 2, sy / 2);
                 for (i, ch) in text.chars().enumerate() {
                     let c = &mut cells[y * sx + x + i];
-                    c.text = ch.to_string();
+                    c.text = ch.into();
                     c.style.fg = colour;
                 }
                 cursor = (x + len, y);

@@ -1159,7 +1159,7 @@ fn divider(a: &Attached, x: u16) -> Vec<(String, vtmux_vt::Color)> {
     (0..9)
         .map(|y| {
             let c = snap.cell(x, y).unwrap();
-            (c.text.clone(), c.style.fg)
+            (c.text.to_string(), c.style.fg)
         })
         .collect()
 }

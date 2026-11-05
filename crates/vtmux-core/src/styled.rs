@@ -2822,7 +2822,7 @@ mod tests {
             text: if plain {
                 String::new()
             } else {
-                cell.text.clone()
+                cell.text.to_string()
             },
             width: cell.width,
             fg: if plain { Color::Default } else { s.fg },

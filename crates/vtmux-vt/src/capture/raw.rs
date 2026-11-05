@@ -289,8 +289,8 @@ pub fn capture_grid(term: &PaneTerm, history_limit: usize) -> Vec<u8> {
                 fbits |= 0x80;
             }
             let (an, ab) = attrs(&style, c.acs && !r.padding);
-            let link = c.uri.as_deref().filter(|_| !r.padding).unwrap_or("NONE");
-            let linkid = match (&c.link_id, r.padding, link) {
+            let link = c.uri().filter(|_| !r.padding).unwrap_or("NONE");
+            let linkid = match (c.link_id(), r.padding, link) {
                 (_, _, "NONE") | (_, true, _) => "NONE".to_owned(),
                 (Some(libghostty_vt::screen::HyperlinkId::Explicit(id)), ..) if !id.is_empty() => {
                     String::from_utf8_lossy(id).into_owned()

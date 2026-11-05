@@ -9,6 +9,7 @@ use libghostty_vt::screen::{CellContentTag, CellWide, GridRef, HyperlinkId};
 use libghostty_vt::terminal::{Point, PointCoordinate};
 
 use crate::snapshot::{Cell, Color, Style, Underline};
+use crate::text::CellText;
 use std::rc::Rc;
 
 use crate::term::{HistoryRow, LineMark, PaneTerm};
@@ -340,18 +341,37 @@ enum Width {
     SpacerHead,
 }
 
+/// A [`RowCell`]'s link: the URI and OSC 8 id, either of which may be
+/// unreadable.
+#[derive(Clone, Debug, PartialEq)]
+struct LinkTarget {
+    uri: Option<String>,
+    id: Option<HyperlinkId>,
+}
+
+impl LinkTarget {
+    /// The link of the cell at `gr`; none if neither part reads.
+    fn read(gr: &GridRef<'_>) -> Option<Box<Self>> {
+        let target = Self {
+            uri: hyperlink_uri(gr),
+            id: gr.hyperlink_id().ok(),
+        };
+        (target.uri.is_some() || target.id.is_some()).then(|| Box::new(target))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RowCell {
-    text: String,
+    text: CellText,
     style: Style,
     /// Blank cell with no text (tmux stores a space).
     empty: bool,
     wide: Width,
     acs: bool,
     link: bool,
-    /// The hyperlink's URI and OSC 8 id (Ghostty patch 0006).
-    uri: Option<String>,
-    link_id: Option<HyperlinkId>,
+    /// The hyperlink's URI and OSC 8 id (Ghostty patch 0006), boxed: links
+    /// are rare and a row of cells is read for every line a search passes.
+    target: Option<Box<LinkTarget>>,
     /// Ghostty's tab mark (`Cell.tab`, `patches/0002-tab-cell-mark.patch`):
     /// 0 none, 1..=32 the first cell of a tab that many columns wide,
     /// [`TAB_CONTINUATION`] for the other cells of it.
@@ -368,6 +388,18 @@ impl RowCell {
             && self.wide == Width::Narrow
             && !self.link
             && self.tab == 0
+    }
+
+    /// A cell that [`RowCell::to_cell`] makes a blank of width 1 with no
+    /// colour, link or line drawing: past the last used cell, tmux's
+    /// `cellused` does not count it.
+    fn unused(&self) -> bool {
+        self.tab == 0
+            && matches!(self.wide, Width::Narrow | Width::SpacerHead)
+            && self.text.is_empty()
+            && !self.link
+            && !self.acs
+            && self.style == Style::default()
     }
 
     /// Cells tmux does not store: the second column of a wide character and
@@ -398,9 +430,18 @@ impl RowCell {
         }
     }
 
+    fn uri(&self) -> Option<&str> {
+        self.target.as_deref()?.uri.as_deref()
+    }
+
+    fn link_id(&self) -> Option<&HyperlinkId> {
+        self.target.as_deref()?.id.as_ref()
+    }
+
     /// The cell's link as tmux tells links apart.
     fn link_key(&self) -> Option<LinkKey> {
-        Some((self.uri.clone()?, self.link_id.clone()?))
+        let target = self.target.as_deref()?;
+        Some((target.uri.clone()?, target.id.clone()?))
     }
 
     /// A [`Row`]'s cell back in capture form (`-M`). Rows keep no URIs. A
@@ -408,9 +449,9 @@ impl RowCell {
     /// cell before is a tab or a tab's padding ([`RowCell::to_cell`]).
     fn from_cell(c: &Cell, after_tab: bool) -> Self {
         let (text, wide, tab) = match (c.tab, c.width) {
-            (true, n) => ("\t".to_owned(), Width::Narrow, n),
-            (false, 0) if after_tab => (String::new(), Width::Narrow, TAB_CONTINUATION),
-            (false, 0) => (String::new(), Width::SpacerTail, 0),
+            (true, n) => (CellText::from('\t'), Width::Narrow, n),
+            (false, 0) if after_tab => (CellText::new(), Width::Narrow, TAB_CONTINUATION),
+            (false, 0) => (CellText::new(), Width::SpacerTail, 0),
             (false, 2) => (c.text.clone(), Width::Double, 0),
             (false, _) => (c.text.clone(), Width::Narrow, 0),
         };
@@ -421,8 +462,7 @@ impl RowCell {
             wide,
             acs: c.acs,
             link: c.link,
-            uri: None,
-            link_id: None,
+            target: None,
             tab,
         }
     }
@@ -431,8 +471,8 @@ impl RowCell {
     fn to_cell(&self) -> Cell {
         // tmux stores a tab as one cell as wide as the tab, then padding.
         let (text, width, tab) = match (self.tab, self.wide) {
-            (TAB_CONTINUATION, _) => (String::new(), 0, false),
-            (n @ 1..=32, _) => (" ".repeat(usize::from(n)), n, true),
+            (TAB_CONTINUATION, _) => (CellText::new(), 0, false),
+            (n @ 1..=32, _) => (" ".repeat(usize::from(n)).into(), n, true),
             (_, Width::Double) => (self.text.clone(), 2, false),
             (_, Width::SpacerTail) => (self.text.clone(), 0, false),
             (_, Width::Narrow | Width::SpacerHead) => (self.text.clone(), 1, false),
@@ -569,19 +609,40 @@ impl ScreenCopy {
     /// Row `y` as [`PaneTerm::row`] gave it when the copy was taken.
     #[must_use]
     pub fn row(&self, y: usize) -> Row {
-        if y >= self.hsize + self.rows {
-            return Row::default();
-        }
-        let (cells, wrapped) = match (&self.frozen, &self.term) {
-            (Some(frozen), _) if y < self.hsize => {
-                frozen.get(y).map(FrozenRow::thaw).unwrap_or_default()
-            }
-            (_, Some(term)) => read_screen_row(term, y + self.retained - self.hsize, self.cols),
-            (_, None) => return Row::default(),
-        };
+        let (cells, wrapped) = self.row_cells(y, false);
         Row {
             cells: cells.iter().map(RowCell::to_cell).collect(),
             wrapped,
+        }
+    }
+
+    /// [`ScreenCopy::row`] without its trailing unused cells (blanks
+    /// nothing wrote with a colour, a link or the line-drawing set: tmux's
+    /// `cellused`), and no room kept for them.
+    #[must_use]
+    pub fn used_row(&self, y: usize) -> Row {
+        let (cells, wrapped) = self.row_cells(y, true);
+        let used = cells.iter().rposition(|c| !c.unused()).map_or(0, |x| x + 1);
+        Row {
+            cells: cells[..used].iter().map(RowCell::to_cell).collect(),
+            wrapped,
+        }
+    }
+
+    /// The row's cells; with `used_only` they may stop after the last
+    /// cell Ghostty has anything in.
+    fn row_cells(&self, y: usize, used_only: bool) -> (Vec<RowCell>, bool) {
+        if y >= self.hsize + self.rows {
+            return (Vec::new(), false);
+        }
+        match (&self.frozen, &self.term) {
+            (Some(frozen), _) if y < self.hsize => {
+                frozen.get(y).map(FrozenRow::thaw).unwrap_or_default()
+            }
+            (_, Some(term)) => {
+                read_screen_cells(term, y + self.retained - self.hsize, self.cols, used_only)
+            }
+            (_, None) => (Vec::new(), false),
         }
     }
 
@@ -722,6 +783,18 @@ fn read_row(term: &PaneTerm, y: usize, hsize: usize, cols: usize) -> (Vec<RowCel
 /// walk for the row and one call for its cells; a cell's style and
 /// grapheme are looked up only when it has them.
 fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCell>, bool) {
+    read_screen_cells(term, y, cols, false)
+}
+
+/// [`read_screen_row`]; with `used_only`, the cells Ghostty has nothing in
+/// after the last it has something in are not read (they are blanks, and
+/// a tab is judged by the whole row's width all the same).
+fn read_screen_cells(
+    term: &Terminal<'_, '_>,
+    y: usize,
+    cols: usize,
+    used_only: bool,
+) -> (Vec<RowCell>, bool) {
     // Ghostty resolves a screen point by walking its pages from the oldest
     // and an active point from the newest: a row of the active area is
     // read as one, at a cost that does not grow with the history.
@@ -752,77 +825,153 @@ fn read_screen_row(term: &Terminal<'_, '_>, y: usize, cols: usize) -> (Vec<RowCe
     }
     // An incomplete reflow can leave the page narrower than the screen.
     raw.truncate(cols);
+    let width = raw.len();
+    if used_only {
+        raw.truncate(raw.iter().rposition(|c| c.bits() != 0).map_or(0, |x| x + 1));
+    }
     let mut cells = Vec::with_capacity(raw.len());
     for (x, &cell) in raw.iter().enumerate() {
+        let cell = CellBits(cell.bits());
+        if cell.0 == 0 {
+            // Most of a row: a blank nothing wrote.
+            cells.push(RowCell {
+                empty: true,
+                ..RowCell::default()
+            });
+            continue;
+        }
         let gr = row_ref.with_x(u16::try_from(x).unwrap_or(u16::MAX));
         let wide = match cell.wide() {
-            Ok(CellWide::Wide) => Width::Double,
-            Ok(CellWide::SpacerTail) => Width::SpacerTail,
-            Ok(CellWide::SpacerHead) => Width::SpacerHead,
-            _ => Width::Narrow,
+            CellWide::Wide => Width::Double,
+            CellWide::SpacerTail => Width::SpacerTail,
+            CellWide::SpacerHead => Width::SpacerHead,
+            CellWide::Narrow => Width::Narrow,
         };
         // Most cells are unstyled: skip the style lookup for them.
-        let mut style = if styled && cell.has_styling().unwrap_or(true) {
+        let mut style = if styled && cell.has_styling() {
             gr.style().map(Style::from).unwrap_or_default()
         } else {
             Style::default()
         };
-        let tab = cell.tab().unwrap_or(0);
+        let tab = cell.tab();
         let text = match cell.content_tag() {
             // One codepoint: no grapheme buffer needed.
-            Ok(CellContentTag::Codepoint) => cell
-                .codepoint()
-                .ok()
-                .and_then(char::from_u32)
+            CellContentTag::Codepoint => char::from_u32(cell.codepoint())
                 .filter(|&c| c != '\0')
-                .map(String::from)
+                .map(CellText::from)
                 .unwrap_or_default(),
-            Ok(CellContentTag::CodepointGrapheme) => cell_text(&gr),
-            Ok(CellContentTag::BgColorPalette) => {
-                if let Ok(i) = cell.bg_color_palette() {
-                    style.bg = Color::Palette(i.0);
-                }
-                String::new()
+            CellContentTag::CodepointGrapheme => cell_text(&gr).into(),
+            CellContentTag::BgColorPalette => {
+                style.bg = Color::Palette(cell.palette());
+                CellText::new()
             }
-            Ok(CellContentTag::BgColorRgb) => {
-                if let Ok(c) = cell.bg_color_rgb() {
-                    style.bg = Color::Rgb(c.r, c.g, c.b);
-                }
-                String::new()
+            CellContentTag::BgColorRgb => {
+                let (r, g, b) = cell.rgb();
+                style.bg = Color::Rgb(r, g, b);
+                CellText::new()
             }
-            Err(_) => String::new(),
         };
         // A tab's first cell is a TAB cell: `\t` in a capture (grid.c
         // `grid_string_cells`), spaces everywhere else (`to_cell`).
         let text = if matches!(tab, 1..=32) {
-            "\t".to_owned()
+            CellText::from('\t')
         } else {
             text
         };
-        let link = linked && cell.has_hyperlink().unwrap_or(false);
+        let link = linked && cell.has_hyperlink();
         cells.push(RowCell {
             empty: text.is_empty(),
             text,
             style,
             wide,
-            acs: cell.is_protected().unwrap_or(false),
+            acs: cell.is_protected(),
             link,
             // Links are rare: their URI and id are read as the cell is.
-            uri: link.then(|| hyperlink_uri(&gr)).flatten(),
-            link_id: link.then(|| gr.hyperlink_id().ok()).flatten(),
+            target: if link { LinkTarget::read(&gr) } else { None },
             tab,
         });
     }
-    whole_tabs(&mut cells);
+    whole_tabs(&mut cells, width);
     (cells, wrapped)
+}
+
+/// A Ghostty cell read from its bits rather than a `ghostty_cell_get` call
+/// per field. `page.zig`'s `Cell` is a `packed struct(u64)`, fields from
+/// the least significant bit: `content_tag` (2 bits), `content` (24: a
+/// codepoint in the low 21, a palette index in the low 8, or r, g, b),
+/// `style_id` (16), `wide` (2), `protected`, `hyperlink`,
+/// `semantic_content` (2), `tab` (8, patch 0002). The test
+/// `cell_bits_match_the_getters` holds it to the getters.
+#[derive(Clone, Copy)]
+struct CellBits(u64);
+
+impl CellBits {
+    fn field(self, shift: u32, bits: u32) -> u32 {
+        u32::try_from((self.0 >> shift) & ((1 << bits) - 1)).expect("masked to 24 bits")
+    }
+
+    fn content_tag(self) -> CellContentTag {
+        match self.field(0, 2) {
+            0 => CellContentTag::Codepoint,
+            1 => CellContentTag::CodepointGrapheme,
+            2 => CellContentTag::BgColorPalette,
+            _ => CellContentTag::BgColorRgb,
+        }
+    }
+
+    /// `Cell.codepoint()`: 0 for a colour-only cell.
+    fn codepoint(self) -> u32 {
+        match self.content_tag() {
+            CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => self.field(2, 21),
+            _ => 0,
+        }
+    }
+
+    fn palette(self) -> u8 {
+        self.byte(2)
+    }
+
+    fn rgb(self) -> (u8, u8, u8) {
+        (self.byte(2), self.byte(10), self.byte(18))
+    }
+
+    fn byte(self, shift: u32) -> u8 {
+        u8::try_from(self.field(shift, 8)).expect("masked to 8 bits")
+    }
+
+    fn has_styling(self) -> bool {
+        self.field(26, 16) != 0
+    }
+
+    fn wide(self) -> CellWide {
+        match self.field(42, 2) {
+            0 => CellWide::Narrow,
+            1 => CellWide::Wide,
+            2 => CellWide::SpacerTail,
+            _ => CellWide::SpacerHead,
+        }
+    }
+
+    fn is_protected(self) -> bool {
+        self.field(44, 1) != 0
+    }
+
+    fn has_hyperlink(self) -> bool {
+        self.field(45, 1) != 0
+    }
+
+    fn tab(self) -> u8 {
+        self.byte(48)
+    }
 }
 
 /// Undo what a resize does to a tab: Ghostty reflows cell by cell and can cut a
 /// tab at the row's end, leaving its first cell without its columns or its
 /// continuation at the start of the next row. tmux wraps a TAB cell whole
 /// (`grid_reflow`), so such halves are plain blanks here. A tab tmux itself
-/// could hold (`window_copy` over a partly erased tab) stays.
-fn whole_tabs(cells: &mut [RowCell]) {
+/// could hold (`window_copy` over a partly erased tab) stays. `width` is
+/// the row's, which `cells` may stop short of.
+fn whole_tabs(cells: &mut [RowCell], width: usize) {
     let blank = |c: &mut RowCell| {
         c.tab = 0;
         c.text.clear();
@@ -838,7 +987,7 @@ fn whole_tabs(cells: &mut [RowCell]) {
     if let Some(x) = cells
         .iter()
         .rposition(|c| c.tab != 0 && c.tab != TAB_CONTINUATION)
-        && x + usize::from(cells[x].tab) > cells.len()
+        && x + usize::from(cells[x].tab) > width
     {
         let n = cells.len() - x;
         cells[x..x + n].iter_mut().for_each(blank);
@@ -1069,11 +1218,7 @@ fn tmux_cellsize(cells: &[RowCell], used: usize) -> usize {
         // A run is what one grid_set_cells writes: same style, charset
         // and link.
         let same = |a: &RowCell, b: &RowCell| {
-            b.spacer()
-                || (a.style == b.style
-                    && a.acs == b.acs
-                    && a.uri == b.uri
-                    && a.link_id == b.link_id)
+            b.spacer() || (a.style == b.style && a.acs == b.acs && a.target == b.target)
         };
         let mut j = i + 1;
         while j < extent && written(&cells[j]) && same(&cells[j], &cells[i]) {
@@ -1247,6 +1392,88 @@ mod tests {
         assert_eq!(LOOKUPS.with(std::cell::Cell::get) - before, rows.len());
         assert_eq!(rows[0].trim_end(), "ab\u{e9}");
         assert_eq!(rows[3].trim_end(), "e");
+    }
+
+    /// [`CellBits`] reads every field the way the getters do, over cells
+    /// with each kind of content: text, a cluster, palette and RGB
+    /// colour-only blanks, styles, wide characters and their spacers (head
+    /// and tail), DECSCA protection, a hyperlink, tabs.
+    #[test]
+    fn cell_bits_match_the_getters() {
+        let mut t = PaneTerm::new(8, 3, 100);
+        t.feed(
+            "a\x1b[1;31mb\x1b[m\u{e9}e\u{301}\x1b[44m\x1b[K\x1b[m\r\n\x1b[48;2;1;2;3m\x1b[K\x1b[mab\r\nabcdefg\u{4e2d}\r\n\
+             \x1b(0q\x1b(B\x1b]8;;http://a/\x1b\\L\x1b]8;;\x1b\\\tx\r\n\x1b[48;5;200m\x1b[2K\x1b[m\u{1f600}"
+                .as_bytes(),
+        );
+        let term = &t.term;
+        let rows = term.scrollback_rows().unwrap_or(0) + 3;
+        let mut seen = 0;
+        for y in 0..rows {
+            let row_ref = term
+                .grid_ref(Point::Screen(PointCoordinate {
+                    x: 0,
+                    y: u32::try_from(y).unwrap(),
+                }))
+                .unwrap();
+            let mut raw = Vec::new();
+            row_ref.row_cells(&mut raw).unwrap();
+            for cell in raw {
+                let bits = CellBits(cell.bits());
+                let at = format!("row {y} {:#x}", cell.bits());
+                let tag = cell.content_tag().unwrap();
+                assert_eq!(bits.content_tag(), tag, "{at}");
+                assert_eq!(bits.codepoint(), cell.codepoint().unwrap(), "{at}");
+                if tag == CellContentTag::BgColorPalette {
+                    assert_eq!(bits.palette(), cell.bg_color_palette().unwrap().0, "{at}");
+                }
+                if tag == CellContentTag::BgColorRgb {
+                    let c = cell.bg_color_rgb().unwrap();
+                    assert_eq!(bits.rgb(), (c.r, c.g, c.b), "{at}");
+                }
+                assert_eq!(bits.has_styling(), cell.has_styling().unwrap(), "{at}");
+                assert_eq!(bits.wide(), cell.wide().unwrap(), "{at}");
+                assert_eq!(bits.is_protected(), cell.is_protected().unwrap(), "{at}");
+                assert_eq!(bits.has_hyperlink(), cell.has_hyperlink().unwrap(), "{at}");
+                assert_eq!(bits.tab(), cell.tab().unwrap(), "{at}");
+                seen |= 1 << (tag as u32);
+                seen |= 1 << (4 + bits.wide() as u32);
+                seen |= u32::from(bits.is_protected()) << 8;
+                seen |= u32::from(bits.has_hyperlink()) << 9;
+                seen |= u32::from(bits.tab() != 0) << 10;
+                seen |= u32::from(bits.has_styling()) << 11;
+            }
+        }
+        assert_eq!(seen, 0xfff, "every kind of cell was read: {seen:#b}");
+    }
+
+    /// `used_row` is `row` with the trailing cells copy mode drops (blank,
+    /// width 1, no colour, link or line drawing) cut off, whatever ends
+    /// the row: spaces, a coloured erase, a tab (whole or partly erased),
+    /// the blank a wrapped wide character leaves, line drawing, a link.
+    #[test]
+    fn used_row_is_row_without_its_unused_tail() {
+        let mut t = PaneTerm::new(6, 2, 100);
+        t.feed(
+            "ab  \r\nx\x1b[44m\x1b[K\x1b[m\r\na\tb\r\nq\t\r\n\t\x1b[3G\x1b[K\r\nabcde\u{4e2d}\r\n\x1b(0q\x1b(B\r\n\x1b]8;;http://a/\x1b\\L\x1b]8;;\x1b\\\r\n\r\nz"
+                .as_bytes(),
+        );
+        let copy = t.copy_screen();
+        for y in 0..copy.history_size() + 2 {
+            let mut want = copy.row(y);
+            while want.cells.last().is_some_and(|c| {
+                c.text.is_empty()
+                    && c.width == 1
+                    && !c.link
+                    && !c.acs
+                    && c.style == Style::default()
+            }) {
+                want.cells.pop();
+            }
+            let got = copy.used_row(y);
+            assert_eq!(got, want, "row {y}");
+            assert_eq!(got.cells.capacity(), got.cells.len(), "row {y}");
+        }
     }
 
     /// format.c:7200-7218: a cell's OSC 8 URI, from history too and from

@@ -440,7 +440,7 @@ impl Canvas {
                 x,
                 y,
                 Cell {
-                    text: c.to_string(),
+                    text: c.into(),
                     width: width.max(1),
                     style,
                     ..Cell::default()

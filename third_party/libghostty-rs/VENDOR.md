@@ -202,6 +202,12 @@ Recorded per commit in git history; the list is kept current:
   dirties the row). Throughput: a 21.9 MB ASCII, 19.5 MB Latin-1 and 15 MB
   CJK flood through one `PaneTerm` (80x24, release) take 0.10/0.13/0.13 s,
   against 0.16/0.16/0.15 s on main before this and the scanner's ASCII run.
+- `libghostty-vt/src/screen.rs`: `Cell::bits`, the cell's `u64`. `vtmux-vt`
+  (`capture.rs` `CellBits`) decodes `page.zig`'s packed `Cell` from it
+  instead of seven `ghostty_cell_get` calls per cell (copy mode reading a
+  27-cell row: 2.2 to 1.65 µs, release, with the row kept).
+  `cell_bits_match_the_getters` checks the decoding against the getters, so
+  a bump that moves a field fails there.
 
 ## Bumping ghostty
 
