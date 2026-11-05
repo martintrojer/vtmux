@@ -398,6 +398,15 @@ pub struct Scene {
     wsx: i32,
     wsy: i32,
     ring: bool,
+    /// Some cell is a pane status line's: without one, [`Self::status_line`]
+    /// need not scan the scene (it runs per pane, every frame).
+    has_status: bool,
+    /// Per row, the pane content rows on it in order, each once per run
+    /// ([`Self::row_panes`]).
+    row_panes: Vec<Vec<(PaneId, u32)>>,
+    /// Some cell is [`SceneCell::Outside`], some [`SceneCell::Empty`]
+    /// ([`Self::fills`]).
+    fills: (bool, bool),
 }
 
 fn int(n: u32) -> i32 {
@@ -442,6 +451,9 @@ impl Scene {
             wsx: int(win.sx),
             wsy: int(win.sy),
             ring: win.ring.is_some(),
+            has_status: false,
+            row_panes: Vec::new(),
+            fills: (false, false),
         };
         for p in &win.panes {
             scene.mark_pane(p, win.indicators);
@@ -462,7 +474,45 @@ impl Scene {
         {
             scene.mark_two_pane_colours(dir);
         }
+        scene.has_status = scene
+            .cells
+            .iter()
+            .any(|c| matches!(c, SceneCell::Status { .. }));
+        scene.fills = (
+            scene.cells.iter().any(|c| matches!(c, SceneCell::Outside)),
+            scene.cells.iter().any(|c| matches!(c, SceneCell::Empty)),
+        );
+        scene.row_panes = (0..rows)
+            .map(|y| {
+                let mut on: Vec<(PaneId, u32)> = Vec::new();
+                for x in 0..cols {
+                    if let SceneCell::Pane { pane, py, .. } = scene.get(x, y)
+                        && on.last() != Some(&(*pane, *py))
+                    {
+                        on.push((*pane, *py));
+                    }
+                }
+                on
+            })
+            .collect();
         scene
+    }
+
+    /// Whether some cell is outside the window, and whether some is inside
+    /// it but on no pane: without one, its fill cell is never drawn.
+    #[must_use]
+    pub fn fills(&self) -> (bool, bool) {
+        self.fills
+    }
+
+    /// The pane content rows row `y` shows, left to right: (pane, content
+    /// row), once for each run of the row's pane cells, the cells between
+    /// runs skipped. The compositor's row cache keys on it every frame.
+    #[must_use]
+    pub fn row_panes(&self, y: u16) -> &[(PaneId, u32)] {
+        self.row_panes
+            .get(usize::from(y))
+            .map_or(&[], Vec::as_slice)
     }
 
     #[must_use]
@@ -753,6 +803,9 @@ impl Scene {
     #[must_use]
     pub fn status_line(&self, pane: PaneId) -> Vec<Option<Shape>> {
         let mut out: Vec<Option<Shape>> = Vec::new();
+        if !self.has_status {
+            return out;
+        }
         for cell in &self.cells {
             if let SceneCell::Status {
                 pane: p,

@@ -217,14 +217,7 @@ impl PlainFrame {
 pub fn blank(buffer: Option<Snapshot>, cols: u16, rows: u16) -> Snapshot {
     match buffer {
         Some(mut b) if (b.cols, b.rows) == (cols, rows) => {
-            for c in &mut b.cells {
-                c.text.clear();
-                c.width = 0;
-                c.style = Style::default();
-                c.acs = false;
-                c.link = false;
-                c.tab = false;
-            }
+            clear_cells(&mut b.cells);
             b.wrapped.clear();
             b.cursor = None;
             b.cursor_visible = true;
@@ -241,11 +234,29 @@ pub fn blank(buffer: Option<Snapshot>, cols: u16, rows: u16) -> Snapshot {
     }
 }
 
+/// Empty `cells`, as [`blank`] leaves them.
+pub fn clear_cells(cells: &mut [vtmux_vt::Cell]) {
+    for c in cells {
+        c.text.clear();
+        c.width = 0;
+        c.style = Style::default();
+        c.acs = false;
+        c.link = false;
+        c.tab = false;
+    }
+}
+
 #[derive(Default)]
 pub struct Compositor {
     last: Option<Snapshot>,
+    /// Per row of `last`, the composed row it was copied from
+    /// ([`compose::ComposeCache::copy_rows`]); 0 for a row drawn otherwise.
+    /// Two frames' rows with the same nonzero tag hold the same cells.
+    last_tags: Vec<u64>,
     /// The frame before `last`, its buffer kept for the next one.
     spare: Option<Snapshot>,
+    /// `spare`'s row tags, as `last_tags`.
+    spare_tags: Vec<u64>,
     /// The client is not keeping up: compose nothing until it drains.
     blocked: bool,
     /// When the last frame was sent.
@@ -297,6 +308,7 @@ impl Compositor {
     pub fn invalidate(&mut self) {
         self.spare = self.last.take();
         self.forced.clear();
+        self.spare_tags = std::mem::take(&mut self.last_tags);
     }
     /// The last frame sent is still what the terminal shows, at this size.
     #[must_use]
@@ -307,13 +319,46 @@ impl Compositor {
                 .as_ref()
                 .is_some_and(|s| (s.cols, s.rows) == (cols, rows))
     }
-    /// Keep `screen`, unsent, as the next frame's buffer.
-    pub fn recycle(&mut self, screen: Snapshot) {
-        self.spare = Some(screen);
+    /// The last frame sent and its row tags.
+    #[cfg(test)]
+    #[must_use]
+    pub fn last(&self) -> Option<(&Snapshot, &[u64])> {
+        self.last.as_ref().map(|l| (l, self.last_tags.as_slice()))
     }
-    /// An empty `cols` x `rows` screen for the next frame ([`blank`]).
-    pub fn buffer(&mut self, cols: u16, rows: u16) -> Snapshot {
-        blank(self.spare.take(), cols, rows)
+    /// Keep `screen` and its row tags, unsent, as the next frame's buffer.
+    pub fn recycle(&mut self, screen: Snapshot, tags: Vec<u64>) {
+        self.spare = Some(screen);
+        self.spare_tags = tags;
+    }
+    /// A `cols` x `rows` screen for the next frame and its row tags: empty
+    /// ([`blank`], tags 0) but for rows `keep`, which hold what they held
+    /// in the frame before last, with its tags. The caller draws every
+    /// kept row whose tag is not the one it wants
+    /// ([`compose::ComposeCache::copy_rows`]).
+    pub fn buffer(
+        &mut self,
+        cols: u16,
+        rows: u16,
+        keep: std::ops::Range<u16>,
+    ) -> (Snapshot, Vec<u64>) {
+        let mut tags = std::mem::take(&mut self.spare_tags);
+        match self.spare.take() {
+            Some(mut b) if (b.cols, b.rows) == (cols, rows) && tags.len() == usize::from(rows) => {
+                let width = usize::from(cols).max(1);
+                let lines = b.cells.chunks_mut(width).zip(tags.iter_mut());
+                for (y, (row, tag)) in (0..rows).zip(lines) {
+                    if !keep.contains(&y) {
+                        clear_cells(row);
+                        *tag = 0;
+                    }
+                }
+                b.wrapped.clear();
+                b.cursor = None;
+                b.cursor_visible = true;
+                (b, tags)
+            }
+            spare => (blank(spare, cols, rows), vec![0; usize::from(rows)]),
+        }
     }
     /// Move the terminal's cursor back to where the last frame left it,
     /// after raw bytes (passthrough) may have moved it.
@@ -366,7 +411,9 @@ impl Compositor {
     /// Per row of `screen`, whether it differs from what the terminal shows
     /// (every row when the size changed); `None` when nothing does, the
     /// cursor included.
-    fn changed_rows(&self, screen: &Snapshot, same_size: bool) -> Option<Vec<bool>> {
+    /// Rows tagged alike in both are equal without a look (see
+    /// `last_tags`).
+    fn changed_rows(&self, screen: &Snapshot, tags: &[u64], same_size: bool) -> Option<Vec<bool>> {
         let Some(last) = self.last.as_ref().filter(|_| same_size) else {
             return Some(vec![true; usize::from(screen.rows)]);
         };
@@ -375,7 +422,11 @@ impl Compositor {
             .cells
             .chunks(width)
             .zip(last.cells.chunks(width))
-            .map(|(a, b)| a != b)
+            .enumerate()
+            .map(|(y, (a, b))| {
+                let tag = tags.get(y).copied().unwrap_or(0);
+                !(tag != 0 && self.last_tags.get(y) == Some(&tag)) && a != b
+            })
             .collect();
         for &(y, _, _) in &self.forced {
             if let Some(r) = rows.get_mut(usize::from(y)) {
@@ -389,12 +440,18 @@ impl Compositor {
     /// One frame per tick. The caller supplies a fully composed screen;
     /// therefore changes behind opaque overlays cannot escape into a frame.
     pub fn frame(&mut self, screen: Snapshot, caps: Caps) -> Vec<u8> {
+        let tags = vec![0; usize::from(screen.rows)];
+        self.frame_tagged(screen, tags, caps)
+    }
+    /// [`Self::frame`] of a screen with row tags ([`Self::buffer`]).
+    pub fn frame_tagged(&mut self, screen: Snapshot, tags: Vec<u64>, caps: Caps) -> Vec<u8> {
         let same_size = self
             .last
             .as_ref()
             .is_some_and(|s| (s.cols, s.rows) == (screen.cols, screen.rows));
-        let Some(changed_rows) = self.changed_rows(&screen, same_size) else {
+        let Some(changed_rows) = self.changed_rows(&screen, &tags, same_size) else {
             self.spare = Some(screen);
+            self.spare_tags = tags;
             return Vec::new();
         };
         let forced = std::mem::take(&mut self.forced);
@@ -503,6 +560,7 @@ impl Compositor {
             out.push_str("\x1b[?2026l");
         }
         self.spare = self.last.replace(screen);
+        self.spare_tags = std::mem::replace(&mut self.last_tags, tags);
         self.sent = Some(std::time::Instant::now());
         out.into_bytes()
     }

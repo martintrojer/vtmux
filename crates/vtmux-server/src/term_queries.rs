@@ -380,7 +380,7 @@ impl Server {
                     .clients
                     .get(&client)
                     .and_then(|c| c.term.as_ref())
-                    .and_then(vtmux_core::term_features::Term::clipboard_query);
+                    .and_then(|t| t.clipboard_query());
                 self.add_request(p, Request::Clipboard { client, end });
                 if let Some(q) = query {
                     self.send(client, &ServerMsg::Frame(q));

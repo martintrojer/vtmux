@@ -371,10 +371,23 @@ struct SyncHold {
     /// output (`?2026h`), which is what the clients keep showing while the
     /// mode is on, and when the 1 s sync timer was last armed
     /// (`screen_write_start_sync` re-arms it on every `?2026h`).
-    hold: Option<(crate::Snapshot, std::time::Instant)>,
-    /// The hold that synchronized output last ended with (`?2026l`, the
-    /// timer, [`PaneTerm::stop_sync`]), until [`PaneTerm::take_sync_flush`].
-    ended: Option<crate::Snapshot>,
+    hold: Option<(HeldScreen, std::time::Instant)>,
+    /// The row stamps of the hold that synchronized output last ended with
+    /// (`?2026l`, the timer, [`PaneTerm::stop_sync`]), until
+    /// [`PaneTerm::take_sync_flush`].
+    ended: Option<Rc<[u64]>>,
+}
+
+/// What a pane in synchronized output keeps showing ([`PaneTerm::sync_held`]):
+/// its grid when the update began, and that grid's row stamps
+/// ([`crate::ScreenView::row_stamps`]), which still describe it. The grid
+/// is the view's own, shared: a hold copies nothing, and the view copies
+/// its grid only if the pane's rows are read while the hold is on (pi and
+/// other ink apps end the update in the same read).
+#[derive(Clone, Debug)]
+pub struct HeldScreen {
+    pub screen: Rc<crate::Snapshot>,
+    pub stamps: Rc<[u64]>,
 }
 
 /// A `DCS tmux;` payload (input.c `input_dcs_dispatch`), unescaped, for the
@@ -1900,17 +1913,24 @@ impl PaneTerm {
     /// 1 s timer. A second `?2026h` keeps the first hold.
     fn start_sync(&mut self) {
         let now = std::time::Instant::now();
-        match self.sync.hold.as_mut() {
-            Some((_, since)) => *since = now,
-            None => self.sync.hold = Some((crate::snapshot(self), now)),
+        if let Some((_, since)) = self.sync.hold.as_mut() {
+            *since = now;
+            return;
         }
+        let view = self.screen();
+        let hold = HeldScreen {
+            screen: view.shared(),
+            stamps: view.row_stamps().into(),
+        };
+        drop(view);
+        self.sync.hold = Some((hold, now));
     }
 
     /// The screen the clients keep showing while the program has
     /// synchronized output on (tmux's `MODE_SYNC`, screen-write.c:211-240:
     /// nothing of the pane is drawn until it ends); `None` when it is off.
     #[must_use]
-    pub fn sync_held(&self) -> Option<&crate::Snapshot> {
+    pub fn sync_held(&self) -> Option<&HeldScreen> {
         self.sync.hold.as_ref().map(|(s, _)| s)
     }
 
@@ -1938,31 +1958,25 @@ impl PaneTerm {
 
     fn end_sync_hold(&mut self) {
         if let Some((held, _)) = self.sync.hold.take() {
-            self.sync.ended = Some(held);
+            self.sync.ended = Some(held.stamps);
         }
     }
 
     /// `screen_write_flush_dirty` (screen-write.c:1267-1290): when
     /// synchronized output ends, the lines written under it are drawn
-    /// whole, not as a diff. Per visible row, whether it differs from the
-    /// held screen (every row after a size change); `None` when no hold
-    /// ended since the last call.
+    /// whole, not as a diff. Per visible row, whether it changed since the
+    /// hold began: its stamp moved (every row after a size change, which
+    /// stamps them all afresh); `None` when no hold ended since the last
+    /// call. Stamps, not cells: keeping the held cells would make the view
+    /// copy its grid on every synchronized update.
     pub fn take_sync_flush(&mut self) -> Option<Vec<bool>> {
         let held = self.sync.ended.take()?;
         let view = self.screen();
-        let now = view.snapshot();
-        let rows = usize::from(now.rows);
-        if (held.cols, held.rows) != (now.cols, now.rows) {
-            return Some(vec![true; rows]);
+        let now = view.row_stamps();
+        if held.len() != now.len() {
+            return Some(vec![true; now.len()]);
         }
-        let width = usize::from(now.cols).max(1);
-        Some(
-            now.cells
-                .chunks(width)
-                .zip(held.cells.chunks(width))
-                .map(|(a, b)| a != b)
-                .collect(),
-        )
+        Some(now.iter().zip(held.iter()).map(|(a, b)| a != b).collect())
     }
 
     /// Whether the program asked for a full pane redraw since the last call
@@ -3255,11 +3269,15 @@ mod tests {
         t.feed(b"old");
         assert!(t.sync_held().is_none() && t.sync_deadline().is_none());
         t.feed(b"[?2026h[2Jnew");
-        assert_eq!(text(t.sync_held().unwrap()), "old");
+        assert_eq!(text(&t.sync_held().unwrap().screen), "old");
         let first = t.sync_deadline().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(5));
         t.feed(b"[?25;2026hmore");
-        assert_eq!(text(t.sync_held().unwrap()), "old", "the first hold stays");
+        assert_eq!(
+            text(&t.sync_held().unwrap().screen),
+            "old",
+            "the first hold stays"
+        );
         assert!(t.sync_deadline().unwrap() > first, "the timer is re-armed");
         t.feed(b"[?2026l");
         assert!(t.sync_held().is_none());
@@ -3292,6 +3310,14 @@ mod tests {
         t.feed(b"\x1b[?2026h\x1b[1;1HA");
         assert!(t.stop_sync());
         assert_eq!(t.take_sync_flush(), Some(vec![true, false, false]));
+        // The hold shares the view's grid; the view copies it only to
+        // read rows while the hold is on. A row written with what it held
+        // is not flushed.
+        t.feed(b"\x1b[?2026h");
+        let held = Rc::clone(&t.sync_held().unwrap().screen);
+        assert!(Rc::ptr_eq(&held, &t.screen().shared()), "no copy");
+        t.feed(b"\x1b[3;1Hc\x1b[?2026l");
+        assert_eq!(t.take_sync_flush(), Some(vec![false, false, false]));
         t.feed(b"[?2026$p");
         assert_eq!(
             t.take_replies(),
