@@ -814,6 +814,8 @@ fn flood_with_a_stalled_client(w: &World, args: &[&str]) -> (Child, Control) {
 fn pause_after_pauses_a_pane_the_client_is_behind_on() {
     compare("pause_after_pauses_a_pane_the_client_is_behind_on", |w| {
         let (mut fast, mut c) = flood_with_a_stalled_client(w, &["-f", "pause-after=1"]);
+        // Only time has to pass (the stalled client's pipe fills at once),
+        // so a margin over the 1 s age is enough on a slow machine too.
         thread::sleep(Duration::from_secs(3));
         c.start_reading();
         c.wait("%pause", |t| t.contains("%pause %0\n"));
@@ -856,7 +858,13 @@ fn too_far_behind_lets_a_stalled_client_go() {
     w.env
         .push(("VTMUX_CONTROL_MAXIMUM_AGE".into(), "1000".into()));
     let (mut fast, mut c) = flood_with_a_stalled_client(&w, &[]);
-    thread::sleep(Duration::from_secs(3));
+    // Let go, the stalled client leaves its session and the list; how
+    // soon after the age passes depends on the machine, so no fixed stall.
+    let end = Instant::now() + Duration::from_secs(20);
+    while w.run(&["lsc", "-F", "x"]).0.lines().count() > 1 {
+        assert!(Instant::now() < end, "stalled client never let go");
+        thread::sleep(Duration::from_millis(50));
+    }
     c.start_reading();
     c.wait("%exit", |t| t.contains("%exit"));
     let _ = fast.kill();
@@ -889,11 +897,36 @@ fn reply_buffer_cap_lets_a_stalled_client_go() {
         for _ in 0..80 {
             c.send("show-buffer -b big");
         }
-        thread::sleep(Duration::from_secs(2));
+        // Wait until the server has run every `show-buffer`, however long
+        // that takes (a debug vtmux without a UTF-8 locale needs over 2 s),
+        // not a fixed stall. Lines run in order, so the marker is set after
+        // the last reply is queued or dropped. A client let go first may
+        // never run it: vtmux drops lines that arrive after the exit, tmux
+        // drops the queue of a client the exit timer gives up on
+        // (server-client.c `server_client_exit_timer`). Either way the
+        // client is no longer listed.
+        c.send("set -g @rvdone 1");
+        let end = Instant::now() + Duration::from_secs(60);
+        while w.run(&["show", "-gv", "@rvdone"]).0.trim() != "1"
+            && w.run(&["lsc", "-F", "x"]).0.contains('x')
+        {
+            assert!(
+                Instant::now() < end,
+                "{}: replies never queued",
+                w.bin.display()
+            );
+            thread::sleep(Duration::from_millis(50));
+        }
         c.start_reading();
+        // stdin stays open: the server lets the client go, not EOF.
         let end = Instant::now() + Duration::from_secs(30);
         while c.child.try_wait().unwrap().is_none() {
-            assert!(Instant::now() < end, "client still running");
+            assert!(Instant::now() < end, "client still running: {}", {
+                let t = c.text();
+                t.get(t.len().saturating_sub(200)..)
+                    .unwrap_or(&t)
+                    .to_owned()
+            });
             thread::sleep(Duration::from_millis(50));
         }
         let (out, _, code) = c.close();
