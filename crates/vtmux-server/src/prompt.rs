@@ -14,7 +14,10 @@
 //!
 //! Tab completes the first word of a command prompt (`prompt_complete`).
 //!
-//! Not here yet: mouse.
+//! A click on the prompt's line ([`Prompt::mouse`], `prompt_mouse`) picks
+//! a listed match or moves the cursor; where the prompt is drawn gives its
+//! [`Layout`]. A mode's own prompt (mode-tree.c:1520-1545) takes no
+//! clicks yet.
 
 use vtmux_core::cmd::TMUX_COMMANDS;
 use vtmux_core::keys::Key;
@@ -172,9 +175,29 @@ pub struct Prompt {
     /// `PROMPT_EDITARROWS`: Left and Right edit an incremental prompt's
     /// line instead of moving (switch-mode's search).
     pub edit_arrows: bool,
-    /// `pr->complete_display`: the matches Tab found and could not narrow
-    /// down, a space before each, shown after the line until the next key.
+    /// `pr->complete_list`: the matches Tab found and could not narrow
+    /// down, shown after the line until the next key.
+    complete_list: Vec<String>,
+    /// `pr->complete_display`: the matches, a space before each.
     complete_display: Option<String>,
+}
+
+/// `struct prompt_layout` (prompt.c:464-556): where a prompt drawn in an
+/// area falls, in columns of the row it is drawn on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Layout {
+    /// The first column of the label and input (`content_x`).
+    pub content_x: usize,
+    /// The label, input and listed matches' width (`content_width`).
+    pub content_width: usize,
+    /// Where the input starts (`input_x`).
+    pub input_x: usize,
+    /// The input's first column shown (`input_offset`).
+    pub input_offset: usize,
+    /// The input's width shown (`input_width`).
+    pub input_width: usize,
+    /// The cursor's column (`cursor_x`).
+    pub cursor_x: usize,
 }
 
 impl Prompt {
@@ -205,6 +228,7 @@ impl Prompt {
             is_mode: false,
             no_format: false,
             edit_arrows: false,
+            complete_list: Vec::new(),
             complete_display: None,
         }
     }
@@ -232,6 +256,12 @@ impl Prompt {
         self.buffer = input.chars().collect();
         self.index = self.buffer.len();
         self.history_at = Position::default();
+        self.clear_complete();
+    }
+
+    /// `prompt_clear_complete`.
+    fn clear_complete(&mut self) {
+        self.complete_list.clear();
         self.complete_display = None;
     }
 
@@ -333,7 +363,7 @@ impl Prompt {
     /// `prompt_key`.
     pub fn key(&mut self, key: Key, env: &mut KeyEnv<'_>) -> KeyOutcome {
         // prompt.c:1229: Tab rebuilds the matches if they still apply.
-        self.complete_display = None;
+        self.clear_complete();
         if self.kind == Kind::Key {
             return KeyOutcome::DoneClose {
                 value: key.to_string(),
@@ -423,7 +453,7 @@ impl Prompt {
         }
         let changed = match action {
             Action::Left | Action::Right | Action::Home | Action::End => false,
-            Action::Complete => self.replace_complete(env.aliases),
+            Action::Complete => self.replace_complete(None, env.aliases),
             Action::Backspace if self.kind == Kind::BackspaceExit && size == 0 => {
                 return Edit::Out(KeyOutcome::Done(None));
             }
@@ -582,14 +612,17 @@ impl Prompt {
         true
     }
 
+    /// The line becomes `line`, a history line: a byte that is not UTF-8
+    /// is U+FFFD here (tmux keeps it as a one-byte character).
     fn set_line(&mut self, line: &str) {
-        self.buffer = line.chars().collect();
+        self.buffer = vtmux_core::rawstr::to_lossy(line).chars().collect();
         self.index = self.buffer.len();
     }
 
-    /// `prompt_replace_complete` (prompt.c:996-1060) for Tab: complete the
-    /// word at the cursor. `true` when the line changed.
-    fn replace_complete(&mut self, aliases: &[String]) -> bool {
+    /// `prompt_replace_complete` (prompt.c:996-1060): replace the word at
+    /// the cursor with `with`, or for Tab (`None`) with its completion.
+    /// `true` when the line changed.
+    fn replace_complete(&mut self, with: Option<&str>, aliases: &[String]) -> bool {
         let size = self.buffer.len();
         // The word the cursor is in; `buffer[size]` is the terminator.
         let idx = self.index.saturating_sub(1);
@@ -613,13 +646,18 @@ impl Prompt {
         if last < first {
             return false;
         }
-        let word: String = self.buffer[first..last].iter().collect();
-        // `char word[64]`: a longer word is left alone.
-        if word.len() >= 64 {
-            return false;
-        }
-        let Some(insert) = self.complete(&word, first, aliases) else {
-            return false;
+        let insert = if let Some(with) = with {
+            with.to_owned()
+        } else {
+            let word: String = self.buffer[first..last].iter().collect();
+            // `char word[64]`: a longer word is left alone.
+            if word.len() >= 64 {
+                return false;
+            }
+            let Some(insert) = self.complete(&word, first, aliases) else {
+                return false;
+            };
+            insert
         };
         self.buffer.splice(first..last, insert.chars());
         self.index = first + insert.chars().count();
@@ -677,9 +715,80 @@ impl Prompt {
             return Some(out);
         }
         if list.len() > 1 {
+            // prompt_store_complete.
             self.complete_display = Some(list.iter().flat_map(|n| [" ", n]).collect());
+            self.complete_list = list.into_iter().map(str::to_owned).collect();
         }
         None
+    }
+
+    /// `prompt_mouse` (prompt.c:660-711): a button-1 press at column `x`
+    /// of the prompt's line, the prompt drawn in the area `ax`, `aw` as
+    /// `layout` says. `None` when the click is not the prompt's; else
+    /// whether the line or cursor changed.
+    pub fn mouse(&mut self, x: usize, ax: usize, aw: usize, layout: &Layout) -> Option<bool> {
+        if x < ax || x >= ax + aw {
+            return None;
+        }
+        if layout.input_width == 0 {
+            return Some(false);
+        }
+        if let Some(changed) = self.mouse_complete(x, layout) {
+            return Some(changed);
+        }
+        let pwidth = self.cells().iter().map(|c| usize::from(c.1)).sum::<usize>();
+        let target = if x <= layout.input_x {
+            layout.input_offset
+        } else {
+            layout.input_offset + x - layout.input_x
+        }
+        .min(pwidth);
+        let mut width = 0;
+        let mut idx = 0;
+        for &c in &self.buffer {
+            if width >= target {
+                break;
+            }
+            width += usize::from(display(c).1);
+            idx += 1;
+        }
+        if idx == self.index {
+            return Some(false);
+        }
+        self.index = idx;
+        self.clear_complete();
+        Some(true)
+    }
+
+    /// `prompt_mouse_complete` (prompt.c:557-597): a click on a listed
+    /// match replaces the word with it and a space. `None` when the click
+    /// is not on the list.
+    fn mouse_complete(&mut self, x: usize, layout: &Layout) -> Option<bool> {
+        let (cx, ax, aw) = (layout.cursor_x, layout.content_x, layout.content_width);
+        let display = self.complete_display()?;
+        if self.complete_list.is_empty() || cx < ax || cx - ax >= aw || x < cx {
+            return None;
+        }
+        let clicked = x - cx;
+        let width = str_width(display).min(aw - (cx - ax));
+        if clicked >= width {
+            return None;
+        }
+        let mut end = 0;
+        let hit = self.complete_list.iter().find(|m| {
+            let start = end + 1;
+            end = start + str_width(m);
+            (start..end).contains(&clicked)
+        });
+        // A click on a space between matches is used up too.
+        let Some(hit) = hit.map(|m| format!("{m} ")) else {
+            return Some(false);
+        };
+        if self.replace_complete(Some(&hit), &[]) {
+            self.clear_complete();
+            return Some(true);
+        }
+        Some(false)
     }
 
     /// `prompt_paste`: what `C-w` cut, else the top buffer up to its first
@@ -976,6 +1085,11 @@ fn literal(key: Key) -> Option<char> {
 }
 
 /// A character as the prompt draws it, with its columns.
+/// `utf8_cstrwidth`.
+fn str_width(s: &str) -> usize {
+    s.chars().map(|c| usize::from(char_width(c))).sum()
+}
+
 fn display(c: char) -> (String, u8) {
     if c <= '\x1f' || c == '\x7f' {
         let shown = if c == '\x7f' {

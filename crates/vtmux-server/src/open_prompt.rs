@@ -18,6 +18,7 @@ use vtmux_core::options::TreeId;
 
 use crate::cmdq::{End, NewBatch};
 use crate::commands::{command_prompt, confirm_before};
+use crate::input::{MOUSE_MASK_BUTTONS, MouseInput};
 use crate::prompt::{KeyEnv, KeyOutcome, OpenPrompt, Prompt};
 use crate::server::{ClientId, Server};
 use crate::target::Found;
@@ -337,9 +338,101 @@ impl Server {
         !matches!(self.prompt_key(Place::Pane(p), c, key), Taken::No)
     }
 
-    /// Client `c`'s window shows a pane prompt (server-client.c:1837-1847).
-    pub(crate) fn client_has_pane_prompt(&self, c: ClientId) -> bool {
-        self.client_pane_prompt(c).is_some()
+    /// `status_prompt_key` then `window_pane_prompt_key` for mouse report
+    /// `m` from client `c` (server-client.c:1826-1857): a button-1 press,
+    /// not a drag or release, on a prompt's line goes to `prompt_mouse`.
+    /// `true` when the event is used up: by a prompt, or by a visible pane
+    /// prompt, which takes every mouse event.
+    pub(crate) fn prompts_mouse(&mut self, c: ClientId, m: &MouseInput) -> bool {
+        let press = m.b & MOUSE_MASK_BUTTONS == 0 && m.b & 32 == 0;
+        if press && self.status_prompt_mouse(c, m) {
+            return true;
+        }
+        let Some(p) = self.client_pane_prompt(c) else {
+            return false;
+        };
+        if press {
+            self.pane_prompt_mouse(c, p, m);
+        }
+        true
+    }
+
+    /// `status_prompt_key` for a press: on `status_prompt_screen_line`
+    /// (status.c:641-653), in `status_message_area`. With no status line
+    /// that is the row below the terminal, so no click reaches it.
+    fn status_prompt_mouse(&mut self, c: ClientId, m: &MouseInput) -> bool {
+        let Some(client) = self.clients.get(&c) else {
+            return false;
+        };
+        let (Some(s), Some(prompt)) = (client.attached, client.status.prompt()) else {
+            return false;
+        };
+        let Some((cols, rows)) = client
+            .hello
+            .as_ref()
+            .and_then(|h| h.tty.as_ref())
+            .map(|t| (t.cols as usize, t.rows))
+        else {
+            return false;
+        };
+        let lines = self.status_line_size(client);
+        let source = self.render_source();
+        let (ax, aw, at) =
+            crate::render::status::status_prompt_area(&source, s, cols, lines as usize);
+        let at = u32::try_from(at).unwrap_or(u32::MAX);
+        let line = if self.model.status_top(TreeId::Session(s)) {
+            at
+        } else if lines - at <= rows {
+            rows - (lines - at)
+        } else {
+            rows - 1
+        };
+        if m.y != line {
+            return false;
+        }
+        let layout =
+            crate::render::status::prompt_layout(&source, TreeId::Session(s), prompt, ax, aw);
+        drop(source);
+        let Some(editor) = self.clients.get_mut(&c).and_then(|x| x.status.prompt_mut()) else {
+            return false;
+        };
+        editor.editor.mouse(m.x as usize, ax, aw, &layout).is_some()
+    }
+
+    /// `window_pane_prompt_key` for a press (window.c:1963-2000): in the
+    /// pane by `cmd_mouse_at`, which sees the report's own coordinates
+    /// here (no status or window offset yet), on the prompt's line (the
+    /// pane's first under a top status), the pane's width the area.
+    fn pane_prompt_mouse(&mut self, c: ClientId, p: PaneId, m: &MouseInput) {
+        let top = self.status_place(c).0 == Some(0);
+        let Some(pane) = self.model.panes.get(&p) else {
+            return;
+        };
+        let Some(prompt) = pane.prompt.as_ref() else {
+            return;
+        };
+        let rect = pane.rect;
+        let (col, row) = (
+            i64::from(m.x) - i64::from(rect.xoff),
+            i64::from(m.y) - i64::from(rect.yoff),
+        );
+        let py = if top { 0 } else { i64::from(rect.sy) - 1 };
+        if col < 0 || col >= i64::from(rect.sx) || row != py {
+            return;
+        }
+        let tree = self
+            .client_session(c)
+            .map_or(TreeId::GlobalSession, TreeId::Session);
+        let width = rect.sx as usize;
+        let source = self.render_source();
+        let layout = crate::render::status::prompt_layout(&source, tree, prompt, 0, width);
+        drop(source);
+        let x = usize::try_from(col).unwrap_or(0);
+        if let Some(open) = self.model.panes.get_mut(&p).and_then(|x| x.prompt.as_mut())
+            && open.editor.mouse(x, 0, width, &layout) == Some(true)
+        {
+            self.model.redraw_panes.insert(p);
+        }
     }
 
     /// The pane prompt client `c`'s keys go to (server-client.c:1837-1847).

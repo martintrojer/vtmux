@@ -29,7 +29,8 @@ use super::Caps;
 use super::compose::draw_line_by;
 use super::window::Source;
 use crate::format_ctx::Ctx;
-use crate::prompt::OpenPrompt;
+use crate::prompt::{Layout, OpenPrompt, Prompt};
+use vtmux_core::width::char_width;
 
 /// A status-line message (`c->message_string` and its flags).
 #[derive(Debug)]
@@ -550,16 +551,9 @@ pub fn mode_prompt_row(
     (row, cursor_x)
 }
 
-/// `prompt_draw` in the area `ax`, `aw` of `row`; returns the cursor's
-/// column.
-fn draw_prompt(
-    source: &Source<'_>,
-    tree: TreeId,
-    prompt: &OpenPrompt,
-    row: &mut Vec<Cell>,
-    ax: usize,
-    aw: usize,
-) -> usize {
+/// The prompt's style (`prompt_effective_style`) and expanded
+/// `message-format`, in the prompt's format tree.
+fn prompt_parts(source: &Source<'_>, tree: TreeId, prompt: &OpenPrompt) -> (Style, String) {
     let editor = &prompt.editor;
     let mut ctx = Ctx::new(source.model, source.info, source.env, prompt.state);
     for (k, v) in editor.format_vars() {
@@ -576,14 +570,29 @@ fn draw_prompt(
         .map(|e| e.value.to_text(e.def, None, false))
         .unwrap_or_default();
     let expanded = vtmux_core::format::expand_time(&template, &ctx);
+    (sy, expanded)
+}
 
-    // prompt_layout (prompt.c:464-556).
-    let label_width = styled::format_width(&expanded).min(aw);
-    let cells = editor.cells();
+/// `prompt_layout` (prompt.c:464-556) of `prompt` in the area `ax`, `aw`.
+#[must_use]
+pub fn prompt_layout(
+    source: &Source<'_>,
+    tree: TreeId,
+    prompt: &OpenPrompt,
+    ax: usize,
+    aw: usize,
+) -> Layout {
+    let (sy, expanded) = prompt_parts(source, tree, prompt);
+    layout(&prompt.editor, &sy, &expanded, ax, aw)
+}
+
+/// `prompt_layout` with the style and expanded label worked out.
+fn layout(editor: &Prompt, sy: &Style, expanded: &str, ax: usize, aw: usize) -> Layout {
+    let label_width = styled::format_width(expanded).min(aw);
     let pcursor = editor.cursor_width();
-    let pwidth: usize = cells.iter().map(|c| usize::from(c.1)).sum();
+    let pwidth: usize = editor.cells().iter().map(|c| usize::from(c.1)).sum();
     let avail = aw - label_width;
-    let (offset, input_width) = if avail == 0 {
+    let (input_offset, input_width) = if avail == 0 {
         (0, 0)
     } else if pcursor >= avail {
         (pcursor - avail + 1, avail)
@@ -594,22 +603,12 @@ fn draw_prompt(
     let cursor_col = if avail == 0 {
         label_width
     } else {
-        pcursor - offset + label_width
+        pcursor - input_offset + label_width
     };
     // The matches Tab listed (`prompt_draw_complete`) widen the content.
-    let complete = editor
-        .complete_display()
-        .filter(|_| cursor_col < aw)
-        .map(|d| {
-            let cells: Vec<(String, u8)> = d
-                .chars()
-                .map(|c| (c.to_string(), vtmux_core::width::char_width(c)))
-                .collect();
-            let width = cells.iter().map(|c| usize::from(c.1)).sum::<usize>();
-            (cells, width.min(aw - cursor_col))
-        });
-    if let Some((_, width)) = &complete {
-        content_width = content_width.max(cursor_col + width);
+    if let Some(d) = editor.complete_display().filter(|_| cursor_col < aw) {
+        let width = d.chars().map(|c| usize::from(char_width(c))).sum::<usize>();
+        content_width = content_width.max(cursor_col + width.min(aw - cursor_col));
     }
     let content_width = content_width.min(aw);
     let content_x = match sy.align {
@@ -617,12 +616,59 @@ fn draw_prompt(
         Align::Right => ax + aw - content_width,
         Align::Default | Align::Left => ax,
     };
-    let input_x = content_x + label_width;
-    let cursor_x = if avail == 0 {
-        content_x + label_width
-    } else {
-        input_x + pcursor - offset
-    };
+    Layout {
+        content_x,
+        content_width,
+        input_x: content_x + label_width,
+        input_offset,
+        input_width,
+        cursor_x: content_x + cursor_col,
+    }
+}
+
+/// `status_message_area` and `status_prompt_line_at` for session `s`'s
+/// status, `cols` wide and `lines` high: the prompt's area and its line
+/// of the status.
+#[must_use]
+pub fn status_prompt_area(
+    source: &Source<'_>,
+    s: SessionId,
+    cols: usize,
+    lines: usize,
+) -> (usize, usize, usize) {
+    let tree = TreeId::Session(s);
+    let (ax, aw) = message_area(source, tree, cols);
+    (ax, aw, prompt_line(source, tree, lines))
+}
+
+/// `prompt_draw` in the area `ax`, `aw` of `row`; returns the cursor's
+/// column.
+fn draw_prompt(
+    source: &Source<'_>,
+    tree: TreeId,
+    prompt: &OpenPrompt,
+    row: &mut Vec<Cell>,
+    ax: usize,
+    aw: usize,
+) -> usize {
+    let editor = &prompt.editor;
+    let (sy, expanded) = prompt_parts(source, tree, prompt);
+    let l = layout(editor, &sy, &expanded, ax, aw);
+    let label_width = l.input_x - l.content_x;
+    let (content_x, content_width, input_x, cursor_x) =
+        (l.content_x, l.content_width, l.input_x, l.cursor_x);
+    let (offset, input_width) = (l.input_offset, l.input_width);
+    let cells = editor.cells();
+    let cursor_col = cursor_x - content_x;
+    let complete = editor
+        .complete_display()
+        .filter(|_| cursor_col < aw)
+        .map(|d| {
+            let cells: Vec<(String, u8)> =
+                d.chars().map(|c| (c.to_string(), char_width(c))).collect();
+            let width = cells.iter().map(|c| usize::from(c.1)).sum::<usize>();
+            (cells, width.min(aw - cursor_col))
+        });
 
     // screen_write_clearcharacter in the fill colour.
     if sy.fill != Colour::Default {

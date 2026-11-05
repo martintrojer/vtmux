@@ -1,0 +1,505 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "prompt_mouse",
+  "inputs": {
+    "name": "prompt_mouse",
+    "size": [
+      60,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "5",
+          "cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mouse",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-p",
+          "command-prompt",
+          "-P"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "\u0002:"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "ne\t"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;19;6M\u001b[<0;19;6m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "-d"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;3;6M\u001b[<0;3;6m"
+      },
+      {
+        "keys": "X"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;1;6M\u001b[<0;1;6m"
+      },
+      {
+        "keys": "Y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;50;6M\u001b[<0;50;6m"
+      },
+      {
+        "keys": "Z"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0015ne\t"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;13;6M\u001b[<0;13;6m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<32;20;6M"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;9;6M\u001b[<0;9;6m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;9;2M\u001b[<0;9;2m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0003"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001bp"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "ne\t"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;30;5M\u001b[<0;30;5m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[<0;2;5M\u001b[<0;2;5m"
+      },
+      {
+        "keys": "W"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0003"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:ne\\e[4m new-pane new-session new-window next-layout next-window\\e[0m\\e[43m"
+        ],
+        "cursor": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:new-session\\e[39m"
+        ],
+        "cursor": [
+          13,
+          5
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:new-session -d\\e[39m"
+        ],
+        "cursor": [
+          15,
+          5
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:nXew-session -d\\e[39m"
+        ],
+        "cursor": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:YnXew-session -d\\e[39m"
+        ],
+        "cursor": [
+          2,
+          5
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:YnXew-session -dZ\\e[39m"
+        ],
+        "cursor": [
+          18,
+          5
+        ]
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:ne\\e[4m new-pane new-session new-window next-layout next-window\\e[0m\\e[43m"
+        ],
+        "cursor": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:ne\\e[4m new-pane new-session new-window next-layout next-window\\e[0m\\e[43m"
+        ],
+        "cursor": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:ne\\e[4m new-pane new-session new-window next-layout next-window\\e[0m\\e[43m"
+        ],
+        "cursor": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:new-pane\\e[39m"
+        ],
+        "cursor": [
+          10,
+          5
+        ]
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:new-pane\\e[39m"
+        ],
+        "cursor": [
+          10,
+          5
+        ]
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:ne\\e[4m new-pane new-session new-window next-layout next-window\\e[0m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          4
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:new-window \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          12,
+          4
+        ]
+      }
+    },
+    {
+      "step": 43,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43m:Wnew-window \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          4
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                   \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

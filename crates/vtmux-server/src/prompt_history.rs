@@ -2,8 +2,14 @@
 //! first, capped by `prompt-history-limit`. A line equal to the newest is
 //! not added again. `history-file` is read when the config has run and
 //! written when the server exits (cfg.c:59, server.c:261).
+//!
+//! A line is a C string in tmux: any byte but NUL. Lines hold their bytes
+//! as [`rawstr`] text, so a file line that is not UTF-8 is saved back as it
+//! was read and `show-prompt-history` prints it as it is.
 
 use std::path::{Path, PathBuf};
+
+use vtmux_core::rawstr;
 
 /// `enum prompt_type`: 3.8 has only these two (`PROMPT_NTYPES` 2,
 /// prompt.c:1712-1736).
@@ -71,7 +77,8 @@ impl History {
         }
     }
 
-    /// `prompt_up_history`: the next older line, `None` at the oldest.
+    /// `prompt_up_history`: the next older line, `None` at the oldest
+    /// ([`rawstr`] text).
     pub fn up(&self, at: &mut Position, ty: PromptType) -> Option<&str> {
         let list = &self.lists[ty.index()];
         let i = &mut at[ty.index()];
@@ -128,19 +135,20 @@ impl History {
             lines.pop();
         }
         for line in lines {
-            self.add_typed(&String::from_utf8_lossy(line), limit);
+            // The line as the C string getline gave: up to a NUL.
+            self.add_typed(rawstr::c_str(&rawstr::from_bytes(line)), limit);
         }
     }
 
     /// `prompt_save_history`: every type's lines as `type:line`.
     pub fn save(&self, path: &Path) {
-        let mut out = String::new();
+        let mut out = Vec::new();
         for ty in PromptType::ALL {
             for line in self.lines(ty) {
-                out.push_str(ty.name());
-                out.push(':');
-                out.push_str(line);
-                out.push('\n');
+                out.extend_from_slice(ty.name().as_bytes());
+                out.push(b':');
+                out.extend_from_slice(&rawstr::to_bytes(line));
+                out.push(b'\n');
             }
         }
         let _ = std::fs::write(path, out);
@@ -197,6 +205,31 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(out).unwrap(),
             "command:a\ncommand:plain\ncommand:foo:bar\ncommand:\nsearch:b:c\n"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// prompt-history.c `prompt_load_history` keeps a line's bytes, and
+    /// `prompt_save_history` writes them back; a NUL ends the line.
+    #[test]
+    fn file_keeps_bytes_that_are_not_utf8() {
+        let dir = std::env::temp_dir().join(format!("vtmux-hist-raw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("h");
+        let data: &[u8] = b"command:a\xff\xfeb\nsearch:\xe9t\xc3\xa9\ncommand:x\0y\n";
+        std::fs::write(&path, data).unwrap();
+        let mut h = History::default();
+        h.load(&path, 100);
+        assert_eq!(
+            &*rawstr::to_bytes(&h.lines(PromptType::Command)[0]),
+            b"a\xff\xfeb"
+        );
+        assert_eq!(h.lines(PromptType::Command)[1], "x");
+        let out = dir.join("o");
+        h.save(&out);
+        assert_eq!(
+            std::fs::read(out).unwrap(),
+            b"command:a\xff\xfeb\ncommand:x\nsearch:\xe9t\xc3\xa9\n"
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
