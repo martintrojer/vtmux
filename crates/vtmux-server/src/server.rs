@@ -47,6 +47,9 @@ const NAME_INTERVAL: Duration = Duration::from_millis(500);
 /// How long a client told to go may take to read the rest of its output
 /// (`server_client_start_exit_timer`, server-client.c:2365).
 const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a pane no client shows keeps its screen view after its last
+/// output ([`Server::release_hidden_screens`]).
+const HIDDEN_VIEW_IDLE: Duration = Duration::from_secs(1);
 
 /// A connected client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -935,6 +938,8 @@ impl Server {
                 .scrollbar_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.sync_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.hidden_view_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.request_deadline()
                 .map(|d| d.saturating_duration_since(now)),
@@ -2546,7 +2551,7 @@ impl Server {
     /// redraws and bursts are used up.
     fn render_and_exit(&mut self) {
         self.render_clients();
-        self.release_hidden_screens();
+        self.release_hidden_screens(Instant::now());
         for (id, code) in std::mem::take(&mut self.pending_exits) {
             self.finish_client(id, code);
         }
@@ -2708,12 +2713,18 @@ impl Server {
     }
 
     /// Drop the screen view ([`vtmux_vt::PaneTerm::release_screen`]) of
-    /// every pane no attached client's window shows: a hidden pane keeps
-    /// only its terminal, and its view is read again when it is drawn
-    /// (about 0.7 MB per full 100x50 pane; `docs/PERFORMANCE.md`, *Hidden
-    /// panes*). A preview (choose-tree, display-panes) reads it again
+    /// every pane no attached client's window shows, once it has had no
+    /// output for [`HIDDEN_VIEW_IDLE`] ([`hidden_view_kept`]): an idle
+    /// hidden pane keeps only its terminal, and its view is read again
+    /// when it is drawn (about 0.7 MB per full 100x50 pane;
+    /// `docs/PERFORMANCE.md`, *Hidden panes*). A busy one keeps it, as
+    /// each synchronized update reads it (`?2026h` holds the screen, and
+    /// its end compares the rows): rebuilt from a whole-screen read at
+    /// every update, that cost 5x tmux's CPU with agent TUIs in hidden
+    /// windows (*Agent panes*). Output while shown does not count. A
+    /// preview (choose-tree, display-panes) reads a released view again
     /// each frame it draws.
-    fn release_hidden_screens(&self) {
+    fn release_hidden_screens(&mut self, now: Instant) {
         let shown: BTreeSet<WindowId> = self
             .clients
             .values()
@@ -2721,17 +2732,30 @@ impl Server {
             .filter_map(|c| self.model.current_of(c.attached?))
             .map(|(_, w, _)| w)
             .collect();
-        for pane in self.model.panes.values() {
+        let windows = &self.model.windows;
+        for pane in self.model.panes.values_mut() {
             let visible = shown.contains(&pane.window)
-                && self
-                    .model
-                    .windows
+                && windows
                     .get(&pane.window)
                     .is_some_and(|w| w.is_visible(pane.id));
-            if !visible {
+            if visible {
+                pane.output_at = None;
+            } else if !hidden_view_kept(pane.output_at, now) {
+                pane.output_at = None;
                 pane.term.release_screen();
             }
         }
+    }
+
+    /// When the next hidden pane's view is due to be released
+    /// ([`Self::release_hidden_screens`]).
+    fn hidden_view_deadline(&self) -> Option<Instant> {
+        self.model
+            .panes
+            .values()
+            .filter_map(|p| p.output_at)
+            .min()
+            .map(|t| t + HIDDEN_VIEW_IDLE)
     }
 
     /// Client `id`'s buffer for the next frame, its row tags, and whether
@@ -4281,6 +4305,7 @@ impl Server {
             dead_time: None,
             changed: false,
             unseen_changes: false,
+            output_at: None,
             last_rename: None,
             rect: ps.rect,
             history_limit,
@@ -4601,7 +4626,9 @@ impl Server {
         pane.term.feed(bytes);
         let passthrough = pane.term.take_passthrough();
         let renames = pane.term.take_renames();
-        pane.compress.observe(&pane.term, Instant::now());
+        let now = Instant::now();
+        pane.compress.observe(&pane.term, now);
+        pane.output_at = Some(now);
         let entered_alternate = !alternate && pane.term.alternate_on();
         // input.c:2725-2740: a new title (OSC 0/2) or path
         // (OSC 7) redraws the status of the window's sessions.
@@ -5046,6 +5073,13 @@ pub(crate) fn sig_name(sig: i32) -> String {
     sig.to_string()
 }
 
+/// Whether a pane no client shows keeps its screen view: it had output
+/// (`output_at`, since it was last shown or released) less than
+/// [`HIDDEN_VIEW_IDLE`] before `now`.
+fn hidden_view_kept(output_at: Option<Instant>, now: Instant) -> bool {
+    output_at.is_some_and(|t| now.saturating_duration_since(t) < HIDDEN_VIEW_IDLE)
+}
+
 fn int(n: u32) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
 }
@@ -5073,6 +5107,51 @@ mod tests {
         let other = vtmux_core::ids::WindowId(w.0 + 1);
         server.burst_started.insert(p);
         assert!(!server.unpaced_change_in(other), "another window's pane");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A hidden pane keeps its view for `HIDDEN_VIEW_IDLE` after its last
+    /// output, not a moment longer; with no output, not at all.
+    #[test]
+    fn hidden_view_kept_until_idle() {
+        use super::{HIDDEN_VIEW_IDLE, hidden_view_kept};
+        let t = std::time::Instant::now();
+        let ms = std::time::Duration::from_millis;
+        assert!(!hidden_view_kept(None, t), "no output since shown");
+        assert!(hidden_view_kept(Some(t), t));
+        assert!(hidden_view_kept(
+            Some(t),
+            t + HIDDEN_VIEW_IDLE.saturating_sub(ms(1))
+        ));
+        assert!(!hidden_view_kept(Some(t), t + HIDDEN_VIEW_IDLE));
+        assert!(hidden_view_kept(Some(t + ms(5)), t), "output after now");
+    }
+
+    /// A pane no client shows (no client is attached here) drops its
+    /// screen view at the end of a turn with no output since it was last
+    /// shown, but keeps it while synchronized updates (which read it)
+    /// keep coming, so each is an incremental read, not a whole one; the
+    /// server wakes to drop it once the output stops.
+    #[test]
+    fn hidden_pane_keeps_its_view_while_output_flows() {
+        let (mut server, p, _, _, dir) = setup();
+        let held = |server: &super::Server| server.model.panes[&p].term.holds_screen();
+        let _ = server.model.panes[&p].term.screen();
+        server.release_hidden_screens(std::time::Instant::now());
+        assert!(!held(&server), "idle and hidden: released");
+        assert_eq!(server.hidden_view_deadline(), None);
+
+        server.pane_input(p, b"\x1b[?2026hone\x1b[?2026l", false);
+        assert!(held(&server), "the update read the screen");
+        let out = server.model.panes[&p].output_at.unwrap();
+        server.release_hidden_screens(out);
+        assert!(held(&server), "output flows: kept");
+        let due = out + super::HIDDEN_VIEW_IDLE;
+        assert_eq!(server.hidden_view_deadline(), Some(due));
+
+        server.release_hidden_screens(due);
+        assert!(!held(&server), "idle for HIDDEN_VIEW_IDLE: released");
+        assert_eq!(server.hidden_view_deadline(), None, "no more wakeups");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

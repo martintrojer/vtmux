@@ -239,6 +239,10 @@ pub struct Pane {
     pub changed: bool,
     /// `PANE_UNSEENCHANGES`: output arrived while the pane was in a mode.
     pub unseen_changes: bool,
+    /// When its program last wrote, since the last turn a client showed
+    /// it or its screen view was released: a hidden pane keeps its view
+    /// for a while after output (`Server::release_hidden_screens`).
+    pub output_at: Option<Instant>,
     pub last_rename: Option<Instant>,
     /// `wp->xoff`, `wp->yoff`, `wp->sx`, `wp->sy` as `layout_fix_panes` set
     /// them.

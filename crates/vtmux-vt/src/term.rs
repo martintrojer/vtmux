@@ -1370,6 +1370,17 @@ impl PaneTerm {
         }
     }
 
+    /// Whether [`Self::screen`] keeps a view now: it was read since the
+    /// last [`Self::release_screen`].
+    ///
+    /// # Panics
+    /// Only while a view returned by [`Self::screen`] is still held
+    /// mutably, which never happens outside this crate.
+    #[must_use]
+    pub fn holds_screen(&self) -> bool {
+        self.view.borrow().is_live()
+    }
+
     /// Resize the pane. Primary-screen content reflows (Ghostty).
     ///
     /// # Panics
