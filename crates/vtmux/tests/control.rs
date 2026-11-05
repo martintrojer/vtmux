@@ -498,21 +498,38 @@ fn refresh_client_pane_output_states() {
         let mut c = w.control(&["attach", "-t", "c"]);
         c.wait("%session-changed", |t| t.contains("%session-changed"));
         let mut seen = Vec::new();
-        let mut step = |c: &mut Control, w: &World, line: &str, text: &str| {
+        // `read`: whether the server reads the pane after `line`. With the
+        // control client the only one attached and the pane `off` for it,
+        // neither does (control.c `control_pane_offset`, server-client.c
+        // `server_client_check_pane_buffer`), so the echo waits for `on`.
+        let mut step = |c: &mut Control, w: &World, line: &str, text: &str, read: bool| {
             c.send(line);
             c.send(&format!("send-keys -t c -l {text}"));
+            // The echo comes back from the pane asynchronously: wait until
+            // the server has read it (it is on the pane's screen), so any
+            // `%output` for it is queued before the `synced` reply. Both
+            // servers queue control output as they read the pane, before
+            // the screen shows it (window.c `window_pane_read_callback`).
+            let end = Instant::now() + WAIT;
+            while read && !w.run(&["capture-pane", "-p", "-t", "c"]).0.contains(text) {
+                assert!(
+                    Instant::now() < end,
+                    "{}: pane never showed {text}",
+                    w.bin.display()
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
             c.send("display -p synced");
             c.wait("sync", |t| t.matches("synced").count() > seen.len());
             seen.push(String::from_utf8_lossy(&pane_output(&c.text())).into_owned());
-            let _ = w;
         };
-        step(&mut c, w, "display -p one", "AAA");
-        step(&mut c, w, "refresh-client -A '%0:off'", "BBB");
-        step(&mut c, w, "refresh-client -A '%0:on'", "CCC");
-        step(&mut c, w, "refresh-client -A '%0:pause'", "DDD");
-        step(&mut c, w, "refresh-client -A '%0:continue'", "EEE");
-        step(&mut c, w, "refresh-client -f no-output", "FFF");
-        step(&mut c, w, "refresh-client -f '!no-output'", "GGG");
+        step(&mut c, w, "display -p one", "AAA", true);
+        step(&mut c, w, "refresh-client -A '%0:off'", "BBB", false);
+        step(&mut c, w, "refresh-client -A '%0:on'", "CCC", true);
+        step(&mut c, w, "refresh-client -A '%0:pause'", "DDD", true);
+        step(&mut c, w, "refresh-client -A '%0:continue'", "EEE", true);
+        step(&mut c, w, "refresh-client -f no-output", "FFF", true);
+        step(&mut c, w, "refresh-client -f '!no-output'", "GGG", true);
         let (out, _, code) = c.close();
         let events: Vec<String> = normalise_guards(&out)
             .into_iter()
