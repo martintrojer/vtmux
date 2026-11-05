@@ -245,7 +245,7 @@ product reasons" category.
 
 ### D-028: the editor `e` opens runs in a popup, not a modal floating pane
 
-- Test / assertion: regress `customize-mode.sh` `test_editor`, `test_editor_invalidation` (they check the values, not where the editor is drawn); oracle `customize_edit`.
+- Test / assertion: regress `customize-mode.sh` `test_editor`, `test_editor_invalidation` (they check the values, not where the editor is drawn); oracle `customize_edit`, `choose_buffer_edit` (customize-mode's and choose-buffer's `e`); regress `modal-pane.sh` stays xfail where it looks for the buffer editor's modal pane.
 - tmux behaviour: `spawn_editor` (spawn.c:703-800) runs `editor file` in a floating pane nine tenths of the window, centred, with `SPAWN_MODAL|SPAWN_FLOATOVERZOOM`: the window's other panes take no input until it exits, and the pane is listed (`list-panes`, `#{window_panes}`) while it runs.
 - vtmux behaviour: the same command, size and placement (of the client's terminal, not the window) in a popup over the client whose key pressed `e`, closed when the editor exits; the file is read back at that point as in `spawn_editor_finish`. The popup is not a pane, so `list-panes` does not show it, and the other clients see only `WAITING FOR EDITOR`.
 - Evidence: vtmux has floating panes but no modal ones (`new-pane -O` is not implemented); a popup is modal for its client already.

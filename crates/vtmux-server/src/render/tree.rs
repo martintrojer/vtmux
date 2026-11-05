@@ -537,7 +537,13 @@ impl Source<'_> {
     pub fn mode_tree_frame(&self, pane: &crate::model::Pane, mode: &Mode) -> Option<Frame> {
         Some(match mode {
             Mode::Tree(t) => self.tree_frame(pane, &**t),
-            Mode::Buffer(t) => self.tree_frame(pane, &**t),
+            Mode::Buffer(t) => {
+                let mut frame = self.tree_frame(pane, &**t);
+                if let Some(pid) = t.editing() {
+                    draw_waiting(&mut frame.canvas, pid);
+                }
+                frame
+            }
             Mode::Client(t) => self.tree_frame(pane, &**t),
             Mode::Customize(t) => {
                 let mut frame = self.tree_frame(pane, &**t);
@@ -1004,7 +1010,8 @@ fn tree_preview_box<K, D>(
     }
 }
 
-/// `window_customize_draw_waiting` (window-customize.c:391-435): a box in
+/// `window_customize_draw_waiting` (window-customize.c:391-435) and
+/// `window_buffer_draw_waiting` (window-buffer.c:491-534): a box in
 /// the middle of the mode saying it waits for editor `pid`; nothing if the
 /// pane is too small for it.
 fn draw_waiting(c: &mut Canvas, pid: i32) {
