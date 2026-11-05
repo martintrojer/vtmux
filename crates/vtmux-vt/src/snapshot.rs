@@ -240,6 +240,12 @@ impl ScreenView {
         Rc::clone(&self.snap)
     }
 
+    /// Whether the view has read the terminal (holds a render state).
+    #[must_use]
+    pub(crate) fn is_live(&self) -> bool {
+        self.state.is_some()
+    }
+
     /// Per row, the stamp of the update that last changed it; a row whose
     /// stamp is unchanged since an earlier look holds the same cells.
     #[must_use]
@@ -465,6 +471,27 @@ mod tests {
         assert!(
             !kept.view.borrow_mut().update(&kept),
             "nothing new: no change"
+        );
+    }
+
+    /// A released view (a hidden pane's) is read again whole: the same
+    /// grid, with output written while it was gone, and every row stamped
+    /// anew so no cached row of the old view is taken for it.
+    #[test]
+    fn released_view_reads_the_screen_again() {
+        let mut t = PaneTerm::new(10, 3, 100);
+        t.feed(b"one\r\ntwo");
+        let before = t.screen().row_stamps().to_vec();
+        t.release_screen();
+        assert!(!t.view.borrow().is_live());
+        t.feed(b"\r\nthree");
+        let mut fresh = PaneTerm::new(10, 3, 100);
+        fresh.feed(b"one\r\ntwo\r\nthree");
+        assert_eq!(t.screen().snapshot(), &snapshot(&fresh));
+        let after = t.screen().row_stamps().to_vec();
+        assert!(
+            before.iter().all(|s| !after.contains(s)),
+            "{before:?} {after:?}"
         );
     }
 

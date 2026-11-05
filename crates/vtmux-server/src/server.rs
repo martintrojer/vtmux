@@ -7,7 +7,7 @@
 //! its command stays connected and is handed to the attach hooks
 //! ([`Server::attach_client`], [`Server::on_client_input`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixListener as StdListener;
 use std::path::{Path, PathBuf};
@@ -2541,6 +2541,7 @@ impl Server {
     /// redraws and bursts are used up.
     fn render_and_exit(&mut self) {
         self.render_clients();
+        self.release_hidden_screens();
         for (id, code) in std::mem::take(&mut self.pending_exits) {
             self.finish_client(id, code);
         }
@@ -2698,6 +2699,33 @@ impl Server {
                 self.send(id, &ServerMsg::Frame(frame));
             }
             self.send_passthrough(id, caps);
+        }
+    }
+
+    /// Drop the screen view ([`vtmux_vt::PaneTerm::release_screen`]) of
+    /// every pane no attached client's window shows: a hidden pane keeps
+    /// only its terminal, and its view is read again when it is drawn
+    /// (about 0.7 MB per full 100x50 pane; `docs/PERFORMANCE.md`, *Hidden
+    /// panes*). A preview (choose-tree, display-panes) reads it again
+    /// each frame it draws.
+    fn release_hidden_screens(&self) {
+        let shown: BTreeSet<WindowId> = self
+            .clients
+            .values()
+            .filter(|c| c.control.is_none())
+            .filter_map(|c| self.model.current_of(c.attached?))
+            .map(|(_, w, _)| w)
+            .collect();
+        for pane in self.model.panes.values() {
+            let visible = shown.contains(&pane.window)
+                && self
+                    .model
+                    .windows
+                    .get(&pane.window)
+                    .is_some_and(|w| w.is_visible(pane.id));
+            if !visible {
+                pane.term.release_screen();
+            }
         }
     }
 
