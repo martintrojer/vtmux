@@ -1,0 +1,380 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "wrap_flag_redraw_copy",
+  "inputs": {
+    "name": "wrap_flag_redraw_copy",
+    "size": [
+      40,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "12",
+          "sh",
+          "-c",
+          "printf '\\033[31mxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            y\\033[2;1H\\033[2K            y'; tmux wait-for -S drawn; exec cat"
+        ]
+      },
+      {
+        "wait_for": "drawn"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-x",
+          "10",
+          "-y",
+          "8",
+          "sh",
+          "-c",
+          "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[2Kzz\\033[5;1Hx\\r\\naaaaaaaaaabbbbb\\033[T'; tmux wait-for -S copied; exec cat"
+        ]
+      },
+      {
+        "wait_for": "copied"
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-X",
+          "top-line"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-X",
+          "cursor-down"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-X",
+          "select-line"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-X",
+          "copy-selection-and-cancel"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "b:"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-X",
+          "top-line"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-N",
+          "6",
+          "-X",
+          "cursor-down"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-X",
+          "select-line"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "b:",
+          "-X",
+          "copy-selection-and-cancel"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[31mxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "\\e[39m            \\e[31my\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                               \\e[30mR"
+        ],
+        "cursor": [
+          13,
+          1
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaa",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "aaaaaaaaaabbbbb",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

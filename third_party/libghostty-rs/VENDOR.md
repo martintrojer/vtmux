@@ -232,6 +232,36 @@ Recorded per commit in git history; the list is kept current:
   gives 3251 pass, 37 skip and the known `tabClear single` failure (see
   0009). Upstream candidate only for a consumer that needs the SGR form.
 
+- `patches/0011-tmux-wrap-bookkeeping.patch` (`Terminal.zig`
+  `insertLines`, `deleteLines`, `scrollDown`, `scrollUp`, `index`,
+  `eraseLine`, `eraseDisplay`, `switchScreenMode`; `Screen.zig`
+  `unwrapRow`; `stream_terminal.zig` CSI M): the soft-wrap flag follows
+  tmux's `GRID_LINE_WRAPPED` bookkeeping (grid.c `grid_clear_lines`,
+  `grid_move_lines`) instead of Ghostty's, so `capture-pane -J`, copy
+  mode, reflow and the compositor see the lines tmux sees as wrapped.
+  A full-width clear (EL 2, EL 0 from column 0, EL 1 from the last
+  column, ED 0's lines below, ED 1's lines above, ED 2) unwraps the row
+  above it, the last scrollback row for the top row; EL 0 from further
+  right keeps the row's own flag, and with a pending wrap changes nothing
+  (`screen_write_clearendofline`). IL/DL/SD/RI move rows with their flags
+  (upstream unset them) and unwrap as `grid_move_lines` does: IL the row
+  above the cursor, the last row of the inserted count before the move
+  and the row its `grid_clear` touches (also when tmux's `ny - ny2`
+  underflows); SD and RI the top row and the row above; DL (CSI M only,
+  `deleteLinesTmux`; Ghostty's SU path through `deleteLines` keeps tmux's
+  history-scroll behaviour) the row above and the last moved row. A
+  region scrolled up without scrollback (the alternate screen) unwraps
+  the row above it (`grid_view_scroll_region_up`), and entering the
+  alternate screen unwraps the primary's last scrollback row
+  (`screen_alternate_on`). Continuation flags are recomputed after a
+  move. Four upstream tests that assert the xterm behaviour now assert
+  tmux's ("insertLines resets wrap", "deleteLines resets wrap",
+  "deleteLines wide character spacer head", "eraseLine resets pending
+  wrap"); new test `Terminal: tmux wrap bookkeeping (vtmux)`. The full
+  `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` gives
+  3252 pass, 37 skip and the known `tabClear single` failure. Not an
+  upstream candidate (it is tmux's model, not a terminal's).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

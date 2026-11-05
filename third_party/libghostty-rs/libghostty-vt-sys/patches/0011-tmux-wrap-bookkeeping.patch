@@ -1,0 +1,437 @@
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index 900359205..0c48df85d 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -1661,6 +1661,24 @@ pub inline fn cursorMarkDirty(self: *Screen) void {
+ /// since it's on Screen not Terminal. This needs to be addressed down the
+ /// line. Not an extremely urgent issue since it's an edge case of an edge
+ /// case, but not ideal.
++/// vtmux: unset the soft wrap of the row at `p` (and the continuation
++/// flag of the row below), as tmux's grid_clear_lines and grid_move_lines
++/// clear GRID_LINE_WRAPPED on the line above the lines they touch. A
++/// spacer head left at the end of the row is cleared, as in
++/// `cursorResetWrap`.
++pub fn unwrapRow(self: *Screen, p: Pin) void {
++    const row = p.rowAndCell().row;
++    if (!row.wrap) return;
++    row.wrap = false;
++    if (p.down(1)) |next| next.rowAndCell().row.wrap_continuation = false;
++    const cells = p.cells(.all);
++    const last = p.node.cols() - 1;
++    if (cells[last].wide == .spacer_head) {
++        self.clearCells(p.node.page(), row, cells[last..][0..1]);
++    }
++    p.markDirty();
++}
++
+ pub fn cursorResetWrap(self: *Screen) void {
+     // Reset the cursor's pending wrap state
+     self.cursor.pending_wrap = false;
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 8fca1c61d..5ff284cb8 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -2588,6 +2588,7 @@ pub fn index(self: *Terminal) !void {
+         try screen.cursorScrollRegionUp(
+             self.scrolling_region.bottom - self.scrolling_region.top,
+         );
++        self.tmuxUnwrapAboveRegionWithoutHistory();
+ 
+         return;
+     }
+@@ -2846,7 +2847,7 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
+ 
+     // Move to the top of the scroll region
+     self.screens.active.cursorAbsolute(self.scrolling_region.left, self.scrolling_region.top);
+-    self.insertLines(count);
++    self.insertLinesRows(count, true);
+ }
+ 
+ /// Removes amount lines from the top of the scroll region. The remaining lines
+@@ -2932,6 +2933,19 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+     // Move to the top of the scroll region
+     self.screens.active.cursorAbsolute(self.scrolling_region.left, self.scrolling_region.top);
+     self.deleteLines(count);
++    self.tmuxUnwrapAboveRegionWithoutHistory();
++}
++
++/// vtmux: without history (the alternate screen) tmux scrolls a region up
++/// with grid_move_lines (grid_view_scroll_region_up), which unwraps the
++/// line above the region; with history grid_scroll_history_region does
++/// not.
++fn tmuxUnwrapAboveRegionWithoutHistory(self: *Terminal) void {
++    if (!self.screens.active.no_scrollback) return;
++    if (self.scrolling_region.left > 0 or
++        self.scrolling_region.right < self.cols - 1) return;
++    if (self.scrolling_region.top == 0) return;
++    self.tmuxUnwrapAbove(self.scrolling_region.top);
+ }
+ 
+ /// Options for scrolling the viewport of the terminal grid.
+@@ -3156,6 +3170,12 @@ fn invalidateFullWidthRowRange(
+ ///
+ /// Moves the cursor to the left margin.
+ pub fn insertLines(self: *Terminal, count: usize) void {
++    self.insertLinesRows(count, false);
++}
++
++/// `insertLines`; `sd` for SD and RI, which tmux does as single-line
++/// grid_view_scroll_region_down steps (screen_write_scrolldown).
++fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
+     // Rare, but happens
+     if (count == 0) return;
+ 
+@@ -3190,6 +3210,14 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+     // region. So we take whichever is smaller.
+     const adjusted_count = @min(count, rem);
+ 
++    // vtmux: grid_move_lines unwraps the line above its destination
++    // before it moves the lines: for IL the last line of the inserted
++    // count, which then moves down with its flag cleared; SD and RI move
++    // one line at a time, so for them the top line.
++    if (!left_right and rem > adjusted_count) {
++        self.tmuxUnwrapRow(start_y + if (sd) 0 else adjusted_count - 1);
++    }
++
+     // Create a new tracked pin which we'll use to navigate the page list
+     // so that if we need to adjust capacity it will be properly tracked.
+     var cur_p = self.screens.active.pages.trackPin(
+@@ -3230,13 +3258,10 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+             self.rowWillBeShifted(cur_p.node.page(), cur_row);
+             self.rowWillBeShifted(off_p.node.page(), off_row);
+ 
+-            // If our scrolling region is full width, then we unset wrap.
+-            if (!left_right) {
+-                off_row.wrap = false;
+-                cur_row.wrap = false;
+-                off_row.wrap_continuation = false;
+-                cur_row.wrap_continuation = false;
+-            }
++            // vtmux: a moved row keeps its wrap flags, as tmux's
++            // grid_move_lines moves the line data with its flags; the
++            // continuation flags are made consistent afterwards
++            // (tmuxFixContinuations).
+ 
+             const src_p = off_p;
+             const src_row = off_row;
+@@ -3311,6 +3336,80 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+         // Move our pin up to the next row.
+         if (cur_p.up(1)) |p| cur_p.* = p;
+     }
++
++    // vtmux: tmux's grid_move_lines unwraps the line above the inserted
++    // lines (grid_view_insert_lines_region, grid_view_scroll_region_down:
++    // IL, SD and RI at the top margin). IL's grid_clear(py + ny2, ny - ny2)
++    // also unwraps the line above py + ny2, the moved count below the
++    // cursor, even when ny - ny2 underflows (the u_int count wraps so
++    // grid_check_y passes and no line is cleared).
++    if (!left_right) {
++        if (!sd and rem > adjusted_count) {
++            self.tmuxUnwrapRow(start_y + (rem - adjusted_count) - 1);
++        }
++        self.tmuxUnwrapAbove(start_y);
++        self.tmuxFixContinuations(start_y, rem + 1);
++    }
++}
++
++/// vtmux: unwrap the row above active row `y` (the last scrollback row
++/// for row 0), as tmux's grid_clear_lines and grid_move_lines do to the
++/// line above row `y` when they clear or move it.
++fn tmuxUnwrapAbove(self: *Terminal, y: usize) void {
++    const screen = self.screens.active;
++    const p = screen.pages.pin(.{ .active = .{ .y = @intCast(y) } }) orelse return;
++    const above = p.up(1) orelse return;
++    screen.unwrapRow(above);
++}
++
++/// vtmux: unwrap active row `y`.
++fn tmuxUnwrapRow(self: *Terminal, y: usize) void {
++    const screen = self.screens.active;
++    const p = screen.pages.pin(.{ .active = .{ .y = @intCast(y) } }) orelse return;
++    screen.unwrapRow(p);
++}
++
++/// vtmux: after rows moved with their wrap flags, make the continuation
++/// flag of each of `n` active rows from `y` match the wrap flag of the
++/// row above it.
++fn tmuxFixContinuations(self: *Terminal, y: usize, n: usize) void {
++    const screen = self.screens.active;
++    var p = screen.pages.pin(.{ .active = .{ .y = @intCast(y) } }) orelse return;
++    var i: usize = 0;
++    while (i < n) : (i += 1) {
++        const above = if (p.up(1)) |a| a.rowAndCell().row.wrap else false;
++        const row = p.rowAndCell().row;
++        if (row.wrap_continuation != above) {
++            row.wrap_continuation = above;
++            p.markDirty();
++        }
++        p = p.down(1) orelse break;
++    }
++}
++
++/// vtmux: DL as tmux's screen_write_deleteline does it
++/// (grid_view_delete_lines, grid_view_delete_lines_region): the line
++/// above the cursor is unwrapped by grid_move_lines, and the last moved
++/// line by the grid_clear of the freed lines. SU, which Ghostty also does
++/// with deleteLines, unwraps neither in tmux.
++pub fn deleteLinesTmux(self: *Terminal, count: usize) void {
++    const y = self.screens.active.cursor.y;
++    const left_right = self.scrolling_region.left > 0 or
++        self.scrolling_region.right < self.cols - 1;
++    const applies = count > 0 and !left_right and
++        y >= self.scrolling_region.top and
++        y <= self.scrolling_region.bottom and
++        self.screens.active.cursor.x >= self.scrolling_region.left and
++        self.screens.active.cursor.x <= self.scrolling_region.right;
++    const rem = if (applies) self.scrolling_region.bottom - y + 1 else 0;
++    self.deleteLines(count);
++    if (!applies) return;
++    const moved = rem - @min(count, rem);
++    self.tmuxUnwrapAbove(y);
++    // grid_view_delete_lines_region's grid_clear(py + ny2, ny - ny2)
++    // unwraps the line above py + ny2 even when ny - ny2 underflows (the
++    // u_int count wraps so grid_check_y passes and no line is cleared).
++    if (moved > 0) self.tmuxUnwrapRow(y + moved - 1);
+ }
+ 
+ /// Removes amount lines from the current cursor row down. The remaining lines
+@@ -3398,13 +3497,10 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+             self.rowWillBeShifted(cur_p.node.page(), cur_row);
+             self.rowWillBeShifted(off_p.node.page(), off_row);
+ 
+-            // If our scrolling region is full width, then we unset wrap.
+-            if (!left_right) {
+-                off_row.wrap = false;
+-                cur_row.wrap = false;
+-                off_row.wrap_continuation = false;
+-                cur_row.wrap_continuation = false;
+-            }
++            // vtmux: a moved row keeps its wrap flags, as tmux's
++            // grid_move_lines moves the line data with its flags; the
++            // continuation flags are made consistent afterwards
++            // (tmuxFixContinuations).
+ 
+             const src_p = off_p;
+             const src_row = off_row;
+@@ -3793,21 +3889,37 @@ pub fn eraseLine(
+         .right => right: {
+             var x = self.screens.active.cursor.x;
+ 
++            // vtmux: tmux's EL 0 with the cursor past the last column (a
++            // pending wrap) changes nothing (screen_write_clearendofline).
++            if (self.screens.active.cursor.pending_wrap) return;
++
++            // vtmux: tmux's EL 0 from column 0 is EL 2
++            // (screen_write_clearendofline); from further right it keeps
++            // the line's GRID_LINE_WRAPPED.
++            if (x == 0) {
++                self.screens.active.cursorResetWrap();
++                self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++            }
++
+             // If our X is a wide spacer tail then we need to erase the
+             // previous cell too so we don't split a multi-cell character.
+             if (x > 0 and self.screens.active.cursor.page_cell.wide == .spacer_tail) {
+                 x -= 1;
+             }
+ 
+-            // Reset our row's soft-wrap.
+-            self.screens.active.cursorResetWrap();
+-
+             break :right .{ x, self.cols };
+         },
+ 
+         .left => left: {
+             var x = self.screens.active.cursor.x;
+ 
++            // vtmux: tmux's EL 1 from the last column is EL 2
++            // (screen_write_clearstartofline).
++            if (x >= self.cols - 1) {
++                self.screens.active.cursorResetWrap();
++                self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++            }
++
+             // If our x is a wide char we need to delete the tail too.
+             if (self.screens.active.cursor.page_cell.wide == .wide) {
+                 x += 1;
+@@ -3822,6 +3934,9 @@ pub fn eraseLine(
+             // continue onto the next row.
+             self.screens.active.cursorResetWrap();
+ 
++            // vtmux: tmux's grid_clear_lines also unwraps the line above.
++            self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++
+             break :complete .{ 0, self.cols };
+         },
+ 
+@@ -3983,6 +4098,10 @@ pub fn eraseDisplay(
+                 protected,
+             );
+ 
++            // vtmux: tmux's grid_clear_lines of the whole screen unwraps
++            // the last history line.
++            self.tmuxUnwrapAbove(0);
++
+             // Unsets pending wrap state
+             self.screens.active.cursor.pending_wrap = false;
+ 
+@@ -4011,10 +4130,15 @@ pub fn eraseDisplay(
+                     null,
+                     protected,
+                 );
++
++                // vtmux: clearing the lines below unwraps the cursor's
++                // line (grid_clear_lines).
++                self.tmuxUnwrapRow(self.screens.active.cursor.y);
+             }
+ 
+-            // Unsets pending wrap state. Should be done by eraseLine.
+-            assert(!self.screens.active.cursor.pending_wrap);
++            // vtmux: eraseLine keeps a pending wrap as tmux does
++            // (screen_write_clearendofscreen leaves cx past the last
++            // column), so no pending-wrap assertion here.
+         },
+ 
+         .above => {
+@@ -4028,6 +4152,10 @@ pub fn eraseDisplay(
+                     .{ .active = .{ .y = self.screens.active.cursor.y - 1 } },
+                     protected,
+                 );
++
++                // vtmux: clearing the lines above unwraps the last history
++                // line (grid_clear_lines).
++                self.tmuxUnwrapAbove(0);
+             }
+ 
+             // Unsets pending wrap state
+@@ -5231,6 +5359,10 @@ pub fn switchScreenMode(
+         .@"1049" => if (enabled) self.saveCursor(),
+     }
+ 
++    // vtmux: tmux's screen_alternate_on clears the shared grid's visible
++    // lines with grid_clear_lines, which unwraps the last history line.
++    if (enabled and self.screens.active_key == .primary) self.tmuxUnwrapAbove(0);
++
+     // Switch screens first to whatever we're going to.
+     const to: ScreenSet.Key = if (enabled) .alternate else .primary;
+     const old_ = try self.switchScreen(to);
+@@ -9473,9 +9605,12 @@ test "Terminal: insertLines resets wrap" {
+     }
+ 
+     {
++        // vtmux: a moved row keeps its wrap flag, as in tmux's
++        // grid_move_lines (reference tmux 3.8: `capture-pane -R` shows
++        // line 2 WRAPPED).
+         const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?;
+         const row = list_cell.row;
+-        try testing.expect(!row.wrap);
++        try testing.expect(row.wrap);
+     }
+ }
+ 
+@@ -12609,7 +12744,8 @@ test "Terminal: deleteLines resets wrap" {
+ 
+     t.setTopAndBottomMargin(1, 2);
+     t.setCursorPos(1, 1);
+-    t.deleteLines(1);
++    // vtmux: CSI M is deleteLinesTmux, which unwraps the last moved row.
++    t.deleteLinesTmux(1);
+     try t.print('X');
+ 
+     {
+@@ -12759,7 +12895,9 @@ test "Terminal: deleteLines wide character spacer head" {
+         const unwrapped_str = try t.plainStringUnwrapped(testing.allocator);
+         defer testing.allocator.free(unwrapped_str);
+         try testing.expectEqualStrings("BBBB\n\u{1F600}CCC", str);
+-        try testing.expectEqualStrings("BBBB\n\u{1F600}CCC", unwrapped_str);
++        // vtmux: the moved row keeps its wrap flag (tmux's
++        // grid_move_lines), so it still joins the next one.
++        try testing.expectEqualStrings("BBBB \u{1F600}CCC", unwrapped_str);
+     }
+ }
+ 
+@@ -14768,13 +14906,69 @@ test "Terminal: eraseLine resets pending wrap" {
+     for ("ABCDE") |c| try t.print(c);
+     try testing.expect(t.screens.active.cursor.pending_wrap);
+     t.eraseLine(.right, false);
+-    try testing.expect(!t.screens.active.cursor.pending_wrap);
++    // vtmux: tmux's EL 0 past the last column changes nothing
++    // (screen_write_clearendofline), so the wrap stays pending.
++    try testing.expect(t.screens.active.cursor.pending_wrap);
+     try t.print('B');
+ 
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("ABCDB", str);
++        try testing.expectEqualStrings("ABCDE\nB", str);
++    }
++}
++
++test "Terminal: tmux wrap bookkeeping (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 5 });
++    defer t.deinit(alloc);
++
++    // AAAAA (wrapped) / BB, then EL 2 on the second row unwraps the first
++    // (grid_clear_lines).
++    try t.printString("AAAAABB");
++    t.eraseLine(.complete, false);
++    {
++        const row = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?.row;
++        try testing.expect(!row.wrap);
++    }
++
++    // EL 0 from column 2 keeps the line's own wrap.
++    t.setCursorPos(1, 1);
++    try t.printString("CCCCCDD");
++    t.setCursorPos(1, 3);
++    t.eraseLine(.right, false);
++    {
++        const row = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?.row;
++        try testing.expect(row.wrap);
++    }
++
++    // IL 2 above the wrapped pair moves it down with its flags (only the
++    // second line, the last of the inserted count, is unwrapped before the
++    // move), and the continuation flag follows.
++    t.setCursorPos(1, 1);
++    t.insertLines(2);
++    {
++        const r2 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?.row;
++        const r3 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 3 } }).?.row;
++        try testing.expect(r2.wrap);
++        try testing.expect(r3.wrap_continuation);
++    }
++
++    // DL of a row above it unwraps only the last moved row.
++    t.setCursorPos(1, 1);
++    t.deleteLinesTmux(1);
++    {
++        const r1 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 1 } }).?.row;
++        try testing.expect(r1.wrap);
++    }
++
++    // IL 1 on the wrapped row unwraps it before moving it down.
++    t.setCursorPos(2, 1);
++    t.insertLines(1);
++    {
++        const r2 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?.row;
++        try testing.expect(!r2.wrap);
+     }
+ }
+ 
+diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
+index 15ea8aebc..1da0e2819 100644
+--- a/src/terminal/stream_terminal.zig
++++ b/src/terminal/stream_terminal.zig
+@@ -667,7 +667,7 @@ pub const Handler = struct {
+             .insert_blanks => self.terminal.insertBlanks(value),
+             .insert_columns => self.terminal.insertColumns(value),
+             .delete_columns => self.terminal.deleteColumns(value),
+-            .delete_lines => self.terminal.deleteLines(value),
++            .delete_lines => self.terminal.deleteLinesTmux(value),
+             .scroll_up => try self.terminal.scrollUp(value),
+             .scroll_down => self.terminal.scrollDown(value),
+             .horizontal_tab => self.horizontalTab(value),

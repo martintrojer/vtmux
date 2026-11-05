@@ -1,0 +1,32 @@
+name = "wrap_flag_redraw_copy"
+size = [40, 12]
+# The wrap flag as the client and copy mode see it (D-006, task wrap_model).
+# tty_draw_line (tty-draw.c) writes a leading run of blanks on a line that is
+# not a wrapped continuation with EL1, so it shows the default colour: EL 2
+# on the continuation line unwraps the line above (grid_clear_lines). Copy
+# mode's select-line copies a wrapped line with its continuation
+# (window-copy.c); after EL 2 the first line is copied alone, and a line SD
+# moved keeps its flag (grid_move_lines).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "12", "sh", "-c", "printf '\\033[31mxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            y\\033[2;1H\\033[2K            y'; tmux wait-for -S drawn; exec cat"] },
+  { wait_for = "drawn" },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["select-pane", "-t", "a:0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { run = ["new", "-d", "-s", "b", "-x", "10", "-y", "8", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[2Kzz\\033[5;1Hx\\r\\naaaaaaaaaabbbbb\\033[T'; tmux wait-for -S copied; exec cat"] },
+  { wait_for = "copied" },
+  { run = ["copy-mode", "-t", "b:"] },
+  { run = ["send-keys", "-t", "b:", "-X", "top-line"] },
+  { run = ["send-keys", "-t", "b:", "-X", "cursor-down"] },
+  { run = ["send-keys", "-t", "b:", "-X", "select-line"] },
+  { run = ["send-keys", "-t", "b:", "-X", "copy-selection-and-cancel"] },
+  { run = ["show-buffer"] },
+  { run = ["copy-mode", "-t", "b:"] },
+  { run = ["send-keys", "-t", "b:", "-X", "top-line"] },
+  { run = ["send-keys", "-t", "b:", "-N", "6", "-X", "cursor-down"] },
+  { run = ["send-keys", "-t", "b:", "-X", "select-line"] },
+  { run = ["send-keys", "-t", "b:", "-X", "copy-selection-and-cancel"] },
+  { run = ["show-buffer"] },
+]

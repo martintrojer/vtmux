@@ -1,0 +1,125 @@
+name = "wrap_flag_capture_join"
+size = [10, 6]
+# tmux keeps GRID_LINE_WRAPPED per line and clears it on the line above the
+# lines grid_clear_lines and grid_move_lines touch (grid.c); capture-pane -J
+# joins wrapped lines, so each scene shows which lines are still wrapped. One
+# session per scene, each printing a 15-character line that wraps on 10
+# columns and then the sequence under test (D-006, task wrap_model).
+steps = [
+  # el2: EL 2 (grid_clear_lines)
+  { run = ["new", "-d", "-s", "el2", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[2Kzz'; tmux wait-for -S el2; exec cat"] },
+  { wait_for = "el2" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "el2:"] },
+  # el0col0: EL 0 from column 0 is EL 2
+  { run = ["new", "-d", "-s", "el0col0", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[Kzz'; tmux wait-for -S el0col0; exec cat"] },
+  { wait_for = "el0col0" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "el0col0:"] },
+  # el1last: EL 1 from the last column is EL 2
+  { run = ["new", "-d", "-s", "el1last", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;10H\\033[1K\\033[2;1Hzz'; tmux wait-for -S el1last; exec cat"] },
+  { wait_for = "el1last" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "el1last:"] },
+  # el0pend: EL 0 with a pending wrap changes nothing
+  { run = ["new", "-d", "-s", "el0pend", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaa\\033[Kb'; tmux wait-for -S el0pend; exec cat"] },
+  { wait_for = "el0pend" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "el0pend:"] },
+  # ed0col0: ED 0 from column 0
+  { run = ["new", "-d", "-s", "ed0col0", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[Jzz'; tmux wait-for -S ed0col0; exec cat"] },
+  { wait_for = "ed0col0" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "ed0col0:"] },
+  # ed0mid: ED 0 clears the lines below: the cursor line unwraps
+  { run = ["new", "-d", "-s", "ed0mid", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[1;4H\\033[J\\033[1;4Hxxxxxxx\\033[2;1Hzz'; tmux wait-for -S ed0mid; exec cat"] },
+  { wait_for = "ed0mid" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "ed0mid:"] },
+  # il: IL unwraps the line above
+  { run = ["new", "-d", "-s", "il", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[Lzz'; tmux wait-for -S il; exec cat"] },
+  { wait_for = "il" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "il:"] },
+  # ilabove: IL: moved lines keep their flag
+  { run = ["new", "-d", "-s", "ilabove", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[1;1H\\033[L'; tmux wait-for -S ilabove; exec cat"] },
+  { wait_for = "ilabove" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "ilabove:"] },
+  # ilcur: IL: the cursor line moves down unwrapped
+  { run = ["new", "-d", "-s", "ilcur", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[L'; tmux wait-for -S ilcur; exec cat"] },
+  { wait_for = "ilcur" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "ilcur:"] },
+  # il2cur: IL 2: grid_clear with an underflowed count unwraps a moved line
+  { run = ["new", "-d", "-s", "il2cur", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[2L'; tmux wait-for -S il2cur; exec cat"] },
+  { wait_for = "il2cur" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "il2cur:"] },
+  # ilregion: IL in a region
+  { run = ["new", "-d", "-s", "ilregion", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[1;3r\\033[2;1H\\033[Lzz\\033[r'; tmux wait-for -S ilregion; exec cat"] },
+  { wait_for = "ilregion" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "ilregion:"] },
+  # riregion: RI at the top margin
+  { run = ["new", "-d", "-s", "riregion", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[2;4r\\033[2;1H\\033M\\033[r'; tmux wait-for -S riregion; exec cat"] },
+  { wait_for = "riregion" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "riregion:"] },
+  # sd: SD: moved lines keep their flag
+  { run = ["new", "-d", "-s", "sd", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[T'; tmux wait-for -S sd; exec cat"] },
+  { wait_for = "sd" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "sd:"] },
+  # sd2: SD 2 is two single steps
+  { run = ["new", "-d", "-s", "sd2", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2T'; tmux wait-for -S sd2; exec cat"] },
+  { wait_for = "sd2" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "sd2:"] },
+  # su: SU
+  { run = ["new", "-d", "-s", "su", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[S'; tmux wait-for -S su; exec cat"] },
+  { wait_for = "su" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "su:"] },
+  # dl: DL unwraps the line above
+  { run = ["new", "-d", "-s", "dl", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbbbb\\r\\nccc\\033[2;1H\\033[M'; tmux wait-for -S dl; exec cat"] },
+  { wait_for = "dl" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "dl:"] },
+  # dlabove: DL: moved lines keep their flag
+  { run = ["new", "-d", "-s", "dlabove", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\ny\\r\\naaaaaaaaaabbbbb\\r\\nccc\\033[1;1H\\033[M'; tmux wait-for -S dlabove; exec cat"] },
+  { wait_for = "dlabove" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "dlabove:"] },
+  # dlbelow: DL 2
+  { run = ["new", "-d", "-s", "dlbelow", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbb\\r\\nccc\\r\\naaaaaaaaaabbbbb\\033[1;1H\\033[2M'; tmux wait-for -S dlbelow; exec cat"] },
+  { wait_for = "dlbelow" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "dlbelow:"] },
+  # dlregion: DL in a region unwraps the last moved line
+  { run = ["new", "-d", "-s", "dlregion", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\ny\\r\\naaaaaaaaaabbbbb\\r\\nqq\\033[1;3r\\033[1;1H\\033[M\\033[r\\033[3;1Hzz'; tmux wait-for -S dlregion; exec cat"] },
+  { wait_for = "dlregion" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "dlregion:"] },
+  # dlregion2: DL in a region, as many deleted as moved
+  { run = ["new", "-d", "-s", "dlregion2", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\ny\\r\\naaaaaaaaaabbbbb\\r\\nqq\\033[1;3r\\033[2;1H\\033[M\\033[r\\033[3;1Hzz'; tmux wait-for -S dlregion2; exec cat"] },
+  { wait_for = "dlregion2" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "dlregion2:"] },
+  # ed1hist: ED 1 unwraps the last history line
+  { run = ["new", "-d", "-s", "ed1hist", "-x", "10", "-y", "4", "sh", "-c", "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[3;10H\\033[1J\\033[1;1Hzz'; tmux wait-for -S ed1hist; exec cat"] },
+  { wait_for = "ed1hist" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "ed1hist:"] },
+  # ilhist: IL on the top line unwraps the last history line
+  { run = ["new", "-d", "-s", "ilhist", "-x", "10", "-y", "4", "sh", "-c", "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033[Lzz'; tmux wait-for -S ilhist; exec cat"] },
+  { wait_for = "ilhist" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "ilhist:"] },
+  # rihist: RI on the top line
+  { run = ["new", "-d", "-s", "rihist", "-x", "10", "-y", "4", "sh", "-c", "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033Mzz'; tmux wait-for -S rihist; exec cat"] },
+  { wait_for = "rihist" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "rihist:"] },
+  # dlhist: DL on the top line
+  { run = ["new", "-d", "-s", "dlhist", "-x", "10", "-y", "4", "sh", "-c", "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033[M'; tmux wait-for -S dlhist; exec cat"] },
+  { wait_for = "dlhist" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "dlhist:"] },
+  # el2hist: EL 2 on the top line
+  { run = ["new", "-d", "-s", "el2hist", "-x", "10", "-y", "4", "sh", "-c", "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[1;1H\\033[2Kzz'; tmux wait-for -S el2hist; exec cat"] },
+  { wait_for = "el2hist" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "el2hist:"] },
+  # althist: entering the alternate screen (1049) unwraps the last history line
+  { run = ["new", "-d", "-s", "althist", "-x", "10", "-y", "4", "sh", "-c", "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[?1049h\\033[?1049l'; tmux wait-for -S althist; exec cat"] },
+  { wait_for = "althist" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "althist:"] },
+  # alt47hist: and with 47
+  { run = ["new", "-d", "-s", "alt47hist", "-x", "10", "-y", "4", "sh", "-c", "printf '1\\n2\\naaaaaaaaaabbbbb\\n6\\n7\\n8\\033[?47h\\033[?47l'; tmux wait-for -S alt47hist; exec cat"] },
+  { wait_for = "alt47hist" },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "alt47hist:"] },
+  # altlf: LF at the bottom of a region on the alternate screen (no history) unwraps the line above the region
+  { run = ["new", "-d", "-s", "altlf", "-x", "10", "-y", "6", "sh", "-c", "printf '\\033[?1049hx\\r\\naaaaaaaaaabbbbb\\r\\nccc\\r\\nd\\033[3;6r\\033[6;1H\\nzz\\033[r'; tmux wait-for -S altlf; exec cat"] },
+  { wait_for = "altlf" },
+  { run = ["capture-pane", "-p", "-J", "-t", "altlf:"] },
+  # altsu: and SU
+  { run = ["new", "-d", "-s", "altsu", "-x", "10", "-y", "6", "sh", "-c", "printf '\\033[?1049hx\\r\\naaaaaaaaaabbbbb\\r\\nccc\\r\\nd\\033[3;6r\\033[S\\033[3;1Hzz\\033[r'; tmux wait-for -S altsu; exec cat"] },
+  { wait_for = "altsu" },
+  { run = ["capture-pane", "-p", "-J", "-t", "altsu:"] },
+]
