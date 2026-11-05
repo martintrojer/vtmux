@@ -339,7 +339,7 @@ status = "pass"
 
 [tests."modal-pane.sh"]
 status = "xfail"
-reason = "modal panes, -A/-O over zoom, -C/-D/-K, mouse and keys pass; stops at the buffer editor: choose-buffer `e` (and customize-mode `e`) opens $EDITOR in a modal floating pane (spawn.c spawn_editor), which vtmux does not do (lows_choose, gap_misc)"
+reason = "modal panes, -A/-O over zoom, -C/-D/-K, mouse and keys pass; stops at the buffer editor: choose-buffer `e` (and customize-mode `e`) opens $EDITOR in a modal floating pane (spawn.c spawn_editor), vtmux in a popup (D-028)"
 
 [tests."mode-kill.sh"]
 status = "pass"

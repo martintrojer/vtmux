@@ -4,8 +4,13 @@
 //! current buffer, `P` for each tagged one; `d` deletes the current
 //! buffer, `D` the tagged ones. The mode ends when no buffer is left.
 //!
-//! Not here yet: `e` (editing a buffer in `$EDITOR`, `spawn_editor`) and
-//! the mouse menu.
+//! `e` edits the current buffer in `editor` (`window_buffer_start_edit`),
+//! in a popup over the client as customize-mode's `e` does
+//! ([`crate::popup::Editor`], compat/DIVERGENCES.md D-028); while it runs
+//! the mode shows `WAITING FOR EDITOR` and takes only `q`, Escape and
+//! C-c, which end it.
+//!
+//! Not here yet: the mouse menu.
 
 use vtmux_core::ids::PaneId;
 use vtmux_core::keys::Key;
@@ -53,6 +58,18 @@ pub struct BufferMode {
     format: String,
     key_format: String,
     command: String,
+    /// The pid of the editor open for this mode (`data->editor`,
+    /// `spawn_get_editor_pid`), which the waiting box shows.
+    editing: Option<i32>,
+}
+
+/// What an editor started by `e` is editing (`window_buffer_editdata`):
+/// the buffer's name and which buffer it was (`ed->pb`), so a buffer of
+/// that name made since is left alone.
+#[derive(Debug)]
+pub struct Edit {
+    name: String,
+    order: u64,
 }
 
 /// `sort_get_buffers` (sort.c:429-449) with `sort_buffer_cmp`: the time
@@ -105,7 +122,14 @@ impl BufferMode {
                 .key_format
                 .unwrap_or_else(|| DEFAULT_KEY_FORMAT.to_owned()),
             command: o.command.unwrap_or_else(|| DEFAULT_COMMAND.to_owned()),
+            editing: None,
         }
+    }
+
+    /// The pid of the editor open for the mode.
+    #[must_use]
+    pub fn editing(&self) -> Option<i32> {
+        self.editing
     }
 
     pub fn build(&mut self, server: &Server) {
@@ -148,6 +172,9 @@ impl TreeMode for BufferMode {
     }
     fn tree_mut(&mut self) -> &mut ModeTree<u64, Item> {
         &mut self.tree
+    }
+    fn editing(&self) -> bool {
+        self.editing.is_some()
     }
     fn common(&self) -> &Common {
         &self.common
@@ -244,6 +271,11 @@ impl TreeMode for BufferMode {
             .as_char()
             .filter(|_| !key.has_ctrl() && !key.has_meta());
         match ch {
+            Some('e') => {
+                if let (Some(c), Some(name)) = (c, item) {
+                    server.buffer_start_edit(p, c, &name);
+                }
+            }
             Some('d') => {
                 server.with_tree::<Self, _>(p, |server, t| {
                     if let Some(name) = item {
@@ -324,6 +356,60 @@ impl TreeMode for BufferMode {
             let mut x = cx;
             nputs(canvas, &mut x, cy + i, sx, &text);
         }
+    }
+}
+
+impl Server {
+    /// `window_buffer_start_edit`: buffer `name`'s data in the editor,
+    /// unless one is open for the mode already.
+    fn buffer_start_edit(&mut self, p: PaneId, c: ClientId, name: &str) {
+        if self.with_tree::<BufferMode, _>(p, |_, t| t.editing.is_some()) != Some(false) {
+            return;
+        }
+        let Some(pb) = self.model.paste.get(name) else {
+            return;
+        };
+        let (data, edit) = (
+            pb.data.clone(),
+            Edit {
+                name: pb.name.clone(),
+                order: pb.order,
+            },
+        );
+        if self.spawn_editor(c, p, &data, crate::popup::Edit::Buffer(edit)) {
+            let pid = self.editor_pid(p);
+            self.with_tree::<BufferMode, _>(p, |_, t| t.editing = pid);
+        }
+    }
+
+    /// `window_buffer_edit_close_cb` (window-buffer.c:536-587): the
+    /// editor is done; `value` is what it left in the file, `None` when it
+    /// failed. Nothing changes if the mode is gone (`spawn_cancel_editor`
+    /// in `window_buffer_free`), the file is empty, or the buffer is gone
+    /// or another one; a newline the editor added to a buffer that did not
+    /// end in one goes.
+    pub(crate) fn buffer_edit_done(&mut self, p: PaneId, edit: &Edit, value: Option<Vec<u8>>) {
+        if self.with_tree::<BufferMode, _>(p, |_, t| t.editing.take().is_some()) != Some(true) {
+            return;
+        }
+        let Some(mut value) = value.filter(|v| !v.is_empty()) else {
+            return;
+        };
+        let Some(pb) = self
+            .model
+            .paste
+            .get(&edit.name)
+            .filter(|pb| pb.order == edit.order)
+        else {
+            return;
+        };
+        if pb.data.last().is_some_and(|&b| b != b'\n') && value.last() == Some(&b'\n') {
+            value.pop();
+        }
+        if !value.is_empty() {
+            self.model.paste.replace(&edit.name, value);
+        }
+        self.with_tree::<BufferMode, _>(p, |s, t| rebuild(t, s));
     }
 }
 

@@ -82,8 +82,17 @@ pub struct Editor {
     pub path: PathBuf,
     /// Whose edit it is: the pane whose mode started it.
     pub pane: vtmux_core::ids::PaneId,
-    /// Which edit, for the mode (`window_customize_editdata`).
-    pub edit: crate::mode::window_customize::Edit,
+    /// Which edit, for the mode.
+    pub edit: Edit,
+}
+
+/// What an [`Editor`] edits, by the mode that started it.
+#[derive(Debug)]
+pub enum Edit {
+    /// `window_customize_editdata`.
+    Customize(crate::mode::window_customize::Edit),
+    /// `window_buffer_editdata`.
+    Buffer(crate::mode::window_buffer::Edit),
 }
 
 impl Drop for Editor {
@@ -421,7 +430,10 @@ impl Server {
             let value = (popup.status == 0)
                 .then(|| std::fs::read(&editor.path).ok())
                 .flatten();
-            self.customize_edit_done(&editor, value);
+            match &editor.edit {
+                Edit::Customize(edit) => self.customize_edit_done(editor.pane, edit, value),
+                Edit::Buffer(edit) => self.buffer_edit_done(editor.pane, edit, value),
+            }
         }
     }
 
@@ -434,7 +446,7 @@ impl Server {
         c: ClientId,
         p: vtmux_core::ids::PaneId,
         value: &[u8],
-        edit: crate::mode::window_customize::Edit,
+        edit: Edit,
     ) -> bool {
         if self.popup_present(c) {
             return false;

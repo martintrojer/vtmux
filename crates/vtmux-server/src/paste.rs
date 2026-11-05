@@ -96,6 +96,15 @@ impl PasteStore {
         }
     }
 
+    /// `paste_replace`: buffer `name` gets `data`, keeping its name, order
+    /// and time; `paste-buffer-changed` fires.
+    pub fn replace(&mut self, name: &str, data: Vec<u8>) {
+        if let Some(b) = self.by_name.get_mut(name) {
+            b.data = data;
+            self.changes.push((false, name.to_owned()));
+        }
+    }
+
     /// The paste events since the last call.
     pub fn take_changes(&mut self) -> Vec<(bool, String)> {
         std::mem::take(&mut self.changes)

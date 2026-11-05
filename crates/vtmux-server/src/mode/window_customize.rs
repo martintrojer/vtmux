@@ -383,6 +383,9 @@ impl TreeMode for CustomizeMode {
     fn tree_mut(&mut self) -> &mut ModeTree<Tag, Item> {
         &mut self.tree
     }
+    fn editing(&self) -> bool {
+        self.editing.is_some()
+    }
     fn common(&self) -> &Common {
         &self.common
     }
@@ -486,16 +489,6 @@ impl TreeMode for CustomizeMode {
         key: Key,
         item: Option<Item>,
     ) -> bool {
-        // window_customize_key: while the editor runs only q, Escape and
-        // C-c do anything, and they end the mode.
-        if server
-            .with_tree::<CustomizeMode, _>(p, |_, t| t.editing.is_some())
-            .unwrap_or(false)
-        {
-            return key == Key::from_char('q')
-                || key == Key::ascii(0x1b)
-                || key == Key::ascii(b'c').ctrl();
-        }
         server.customize_key(p, c, key, item.as_ref());
         false
     }
@@ -1632,7 +1625,7 @@ impl Server {
             value
         };
         let edit = Edit { item: item.clone() };
-        if self.spawn_editor(c, p, value.as_bytes(), edit) {
+        if self.spawn_editor(c, p, value.as_bytes(), crate::popup::Edit::Customize(edit)) {
             let pid = self.editor_pid(p);
             self.with_tree::<CustomizeMode, _>(p, |_, t| t.editing = pid);
         }
@@ -1642,12 +1635,7 @@ impl Server {
     /// the editor is done; `value` is what it left in the file, `None`
     /// when it failed. Nothing changes if the mode is gone, the file is
     /// empty, or the item is no longer valid; one trailing newline goes.
-    pub(crate) fn customize_edit_done(
-        &mut self,
-        editor: &crate::popup::Editor,
-        value: Option<Vec<u8>>,
-    ) {
-        let p = editor.pane;
+    pub(crate) fn customize_edit_done(&mut self, p: PaneId, edit: &Edit, value: Option<Vec<u8>>) {
         // data->dead, or not this mode's editor (spawn_cancel_editor when
         // the mode went): nothing happens.
         if self.with_tree::<CustomizeMode, _>(p, |_, t| t.editing.take().is_some()) != Some(true) {
@@ -1663,7 +1651,7 @@ impl Server {
         let Some(found) = self.with_tree::<CustomizeMode, _>(p, |s, t| t.found(s)) else {
             return;
         };
-        let item = &editor.edit.item;
+        let item = &edit.item;
         let valid = self
             .with_tree::<CustomizeMode, _>(p, |s, t| t.check(s, item))
             .unwrap_or(false);

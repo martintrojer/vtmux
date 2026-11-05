@@ -112,6 +112,10 @@ pub(crate) trait TreeMode: Sized + 'static {
     fn empty(_server: &Server) -> bool {
         false
     }
+    /// An editor started by `e` is open for the mode (`data->editor`).
+    fn editing(&self) -> bool {
+        false
+    }
     /// `swapcb` for `J`/`K`.
     fn swap(_server: &mut Server, _p: PaneId, _direction: isize) {}
     /// The mode's own keys after mode-tree's; `true` when it is finished.
@@ -418,6 +422,9 @@ impl Server {
             self.reset_mode(p);
             return;
         }
+        if self.tree_editor_key::<M>(p, key) {
+            return;
+        }
         let Some((action, item)) = self.with_tree::<M, _>(p, |server, t| {
             let mut tree = std::mem::take(t.tree_mut());
             let before = (tree.current_item().map(|i| i.tag), tree.builds());
@@ -474,6 +481,9 @@ impl Server {
             self.reset_mode(p);
             return;
         }
+        if self.tree_editor_key::<M>(p, key) {
+            return;
+        }
         let Some((action, item)) = self.with_tree::<M, _>(p, |_, t| {
             let action = t.tree_mut().mouse_key(key, at);
             (action, t.tree().current_item().map(|i| i.data.clone()))
@@ -481,6 +491,19 @@ impl Server {
             return;
         };
         self.tree_action::<M>(p, Some(c), action, item);
+    }
+
+    /// `window_buffer_key`, `window_customize_key`: while the mode's
+    /// editor runs, the keys skip mode-tree; q, Escape and C-c end the
+    /// mode, others do nothing. `false` if no editor runs.
+    fn tree_editor_key<M: TreeMode>(&mut self, p: PaneId, key: Key) -> bool {
+        if self.with_tree::<M, _>(p, |_, t| t.editing()) != Some(true) {
+            return false;
+        }
+        if key == Key::from_char('q') || key == Key::ascii(0x1b) || key == Key::ascii(b'c').ctrl() {
+            self.reset_mode(p);
+        }
+        true
     }
 
     fn tree_action<M: TreeMode>(

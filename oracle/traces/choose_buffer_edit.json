@@ -1,0 +1,616 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "devvm51629.rva0.facebook.com",
+  "name": "choose_buffer_edit",
+  "inputs": {
+    "name": "choose_buffer_edit",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "editor",
+          "sh -c 'tmux wait-for -S opened; tmux wait-for go; printf \"%s\\n\" \"$(cat \"$1\")-new\" >\"$1\"' x"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "nl",
+          "has newline\n"
+        ]
+      },
+      {
+        "run": [
+          "set-buffer",
+          "-b",
+          "plain",
+          "no newline"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "choose-buffer",
+          "-t",
+          "a:0.0",
+          "-O",
+          "name",
+          "-F",
+          "#{buffer_name}=#{buffer_sample}"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show-buffer",
+          "-b",
+          "plain"
+        ]
+      },
+      {
+        "keys": "k"
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "show-buffer",
+          "-b",
+          "nl"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "keys": "e"
+      },
+      {
+        "wait_for": "opened"
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:0.0",
+          "j"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:0.0",
+          "q"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:0.0",
+          "#{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "run": [
+          "show-buffer",
+          "-b",
+          "nl"
+        ]
+      },
+      {
+        "run": [
+          "list-buffers",
+          "-F",
+          "#{buffer_name}"
+        ]
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) nl: nl=has newline\\n\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[39mplain\\e[37m: \\e[39mplain=no newline",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ nl (sort: name) ─────────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m has newline                                                                  \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[39mnl\\e[37m: \\e[39mnl=has newline\\n",
+          "\\e[30m\\e[43m(1) plain: plain=no newline-new\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ plain (sort: name) ──────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m no newline-new                                                               \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "no newline-new",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) nl: nl=has newline-new\\n\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[39mplain\\e[37m: \\e[39mplain=no newline-new",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ nl (sort: name) ─────────────────────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m has newline-new                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "has newline-new\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "has newline-new\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "cli",
+        "stdout": "plain\nnl\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                                                                       \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}
