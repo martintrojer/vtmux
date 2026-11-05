@@ -613,9 +613,21 @@ fn wait_exit_lingers_until_an_empty_line() {
 /// `kill-server` a control client whose output never drains (its reader
 /// stopped) cannot keep the server alive past the exit timeout, 10 s
 /// (control-client-exit-stalled.sh; compat/DIVERGENCES.md D-029).
+///
+/// tmux can take both 10 s steps here, so its server is gone 20 s after
+/// `kill-server`, right on a 20 s limit. That happens when the full pipe has
+/// fewer than 6 bytes free (about half the runs on macOS). At the first step
+/// the client gets `MSG_SHUTDOWN` and prints `%exit` (client.c
+/// `client_main`). Its stdout is still non-blocking (control.c
+/// `control_start`), so that `fflush` fails with `EAGAIN` and the bytes stay
+/// in the stdio buffer. Then `client_main` makes stdout blocking again, and
+/// the flush at `exit()` blocks for good on the pipe nobody reads. The
+/// server then waits for the second step, `took too long to exit`
+/// (`server_client_exit_timer`). vtmux drops such a client at the first
+/// step (D-029), so its limit stays 10 s + 10 s slack.
 #[test]
 fn stalled_client_does_not_keep_the_server() {
-    for bin in bins() {
+    for (bin, limit) in bins().into_iter().zip([20, 30]) {
         let w = World::new(&bin);
         w.run(&[
             "new",
@@ -648,11 +660,11 @@ fn stalled_client_does_not_keep_the_server() {
         }
         thread::sleep(Duration::from_secs(2));
         w.run(&["kill-server"]);
-        let end = Instant::now() + Duration::from_secs(20);
+        let end = Instant::now() + Duration::from_secs(limit);
         while rustix::process::test_kill_process(pid).is_ok() {
             assert!(
                 Instant::now() < end,
-                "{}: server still running 20 s after kill-server",
+                "{}: server still running {limit} s after kill-server",
                 bin.display()
             );
             thread::sleep(Duration::from_millis(100));
