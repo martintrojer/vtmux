@@ -1563,7 +1563,14 @@ impl Model {
         if let Some(menu) = window.menu.as_mut() {
             menu.fit(nx, ny);
         }
+        let sizes: Vec<(PaneId, (u32, u32))> = window
+            .panes
+            .panes
+            .iter()
+            .filter_map(|p| self.panes.get(p).map(|x| (*p, (x.rect.sx, x.rect.sy))))
+            .collect();
         self.fix_panes(w);
+        self.clip_mode_positions(&sizes, old);
         // resize.c:80.
         self.redraw(Redraw::Window(w));
         if let Some(p) = zoomed {
@@ -1583,6 +1590,35 @@ impl Model {
             .int("old_width", old.0)
             .int("old_height", old.1);
         self.push_event(ev);
+    }
+
+    /// A copy or view mode a window resize resized drew its position
+    /// indicator inside the window's old size ([`CopyMode::clip_position`]):
+    /// `sizes` are the panes' sizes before, `old` the window's.
+    ///
+    /// [`CopyMode::clip_position`]: crate::mode::CopyMode::clip_position
+    fn clip_mode_positions(&mut self, sizes: &[(PaneId, (u32, u32))], old: (u32, u32)) {
+        for (p, size) in sizes {
+            let Some(pane) = self.panes.get_mut(p) else {
+                continue;
+            };
+            if (pane.rect.sx, pane.rect.sy) == *size {
+                continue;
+            }
+            // window_visible_ranges: nothing is visible on a row or from a
+            // column outside the window.
+            let (xoff, yoff) = (i64::from(pane.rect.xoff), i64::from(pane.rect.yoff));
+            let last = if yoff < 0 || yoff >= i64::from(old.1) {
+                0
+            } else {
+                usize::try_from(i64::from(old.0) - xoff).unwrap_or(0)
+            };
+            match pane.modes.first_mut() {
+                Some(crate::mode::Mode::Copy(m)) => m.clip_position(last),
+                Some(crate::mode::Mode::View(m)) => m.clip_position(last),
+                _ => {}
+            }
+        }
     }
 
     /// `window_push_zoom` (window.c:1108-1124): unzoom, and say whether

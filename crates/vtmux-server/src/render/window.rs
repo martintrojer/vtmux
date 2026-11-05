@@ -551,7 +551,9 @@ impl Source<'_> {
                     cols
                 ];
                 let drawn = styled::draw_onto(&base, under, &expanded, false, false);
-                for (x, c) in drawn.cells.iter().enumerate() {
+                let first = drawn.cells.iter().position(|c| c.text != KEEP);
+                let last = first.and_then(|f| m.position_clip(f)).unwrap_or(usize::MAX);
+                for (x, c) in drawn.cells.iter().enumerate().take(last.saturating_add(1)) {
                     if c.text != KEEP {
                         screen.cells[x] = theme.cell(c);
                     }

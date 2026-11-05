@@ -251,6 +251,9 @@ pub struct CopyMode {
     lastsx: usize,
     scroll_exit: bool,
     hide_position: bool,
+    /// The last column of the position indicator drawn, when a window grew
+    /// under the mode: see [`CopyMode::clip_position`].
+    position_clip: Option<usize>,
     /// 0 off, 1 from the option, 2 the default numbers when the option is off.
     line_numbers: u8,
     recentre: Recentre,
@@ -674,6 +677,7 @@ impl CopyMode {
             lastsx: 0,
             scroll_exit,
             hide_position,
+            position_clip: None,
             line_numbers: 1,
             recentre: Recentre::Middle,
             recentre_line: 0,
@@ -750,6 +754,7 @@ impl CopyMode {
     /// cursor line now in history is shown at the top, else the view goes
     /// to the bottom. The selection is cleared (`window_copy_size_changed`).
     pub fn resize(&mut self, sx: usize, sy: usize) {
+        self.position_clip = None;
         let (sx, sy) = (sx.max(1), sy.max(1));
         let hsize = self.hsize();
         self.oy = self.oy.min(hsize + self.cy);
@@ -833,6 +838,7 @@ impl CopyMode {
     /// view back: at the bottom when `follow`, else on the same lines (the
     /// distance from the top of history kept).
     pub fn refresh(&mut self, env: &Env, source: &PaneTerm, follow: bool) {
+        self.position_clip = None;
         self.oy = self.oy.min(self.hsize());
         let from_top = self.hsize() - self.oy;
         let (backing, _, _) = Grid::clone_of(source, self.sx, self.sy, false);
@@ -1045,6 +1051,26 @@ impl CopyMode {
 
     // --- drawing ----------------------------------------------------------
 
+    /// The redraw of a resize that grew the window drew the indicator while
+    /// the window still had its old size (resize.c `resize_window` resizes
+    /// the layout, and so the pane and its mode, before the window).
+    /// `format_draw` copies the indicator with `screen_write_fast_copy`,
+    /// which stops after the first cell outside the window
+    /// (`window_position_is_visible`, screen-write.c:701-707): the cells
+    /// after column `last` (of the pane; `last` is the old window width
+    /// less the pane's offset) are left out, but the indicator's first
+    /// cell is always drawn. It stays so until the mode draws the
+    /// indicator again.
+    pub fn clip_position(&mut self, last: usize) {
+        self.position_clip = Some(last);
+    }
+
+    /// The last column of the indicator to draw, given its first cell's.
+    #[must_use]
+    pub fn position_clip(&self, first: usize) -> Option<usize> {
+        self.position_clip.map(|last| last.max(first))
+    }
+
     /// Whether the position indicator is drawn (`!data->hide_position`).
     #[must_use]
     pub fn shows_position(&self) -> bool {
@@ -1120,7 +1146,7 @@ impl CopyMode {
                 if tab_left > 0 {
                     tab_left -= 1;
                     c = Cell {
-                        text: " ".to_owned(),
+                        text: " ".into(),
                         width: 1,
                         tab: false,
                         ..c
@@ -1207,6 +1233,9 @@ impl CopyMode {
             return Err(CommandError::ReadOnly);
         }
         let np = std::mem::replace(&mut self.prefix, 1).max(1);
+        // tmux draws the indicator again (window_copy_write_line, row 0)
+        // for a command; vtmux draws the whole screen after every one.
+        self.position_clip = None;
         let Some(args) = parse_args(name, args) else {
             return Ok(Action::Stay.into());
         };

@@ -98,6 +98,11 @@ impl ViewMode {
     /// (then the top left). A reflow does not keep it at all
     /// (`screen_reflow` without `cursor`, screen.c:681-684): the top left
     /// of the screen, so the next line goes on the screen's second row.
+    /// [`CopyMode::clip_position`] of the view's copy.
+    pub fn clip_position(&mut self, last: usize) {
+        self.copy.clip_position(last);
+    }
+
     pub fn resize(&mut self, sx: usize, sy: usize) {
         self.copy.resize(sx, sy);
         let clamp = |n: usize| u16::try_from(n.max(1)).unwrap_or(u16::MAX);
@@ -222,7 +227,7 @@ mod tests {
         (0..s.rows)
             .map(|y| {
                 (0..s.cols)
-                    .map(|x| s.cell(x, y).map_or(String::new(), |c| c.text.clone()))
+                    .map(|x| s.cell(x, y).map_or(String::new(), |c| c.text.to_string()))
                     .collect::<String>()
                     .trim_end()
                     .to_owned()
