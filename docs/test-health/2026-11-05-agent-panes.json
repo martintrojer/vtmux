@@ -1,0 +1,362 @@
+{
+ "on_3682ca7": {
+  "meta": {
+   "date": "2026-11-05 11:36 UTC",
+   "commit": "8902002",
+   "host": "Linux-6.16.1-0_fbk5_0_g0e127f210adc-x86_64-with-glibc2.34",
+   "cpu": "AMD EPYC-Genoa Processor",
+   "cpus": 96,
+   "kernel": "6.16.1-0_fbk5_0_g0e127f210adc",
+   "load_at_start": 2.78,
+   "runs": 3,
+   "versions": {
+    "tmux": "tmux 3.8",
+    "base": "vtmux 0.0.0 (tmux 3.8)",
+    "vtmux": "vtmux 0.0.0 (tmux 3.8)"
+   }
+  },
+  "scenarios": {
+   "agent_panes": {
+    "title": "agent_panes (N panes of scripts/agent_tui.py, pi-like synchronized redraws, 2 panes per window; 1/2 200x50 clients with sync on, the second on window 1; 10 s)",
+    "rows": {
+     "5 panes / 1 clients": {
+      "tmux": {
+       "server_cpu_pct": 1.361665776564452,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 15.203731929823576,
+       "frames_per_s": 68.09703222926458,
+       "wakeups_per_s": 263.9884949856953,
+       "rss_mb": 6.08984375
+      },
+      "base": {
+       "server_cpu_pct": 8.120979753302066,
+       "client_cpu_pct": 0.15724059678010438,
+       "term_kb_per_s": 14.177077425981139,
+       "frames_per_s": 67.29734508620223,
+       "wakeups_per_s": 205.8918774628386,
+       "rss_mb": 22.1796875
+      },
+      "vtmux": {
+       "server_cpu_pct": 1.583202577828537,
+       "client_cpu_pct": 0.1529820275127413,
+       "term_kb_per_s": 14.273324391873203,
+       "frames_per_s": 67.59715187520976,
+       "wakeups_per_s": 232.59020009132828,
+       "rss_mb": 21.4140625
+      }
+     },
+     "5 panes / 2 clients": {
+      "tmux": {
+       "server_cpu_pct": 1.4843531806180343,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 30.412755456184914,
+       "frames_per_s": 134.69464375967243,
+       "wakeups_per_s": 264.88881721482,
+       "rss_mb": 6.20703125
+      },
+      "base": {
+       "server_cpu_pct": 14.2735003992141,
+       "client_cpu_pct": 0.2809047015812602,
+       "term_kb_per_s": 27.69454580850379,
+       "frames_per_s": 132.99506263798463,
+       "wakeups_per_s": 203.5907743252074,
+       "rss_mb": 25.65234375
+      },
+      "vtmux": {
+       "server_cpu_pct": 2.39975642676273,
+       "client_cpu_pct": 0.31297823338376624,
+       "term_kb_per_s": 28.121134435526212,
+       "frames_per_s": 134.6942225334987,
+       "wakeups_per_s": 292.28779634119985,
+       "rss_mb": 24.8671875
+      }
+     },
+     "10 panes / 1 clients": {
+      "tmux": {
+       "server_cpu_pct": 2.280728748474159,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 15.208245331234059,
+       "frames_per_s": 68.19746672328813,
+       "wakeups_per_s": 476.7822893499088,
+       "rss_mb": 6.640625
+      },
+      "base": {
+       "server_cpu_pct": 12.383493550916352,
+       "client_cpu_pct": 0.14672105015091835,
+       "term_kb_per_s": 14.224689069549642,
+       "frames_per_s": 67.497028234085,
+       "wakeups_per_s": 357.8858285090393,
+       "rss_mb": 28.51953125
+      },
+      "vtmux": {
+       "server_cpu_pct": 2.279365958852803,
+       "client_cpu_pct": 0.1515638269527924,
+       "term_kb_per_s": 14.311665603780433,
+       "frames_per_s": 67.79743514173904,
+       "wakeups_per_s": 396.38500428002004,
+       "rss_mb": 27.765625
+      }
+     },
+     "10 panes / 2 clients": {
+      "tmux": {
+       "server_cpu_pct": 2.2823332879895637,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 30.43465657535805,
+       "frames_per_s": 135.49429735689975,
+       "wakeups_per_s": 474.47891932936227,
+       "rss_mb": 6.75
+      },
+      "base": {
+       "server_cpu_pct": 20.27343376702396,
+       "client_cpu_pct": 0.2920006721931198,
+       "term_kb_per_s": 27.694400197158515,
+       "frames_per_s": 133.5939475660459,
+       "wakeups_per_s": 330.7867704482097,
+       "rss_mb": 32.046875
+      },
+      "vtmux": {
+       "server_cpu_pct": 3.301708852536561,
+       "client_cpu_pct": 0.30969328130593216,
+       "term_kb_per_s": 28.160727673166033,
+       "frames_per_s": 134.3948041090683,
+       "wakeups_per_s": 444.2804915545488,
+       "rss_mb": 31.19921875
+      }
+     },
+     "20 panes / 1 clients": {
+      "tmux": {
+       "server_cpu_pct": 4.308937111703426,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 15.245662002360392,
+       "frames_per_s": 68.39718679651335,
+       "wakeups_per_s": 855.2648252661498,
+       "rss_mb": 8.0078125
+      },
+      "base": {
+       "server_cpu_pct": 22.199464419178916,
+       "client_cpu_pct": 0.15487405006767735,
+       "term_kb_per_s": 14.221624520986412,
+       "frames_per_s": 67.49185955705101,
+       "wakeups_per_s": 577.577687770373,
+       "rss_mb": 43.53515625
+      },
+      "vtmux": {
+       "server_cpu_pct": 3.916098726730267,
+       "client_cpu_pct": 0.16263117145522113,
+       "term_kb_per_s": 14.313858276846004,
+       "frames_per_s": 67.8972408394469,
+       "wakeups_per_s": 712.7710349095397,
+       "rss_mb": 42.3046875
+      }
+     },
+     "20 panes / 2 clients": {
+      "tmux": {
+       "server_cpu_pct": 4.4894754912477355,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 30.467208159084915,
+       "frames_per_s": 135.39445008682327,
+       "wakeups_per_s": 851.7662917740445,
+       "rss_mb": 8.109375
+      },
+      "base": {
+       "server_cpu_pct": 33.570239683902614,
+       "client_cpu_pct": 0.29149514870811233,
+       "term_kb_per_s": 27.752793897999247,
+       "frames_per_s": 134.08615437095332,
+       "wakeups_per_s": 513.075824738775,
+       "rss_mb": 46.42578125
+      },
+      "vtmux": {
+       "server_cpu_pct": 5.292819042683412,
+       "client_cpu_pct": 0.3087559642010377,
+       "term_kb_per_s": 28.265131947859782,
+       "frames_per_s": 134.69387692418232,
+       "wakeups_per_s": 761.0653192430034,
+       "rss_mb": 45.7265625
+      }
+     }
+    }
+   }
+  }
+ },
+ "on_e3778ca": {
+  "meta": {
+   "date": "2026-11-05 11:04 UTC",
+   "commit": "a3b71dd+dirty",
+   "host": "Linux-6.16.1-0_fbk5_0_g0e127f210adc-x86_64-with-glibc2.34",
+   "cpu": "AMD EPYC-Genoa Processor",
+   "cpus": 96,
+   "kernel": "6.16.1-0_fbk5_0_g0e127f210adc",
+   "load_at_start": 3.26,
+   "runs": 3,
+   "versions": {
+    "tmux": "tmux 3.8",
+    "base": "vtmux 0.0.0 (tmux 3.8)",
+    "vtmux": "vtmux 0.0.0 (tmux 3.8)"
+   }
+  },
+  "scenarios": {
+   "agent_panes": {
+    "title": "agent_panes (N panes of scripts/agent_tui.py, pi-like synchronized redraws, 2 panes per window; 1/2 200x50 clients with sync on, the second on window 1; 10 s)",
+    "rows": {
+     "5 panes / 1 clients": {
+      "tmux": {
+       "server_cpu_pct": 1.3984942231306294,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 15.24011680281554,
+       "frames_per_s": 68.39684268553592,
+       "wakeups_per_s": 261.3879338888756,
+       "rss_mb": 6.1171875
+      },
+      "base": {
+       "server_cpu_pct": 7.880737281530107,
+       "client_cpu_pct": 0.15765613353348398,
+       "term_kb_per_s": 9.407969387074797,
+       "frames_per_s": 67.0969400441826,
+       "wakeups_per_s": 217.79027777684468,
+       "rss_mb": 21.62109375
+      },
+      "vtmux": {
+       "server_cpu_pct": 1.5692306923134747,
+       "client_cpu_pct": 0.1611116643010077,
+       "term_kb_per_s": 9.422406947403767,
+       "frames_per_s": 67.49675307540019,
+       "wakeups_per_s": 232.38903425914341,
+       "rss_mb": 20.94140625
+      }
+     },
+     "5 panes / 2 clients": {
+      "tmux": {
+       "server_cpu_pct": 1.4912639803869943,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 30.420490521216045,
+       "frames_per_s": 134.99342290416718,
+       "wakeups_per_s": 262.1872258183158,
+       "rss_mb": 6.18359375
+      },
+      "base": {
+       "server_cpu_pct": 13.91643766529187,
+       "client_cpu_pct": 0.29956499278153736,
+       "term_kb_per_s": 17.789035127842652,
+       "frames_per_s": 133.29320925747078,
+       "wakeups_per_s": 205.08952810804882,
+       "rss_mb": 25.08984375
+      },
+      "vtmux": {
+       "server_cpu_pct": 2.2933634010033037,
+       "client_cpu_pct": 0.3035769284480041,
+       "term_kb_per_s": 17.82074692072886,
+       "frames_per_s": 134.39370208246135,
+       "wakeups_per_s": 279.0857425972785,
+       "rss_mb": 24.375
+      }
+     },
+     "10 panes / 1 clients": {
+      "tmux": {
+       "server_cpu_pct": 2.209269558932582,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 15.20592496648805,
+       "frames_per_s": 68.09723237858037,
+       "wakeups_per_s": 481.8767500256884,
+       "rss_mb": 6.63671875
+      },
+      "base": {
+       "server_cpu_pct": 11.297632681129835,
+       "client_cpu_pct": 0.1490738426696077,
+       "term_kb_per_s": 9.40239661000751,
+       "frames_per_s": 67.09720698484895,
+       "wakeups_per_s": 350.28377849771886,
+       "rss_mb": 26.6484375
+      },
+      "vtmux": {
+       "server_cpu_pct": 2.1870472020130394,
+       "client_cpu_pct": 0.15470214944289573,
+       "term_kb_per_s": 9.42495714671672,
+       "frames_per_s": 67.69688644418618,
+       "wakeups_per_s": 394.5797502071031,
+       "rss_mb": 26.4609375
+      }
+     },
+     "10 panes / 2 clients": {
+      "tmux": {
+       "server_cpu_pct": 2.3298269284855,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 30.43373378077946,
+       "frames_per_s": 135.29336787845054,
+       "wakeups_per_s": 471.1769027666364,
+       "rss_mb": 6.71875
+      },
+      "base": {
+       "server_cpu_pct": 19.435878192565866,
+       "client_cpu_pct": 0.2749228652619863,
+       "term_kb_per_s": 17.752869728412783,
+       "frames_per_s": 132.79370764978793,
+       "wakeups_per_s": 315.0858289206947,
+       "rss_mb": 30.2421875
+      },
+      "vtmux": {
+       "server_cpu_pct": 3.1436812632170046,
+       "client_cpu_pct": 0.3081819233412601,
+       "term_kb_per_s": 17.826920158931518,
+       "frames_per_s": 134.59347357622917,
+       "wakeups_per_s": 449.57946617687423,
+       "rss_mb": 29.89453125
+      }
+     },
+     "20 panes / 1 clients": {
+      "tmux": {
+       "server_cpu_pct": 4.451528382592897,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 15.24567678085377,
+       "frames_per_s": 68.39725309782398,
+       "wakeups_per_s": 865.4579602937181,
+       "rss_mb": 7.9921875
+      },
+      "base": {
+       "server_cpu_pct": 20.082057751374673,
+       "client_cpu_pct": 0.15095622583858978,
+       "term_kb_per_s": 9.431962725150496,
+       "frames_per_s": 67.59670937854162,
+       "wakeups_per_s": 584.7720151494107,
+       "rss_mb": 40.2578125
+      },
+      "vtmux": {
+       "server_cpu_pct": 3.637326605104128,
+       "client_cpu_pct": 0.14677789421033272,
+       "term_kb_per_s": 9.445083471356204,
+       "frames_per_s": 67.89694958024113,
+       "wakeups_per_s": 713.3679503762006,
+       "rss_mb": 39.96484375
+      }
+     },
+     "20 panes / 2 clients": {
+      "tmux": {
+       "server_cpu_pct": 4.392450124575146,
+       "client_cpu_pct": 0.0,
+       "term_kb_per_s": 30.464731548852317,
+       "frames_per_s": 135.49199613543306,
+       "wakeups_per_s": 854.6495136306614,
+       "rss_mb": 8.10546875
+      },
+      "base": {
+       "server_cpu_pct": 31.515285117774603,
+       "client_cpu_pct": 0.27756830812020494,
+       "term_kb_per_s": 17.765451338304747,
+       "frames_per_s": 132.69432637529945,
+       "wakeups_per_s": 486.9791781821465,
+       "rss_mb": 43.65234375
+      },
+      "vtmux": {
+       "server_cpu_pct": 5.0775054727654565,
+       "client_cpu_pct": 0.30843716041850666,
+       "term_kb_per_s": 17.84286979876645,
+       "frames_per_s": 134.59336041549363,
+       "wakeups_per_s": 761.7609049820472,
+       "rss_mb": 43.3828125
+      }
+     }
+    }
+   }
+  }
+ }
+}
