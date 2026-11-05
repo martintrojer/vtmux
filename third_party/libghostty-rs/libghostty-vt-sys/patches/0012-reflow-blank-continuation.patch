@@ -1,0 +1,136 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 0c9187e90..af2828d0a 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1672,6 +1672,11 @@ const ReflowCursor = struct {
+     page_cell: *pagepkg.Cell,
+     new_rows: usize,
+ 
++    /// vtmux: whether the last source row reflowed was soft-wrapped. Set
++    /// at the end of reflowRow, so a destination page change in the
++    /// middle of a row (init) does not lose it.
++    prev_wrap: bool,
++
+     /// This is the final row count of the reflowed pages.
+     total_rows: usize,
+ 
+@@ -1718,6 +1723,7 @@ const ReflowCursor = struct {
+             .page_row = &rows[0],
+             .page_cell = &rows[0].cells.ptr(page.memory)[0],
+             .new_rows = 0,
++            .prev_wrap = false,
+ 
+             // Initially whatever size our input node is.
+             .total_rows = node.rows(),
+@@ -1739,6 +1745,10 @@ const ReflowCursor = struct {
+         const src_y = row.y;
+         const cells = src_row.cells.ptr(src_page.memory)[0..src_page.size.cols];
+ 
++        // vtmux: read before anything below can reinitialize the cursor.
++        const prev_wrap = self.prev_wrap;
++        defer self.prev_wrap = src_row.wrap;
++
+         // Calculate the columns in this row. First up we trim non-semantic
+         // rightmost blanks.
+         var cols_len = src_page.size.cols;
+@@ -1752,6 +1762,7 @@ const ReflowCursor = struct {
+             // so we just consider pretend the first cell of the row isn't empty.
+             if (cols_len == 0 and src_row.semantic_prompt != .none) cols_len = 1;
+         }
++        const blank = cols_len == 0;
+ 
+         // Handle tracked pin adjustments. We also note whether any
+         // tracked pin is on this row at all so that the per-cell loop
+@@ -1797,13 +1808,32 @@ const ReflowCursor = struct {
+             }
+         }
+ 
++        // vtmux: a blank row under a wrapped line is one of two lines in
++        // tmux, told apart here by the continuation flag (patch 0011 keeps
++        // it on rows that move and leaves it unset on the blank rows a
++        // scroll adds). A continuation is a line erased with ECH or EL 1:
++        // tmux keeps the erased cells (cellused), so grid_reflow_join joins
++        // them, one blank cell here, and the line ends after them. Any
++        // other blank row is tmux's empty line (cellused 0), where
++        // grid_reflow_join stops: the wrapped line ends above it and it
++        // stays a blank line of its own. Upstream dropped a blank
++        // continuation, and the line break with it.
++        if (blank) {
++            if (src_row.wrap_continuation) {
++                cols_len = @max(cols_len, 1);
++            } else if (prev_wrap) {
++                // tmux keeps the line above wrapped (capture-pane -J
++                // joins the empty line to it), so the next reflow sees the
++                // same pair.
++                self.page_row.wrap = true;
++                self.new_rows += 1;
++            }
++        }
++
+         // Defer processing of blank rows so that blank rows
+         // at the end of the page list are never written.
+         if (cols_len == 0) {
+-            // If this blank row was a wrap continuation somehow
+-            // then we won't need to write it since it should be
+-            // a part of the previously written row.
+-            if (!src_row.wrap_continuation) self.new_rows += 1;
++            self.new_rows += 1;
+             return;
+         }
+ 
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 3cc770783..09f762d33 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -15087,6 +15087,51 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+     }
+ }
+ 
++test "Terminal: reflow keeps the line break after a blank continuation (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++    defer t.deinit(alloc);
++
++    // aaaaaaaaaa wraps onto b, which ECH erases: tmux keeps the erased cell
++    // and ccc stays on its own line after a wider reflow.
++    try t.printString("x\naaaaaaaaaab\nccc");
++    t.setCursorPos(3, 1);
++    t.eraseChars(1);
++    t.setCursorPos(6, 1);
++    try t.resize(alloc, .{ .cols = 14, .rows = 6 });
++    const str = try t.plainString(testing.allocator);
++    defer testing.allocator.free(str);
++    try testing.expectEqualStrings("x\naaaaaaaaaa\nccc", str);
++    try testing.expectEqual(@as(usize, 4), t.screens.active.cursor.y);
++}
++
++test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++    defer t.deinit(alloc);
++
++    // SU in the region 1-2 scrolls x into history and adds an empty line
++    // under the wrapped aaaaaaaaaa: tmux's grid_reflow_join stops at the
++    // empty line, so it stays a blank line above bbb.
++    try t.printString("x\naaaaaaaaaabbb");
++    t.setTopAndBottomMargin(1, 2);
++    try t.scrollUp(1);
++    t.setTopAndBottomMargin(0, 0);
++    t.setCursorPos(6, 1);
++    try t.resize(alloc, .{ .cols = 14, .rows = 6 });
++    const str = try t.plainString(testing.allocator);
++    defer testing.allocator.free(str);
++    try testing.expectEqualStrings("aaaaaaaaaa\n\nbbb", str);
++    try testing.expectEqual(@as(usize, 5), t.screens.active.cursor.y);
++    // and the line above it stays wrapped, as tmux's does.
++    const r0 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?.row;
++    const r1 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 1 } }).?.row;
++    try testing.expect(r0.wrap);
++    try testing.expect(!r1.wrap_continuation);
++}
++
+ test "Terminal: eraseLine resets wrap" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;

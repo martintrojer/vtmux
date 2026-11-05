@@ -28,18 +28,41 @@ index 900359205..0c48df85d 100644
      // Reset the cursor's pending wrap state
      self.cursor.pending_wrap = false;
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 8fca1c61d..5ff284cb8 100644
+index 8fca1c61d..3cc770783 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -2588,6 +2588,7 @@ pub fn index(self: *Terminal) !void {
+@@ -2556,11 +2556,13 @@ pub fn index(self: *Terminal) !void {
+                 if (screen.kitty_images.placements.count() != 0) {
+                     @branchHint(.unlikely);
+                     try self.indexScrollWithImages(.window_shift);
++                    self.tmuxFixContinuationsBelowRegion();
+                     return;
+                 }
+             }
+ 
+             try screen.cursorScrollAbove();
++            self.tmuxFixContinuationsBelowRegion();
+             return;
+         }
+ 
+@@ -2579,6 +2581,7 @@ pub fn index(self: *Terminal) !void {
+             if (screen.kitty_images.placements.count() != 0) {
+                 @branchHint(.unlikely);
+                 try self.indexScrollWithImages(.in_place);
++                self.tmuxFixRegionContinuations();
+                 return;
+             }
+         }
+@@ -2588,6 +2591,8 @@ pub fn index(self: *Terminal) !void {
          try screen.cursorScrollRegionUp(
              self.scrolling_region.bottom - self.scrolling_region.top,
          );
++        self.tmuxFixRegionContinuations();
 +        self.tmuxUnwrapAboveRegionWithoutHistory();
  
          return;
      }
-@@ -2846,7 +2847,7 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
+@@ -2846,7 +2851,7 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
  
      // Move to the top of the scroll region
      self.screens.active.cursorAbsolute(self.scrolling_region.left, self.scrolling_region.top);
@@ -48,7 +71,15 @@ index 8fca1c61d..5ff284cb8 100644
  }
  
  /// Removes amount lines from the top of the scroll region. The remaining lines
-@@ -2932,6 +2933,19 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+@@ -2926,12 +2931,71 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+         // use the cursorScrollAbove function to create scrollback
+         self.screens.active.cursorAbsolute(0, self.scrolling_region.bottom);
+         for (0..adjusted_count) |_| try self.screens.active.cursorScrollAbove();
++
++        self.tmuxFixContinuationsBelowRegion();
+         return;
+     }
+ 
      // Move to the top of the scroll region
      self.screens.active.cursorAbsolute(self.scrolling_region.left, self.scrolling_region.top);
      self.deleteLines(count);
@@ -65,10 +96,54 @@ index 8fca1c61d..5ff284cb8 100644
 +        self.scrolling_region.right < self.cols - 1) return;
 +    if (self.scrolling_region.top == 0) return;
 +    self.tmuxUnwrapAbove(self.scrolling_region.top);
++}
++
++/// vtmux: a moved row keeps its wrap flags (tmux's grid_move_lines), so
++/// the continuation flag of a row whose neighbour above changed is made to
++/// follow that neighbour's wrap flag. A blank row a scroll adds is left
++/// as it is: a blank row that is not a continuation is tmux's empty line
++/// (grid_empty_line), which a reflow keeps as a line of its own even under
++/// a wrapped line (grid_reflow_join); patch 0012.
++///
++/// This one is for a full-width region scrolled up in place by one row
++/// (cursorScrollRegionUp, the cursor on its bottom row): the region's top
++/// row and the row below the region have new neighbours. The alternate
++/// screen does not reflow, so it skips this.
++fn tmuxFixRegionContinuations(self: *Terminal) void {
++    const screen = self.screens.active;
++    if (screen.no_scrollback) return;
++    const bottom = screen.cursor.page_pin.*;
++    if (bottom.up(self.scrolling_region.bottom - self.scrolling_region.top)) |top| {
++        tmuxFixContinuationAt(top);
++    }
++    if (self.scrolling_region.bottom + 1 < self.rows) {
++        if (bottom.down(1)) |below| tmuxFixContinuationAt(below);
++    }
++}
++
++/// vtmux: make row `p`'s continuation flag match the wrap flag of the
++/// row above it.
++fn tmuxFixContinuationAt(p: PageList.Pin) void {
++    const above = if (p.up(1)) |a| a.rowAndCell().row.wrap else false;
++    const row = p.rowAndCell().row;
++    if (row.wrap_continuation != above) {
++        row.wrap_continuation = above;
++        p.markDirty();
++    }
++}
++
++/// vtmux: a region from the top scrolled into history (cursorScrollAbove,
++/// the cursor on the region's bottom row) puts a blank row above the row
++/// below the region, whose continuation flag follows
++/// (tmuxFixRegionContinuations). A full-screen scroll keeps every row's
++/// neighbour, so the hot path pays only the comparison.
++fn tmuxFixContinuationsBelowRegion(self: *Terminal) void {
++    if (self.scrolling_region.bottom + 1 >= self.rows) return;
++    if (self.screens.active.cursor.page_pin.down(1)) |below| tmuxFixContinuationAt(below);
  }
  
  /// Options for scrolling the viewport of the terminal grid.
-@@ -3156,6 +3170,12 @@ fn invalidateFullWidthRowRange(
+@@ -3156,6 +3220,12 @@ fn invalidateFullWidthRowRange(
  ///
  /// Moves the cursor to the left margin.
  pub fn insertLines(self: *Terminal, count: usize) void {
@@ -81,7 +156,7 @@ index 8fca1c61d..5ff284cb8 100644
      // Rare, but happens
      if (count == 0) return;
  
-@@ -3190,6 +3210,14 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3190,6 +3260,14 @@ pub fn insertLines(self: *Terminal, count: usize) void {
      // region. So we take whichever is smaller.
      const adjusted_count = @min(count, rem);
  
@@ -96,7 +171,7 @@ index 8fca1c61d..5ff284cb8 100644
      // Create a new tracked pin which we'll use to navigate the page list
      // so that if we need to adjust capacity it will be properly tracked.
      var cur_p = self.screens.active.pages.trackPin(
-@@ -3230,13 +3258,10 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3230,13 +3308,10 @@ pub fn insertLines(self: *Terminal, count: usize) void {
              self.rowWillBeShifted(cur_p.node.page(), cur_row);
              self.rowWillBeShifted(off_p.node.page(), off_row);
  
@@ -114,7 +189,7 @@ index 8fca1c61d..5ff284cb8 100644
  
              const src_p = off_p;
              const src_row = off_row;
-@@ -3311,6 +3336,80 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+@@ -3311,6 +3386,75 @@ pub fn insertLines(self: *Terminal, count: usize) void {
          // Move our pin up to the next row.
          if (cur_p.up(1)) |p| cur_p.* = p;
      }
@@ -159,12 +234,7 @@ index 8fca1c61d..5ff284cb8 100644
 +    var p = screen.pages.pin(.{ .active = .{ .y = @intCast(y) } }) orelse return;
 +    var i: usize = 0;
 +    while (i < n) : (i += 1) {
-+        const above = if (p.up(1)) |a| a.rowAndCell().row.wrap else false;
-+        const row = p.rowAndCell().row;
-+        if (row.wrap_continuation != above) {
-+            row.wrap_continuation = above;
-+            p.markDirty();
-+        }
++        tmuxFixContinuationAt(p);
 +        p = p.down(1) orelse break;
 +    }
 +}
@@ -195,7 +265,7 @@ index 8fca1c61d..5ff284cb8 100644
  }
  
  /// Removes amount lines from the current cursor row down. The remaining lines
-@@ -3398,13 +3497,10 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+@@ -3398,13 +3542,10 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
              self.rowWillBeShifted(cur_p.node.page(), cur_row);
              self.rowWillBeShifted(off_p.node.page(), off_row);
  
@@ -213,7 +283,25 @@ index 8fca1c61d..5ff284cb8 100644
  
              const src_p = off_p;
              const src_row = off_row;
-@@ -3793,21 +3889,37 @@ pub fn eraseLine(
+@@ -3479,6 +3620,17 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+         // Move our pin down to the next row.
+         if (cur_p.down(1)) |p| cur_p.* = p;
+     }
++
++    // vtmux: the moved rows kept their wrap flags (DL, and SU in a region
++    // or on the alternate screen). The first moved row and the row below
++    // the region have new neighbours above; their continuation flags
++    // follow (tmuxFixRegionContinuations).
++    if (!left_right) {
++        if (rem > adjusted_count) self.tmuxFixContinuations(start_y, 1);
++        if (self.scrolling_region.bottom + 1 < self.rows) {
++            self.tmuxFixContinuations(self.scrolling_region.bottom + 1, 1);
++        }
++    }
+ }
+ 
+ /// Inserts spaces at current cursor position moving existing cell contents
+@@ -3793,21 +3945,37 @@ pub fn eraseLine(
          .right => right: {
              var x = self.screens.active.cursor.x;
  
@@ -254,7 +342,7 @@ index 8fca1c61d..5ff284cb8 100644
              // If our x is a wide char we need to delete the tail too.
              if (self.screens.active.cursor.page_cell.wide == .wide) {
                  x += 1;
-@@ -3822,6 +3934,9 @@ pub fn eraseLine(
+@@ -3822,6 +3990,9 @@ pub fn eraseLine(
              // continue onto the next row.
              self.screens.active.cursorResetWrap();
  
@@ -264,7 +352,7 @@ index 8fca1c61d..5ff284cb8 100644
              break :complete .{ 0, self.cols };
          },
  
-@@ -3983,6 +4098,10 @@ pub fn eraseDisplay(
+@@ -3983,6 +4154,10 @@ pub fn eraseDisplay(
                  protected,
              );
  
@@ -275,7 +363,7 @@ index 8fca1c61d..5ff284cb8 100644
              // Unsets pending wrap state
              self.screens.active.cursor.pending_wrap = false;
  
-@@ -4011,10 +4130,15 @@ pub fn eraseDisplay(
+@@ -4011,10 +4186,15 @@ pub fn eraseDisplay(
                      null,
                      protected,
                  );
@@ -293,7 +381,7 @@ index 8fca1c61d..5ff284cb8 100644
          },
  
          .above => {
-@@ -4028,6 +4152,10 @@ pub fn eraseDisplay(
+@@ -4028,6 +4208,10 @@ pub fn eraseDisplay(
                      .{ .active = .{ .y = self.screens.active.cursor.y - 1 } },
                      protected,
                  );
@@ -304,7 +392,7 @@ index 8fca1c61d..5ff284cb8 100644
              }
  
              // Unsets pending wrap state
-@@ -5231,6 +5359,10 @@ pub fn switchScreenMode(
+@@ -5231,6 +5415,10 @@ pub fn switchScreenMode(
          .@"1049" => if (enabled) self.saveCursor(),
      }
  
@@ -315,7 +403,7 @@ index 8fca1c61d..5ff284cb8 100644
      // Switch screens first to whatever we're going to.
      const to: ScreenSet.Key = if (enabled) .alternate else .primary;
      const old_ = try self.switchScreen(to);
-@@ -9473,9 +9605,12 @@ test "Terminal: insertLines resets wrap" {
+@@ -9473,9 +9661,12 @@ test "Terminal: insertLines resets wrap" {
      }
  
      {
@@ -329,7 +417,7 @@ index 8fca1c61d..5ff284cb8 100644
      }
  }
  
-@@ -12609,7 +12744,8 @@ test "Terminal: deleteLines resets wrap" {
+@@ -12609,7 +12800,8 @@ test "Terminal: deleteLines resets wrap" {
  
      t.setTopAndBottomMargin(1, 2);
      t.setCursorPos(1, 1);
@@ -339,7 +427,7 @@ index 8fca1c61d..5ff284cb8 100644
      try t.print('X');
  
      {
-@@ -12759,7 +12895,9 @@ test "Terminal: deleteLines wide character spacer head" {
+@@ -12759,7 +12951,9 @@ test "Terminal: deleteLines wide character spacer head" {
          const unwrapped_str = try t.plainStringUnwrapped(testing.allocator);
          defer testing.allocator.free(unwrapped_str);
          try testing.expectEqualStrings("BBBB\n\u{1F600}CCC", str);
@@ -350,7 +438,7 @@ index 8fca1c61d..5ff284cb8 100644
      }
  }
  
-@@ -14768,13 +14906,69 @@ test "Terminal: eraseLine resets pending wrap" {
+@@ -14768,13 +14962,128 @@ test "Terminal: eraseLine resets pending wrap" {
      for ("ABCDE") |c| try t.print(c);
      try testing.expect(t.screens.active.cursor.pending_wrap);
      t.eraseLine(.right, false);
@@ -419,9 +507,80 @@ index 8fca1c61d..5ff284cb8 100644
 +    {
 +        const r2 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?.row;
 +        try testing.expect(!r2.wrap);
++    }
++}
++
++test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // x / aaaaaaaaaa (wrapped) / b erased with ECH / ccc. DL on the wrapped
++    // row moves the blank continuation under x: it is a line of its own
++    // again and a wider reflow keeps it (tmux 3.8, 10x6 to 14 columns).
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("x\naaaaaaaaaab\nccc");
++        t.setCursorPos(3, 1);
++        t.eraseChars(1);
++        t.setCursorPos(2, 1);
++        t.deleteLinesTmux(1);
++        const r1 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 1 } }).?.row;
++        try testing.expect(!r1.wrap_continuation);
++        t.setCursorPos(6, 1);
++        try t.resize(alloc, .{ .cols = 14, .rows = 6 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("x\n\nccc", str);
++        try testing.expectEqual(@as(usize, 5), t.screens.active.cursor.y);
++    }
++
++    // SU in a region and LF at the bottom of a region that does not start
++    // at the top move rows up in place: the moved rows' continuation flags
++    // and the row below the region follow.
++    for ([_]bool{ false, true }) |lf| {
++        var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("x\naaaaaaaaaab\nccc");
++        t.setTopAndBottomMargin(2, 3);
++        if (lf) {
++            t.setCursorPos(3, 1);
++            try t.index();
++        } else try t.scrollUp(1);
++        const r1 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 1 } }).?.row;
++        const r3 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 3 } }).?.row;
++        try testing.expect(!r1.wrap_continuation);
++        try testing.expect(!r3.wrap_continuation);
++    }
++
++    // A region from the top scrolled into history: its new blank bottom row
++    // is tmux's empty line, not a continuation, and the row below it
++    // follows it.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("x\naaaaaaaaaab");
++        t.setTopAndBottomMargin(1, 2);
++        try t.scrollUp(1);
++        const r1 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 1 } }).?.row;
++        const r2 = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?.row;
++        try testing.expect(!r1.wrap_continuation);
++        try testing.expect(!r2.wrap_continuation);
      }
  }
  
+@@ -17970,7 +18279,10 @@ test "Terminal: deleteLines count over region blanks row metadata" {
+     ).?.row.semantic_prompt = .prompt;
+ 
+     t.setCursorPos(2, 1);
+-    t.deleteLines(10);
++    // vtmux: deleteLines keeps the wrap of the row above, so the first
++    // blank row stays its continuation; CSI M (deleteLinesTmux) unwraps it
++    // as tmux does.
++    t.deleteLinesTmux(10);
+ 
+     for (1..5) |y| {
+         const rac = t.screens.active.pages.getCell(
 diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
 index 15ea8aebc..1da0e2819 100644
 --- a/src/terminal/stream_terminal.zig

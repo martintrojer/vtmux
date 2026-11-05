@@ -1,0 +1,105 @@
+name = "wrap_flag_resize"
+size = [10, 6]
+# A wider pane reflows lines by their GRID_LINE_WRAPPED flags (grid.c
+# grid_reflow_join), so each scene ends with resize-window -x 14 and shows the
+# lines and the cursor after the reflow. Rows moved by DL, SU, SD, RI, IL and
+# a region scroll keep their flags (grid_move_lines); a wrapped line whose
+# continuation was erased (ECH, EL 1) keeps the erased cells and joins them;
+# an empty line a scroll adds under a wrapped line stops the join and stays a
+# line of its own (cellused 0). One 10x6 session per scene. capture-pane -J
+# only where no erased cell trails a wrapped line (D-027, the cellsize model).
+steps = [
+  # dl: DL moves the erased continuation (ECH) of a wrapped line under x: a line of its own again
+  { run = ["new", "-d", "-s", "dl", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[2;1H\\033[M\\033[6;1H'; tmux wait-for -S dl; exec cat"] },
+  { wait_for = "dl" },
+  { run = ["resize-window", "-t", "dl", "-x", "14"] },
+  { run = ["display", "-p", "-t", "dl:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "dl:"] },
+  # dlel1: and with EL 1
+  { run = ["new", "-d", "-s", "dlel1", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;5H\\033[1K\\033[2;1H\\033[M\\033[6;1H'; tmux wait-for -S dlel1; exec cat"] },
+  { wait_for = "dlel1" },
+  { run = ["resize-window", "-t", "dlel1", "-x", "14"] },
+  { run = ["display", "-p", "-t", "dlel1:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "dlel1:"] },
+  # dlregion: DL in a region
+  { run = ["new", "-d", "-s", "dlregion", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[2;4r\\033[2;1H\\033[M\\033[r\\033[6;1H'; tmux wait-for -S dlregion; exec cat"] },
+  { wait_for = "dlregion" },
+  { run = ["resize-window", "-t", "dlregion", "-x", "14"] },
+  { run = ["display", "-p", "-t", "dlregion:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "dlregion:"] },
+  # ech: a wrapped line whose continuation ECH erased: the erased cell joins it, ccc stays a line of its own
+  { run = ["new", "-d", "-s", "ech", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[6;1H'; tmux wait-for -S ech; exec cat"] },
+  { wait_for = "ech" },
+  { run = ["resize-window", "-t", "ech", "-x", "14"] },
+  { run = ["display", "-p", "-t", "ech:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "ech:"] },
+  # el1: and EL 1
+  { run = ["new", "-d", "-s", "el1", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;5H\\033[1K\\033[6;1H'; tmux wait-for -S el1; exec cat"] },
+  { wait_for = "el1" },
+  { run = ["resize-window", "-t", "el1", "-x", "14"] },
+  { run = ["display", "-p", "-t", "el1:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "el1:"] },
+  # su: SU
+  { run = ["new", "-d", "-s", "su", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[1;1H\\033[S\\033[6;1H'; tmux wait-for -S su; exec cat"] },
+  { wait_for = "su" },
+  { run = ["resize-window", "-t", "su", "-x", "14"] },
+  { run = ["display", "-p", "-t", "su:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "su:"] },
+  # suregtop: SU in a region from the top
+  { run = ["new", "-d", "-s", "suregtop", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[1;3r\\033[S\\033[r\\033[6;1H'; tmux wait-for -S suregtop; exec cat"] },
+  { wait_for = "suregtop" },
+  { run = ["resize-window", "-t", "suregtop", "-x", "14"] },
+  { run = ["display", "-p", "-t", "suregtop:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "suregtop:"] },
+  # lfregtop: LF at the bottom of a region from the top
+  { run = ["new", "-d", "-s", "lfregtop", "-x", "10", "-y", "6", "sh", "-c", "printf 'y\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[1;4r\\033[4;1H\\n\\033[r\\033[6;1H'; tmux wait-for -S lfregtop; exec cat"] },
+  { wait_for = "lfregtop" },
+  { run = ["resize-window", "-t", "lfregtop", "-x", "14"] },
+  { run = ["display", "-p", "-t", "lfregtop:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "lfregtop:"] },
+  # sd: SD
+  { run = ["new", "-d", "-s", "sd", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaab\\r\\nccc\\033[2;1H\\033[X\\033[T\\033[6;1H'; tmux wait-for -S sd; exec cat"] },
+  { wait_for = "sd" },
+  { run = ["resize-window", "-t", "sd", "-x", "14"] },
+  { run = ["display", "-p", "-t", "sd:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "sd:"] },
+  # ri: RI on the top line
+  { run = ["new", "-d", "-s", "ri", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[1;1H\\033M\\033[6;1H'; tmux wait-for -S ri; exec cat"] },
+  { wait_for = "ri" },
+  { run = ["resize-window", "-t", "ri", "-x", "14"] },
+  { run = ["display", "-p", "-t", "ri:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "ri:"] },
+  # riregion: RI at the top of a region
+  { run = ["new", "-d", "-s", "riregion", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[2;5r\\033[2;1H\\033M\\033[r\\033[6;1H'; tmux wait-for -S riregion; exec cat"] },
+  { wait_for = "riregion" },
+  { run = ["resize-window", "-t", "riregion", "-x", "14"] },
+  { run = ["display", "-p", "-t", "riregion:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "riregion:"] },
+  # il: IL
+  { run = ["new", "-d", "-s", "il", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaab\\r\\nccc\\033[3;1H\\033[X\\033[1;1H\\033[L\\033[6;1H'; tmux wait-for -S il; exec cat"] },
+  { wait_for = "il" },
+  { run = ["resize-window", "-t", "il", "-x", "14"] },
+  { run = ["display", "-p", "-t", "il:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "il:"] },
+  # suregbot: SU in a region from the top whose last line is wrapped: the empty line it adds stays a line of its own, and the wrapped line keeps its flag
+  { run = ["new", "-d", "-s", "suregbot", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbb\\033[1;2r\\033[S\\033[r\\033[6;1H'; tmux wait-for -S suregbot; exec cat"] },
+  { wait_for = "suregbot" },
+  { run = ["resize-window", "-t", "suregbot", "-x", "14"] },
+  { run = ["display", "-p", "-t", "suregbot:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "suregbot:"] },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "suregbot:"] },
+  # su2regbot: SU 2
+  { run = ["new", "-d", "-s", "su2regbot", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbb\\033[1;2r\\033[2S\\033[r\\033[6;1H'; tmux wait-for -S su2regbot; exec cat"] },
+  { wait_for = "su2regbot" },
+  { run = ["resize-window", "-t", "su2regbot", "-x", "14"] },
+  { run = ["display", "-p", "-t", "su2regbot:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "su2regbot:"] },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "su2regbot:"] },
+  # lfregbot: and LF
+  { run = ["new", "-d", "-s", "lfregbot", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbb\\033[1;2r\\033[2;1H\\n\\033[r\\033[6;1H'; tmux wait-for -S lfregbot; exec cat"] },
+  { wait_for = "lfregbot" },
+  { run = ["resize-window", "-t", "lfregbot", "-x", "14"] },
+  { run = ["display", "-p", "-t", "lfregbot:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "lfregbot:"] },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "lfregbot:"] },
+]
