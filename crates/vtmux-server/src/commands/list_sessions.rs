@@ -78,8 +78,9 @@ pub(super) fn sorted(
         sessions.sort_by(|a, b| {
             let primary = match ord {
                 Order::Name => std::cmp::Ordering::Equal,
-                Order::Index => a.id.cmp(&b.id),
-                Order::Creation => a.created.cmp(&b.created),
+                // `creation_time` (microseconds) is set with the id in
+                // session_create; `created` is whole seconds and would tie.
+                Order::Index | Order::Creation => a.id.cmp(&b.id),
                 Order::Activity => b.activity.cmp(&a.activity),
             };
             let o = primary.then_with(|| a.name.cmp(&b.name));
