@@ -30,6 +30,8 @@ jobs:
   # Linux's ~18, so it runs only where it pays: main (after the merge, not
   # in its way), pull requests, and the weekly schedule. Worker branches
   # skip it. A red macOS run on main is fixed on main like any other.
+  # A run no macOS runner picked up (GitHub capacity) is re-run by
+  # ci-retry.yml.
   # macos-15: Zig 0.17 (needed by the ghostty pin in third_party/libghostty-rs)
   # targets macOS 15+ and its own binary needs macOS 15 to run.
   check-macos:

@@ -1315,8 +1315,11 @@ impl PaneTerm {
     /// as many as it gets shorter by; only the rest of the shrink pushes
     /// lines into history. Ghostty trims only blank rows, so the lines are
     /// erased first and the resize trims them (the cursor's row is pinned,
-    /// so nothing above it goes). A cursor waiting to wrap keeps its
-    /// lines: moving it back would lose the wrap.
+    /// so nothing above it goes). Lines with no text are left to Ghostty's
+    /// trim: erasing them would write every cell and fault in the page
+    /// memory of a pane that never drew there (an idle split pane). A
+    /// cursor waiting to wrap keeps its lines: moving it back would lose
+    /// the wrap.
     fn eat_below_cursor(&mut self, rows: u16) {
         let old = self.rows();
         if rows >= old || self.term.is_cursor_pending_wrap().unwrap_or(false) {
@@ -1324,7 +1327,7 @@ impl PaneTerm {
         }
         let (cx, cy) = self.cursor();
         let eat = (old - 1 - cy.min(old - 1)).min(old - rows);
-        if eat == 0 {
+        if eat == 0 || self.bottom_rows_blank(eat) {
             return;
         }
         self.write_screen_moves(&format!(
@@ -1333,6 +1336,24 @@ impl PaneTerm {
             cy + 1,
             cx + 1
         ));
+    }
+
+    /// Whether the bottom `n` rows of the screen hold no text (Ghostty's
+    /// `trailingBlankLines` test). Reads those rows' cells only: the
+    /// pane's [`Self::screen`] view would read, and keep, the whole grid.
+    fn bottom_rows_blank(&self, n: u16) -> bool {
+        let rows = self.rows();
+        let mut cells = Vec::new();
+        (rows.saturating_sub(n)..rows).all(|y| {
+            let at = Point::Active(PointCoordinate {
+                x: 0,
+                y: u32::from(y),
+            });
+            self.term.grid_ref(at).is_ok_and(|row| {
+                row.row_cells(&mut cells).is_ok()
+                    && cells.iter().all(|c| !c.has_text().unwrap_or(true))
+            })
+        })
     }
 
     /// `screen_resize_y` (screen.c:466-487): a taller screen pulls as many

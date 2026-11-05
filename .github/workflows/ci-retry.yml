@@ -1,0 +1,55 @@
+name: ci-retry
+# GitHub's macOS arm64 runners run out at busy times: check-macos then waits
+# ~15 min and ends `cancelled` with no runner and the annotation "The job was
+# not acquired by Runner of type hosted even after multiple attempts" (main
+# 3682ca7, runs 41854335963 to 41871887523; a manual rerun the next morning
+# got a runner at once). Nothing on main cancels a main run otherwise (one
+# concurrency group per commit), so such a job is re-run, one at a time, up
+# to three times, each after the run completes again. Re-runs made with
+# GITHUB_TOKEN start no new workflow_run event, so this job waits for them
+# itself.
+# workflow_run fires only for this file as it is on the default branch.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+permissions:
+  actions: write
+  checks: read
+jobs:
+  rerun-unacquired:
+    if: github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - name: Re-run jobs no runner picked up
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          for try in 1 2 3; do
+            while [ "$(gh api "repos/$REPO/actions/runs/$RUN" --jq .status)" != completed ]; do
+              sleep 60
+            done
+            attempt=$(gh api "repos/$REPO/actions/runs/$RUN" --jq .run_attempt)
+            job=""
+            for id in $(gh api "repos/$REPO/actions/runs/$RUN/attempts/$attempt/jobs" \
+                --jq '.jobs[] | select(.conclusion == "cancelled" and (.runner_name // "") == "") | .id'); do
+              if gh api "repos/$REPO/check-runs/$id/annotations" --jq '.[].message' |
+                  grep -q 'not acquired by Runner'; then
+                job=$id
+                break
+              fi
+            done
+            if [ -z "$job" ]; then
+              echo "attempt $attempt: no job left waiting for a runner"
+              exit 0
+            fi
+            echo "attempt $attempt: job $job got no runner; re-run $try of 3"
+            gh api -X POST "repos/$REPO/actions/jobs/$job/rerun" >/dev/null
+            sleep 30
+          done
