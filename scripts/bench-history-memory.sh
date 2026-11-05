@@ -9,6 +9,9 @@
 #   flood   120x40,  limit 2000,   1M log lines of ~60 characters (the
 #           output time is the number: pruning cost; not run by default)
 #   flood100k  the same with limit 100000
+#   big     120x40,  limit 1000000, 1.5M log lines of the spec kind (not run
+#           by default; give it SETTLE=900: the compression pass is ten times
+#           the spec one)
 #
 # Per binary it reports: server RSS 0.5 s after the output (rss_out, before
 # any compression), after IDLE seconds of idle (rss_mb, the criterion 1
@@ -22,7 +25,15 @@
 # Other modes (spec, criteria 3 and 6), first argument:
 #   copymode [scenario...]  `copy-mode` entry time on the history as the output
 #           left it and again on fully compressed history (criterion 3; the
-#           bar is compressed <= 2x uncompressed). Default scenarios: spec narrow.
+#           bar is compressed <= 2x uncompressed), then in the same copy mode
+#           `search-backward` for a string that is nowhere in the history (a
+#           scan of all of it) and `history-top`; on the compressed server the
+#           RSS in copy mode after those, and settled again after `cancel`.
+#           Default scenarios: spec narrow.
+#   session [scenario]  SESSION_PANES (default 10) windows of one session,
+#           each pane writing the scenario's output at the same time (default
+#           session100k: 100k log lines each, limit 100000, 120x40): total
+#           server RSS right after the output, after IDLE and settled.
 #   steps [scenario...]  the `compress_steps` example: step count, longest step
 #           (criterion 6 bounds it at 5 ms) and capture identity.
 #   latency [scenario...]  busy-pane PTY-to-client latency, alternating
@@ -35,7 +46,7 @@
 #           at 10%. Scenarios spec, narrow (default spec).
 #
 # Usage: scripts/bench-history-memory.sh [scenario...]
-#        scripts/bench-history-memory.sh copymode|steps|latency [scenario...]
+#        scripts/bench-history-memory.sh copymode|steps|latency|session [scenario...]
 # Env: VTMUX (default target/release/vtmux), VTMUX_REFERENCE_TMUX (default
 # the `cargo xtask ref-tmux` cache), IDLE (default 10), RUNS (default 1:
 # runs per binary, the fastest is shown), BASE (another vtmux binary to
@@ -49,11 +60,14 @@
 # The script can be sourced (it then only defines functions); scripts/bench.sh's
 # `history` scenario runs it as a command and parses the table.
 
-gen_spec() {
-  awk 'BEGIN { for (i = 0; i < 150000; i++)
+gen_log() {
+  awk -v n="$1" 'BEGIN { for (i = 0; i < n; i++)
     printf "2026-10-31T12:%02d:%02d.%03dZ INFO  worker[%d] handled request id=%08x path=/api/v1/items/%d status=200 bytes=%d\n",
       (i / 60000) % 60, (i / 1000) % 60, i % 1000, i % 16, i * 2654435761 % 4294967296, i, (i * 37) % 100000 }'
 }
+gen_spec() { gen_log 150000; }
+gen_big() { gen_log 1500000; }
+gen_session100k() { gen_log 100000; }
 gen_narrow() {
   awk 'BEGIN { for (i = 0; i < 12000; i++) { s = sprintf("%05d", i)
     for (j = 0; j < 70; j++) s = s sprintf("\033[38;2;%d;%d;%dm%c", i % 256, j, (i * 7) % 256, 65 + j % 26)
@@ -163,23 +177,35 @@ ms_of() {
 median() { sort -n | awk '{ v[NR] = $1 } END { print v[int((NR + 1) / 2)] }'; }
 
 # copymode_run BIN LABEL COLS ROWS LIMIT FILE -> one line:
-#   "noise_ms uncompressed_ms compressed_ms rss_uncompressed_kb rss_compressed_kb"
+#   "noise_ms uncompressed_ms compressed_ms rss_uncompressed_kb rss_compressed_kb
+#    search_u_ms top_u_ms search_c_ms top_c_ms rss_in_copy_c_kb rss_after_c_kb"
 # Two servers, since a history read restores the pages for good. First: the
 # `copy-mode` entry comes right after the output, before the 5 s idle delay,
 # so nothing is compressed yet. Second: the entry comes after the RSS stopped
-# falling; the RSS shown is taken just before the entry.
+# falling; the RSS shown is taken just before the entry. On each, the entry is
+# followed by a search-backward for a string that is not in the history (it
+# scans every line, wrapping) and history-top; on the second the RSS is taken
+# in copy mode after them, and settled again after cancel.
+ABSENT='no-such-text-in-the-history'
 copymode_run() {
-  local bin=$1 label=$2 cols=$3 rows=$4 limit=$5 file=$6 noise un co rss_u rss_c i
+  local bin=$1 label=$2 cols=$3 rows=$4 limit=$5 file=$6 noise un co rss_u rss_c i su tu sc tc rss_in rss_after
   fill "$bin" "$label-u" "$cols" "$rows" "$limit" "$file"
   noise=$(for i in 1 2 3 4 5; do ms_of "${t[@]}" display -p ok; done | sort -n | head -1)
   rss_u=$(rss_kb "$pid")
   un=$(ms_of "${t[@]}" copy-mode -t b)
+  su=$(ms_of "${t[@]}" send -t b -X search-backward "$ABSENT")
+  tu=$(ms_of "${t[@]}" send -t b -X history-top)
   "${t[@]}" kill-server
   fill "$bin" "$label-c" "$cols" "$rows" "$limit" "$file"
   rss_c=$(settle "$pid" 6)
   co=$(ms_of "${t[@]}" copy-mode -t b)
+  sc=$(ms_of "${t[@]}" send -t b -X search-backward "$ABSENT")
+  tc=$(ms_of "${t[@]}" send -t b -X history-top)
+  rss_in=$(rss_kb "$pid")
+  "${t[@]}" send -t b -X cancel
+  rss_after=$(settle "$pid" 6)
   "${t[@]}" kill-server
-  echo "$noise $un $co $rss_u $rss_c"
+  echo "$noise $un $co $rss_u $rss_c $su $tu $sc $tc $rss_in $rss_after"
 }
 
 scenario_params() {
@@ -189,6 +215,8 @@ scenario_params() {
     wide) cols=500 rows=24 limit=10000 ;;
     flood) cols=120 rows=40 limit=2000 ;;
     flood100k) cols=120 rows=40 limit=100000 ;;
+    big) cols=120 rows=40 limit=1000000 ;;
+    session100k) cols=120 rows=40 limit=100000 ;;
     *) echo "unknown scenario $1" >&2; exit 2 ;;
   esac
 }
@@ -196,7 +224,8 @@ scenario_params() {
 mode_copymode() {
   local s n copies=${COPIES:-3}
   [ $# -gt 0 ] || set -- spec narrow
-  printf '%-7s %-7s %6s %9s %9s %9s %6s %9s %9s\n' scenario binary limit noise_ms uncomp_ms comp_ms ratio rss_u_mb rss_c_mb
+  printf '%-7s %-7s %7s %9s %9s %9s %6s %9s %9s %9s %9s %9s %9s %9s %9s\n' scenario binary limit noise_ms uncomp_ms comp_ms ratio rss_u_mb rss_c_mb \
+    search_u top_u search_c top_c rss_cm_mb rss_end_mb
   for s in "$@"; do
     scenario_params "$s"
     file="$work/$s.txt"
@@ -209,10 +238,54 @@ mode_copymode() {
       done
       col() { awk -v c="$1" '{ print $c }' "$work/cm.txt" | median; }
       noise=$(col 1) un=$(col 2) co=$(col 3) ru=$(col 4) rc=$(col 5)
-      printf '%-7s %-7s %6s %9s %9s %9s %6.2f %9.1f %9.1f\n' "$s" $which $limit "$noise" "$un" "$co" \
-        "$(echo "$co / ($un + ($un == 0))" | bc -l)" "$(echo "$ru / 1024" | bc -l)" "$(echo "$rc / 1024" | bc -l)"
-      awk -v s="$s" -v w="$which" '{ printf "  run %s %s: %s ms uncompressed, %s ms compressed (RSS %.0f -> %.0f MB)\n", s, w, $2, $3, $4 / 1024, $5 / 1024 }' "$work/cm.txt"
+      printf '%-7s %-7s %7s %9s %9s %9s %6.2f %9.1f %9.1f %9s %9s %9s %9s %9.1f %9.1f\n' "$s" $which $limit "$noise" "$un" "$co" \
+        "$(echo "$co / ($un + ($un == 0))" | bc -l)" "$(echo "$ru / 1024" | bc -l)" "$(echo "$rc / 1024" | bc -l)" \
+        "$(col 6)" "$(col 7)" "$(col 8)" "$(col 9)" "$(echo "$(col 10) / 1024" | bc -l)" "$(echo "$(col 11) / 1024" | bc -l)"
+      awk -v s="$s" -v w="$which" '{ printf "  run %s %s: entry %s ms uncompressed, %s ms compressed (RSS %.0f -> %.0f MB); search %s / %s ms, top %s / %s ms; RSS in copy mode %.1f MB, after cancel %.1f MB\n", s, w, $2, $3, $4 / 1024, $5 / 1024, $6, $8, $7, $9, $10 / 1024, $11 / 1024 }' "$work/cm.txt"
     done
+  done
+}
+
+mode_session() {
+  local s=${1:-session100k} n=${SESSION_PANES:-10} which bin i start end out idle settled hs secs
+  scenario_params "$s"
+  file="$work/$s.txt"
+  "gen_$s" > "$file"
+  binaries=(tmux vtmux)
+  [ -z "${BASE:-}" ] || binaries=(tmux base vtmux)
+  printf '%-11s %-7s %5s %7s %8s %8s %10s %8s %10s %10s %8s\n' scenario binary panes limit hist_sum output_s rss_out_mb rss_mb settled_mb per_pane_mb settle_s
+  for which in "${binaries[@]}"; do
+    case $which in tmux) bin=$REF ;; base) bin=$BASE ;; *) bin=$VTMUX ;; esac
+    t=(env -u TMUX -u TMUX_PANE -u EDITOR -u VISUAL SHELL=/bin/sh
+      TMUX_TMPDIR="$work" "$bin" -L "sess-$which-$$" -f /dev/null)
+    local cmd="cat '$file'; echo DONE; exec cat" args=()
+    for i in $(seq 2 "$n"); do args+=(\; neww -d -t b: "$cmd"); done
+    start=$(now)
+    "${t[@]}" new -d -s keep cat \; set -g history-limit "$limit" \; \
+      new -d -s b -x "$cols" -y "$rows" "$cmd" "${args[@]}"
+    local give_up=$((SECONDS + ${DEADLINE:-600}))
+    for i in $(seq 0 $((n - 1))); do
+      until "${t[@]}" capture-pane -p -t "b:$i" 2>/dev/null | grep -q '^DONE$'; do
+        if [ "$SECONDS" -ge "$give_up" ]; then
+          echo "bench-history-memory.sh: session: no DONE marker in b:$i within ${DEADLINE:-600} s" >&2
+          exit 1
+        fi
+        sleep 0.05
+      done
+    done
+    end=$(now)
+    pid=$("${t[@]}" display -p -t b '#{pid}')
+    sleep 0.5
+    out=$(rss_kb "$pid")
+    sleep "$IDLE"
+    idle=$(rss_kb "$pid")
+    hs=$("${t[@]}" list-panes -s -t b -F '#{history_size}' | awk '{ s += $1 } END { print s }')
+    settled=$(settle "$pid" 0)
+    secs=$(echo "$(now) - $end" | bc | cut -d. -f1)
+    "${t[@]}" kill-server
+    printf '%-11s %-7s %5s %7s %8s %8.2f %10.1f %8.1f %10.1f %10.1f %8s\n' "$s" $which "$n" $limit "$hs" "$(echo "$end - $start" | bc)" \
+      "$(echo "$out / 1024" | bc -l)" "$(echo "$idle / 1024" | bc -l)" "$(echo "$settled / 1024" | bc -l)" \
+      "$(echo "$settled / 1024 / $n" | bc -l)" "$secs"
   done
 }
 
@@ -270,7 +343,7 @@ main() {
   trap 'rm -rf "$work"' EXIT
 
   case "${1:-}" in
-    copymode | steps | latency) local mode=$1; shift; "mode_$mode" "$@"; return ;;
+    copymode | steps | latency | session) local mode=$1; shift; "mode_$mode" "$@"; return ;;
   esac
   scenarios=("$@")
   [ ${#scenarios[@]} -gt 0 ] || scenarios=(spec narrow wide)
