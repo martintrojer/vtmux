@@ -6708,7 +6708,13 @@ fn format_cursor_character() {
             ]));
             let start = Instant::now();
             let f = "#{cursor_x},#{cursor_y}";
-            while w.run(&["display", "-p", "-t", &s, f]).stdout != format!("{},0\n", col - 1)
+            // The cursor starts at 0,0, so for column 1 the text must be
+            // in too.
+            while (w.run(&["display", "-p", "-t", &s, f]).stdout != format!("{},0\n", col - 1)
+                || !w
+                    .run(&["capture-pane", "-p", "-t", &s])
+                    .stdout
+                    .starts_with("ab"))
                 && start.elapsed() < Duration::from_secs(5)
             {
                 std::thread::sleep(Duration::from_millis(20));
