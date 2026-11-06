@@ -480,7 +480,7 @@ const SIZE_MAX: u32 = 10_000;
 /// and a unique name and index per window, every window has an active
 /// pane, sizes are within `WINDOW_MAXIMUM`, every session's winlink tree
 /// is a red-black tree of its window indexes, and client ids are unique.
-fn validate(s: &snap::Snapshot) -> io::Result<()> {
+pub(super) fn validate(s: &snap::Snapshot) -> io::Result<()> {
     s.check().map_err(|e| invalid(e.to_string()))?;
     let past = |what: &str, next: u32, ids: &mut dyn Iterator<Item = u32>| match ids.max() {
         Some(max) if next <= max => Err(invalid(format!("next {what} id {next} not past {max}"))),

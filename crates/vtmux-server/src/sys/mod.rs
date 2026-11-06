@@ -8,4 +8,5 @@ pub mod fdwait;
 pub mod job;
 pub mod pty;
 pub mod signal;
+pub mod upgrade;
 pub mod user;

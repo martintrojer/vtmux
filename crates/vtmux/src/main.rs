@@ -210,7 +210,12 @@ fn connect_or_start(
 }
 
 fn main() -> ExitCode {
-    let mut args: Vec<OsString> = std::env::args_os().collect();
+    let args: Vec<OsString> = std::env::args_os().collect();
+    upgrade_image(args.get(1..).unwrap_or_default()).unwrap_or_else(|| client_main(args))
+}
+
+/// The client: find or start the server, send the command, relay.
+fn client_main(mut args: Vec<OsString>) -> ExitCode {
     let argv0 = if args.is_empty() {
         OsString::from("vtmux")
     } else {
@@ -315,6 +320,32 @@ fn main() -> ExitCode {
     match cli.control {
         ControlMode::None => relay(&mut stream),
         _ => control_relay(&mut stream),
+    }
+}
+
+/// The images a live upgrade starts (vtmux-server `sys::upgrade`): the new
+/// server, `--vtmux-resume <fd> [--vtmux-switched-back]`, and the dry run,
+/// `--vtmux-check-snapshot <fd>`. `None` for any other command line.
+fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
+    use vtmux_server::server::resume;
+    use vtmux_server::sys::upgrade::{CHECK_FLAG, RESUME_FLAG, SWITCHED_BACK_FLAG};
+    let words: Vec<&str> = args.iter().map(|a| a.to_str()).collect::<Option<_>>()?;
+    let fd = |w: &str| w.parse::<i32>().ok();
+    match words.as_slice() {
+        [flag, n] if *flag == RESUME_FLAG => Some(ExitCode::from(
+            u8::try_from(resume::resume(fd(n)?, false)).unwrap_or(1),
+        )),
+        [flag, n, back] if *flag == RESUME_FLAG && *back == SWITCHED_BACK_FLAG => Some(
+            ExitCode::from(u8::try_from(resume::resume(fd(n)?, true)).unwrap_or(1)),
+        ),
+        [flag, n] if *flag == CHECK_FLAG => Some(match resume::check_snapshot(fd(n)?) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                write_err(message.as_bytes());
+                ExitCode::from(1)
+            }
+        }),
+        _ => None,
     }
 }
 
