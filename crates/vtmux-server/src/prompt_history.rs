@@ -57,6 +57,18 @@ pub struct History {
 }
 
 impl History {
+    /// Each type's list, oldest first: command, then search.
+    #[must_use]
+    pub fn lists(&self) -> &[Vec<String>; 2] {
+        &self.lists
+    }
+
+    /// A history of these lists (a snapshot's, D27).
+    #[must_use]
+    pub fn from_lists(lists: [Vec<String>; 2]) -> Self {
+        Self { lists }
+    }
+
     /// `prompt_add_history` with `prompt-history-limit` `limit`.
     pub fn add(&mut self, line: &str, ty: PromptType, limit: usize) {
         let list = &mut self.lists[ty.index()];

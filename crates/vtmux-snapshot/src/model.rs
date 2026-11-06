@@ -8,12 +8,15 @@
 //! an internal numbering cannot change what a snapshot means.
 //!
 //! Modes carried across an upgrade: copy mode (its frozen grid, D-010, and
-//! position), view mode and clock mode. Tree, buffer, client, customize,
-//! switch and display-panes modes, prompts and menus are closed by the
-//! upgrade and re-opened by the user (spec, *Modes in progress*); a mode
-//! a reader doesn't know reads as [`PaneMode::Closed`], so carrying a new
-//! mode later doesn't make older readers refuse the stream. Popups are
-//! carried with their pty.
+//! position) and clock mode. View mode is closed for now: its backing
+//! terminal is pane terminal state, and [`PaneMode::View`] is kept for when
+//! that is carried. Tree, buffer, client, customize, switch and
+//! display-panes modes, prompts and menus are closed by the upgrade and
+//! re-opened by the user (spec, *Open questions*); a mode a reader doesn't
+//! know reads as [`PaneMode::Closed`], so carrying a new mode later doesn't
+//! make older readers refuse the stream. Popups are carried with their
+//! pty; one editing a buffer or an option (its editor's temp file) is
+//! closed.
 
 use crate::row::{HistoryPage, Row};
 use crate::term::TermState;
@@ -24,7 +27,8 @@ oneof! {
     pub enum Value {
         1 => String(String),
         2 => Number(i64),
-        /// A key, as `key_string_lookup_key` prints it.
+        /// A key, as `key_string_lookup_key` prints it; a key whose name
+        /// reads back as another key is `0x` and its tmux key code.
         3 => Key(String),
         /// A colour, as `colour_tostring` prints it.
         4 => Colour(String),
@@ -121,6 +125,10 @@ record! {
         9 => one fire_time: i64,
         /// The value it last saw.
         10 => opt last: Option<String>,
+        /// Pane or window monitors: the last value per (id, index).
+        11 => many each: Vec<SubValue>,
+        /// When it looks next.
+        12 => opt due_in_ms: Option<u64>,
     }
 }
 
@@ -136,7 +144,8 @@ record! {
 
 record! {
     pub struct Binding {
-        /// The key, as `key_string_lookup_key` prints it.
+        /// The key, as `key_string_lookup_key` prints it (or `0x` and its
+        /// tmux key code, as [`Value::Key`]).
         1 => one key: String,
         2 => opt note: Option<String>,
         3 => one repeat: bool,
@@ -241,6 +250,38 @@ record! {
         /// `cfg_add_cause`): the next attach shows them
         /// (`cfg_show_causes`).
         29 => many config_causes: Vec<String>,
+        /// The last command number handed out (cmd-queue.c `cmdq_next`):
+        /// a control client's `%begin` numbers go on from it.
+        30 => one cmd_number: u32,
+        /// `next_active_point` (window.c:63).
+        31 => one active_points: u64,
+        /// The last winlink attachment stamp ([`Winlink::seq`]).
+        32 => one link_stamp: u64,
+        /// The session the marked winlink really is in when a link into
+        /// another session moved it there (server-fn.c:335-336).
+        33 => opt marked_elsewhere: Option<u32>,
+        /// `server-access` entries (server-acl.c).
+        34 => many access: Vec<Access>,
+    }
+}
+
+record! {
+    /// A `server-access` entry.
+    pub struct Access {
+        /// A group id, else a user id.
+        1 => one group: bool,
+        2 => one id: u32,
+        3 => one read_only: bool,
+    }
+}
+
+record! {
+    /// A node of a session's winlinks red-black tree, in preorder: the
+    /// tree's shape decides the order `session_destroy` unlinks windows
+    /// in (session.c:221-224), which hooks and control mode show.
+    pub struct RbNode {
+        1 => one key: u32,
+        2 => one red: bool,
     }
 }
 
@@ -273,6 +314,7 @@ record! {
         11 => opt last_attached: Option<i64>,
         12 => many options: Vec<OptionEntry>,
         13 => opt group: Option<String>,
+        14 => many link_tree: Vec<RbNode>,
     }
 }
 
@@ -437,7 +479,7 @@ record! {
         23 => one selr: Pos,
         24 => one endselr: Pos,
         25 => one separators: String,
-        26 => one search_text: String,
+        26 => opt search_text: Option<String>,
         27 => one search_type: u32,
         28 => one search_regex: bool,
         29 => opt pane_search: Option<(String, bool)>,
@@ -448,6 +490,51 @@ record! {
         34 => one scrolled: bool,
         /// `copy-mode -s`: the frozen grid came from another pane.
         35 => opt source_pane: Option<u32>,
+        /// `#{pane_key_mode}` of the mode's screen: 0 `VT10x`, 1 `Ext 1`, 2 `Ext 2`.
+        36 => one key_mode: u32,
+        /// `copy-mode -k`: the pane is killed when the mode exits.
+        37 => one kill: bool,
+        /// History lines that scrolled there and were not cleared.
+        38 => one hscrolled: u64,
+        /// The frozen grid's width and screen height.
+        39 => one grid_sx: u32,
+        40 => one grid_sy: u32,
+        /// `RECENTRE_*`: 0 top, 1 middle, 2 bottom; and its line.
+        41 => one recentre: u32,
+        42 => one recentre_line: u64,
+        /// `cursordrag`: 0 none, 1 end, 2 start.
+        43 => one drag: u32,
+        /// The selection as drawn (`struct screen_sel`).
+        44 => opt sel: Option<ScreenSel>,
+        45 => one search_down: bool,
+        /// Where an incremental search started: x, y and offset.
+        46 => opt search_origin: Option<(u64, (u64, u64))>,
+        47 => one search_all: bool,
+        /// One mark per cell in view (`searchmark`).
+        48 => opt search_marks: Option<Vec<u8>>,
+        49 => one search_generation: u32,
+        /// `searchcount`, -1 unknown.
+        50 => one search_count: i64,
+        51 => one search_more: bool,
+        52 => one search_timeout: bool,
+        /// When the automatic refresh runs next, while it is on.
+        53 => opt refresh_in_ms: Option<u64>,
+        /// The view is of another pane (`copy-mode -s`).
+        54 => one foreign: bool,
+    }
+}
+
+record! {
+    /// A copy mode selection as drawn (`struct screen_sel`), in screen
+    /// coordinates.
+    pub struct ScreenSel {
+        1 => one sx: u64,
+        2 => one sy: u64,
+        3 => one ex: u64,
+        4 => one ey: u64,
+        5 => one rectangle: bool,
+        6 => one vi: bool,
+        7 => one hidden: bool,
     }
 }
 
@@ -457,7 +544,8 @@ oneof! {
         1 => Copy(CopyMode),
         /// `window_view_mode`: copy mode over command output.
         2 => View(CopyMode),
-        3 => Clock(()),
+        /// Clock mode, with its screen's key mode (as `CopyMode::key_mode`).
+        3 => Clock(u32),
         /// A mode this reader doesn't know (a newer writer's), or one the
         /// writer closed: the restore drops it from the stack.
         4 => Closed(()),
@@ -600,16 +688,26 @@ record! {
         6 => one sx: u32,
         7 => one sy: u32,
         8 => one title: String,
-        9 => one style: String,
-        10 => one border_style: String,
+        /// `-s` and `-S`.
+        9 => opt style: Option<String>,
+        10 => opt border_style: Option<String>,
         11 => one border_lines: String,
         /// `-E` / `-EE`: 0 never, 1 on exit, 2 on success.
         12 => one close_on_exit: u32,
         13 => opt term: Option<TermState>,
         /// The pane it was opened from.
         14 => opt pane: Option<u32>,
+        /// The job closed its output and was reaped.
         15 => one exited: bool,
         16 => opt status: Option<ExitStatus>,
+        /// The position and size it was opened with: x, y, then sx, sy.
+        17 => one preferred: ((u32, u32), (u32, u32)),
+        /// `-k`: any key closes it once the job has exited.
+        18 => one any_key: bool,
+        /// `pd->status`: `128 + SIGHUP` until the job exits.
+        19 => one status_code: i32,
+        /// The client whose command opened it.
+        20 => opt caller: Option<u32>,
     }
 }
 
@@ -651,8 +749,54 @@ record! {
         30 => opt popup: Option<Popup>,
         /// The one-time token a re-attaching client presents (decision 21).
         31 => one token: u64,
-        /// What the terminal reported back to vtmux's queries, by name.
-        32 => many reported: Vec<(String, String)>,
+        /// The terminal's OSC 10 and 11 replies.
+        32 => opt fg: Option<Rgb>,
+        33 => opt bg: Option<Rgb>,
+        /// The last `CSI ? 997` report: `light` or `dark`.
+        34 => opt theme: Option<String>,
+        /// Its OSC 4 replies for palette entries 0-15.
+        35 => many palette: Vec<PaletteEntry>,
+        /// Frame bytes sent (`c->written`, `#{client_written}`).
+        36 => one written: u64,
+        /// The terminal's replies to the attach queries, in order: they
+        /// shape its features (`tty_keys_device_attributes` and friends).
+        37 => many term_replies: Vec<TermReply>,
+        /// Invoked as `tmux` (else `vtmux`).
+        38 => one tmux_invocation: bool,
+        /// The session a client that lost its own was last in (the
+        /// `client-detached` payload).
+        39 => opt left_session: Option<u32>,
+        /// The client has a terminal (`tty` may still be empty: a
+        /// terminal without a name).
+        40 => one has_tty: bool,
+    }
+}
+
+record! {
+    pub struct Rgb {
+        1 => one r: u8,
+        2 => one g: u8,
+        3 => one b: u8,
+    }
+}
+
+record! {
+    pub struct PaletteEntry {
+        1 => one index: u32,
+        2 => one rgb: Rgb,
+    }
+}
+
+record! {
+    /// One reply of a client terminal to the attach queries.
+    pub struct TermReply {
+        /// 0 synchronized output supported, 1 DA, 2 secondary DA, 3
+        /// XTVERSION.
+        1 => one kind: u32,
+        /// DA's parameters; secondary DA's first one.
+        2 => many params: Vec<u32>,
+        /// XTVERSION's text.
+        3 => one text: String,
     }
 }
 
@@ -787,6 +931,12 @@ pub(crate) mod tests {
                 fire_count: 1,
                 fire_time: 9,
                 last: Some("t".into()),
+                each: vec![SubValue {
+                    id: 2,
+                    index: 1,
+                    value: "v".into(),
+                }],
+                due_in_ms: Some(700),
             }],
             monitor_serial: 7,
             key_tables: vec![KeyTable {
@@ -832,6 +982,22 @@ pub(crate) mod tests {
             activity: 99,
             config_files: vec!["/etc/tmux.conf".into(), "/home/u/.tmux.conf".into()],
             config_causes: vec!["/home/u/.tmux.conf:3: unknown command: nope".into()],
+            cmd_number: 41,
+            active_points: 17,
+            link_stamp: 5,
+            marked_elsewhere: Some(1),
+            access: vec![
+                Access {
+                    group: false,
+                    id: 1000,
+                    read_only: false,
+                },
+                Access {
+                    group: true,
+                    id: 20,
+                    read_only: true,
+                },
+            ],
         }
     }
 
@@ -863,6 +1029,7 @@ pub(crate) mod tests {
             last_attached: Some(1_790_000_050),
             options: sample_options(),
             group: Some("g".into()),
+            link_tree: vec![RbNode { key: 0, red: false }, RbNode { key: 4, red: true }],
         }
     }
 
@@ -969,7 +1136,7 @@ pub(crate) mod tests {
             selr: p(7, 8),
             endselr: p(9, 10),
             separators: " -_".into(),
-            search_text: "needle".into(),
+            search_text: Some("needle".into()),
             search_type: 1,
             search_regex: true,
             pane_search: Some(("needle".into(), true)),
@@ -979,6 +1146,33 @@ pub(crate) mod tests {
             show_mark: true,
             scrolled: true,
             source_pane: Some(9),
+            key_mode: 1,
+            kill: true,
+            hscrolled: 3,
+            grid_sx: 21,
+            grid_sy: 2,
+            recentre: 2,
+            recentre_line: 6,
+            drag: 1,
+            sel: Some(ScreenSel {
+                sx: 1,
+                sy: 2,
+                ex: 3,
+                ey: 4,
+                rectangle: true,
+                vi: true,
+                hidden: true,
+            }),
+            search_down: true,
+            search_origin: Some((1, (2, 3))),
+            search_all: true,
+            search_marks: Some(vec![0, 1, 2]),
+            search_generation: 2,
+            search_count: -1,
+            search_more: true,
+            search_timeout: true,
+            refresh_in_ms: Some(50),
+            foreign: true,
         }
     }
 
@@ -1016,7 +1210,7 @@ pub(crate) mod tests {
             modes: vec![
                 PaneMode::Copy(sample_copy()),
                 PaneMode::View(CopyMode::default()),
-                PaneMode::Clock(()),
+                PaneMode::Clock(2),
                 PaneMode::Closed(()),
             ],
             search: Some(("s".into(), false)),
@@ -1137,17 +1331,47 @@ pub(crate) mod tests {
                 sx: 40,
                 sy: 10,
                 title: "pop".into(),
-                style: "bg=red".into(),
-                border_style: "fg=blue".into(),
+                style: Some("bg=red".into()),
+                border_style: Some("fg=blue".into()),
                 border_lines: "rounded".into(),
                 close_on_exit: 2,
                 term: Some(sample_term()),
                 pane: Some(1),
                 exited: true,
                 status: Some(ExitStatus::default()),
+                preferred: ((1, 2), (3, 4)),
+                any_key: true,
+                status_code: 129,
+                caller: Some(7),
             }),
             token: 0xdead_beef,
-            reported: vec![("theme".into(), "dark".into())],
+            fg: Some(Rgb { r: 1, g: 2, b: 3 }),
+            bg: None,
+            theme: Some("dark".into()),
+            palette: vec![PaletteEntry {
+                index: 4,
+                rgb: Rgb {
+                    r: 0,
+                    g: 0xff,
+                    b: 9,
+                },
+            }],
+            written: 12_345,
+            term_replies: vec![
+                TermReply {
+                    kind: 1,
+                    params: vec![62, 22],
+                    text: String::new(),
+                },
+                TermReply {
+                    kind: 3,
+                    params: Vec::new(),
+                    text: "ghostty 1.2".into(),
+                },
+            ],
+            tmux_invocation: true,
+            left_session: Some(2),
+            has_tty: true,
         }
     }
 
@@ -1248,9 +1472,9 @@ pub(crate) mod tests {
         assert_eq!(PaneMode::get(&out, &Ctx::new(1)), Ok(PaneMode::Closed(())));
         // In a pane's stack, beside the modes it knows.
         let mut pane = Vec::new();
-        crate::wire::put_field(&mut pane, 21, |o| PaneMode::Clock(()).put(o));
+        crate::wire::put_field(&mut pane, 21, |o| PaneMode::Clock(1).put(o));
         crate::wire::put_field(&mut pane, 21, |o| o.extend_from_slice(&out));
         let p = Pane::get(&pane, &Ctx::new(1)).unwrap();
-        assert_eq!(p.modes, [PaneMode::Clock(()), PaneMode::Closed(())]);
+        assert_eq!(p.modes, [PaneMode::Clock(1), PaneMode::Closed(())]);
     }
 }

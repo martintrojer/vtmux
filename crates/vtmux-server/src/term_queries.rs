@@ -46,6 +46,23 @@ pub struct Reported {
 }
 
 impl Reported {
+    /// What a snapshot carries (D27): no palette query is out.
+    #[must_use]
+    pub fn restored(
+        fg: Option<Rgb>,
+        bg: Option<Rgb>,
+        theme: Option<Theme>,
+        palette: [Option<Rgb>; BLEND_PALETTE as usize],
+    ) -> Self {
+        Self {
+            fg,
+            bg,
+            theme,
+            palette,
+            palette_out: 0,
+        }
+    }
+
     /// `server_client_update_theme_colours` (server-client.c:1274-1310):
     /// the theme the colours come from, `c->theme`, else the background's
     /// (`colour_totheme(c->tty.bg)`); dark while neither is known.

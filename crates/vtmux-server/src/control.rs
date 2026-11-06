@@ -95,7 +95,61 @@ pub enum PaneOutput {
     Paused,
 }
 
+/// What a snapshot carries of a control client (D27). Its exit, held
+/// notifications and unflushed bytes are not carried: an upgrade runs
+/// between commands, with every guard closed and the output flushed.
+#[derive(Debug, Default)]
+pub struct ControlParts {
+    pub inbuf: Vec<u8>,
+    pub ready: bool,
+    pub eof: bool,
+    pub guard_depth: u32,
+    pub retval: i32,
+    pub panes: Vec<(PaneId, PaneOutput)>,
+    pub windows: Vec<(WindowId, (u32, u32))>,
+    pub size: Option<(u32, u32)>,
+    pub subs: crate::control_subs::Subs,
+    pub held: Vec<queue::Held>,
+}
+
 impl ControlState {
+    /// [`ControlParts`] of this client; its pane bytes from `streams`.
+    #[must_use]
+    pub fn parts(&self, streams: &queue::Streams) -> ControlParts {
+        let (items, due) = self.subs.parts();
+        ControlParts {
+            inbuf: self.inbuf.clone(),
+            ready: self.ready,
+            eof: self.eof,
+            guard_depth: self.guard_depth,
+            retval: self.retval,
+            panes: self.panes.iter().map(|(p, o)| (*p, *o)).collect(),
+            windows: self.windows.iter().map(|(w, s)| (*w, *s)).collect(),
+            size: self.size,
+            subs: crate::control_subs::Subs::from_parts(items, due),
+            held: self.queue.held(streams),
+        }
+    }
+
+    /// A control client's state from [`Self::parts`]; its pane bytes go
+    /// back into `streams`.
+    #[must_use]
+    pub fn from_parts(p: ControlParts, streams: &mut queue::Streams) -> Self {
+        Self {
+            inbuf: p.inbuf,
+            ready: p.ready,
+            eof: p.eof,
+            guard_depth: p.guard_depth,
+            retval: p.retval,
+            panes: p.panes.into_iter().collect(),
+            windows: p.windows.into_iter().collect(),
+            size: p.size,
+            subs: p.subs,
+            queue: queue::Queue::from_held(p.held, streams),
+            ..Self::default()
+        }
+    }
+
     /// The client's size: what `refresh-client -C` set, else 80x24
     /// (server-client.c:299).
     #[must_use]

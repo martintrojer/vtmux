@@ -51,6 +51,8 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// output ([`Server::release_hidden_screens`]).
 const HIDDEN_VIEW_IDLE: Duration = Duration::from_secs(1);
 
+pub mod snapshot;
+
 /// A connected client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientId(pub usize);
@@ -172,6 +174,9 @@ pub(crate) struct Client {
     /// `c->title`: the last title written to the terminal, so an
     /// unchanged one is not written again.
     title: Option<String>,
+    /// The terminal's replies that changed its features, in order: a
+    /// snapshot replays them onto the terminal opened again (D27).
+    pub(crate) term_replies: Vec<snapshot::TermReply>,
 }
 
 impl Client {
@@ -227,6 +232,7 @@ impl Client {
             clipboard_query: None,
             reported: crate::term_queries::Reported::default(),
             title: None,
+            term_replies: Vec::new(),
             written: 0,
             pasting: false,
             mouse: crate::mouse::ClientMouse::default(),
@@ -2380,24 +2386,28 @@ impl Server {
                     // and tty_update_features redraws the client.
                     if let (true, Some(term)) = (sync, &mut c.term) {
                         std::rc::Rc::make_mut(term).sync_supported();
+                        c.term_replies.push(snapshot::TermReply::Sync);
                         self.update_features(id);
                     }
                 }
                 crate::input::Event::DeviceAttributes(params) => {
                     if let Some(term) = &mut c.term {
                         std::rc::Rc::make_mut(term).device_attributes(&params);
+                        c.term_replies.push(snapshot::TermReply::Da(params));
                     }
                     self.update_features(id);
                 }
                 crate::input::Event::DeviceAttributes2(first) => {
                     if let Some(term) = &mut c.term {
                         std::rc::Rc::make_mut(term).secondary_device_attributes(first);
+                        c.term_replies.push(snapshot::TermReply::Da2(first));
                     }
                     self.update_features(id);
                 }
                 crate::input::Event::ExtendedDeviceAttributes(text) => {
                     if let Some(term) = &mut c.term {
                         std::rc::Rc::make_mut(term).extended_device_attributes(&text);
+                        c.term_replies.push(snapshot::TermReply::Xtversion(text));
                     }
                     self.update_features(id);
                 }

@@ -3100,6 +3100,270 @@ impl CopyMode {
     }
 }
 
+/// `x` as a snapshot number.
+fn n64(x: usize) -> u64 {
+    x as u64
+}
+
+/// A snapshot number as a position; one that does not fit is the end.
+fn us(x: u64) -> usize {
+    usize::try_from(x).unwrap_or(usize::MAX)
+}
+
+fn pos_out((x, y): Pos) -> vtmux_snapshot::Pos {
+    vtmux_snapshot::Pos {
+        x: n64(x),
+        y: n64(y),
+    }
+}
+
+fn pos_in(p: &vtmux_snapshot::Pos) -> Pos {
+    (us(p.x), us(p.y))
+}
+
+/// `#{pane_key_mode}` as a snapshot number, and back.
+#[must_use]
+pub fn key_mode_out(k: vtmux_vt::KeyMode) -> u32 {
+    match k {
+        vtmux_vt::KeyMode::Standard => 0,
+        vtmux_vt::KeyMode::Extended1 => 1,
+        vtmux_vt::KeyMode::Extended2 => 2,
+    }
+}
+
+#[must_use]
+pub fn key_mode_in(n: u32) -> vtmux_vt::KeyMode {
+    match n {
+        1 => vtmux_vt::KeyMode::Extended1,
+        2 => vtmux_vt::KeyMode::Extended2,
+        _ => vtmux_vt::KeyMode::Standard,
+    }
+}
+
+impl CopyMode {
+    /// The mode as a snapshot carries it (D27): the frozen grid, the view,
+    /// the selection, the search and the jump. A mouse drag in progress is
+    /// not carried.
+    #[must_use]
+    #[expect(clippy::too_many_lines, reason = "one field after another")]
+    pub fn export(&self, now: Instant) -> vtmux_snapshot::CopyMode {
+        let (rows, hsize, hscrolled, gsx, gsy) = self.backing.export();
+        let mut rows = rows;
+        let screen = rows.split_off(hsize.min(rows.len()));
+        let history = if rows.is_empty() {
+            Vec::new()
+        } else {
+            vec![vtmux_snapshot::HistoryPage::from_rows(&rows, false)]
+        };
+        let u = |x: usize| u32::try_from(x).unwrap_or(u32::MAX);
+        vtmux_snapshot::CopyMode {
+            history,
+            rows: screen,
+            vi: self.modekeys_vi,
+            sx: u(self.sx),
+            sy: u(self.sy),
+            oy: n64(self.oy),
+            cx: u(self.cx),
+            cy: u(self.cy),
+            lastcx: u(self.lastcx),
+            lastsx: u(self.lastsx),
+            scroll_exit: self.scroll_exit,
+            hide_position: self.hide_position,
+            position_clip: self.position_clip.map(u),
+            line_numbers: u32::from(self.line_numbers),
+            prefix: self.prefix,
+            selecting: self.sel.is_some(),
+            selpos: pos_out(self.selpos),
+            endpos: pos_out(self.endpos),
+            line_select: match self.lineflag {
+                LineSel::None => 0,
+                LineSel::LeftRight => 1,
+                LineSel::RightLeft => 2,
+            },
+            rect: self.rectflag,
+            sel_mode: match self.selflag {
+                SelectionMode::Char => 0,
+                SelectionMode::Word => 1,
+                SelectionMode::Line => 2,
+            },
+            dpos: pos_out(self.dpos),
+            selr: pos_out(self.selr),
+            endselr: pos_out(self.endselr),
+            separators: self.separators.clone(),
+            search_text: self.search.string.clone(),
+            search_type: match self.search.kind {
+                SearchKind::Off => 0,
+                SearchKind::Up => 1,
+                SearchKind::Down => 2,
+            },
+            search_regex: self.search.regex,
+            pane_search: self.pane_search.clone(),
+            jump_type: match self.jump {
+                Jump::Off => 0,
+                Jump::Forward => 1,
+                Jump::Backward => 2,
+                Jump::ToForward => 3,
+                Jump::ToBackward => 4,
+            },
+            jump_char: self.jumpchar.clone(),
+            mark: pos_out(self.mark),
+            show_mark: self.show_mark,
+            scrolled: self.scrolled,
+            source_pane: None,
+            key_mode: key_mode_out(self.key_mode),
+            kill: self.kill,
+            hscrolled: n64(hscrolled),
+            grid_sx: u(gsx),
+            grid_sy: u(gsy),
+            recentre: match self.recentre {
+                Recentre::Top => 0,
+                Recentre::Middle => 1,
+                Recentre::Bottom => 2,
+            },
+            recentre_line: n64(self.recentre_line),
+            drag: match self.drag {
+                Drag::None => 0,
+                Drag::End => 1,
+                Drag::Start => 2,
+            },
+            sel: self.sel.map(|s| vtmux_snapshot::ScreenSel {
+                sx: n64(s.sx),
+                sy: n64(s.sy),
+                ex: n64(s.ex),
+                ey: n64(s.ey),
+                rectangle: s.rectangle,
+                vi: s.vi,
+                hidden: s.hidden,
+            }),
+            search_down: self.search.down,
+            search_origin: self
+                .search
+                .origin
+                .map(|(x, y, o)| (n64(x), (n64(y), n64(o)))),
+            search_all: self.search.all,
+            search_marks: self.search.marks.clone(),
+            search_generation: u32::from(self.search.generation),
+            search_count: self.search.count,
+            search_more: self.search.more,
+            search_timeout: self.search.timeout,
+            refresh_in_ms: self.refresh_due.map(|d| {
+                u64::try_from(d.saturating_duration_since(now).as_millis()).unwrap_or(u64::MAX)
+            }),
+            foreign: self.foreign,
+        }
+    }
+
+    /// A copy mode from [`Self::export`].
+    ///
+    /// # Errors
+    /// A history page that does not decode.
+    pub fn import(
+        r: &vtmux_snapshot::CopyMode,
+        now: Instant,
+    ) -> Result<Self, vtmux_snapshot::Error> {
+        let mut rows = Vec::new();
+        for page in &r.history {
+            page.each_row(|row| rows.push(row.clone()))?;
+        }
+        let hsize = rows.len();
+        rows.extend(r.rows.iter().cloned());
+        let backing = Grid::import(
+            &rows,
+            hsize,
+            us(r.hscrolled),
+            r.grid_sx as usize,
+            r.grid_sy as usize,
+        );
+        Ok(Self {
+            key_mode: key_mode_in(r.key_mode),
+            backing,
+            sx: r.sx as usize,
+            sy: r.sy as usize,
+            oy: us(r.oy),
+            cx: r.cx as usize,
+            cy: r.cy as usize,
+            lastcx: r.lastcx as usize,
+            lastsx: r.lastsx as usize,
+            scroll_exit: r.scroll_exit,
+            hide_position: r.hide_position,
+            position_clip: r.position_clip.map(|x| x as usize),
+            line_numbers: u8::try_from(r.line_numbers).unwrap_or(0),
+            recentre: match r.recentre {
+                0 => Recentre::Top,
+                2 => Recentre::Bottom,
+                _ => Recentre::Middle,
+            },
+            recentre_line: us(r.recentre_line),
+            prefix: r.prefix,
+            kill: r.kill,
+            modekeys_vi: r.vi,
+            sel: r.sel.as_ref().map(|s| ScreenSel {
+                sx: us(s.sx),
+                sy: us(s.sy),
+                ex: us(s.ex),
+                ey: us(s.ey),
+                rectangle: s.rectangle,
+                vi: s.vi,
+                hidden: s.hidden,
+            }),
+            selpos: pos_in(&r.selpos),
+            endpos: pos_in(&r.endpos),
+            drag: match r.drag {
+                1 => Drag::End,
+                2 => Drag::Start,
+                _ => Drag::None,
+            },
+            lineflag: match r.line_select {
+                1 => LineSel::LeftRight,
+                2 => LineSel::RightLeft,
+                _ => LineSel::None,
+            },
+            rectflag: r.rect,
+            selflag: match r.sel_mode {
+                1 => SelectionMode::Word,
+                2 => SelectionMode::Line,
+                _ => SelectionMode::Char,
+            },
+            dpos: pos_in(&r.dpos),
+            selr: pos_in(&r.selr),
+            endselr: pos_in(&r.endselr),
+            separators: r.separators.clone(),
+            search: Search {
+                kind: match r.search_type {
+                    1 => SearchKind::Up,
+                    2 => SearchKind::Down,
+                    _ => SearchKind::Off,
+                },
+                regex: r.search_regex,
+                string: r.search_text.clone(),
+                down: r.search_down,
+                origin: r.search_origin.map(|(x, (y, o))| (us(x), us(y), us(o))),
+                all: r.search_all,
+                marks: r.search_marks.clone(),
+                generation: u8::try_from(r.search_generation).unwrap_or(u8::MAX),
+                count: r.search_count,
+                more: r.search_more,
+                timeout: r.search_timeout,
+            },
+            pane_search: r.pane_search.clone(),
+            jump: match r.jump_type {
+                1 => Jump::Forward,
+                2 => Jump::Backward,
+                3 => Jump::ToForward,
+                4 => Jump::ToBackward,
+                _ => Jump::Off,
+            },
+            jumpchar: r.jump_char.clone(),
+            mark: pos_in(&r.mark),
+            show_mark: r.show_mark,
+            foreign: r.foreign,
+            refresh_due: r.refresh_in_ms.map(|ms| now + Duration::from_millis(ms)),
+            drag_due: None,
+            scrolled: r.scrolled,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

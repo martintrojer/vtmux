@@ -29,6 +29,7 @@
 
 mod customize;
 pub mod monitor;
+mod parts;
 mod set;
 mod show;
 mod table;
@@ -42,6 +43,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 pub use customize::{default_text, is_changed};
+pub use parts::{StoreParts, def_of};
 pub use set::{SetOutcome, apply_set};
 pub use show::apply_show;
 pub use table::{ArrayKey, DefaultValue, Kind, Level, OptionDef, Scope, StringCheck, find, table};

@@ -26,6 +26,12 @@ pub enum Access {
 pub struct Acl(BTreeMap<Subject, bool>);
 
 impl Acl {
+    /// A list of these entries (a snapshot's, D27).
+    #[must_use]
+    pub fn from_entries(entries: impl IntoIterator<Item = (Subject, bool)>) -> Self {
+        Self(entries.into_iter().collect())
+    }
+
     /// `server_acl_init`: root and `owner`, writable.
     #[must_use]
     pub fn new(owner: u32) -> Self {

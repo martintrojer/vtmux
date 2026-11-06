@@ -428,6 +428,20 @@ impl Default for Model {
 }
 
 impl Model {
+    /// The model's own counters, for a snapshot (D27): the activity
+    /// stamp, `next_active_point` and the winlink attachment stamp.
+    #[must_use]
+    pub fn counters(&self) -> (u64, u64, u64) {
+        (self.activity, self.active_points, self.link_stamp)
+    }
+
+    /// Put [`Self::counters`] back.
+    pub fn set_counters(&mut self, (activity, active_points, link_stamp): (u64, u64, u64)) {
+        self.activity = activity;
+        self.active_points = active_points;
+        self.link_stamp = link_stamp;
+    }
+
     /// Ask for a status redraw ([`Redraw`]).
     pub fn redraw(&mut self, r: Redraw) {
         if !self.redraws.contains(&r) {
@@ -2225,6 +2239,54 @@ pub mod rb {
     }
 
     impl Tree {
+        /// The tree's shape for a snapshot (D27): its keys in preorder,
+        /// each with whether its node is red.
+        #[must_use]
+        pub fn shape(&self) -> Vec<(u32, bool)> {
+            let mut out = Vec::new();
+            let mut stack: Vec<usize> = self.root.into_iter().collect();
+            while let Some(a) = stack.pop() {
+                let n = &self.nodes[a];
+                out.push((n.key, n.colour == Colour::Red));
+                stack.extend(n.right);
+                stack.extend(n.left);
+            }
+            out
+        }
+
+        /// A tree of the shape [`Self::shape`] gave.
+        #[must_use]
+        pub fn from_shape(shape: &[(u32, bool)]) -> Self {
+            fn build(
+                t: &mut Tree,
+                shape: &[(u32, bool)],
+                at: &mut usize,
+                parent: Option<usize>,
+                below: Option<u32>,
+            ) -> Option<usize> {
+                let &(key, red) = shape.get(*at)?;
+                if below.is_some_and(|b| key >= b) {
+                    return None;
+                }
+                *at += 1;
+                let n = t.nodes.len();
+                t.nodes.push(Node {
+                    key,
+                    colour: if red { Colour::Red } else { Colour::Black },
+                    left: None,
+                    right: None,
+                    parent,
+                });
+                t.nodes[n].left = build(t, shape, at, Some(n), Some(key));
+                t.nodes[n].right = build(t, shape, at, Some(n), below);
+                Some(n)
+            }
+            let mut t = Tree::default();
+            let mut at = 0;
+            t.root = build(&mut t, shape, &mut at, None, None);
+            t
+        }
+
         fn root_key(&self) -> Option<u32> {
             self.root.map(|r| self.nodes[r].key)
         }

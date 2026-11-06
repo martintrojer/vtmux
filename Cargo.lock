@@ -742,6 +742,7 @@ dependencies = [
  "signal-hook-mio",
  "unicode-width",
  "vtmux-core",
+ "vtmux-snapshot",
  "vtmux-vt",
 ]
 

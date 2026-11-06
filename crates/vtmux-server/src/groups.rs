@@ -23,6 +23,19 @@ pub struct Groups {
 }
 
 impl Groups {
+    /// Every group and its members in order, by name.
+    pub fn all(&self) -> impl Iterator<Item = (&str, &[SessionId])> {
+        self.by_name.iter().map(|(n, m)| (n.as_str(), m.as_slice()))
+    }
+
+    /// Groups from [`Self::all`] (a snapshot's, D27).
+    #[must_use]
+    pub fn from_parts(groups: impl IntoIterator<Item = (String, Vec<SessionId>)>) -> Self {
+        Self {
+            by_name: groups.into_iter().collect(),
+        }
+    }
+
     /// `session_group_contains`: the name of `s`'s group.
     #[must_use]
     pub fn name_of(&self, s: SessionId) -> Option<&str> {

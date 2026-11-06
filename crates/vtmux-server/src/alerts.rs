@@ -34,6 +34,26 @@ pub struct WindowAlerts {
     deadline: Option<Instant>,
 }
 
+impl WindowAlerts {
+    /// When the silence timer fires, if it runs.
+    #[must_use]
+    pub fn silence_deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    /// The state a snapshot carries (D27): the flags and the silence
+    /// timer. The window is not queued: the alerts queued before a
+    /// snapshot ran first.
+    #[must_use]
+    pub fn restored(flags: u8, deadline: Option<Instant>) -> Self {
+        Self {
+            flags,
+            queued: false,
+            deadline,
+        }
+    }
+}
+
 /// Which alert fired.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {

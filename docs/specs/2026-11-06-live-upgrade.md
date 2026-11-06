@@ -125,7 +125,7 @@ Out: automatic upgrade on a newer client (decision 3, later option); restoring p
 
 ## Open questions
 
-- Whether tree modes, menus, prompts and popups survive an upgrade or are closed by it (the builder decides per mode in phase 1 and records it; popups' processes always survive since popups are ptys).
+- ~~Whether tree modes, menus, prompts and popups survive an upgrade or are closed by it~~ Decided in phase 1 (`lu_model_snapshot`, `crates/vtmux-server/src/server/snapshot.rs`): **carried** are copy mode (frozen grid with line times, OSC 133 marks and hyperlinks, view, selection, search, jump, mark) and clock mode, and popups (geometry, title, styles, close rules, the pty and its process; the terminal comes with pane terminal state). **Closed** are view mode (its backing terminal is pane terminal state; `PaneMode::View` is kept in the format for when that is carried), the tree modes (`choose-tree`, `choose-buffer`, `choose-client`, `customize-mode`, `switch-mode`), `display-panes`, every prompt (status line, `command-prompt -P` pane prompts, a mode's own prompt), menus, and a popup editing a buffer or option through an editor: they hold callbacks into commands in flight and re-opening them is cheap. A closed mode leaves the modes under it on the pane's stack.
 - The real upgrade time at 10 panes x 100k lines: the first bench sets whether a raw-page fast path is needed (decision 11).
 
 ## Implementation checklist

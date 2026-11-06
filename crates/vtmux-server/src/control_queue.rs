@@ -156,7 +156,60 @@ pub struct Queue {
     line_bytes: usize,
 }
 
+/// One thing a queue holds, as a snapshot carries it (D27): a line, or a
+/// block of pane output with its bytes and when they were read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Held {
+    Line(Vec<u8>),
+    Output {
+        pane: PaneId,
+        data: Vec<u8>,
+        read: Instant,
+    },
+}
+
 impl Queue {
+    /// Everything held, in the order it goes out, the pane bytes read
+    /// from `streams`.
+    #[must_use]
+    pub fn held(&self, streams: &Streams) -> Vec<Held> {
+        let mut at: BTreeMap<PaneId, usize> = BTreeMap::new();
+        self.entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::Line(line) => Some(Held::Line(line.clone())),
+                Entry::Output(p) => {
+                    let i = at.entry(*p).or_default();
+                    let block = self.lanes.get(p)?.get(*i)?;
+                    *i += 1;
+                    let len = usize::try_from(block.end - block.start).unwrap_or(usize::MAX);
+                    Some(Held::Output {
+                        pane: *p,
+                        data: streams.read(*p, block.start, len),
+                        read: block.read,
+                    })
+                }
+            })
+            .collect()
+    }
+
+    /// A queue of what [`Self::held`] gave, its pane bytes kept in
+    /// `streams` again.
+    #[must_use]
+    pub fn from_held(held: Vec<Held>, streams: &mut Streams) -> Self {
+        let mut q = Self::default();
+        for h in held {
+            match h {
+                Held::Line(line) => q.push_line(line),
+                Held::Output { pane, data, read } => {
+                    let (start, end) = streams.append(pane, &data);
+                    q.push_output(pane, start, end, read);
+                }
+            }
+        }
+        q
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
