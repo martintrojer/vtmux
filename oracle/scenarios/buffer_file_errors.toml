@@ -4,7 +4,7 @@ name = "buffer_file_errors"
 # CMD_RETURN_WAIT and the done callback calls cmdq_error, so a control
 # client sees %end then the message. The exit status is still 1.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
   { run = ["set-buffer", "-b", "m", "data"] },
   { control = { argv = ["attach", "-t", "a"], id = "c1" } },
   { control_send = { id = "c1", line = "save-buffer -b m /nonexistent/dir/f" } },

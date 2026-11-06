@@ -6,9 +6,9 @@ name = "hooks_layout_close"
 # and the target again (cmd-join-pane.c:535-536). A one-pane window breaking
 # out is relinked, not closed, and fires nothing.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
-  { run = ["splitw", "-t", "a:0", "cat"] },
-  { run = ["splitw", "-t", "a:0", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["splitw", "-t", "a:0", "cat", "-"] },
+  { run = ["splitw", "-t", "a:0", "cat", "-"] },
   { run = ["set-hook", "-g", "window-layout-changed", "set -agF @n '|#{hook_window}'"] },
   { run = ["set", "-g", "@n", ""] },
   { run = ["breakp", "-d", "-s", "a:0.2"] },
@@ -18,7 +18,7 @@ steps = [
   { run = ["show", "-gv", "@n"] },
   { run = ["set", "-g", "@n", ""] },
   { run = ["breakp", "-d", "-s", "a:0.1"] },
-  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:1", "cat", "-"] },
   { run = ["set", "-g", "@n", ""] },
   { run = ["joinp", "-d", "-s", "a:1.1", "-t", "a:0"] },
   { run = ["show", "-gv", "@n"] },

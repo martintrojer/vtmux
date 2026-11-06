@@ -4,7 +4,7 @@ size = [80, 24]
 # cmd-load-buffer.c, file.c): -a, `-` to stdout, formats in the path,
 # missing files, directories, empty files.
 steps = [
-  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["new", "-d", "-s", "a", "cat", "-"] },
   { run = ["set-buffer", "-b", "b", "x\ny\\z\u0001\t"] },
   { run = ["save-buffer", "-b", "b", "out"] },
   { run = ["save-buffer", "-a", "-b", "b", "out"] },

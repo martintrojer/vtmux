@@ -15,12 +15,12 @@
 name = "menu_mouse_stayopen"
 size = [60, 20]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "mouse", "on"] },
   { run = ["set", "-g", "pane-border-status", "top"] },
   { run = ["select-pane", "-t", "a", "-T", "p0"] },
-  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.1", "-T", "p1"] },
   { run = ["select-pane", "-t", "a:0.0"] },
   { attach = { session = "a" } },

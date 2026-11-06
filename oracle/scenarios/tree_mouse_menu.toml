@@ -14,12 +14,12 @@
 name = "tree_mouse_menu"
 size = [60, 24]
 steps = [
-  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "60", "-y", "23", "cat -"] },
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "60", "-y", "23", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["set", "-g", "mouse", "on"] },
-  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "cat -"] },
-  { run = ["new", "-d", "-s", "bbb", "-n", "x0", "-x", "60", "-y", "23", "cat -"] },
+  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "cat", "-"] },
+  { run = ["new", "-d", "-s", "bbb", "-n", "x0", "-x", "60", "-y", "23", "cat", "-"] },
   { run = ["select-pane", "-t", "%0", "-T", "t0"] },
   { run = ["select-pane", "-t", "%1", "-T", "t1"] },
   { run = ["select-pane", "-t", "%2", "-T", "t2"] },

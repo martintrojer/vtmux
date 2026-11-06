@@ -7,13 +7,13 @@
 name = "floating_break_move"
 size = [80, 24]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["select-pane", "-t", "a", "-T", "p0"] },
-  { run = ["splitw", "-d", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-d", "-h", "-t", "a", "cat", "-"] },
   { run = ["select-pane", "-t", "%1", "-T", "p1"] },
-  { run = ["splitw", "-d", "-v", "-t", "%1", "cat"] },
+  { run = ["splitw", "-d", "-v", "-t", "%1", "cat", "-"] },
   { run = ["select-pane", "-t", "%2", "-T", "p2"] },
   { attach = { session = "a" } },
   { run = ["break-pane", "-W", "-s", "%1"] },

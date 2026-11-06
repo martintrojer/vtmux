@@ -1,7 +1,7 @@
 name = "winlink_rename"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat", "-"] },
   { run = ["ls", "-F", "#{session_id} #{session_name} #{session_windows}"] },
   { run = ["rename", "-t", "a", "x"] },
   { run = ["ls", "-F", "#{session_id} #{session_name} #{session_windows}"] },

@@ -55,7 +55,7 @@ steps = [
   { run = ["display", "-p", "-t", "a", "[#{pane_in_mode}] [#{scroll_position}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
   { run = ["send-keys", "-t", "a", "-X", "cancel"] },
   { run = ["copy-mode", "-k", "-t", "a"] },
-  { run = ["splitw", "-d", "-t", "a", "cat"] },
+  { run = ["splitw", "-d", "-t", "a", "cat", "-"] },
   { run = ["send-keys", "-t", "%0", "-X", "cancel"] },
   { run = ["list-panes", "-t", "a", "-F", "#{pane_id}"] },
 ]

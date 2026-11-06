@@ -8,7 +8,7 @@
 name = "view_run_shell"
 size = [50, 12]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "11", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "11", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },

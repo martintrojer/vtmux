@@ -7,10 +7,10 @@
 name = "popup_positions"
 size = [40, 12]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
-  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
   { run = ["bind", "-n", "M-a", "display-popup", "-w", "10", "-h", "4", "printf C; exec cat"] },
   { run = ["bind", "-n", "M-b", "display-popup", "-w", "10", "-h", "4", "-x", "3", "-y", "7", "printf N; exec cat"] },
   { run = ["bind", "-n", "M-c", "display-popup", "-w", "10", "-h", "4", "-x", "R", "-y", "P", "printf RP; exec cat"] },

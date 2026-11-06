@@ -1,7 +1,7 @@
 name = "pd_fill"
 size = [50, 14]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "13", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "13", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["bind", "a", "display-popup", "-B", "-w", "4", "-h", "2", "tmux wait-for -S up; exec cat"] },

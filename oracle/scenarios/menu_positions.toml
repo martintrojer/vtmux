@@ -10,13 +10,13 @@
 name = "menu_positions"
 size = [40, 12]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["select-pane", "-t", "a", "-T", "p0"] },
-  { run = ["neww", "-d", "-t", "a:1", "-n", "x", "cat"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "x", "cat", "-"] },
   { run = ["select-pane", "-t", "a:1.0", "-T", "p2"] },
-  { run = ["splitw", "-h", "-t", "a:0", "cat"] },
+  { run = ["splitw", "-h", "-t", "a:0", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.1", "-T", "p1"] },
   { attach = { session = "a" } },
   { settle = { quiet_ms = 1000 } },

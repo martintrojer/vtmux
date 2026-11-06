@@ -8,10 +8,10 @@ size = [40, 6]
 # #{client_termname}, #{client_session}; a #(job) string is left out (it is async); turning it
 # off leaves the last title. The raw OSC bytes stay in attach.rs.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat", "-"] },
   { run = ["set", "-g", "status-right", ""] },
   { run = ["select-pane", "-t", "a", "-T", "p"] },
-  { run = ["new-session", "-d", "-s", "b", "-n", "bw", "cat"] },
+  { run = ["new-session", "-d", "-s", "b", "-n", "bw", "cat", "-"] },
   { attach = { session = "a" } },
   { settle = {} },
   { title = {} },
@@ -24,7 +24,7 @@ steps = [
   { run = ["rename-window", "neww"] },
   { settle = { react = true } },
   { title = {} },
-  { run = ["new-window", "-d", "-n", "other", "cat"] },
+  { run = ["new-window", "-d", "-n", "other", "cat", "-"] },
   { run = ["select-pane", "-t", "a:other", "-T", "q"] },
   { run = ["select-window", "-t", ":other"] },
   { settle = { react = true } },

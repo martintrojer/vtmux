@@ -8,7 +8,7 @@ name = "shell_control_queue"
 # guard. -b commands go to the end of the client's queue with guard
 # flags 0 (cmdq_get_command with a new state).
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
   { control = { argv = ["attach", "-t", "a"], id = "c1" } },
   { control_send = { id = "c1", line = "run 'echo x; exit 2' ; display -p next" } },
   { control_wait = { id = "c1", until = "next" } },

@@ -1,9 +1,9 @@
 name = "status_draw_styles"
 size = [50, 6]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
-  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat"] },
-  { run = ["neww", "-d", "-t", "a", "-n", "y", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "y", "cat", "-"] },
   { run = ["set", "-g", "status-left", "#[fg=red,bg=white,bold]LEFT#[default] #[align=right]R#[fg=blue]!"] },
   { run = ["set", "-g", "status-left-length", "30"] },
   { run = ["set", "-g", "status-left-style", "underscore"] },

@@ -21,7 +21,7 @@ tmux.c:557-571), `HOME` and `TMUX_TMPDIR` private temp dirs, `SHELL=/bin/sh`, `P
 under `/tmp`, never `$TMPDIR`, and the runner refuses a socket path of 100 bytes or more (tmux fails at
 `sizeof sun_path`, client.c:114-116; 104 on macOS). A `tmux`
 symlink to the binary under test is first on `PATH`, so pane programs can `tmux wait-for -S chan`.
-Pin pane programs (`cat`, or `sh -c '...; exec cat'`); name windows (`-n w`) when a program's name would
+Pin pane programs as separate arguments, two words at least (`cat`, `-`; or `sh`, `-c`, `...; exec cat`): a one-word command runs as `$SHELL -c word`, and under dash (Ubuntu's `/bin/sh`) the shell stays in front, so `#{pane_current_command}` is `sh`. `cargo test -p xtask` fails on a scenario that starts a pane (`new`, `neww`, `splitw`, `respawn-pane`, `new-pane`, ...) with one word, in `run`, `control` and `control_send`; name windows (`-n w`) when a program's name would
 otherwise race a `%window-renamed`.
 
 ## Adding a scenario

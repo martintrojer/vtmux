@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -49,7 +50,7 @@
       {
         "control_send": {
           "id": "c1",
-          "line": "new-window -d -n two cat"
+          "line": "new-window -d -n two cat -"
         }
       },
       {

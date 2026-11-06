@@ -1,7 +1,7 @@
 name = "attach_mouse_ctrl_drag_end"
 size = [40, 10]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
   { run = ["set", "-g", "status-right", ""] },

@@ -1,6 +1,6 @@
 name = "options_formats"
 steps = [
-  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["new", "-d", "-s", "a", "cat", "-"] },
   { run = ["set", "-g", "@x", "value"] },
   { run = ["set", "-g", "@fmt", "#{@x}:#S"] },
   { run = ["display", "-p", "#{@x}|#{E:@fmt}|#{status-left}"] },

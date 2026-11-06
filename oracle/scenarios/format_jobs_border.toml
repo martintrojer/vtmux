@@ -1,7 +1,7 @@
 name = "format_jobs_border"
 size = [40, 8]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "8", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "8", "cat", "-"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },
   { run = ["run-shell", 'echo one > "$HOME/f"'] },
   { run = ["set", "-g", "status-interval", "0"] },

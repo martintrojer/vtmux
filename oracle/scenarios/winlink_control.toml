@@ -1,8 +1,8 @@
 name = "winlink_control"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
-  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat", "-"] },
   { control = { argv = ["attach", "-t", "b"], id = "c1" } },
   { control_send = { id = "c1", line = "linkw -d -s a:1 -t b:5" } },
   { control_wait = { id = "c1", until = "%end" } },

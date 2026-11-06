@@ -13,7 +13,7 @@
 name = "popup_close"
 size = [40, 12]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["bind", "-n", "M-a", "display-popup", "-w", "20", "-h", "5", "-x", "1", "-y", "5", "printf DONE"] },

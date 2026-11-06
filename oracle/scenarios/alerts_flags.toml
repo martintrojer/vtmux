@@ -1,6 +1,6 @@
 name = "alerts_flags"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
   { run = ["neww", "-d", "-n", "x", "sh", "-c", "while read x; do printf x; done"] },
   { run = ["neww", "-d", "-n", "y", "sh", "-c", "while read x; do printf '\\007'; done"] },
   { run = ["set", "-g", "monitor-activity", "on"] },

@@ -7,7 +7,7 @@
 name = "menu_config_styles"
 size = [60, 16]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "15", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "15", "cat", "-"] },
   { run = ["set-buffer", "-b", "c", "set -g status-right R\nset -s escape-time 0\nset -g @color_text '#cdd6f4'\nset -g @color_base '#1e1e2e'\nset -g @color_crust '#11111b'\nset -g @color_sky '#89dceb'\nset -g menu-style 'fg=#{@color_text},bg=#{@color_base}'\nset -g menu-selected-style 'fg=#{@color_crust},bg=#{@color_sky},bold'\n"] },
   { run = ["save-buffer", "-b", "c", "menu.conf"] },
   { run = ["source-file", "menu.conf"] },

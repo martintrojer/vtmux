@@ -6,7 +6,7 @@ size = [40, 10]
 # window-style's; select-pane -P sets the pane's own. Blank cells and the
 # cleared rest of a row take the background too.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },
   { run = ["set", "-g", "status-right", "x"] },
   { attach = { session = "a" } },
@@ -14,7 +14,7 @@ steps = [
   { run = ["setw", "-t", "a", "window-style", "bg=blue"] },
   { settle = { react = true } },
   { screen = {} },
-  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
   { run = ["select-pane", "-t", "%1", "-T", "t"] },
   { run = ["setw", "-t", "a", "window-active-style", "bg=red,fg=yellow"] },
   { run = ["selectp", "-t", "%0"] },

@@ -6,7 +6,7 @@ name = "pipe_pane_attached"
 # format-expanded with the binding's pane.
 size = [60, 12]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "12", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "12", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["selectp", "-t", "a:w.0", "-T", "t0"] },
   { run = ["bind", "P", "pipep", "-o", "cat >/dev/null"] },

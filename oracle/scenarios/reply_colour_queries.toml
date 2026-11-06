@@ -9,7 +9,7 @@ size = [60, 14]
 # background. Each reply is read raw and printed through `cat -v`, one per
 # line; a query with no answer prints an empty line after the 1 s timeout.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "14", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "14", "cat", "-"] },
   { run = ["set", "-g", "window-style", "fg=#102030,bg=white"] },
   { run = ["set", "-g", "pane-colours[5]", "#0a0b0c"] },
   { run = ["set", "-g", "cursor-colour", "#a0b0c0"] },

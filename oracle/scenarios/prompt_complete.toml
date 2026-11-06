@@ -7,7 +7,7 @@
 name = "prompt_complete"
 size = [60, 6]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "command-alias[10]", "zzz=display-message"] },
   { run = ["set", "-s", "command-alias[11]", "zzy=display-message"] },

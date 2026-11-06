@@ -1,7 +1,7 @@
 name = "status_msg_lines"
 size = [40, 8]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },
   { run = ["set", "-g", "status-format[0]", "zero"] },
   { run = ["set", "-g", "status-format[1]", "one"] },

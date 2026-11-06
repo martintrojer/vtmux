@@ -10,6 +10,8 @@
 //! All take `--only <glob>`; `*` and `?` match.
 
 mod normalize;
+#[cfg(test)]
+mod pane_cmd;
 mod runner;
 mod scenario;
 

@@ -3,15 +3,17 @@
 # builds the tree again (server_client_check_modes), then sets TTY_HAVEDA. A second reply
 # is keys (tty_keys_next, tty-keys.c:924-933): M-[, then `?` starts a search and the rest
 # is typed into it; the tree is not built again, so the killed pane's row stays.
+# The panes run `cat -` as two arguments: execvp'd, so the tree's #{pane_current_command} is `cat` at
+# once; one word (or one string `"cat -"`) runs `$SHELL -c ...`, which stays `sh` under dash (spawn.c spawn_pane).
 name = "tree_da_redraw_once"
 size = [80, 24]
 steps = [
-  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "80", "-y", "23", "cat -"] },
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "80", "-y", "23", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "status-interval", "0"] },
-  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "cat -"] },
-  { run = ["splitw", "-d", "-t", "aaa:1", "cat -"] },
-  { run = ["splitw", "-d", "-t", "aaa:1", "cat -"] },
+  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "aaa:1", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "aaa:1", "cat", "-"] },
   { run = ["select-pane", "-t", "%0", "-T", "t0", ";", "select-pane", "-t", "%1", "-T", "t1", ";", "select-pane", "-t", "%2", "-T", "t2", ";", "select-pane", "-t", "%3", "-T", "t3"] },
   { attach = { session = "aaa" } },
   { run = ["choose-tree", "-t", "aaa:0.0"] },

@@ -1,13 +1,13 @@
 name = "wincmd_rotate"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat", "-"] },
   # One pane: nothing moves.
   { run = ["rotatew", "-t", "a"] },
   { run = ["lsp", "-t", "a", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
-  { run = ["splitw", "-d", "-t", "a", "cat"] },
-  { run = ["splitw", "-d", "-t", "a", "-h", "cat"] },
-  { run = ["splitw", "-d", "-t", "a:0.0", "-l", "3", "cat"] },
+  { run = ["splitw", "-d", "-t", "a", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a", "-h", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:0.0", "-l", "3", "cat", "-"] },
   { run = ["lsp", "-t", "a", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
   { run = ["display", "-p", "-t", "a", "#{window_layout}"] },
   { run = ["rotatew", "-t", "a"] },

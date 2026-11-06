@@ -5,9 +5,9 @@
 name = "target_client_name"
 size = [60, 20]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat -"] },
-  { run = ["new", "-d", "-s", "b", "-n", "v", "-x", "60", "-y", "19", "cat -"] },
-  { run = ["splitw", "-h", "-t", "b", "cat -"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "v", "-x", "60", "-y", "19", "cat", "-"] },
+  { run = ["splitw", "-h", "-t", "b", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["select-pane", "-t", "%0", "-T", "t0"] },
   { run = ["select-pane", "-t", "%1", "-T", "t1"] },

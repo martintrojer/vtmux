@@ -1,7 +1,7 @@
 name = "status_msg_keys"
 size = [40, 6]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },
   { run = ["bind", "-n", "F2", "select-window", "-t", ":9"] },
   { run = ["set", "-g", "status-right", "R"] },

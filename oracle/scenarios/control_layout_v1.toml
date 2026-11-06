@@ -5,8 +5,8 @@ name = "control_layout_v1"
 # describe. A v1 layout given to select-layout fires window-layout-changed
 # a second time (layout-custom.c:717-721), a v2 one does not.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
-  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
   { control = { argv = ["display-message", "-p", "-t", "a:w", "#{window_layout} #{window_visible_layout}"], id = "d1" } },
   { control_close = { id = "d1" } },
   { run = ["display-message", "-p", "-t", "a:w", "#{window_layout}"] },

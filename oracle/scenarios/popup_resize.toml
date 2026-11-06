@@ -7,7 +7,7 @@
 name = "popup_resize"
 size = [60, 16]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "15", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "15", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["bind", "-n", "M-a", "display-popup", "-w", "30", "-h", "8", "-x", "25", "-y", "6", "sh", "-c", "trap 'printf \"\\n%s\" \"$(stty size)\"' WINCH; printf \"%s\" \"$(stty size)\"; sleep 100000 & while :; do wait; done"] },

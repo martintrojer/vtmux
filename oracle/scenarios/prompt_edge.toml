@@ -5,7 +5,7 @@
 name = "prompt_edge"
 size = [30, 6]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "5", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "5", "cat", "-"] },
   { run = ["bind", "-n", "M-a", "command-prompt", "-p", "this is a very long prompt label that overflows", "set -g @a '%%'"] },
   { run = ["bind", "-n", "M-b", "command-prompt", "-p", "#[fg=red]red#[default] #{window_name}", "set -g @b '%%'"] },
   { run = ["bind", "-n", "M-c", "command-prompt", "-p", "c", "set -g @c '%%'", ";", "set", "-g", "@after", "%%"] },

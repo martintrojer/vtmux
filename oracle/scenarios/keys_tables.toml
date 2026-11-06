@@ -1,7 +1,7 @@
 name = "keys_tables"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "w", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "cat", "-"] },
   { run = ["bind", "-n", "M-x", "select-window", "-t", ":9"] },
   { run = ["bind", "-n", "M-y", "display", "-p", "hello"] },
   { run = ["bind", "-N", "rep", "-r", "R", "display", "-p", "rep"] },

@@ -7,15 +7,15 @@
 name = "panes_mode_floating"
 size = [60, 20]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["set", "-g", "display-panes-format", "F#{pane_index}:#{pane_unzoomed_width}x#{pane_unzoomed_height}"] },
   { run = ["select-pane", "-t", "%0", "-T", "p0"] },
-  { run = ["splitw", "-dh", "-t", "%0", "cat"] },
+  { run = ["splitw", "-dh", "-t", "%0", "cat", "-"] },
   { run = ["select-pane", "-t", "%1", "-T", "p1"] },
-  { run = ["new-pane", "-d", "-B", "none", "-T", "f2", "-x", "24", "-y", "8", "-X", "6", "-Y", "3", "cat"] },
-  { run = ["new-pane", "-d", "-T", "f3", "-x", "20", "-y", "7", "-X", "26", "-Y", "9", "cat"] },
+  { run = ["new-pane", "-d", "-B", "none", "-T", "f2", "-x", "24", "-y", "8", "-X", "6", "-Y", "3", "cat", "-"] },
+  { run = ["new-pane", "-d", "-T", "f3", "-x", "20", "-y", "7", "-X", "26", "-Y", "9", "cat", "-"] },
   { attach = { session = "a" } },
   { run = ["display-panes", "-Z", "-d", "0", "-t", "%0"] },
   { settle = { react = true } },

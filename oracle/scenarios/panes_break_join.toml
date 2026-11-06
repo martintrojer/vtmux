@@ -1,9 +1,9 @@
 name = "panes_break_join"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat"] },
-  { run = ["splitw", "-t", "a", "-d", "cat"] },
-  { run = ["splitw", "-t", "a", "-d", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "bw", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["splitw", "-t", "a", "-d", "cat", "-"] },
+  { run = ["splitw", "-t", "a", "-d", "cat", "-"] },
   { run = ["breakp", "-t", "a:0", "-s", "a:0.1"] },
   { run = ["breakp", "-d", "-s", "a:0.1", "-t", "a:5", "-n", "five", "-P"] },
   { run = ["breakp", "-s", "a:5", "-t", "a:7", "-P", "-F", "#{window_id} #{pane_id} #{window_index}"] },

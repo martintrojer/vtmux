@@ -8,17 +8,17 @@
 name = "switch_mode_cli"
 size = [60, 16]
 steps = [
-  { run = ["new", "-d", "-s", "alpha", "-n", "main", "-x", "60", "-y", "15", "cat"] },
+  { run = ["new", "-d", "-s", "alpha", "-n", "main", "-x", "60", "-y", "15", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["select-pane", "-t", "alpha", "-T", "p0"] },
-  { run = ["splitw", "-d", "-h", "-t", "alpha:main", "cat"] },
+  { run = ["splitw", "-d", "-h", "-t", "alpha:main", "cat", "-"] },
   { run = ["select-pane", "-t", "alpha:main.1", "-T", "p1"] },
-  { run = ["neww", "-d", "-t", "alpha:", "-n", "pick-one", "cat"] },
+  { run = ["neww", "-d", "-t", "alpha:", "-n", "pick-one", "cat", "-"] },
   { run = ["select-pane", "-t", "alpha:1", "-T", "p2"] },
-  { run = ["new", "-d", "-s", "bravo", "-n", "pick-two", "-x", "60", "-y", "15", "cat"] },
+  { run = ["new", "-d", "-s", "bravo", "-n", "pick-two", "-x", "60", "-y", "15", "cat", "-"] },
   { run = ["select-pane", "-t", "bravo", "-T", "p3"] },
-  { run = ["new", "-d", "-s", "charlie", "-n", "last", "-x", "60", "-y", "15", "cat"] },
+  { run = ["new", "-d", "-s", "charlie", "-n", "last", "-x", "60", "-y", "15", "cat", "-"] },
   { run = ["select-pane", "-t", "charlie", "-T", "p4"] },
   { run = ["set", "-g", "@picked", ""] },
   { attach = { session = "alpha" } },

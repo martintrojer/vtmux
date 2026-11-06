@@ -1,10 +1,10 @@
 name = "panes_mode_sendkeys_hex"
 size = [60, 20]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat", "-"] },
   { run = ["set", "-g", "status-right", ""] },
-  { run = ["splitw", "-h", "-t", "a", "cat"] },
-  { run = ["splitw", "-v", "-t", "%1", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
+  { run = ["splitw", "-v", "-t", "%1", "cat", "-"] },
   { attach = { session = "a" } },
   { run = ["set", "-g", "@log", ""] },
   { run = ["set-hook", "-g", "pane-mode-changed", "set -agF @log '[#{hook_pane}:#{pane_mode}]'"] },

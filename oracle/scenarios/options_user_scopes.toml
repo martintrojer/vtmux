@@ -1,6 +1,6 @@
 name = "options_user_scopes"
 steps = [
-  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["new", "-d", "-s", "a", "cat", "-"] },
   { run = ["set-option", "-s", "@x", "server"] },
   { run = ["set", "-g", "@x", "global session"] },
   { run = ["setw", "-g", "@x", "global window"] },

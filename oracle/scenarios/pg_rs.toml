@@ -1,7 +1,7 @@
 name = "pg_rs"
 size = [50, 14]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "13", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "13", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["bind", "b", "command-prompt", "-p", "ask", "display-message %%"] },

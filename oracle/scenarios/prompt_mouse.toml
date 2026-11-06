@@ -9,7 +9,7 @@
 name = "prompt_mouse"
 size = [60, 6]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "5", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "mouse", "on"] },

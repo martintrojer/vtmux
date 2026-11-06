@@ -1,14 +1,14 @@
 # split-window -T (cmd-split-window.c:264-275): pane-title-changed fires for the new pane after pane-created and window-layout-changed, with the expanded title, whether or not it differs from the one before.
 name = "split_title_hook"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.0", "-T", "t0"] },
   { run = ["set", "-g", "@log", ""] },
   { run = ["set-hook", "-g", "pane-title-changed", "set -gaF @log '[title #{hook_pane} #{hook_new_title} #{pane_title}]'"] },
   { run = ["set-hook", "-g", "pane-created", "set -gaF @log '[created #{hook_pane}]'"] },
   { run = ["set-hook", "-g", "window-layout-changed", "set -gaF @log '[layout]'"] },
-  { run = ["splitw", "-d", "-t", "a:0", "-T", "t-#{window_name}", "cat"] },
-  { run = ["splitw", "-d", "-t", "a:0", "-T", "", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:0", "-T", "t-#{window_name}", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:0", "-T", "", "cat", "-"] },
   { run = ["show", "-gv", "@log"] },
   { run = ["lsp", "-F", "#{pane_id} [#{pane_title}]"] },
   { run = ["kill-server"] },
