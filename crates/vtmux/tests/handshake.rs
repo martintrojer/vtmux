@@ -100,10 +100,13 @@ fn read(stream: &mut UnixStream) -> Option<ServerMsg> {
 fn an_upgrade_request_is_answered_without_a_hello() {
     let server = Server::start();
     let mut stream = server.connect();
+    // A binary that is not there: refused, so the server answers (one
+    // that execs closes the connection instead, tests/upgrade.rs).
+    let binary = server.dir.path().join("no-vtmux");
     protocol::write_msg(
         &mut stream,
         &ClientMsg::UpgradeRequest {
-            binary: PathBuf::from(env!("CARGO_BIN_EXE_vtmux")),
+            binary: binary.clone(),
         },
     )
     .unwrap();
@@ -111,7 +114,7 @@ fn an_upgrade_request_is_answered_without_a_hello() {
         read(&mut stream),
         Some(ServerMsg::UpgradeResult {
             ok: false,
-            message: "not implemented".into(),
+            message: format!("{}: No such file or directory", binary.display()),
         })
     );
     assert_eq!(read(&mut stream), None, "the result ends the connection");

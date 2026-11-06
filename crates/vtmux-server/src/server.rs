@@ -51,6 +51,7 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// output ([`Server::release_hidden_screens`]).
 const HIDDEN_VIEW_IDLE: Duration = Duration::from_secs(1);
 
+pub mod resume;
 pub mod snapshot;
 
 /// A connected client.
@@ -1535,23 +1536,21 @@ impl Server {
     /// [`ServerMsg::UpgradeResult`] before the connection closes. Only a
     /// peer the access list lets write may ask (it would run `binary` as
     /// the server's owner), and `binary` must be absolute (the server's
-    /// cwd is not the requester's). The upgrade itself is not there yet.
+    /// cwd is not the requester's). A granted request execs `binary`
+    /// ([`Self::exec_upgrade`]); the requester is not carried across it,
+    /// so a request that succeeds ends with the connection closed and no
+    /// result (the preflight and the result after the exec are
+    /// `vtmux-upgrade`'s).
     fn upgrade_request(&mut self, id: ClientId, binary: &std::path::Path) {
         let peer = self.clients.get(&id).and_then(|c| c.peer);
         let message = if self.acl.check(peer) != crate::acl::Access::Write {
-            "access denied"
+            "access denied".to_owned()
         } else if !binary.is_absolute() {
-            "binary must be an absolute path"
+            "binary must be an absolute path".to_owned()
         } else {
-            "not implemented"
+            self.exec_upgrade(binary)
         };
-        self.send(
-            id,
-            &ServerMsg::UpgradeResult {
-                ok: false,
-                message: message.to_owned(),
-            },
-        );
+        self.send(id, &ServerMsg::UpgradeResult { ok: false, message });
         if let Some(c) = self.clients.get_mut(&id) {
             c.closing = true;
         }
@@ -5276,7 +5275,8 @@ mod tests {
     /// An `UpgradeRequest` would run a binary as the server's owner, so a
     /// peer the access list denies or makes read-only is refused
     /// (server-acl.c `server_acl_check`, as `server_accept` does for any
-    /// client); a writer with a relative binary is refused too.
+    /// client); a writer with a relative binary is refused too, and one
+    /// that can't run gets why.
     #[test]
     fn an_upgrade_request_needs_write_access_and_an_absolute_binary() {
         use crate::acl::Subject;
@@ -5301,7 +5301,13 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         };
-        assert_eq!(answer(&mut server, "/bin/vtmux"), "not implemented");
+        // A writer's request runs the dry run, which fails for a binary
+        // that is not there.
+        let missing = dir.join("no-vtmux");
+        assert_eq!(
+            answer(&mut server, missing.to_str().unwrap()),
+            format!("{}: No such file or directory", missing.display())
+        );
         assert_eq!(
             answer(&mut server, "vtmux"),
             "binary must be an absolute path"
