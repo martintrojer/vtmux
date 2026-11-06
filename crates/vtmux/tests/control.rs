@@ -910,7 +910,10 @@ fn too_far_behind_lets_a_stalled_client_go() {
 }
 
 /// `control_check_reply_buffer` (control.c:429-451): a client that does
-/// not read while its replies pass 64 MB is let go, `too far behind`.
+/// not read while its replies pass 64 MB is let go, `too far behind`. Let
+/// go, it reads no more lines: tmux's `control_discard` (control.c:1040-1048)
+/// stops the read event, so only lines already read run; vtmux stops once
+/// it has sent `Exit`. A line sent after the let-go never runs in either.
 #[test]
 fn reply_buffer_cap_lets_a_stalled_client_go() {
     compare("reply_buffer_cap_lets_a_stalled_client_go", |w| {
@@ -929,16 +932,12 @@ fn reply_buffer_cap_lets_a_stalled_client_go() {
         // Wait until the server has run every `show-buffer`, however long
         // that takes (a debug vtmux without a UTF-8 locale needs over 2 s),
         // not a fixed stall. Lines run in order, so the marker is set after
-        // the last reply is queued or dropped. A client let go first may
-        // never run it: vtmux drops lines that arrive after the exit, tmux
-        // drops the queue of a client the exit timer gives up on
-        // (server-client.c `server_client_exit_timer`). Either way the
-        // client is no longer listed.
+        // the last reply is queued or dropped, and after the let-go at the
+        // 64th. The lines were all read before it (one write, a few KB).
+        let set = |w: &World, name: &str| w.run(&["show", "-gv", name]).0.trim() == "1";
         c.send("set -g @rvdone 1");
         let end = Instant::now() + Duration::from_secs(60);
-        while w.run(&["show", "-gv", "@rvdone"]).0.trim() != "1"
-            && w.run(&["lsc", "-F", "x"]).0.contains('x')
-        {
+        while !set(w, "@rvdone") {
             assert!(
                 Instant::now() < end,
                 "{}: replies never queued",
@@ -946,6 +945,9 @@ fn reply_buffer_cap_lets_a_stalled_client_go() {
             );
             thread::sleep(Duration::from_millis(50));
         }
+        // Read after the let-go: never run (checked once the client is
+        // gone, so it had its chance).
+        c.send("set -g @rvafter 1");
         c.start_reading();
         // stdin stays open: the server lets the client go, not EOF.
         let end = Instant::now() + Duration::from_secs(30);
@@ -963,6 +965,7 @@ fn reply_buffer_cap_lets_a_stalled_client_go() {
             out.ends_with("\n%exit too far behind\n"),
             out.len() < 70 << 20,
             code,
+            set(w, "@rvafter"),
         )
     });
 }
