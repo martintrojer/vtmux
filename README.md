@@ -18,15 +18,13 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 
 ## What tmux can't do
 
-**Pane blend: see which pane is active, without spending a cell.** tmux marks the active pane with a half-coloured border and an arrow, and its `window-style` only recolours cells that use default colours, so TUIs that paint their own colours look the same in every pane. vtmux blends every cell of the inactive panes toward the terminal's own background in its compositor, explicit colours included, the way Ghostty dims unfocused splits. Nothing on screen moves and no row or column is spent:
+**Pane blend.** Inactive panes dim, every cell, like Ghostty's unfocused splits. You always know where you're typing, and it costs no screen space ([spec](docs/specs/2026-11-04-pane-blend.md)).
 
 ```tmux
 if -F '#{vtmux_version}' "set -g vtmux-pane-inactive-blend 'fg=bg/25'"
 ```
 
-`vtmux-pane-active-blend` does the same for the active pane; both are off unless set ([spec](docs/specs/2026-11-04-pane-blend.md)).
-
-**Live upgrades: a new binary without losing a pane.** Upgrading tmux under a running server ends in `protocol version mismatch` and a `kill-server` that takes every shell, editor and build with it. `tmux vtmux-upgrade` snapshots the server, checks that the new binary can read the snapshot, and replaces itself in place: every pane's program keeps running, attached clients follow onto the new binary, and control clients (scripts, mu, murmur) stay connected. If anything fails, the old server keeps running. The same snapshot, opt-in with `vtmux-persist`, brings back sessions, layout and each pane's last screen and scrollback after a crash or reboot; commands are never relaunched for you ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress, M2).
+**Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached. Opt-in `vtmux-persist` uses the same snapshot to bring sessions and scrollback back after a reboot ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress).
 
 ## Also
 
