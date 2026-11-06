@@ -113,7 +113,7 @@ product reasons" category.
 ### D-011: closed (U+0085 and TAB cells match tmux)
 
 - Was: a C1 control written as UTF-8 (U+0085) took a cell of its own in Ghostty where tmux combines it into the cell before (`utf8_width`: wcwidth -1, C1, width 0), so next-word over `xa\302\205b` stopped one column later; and HT left no TAB cell.
-- Now: vendored patch `0009-c1-is-zero-width.patch` makes a decoded C1 control a zero-width character that joins the previous cell (Ghostty dropped it), and `0002-tab-cell-mark.patch` gives tmux's TAB cell. Regress `copy-mode-unicode-whitespace.sh`, `utf8-test.sh` and `copy-mode-test-emacs.sh` pass; cli `program_output_reaches_the_grid_as_in_tmux` (case `c1`) pins it. Left over, in the P2 reflow entry of `crates/vtmux-vt/DIVERGENCES-PENDING.md`: narrowing a line that holds a tab wraps it in tmux (`grid_reflow` keeps the TAB cell whole) and not in vtmux.
+- Now: vendored patch `0009-c1-is-zero-width.patch` makes a decoded C1 control a zero-width character that joins the previous cell (Ghostty dropped it), and `0002-tab-cell-mark.patch` gives tmux's TAB cell. Regress `copy-mode-unicode-whitespace.sh`, `utf8-test.sh` and `copy-mode-test-emacs.sh` pass; cli `program_output_reaches_the_grid_as_in_tmux` (case `c1`) pins it. A resize reflows a tab as tmux's `grid_reflow` does (the TAB cell's width plus one per padding cell): patch `0015-reflow-tab-as-tmux.patch`, goldens `cap_tab_resize_*`, oracle `rep_deccolm_tab_reflow`.
 
 ### D-012: a new window's first automatic-rename check waits one name interval
 

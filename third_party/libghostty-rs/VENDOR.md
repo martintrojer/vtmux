@@ -369,6 +369,29 @@ Recorded per commit in git history; the list is kept current:
   and the kitty temporary-file test of 0001 (whose leak is the one
   reported).
 
+- `patches/0015-reflow-tab-as-tmux.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`, new field `tab_extra`, `bulkCopyable`,
+  `BulkRunMask`, `moveLastRowToNewPage`, `cursorScroll`): a reflow
+  measures a tab as tmux's does. tmux keeps a tab as one TAB cell as wide
+  as the tab plus a padding cell per further column, and `grid_reflow`,
+  `grid_reflow_split` and `grid_reflow_join` add up `gc.data.width`, where
+  a padding cell reads back as width 1 (`grid_get_cell1`): a tab of width
+  w costs 2w - 1 columns. The reflow cursor keeps that excess for the row
+  it is filling (`tab_extra`) and starts the next row before a cell that
+  does not fit by it, so a tab that does not fit moves whole and one that
+  fits by its cells but not by tmux's measure splits after its first
+  columns, the rest of its cells going to the next row as tmux's padding
+  does (`ab<tab>c` on 20 columns narrowed to 12: `ab<tab>` and `c` in
+  column 1). Upstream cut a tab cell by cell at the row's end. A line that
+  fits by its cells but not by tmux's measure takes only its used cells,
+  as a split does. A wrapped row with a used count (patch 0013) shorter
+  than the width, which only such a wrap leaves, is measured by it when it
+  joins back. Tab cells leave the bulk copy, which no longer runs past
+  `tab_extra`. Wide characters keep upstream's reflow (tmux also counts
+  their padding cell). Test: `Terminal: reflow measures a tab as tmux does
+  (vtmux)`; `zig build test-lib-vt -Dtest-filter=PageList` (348 pass).
+  Not an upstream candidate (tmux's model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

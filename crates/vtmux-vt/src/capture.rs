@@ -971,25 +971,19 @@ impl CellBits {
     }
 }
 
-/// Undo what a resize does to a tab: Ghostty reflows cell by cell and can cut a
-/// tab at the row's end, leaving its first cell without its columns or its
-/// continuation at the start of the next row. tmux wraps a TAB cell whole
-/// (`grid_reflow`), so such halves are plain blanks here. A tab tmux itself
-/// could hold (`window_copy` over a partly erased tab) stays. `width` is
-/// the row's, which `cells` may stop short of.
+/// A tab whose first cell has fewer columns left in the row than it is wide
+/// (a resize without reflow cut it) is plain blanks here. A reflow never
+/// cuts one: it moves a tab whole or splits it after its first cell as tmux
+/// does (patch 0015), and the columns moved to the next row are padding
+/// there, as tmux's are. A tab tmux itself could hold (`window_copy` over a
+/// partly erased tab) stays. `width` is the row's, which `cells` may stop
+/// short of.
 fn whole_tabs(cells: &mut [RowCell], width: usize) {
     let blank = |c: &mut RowCell| {
         c.tab = 0;
         c.text.clear();
         c.empty = true;
     };
-    if cells.first().is_some_and(|c| c.tab == TAB_CONTINUATION) {
-        let n = cells
-            .iter()
-            .take_while(|c| c.tab == TAB_CONTINUATION)
-            .count();
-        cells[..n].iter_mut().for_each(blank);
-    }
     if let Some(x) = cells
         .iter()
         .rposition(|c| c.tab != 0 && c.tab != TAB_CONTINUATION)
