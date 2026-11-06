@@ -67,3 +67,12 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   reference. The patch polls `display` (max 10 s) for the printf's cursor
   position before `copy-mode`; patched, 96/96 vi and 48/48 emacs on vtmux,
   48/48 vi on the reference. Seen once in CI (GitHub run 42157716129, macOS).
+- `screen-redraw-scrollbars.sh`
+  (`0005-screen-redraw-scrollbars-wait-before-copy-mode.patch`): scene
+  `scrollbar-copy-mode` runs `copy-mode -H` right after `neww -d "sh -c 'seq
+  40; …'"`; the other scenes' `sleep 1` before capture covers late output, but
+  copy mode copies the screen when it starts, so an early entry shows a short
+  or empty copy. Failed once in a loaded local `cargo xtask regress` (8 busy
+  loops); with `sleep 0.5` before `seq` it fails every run on both vtmux and
+  the reference. The patch polls `capturep` (max 10 s) for seq's `40` before
+  `copy-mode`; with the delay it then passes on both.
