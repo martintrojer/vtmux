@@ -369,6 +369,28 @@ pub struct Model {
     /// Panes of windows a group synchronisation destroyed, for the server
     /// to close ([`crate::server::Server::close_dropped`]).
     pub(crate) dropped: Vec<Pane>,
+    /// The attached clients, in connection order, as a target's session
+    /// part can name them (cmd-find.c:284-289): each one's name, tty and
+    /// session. The server refreshes it before a command resolves its
+    /// targets ([`crate::server::Server::refresh_client_targets`]).
+    pub(crate) client_targets: Vec<ClientTarget>,
+}
+
+/// An attached client as [`Model::client_targets`] lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClientTarget {
+    pub name: String,
+    pub tty: String,
+    pub session: SessionId,
+}
+
+impl ClientTarget {
+    /// `cmd_find_client` (cmd-find.c:1325-1340): `target` is the client's
+    /// name or its tty, with or without `/dev/`.
+    pub(crate) fn matches(name: &str, tty: &str, target: &str) -> bool {
+        name == target
+            || (!tty.is_empty() && (tty == target || tty.strip_prefix("/dev/") == Some(target)))
+    }
 }
 
 impl Default for Model {
@@ -397,6 +419,7 @@ impl Default for Model {
             groups: crate::groups::Groups::default(),
             held: None,
             dropped: Vec::new(),
+            client_targets: Vec::new(),
         }
     }
 }

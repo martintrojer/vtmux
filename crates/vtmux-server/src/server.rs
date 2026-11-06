@@ -3733,11 +3733,30 @@ impl Server {
                 .as_ref()
                 .and_then(|h| h.tty.as_ref())
                 .map_or("", |t| t.name.as_str());
-            let hit = self.client_name(id) == target
-                || (!tty.is_empty()
-                    && (tty == target || tty.strip_prefix("/dev/") == Some(target)));
-            hit.then_some(id)
+            crate::model::ClientTarget::matches(&self.client_name(id), tty, target).then_some(id)
         })
+    }
+
+    /// Refresh [`crate::model::Model::client_targets`] from the attached
+    /// clients, so a target's session part can name one.
+    pub fn refresh_client_targets(&mut self) {
+        let targets = self
+            .clients
+            .iter()
+            .filter_map(|(&id, c)| {
+                Some(crate::model::ClientTarget {
+                    name: self.client_name(id),
+                    tty: c
+                        .hello
+                        .as_ref()
+                        .and_then(|h| h.tty.as_ref())
+                        .map(|t| t.name.clone())
+                        .unwrap_or_default(),
+                    session: c.attached?,
+                })
+            })
+            .collect();
+        self.model.client_targets = targets;
     }
 
     /// A format context over `found` with `client` as `ft->c`.

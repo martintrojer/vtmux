@@ -376,6 +376,7 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
 
 fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(), CmdError> {
     call.entry.ensure_implemented()?;
+    server.refresh_client_targets();
     let source = resolve_source(server, item, call)?;
     // cmdq_find_flag (cmd-queue.c:514-530): resolve the target before the
     // command runs; commands without a target slot get the client's
