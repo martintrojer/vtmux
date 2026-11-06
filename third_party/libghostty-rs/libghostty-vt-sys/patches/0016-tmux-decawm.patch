@@ -1,0 +1,134 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 46ae5d8b6..4ea713683 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -1592,8 +1592,13 @@ pub fn print(self: *Terminal, c: u21) !void {
+         if (self.modes.get(.wraparound)) {
+             try self.printWrap();
+         } else {
+-            // Match xterm's consumption of a pending wrap.
+-            self.screens.active.cursor.pending_wrap = false;
++            // vtmux: a pending wrap is tmux's cursor past the last
++            // column (patch 0014), which only autowrap leaves; with
++            // autowrap reset since, the character does not fit and is
++            // dropped, the cursor staying where it is (screen-write.c
++            // screen_write_cell, "Sanity check cursor position").
++            // Upstream overwrote the last cell as xterm does.
++            return;
+         }
+     }
+ 
+@@ -1660,7 +1665,11 @@ pub fn print(self: *Terminal, c: u21) !void {
+     // If we're at the column limit, then we need to wrap the next time.
+     // In this case, we don't move the cursor.
+     if (self.screens.active.cursor.x == right_limit - 1) {
+-        self.screens.active.cursor.pending_wrap = true;
++        // vtmux: with autowrap reset tmux leaves the cursor on the last
++        // column, so the next character replaces this one
++        // (screen_write_cell: `not_wrap`); only autowrap puts it past
++        // the column. Upstream set a pending wrap either way.
++        if (self.modes.get(.wraparound)) self.screens.active.cursor.pending_wrap = true;
+         return;
+     }
+ 
+@@ -4726,7 +4735,10 @@ pub fn resize(
+     try primary.resize(.{
+         .cols = opts.cols,
+         .rows = opts.rows,
+-        .reflow = self.modes.get(.wraparound),
++        // vtmux: tmux reflows the main screen whatever DECAWM says
++        // (window.c window_pane_resize: reflow unless the alternate
++        // screen is on). Upstream reflowed only with wraparound set.
++        .reflow = true,
+         .prompt_redraw = self.flags.shell_redraws_prompt,
+         .pull_scrollback = self.flags.resize_pull_scrollback,
+     });
+@@ -15268,6 +15280,63 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
+     try testing.expect(!r1.wrap_continuation);
+ }
+ 
++test "Terminal: DECAWM as tmux (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // A line filled under autowrap leaves the cursor past the last
++    // column; with autowrap reset since, a character is dropped.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 3, .cols = 5 });
++        defer t.deinit(alloc);
++        try t.printString("abcde");
++        t.modes.set(.wraparound, false);
++        try t.printString("YZ");
++        try testing.expect(t.screens.active.cursor.pending_wrap);
++        try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("abcde", str);
++
++        // Autowrap set again: the next character wraps.
++        t.modes.set(.wraparound, true);
++        try t.printString("Q");
++        const str2 = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str2);
++        try testing.expectEqualStrings("abcde\nQ", str2);
++    }
++
++    // Filled under autowrap reset, the cursor stays on the last column:
++    // each character replaces the last, and one after autowrap is set
++    // again replaces it too, then waits to wrap.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 3, .cols = 5 });
++        defer t.deinit(alloc);
++        t.modes.set(.wraparound, false);
++        try t.printString("abcdeXY");
++        try testing.expect(!t.screens.active.cursor.pending_wrap);
++        try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
++        t.modes.set(.wraparound, true);
++        try t.printString("Z");
++        try testing.expect(t.screens.active.cursor.pending_wrap);
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("abcdZ", str);
++    }
++
++    // The main screen reflows with autowrap reset.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefghijkl\nmn");
++        t.modes.set(.wraparound, false);
++        try t.resize(alloc, .{ .cols = 6, .rows = 4 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("abcdef\nghijkl\nmn", str);
++    }
++}
++
+ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+@@ -18002,9 +18071,11 @@ test "Terminal: resize less cols without reflow cutting wide char tail" {
+     var t = try init(io_impl, alloc, .{ .cols = 3, .rows = 1 });
+     defer t.deinit(alloc);
+ 
++    // vtmux: the main screen reflows whatever DECAWM says (patch 0016),
++    // so the alternate screen gives the resize without reflow.
++    try t.switchScreenMode(.@"1047", true);
+     try t.print('a');
+     try t.print('一');
+-    t.modes.set(.wraparound, false);
+     try t.resize(alloc, .{ .cols = 2, .rows = 1 });
+ 
+     try testing.expect(t.screens.active.pages.getCell(.{ .active = .{ .x = 1 } }).?.cell.isEmpty());
+@@ -18068,9 +18139,10 @@ test "Terminal: resize with wraparound off" {
+     const new_cols = 2;
+     try t.resize(alloc, .{ .cols = new_cols, .rows = rows });
+ 
++    // vtmux: reflowed as with wraparound on (tmux, patch 0016).
+     const str = try t.plainString(testing.allocator);
+     defer testing.allocator.free(str);
+-    try testing.expectEqualStrings("01", str);
++    try testing.expectEqualStrings("01\n23", str);
+ }
+ 
+ test "Terminal: resize with wraparound on" {

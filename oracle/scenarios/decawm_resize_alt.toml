@@ -1,0 +1,72 @@
+name = "decawm_resize_alt"
+size = [14, 8]
+# DECAWM as tmux: a line filled under autowrap leaves the cursor past the
+# last column (cx 14), and with ?7l since, the characters after it do not
+# fit and are dropped (screen-write.c screen_write_cell, "Sanity check
+# cursor position"); a line filled under ?7l leaves it on the last column,
+# each character replacing the last (not_wrap), and one after ?7h replaces
+# it too, then wraps. The main screen reflows whatever DECAWM says
+# (window.c window_pane_resize). Then two resizes vtmux cannot follow:
+# the alternate screen narrowed and widened keeps no cells past the
+# narrow width (D-038), nor does a main-screen line that fitted (D-036).
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "14", "-y", "8", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # fill: 14 characters on 14 columns, ?7l, YZ dropped
+  { run = ["new", "-d", "-s", "fill", "-n", "w", "-x", "14", "-y", "8", "sh", "-c", "printf 'abcdefghijklmn\\033[?7lYZ'; tmux wait-for -S fill; exec cat"] },
+  { wait_for = "fill" },
+  { attach = { session = "fill", id = "fill" } },
+  { run = ["display", "-p", "-t", "fill:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "fill:"] },
+  { screen = { id = "fill" } },
+  # fillwide: a wide character dropped too, then ?7h and Q wraps
+  { run = ["new", "-d", "-s", "fillwide", "-n", "w", "-x", "14", "-y", "8", "sh", "-c", "printf 'abcdefghijklmn\\033[?7l\\344\\270\\200\\033[?7hQ'; tmux wait-for -S fillwide; exec cat"] },
+  { wait_for = "fillwide" },
+  { attach = { session = "fillwide", id = "fillwide" } },
+  { run = ["display", "-p", "-t", "fillwide:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "fillwide:"] },
+  { screen = { id = "fillwide" } },
+  # filloff: filled under ?7l, X and Y replace the last character, the cursor stays on column 13; after ?7h, Z replaces it and Q wraps
+  { run = ["new", "-d", "-s", "filloff", "-n", "w", "-x", "14", "-y", "8", "sh", "-c", "printf '\\033[?7labcdefghijklmnXY'; tmux wait-for -S filloffa; tmux wait-for filloffb; printf '\\033[?7hZQ'; tmux wait-for -S filloffc; exec cat"] },
+  { wait_for = "filloffa" },
+  { run = ["display", "-p", "-t", "filloff:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "filloffb"] },
+  { wait_for = "filloffc" },
+  { attach = { session = "filloff", id = "filloff" } },
+  { run = ["display", "-p", "-t", "filloff:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "filloff:"] },
+  { screen = { id = "filloff" } },
+  # filled: a clear keeps the cursor past the last column under ?7l: X dropped, Y wraps after ?7h
+  { run = ["new", "-d", "-s", "filled", "-n", "w", "-x", "14", "-y", "8", "sh", "-c", "printf 'l0\\r\\nabcdefghijklmn\\033[?7l\\033[2J'; tmux wait-for -S filleda; tmux wait-for filledb; printf 'X\\033[?7hY'; tmux wait-for -S filledc; exec cat"] },
+  { wait_for = "filleda" },
+  { run = ["display", "-p", "-t", "filled:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "filledb"] },
+  { wait_for = "filledc" },
+  { run = ["display", "-p", "-t", "filled:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "filled:"] },
+  # reflow7l: drawn on 20 columns with ?7l left on, narrowed to 14 by the client: reflowed
+  { run = ["new", "-d", "-s", "reflow7l", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf 'abcdefghijklmnopqrstuvwxyz\\r\\nshort\\033[?7l'; tmux wait-for -S reflow7l; exec cat"] },
+  { wait_for = "reflow7l" },
+  { attach = { session = "reflow7l", id = "reflow7l" } },
+  { run = ["display", "-p", "-t", "reflow7l:", "#{history_size} #{cursor_x},#{cursor_y} #{pane_width}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "reflow7l:"] },
+  { screen = { id = "reflow7l" } },
+  # alt: the alternate screen under ?7l, 20 -> 14 -> 20 columns without a redraw: tmux draws the cut cells again (D-038)
+  { run = ["new", "-d", "-s", "alt", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf '\\033[?1049h\\033[?7labcdefghijklmnopqrstuvwxyz\\r\\n0123456789abcdefghij\\r\\nshort\\033[2;5H'; tmux wait-for -S alt; exec cat"] },
+  { wait_for = "alt" },
+  { run = ["resize-window", "-t", "alt", "-x", "14"] },
+  { run = ["display", "-p", "-t", "alt:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "alt:"] },
+  { run = ["resize-window", "-t", "alt", "-x", "20"] },
+  { run = ["display", "-p", "-t", "alt:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { divergence = { id = "D-038", expect = { kind = "cli", stdout = "abcdefghijklmn\n0123456789abcd\nshort\n\n\n\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-t", "alt:"] },
+  # bgerase: a line erased in green then written fits 15 columns and keeps its cells to 20 in tmux, which 25 columns show again (D-036)
+  { run = ["new", "-d", "-s", "bgerase", "-n", "w", "-x", "20", "-y", "8", "sh", "-c", "printf '\\033[42m\\033[K\\033[0mafter-bg-erase\\r\\n'; tmux wait-for -S bgerase; exec cat"] },
+  { wait_for = "bgerase" },
+  { run = ["resize-window", "-t", "bgerase", "-x", "15"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "bgerase:"] },
+  { run = ["resize-window", "-t", "bgerase", "-x", "25"] },
+  { divergence = { id = "D-036", expect = { kind = "cli", stdout = "after-bg-erase\u001b[42m \u001b[49m\n\n\n\n\n\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-e", "-t", "bgerase:"] },
+]

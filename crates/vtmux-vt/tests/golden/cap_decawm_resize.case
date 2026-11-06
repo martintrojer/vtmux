@@ -1,0 +1,7 @@
+kind=capture
+cols=20
+bytes=abcdefghijklmnopqrstuvwxyz\nshort\033[?7l
+flags=-p -S -
+resize=15x5
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'abcdefghijklmnopqrstuvwxyz\nshort\033[?7l'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; resize-window -t 0 -x 15 -y 5 ; capturep -p -S -
+expected=abcdefghijklmno\npqrstuvwxyz\nshort\n\n\n

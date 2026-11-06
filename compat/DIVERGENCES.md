@@ -251,13 +251,10 @@ product reasons" category.
 - Evidence: `control-client-exit-stalled.sh` passes on both, 12.1 s each (`cargo xtask regress --tmux reference --only control-client-exit-stalled.sh`). A reader 64 KB per 10 ms behind a `yes` flood and then detached: both exit 0 with `%exit` within 0.5 s (reviewer repro rv_det2.py).
 - Category: Deferred (the exit on a channel of its own).
 
-### D-030: DECAWM off with a wrap already pending reports the last column
+### D-030: closed (DECAWM as tmux)
 
-- Test / assertion: none fails (regress `input-scroll.sh` passes); cli `program_output_reaches_the_grid_as_in_tmux` pins the common case (`nowrap`).
-- tmux behaviour: with autowrap off a print that reaches the last column leaves `cx` on it (`screen_write_cell`, `not_wrap`); with it on, `cx` becomes the column count. A line filled under autowrap and then `ESC[?7l` keeps `cx` = width (10 on a 10-column pane, `#{cursor_x}` 10); filled under `?7l` and then `?7h`, `cx` stays 9.
-- vtmux behaviour: Ghostty keeps the last column and a pending-wrap flag in both cases; vtmux reports the column count only while the flag is set and DECAWM is on (`term.rs` `tmux_cursor`), so it matches every print made under one mode, and gives 9 and 10 for the two mode switches above. The next character also differs there: Ghostty wraps the second case (the flag survives `?7l`/`?7h`), tmux overwrites the last cell.
-- Evidence: 10x3 pane, reference tmux 3.8: `printf 'abcdefghij\033[?7l'` gives `#{cursor_x}` 10, vtmux 9; `printf '\033[?7labcdefghij\033[?7h'` 9, vtmux 10.
-- Category: Deferred (a mode switch between filling a line and the next print; Ghostty's flag would need setting through the API).
+- Was: Ghostty set its pending-wrap flag on a print reaching the last column under DECAWM reset too, and a print with the flag set and DECAWM reset replaced the last cell (xterm), so a wrap pending when `?7l` arrived reported column 9 of 10 (tmux 10) and took the next characters; one filled under `?7l` and then `?7h` reported 10 (tmux 9) and wrapped. Ghostty also did not reflow the main screen while DECAWM was reset.
+- Now: vendored patch `0016-tmux-decawm.patch` sets the flag only under autowrap, drops a character printed with the flag set and autowrap reset (`screen_write_cell`, "Sanity check cursor position"), and reflows the main screen whatever DECAWM says (`window_pane_resize`); `term.rs` `tmux_cursor` reports the column count whenever the flag is set. Goldens `cap_decawm_*`, `fmt_decawm_*`; oracle `decawm_resize_alt`.
 
 ### D-031: tmux's own character widths that Ghostty's clustering does not give
 
@@ -304,7 +301,7 @@ product reasons" category.
 - Test / assertion: oracle `reflow_cells_used` scene `grow` (annotated, the last `capture-pane -e`).
 - tmux behaviour: a line that fits the narrower width is moved as it is (`grid_reflow_move`, grid.c), so cells past the new width stay allocated (`cellsize`) and are drawn again when the pane widens: a line written `ab` then erased to its end with a red background on 20 columns, narrowed to 10 and widened back to 20, is red to column 20.
 - vtmux behaviour: Ghostty's reflow copies a row into rows of the new width, so the cells past it are gone: the same line is red to column 10, then default. Narrowing itself matches (patch 0013 measures the line by tmux's `cellused` and keeps the background cells up to the new width).
-- Evidence: reference tmux 3.8, `printf 'ab\033[41m\033[K\033[0m\r\nnext'` on 20x8, `resize-window -x 10`, then `-x 20`: `capture-pane -pe` `ab\e[41m` / `\e[49mnext`; vtmux `ab\e[41m        \e[49m` / `next` (eight red cells, then the default background).
+- Evidence: reference tmux 3.8, `printf 'ab\033[41m\033[K\033[0m\r\nnext'` on 20x8, `resize-window -x 10`, then `-x 20`: `capture-pane -pe` `ab\e[41m` / `\e[49mnext`; vtmux `ab\e[41m        \e[49m` / `next` (eight red cells, then the default background). Widened past the first width the same way, a line erased in green and then written (`printf '\033[42m\033[K\033[0mafter-bg-erase\r\n'`, 20 -> 15 -> 25 columns, oracle `decawm_resize_alt` scene `bgerase`, annotated): tmux keeps the green cells to column 20 and its `capture-pane -pe` trims them (`after-bg-erase\e[42m`); vtmux has one green cell and default cells after it (`after-bg-erase\e[42m \e[49m`). 80 -> 60 -> 100 columns (review_reflow_cells_used): tmux `after-bg-erase\e[42m` (its cells kept to column 80, trimmed), vtmux `after-bg-erase\e[42m` and 46 green blanks to column 60, then `\e[49m`.
 - Category: Ghostty grid (a row holds as many cells as the pane is wide).
 
 ### D-037: a client that starts as `kill-server` finishes finds no server, not a dropped connection
@@ -314,3 +311,11 @@ product reasons" category.
 - vtmux behaviour: with no job the server waits for (`job_still_running`), the socket and the `tmux` shim are closed before `kill-server`'s client is answered, so the next client is refused and starts a fresh server. With a job running the socket stays open as in tmux (`kill_server_with_running_job`).
 - Evidence: `kill-server` then `start-server ; set -g exit-empty off` at once, 8 busy loops, 150 rounds each: vtmux 11/150 failed (`server exited unexpectedly`, then `no server running`), reference tmux 0/450 (its window is shorter; vtmux's turn runs render and compression between the reply and the socket close). With the change, the cli test passes 60/60 under load; without it, 37 of 81 runs fail.
 - Category: Do not copy tmux bug (a command that follows `kill-server` is lost to a server that is already leaving).
+
+### D-038: the alternate screen keeps no cells past the width it was narrowed to
+
+- Test / assertion: oracle `decawm_resize_alt` scene `alt` (annotated, the `capture-pane` after widening back).
+- tmux behaviour: the alternate screen is resized without reflow (`window_pane_resize`: reflow only without `saved_grid`), and `screen_resize_cursor` then only changes the grid's `sx`: every line keeps its cells, so narrowing hides the cells past the new width and widening shows them again, before the program redraws.
+- vtmux behaviour: Ghostty's resize without reflow (`PageList.resizeWithoutReflow`) clears the cells past the new width, so widening shows blanks there until the program redraws. Keeping them would need every full-line clear and scroll to clear past the width too (tmux's lines go whole, `grid_empty_line`), and Ghostty's page bookkeeping (style counts, clone, compression) to cover cells past the width.
+- Evidence: reference tmux 3.8, a pane on 20 columns printing `\033[?1049h\033[?7labcdefghijklmnopqrstuvwxyz\r\n0123456789abcdefghij\r\nshort`, then `resize-window -x 14` and `-x 20`: `capture-pane -p` `abcdefghijklmnopqrsz` / `0123456789abcdefghij` / `short`; vtmux `abcdefghijklmn` / `0123456789abcd` / `short`. A program that redraws on SIGWINCH (pi, `scripts/agent_tui.py`, a full-screen editor) hides it; it shows between the resize and that redraw, or in a program that does not redraw.
+- Category: Ghostty grid (a row holds as many cells as the pane is wide).
