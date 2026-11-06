@@ -122,9 +122,14 @@ impl Options {
     /// `options_get_only`: this tree only, by name or an old spelling.
     #[must_use]
     pub fn get_only(&self, name: &str) -> Option<&Entry> {
-        self.entries
-            .get(name)
-            .or_else(|| self.entries.get(table::map_name(name)))
+        self.entries.get(name).or_else(|| {
+            // Looked up again only under an alias's other name: most
+            // lookups miss in a tree or two before their ancestor has it.
+            let mapped = table::map_name(name);
+            (!std::ptr::eq(mapped, name))
+                .then(|| self.entries.get(mapped))
+                .flatten()
+        })
     }
 
     fn get_only_mut(&mut self, name: &str) -> Option<&mut Entry> {
