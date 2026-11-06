@@ -32,13 +32,17 @@ REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/../src/options/golden"
 SOCK="vtmux-options-cases-$$"
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's (/tmp/tmux-<uid>).
+TMUX_TMPDIR=$(mktemp -d /tmp/vtmux-sock.XXXXXX)
+export TMUX_TMPDIR
 OWNER_CONFS="${VTMUX_OWNER_CONFS:-$HOME/dotfiles/tmux/.tmux.conf:$HOME/.local/share/mu-crew-dotfiles/tmux/mu-crew.conf}"
 # Fixed so #{d:current_file} is the same on both sides.
 OWNER_DIR=/tmp/vtmux-options-golden
 export SHELL=/bin/sh HOME=/home/vtmux-test
 unset EDITOR VISUAL
 t() { env -u TMUX -u TMUX_PANE "$REF" -L "$SOCK" -f /dev/null "$@"; }
-trap 't kill-server 2>/dev/null || true; rm -rf "$OWNER_DIR"' EXIT
+trap 't kill-server 2>/dev/null || true; rm -rf "$OWNER_DIR" "$TMUX_TMPDIR"' EXIT
 fresh() { t kill-server 2>/dev/null || true; t new-session -d -s s; }
 
 mkdir -p "$OUT"

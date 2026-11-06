@@ -8,7 +8,12 @@ tty_check_fg / tty_check_bg (tty.c:2842-2960) left of it.
 Row: `colours<TAB>params (space separated)<TAB>fg=<sgr> bg=<sgr>[ bold]` where
 `-` is the default colour. Cases the core cannot tell apart are not asked:
 `38;5;0-15` (ghostty stores them as the aixterm colours)."""
-import fcntl, os, pty, re, struct, subprocess, tempfile, termios, time
+import atexit, fcntl, os, pty, re, shutil, struct, subprocess, tempfile, termios, time
+
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's /tmp/tmux-<uid>.
+SOCKDIR = tempfile.mkdtemp(prefix='vtmux-sock.', dir='/tmp')
+atexit.register(shutil.rmtree, SOCKDIR, ignore_errors=True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'src', 'colour', 'tty_cases.tsv')
@@ -71,7 +76,7 @@ def sgr_state(data):
 
 
 def run(term, rows):
-    env = {'PATH': '/usr/bin:/bin', 'HOME': '/tmp', 'SHELL': '/bin/sh', 'TERM': term, 'LC_ALL': 'C.UTF-8'}
+    env = {'PATH': '/usr/bin:/bin', 'HOME': '/tmp', 'SHELL': '/bin/sh', 'TERM': term, 'LC_ALL': 'C.UTF-8', 'TMUX_TMPDIR': SOCKDIR}
     sock = 'ttycol%d' % os.getpid()
     base = [REF, '-L', sock, '-f', '/dev/null']
 

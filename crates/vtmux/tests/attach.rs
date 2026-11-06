@@ -16,6 +16,10 @@ struct World {
     bin: PathBuf,
     label: String,
     home: tempfile::TempDir,
+    /// `TMUX_TMPDIR` of every command and client: a server leaves its socket
+    /// file behind when it exits, so the world owns the directory and removes
+    /// it on drop. Never the user's real `/tmp/tmux-<uid>/`.
+    sockets: tempfile::TempDir,
     /// `TERM` for the client.
     term: &'static str,
 }
@@ -30,6 +34,13 @@ impl World {
                 SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ),
             home: tempfile::tempdir().unwrap(),
+            // Under /tmp, not $TMPDIR: the socket path (dir, `tmux-<uid>`,
+            // label) must fit `sun_path`, 104 bytes on macOS, where
+            // $TMPDIR is /var/folders/....
+            sockets: tempfile::Builder::new()
+                .prefix("vta")
+                .tempdir_in("/tmp")
+                .unwrap(),
             term: "xterm-256color",
         }
     }
@@ -44,6 +55,7 @@ impl World {
     fn env(&self) -> Vec<(&str, String)> {
         vec![
             ("HOME", self.home.path().display().to_string()),
+            ("TMUX_TMPDIR", self.sockets.path().display().to_string()),
             ("SHELL", "/bin/sh".into()),
             ("TERM", self.term.into()),
             ("PS1", "$ ".into()),
@@ -262,6 +274,35 @@ fn bins() -> Vec<PathBuf> {
     );
     bins.push(reference);
     bins
+}
+/// A world owns its socket directory: the server's socket and an attached
+/// client's both live in it, it is short enough for `sun_path`, and it goes
+/// away with the world. A server leaves its socket file behind on exit (tmux
+/// does too), so without this every test strands one in the user's real
+/// `/tmp/tmux-<uid>/`.
+#[test]
+fn world_sockets_live_in_a_private_dir() {
+    for bin in bins() {
+        let w = World::new(bin);
+        let dir = w.sockets.path().canonicalize().unwrap();
+        let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
+        a.wait(|_| w.cli(&["lsc"]).stdout.len() > 1);
+        let out = w.cli(&["display", "-p", "#{socket_path}"]);
+        let sock = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+        assert!(
+            sock.starts_with(&dir),
+            "{} not in {}",
+            sock.display(),
+            dir.display()
+        );
+        assert!(sock.exists(), "{}", sock.display());
+        // tmux fails at sizeof sun_path (client.c:114-116); macOS has 104.
+        assert!(sock.as_os_str().len() < 100, "{}", sock.display());
+        a.keys(b"\x02d");
+        a.exited(0);
+        drop(w);
+        assert!(!dir.exists(), "{} outlived its world", dir.display());
+    }
 }
 fn pane_text(a: &Attached) -> String {
     String::from_utf8(capture(&a.screen(), CaptureOpts::default())).unwrap()

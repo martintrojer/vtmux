@@ -8,11 +8,14 @@ a PTY, opens `windows` more windows whose pane fills its 100x50 screen, then
 prints the server's RSS before and after and the median time from `C-b n` to
 the client's last output byte over 40 switches. Linux only (/proc).
 """
-import os, pty, fcntl, termios, struct, subprocess, threading, time, sys, statistics
+import os, pty, fcntl, termios, struct, subprocess, threading, time, sys, statistics, tempfile, shutil
 B = sys.argv[1]
 L = sys.argv[2]
 N = int(sys.argv[3]) if len(sys.argv) > 3 else 100
-env = dict(os.environ); env.pop("TMUX", None)
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's /tmp/tmux-<uid>.
+work = tempfile.mkdtemp(prefix="vtmux-hp-")
+env = dict(os.environ, TMUX_TMPDIR=work); env.pop("TMUX", None)
 def t(*a): return subprocess.run([B, "-L", L, *a], env=env, capture_output=True, text=True)
 FILL = "sh -c 'i=0; while [ $i -lt 60 ]; do echo \"$i 0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789ab\"; i=$((i+1)); done; exec cat'"
 try:
@@ -54,3 +57,4 @@ try:
     print(f"{os.path.basename(B)} panes={N+1} rss_before={r0} rss_after={r1} per_hidden_kb={(r1-r0)/N:.1f} switch_ms median={statistics.median(lat):.2f} min={min(lat):.2f} max={max(lat):.2f}")
 finally:
     t("kill-server")
+    shutil.rmtree(work, ignore_errors=True)

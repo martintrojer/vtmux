@@ -18,12 +18,16 @@ Per row, isolated (env -u TMUX -u TMUX_PANE, -L, -f /dev/null, SHELL=/bin/sh):
   Ss Se Ms tsl fsl Eneks Dseks (the capabilities the client's terminal ended up with).
 The server is never left empty: the `keep` session lives until kill-server.
 xterm-ghostty needs Ghostty's terminfo ($GHOSTTY_TERMINFO)."""
-import fcntl, os, pty, struct, subprocess, sys, termios, time
+import atexit, fcntl, os, pty, shutil, struct, subprocess, sys, tempfile, termios, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'src', 'term_features', 'golden', 'cases.tsv')
 REF = os.environ.get('VTMUX_REFERENCE_TMUX') or os.path.join(
     os.environ.get('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'vtmux/tmux-3.8/bin/tmux')
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's /tmp/tmux-<uid>.
+SOCKDIR = tempfile.mkdtemp(prefix='vtmux-sock.', dir='/tmp')
+atexit.register(shutil.rmtree, SOCKDIR, ignore_errors=True)
 TERMINFO = os.environ.get('GHOSTTY_TERMINFO',
                           os.path.expanduser('~/.local/opt/ghostty-1.4.0/share/terminfo'))
 CODES = 'Tc RGB setrgbf setrgbb Sync Smulx Setulc Ss Se Ms tsl fsl Eneks Dseks'.split()
@@ -33,7 +37,7 @@ FMT = '#{client_termfeatures}|#{client_colours}|' + ''.join(
 
 def run(term, colorterm, targs, feats, ovs, sock):
     env = {'TERMINFO_DIRS': TERMINFO, 'PATH': '/usr/bin:/bin', 'HOME': '/tmp',
-           'SHELL': '/bin/sh', 'TERM': term, 'LC_ALL': 'C.UTF-8'}
+           'SHELL': '/bin/sh', 'TERM': term, 'LC_ALL': 'C.UTF-8', 'TMUX_TMPDIR': SOCKDIR}
     if colorterm:
         env['COLORTERM'] = colorterm
     base = [REF, '-L', sock, '-f', '/dev/null']

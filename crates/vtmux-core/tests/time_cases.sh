@@ -21,13 +21,17 @@ set -euo pipefail
 
 REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
 SOCK="vtmux-time-cases-$$"
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's (/tmp/tmux-<uid>).
+TMUX_TMPDIR=$(mktemp -d /tmp/vtmux-sock.XXXXXX)
+export TMUX_TMPDIR
 TZV=UTC
 cd /
 t() {
-    env -i PATH=/usr/bin:/bin HOME=/ SHELL=/bin/sh LANG=C.UTF-8 TZ="$TZV" \
+    env -i PATH=/usr/bin:/bin HOME=/ SHELL=/bin/sh LANG=C.UTF-8 TZ="$TZV" TMUX_TMPDIR="$TMUX_TMPDIR" \
         "$REF" -L "$SOCK" -f /dev/null "$@"
 }
-trap 't kill-server 2>/dev/null || true' EXIT
+trap 't kill-server 2>/dev/null || true; rm -rf "$TMUX_TMPDIR"' EXIT
 
 rust_str() { python3 -c '
 import sys

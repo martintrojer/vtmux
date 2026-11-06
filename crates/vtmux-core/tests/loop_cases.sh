@@ -26,17 +26,21 @@ set -euo pipefail
 
 REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
 SOCK="vtmux-loop-cases-$$"
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's (/tmp/tmux-<uid>).
+TMUX_TMPDIR=$(mktemp -d /tmp/vtmux-sock.XXXXXX)
+export TMUX_TMPDIR
 TMP=$(mktemp -d /tmp/vtmux-loop-cases.XXXXXX)
 H1='' H2=''
 cd /
 t() {
-    env -i PATH=/usr/bin:/bin HOME=/ SHELL=/bin/sh LANG=C.UTF-8 TZ=UTC TERM=screen \
+    env -i PATH=/usr/bin:/bin HOME=/ SHELL=/bin/sh LANG=C.UTF-8 TZ=UTC TERM=screen TMUX_TMPDIR="$TMUX_TMPDIR" \
         "$REF" -L "$SOCK" -f /dev/null "$@"
 }
 cleanup() {
     t kill-server 2>/dev/null || true
     for p in $H1 $H2; do kill "$p" 2>/dev/null || true; done
-    rm -rf "$TMP"
+    rm -rf "$TMP" "$TMUX_TMPDIR"
 }
 trap cleanup EXIT
 

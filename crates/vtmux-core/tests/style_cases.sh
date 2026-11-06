@@ -42,6 +42,7 @@ REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/
 export REF
 export TMUX_SRC="${VTMUX_REFERENCE_SRC:-$(cd "$(dirname "$REF")/../.." && pwd)/tmux-3.8-src}"
 exec python3 - "$@" <<'PY'
+import atexit
 import concurrent.futures as cf
 import fcntl
 import glob
@@ -49,6 +50,7 @@ import os
 import pty
 import re
 import select
+import shutil
 import struct
 import subprocess
 import sys
@@ -61,6 +63,11 @@ SRC = os.environ["SRC"]
 TMUX_SRC = os.environ["TMUX_SRC"]
 ENV = {k: v for k, v in os.environ.items() if k not in ("TMUX", "TMUX_PANE", "EDITOR", "VISUAL")}
 ENV.update(SHELL="/bin/sh", LC_ALL="en_US.UTF-8", TERM="xterm-256color")
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's /tmp/tmux-<uid>.
+SOCKDIR = tempfile.mkdtemp(prefix="vtmux-sock.", dir="/tmp")
+atexit.register(shutil.rmtree, SOCKDIR, ignore_errors=True)
+ENV["TMUX_TMPDIR"] = SOCKDIR
 UNIQ = f"vtmux-style-{os.getpid()}"
 _n = [0]
 
