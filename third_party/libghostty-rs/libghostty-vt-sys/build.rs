@@ -112,8 +112,10 @@ fn main() {
 }
 
 /// vtmux: a hash of what decides Ghostty's native page layout in this
-/// build: the pinned commit, every local patch, the Zig optimize mode and
-/// the target (`LIBGHOSTTY_VT_PATCH_STACK`, read by `ffi::PATCH_STACK`).
+/// build: the pinned commit, every local patch, the Zig compiler's
+/// version (`Page` is not an `extern` struct, so a compiler may order its
+/// fields differently at the same size), the Zig optimize mode and the
+/// target (`LIBGHOSTTY_VT_PATCH_STACK`, read by `ffi::PATCH_STACK`).
 /// Compressed-page blobs (patch 0017) are only read back by a binary with
 /// the same value. FNV-1a, so it does not depend on the Rust version.
 fn emit_patch_stack() {
@@ -134,6 +136,17 @@ fn emit_patch_stack() {
     for (_, text) in local_patches() {
         eat(text.as_bytes());
     }
+    // The `zig` this script builds with (`build_vendored`). No zig: no
+    // build either, so the empty version never names a library.
+    let zig = Command::new("zig")
+        .arg("version")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| out.stdout)
+        .unwrap_or_default();
+    eat(b"zig");
+    eat(zig.trim_ascii());
     eat(zig_optimize_mode().as_bytes());
     eat(env::var("TARGET").unwrap_or_default().as_bytes());
     println!("cargo:rustc-env=LIBGHOSTTY_VT_PATCH_STACK={h:016x}");

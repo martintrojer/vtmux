@@ -426,7 +426,11 @@ Recorded per commit in git history; the list is kept current:
     with `blob_if_compressed`, comes out as a blob: a small header, the
     native `Page` value and the LZ4 bytes, readable only by the same build
     (decision 23; vtmux checks `ffi::PATCH_STACK`, the import checks the
-    magic and `@sizeOf(Page)`).
+    magic, `@sizeOf(Page)` and an XxHash3 checksum over the `Page` value
+    and the LZ4 bytes before it reads either, then that the `Page` value
+    is the one `Page.initBuf` gives for its capacity but for the fields
+    use changes (size, dirty, allocator search hints, set counters, each
+    bounded), and that its width is the terminal's).
   - `ghostty_vtmux_state_export`: the state outside the grids
     (`GhosttyVtmuxState`): every mode by number with its current, saved
     and default value, tab stops, scroll region, status display, REP's
@@ -436,15 +440,28 @@ Recorded per commit in git history; the list is kept current:
     hyperlink counter), saved cursor, charsets, protected mode, Kitty
     keyboard stack and semantic-click state. Title and pwd use the
     existing options.
-  - `ghostty_vtmux_importer_new` / `_page` / `_finish` / `_free`: build
+  - `ghostty_vtmux_importer_new(terminal, check, out)` / `_page` /
+    `_finish` / `_free`: build
     each screen's pages with `PageList.Builder` (rows into fresh pages via
     `styles.add`, `insertHyperlink`, `setHyperlink`, `appendGrapheme`;
     blobs as compressed nodes over fresh backing memory, as
     `cloneCompressedNode` does), then swap them into a fresh terminal's
     screens (refused while it has tracked grid refs) and rebuild the
     cursor as `snapshot/screen.zig` `decode` does. A page's capacity is the
-    exporter's when given (it held that content), else what
-    `Page.exactRowCapacity` would count.
+    exporter's when given (it held that content); when the content does
+    not fit it (another build's capacities) the half-built page is taken
+    off the builder again and refilled at what `Page.exactRowCapacity`
+    would count. Every count from outside is checked arithmetic: a page of
+    another width than the terminal's, a capacity whose layout passes
+    `size.max_page_size`, a grapheme on a cell without a codepoint, a
+    cursor off the screen, a scroll region out of order or a previous
+    character that is not a scalar value is `GHOSTTY_INVALID_VALUE`, the
+    importer or terminal as it was. With `check` (vtmux's dry run before
+    an upgrade's exec), every blob is decoded into scratch memory and
+    every page passes `Page.verifyIntegrity` as it is added; without, a
+    blob is decoded on its first read. vtmux-vt validates the whole state
+    before any of this (`term/state/validate.rs`); these checks are the
+    second line.
   - `ghostty_vtmux_set_active_screen`: switch screens with no mode side
     effects (vtmux pins OSC 133 marks on the primary before switching).
   Ghostty's own snapshot codec (`src/terminal/snapshot`) is not used: its
@@ -452,16 +469,27 @@ Recorded per commit in git history; the list is kept current:
   bits (`tmux_used`, the palette-256 flags, tab marks), and it cannot carry
   compressed pages compressed. Wrapper: `libghostty-vt/src/vtmux.rs`
   (`Terminal::vtmux_page_export`, `vtmux_state_export`, `vtmux_importer`,
-  `Importer`, `vtmux_set_title`, `vtmux_set_pwd`, `vtmux_set_active_screen`),
+  `Importer`, `vtmux_set_title`, `vtmux_set_pwd`, `vtmux_set_active_screen`;
+  `Importer` does not borrow the terminal, so a streamed import keeps both
+  side by side: each call takes the terminal and refuses another one),
   `Vtmux*` structs and functions added by hand to `bindings.rs` with size
   asserts that `vtmux_state.zig` asserts too. `build.rs` `emit_patch_stack`
-  sets `LIBGHOSTTY_VT_PATCH_STACK` (FNV-1a of the commit, every patch, the
-  Zig optimize mode and the target), read as `ffi::PATCH_STACK`.
+  sets `LIBGHOSTTY_VT_PATCH_STACK` (FNV-1a of the commit, every patch,
+  `zig version`, the Zig optimize mode and the target: `Page` is not an
+  `extern` struct, so another compiler may order its fields differently
+  at the same size), read as `ffi::PATCH_STACK`.
   vtmux-vt's `PaneTerm::export_state` / `import_state` (`term/state.rs`)
   are the one consumer. Tests: `vtmux state: rows round trip into a
-  fresh terminal` (`zig build test-lib-vt -Dtest-filter="vtmux state"`);
+  fresh terminal`, `vtmux state: malformed pages and states are refused`
+  and `vtmux state: blobs are checked before they are trusted` (a resealed
+  blob with a moved offset, another width, or LZ4 bytes cut short, which
+  only a `check` import decodes and refuses)
+  (`zig build test-lib-vt -Dtest-filter="vtmux state"`);
   the full `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none`
-  gives 3257 pass, 38 skip and the known `tabClear single` failure;
+  (Debug) gives 3256 pass, 38 skip and two known failures per test
+  binary: `tabClear single`, and the kitty `temporary file outside
+  directory prefix is rejected` of patch 0001's note (it fails whenever
+  the checkout is under `/tmp`, as this run's was);
   vtmux's `crates/vtmux-vt/tests/state_roundtrip.rs`. Not an upstream
   candidate as is (it carries vtmux's patch bits).
 

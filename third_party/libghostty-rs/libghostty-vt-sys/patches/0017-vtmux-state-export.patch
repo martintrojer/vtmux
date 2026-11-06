@@ -1,5 +1,5 @@
 diff --git a/include/ghostty/vt.h b/include/ghostty/vt.h
-index cfa1017e7..a78a5f7a8 100644
+index cfa1017..a78a5f7 100644
 --- a/include/ghostty/vt.h
 +++ b/include/ghostty/vt.h
 @@ -169,6 +169,7 @@ extern "C" {
@@ -12,10 +12,10 @@ index cfa1017e7..a78a5f7a8 100644
  #ifdef __cplusplus
 diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
 new file mode 100644
-index 000000000..fa9f50ffa
+index 0000000..adcc99d
 --- /dev/null
 +++ b/include/ghostty/vt/vtmux_state.h
-@@ -0,0 +1,313 @@
+@@ -0,0 +1,325 @@
 +/**
 + * @file vtmux_state.h
 + *
@@ -300,19 +300,31 @@ index 000000000..fa9f50ffa
 +
 +/**
 + * Start importing into `terminal`, which must be fresh: no tracked grid
-+ * references, and the size the state will have.
++ * references, and the size the state will have. With `check`, every blob
++ * is decoded at once and every page's integrity verified (a dry run);
++ * without, a blob is only checked against its checksum and its `Page`
++ * value against the layout of its capacity, and decoded on its first read.
 + */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_importer_new(GhosttyTerminal terminal,
++                                                     bool check,
 +                                                     GhosttyVtmuxImporter* out);
 +
-+/** Add the next page (oldest first) of a screen. The page is copied. */
++/**
++ * Add the next page (oldest first) of a screen. The page is copied. A page
++ * of another width than the terminal's, a count or offset out of range, a
++ * blob that fails its checksum or a capacity over Ghostty's page limit is
++ * GHOSTTY_INVALID_VALUE, and the importer is as it was.
++ */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_importer_page(GhosttyVtmuxImporter importer,
 +                                                      uint8_t screen,
 +                                                      const GhosttyVtmuxPage* page);
 +
 +/**
 + * Replace the terminal's screens with the pages added and apply `state`.
-+ * On failure the terminal is unchanged. Free the importer either way.
++ * A cursor outside the screen, a scroll region out of order or off it, or
++ * a previous character that is not a Unicode scalar value is
++ * GHOSTTY_INVALID_VALUE. On failure the terminal is unchanged. Free the
++ * importer either way.
 + */
 +GHOSTTY_API GhosttyResult ghostty_vtmux_importer_finish(GhosttyVtmuxImporter importer,
 +                                                        const GhosttyVtmuxState* state);
@@ -330,7 +342,7 @@ index 000000000..fa9f50ffa
 +
 +#endif /* GHOSTTY_VT_VTMUX_STATE_H */
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 12687a6b3..88cea3e5f 100644
+index 12687a6..88cea3e 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
 @@ -381,6 +381,14 @@ comptime {
@@ -349,7 +361,7 @@ index 12687a6b3..88cea3e5f 100644
              @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
              @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index b7ae455c5..d3f1513f2 100644
+index b7ae455..d3f1513 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
 @@ -49,6 +49,7 @@ pub const style = @import("style.zig");
@@ -385,10 +397,10 @@ index b7ae455c5..d3f1513f2 100644
  
 diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
 new file mode 100644
-index 000000000..966754bc3
+index 0000000..8af48eb
 --- /dev/null
 +++ b/src/terminal/c/vtmux_state.zig
-@@ -0,0 +1,1340 @@
+@@ -0,0 +1,1669 @@
 +//! vtmux: export and import the whole state of a terminal (see
 +//! include/ghostty/vt/vtmux_state.h).
 +//!
@@ -845,24 +857,37 @@ index 000000000..966754bc3
 +/// The blob of a compressed page: this header, the page's metadata (its
 +/// `Page` value, the memory pointer zeroed) and the compressed bytes. Only
 +/// a library of the same build reads it back (`Page` is native layout).
++/// `checksum` is the XxHash3 of everything after the header: the import
++/// reads nothing of a blob it does not match, and the page's LZ4 bytes
++/// are only decoded on its first read, long after the import.
 +const BlobHeader = extern struct {
 +    magic: u32 = blob_magic,
 +    page_size: u32 = @sizeOf(Page),
 +    memory_len: u64,
 +    encoded_len: u64,
++    checksum: u64,
 +    heap: u8,
 +    reserved: [7]u8 = @splat(0),
 +};
-+const blob_magic: u32 = 0x42505456; // "VTPB"
++const blob_magic: u32 = 0x32505456; // "VTP2"
++const blob_seed: u64 = 0x7674_6d75_7862_6c62; // "vtmuxblb"
++
++fn blobChecksum(meta: []const u8, encoded: []const u8) u64 {
++    var h: std.hash.XxHash3 = .init(blob_seed);
++    h.update(meta);
++    h.update(encoded);
++    return h.final();
++}
 +
 +fn exportBlob(c: *const compression.Page, heap: bool, out: *CPage) Result {
++    var meta = c.page;
++    meta.memory = &.{};
 +    const header: BlobHeader = .{
 +        .memory_len = c.page.memory.len,
 +        .encoded_len = c.encoded.len,
++        .checksum = blobChecksum(std.mem.asBytes(&meta), c.encoded),
 +        .heap = @intFromBool(heap),
 +    };
-+    var meta = c.page;
-+    meta.memory = &.{};
 +    var bytes: Out(u8) = .{ .ptr = out.bytes, .cap = out.bytes_cap };
 +    bytes.pushSlice(std.mem.asBytes(&header));
 +    bytes.pushSlice(std.mem.asBytes(&meta));
@@ -886,6 +911,10 @@ index 000000000..966754bc3
 +    wrapper: @typeInfo(terminal_c.Terminal).optional.child,
 +    alloc: Allocator,
 +    builders: [2]?PageList.Builder = .{ null, null },
++    /// Decode every blob now and verify every page's integrity, instead
++    /// of trusting a blob's checksum until its first read (vtmux's dry
++    /// run before an upgrade's exec).
++    check: bool,
 +
 +    fn deinit(self: *Importer) void {
 +        for (&self.builders) |*b| if (b.*) |*builder| builder.deinit();
@@ -897,6 +926,7 @@ index 000000000..966754bc3
 +
 +pub fn importer_new(
 +    terminal_: terminal_c.Terminal,
++    check: bool,
 +    out: ?*CImporter,
 +) callconv(lib.calling_conv) Result {
 +    const wrapper = terminal_ orelse return .invalid_value;
@@ -906,7 +936,7 @@ index 000000000..966754bc3
 +    if (wrapper.tracked_grid_refs.count() != 0) return .invalid_value;
 +    const alloc = wrapper.terminal.gpa();
 +    const imp = alloc.create(Importer) catch return .out_of_memory;
-+    imp.* = .{ .wrapper = wrapper, .alloc = alloc };
++    imp.* = .{ .wrapper = wrapper, .alloc = alloc, .check = check };
 +    o.* = imp;
 +    return .success;
 +}
@@ -936,10 +966,26 @@ index 000000000..966754bc3
 +        }) catch return .out_of_memory;
 +    }
 +    const builder = &imp.builders[screen_key].?;
-+    if (page.blob) return importBlob(builder, page);
-+    importRows(imp.alloc, builder, page) catch |err| return switch (err) {
-+        error.OutOfMemory => .out_of_memory,
-+        error.Invalid => .invalid_value,
++    if (page.blob) {
++        importBlob(imp, builder, page, t.cols) catch |err| return switch (err) {
++            error.OutOfMemory => .out_of_memory,
++            error.Invalid => .invalid_value,
++        };
++        return .success;
++    }
++    // Every page of a screen has the terminal's width: Ghostty's page
++    // list operations assume it (`PageList.resizeCols`, `beginUpdate`).
++    if (page.cols != t.cols) return .invalid_value;
++    // The exporter's capacity first: the same build's page held this
++    // content. Another build's may be too small for it; the page is then
++    // sized from its content.
++    importRows(imp, builder, page, true) catch |err| switch (err) {
++        error.PageFull => importRows(imp, builder, page, false) catch |err2| return switch (err2) {
++            error.OutOfMemory => .out_of_memory,
++            error.Invalid, error.PageFull => .invalid_value,
++        },
++        error.OutOfMemory => return .out_of_memory,
++        error.Invalid => return .invalid_value,
 +    };
 +    return .success;
 +}
@@ -951,44 +997,58 @@ index 000000000..966754bc3
 +/// `snapshot/grid.zig` `kitty_virtual_placeholder`.
 +const kitty_virtual_placeholder: u21 = 0x10EEEE;
 +
-+/// The capacity for a page: the exporter's when it gave one (the source
-+/// page held exactly this content, so it fits; another build's hint may
-+/// not, and the import then fails with out of memory, see vtmux's
-+/// `import_state`), else what `Page.exactRowCapacity` would count, and at
-+/// least the standard capacity.
-+fn capacityFor(page: *const CPage) error{Invalid}!Capacity {
++/// The capacity for a page: the exporter's when it gave one and
++/// `use_hint` (the source page held exactly this content, so it fits;
++/// another build's may not, and the page is then filled again without
++/// it), else what `Page.exactRowCapacity` would count, and at least the
++/// standard capacity. Every sum is checked: the counts come from outside.
++fn capacityFor(page: *const CPage, use_hint: bool) error{Invalid}!Capacity {
 +    if (page.cols == 0 or page.rows_len == 0) return error.Invalid;
 +    const rows = std.math.cast(u16, page.rows_len) orelse return error.Invalid;
 +    const hint = page.capacity;
-+    if (hint.rows != 0) {
-+        return .{
-+            .cols = page.cols,
-+            .rows = @max(rows, std.math.cast(u16, hint.rows) orelse return error.Invalid),
-+            .styles = std.math.cast(u16, hint.styles) orelse return error.Invalid,
-+            .hyperlink_bytes = std.math.cast(u16, hint.hyperlink_bytes) orelse return error.Invalid,
-+            .grapheme_bytes = std.math.cast(u32, hint.grapheme_bytes) orelse return error.Invalid,
-+            .string_bytes = std.math.cast(u32, hint.string_bytes) orelse return error.Invalid,
-+        };
-+    }
++    const cap: Capacity = if (use_hint and hint.rows != 0) .{
++        .cols = page.cols,
++        .rows = @max(rows, std.math.cast(u16, hint.rows) orelse return error.Invalid),
++        .styles = std.math.cast(u16, hint.styles) orelse return error.Invalid,
++        .hyperlink_bytes = std.math.cast(u16, hint.hyperlink_bytes) orelse return error.Invalid,
++        .grapheme_bytes = hint.grapheme_bytes,
++        .string_bytes = hint.string_bytes,
++    } else try countedCapacity(page, rows);
++    if (Page.layout(cap).total_size > size_max_page) return error.Invalid;
++    return cap;
++}
++
++const size_max_page = @import("../size.zig").max_page_size;
++const OffsetBuf = @import("../size.zig").OffsetBuf;
++
++fn countedCapacity(page: *const CPage, rows: u16) error{Invalid}!Capacity {
 +    var cap: Capacity = pagepkg.std_capacity.adjust(.{ .cols = page.cols }) catch
 +        .{ .cols = page.cols, .rows = 1 };
 +    cap.rows = @max(cap.rows, rows);
 +
++    const add = std.math.add;
 +    var grapheme_bytes: usize = 0;
 +    if (page.graphemes) |g| {
 +        var i: usize = 0;
 +        while (i + 1 < page.graphemes_len) {
-+            const n = g[i + 1];
-+            grapheme_bytes += GraphemeBytes.bytesRequired(u21, n);
-+            i += 2 + n;
++            const n: usize = g[i + 1];
++            const need = std.math.mul(usize, @sizeOf(u21), n) catch return error.Invalid;
++            grapheme_bytes = add(usize, grapheme_bytes, GraphemeBytes.bytesRequired(u8, need)) catch
++                return error.Invalid;
++            i = add(usize, i, add(usize, 2, n) catch return error.Invalid) catch return error.Invalid;
 +        }
 +    }
 +    var string_bytes: usize = 0;
 +    var link_cells: usize = 0;
 +    if (page.links) |l| {
 +        if (page.links_len > 1) for (l[1..page.links_len]) |link| {
-+            string_bytes += StringBytes.bytesRequired(u8, link.uri_len);
-+            if (link.explicit_id != 0) string_bytes += StringBytes.bytesRequired(u8, link.id_len);
++            string_bytes = add(usize, string_bytes, StringBytes.bytesRequired(u8, link.uri_len)) catch
++                return error.Invalid;
++            if (link.explicit_id != 0) string_bytes = add(
++                usize,
++                string_bytes,
++                StringBytes.bytesRequired(u8, link.id_len),
++            ) catch return error.Invalid;
 +        };
 +    }
 +    if (page.cells) |c| {
@@ -1001,13 +1061,16 @@ index 000000000..966754bc3
 +        hyperlink.Set.capacityForCount(page.links_len -| 1),
 +        std.math.divCeil(usize, link_cells, hyperlink_cell_multiplier) catch 0,
 +    );
++    const link_bytes = std.math.mul(usize, links, @sizeOf(hyperlink.Set.Item)) catch
++        return error.Invalid;
++    // Ghostty's own pages stop at the 16-bit fields' maximum (a page of
++    // 1000 one-cell links fills `hyperlink_bytes`), so these clamp.
 +    cap.styles = @intCast(@min(std.math.maxInt(u16), @max(cap.styles, styles)));
-+    cap.grapheme_bytes = @intCast(@max(cap.grapheme_bytes, grapheme_bytes));
-+    cap.string_bytes = @intCast(@max(cap.string_bytes, string_bytes));
-+    cap.hyperlink_bytes = @intCast(@min(
-+        std.math.maxInt(u16),
-+        @max(cap.hyperlink_bytes, links * @sizeOf(hyperlink.Set.Item)),
-+    ));
++    cap.grapheme_bytes = std.math.cast(u32, @max(cap.grapheme_bytes, grapheme_bytes)) orelse
++        return error.Invalid;
++    cap.string_bytes = std.math.cast(u32, @max(cap.string_bytes, string_bytes)) orelse
++        return error.Invalid;
++    cap.hyperlink_bytes = @intCast(@min(std.math.maxInt(u16), @max(cap.hyperlink_bytes, link_bytes)));
 +    return cap;
 +}
 +
@@ -1040,12 +1103,33 @@ index 000000000..966754bc3
 +    };
 +}
 +
++/// Take the builder's last page off again (an import that failed half
++/// way), as `PageList.destroyNodeExt` frees a resident page.
++fn dropLastPage(builder: *PageList.Builder, page_size: usize, page_serial: u64) void {
++    const node = builder.pages.pop() orelse return;
++    const pool = &builder.pool;
++    const page = node.pageAssumeResident();
++    switch (node.owned) {
++        .pool => {
++            // Pool items are handed out zeroed.
++            @memset(page.memory, 0);
++            pool.pages.destroy(@ptrCast(page.memory.ptr));
++        },
++        .heap => pool.pages.allocator.free(page.memory),
++    }
++    pool.nodes.destroy(node);
++    builder.page_size = page_size;
++    builder.page_serial = page_serial;
++}
++
 +fn importRows(
-+    alloc: Allocator,
++    imp: *Importer,
 +    builder: *PageList.Builder,
 +    src: *const CPage,
-+) (Allocator.Error || error{Invalid})!void {
-+    const cap = try capacityFor(src);
++    use_hint: bool,
++) (Allocator.Error || error{ Invalid, PageFull })!void {
++    const alloc = imp.alloc;
++    const cap = try capacityFor(src, use_hint);
 +    const rows = (src.rows orelse return error.Invalid)[0..src.rows_len];
 +    const cells = if (src.cells) |c| c[0..src.cells_len] else &[_]CCell{};
 +    const styles = if (src.styles) |s| s[0..src.styles_len] else &[_]style_c.Style{};
@@ -1053,7 +1137,10 @@ index 000000000..966754bc3
 +    const bytes = if (src.bytes) |b| b[0..src.bytes_len] else &[_]u8{};
 +    const graphemes = if (src.graphemes) |g| g[0..src.graphemes_len] else &[_]u32{};
 +
++    const size_before = builder.page_size;
++    const serial_before = builder.page_serial;
 +    const page = try builder.allocatePage(cap);
++    errdefer dropLastPage(builder, size_before, serial_before);
 +    page.size = .{ .cols = src.cols, .rows = @intCast(rows.len) };
 +    page.pauseIntegrityChecks(true);
 +    defer page.pauseIntegrityChecks(false);
@@ -1064,17 +1151,18 @@ index 000000000..966754bc3
 +    const style_ids = try alloc.alloc(stylepkg.Id, styles.len);
 +    defer alloc.free(style_ids);
 +    @memset(style_ids, 0);
++    defer for (style_ids) |id| if (id != 0) page.styles.release(page.memory, id);
 +    for (styles, 0..) |s, i| {
 +        if (i == 0) continue;
 +        const value = styleFromC(s);
 +        if (value.default()) continue;
-+        style_ids[i] = page.styles.add(page.memory, value) catch return error.OutOfMemory;
++        style_ids[i] = page.styles.add(page.memory, value) catch return error.PageFull;
 +    }
-+    defer for (style_ids) |id| if (id != 0) page.styles.release(page.memory, id);
 +
 +    const link_ids = try alloc.alloc(hyperlink.Id, links.len);
 +    defer alloc.free(link_ids);
 +    @memset(link_ids, 0);
++    defer for (link_ids) |id| if (id != 0) page.hyperlink_set.release(page.memory, id);
 +    for (links, 0..) |l, i| {
 +        if (i == 0) continue;
 +        if (@as(usize, l.uri_offset) + l.uri_len > bytes.len) return error.Invalid;
@@ -1086,9 +1174,8 @@ index 000000000..966754bc3
 +            else
 +                .{ .implicit = l.implicit_id },
 +        };
-+        link_ids[i] = page.insertHyperlink(link) catch return error.OutOfMemory;
++        link_ids[i] = page.insertHyperlink(link) catch return error.PageFull;
 +    }
-+    defer for (link_ids) |id| if (id != 0) page.hyperlink_set.release(page.memory, id);
 +
 +    for (rows, 0..) |r, y| {
 +        const row = page.getRow(y);
@@ -1144,7 +1231,7 @@ index 000000000..966754bc3
 +                page.hyperlink_set.use(page.memory, id);
 +                page.setHyperlink(row, cell, id) catch {
 +                    page.hyperlink_set.release(page.memory, id);
-+                    return error.OutOfMemory;
++                    return error.PageFull;
 +                };
 +            }
 +        }
@@ -1154,19 +1241,24 @@ index 000000000..966754bc3
 +    while (i < graphemes.len) {
 +        if (i + 1 >= graphemes.len) return error.Invalid;
 +        const index = graphemes[i];
-+        const n = graphemes[i + 1];
-+        if (i + 2 + n > graphemes.len) return error.Invalid;
++        const n: usize = graphemes[i + 1];
++        if (n == 0 or n > graphemes.len - i - 2) return error.Invalid;
 +        const cps = graphemes[i + 2 ..][0..n];
 +        i += 2 + n;
 +        // Find the cell's row: rows are in cell order.
 +        const y = rowOfCell(rows, index) orelse return error.Invalid;
 +        const row = page.getRow(y);
 +        const cell = &page.getCells(row)[index - rows[y].cell_start];
++        // Only a cell with a codepoint carries more.
++        if (cell.content_tag != .codepoint and cell.content_tag != .codepoint_grapheme) return error.Invalid;
++        if (cell.content.codepoint.data == 0) return error.Invalid;
 +        for (cps) |cp| {
 +            const v = std.math.cast(u21, cp) orelse return error.Invalid;
-+            page.appendGrapheme(row, cell, v) catch return error.OutOfMemory;
++            page.appendGrapheme(row, cell, v) catch return error.PageFull;
 +        }
 +    }
++
++    if (imp.check) page.verifyIntegrity(alloc) catch return error.Invalid;
 +}
 +
 +fn rowOfCell(rows: []const CRow, index: u32) ?usize {
@@ -1177,56 +1269,131 @@ index 000000000..966754bc3
 +        const r = rows[mid];
 +        if (index < r.cell_start) {
 +            hi = mid;
-+        } else if (index >= r.cell_start + r.cell_count) {
++        } else if (@as(u64, index) >= @as(u64, r.cell_start) + r.cell_count) {
 +            lo = mid + 1;
 +        } else return mid;
 +    }
 +    return null;
 +}
 +
-+fn importBlob(builder: *PageList.Builder, src: *const CPage) Result {
-+    const bytes = (src.bytes orelse return .invalid_value)[0..src.bytes_len];
-+    if (bytes.len < @sizeOf(BlobHeader) + @sizeOf(Page)) return .invalid_value;
++/// Whether a blob's `Page` value is the one `Page.initBuf` gives for its
++/// capacity over `buf`, but for what changes as the page is used (its
++/// size, dirty flag, allocator search hints and set counters), and those
++/// are in range. `buf` is only used for its address.
++fn blobPageValid(meta: *const Page, buf: []align(std.heap.page_size_min) u8, cols: u16) bool {
++    const cap = meta.capacity;
++    if (cap.cols == 0 or cap.rows == 0) return false;
++    const l = Page.layout(cap);
++    if (l.total_size > size_max_page or l.total_size > buf.len) return false;
++    if (meta.size.cols != cols or meta.size.cols > cap.cols) return false;
++    if (meta.size.rows == 0 or meta.size.rows > cap.rows) return false;
++    const ob: OffsetBuf = .init(buf);
++    var want: Page = .{
++        .memory = meta.memory,
++        .rows = ob.member(Row, l.rows_start),
++        .cells = ob.member(Cell, l.cells_start),
++        .styles = @TypeOf(meta.styles).initAssumeZeroed(ob.add(l.styles_start), l.styles_layout, .{}),
++        .string_alloc = @TypeOf(meta.string_alloc).initAssumeZeroed(
++            ob.add(l.string_alloc_start),
++            l.string_alloc_layout,
++        ),
++        .grapheme_alloc = @TypeOf(meta.grapheme_alloc).initAssumeZeroed(
++            ob.add(l.grapheme_alloc_start),
++            l.grapheme_alloc_layout,
++        ),
++        .grapheme_map = @TypeOf(meta.grapheme_map).initAssumeZeroed(
++            ob.add(l.grapheme_map_start),
++            l.grapheme_map_layout,
++        ),
++        .hyperlink_map = @TypeOf(meta.hyperlink_map).initAssumeZeroed(
++            ob.add(l.hyperlink_map_start),
++            l.hyperlink_map_layout,
++        ),
++        .hyperlink_set = @TypeOf(meta.hyperlink_set).initAssumeZeroed(
++            ob.add(l.hyperlink_set_start),
++            l.hyperlink_set_layout,
++            .{},
++        ),
++        .size = meta.size,
++        .capacity = cap,
++        .dirty = meta.dirty,
++    };
++    want.pause_integrity_checks = meta.pause_integrity_checks;
++    want.string_alloc.search_start = meta.string_alloc.search_start;
++    want.grapheme_alloc.search_start = meta.grapheme_alloc.search_start;
++    inline for (.{ "styles", "hyperlink_set" }) |name| {
++        const got = &@field(meta, name);
++        const set = &@field(want, name);
++        if (got.next_id == 0 or got.next_id > got.layout.cap) return false;
++        if (got.living > got.layout.cap or got.max_psl >= got.psl_stats.len) return false;
++        set.max_psl = got.max_psl;
++        set.psl_stats = got.psl_stats;
++        set.living = got.living;
++        set.next_id = got.next_id;
++    }
++    return std.meta.eql(want, meta.*);
++}
++
++fn importBlob(
++    imp: *Importer,
++    builder: *PageList.Builder,
++    src: *const CPage,
++    cols: u16,
++) error{ OutOfMemory, Invalid }!void {
++    const bytes = (src.bytes orelse return error.Invalid)[0..src.bytes_len];
++    if (bytes.len < @sizeOf(BlobHeader) + @sizeOf(Page)) return error.Invalid;
 +    var header: BlobHeader = undefined;
 +    @memcpy(std.mem.asBytes(&header), bytes[0..@sizeOf(BlobHeader)]);
-+    if (header.magic != blob_magic or header.page_size != @sizeOf(Page)) return .invalid_value;
++    if (header.magic != blob_magic or header.page_size != @sizeOf(Page)) return error.Invalid;
 +    const rest = bytes[@sizeOf(BlobHeader)..];
-+    if (rest.len - @sizeOf(Page) != header.encoded_len) return .invalid_value;
++    if (rest.len - @sizeOf(Page) != header.encoded_len) return error.Invalid;
++    // Nothing of the page is read before its bytes are known to be the
++    // ones exported: a `Page` value from anywhere else is not one.
++    if (blobChecksum(rest[0..@sizeOf(Page)], rest[@sizeOf(Page)..]) != header.checksum) return error.Invalid;
 +    var meta: Page = undefined;
 +    @memcpy(std.mem.asBytes(&meta), rest[0..@sizeOf(Page)]);
 +    const encoded = rest[@sizeOf(Page)..];
-+    const len: usize = std.math.cast(usize, header.memory_len) orelse return .invalid_value;
-+    if (len != Page.layout(meta.capacity).total_size) return .invalid_value;
++    const len: usize = std.math.cast(usize, header.memory_len) orelse return error.Invalid;
++    if (len != Page.layout(meta.capacity).total_size) return error.Invalid;
 +    const heap = header.heap != 0;
 +    const std_size = Page.layout(pagepkg.std_capacity).total_size;
-+    if (!heap and len > std_size) return .invalid_value;
++    if (!heap and len > std_size) return error.Invalid;
 +
 +    // As `PageList.cloneCompressedNode`: fresh backing memory of the same
 +    // kind, never touched until the page is first read and decoded.
 +    const pool = &builder.pool;
-+    const node = pool.nodes.create() catch return .out_of_memory;
++    const node = try pool.nodes.create();
 +    errdefer pool.nodes.destroy(node);
 +    const buf: []align(std.heap.page_size_min) u8 = if (heap)
-+        pool.pages.allocator.alignedAlloc(u8, .fromByteUnits(std.heap.page_size_min), len) catch
-+            return .out_of_memory
++        try pool.pages.allocator.alignedAlloc(u8, .fromByteUnits(std.heap.page_size_min), len)
 +    else
-+        pool.pages.create() catch return .out_of_memory;
++        try pool.pages.create();
++    errdefer if (heap) pool.pages.allocator.free(buf) else pool.pages.destroy(@ptrCast(buf.ptr));
++    if (!blobPageValid(&meta, buf, cols)) return error.Invalid;
 +    const encoded_alloc = if (builtin.is_test) pool.alloc else pool.pages.allocator;
-+    const owned_encoded = encoded_alloc.dupe(u8, encoded) catch {
-+        if (heap) pool.pages.allocator.free(buf) else pool.pages.destroy(@ptrCast(buf.ptr));
-+        pool.nodes.destroy(node);
-+        return .out_of_memory;
-+    };
++    const owned_encoded = try encoded_alloc.dupe(u8, encoded);
++    errdefer encoded_alloc.free(owned_encoded);
 +    meta.memory = buf[0..len];
++    const compressed: compression.Page = .{ .page = meta, .encoded = owned_encoded, .alloc = encoded_alloc };
++    if (imp.check) {
++        // Decode it into scratch memory now, as its first read would.
++        const scratch = try std.heap.page_allocator.alignedAlloc(
++            u8,
++            .fromByteUnits(std.heap.page_size_min),
++            len,
++        );
++        defer std.heap.page_allocator.free(scratch);
++        const p = compressed.cloneBuf(scratch) catch return error.Invalid;
++        p.verifyIntegrity(imp.alloc) catch return error.Invalid;
++    }
 +    node.* = .{
-+        .data = .{ .compressed = .{ .page = meta, .encoded = owned_encoded, .alloc = encoded_alloc } },
++        .data = .{ .compressed = compressed },
 +        .serial = builder.page_serial,
 +        .owned = if (heap) .heap else .pool,
 +    };
 +    builder.page_serial += 1;
 +    builder.page_size += buf.len;
 +    builder.pages.append(node);
-+    return .success;
 +}
 +
 +pub fn importer_finish(
@@ -1243,11 +1410,36 @@ index 000000000..966754bc3
 +    if (wrapper.tracked_grid_refs.count() != 0) return .invalid_value;
 +    if (imp.builders[0] == null) return .invalid_value;
 +    if (state.screens[1].present != (imp.builders[1] != null)) return .invalid_value;
++    if (!stateValid(state, t.cols, t.rows)) return .invalid_value;
 +    finish(imp, state) catch |err| return switch (err) {
 +        error.OutOfMemory => .out_of_memory,
 +        else => .invalid_value,
 +    };
 +    return .success;
++}
++
++/// Whether `finish` can apply the state as it is: what it would clamp or
++/// map to a default is refused instead, so nothing changes on a bad one.
++fn stateValid(s: *const CState, cols: u16, rows: u16) bool {
++    if (s.scroll_top > s.scroll_bottom or s.scroll_bottom >= rows) return false;
++    if (s.scroll_left > s.scroll_right or s.scroll_right >= cols) return false;
++    if (s.previous_char != 0xffffffff) {
++        const c = std.math.cast(u21, s.previous_char) orelse return false;
++        if (!std.unicode.utf8ValidCodepoint(c)) return false;
++    }
++    const bytes_len = if (s.bytes == null) 0 else s.bytes_len;
++    for (s.screens) |screen| {
++        if (!screen.present) continue;
++        if (screen.cursor_x >= cols or screen.cursor_y >= rows) return false;
++        if (screen.link_kind > 2) return false;
++        if (screen.link_kind != 0) {
++            if (screen.link_uri_len == 0) return false;
++            if (@as(usize, screen.link_uri_offset) + screen.link_uri_len > bytes_len) return false;
++        }
++        if (screen.link_kind == 2 and
++            @as(usize, screen.link_id_offset) + screen.link_id_len > bytes_len) return false;
++    }
++    return true;
 +}
 +
 +fn finish(imp: *Importer, state: *const CState) !void {
@@ -1677,7 +1869,7 @@ index 000000000..966754bc3
 +    var links: [8]CLink = undefined;
 +    var bytes: [256]u8 = undefined;
 +    var imp: CImporter = null;
-+    try testing.expectEqual(Result.success, importer_new(b, &imp));
++    try testing.expectEqual(Result.success, importer_new(b, true, &imp));
 +    var n: usize = 0;
 +    try testing.expectEqual(Result.success, page_count(a, 0, &n));
 +    for (0..n) |i| {
@@ -1728,4 +1920,153 @@ index 000000000..966754bc3
 +    const str_b = try sb.dumpStringAlloc(testing.allocator, .{ .screen = .{} });
 +    defer testing.allocator.free(str_b);
 +    try testing.expectEqualStrings(str_a, str_b);
++}
++
++test "vtmux state: malformed pages and states are refused" {
++    const testing = std.testing;
++    var b: terminal_c.Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(null, &b, 10, 3));
++    defer terminal_c.free(b);
++    var imp: CImporter = null;
++    try testing.expectEqual(Result.success, importer_new(b, true, &imp));
++
++    var rows = [_]CRow{
++        .{ .cell_start = 0, .cell_count = 1, .used = 1, .flags = 0 },
++        .{ .cell_start = 1, .cell_count = 0, .used = 0, .flags = 0 },
++        .{ .cell_start = 1, .cell_count = 0, .used = 0, .flags = 0 },
++    };
++    var cells = [_]CCell{.{ .content = 'e', .style = 0, .link = 0, .flags = 1, .tab = 0 }};
++    // A wild count of codepoints after the first: it once overflowed the
++    // capacity's sum.
++    var graphemes = [_]u32{ 0, 0xffffffff, 0x301 };
++    var styles = [_]style_c.Style{.default};
++    var links = [_]CLink{std.mem.zeroes(CLink)};
++    var page: CPage = .{
++        .size = @sizeOf(CPage),
++        .rows = &rows,
++        .rows_cap = rows.len,
++        .rows_len = rows.len,
++        .cells = &cells,
++        .cells_cap = cells.len,
++        .cells_len = cells.len,
++        .graphemes = &graphemes,
++        .graphemes_cap = graphemes.len,
++        .graphemes_len = graphemes.len,
++        .styles = &styles,
++        .styles_cap = styles.len,
++        .styles_len = styles.len,
++        .links = &links,
++        .links_cap = links.len,
++        .links_len = links.len,
++        .bytes = null,
++        .bytes_cap = 0,
++        .bytes_len = 0,
++        .cols = 10,
++        .blob = false,
++        .capacity = .{},
++    };
++    try testing.expectEqual(Result.invalid_value, importer_page(imp, 0, &page));
++    graphemes[1] = 1;
++    // Another width than the terminal's.
++    page.cols = 11;
++    try testing.expectEqual(Result.invalid_value, importer_page(imp, 0, &page));
++    // A capacity over the page limit.
++    page.cols = 10;
++    page.capacity = .{ .rows = 0xffff, .styles = 0xffff, .hyperlink_bytes = 0xffff, .grapheme_bytes = 0xffffffff, .string_bytes = 0xffffffff };
++    try testing.expectEqual(Result.invalid_value, importer_page(imp, 0, &page));
++    page.capacity = .{};
++    try testing.expectEqual(Result.success, importer_page(imp, 0, &page));
++
++    var state: CState = undefined;
++    state.size = @sizeOf(CState);
++    state.bytes = null;
++    state.bytes_cap = 0;
++    try testing.expectEqual(Result.success, state_export(b, &state));
++    // A scroll region whose top is below its bottom.
++    state.scroll_top = 2;
++    state.scroll_bottom = 1;
++    try testing.expectEqual(Result.invalid_value, importer_finish(imp, &state));
++}
++
++test "vtmux state: blobs are checked before they are trusted" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    var resident = try Page.init(try pagepkg.std_capacity.adjust(.{ .cols = 10 }));
++    defer resident.deinit();
++    resident.size.rows = 5;
++    resident.getRowAndCell(1, 2).cell.* = .init('A');
++    const scratch = try alloc.alloc(u8, try compression.Page.requiredScratch(resident.memory.len));
++    defer alloc.free(scratch);
++    var table: compression.lz4.HashTable = undefined;
++    var compressed = (try compression.Page.init(alloc, &resident, scratch, &table)).?;
++    defer compressed.deinit();
++
++    const buf = try alloc.alloc(u8, 1 << 20);
++    defer alloc.free(buf);
++    var out = std.mem.zeroes(CPage);
++    out.size = @sizeOf(CPage);
++    out.bytes = buf.ptr;
++    out.bytes_cap = buf.len;
++    try testing.expectEqual(Result.success, exportBlob(&compressed, false, &out));
++    const good = try alloc.dupe(u8, buf[0..out.bytes_len]);
++    defer alloc.free(good);
++
++    const Case = struct {
++        fn import(blob: []u8, check: bool) !Result {
++            var t: terminal_c.Terminal = null;
++            try testing.expectEqual(Result.success, terminal_c.new(null, &t, 10, 3));
++            defer terminal_c.free(t);
++            var imp: CImporter = null;
++            try testing.expectEqual(Result.success, importer_new(t, check, &imp));
++            defer importer_free(imp);
++            var page = std.mem.zeroes(CPage);
++            page.size = @sizeOf(CPage);
++            page.bytes = blob.ptr;
++            page.bytes_cap = blob.len;
++            page.bytes_len = blob.len;
++            page.blob = true;
++            return importer_page(imp, 0, &page);
++        }
++
++        /// Make the checksum match again, as a forger would.
++        fn reseal(blob: []u8) void {
++            var header: BlobHeader = undefined;
++            @memcpy(std.mem.asBytes(&header), blob[0..@sizeOf(BlobHeader)]);
++            const rest = blob[@sizeOf(BlobHeader)..];
++            header.encoded_len = rest.len - @sizeOf(Page);
++            header.checksum = blobChecksum(rest[0..@sizeOf(Page)], rest[@sizeOf(Page)..]);
++            @memcpy(blob[0..@sizeOf(BlobHeader)], std.mem.asBytes(&header));
++        }
++
++        fn meta(blob: []u8) *align(1) Page {
++            return @ptrCast(blob[@sizeOf(BlobHeader)..].ptr);
++        }
++    };
++
++    try testing.expectEqual(Result.success, try Case.import(good, true));
++    const bad = try alloc.dupe(u8, good);
++    defer alloc.free(bad);
++
++    // A byte of the compressed data changed: the checksum fails.
++    bad[bad.len - 3] ^= 0x10;
++    try testing.expectEqual(Result.invalid_value, try Case.import(bad, false));
++
++    // A `Page` value that is not its capacity's layout.
++    @memcpy(bad, good);
++    Case.meta(bad).cells.offset += 64;
++    Case.reseal(bad);
++    try testing.expectEqual(Result.invalid_value, try Case.import(bad, false));
++
++    // Another width than the terminal's.
++    @memcpy(bad, good);
++    Case.meta(bad).size.cols = 9;
++    Case.reseal(bad);
++    try testing.expectEqual(Result.invalid_value, try Case.import(bad, false));
++
++    // Compressed data that does not decode: only a dry run decodes it.
++    @memcpy(bad, good);
++    const short = bad[0 .. bad.len - 8];
++    Case.reseal(short);
++    try testing.expectEqual(Result.success, try Case.import(short, false));
++    try testing.expectEqual(Result.invalid_value, try Case.import(short, true));
 +}

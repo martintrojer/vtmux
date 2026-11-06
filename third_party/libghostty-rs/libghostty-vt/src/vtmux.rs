@@ -202,14 +202,23 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// Start importing into this terminal, which must be fresh (no
-    /// tracked grid references) and of the state's size.
-    pub fn vtmux_importer(&mut self) -> Result<Importer<'_, 'alloc, 'cb>> {
+    /// tracked grid references) and of the state's size. With `check`,
+    /// every blob is decoded and every page verified as it is added (a dry
+    /// run); without, a blob is checked against its checksum and decoded
+    /// on its first read.
+    pub fn vtmux_importer(&mut self, check: bool) -> Result<Importer<'alloc>> {
         let mut raw: ffi::VtmuxImporter = std::ptr::null_mut();
-        from_result(unsafe { ffi::ghostty_vtmux_importer_new(self.inner.as_raw(), &raw mut raw) })?;
+        from_result(unsafe {
+            ffi::ghostty_vtmux_importer_new(self.inner.as_raw(), check, &raw mut raw)
+        })?;
         if raw.is_null() {
             return Err(Error::InvalidValue);
         }
-        Ok(Importer { raw, _term: self })
+        Ok(Importer {
+            raw,
+            term: self.inner.as_raw(),
+            _alloc: std::marker::PhantomData,
+        })
     }
 
     /// Set the title as OSC 2 would store it, without the title-changed
@@ -234,23 +243,46 @@ fn reserve<T>(v: &mut Vec<T>, len: usize) {
     v.reserve(len.saturating_sub(v.len()));
 }
 
-/// An import in progress; it holds the terminal until it is finished.
+/// An import in progress into one terminal. It does not borrow the
+/// terminal, so it can live beside it (a streamed import keeps both); each
+/// call takes the terminal again and refuses any other one. The importer
+/// only holds the terminal's allocator, never the terminal itself, so
+/// dropping either first is sound.
 #[allow(missing_debug_implementations, reason = "a handle")]
-pub struct Importer<'t, 'alloc, 'cb> {
+pub struct Importer<'alloc> {
     raw: ffi::VtmuxImporter,
-    _term: &'t mut Terminal<'alloc, 'cb>,
+    /// The terminal it was made for, only compared.
+    term: *mut ffi::TerminalImpl,
+    _alloc: std::marker::PhantomData<&'alloc ()>,
 }
 
-impl Importer<'_, '_, '_> {
+impl Importer<'_> {
+    fn check_term(&self, term: &Terminal<'_, '_>) -> Result<()> {
+        if std::ptr::eq(self.term, term.inner.as_raw()) {
+            Ok(())
+        } else {
+            Err(Error::InvalidValue)
+        }
+    }
+
     /// Add the next page (oldest first) of a screen. The page is copied.
-    pub fn page(&mut self, screen: u8, page: &PageRef<'_>) -> Result<()> {
+    /// A page Ghostty refuses (another width, a count out of range, a blob
+    /// that fails its checksum) leaves the import as it was.
+    pub fn page(
+        &mut self,
+        term: &mut Terminal<'_, '_>,
+        screen: u8,
+        page: &PageRef<'_>,
+    ) -> Result<()> {
+        self.check_term(term)?;
         let raw = page.raw();
         from_result(unsafe { ffi::ghostty_vtmux_importer_page(self.raw, screen, &raw const raw) })
     }
 
     /// Swap the pages in and apply `state`; the terminal is unchanged on
     /// failure.
-    pub fn finish(self, state: &State) -> Result<()> {
+    pub fn finish(self, term: &mut Terminal<'_, '_>, state: &State) -> Result<()> {
+        self.check_term(term)?;
         let mut raw = *state.raw;
         raw.size = std::mem::size_of::<RawState>();
         raw.bytes = state.bytes.as_ptr().cast_mut();
@@ -262,7 +294,7 @@ impl Importer<'_, '_, '_> {
     }
 }
 
-impl Drop for Importer<'_, '_, '_> {
+impl Drop for Importer<'_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_vtmux_importer_free(self.raw) };
     }

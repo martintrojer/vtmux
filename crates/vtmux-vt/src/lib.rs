@@ -34,8 +34,9 @@ pub fn set_width_overrides(ranges: &[(u32, u32, u8)]) {
 pub use palette::PaletteState;
 pub use term::{
     CellState, CompressedPages, Compression, CompressionActivity, ExtendedKeys, FrozenCell,
-    FrozenLinkId, FrozenRowState, GhosttyCharset, GhosttyCursor, GhosttyState, HeldScreen, KeyMode,
-    LineMark, LinkId, LinkState, ModeState, MouseModes, MouseTracking, Osc133, PATCH_STACK,
-    PageBlob, PageCapacity, PageRows, PageState, PaneState, PaneTerm, Passthrough, RowState,
-    SavedCursor, ScreenState, StateError, StyleState, TermState, history_reads,
+    FrozenLinkId, FrozenRowState, GhosttyCharset, GhosttyCursor, GhosttyState, HeldScreen,
+    ImportCheck, KeyMode, LineMark, LinkId, LinkState, ModeState, MouseModes, MouseTracking,
+    Osc133, PATCH_STACK, PageBlob, PageCapacity, PageRows, PageState, PaneState, PaneTerm,
+    Passthrough, RowState, SavedCursor, ScreenKind, ScreenState, StateError, StateImport,
+    StyleState, TermState, history_reads,
 };

@@ -19,6 +19,18 @@
 //! compressed can instead come out as its compressed bytes
 //! ([`PageState::Blob`], decision 23): fast, but only a binary built from
 //! the same Ghostty patch stack ([`PATCH_STACK`]) reads it back.
+//!
+//! The same state streams a page at a time: [`PaneTerm::export_state_head`]
+//! (everything but the pages) and [`PaneTerm::export_pages`] on the way
+//! out, [`StateImport`] on the way in, so a pane's history is never held
+//! whole outside Ghostty. `export_state` and `import_state` are those over
+//! a whole [`TermState`].
+//!
+//! An import trusts nothing: every count, index, width, position and
+//! bound is checked (`validate.rs`, then Ghostty again) and a malformed
+//! state is a [`StateError`], never a crash later. A blob carries a
+//! checksum; [`ImportCheck::Full`] also decodes it at once, for the dry
+//! run before an upgrade's exec (decision 7).
 
 use std::rc::Rc;
 
@@ -34,6 +46,8 @@ use super::{
 use crate::capture::FrozenRow;
 use crate::palette::PaletteState;
 use crate::snapshot::{Color, Snapshot, Style, Underline};
+
+mod validate;
 
 /// Identifies the Ghostty build a [`PageState::Blob`] can be read by:
 /// its commit, local patches, optimize mode and target.
@@ -394,7 +408,10 @@ impl From<&FrozenLinkId> for HyperlinkId {
 pub enum StateError {
     /// A blob from a build of another Ghostty patch stack.
     ForeignBlob,
-    /// Ghostty refused the state (malformed, or out of memory).
+    /// The state is malformed: what is wrong with it.
+    Invalid(&'static str),
+    /// Ghostty refused the state (a blob that fails its checksum or does
+    /// not decode, or out of memory).
     Ghostty(String),
 }
 
@@ -402,6 +419,7 @@ impl std::fmt::Display for StateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ForeignBlob => f.write_str("compressed page from another Ghostty build"),
+            Self::Invalid(what) => write!(f, "malformed terminal state: {what}"),
             Self::Ghostty(e) => write!(f, "terminal state rejected: {e}"),
         }
     }
@@ -884,34 +902,38 @@ impl GhosttyState {
 // ---------------------------------------------------------------------
 // PaneTerm
 
-fn export_screen(
-    term: &libghostty_vt::Terminal<'_, '_>,
-    key: u8,
-    compressed: CompressedPages,
-    buf: &mut gv::Page,
-) -> Result<Option<Vec<PageState>>, StateError> {
-    let Some(n) = term.vtmux_page_count(key).map_err(ghostty_err)? else {
-        return Ok(None);
-    };
-    let mut pages = Vec::with_capacity(n);
-    for i in 0..n {
-        term.vtmux_page_export(key, i, compressed == CompressedPages::Blob, buf)
-            .map_err(ghostty_err)?;
-        pages.push(if buf.blob {
-            PageState::Blob(PageBlob {
-                stack: PATCH_STACK.to_owned(),
-                bytes: buf.bytes.clone(),
-            })
-        } else {
-            PageState::Rows(PageRows::from_ffi(buf))
-        });
+/// One of a pane's two screens, for pages exported or imported one at a
+/// time ([`PaneTerm::export_pages`], [`StateImport::page`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenKind {
+    Primary,
+    Alternate,
+}
+
+impl ScreenKind {
+    fn key(self) -> u8 {
+        match self {
+            Self::Primary => gv::PRIMARY,
+            Self::Alternate => gv::ALTERNATE,
+        }
     }
-    Ok(Some(pages))
+}
+
+fn page_state(buf: &gv::Page) -> PageState {
+    if buf.blob {
+        PageState::Blob(PageBlob {
+            stack: PATCH_STACK.to_owned(),
+            bytes: buf.bytes.clone(),
+        })
+    } else {
+        PageState::Rows(PageRows::from_ffi(buf))
+    }
 }
 
 impl PaneTerm {
     /// The pane's whole terminal state, every compressed page as rows (see
     /// [`TermState`]). Reads history without restoring compressed pages.
+    /// Holds every page at once: [`PaneTerm::export_pages`] streams them.
     ///
     /// # Panics
     /// Only if libghostty fails to allocate.
@@ -927,14 +949,34 @@ impl PaneTerm {
     /// Only if libghostty fails to allocate.
     #[must_use]
     pub fn export_state_with(&self, compressed: CompressedPages) -> TermState {
+        let mut state = self.export_state_head();
+        let done: Result<(), std::convert::Infallible> =
+            self.export_pages(compressed, |screen, page| {
+                match (screen, state.alternate.as_mut()) {
+                    (ScreenKind::Alternate, Some(alt)) => alt.pages.push(page),
+                    _ => state.primary.pages.push(page),
+                }
+                Ok(())
+            });
+        let Ok(()) = done;
+        state
+    }
+
+    /// The pane's terminal state but its pages: every screen's `pages` is
+    /// empty, `alternate` is there when the pane has an alternate screen.
+    /// With [`PaneTerm::export_pages`] it is the whole state, a page at a
+    /// time; [`StateImport`] reads it back the same way.
+    ///
+    /// # Panics
+    /// Only if libghostty fails to allocate.
+    #[must_use]
+    pub fn export_state_head(&self) -> TermState {
         let term = &self.term;
-        let mut buf = gv::Page::default();
         let raw = term.vtmux_state_export().expect("terminal state export");
-        let primary_pages = export_screen(term, gv::PRIMARY, compressed, &mut buf)
-            .expect("page export")
-            .unwrap_or_default();
-        let alternate_pages =
-            export_screen(term, gv::ALTERNATE, compressed, &mut buf).expect("page export");
+        let has_alternate = term
+            .vtmux_page_count(gv::ALTERNATE)
+            .expect("page count")
+            .is_some();
         let mut ghostty = GhosttyState::from_ffi(&raw.raw);
         term.title()
             .unwrap_or_default()
@@ -945,15 +987,54 @@ impl PaneTerm {
         TermState {
             cols: raw.raw.cols,
             rows: raw.raw.rows,
-            primary: ScreenState::from_ffi(&raw.raw.screens[0], &raw.bytes, primary_pages),
-            alternate: alternate_pages
-                .map(|pages| ScreenState::from_ffi(&raw.raw.screens[1], &raw.bytes, pages)),
+            primary: ScreenState::from_ffi(&raw.raw.screens[0], &raw.bytes, Vec::new()),
+            alternate: has_alternate
+                .then(|| ScreenState::from_ffi(&raw.raw.screens[1], &raw.bytes, Vec::new())),
             alternate_active: raw.raw.active_screen == 1,
             ghostty,
             pane: self.pane_state(),
         }
     }
 
+    /// Every page of the pane's screens, the primary's oldest first, then
+    /// the alternate's: each is built, handed to `each`, and dropped, so
+    /// only one page is held at a time (a 100k-line history is never in
+    /// memory twice). The pages of [`PaneTerm::export_state_with`], in its
+    /// order. Stops at the first error `each` returns.
+    ///
+    /// # Errors
+    /// What `each` returns.
+    ///
+    /// # Panics
+    /// Only if libghostty fails to allocate.
+    pub fn export_pages<E>(
+        &self,
+        compressed: CompressedPages,
+        mut each: impl FnMut(ScreenKind, PageState) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let mut buf = gv::Page::default();
+        for screen in [ScreenKind::Primary, ScreenKind::Alternate] {
+            let Some(n) = self
+                .term
+                .vtmux_page_count(screen.key())
+                .expect("page count")
+            else {
+                continue;
+            };
+            for i in 0..n {
+                self.term
+                    .vtmux_page_export(
+                        screen.key(),
+                        i,
+                        compressed == CompressedPages::Blob,
+                        &mut buf,
+                    )
+                    .expect("page export");
+                each(screen, page_state(&buf))?;
+            }
+        }
+        Ok(())
+    }
     fn pane_state(&self) -> PaneState {
         let screen_y = |pin: &libghostty_vt::screen::TrackedGridRef| {
             pin.point(PointSpace::Screen).ok().flatten().map(|p| p.y)
@@ -1021,117 +1102,29 @@ impl PaneTerm {
     }
 
     /// A pane that is the terminal `state` was exported from (see
-    /// [`TermState`]).
+    /// [`TermState`]). Blobs are checked as [`ImportCheck::Lazy`] says.
     ///
     /// # Errors
-    /// A blob from a build of another Ghostty patch stack, or a state
-    /// Ghostty refuses.
-    ///
-    /// # Panics
-    /// Only if libghostty fails to allocate.
+    /// A blob from a build of another Ghostty patch stack, a malformed
+    /// state, or one Ghostty refuses.
     pub fn import_state(state: &TermState) -> Result<Self, StateError> {
-        // A page's capacity hint is what the exporting Ghostty needed; one
-        // from another Ghostty build may be too small, and the pages are
-        // then sized from their content.
-        match Self::import_with(state, true) {
-            Err(StateError::Ghostty(_)) => Self::import_with(state, false),
-            other => other,
-        }
+        Self::import_state_with(state, ImportCheck::Lazy)
     }
 
-    fn import_with(state: &TermState, hints: bool) -> Result<Self, StateError> {
-        let p = &state.pane;
-        let mut pane = Self::new(state.cols, state.rows, p.history_limit);
-        pane.history = p.keeps_history;
-        // The limits first: the import copies them into the new pages.
-        let _ = pane.term.set_scrollback_max_bytes(state.ghostty.max_bytes);
-        let _ = pane.term.set_scrollback_max_lines(state.ghostty.max_lines);
-        pane.line_limit = state.ghostty.max_lines;
-
-        pane.import_grid(state, hints)?;
-
-        let g = &state.ghostty;
-        let _ = pane.term.vtmux_set_title(&g.title);
-        let _ = pane.term.vtmux_set_pwd(&g.pwd);
-
-        let pin = |pane: &Self, y: u32| {
-            pane.term
-                .track_grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
-                .ok()
-        };
-        pane.marks = p
-            .marks
-            .iter()
-            .filter_map(|&(y, data)| Some((pin(&pane, y)?, data)))
-            .collect();
-        pane.alt_entry = p
-            .alt_entry
-            .and_then(|(y, retained)| Some((pin(&pane, y)?, retained)));
-        if state.alternate_active {
-            pane.term
-                .vtmux_set_active_screen(gv::ALTERNATE)
-                .map_err(ghostty_err)?;
+    /// [`PaneTerm::import_state`], checking blobs as `check` says.
+    ///
+    /// # Errors
+    /// As [`PaneTerm::import_state`].
+    pub fn import_state_with(state: &TermState, check: ImportCheck) -> Result<Self, StateError> {
+        let mut import = StateImport::new(state, check)?;
+        for page in &state.primary.pages {
+            import.page(ScreenKind::Primary, page)?;
         }
-
-        pane.restore_model(p, state.cols);
-        // Back where the parser was, with nothing it says kept.
-        pane.feed(&p.continuation);
-        let _ = pane.take_answers();
-        let _ = pane.take_title_events();
-        Ok(pane)
+        for page in state.alternate.iter().flat_map(|alt| &alt.pages) {
+            import.page(ScreenKind::Alternate, page)?;
+        }
+        import.finish()
     }
-
-    /// Ghostty's part of an import: both screens' pages and the state
-    /// outside them, the primary screen active.
-    fn import_grid(&mut self, state: &TermState, hints: bool) -> Result<(), StateError> {
-        let mut importer = self.term.vtmux_importer().map_err(ghostty_err)?;
-        let mut scratch = gv::Page::default();
-        let screens = [
-            (gv::PRIMARY, Some(&state.primary)),
-            (gv::ALTERNATE, state.alternate.as_ref()),
-        ];
-        for (key, screen) in screens {
-            let Some(screen) = screen else { continue };
-            for page in &screen.pages {
-                match page {
-                    PageState::Rows(rows) => {
-                        rows.to_ffi(&mut scratch);
-                        if !hints {
-                            scratch.capacity = gv::Capacity::default();
-                        }
-                        importer.page(key, &scratch.as_ref()).map_err(ghostty_err)?;
-                    }
-                    PageState::Blob(blob) => {
-                        if blob.stack != PATCH_STACK {
-                            return Err(StateError::ForeignBlob);
-                        }
-                        let blob_page = gv::PageRef {
-                            bytes: &blob.bytes,
-                            blob: true,
-                            ..gv::PageRef::default()
-                        };
-                        importer.page(key, &blob_page).map_err(ghostty_err)?;
-                    }
-                }
-            }
-        }
-        let mut raw = gv::State::default();
-        raw.raw.cols = state.cols;
-        raw.raw.rows = state.rows;
-        // The primary first: marks and the alternate screen's entry pin
-        // are pinned there.
-        raw.raw.active_screen = 0;
-        state.ghostty.to_ffi(&mut raw.raw);
-        state
-            .primary
-            .to_ffi(&mut raw.raw.screens[0], &mut raw.bytes);
-        if let Some(alt) = &state.alternate {
-            alt.to_ffi(&mut raw.raw.screens[1], &mut raw.bytes);
-        }
-        importer.finish(&raw).map_err(ghostty_err)?;
-        Ok(())
-    }
-
     /// The pane's own part of an import (see [`PaneState`]).
     fn restore_model(&mut self, p: &PaneState, cols: u16) {
         self.hsize = p.hsize;
@@ -1192,5 +1185,191 @@ impl PaneTerm {
                 since,
             ));
         }
+    }
+}
+
+/// How much an import checks of the compressed pages (blobs) it is given.
+/// Rows are always checked whole.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImportCheck {
+    /// A blob's checksum and its page metadata are checked; its
+    /// compressed bytes are decoded on the page's first read.
+    #[default]
+    Lazy,
+    /// Every blob is decoded and every page's integrity verified as it is
+    /// added: the dry run before an upgrade's exec (decision 7), so a bad
+    /// page fails while the old server can still carry on.
+    Full,
+}
+
+/// A pane's terminal state imported a page at a time: the state but its
+/// pages ([`PaneTerm::export_state_head`]), then each page in the order
+/// [`PaneTerm::export_pages`] gives them, then [`StateImport::finish`].
+/// Only the page being added is held outside Ghostty, so a 100k-line
+/// history is never in memory twice. [`PaneTerm::import_state`] is this
+/// over a whole [`TermState`].
+///
+/// Every part is checked before Ghostty sees it; any malformed part is an
+/// error, from the call that is given it or from `finish`.
+pub struct StateImport {
+    importer: gv::Importer<'static>,
+    pane: PaneTerm,
+    /// Ghostty's state outside the grids, applied at `finish`.
+    raw: gv::State,
+    title: String,
+    pwd: String,
+    marks: Vec<(u32, Osc133)>,
+    alt_entry: Option<(u32, usize)>,
+    alternate: bool,
+    alternate_active: bool,
+    continuation: Vec<u8>,
+    scratch: gv::Page,
+}
+
+impl std::fmt::Debug for StateImport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StateImport").finish_non_exhaustive()
+    }
+}
+
+impl StateImport {
+    /// Start importing `head`: everything of it but its pages, which are
+    /// not read (add them with [`StateImport::page`]).
+    ///
+    /// # Errors
+    /// A malformed state ([`StateError::Invalid`]).
+    pub fn new(head: &TermState, check: ImportCheck) -> Result<Self, StateError> {
+        validate::head(head)?;
+        let p = &head.pane;
+        let mut pane = PaneTerm::new(head.cols, head.rows, p.history_limit);
+        pane.history = p.keeps_history;
+        // The limits first: the import copies them into the new pages.
+        let _ = pane.term.set_scrollback_max_bytes(head.ghostty.max_bytes);
+        let _ = pane.term.set_scrollback_max_lines(head.ghostty.max_lines);
+        pane.line_limit = head.ghostty.max_lines;
+        pane.restore_model(p, head.cols);
+        let importer = pane
+            .term
+            .vtmux_importer(check == ImportCheck::Full)
+            .map_err(ghostty_err)?;
+
+        let mut raw = gv::State::default();
+        raw.raw.cols = head.cols;
+        raw.raw.rows = head.rows;
+        // The primary first: marks and the alternate screen's entry pin
+        // are pinned there.
+        raw.raw.active_screen = 0;
+        head.ghostty.to_ffi(&mut raw.raw);
+        head.primary.to_ffi(&mut raw.raw.screens[0], &mut raw.bytes);
+        if let Some(alt) = &head.alternate {
+            alt.to_ffi(&mut raw.raw.screens[1], &mut raw.bytes);
+        }
+        Ok(Self {
+            importer,
+            pane,
+            raw,
+            title: head.ghostty.title.clone(),
+            pwd: head.ghostty.pwd.clone(),
+            marks: p.marks.clone(),
+            alt_entry: p.alt_entry,
+            alternate: head.alternate.is_some(),
+            alternate_active: head.alternate_active,
+            continuation: p.continuation.clone(),
+            scratch: gv::Page::default(),
+        })
+    }
+
+    /// Add a screen's next page (oldest first).
+    ///
+    /// # Errors
+    /// A malformed page ([`StateError::Invalid`]), one for an alternate
+    /// screen the head does not have, a blob from another Ghostty build
+    /// ([`StateError::ForeignBlob`]), or one Ghostty refuses (a blob that
+    /// fails its checksum, or with [`ImportCheck::Full`] does not decode).
+    /// The import is as it was before the call.
+    pub fn page(&mut self, screen: ScreenKind, page: &PageState) -> Result<(), StateError> {
+        if screen == ScreenKind::Alternate && !self.alternate {
+            return Err(StateError::Invalid("page of an absent alternate screen"));
+        }
+        validate::page(page, self.pane.cols())?;
+        let term = &mut self.pane.term;
+        match page {
+            PageState::Rows(rows) => {
+                rows.to_ffi(&mut self.scratch);
+                self.importer
+                    .page(term, screen.key(), &self.scratch.as_ref())
+                    .map_err(ghostty_err)
+            }
+            PageState::Blob(blob) => {
+                let blob_page = gv::PageRef {
+                    bytes: &blob.bytes,
+                    blob: true,
+                    ..gv::PageRef::default()
+                };
+                self.importer
+                    .page(term, screen.key(), &blob_page)
+                    .map_err(ghostty_err)
+            }
+        }
+    }
+
+    /// The pane, once every page is in.
+    ///
+    /// # Errors
+    /// Too few rows for the screen, a cursor, mark or history size the
+    /// pages do not have room for, or a state Ghostty refuses.
+    pub fn finish(self) -> Result<PaneTerm, StateError> {
+        let Self {
+            importer,
+            mut pane,
+            raw,
+            title,
+            pwd,
+            marks,
+            alt_entry,
+            alternate_active,
+            continuation,
+            ..
+        } = self;
+        importer.finish(&mut pane.term, &raw).map_err(ghostty_err)?;
+        let _ = pane.term.vtmux_set_title(&title);
+        let _ = pane.term.vtmux_set_pwd(&pwd);
+
+        // tmux's history is the newest `hsize` rows Ghostty retains
+        // (`PaneTerm::history`); under an alternate screen it is the copy
+        // taken on entry (none: no history), and Ghostty may have
+        // reflowed the primary since. Leaving it clamps to what is
+        // retained (`clamp_history_to_retained`).
+        let history = if alternate_active {
+            pane.frozen.as_ref().map_or(usize::MAX, |rows| rows.len())
+        } else {
+            pane.term.scrollback_rows().unwrap_or(0)
+        };
+        if pane.hsize > history {
+            return Err(StateError::Invalid("history size over the rows retained"));
+        }
+        let pin = |pane: &PaneTerm, y: u32| {
+            pane.term
+                .track_grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
+                .ok()
+                .ok_or(StateError::Invalid("mark off the primary screen"))
+        };
+        pane.marks = marks
+            .iter()
+            .map(|&(y, data)| Ok((pin(&pane, y)?, data)))
+            .collect::<Result<_, StateError>>()?;
+        pane.alt_entry = alt_entry
+            .map(|(y, retained)| Ok::<_, StateError>((pin(&pane, y)?, retained)))
+            .transpose()?;
+        if alternate_active {
+            pane.term
+                .vtmux_set_active_screen(gv::ALTERNATE)
+                .map_err(ghostty_err)?;
+        }
+        // Back where the parser was, with nothing it says kept.
+        pane.feed(&continuation);
+        let _ = pane.take_answers();
+        let _ = pane.take_title_events();
+        Ok(pane)
     }
 }

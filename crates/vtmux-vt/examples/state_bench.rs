@@ -6,11 +6,15 @@
 //! history compressed as the server would. Prints, per mode, export and
 //! import time over all panes, the state's size, RSS growth, and whether
 //! every import captures (`capture-pane -e -S -`) as its source does.
+//! With `STATE_BENCH_STREAMED=1` each pane goes instead page by page from
+//! `export_pages` into a `StateImport` (no whole `TermState`), and the
+//! peak RSS is that path's alone.
 
 use std::time::Instant;
 
 use vtmux_vt::{
-    CaptureOpts, CompressedPages, Compression, LineRef, PageState, PaneTerm, TermState, capture,
+    CaptureOpts, CompressedPages, Compression, ImportCheck, LineRef, PageState, PaneTerm,
+    StateImport, TermState, capture,
 };
 
 fn status_kb(key: &str) -> f64 {
@@ -70,6 +74,34 @@ fn state_bytes(s: &TermState) -> (usize, usize) {
     (bytes, blobs)
 }
 
+/// Every pane exported a page at a time straight into its import, as a
+/// live upgrade's stream would carry it.
+fn stream(terms: &[PaneTerm], mode: CompressedPages, captures: &[Vec<u8>], all: CaptureOpts) {
+    let rss0 = rss_mb();
+    let t0 = Instant::now();
+    let imported: Vec<PaneTerm> = terms
+        .iter()
+        .map(|t| {
+            let mut import =
+                StateImport::new(&t.export_state_head(), ImportCheck::Lazy).expect("head");
+            t.export_pages(mode, |screen, page| import.page(screen, &page))
+                .expect("pages");
+            import.finish().expect("finish")
+        })
+        .collect();
+    let took = t0.elapsed();
+    let rss1 = rss_mb();
+    let same = imported
+        .iter()
+        .zip(captures)
+        .all(|(t, c)| capture(t, all) == *c);
+    println!(
+        "  {mode:?} streamed: export+import {:.0} ms; rss +{:.0} MB; identical={same}",
+        took.as_secs_f64() * 1e3,
+        rss1 - rss0,
+    );
+}
+
 fn main() {
     let args: Vec<usize> = std::env::args()
         .skip(1)
@@ -87,6 +119,7 @@ fn main() {
         end: LineRef::End,
         ..CaptureOpts::default()
     };
+    let streamed = std::env::var_os("STATE_BENCH_STREAMED").is_some_and(|v| v == "1");
 
     for compressed_history in [true, false] {
         let mut terms: Vec<PaneTerm> = (0..panes)
@@ -117,6 +150,10 @@ fn main() {
         );
         for mode in [CompressedPages::Blob, CompressedPages::Rows] {
             if !compressed_history && mode == CompressedPages::Blob {
+                continue;
+            }
+            if streamed {
+                stream(&terms, mode, &captures, all);
                 continue;
             }
             let rss0 = rss_mb();

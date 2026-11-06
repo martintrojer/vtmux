@@ -6106,8 +6106,13 @@ unsafe extern "C" {
     ) -> Result::Type;
     #[doc = " Export the terminal's state outside its grids (vtmux patch 0017)."]
     pub fn ghostty_vtmux_state_export(terminal: Terminal, state: *mut VtmuxState) -> Result::Type;
-    #[doc = " Start importing into a fresh terminal (vtmux patch 0017)."]
-    pub fn ghostty_vtmux_importer_new(terminal: Terminal, out: *mut VtmuxImporter) -> Result::Type;
+    #[doc = " Start importing into a fresh terminal; `check` decodes every blob and"]
+    #[doc = " verifies every page at once (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_importer_new(
+        terminal: Terminal,
+        check: bool,
+        out: *mut VtmuxImporter,
+    ) -> Result::Type;
     #[doc = " Add the next page of a screen to an import (vtmux patch 0017)."]
     pub fn ghostty_vtmux_importer_page(
         importer: VtmuxImporter,

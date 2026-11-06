@@ -1,0 +1,385 @@
+//! Mutation fuzz of `PaneTerm::import_state` (live upgrade spec, decision
+//! 23: a malformed state is an error, never a crash).
+//!
+//! Usage: `state_fuzz rows|state|blob|blob-full FIRST COUNT` (`blob-full`
+//! imports with `ImportCheck::Full`, the dry run's check). Each seed takes an
+//! export of a pane with styled, linked, wide and grapheme history
+//! (compressed, so `blob` has blobs; every other seed with an alternate
+//! screen up), changes one to three fields at random, imports it, and
+//! when the import succeeds uses the pane: captures, input, resizes,
+//! compression and a second export. Prints `seed N` before each seed (and
+//! why an import was refused), and a `done` line with how many imported, how many were refused and how
+//! many panicked in Rust. A crash in Ghostty ends the process: the
+//! last `seed` line names the seed. Build with
+//! `LIBGHOSTTY_VT_SYS_OPTIMIZE=ReleaseSafe` so Ghostty checks its own
+//! invariants instead of running on past them.
+
+#![expect(
+    clippy::many_single_char_names,
+    reason = "a fuzzer's scratch: the rng, an index, a case"
+)]
+
+use std::io::Write as _;
+
+use vtmux_vt::{
+    CaptureOpts, CompressedPages, Compression, ImportCheck, LineRef, PageState, PaneTerm,
+    SavedCursor, TermState, capture,
+};
+
+/// xorshift64: the same seed gives the same mutations on every host.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        if n == 0 {
+            0
+        } else {
+            usize::try_from(self.next() % n as u64).unwrap_or(0)
+        }
+    }
+
+    /// A value that hits edges: zero, all ones, small, 16-bit, anything.
+    fn wild(&mut self) -> u32 {
+        #[expect(clippy::cast_possible_truncation, reason = "random bits")]
+        match self.below(5) {
+            0 => 0,
+            1 => u32::MAX,
+            2 => self.below(70) as u32,
+            3 => (self.next() as u32) & 0xffff,
+            _ => self.next() as u32,
+        }
+    }
+
+    #[expect(clippy::cast_possible_truncation, reason = "random bits")]
+    fn wild16(&mut self) -> u16 {
+        self.wild() as u16
+    }
+
+    #[expect(clippy::cast_possible_truncation, reason = "random bits")]
+    fn byte(&mut self) -> u8 {
+        self.next() as u8
+    }
+}
+
+fn base(blob: bool, alt: bool) -> TermState {
+    let mut a = PaneTerm::new(80, 24, 3000);
+    for i in 0..4000 {
+        a.feed(
+            format!(
+                "\x1b[3{}m{i} \x1b]8;;http://l{}\x07lk\x1b]8;;\x07 e\u{301}\u{1f468}\u{200d}\u{1f469}{}\u{4e16}\r\n",
+                i % 8,
+                i % 5,
+                "w".repeat(i % 37)
+            )
+            .as_bytes(),
+        );
+    }
+    a.feed(b"\x1b[3;5r\x1b7\x1b]133;A\x07$ \x1b]8;id=z;http://open\x07ab");
+    if alt {
+        a.feed(b"\x1b[?1049h\x1b[2;2Halt\x1b[?2026hx");
+    }
+    while a.compress_step() != Compression::Complete {}
+    a.export_state_with(if blob {
+        CompressedPages::Blob
+    } else {
+        CompressedPages::Rows
+    })
+}
+
+fn mutate_blob(st: &mut TermState, r: &mut Rng) {
+    let blobs: Vec<usize> = st
+        .primary
+        .pages
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| matches!(p, PageState::Blob(_)))
+        .map(|(i, _)| i)
+        .collect();
+    assert!(!blobs.is_empty(), "the base has no blobs");
+    let i = blobs[r.below(blobs.len())];
+    let PageState::Blob(b) = &mut st.primary.pages[i] else {
+        return;
+    };
+    let len = b.bytes.len();
+    let c = r.below(6);
+    print!(" blobcase{c}");
+    match c {
+        0 => {
+            let k = r.below(len);
+            b.bytes.truncate(k);
+        }
+        // The header, the `Page` value, anywhere (the LZ4 bytes).
+        1 => {
+            let k = r.below(64.min(len));
+            b.bytes[k] ^= 1 << r.below(8);
+        }
+        2 => {
+            let k = r.below(1200.min(len));
+            b.bytes[k] = r.byte();
+        }
+        3 => {
+            let k = r.below(len);
+            b.bytes[k] = r.byte();
+        }
+        4 => {
+            let from = 1200.min(len - 1);
+            let k = from + r.below(len - from);
+            b.bytes[k] ^= 1 << r.below(8);
+        }
+        _ => {
+            let k = r.below(1200.min(len)) & !3;
+            if k + 4 <= len {
+                b.bytes[k..k + 4].copy_from_slice(&r.wild().to_le_bytes());
+            }
+        }
+    }
+}
+
+fn mutate_rows(st: &mut TermState, r: &mut Rng) {
+    let i = r.below(st.primary.pages.len());
+    let c = r.below(15);
+    print!(" rowcase{c}");
+    if c == 14 {
+        st.primary.pages.remove(i);
+        return;
+    }
+    let PageState::Rows(p) = &mut st.primary.pages[i] else {
+        return;
+    };
+    match c {
+        0 => {
+            let k = r.below(p.rows.len());
+            p.rows[k].cell_start = r.wild();
+        }
+        1 => {
+            let k = r.below(p.rows.len());
+            p.rows[k].cell_count = r.wild16();
+        }
+        2 => {
+            let k = r.below(p.rows.len());
+            p.rows[k].used = r.wild16();
+            p.rows[k].flags = r.byte();
+        }
+        3 if !p.cells.is_empty() => {
+            let k = r.below(p.cells.len());
+            p.cells[k].content = r.wild();
+            p.cells[k].flags = r.wild16();
+        }
+        4 if !p.cells.is_empty() => {
+            let k = r.below(p.cells.len());
+            p.cells[k].style = r.wild16();
+        }
+        5 if !p.cells.is_empty() => {
+            let k = r.below(p.cells.len());
+            p.cells[k].link = r.wild16();
+        }
+        6 if !p.graphemes.is_empty() => {
+            let k = r.below(p.graphemes.len());
+            p.graphemes[k] = r.wild();
+        }
+        7 => match r.below(5) {
+            0 => p.capacity.rows = r.wild(),
+            1 => p.capacity.styles = r.wild(),
+            2 => p.capacity.hyperlink_bytes = r.wild(),
+            3 => p.capacity.grapheme_bytes = r.wild(),
+            _ => p.capacity.string_bytes = r.wild(),
+        },
+        8 => p.cols = r.wild16(),
+        9 => {
+            let k = r.below(p.rows.len() + 1);
+            p.rows.truncate(k);
+        }
+        10 => {
+            let k = r.below(p.styles.len() + 1);
+            p.styles.truncate(k);
+        }
+        11 => {
+            let k = r.below(p.links.len() + 1);
+            p.links.truncate(k);
+        }
+        12 => {
+            let k = r.below(p.cells.len() + 1);
+            p.cells.truncate(k);
+        }
+        13 if !p.cells.is_empty() => {
+            // Only the width: a wide character without its spacer.
+            let k = r.below(p.cells.len());
+            p.cells[k].flags = (p.cells[k].flags & !0x0c) | (u16::from(r.byte() & 3) << 2);
+        }
+        _ => {}
+    }
+}
+
+fn mutate_state(st: &mut TermState, r: &mut Rng) {
+    let c = r.below(24);
+    print!(" statecase{c}");
+    match c {
+        0 => {
+            st.ghostty.scroll_region = (r.wild16(), r.wild16(), r.wild16(), r.wild16());
+        }
+        1 => {
+            st.primary.cursor.x = r.wild16();
+            st.primary.cursor.y = r.wild16();
+        }
+        2 => {
+            st.primary.saved_cursor = Some(SavedCursor {
+                x: r.wild16(),
+                y: r.wild16(),
+                ..SavedCursor::default()
+            });
+        }
+        3 => {
+            st.primary.kitty_index = r.byte();
+            st.primary.kitty_flags[r.below(8)] = r.byte();
+        }
+        4 => st.ghostty.previous_char = Some(r.wild()),
+        5 => st.ghostty.tab_stops.push(r.wild16()),
+        6 if !st.ghostty.modes.is_empty() => {
+            let k = r.below(st.ghostty.modes.len());
+            st.ghostty.modes[k].current ^= true;
+            st.ghostty.modes[k].number = r.wild16();
+        }
+        7 => st.pane.hsize = r.wild() as usize,
+        8 => {
+            let k = r.below(st.pane.times.len() + 1);
+            st.pane.times.truncate(k);
+        }
+        9 if !st.pane.marks.is_empty() => {
+            let k = r.below(st.pane.marks.len());
+            st.pane.marks[k].0 = r.wild();
+        }
+        10 => st.pane.alt_entry = Some((r.wild(), r.wild() as usize)),
+        11 => {
+            st.pane.continuation = (0..r.below(20)).map(|_| r.byte()).collect();
+        }
+        12 => st.cols = r.wild16(),
+        13 => st.rows = r.wild16(),
+        14 => st.alternate_active ^= true,
+        15 => {
+            st.pane.scrolled = u64::from(r.wild()) << r.below(40);
+            st.pane.generation = u64::from(r.wild()) << r.below(40);
+            st.pane.times_base = u64::from(r.wild()) << r.below(40);
+        }
+        16 => {
+            st.primary.charset.g[r.below(4)] = r.byte();
+            st.primary.charset.single_shift = Some(r.byte());
+        }
+        17 => st.pane.history_limit = (r.wild() as usize) << r.below(40),
+        18 => st.pane.input_buffer_size = (r.wild() as usize) << r.below(40),
+        19 => {
+            if let Some((held, _)) = st.pane.sync.as_mut() {
+                held.cols = r.wild16();
+                held.cursor = Some((r.wild16(), r.wild16()));
+            } else if let Some(row) = st.pane.frozen.as_mut().and_then(|rows| rows.first_mut()) {
+                row.len = r.wild() as usize;
+            }
+        }
+        20 => st.alternate = None,
+        21 => {
+            if let Some(link) = st.primary.cursor.link.as_mut() {
+                link.uri.clear();
+            }
+        }
+        22 => st.primary.protected_mode = r.byte(),
+        _ => st.pane.alt_collected = r.wild() as usize,
+    }
+}
+
+fn exercise(b: &mut PaneTerm) {
+    let all = CaptureOpts {
+        start: LineRef::Start,
+        end: LineRef::End,
+        escapes: true,
+        ..CaptureOpts::default()
+    };
+    let flags = CaptureOpts {
+        flags: true,
+        used_only: true,
+        escapes: false,
+        ..all
+    };
+    let look = |b: &PaneTerm| {
+        let _ = capture(b, all);
+        let _ = capture(b, flags);
+        let _ = b.screen().snapshot();
+        let _ = (b.cursor(), b.line_marks(), b.osc133_lines());
+    };
+    look(b);
+    b.feed(b"\x1b[?2026lhello\r\n\x1b[Lx\x1b[3;1Hmore\x1b[S\x1b[T\x1b8z\x1b[2Jcleared");
+    for i in 0..50 {
+        b.feed(format!("after {i} \u{4e16}e\u{301}\r\n").as_bytes());
+    }
+    look(b);
+    b.resize(17, 4);
+    look(b);
+    b.resize(50, 9);
+    while b.compress_step() != Compression::Complete {}
+    look(b);
+    b.set_history_limit(100);
+    b.feed(b"\x1b[?1049l\x1b[3J");
+    look(b);
+    let _ = b.export_state_with(CompressedPages::Blob);
+    let _ = b.export_state();
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let kind = args.get(1).map_or("rows", String::as_str);
+    let first: u64 = args.get(2).and_then(|a| a.parse().ok()).unwrap_or(0);
+    let count: u64 = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(100);
+    std::panic::set_hook(Box::new(|info| eprintln!("panic: {info}")));
+    let blob = kind.starts_with("blob");
+    let check = if kind == "blob-full" {
+        ImportCheck::Full
+    } else {
+        ImportCheck::Lazy
+    };
+    let bases = [base(blob, false), base(blob, true)];
+    let (mut imported, mut refused, mut panicked) = (0, 0, 0);
+    let mut out = std::io::stdout();
+    for seed in first..first + count {
+        print!("seed {seed}");
+        let mut r = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let mut st = bases[usize::from(seed % 2 == 1)].clone();
+        for _ in 0..=r.below(3) {
+            match kind {
+                _ if blob => mutate_blob(&mut st, &mut r),
+                "rows" => mutate_rows(&mut st, &mut r),
+                _ => mutate_state(&mut st, &mut r),
+            }
+            if st.primary.pages.is_empty() {
+                break;
+            }
+        }
+        println!();
+        let _ = out.flush();
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match PaneTerm::import_state_with(&st, check) {
+                Ok(mut b) => {
+                    exercise(&mut b);
+                    true
+                }
+                Err(e) => {
+                    println!("  refused: {e}");
+                    false
+                }
+            }
+        }));
+        match res {
+            Ok(true) => imported += 1,
+            Ok(false) => refused += 1,
+            Err(_) => {
+                panicked += 1;
+                println!("RUSTPANIC seed {seed}");
+            }
+        }
+    }
+    println!("done imported {imported} refused {refused} rustpanic {panicked}");
+}
