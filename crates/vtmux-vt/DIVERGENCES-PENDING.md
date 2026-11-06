@@ -37,10 +37,11 @@ and the probes from `review_vt_wrap`.
 - Visible: `#{history_size}`, `#{cursor_x}`, `#{cursor_y}`, CPR and
   `capture-pane` after a resize that leaves the cursor at the end of a row.
 
-- Tab cells (`d_tab_capture`, golden `cap_tab_resize_narrow`): narrowing 20 -> 12 columns a line `ab<tab>c`
-  (the tab covers 6 columns, so the line is 9 wide and fits): tmux wraps it (`ab<tab>` then `c`, one row into
-  history; `grid_reflow` keeps a TAB cell whole), Ghostty keeps `ab<tab>c` on one row. A tab cut by a narrower
-  row is two blanks in vtmux (`whole_tabs`), and tmux wraps the whole tab.
+- Tab cells: closed (`low_rep_after_control_and_deccolm`). Patch
+  `0015-reflow-tab-as-tmux.patch` measures a tab by tmux's reflow width
+  (the TAB cell's width plus one per padding cell): goldens
+  `cap_tab_resize_narrow`, `cap_tab_resize_split`, `fmt_tab_resize_*`,
+  oracle `rep_deccolm_tab_reflow`.
 
 - Also (review_hist_limit_live, reviewer-63, `/tmp/rv/t7.sh`, `t6.sh`): after a reflow of a full history (limit set at creation or lowered live), vtmux's `history_size` is one higher than tmux's: limit 100, 300 styled 130-column lines at 50 columns, `resize-window -x 30` then `-x 50`: tmux 172 then 99, vtmux 173 then 100 (limit 200: 322/189 vs 323/190; 333-335 match). Same family: reflow and the history count differ around the limit.
 
@@ -63,10 +64,8 @@ and the probes from `review_vt_wrap`.
   bits of the cell) and `vtmux-vt` rebuilds tmux's TAB cell from the marks
   (first cell as wide as the tab, the rest padding). Goldens `cap_tab*`,
   `fmt_tab_cursor`; oracle `copy_tab_cells`; regress
-  `copy-mode-test-emacs.sh` passes. Remaining difference, a narrowing resize
-  of a line holding a tab (`cap_tab_resize_narrow`, folded into P2): tmux
-  wraps the line even when it fits, and a tab cut by a narrower row is
-  blanks.
+  `copy-mode-test-emacs.sh` passes. A resize reflows a tab as tmux does
+  (patch 0015, see P2).
 
 ## P5. Ghostty retains history by whole pages, not lines
 

@@ -1,0 +1,5 @@
+kind=capture
+bytes=l0\033[?1049hab\033[?3hX
+flags=-p -S -
+command=new-session -d -x 20 -y 5 'sh -c 'printf '"'"'l0\033[?1049hab\033[?3hX'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p -S -
+expected=X\n\n\n\n\n

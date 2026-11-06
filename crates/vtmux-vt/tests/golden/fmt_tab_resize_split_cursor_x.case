@@ -1,0 +1,8 @@
+kind=format
+cols=20
+rows=4
+bytes=abcdefghijkl\tZ
+format=#{cursor_x}
+resize=14x4
+command=new-session -d -x 20 -y 4 'sh -c 'printf '"'"'abcdefghijkl\tZ'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; resize-window -t 0 -x 14 -y 4 ; display-message -p -t 0 '#{cursor_x}'
+expected=5\n

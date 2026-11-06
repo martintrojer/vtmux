@@ -620,6 +620,7 @@ impl PaneTerm {
                         .unwrap_or(end - j);
                     if run > 0 {
                         self.pending.clear();
+                        self.scan.last_print = true;
                         j += run;
                         continue;
                     }
@@ -630,6 +631,7 @@ impl PaneTerm {
                         && let Some(n) = utf8_char_len(&bytes[j..])
                     {
                         self.pending.clear();
+                        self.scan.last_print = true;
                         j += n;
                         continue;
                     }
@@ -752,6 +754,9 @@ impl PaneTerm {
                     _ => self.feed_piece(&bytes[i..=i]),
                 }
                 i += 1;
+                if std::mem::take(&mut self.scan.deccolm) {
+                    self.deccolm();
+                }
                 self.scanned_strings(e);
                 if matches!(e, ScanEvent::AltMode(_) | ScanEvent::Reset)
                     && (e == ScanEvent::Reset || self.alternate_on() != alternate)
@@ -1041,10 +1046,26 @@ impl PaneTerm {
         true
     }
 
+    /// DECCOLM set or reset (input.c `input_csi_dispatch_sm_private`,
+    /// `input_csi_dispatch_rm_private`): tmux has no 132-column mode, so
+    /// either homes the cursor (in the scroll region under origin mode,
+    /// `screen_write_cursormove` with `origin` 1) and clears the screen in
+    /// the current background (`screen_write_clearscreen`, which scrolls it
+    /// into history under `scroll-on-clear`, as ED 2 does). Ghostty, without
+    /// DEC mode 40, does nothing. Several modes in one sequence run in
+    /// tmux's parameter order except this one, which comes last.
+    fn deccolm(&mut self) {
+        self.term.vt_write(b"\x1b[H");
+        if !self.clear_into_history(ScanEvent::EraseScreen) {
+            self.term.vt_write(b"\x1b[2J");
+        }
+    }
+
     /// Start from the ground state, as a fresh pane process does: nothing
     /// half-parsed is carried over (a respawned pane).
     pub fn reset_input(&mut self) {
         self.pending.clear();
+        self.scan.last_print = false;
         self.scan.utf8 = Utf8::default();
         self.scan.end_dcs();
         self.scan.state = ScanState::Ground;
@@ -2241,6 +2262,16 @@ struct AltModeScanner {
     /// A private mode sequence named `?2027`, which tmux does not have;
     /// [`PaneTerm::feed`] turns Ghostty's grapheme clustering back on.
     cluster_mode: bool,
+    /// tmux's `INPUT_LAST`: the last thing parsed was a printed character,
+    /// which REP repeats. Any control, escape or control sequence tmux
+    /// dispatches, and the start of a string, clears it (input.c
+    /// `input_c0_dispatch`, `input_esc_dispatch`, `input_csi_dispatch`,
+    /// `input_enter_osc` and the other string starts, `input_top_bit_set`).
+    /// Ghostty keeps its last character until RIS.
+    last_print: bool,
+    /// The private mode sequence just ended set or reset DECCOLM (`?3`);
+    /// [`PaneTerm::feed`] takes it.
+    deccolm: bool,
 }
 
 /// Which mouse events the pane program asked for: tmux's mutually exclusive
@@ -2503,6 +2534,8 @@ enum ScanEvent {
     Reset,
     /// `CSI ? 2026 h` or `l`: [`AltModeScanner::sync`] says which.
     Sync,
+    /// `CSI ? 3 h` or `l` (DECCOLM): [`AltModeScanner::deccolm`] is set.
+    Deccolm,
     /// Back in the ground state with [`AltModeScanner::take_resync`] due.
     Resync,
     /// An `OSC 133` ended; `AltModeScanner::osc133` has its payload.
@@ -2646,6 +2679,7 @@ impl AltModeScanner {
         if let ControlFlow::Break(end) = self.push_osc(b) {
             return end;
         }
+        let rep_repeats_nothing = self.track_last_print(b);
         let prior = self.state;
         match (self.state, b) {
             (_, 0x18 | 0x1a) | (ScanState::Str, 0x07) => self.state = ScanState::Ground,
@@ -2658,6 +2692,9 @@ impl AltModeScanner {
             (_, 0x0e | 0x0f) => self.charset_op(CharsetOp::Shift(b == 0x0e)),
             (ScanState::Ground, 0x80..) => {
                 self.utf8_out = self.utf8.push(b);
+                // input_utf8_close; an invalid character is printed by
+                // input_stop_utf8, which does not set INPUT_LAST.
+                self.last_print = self.utf8_out.is_some() && !self.utf8.bad;
                 return Some(ScanEvent::Utf8);
             }
             // DEL does nothing in tmux's ground state (input.c
@@ -2756,7 +2793,11 @@ impl AltModeScanner {
             }
             (ScanState::Csi, 0x40..=0x7e) => {
                 self.state = ScanState::Ground;
-                return self.csi_event(b);
+                return if rep_repeats_nothing {
+                    Some(ScanEvent::Drop)
+                } else {
+                    self.csi_event(b)
+                };
             }
             (ScanState::Csi, 0x20..=0x2f) => {
                 self.other = true;
@@ -2784,6 +2825,66 @@ impl AltModeScanner {
             return Some(ScanEvent::Utf8Stop);
         }
         (self.resync && self.state == ScanState::Ground).then_some(ScanEvent::Resync)
+    }
+
+    /// Follow tmux's `INPUT_LAST` ([`Self::last_print`]) over byte `b`, read
+    /// in the state before it. True for a REP with nothing to repeat
+    /// (`INPUT_CSI_REP` checks the flag), which Ghostty must not see: it
+    /// would repeat its own last character.
+    fn track_last_print(&mut self, b: u8) -> bool {
+        if self.state == ScanState::Ground && (0x20..=0x7e).contains(&b) {
+            self.last_print = true;
+            return false;
+        }
+        if self.state == ScanState::Csi
+            && b == b'b'
+            && !self.private
+            && !self.gt
+            && self.interm_count == 0
+            && !self.csi_ignored
+            && !self.last_print
+        {
+            return true;
+        }
+        let clears = match (self.state, b) {
+            // CAN and SUB anywhere; other C0 controls outside a string
+            // (inside one the flag is already clear, its start cleared
+            // it); a top-bit byte until its character ends
+            // (`input_top_bit_set`, the Utf8 arm). ESC only starts a
+            // sequence and DEL does nothing.
+            (_, 0x18 | 0x1a) => true,
+            (ScanState::Str | ScanState::Dcs | ScanState::Rename, _) | (_, 0x1b | 0x7f) => false,
+            (ScanState::Ground, 0x80..) | (_, 0x00..=0x1f) => true,
+            // OSC, DCS, APC and the rename string clear it as they start
+            // (`input_enter_osc` and the others); PM and SOS (`^`, `X`)
+            // only consume to ST. input_esc_table: an ESC final tmux does
+            // not know dispatches nothing and leaves the flag.
+            (ScanState::Esc, _) => b"]P_k78=>DEHM\\c".contains(&b),
+            (ScanState::EscIntermediate(i), _) => {
+                matches!((i, b), (b'(' | b')', b'0' | b'B') | (b'#', b'8'))
+            }
+            (ScanState::Csi, 0x40..=0x7e) => !self.csi_ignored && self.csi_in_tmux_table(b),
+            _ => false,
+        };
+        if clears {
+            self.last_print = false;
+        }
+        false
+    }
+
+    /// Whether tmux's `input_csi_table` has the CSI ending in `b`, as
+    /// `input_table_compare` matches it: the final byte and the collected
+    /// prefix and intermediate bytes. One tmux ignores (`csi_ignored`)
+    /// never gets there.
+    fn csi_in_tmux_table(&self, b: u8) -> bool {
+        match (self.private, self.gt, self.intermediate, self.interm_count) {
+            (false, false, None, 0) => b"@ABCDEFGHJKLMPSTXZ`bcdfghlmnrstu".contains(&b),
+            (true, false, None, 0) => matches!(b, b'S' | b'h' | b'l' | b'n'),
+            (false, true, None, 0) => matches!(b, b'c' | b'm' | b'n' | b'q'),
+            (_, false, Some(b'$'), 1) => b == b'p',
+            (false, false, Some(b' '), 1) => b == b'q',
+            _ => false,
+        }
     }
 
     fn in_dcs(&self) -> bool {
@@ -2913,6 +3014,7 @@ impl AltModeScanner {
                         match p {
                             Param::Num(12) => c.set_blinking(b == b'h'),
                             Param::Num(2026) => self.sync = Some(b == b'h'),
+                            Param::Num(3) => self.deccolm = true,
                             // Not a tmux mode: Ghostty's clustering stays on.
                             Param::Num(2027) => self.cluster_mode = true,
                             Param::Num(2031) => self.answers.push(Reply::ThemeUpdates(b == b'h')),
@@ -2958,6 +3060,9 @@ impl AltModeScanner {
         }
         if self.sync.is_some() {
             return Some(ScanEvent::Sync);
+        }
+        if self.deccolm {
+            return Some(ScanEvent::Deccolm);
         }
         if self.cluster_mode {
             return Some(ScanEvent::Resync);
@@ -3019,6 +3124,7 @@ struct Utf8 {
     have: usize,
     /// 0 when no character is started.
     size: usize,
+    /// The character being read, or the last one ended, is not valid.
     bad: bool,
 }
 
@@ -3034,7 +3140,10 @@ impl Utf8 {
                 0xc2..=0xdf => 2,
                 0xe0..=0xef => 3,
                 0xf0..=0xf4 => 4,
-                _ => return Some(REPLACEMENT.to_vec()),
+                _ => {
+                    self.bad = true;
+                    return Some(REPLACEMENT.to_vec());
+                }
             };
             self.buf[0] = b;
             self.have = 1;
@@ -3049,10 +3158,11 @@ impl Utf8 {
         }
         let seq = &self.buf[..self.size];
         self.size = 0;
-        Some(if !self.bad && std::str::from_utf8(seq).is_ok() {
-            seq.to_vec()
-        } else {
+        self.bad |= std::str::from_utf8(seq).is_err();
+        Some(if self.bad {
             REPLACEMENT.to_vec()
+        } else {
+            seq.to_vec()
         })
     }
 
@@ -3574,6 +3684,51 @@ mod tests {
         assert_eq!(t.cursor(), (1, 1));
     }
 
+    /// REP repeats only a character printed right before it (tmux's
+    /// `INPUT_LAST`), whole buffers at a time so the printable runs take
+    /// the fast path. Reference tmux 3.8, 20x5, `capture-pane -p`.
+    #[test]
+    fn rep_repeats_only_a_character_just_printed() {
+        let screen = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 5, 100);
+            t.feed(bytes);
+            captured(&t)
+        };
+        assert_eq!(screen(b"ab\x1b[3bz"), "abbbbz");
+        assert_eq!(screen(b"ab\x1b[31m\x1b[3bz"), "abz");
+        assert_eq!(screen(b"ab\r\x1b[3bz"), "zb");
+        assert_eq!(screen(b"ab\x1b7\x1b[3bz"), "abz");
+        assert_eq!(screen(b"ab\x1b]2;t\x07\x1b[3bz"), "abz");
+        assert_eq!(screen(b"ab\x1b[2b\x1b[2bz"), "abbbz");
+        assert_eq!(screen("a\u{e9}\x1b[2bz".as_bytes()), "a\u{e9}\u{e9}\u{e9}z");
+        // Sequences tmux does not know dispatch nothing and keep it.
+        assert_eq!(screen(b"ab\x1bA\x1b[2bz"), "abbbz");
+        assert_eq!(screen(b"ab\x1b[1x\x1b[2bz"), "abbbz");
+        // A respawned pane starts with nothing to repeat.
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"ab");
+        t.reset_input();
+        t.feed(b"\x1b[2bz");
+        assert_eq!(captured(&t), "abz");
+    }
+
+    /// DECCOLM homes the cursor and clears the screen as ED 2 does, into
+    /// history under scroll-on-clear. Reference tmux 3.8, 20x5.
+    #[test]
+    fn deccolm_clears_the_screen() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"l0\r\nl1\x1b[3;5H\x1b[?3hX");
+        assert_eq!((t.history_size(), t.cursor()), (2, (1, 0)));
+        assert_eq!(captured(&t), "l0\nl1\nX");
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"l0\r\nl1\x1b[2;4r\x1b[?6h\x1b[?3lX");
+        assert_eq!((t.history_size(), t.cursor()), (2, (1, 1)));
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.feed(b"l0\x1b[?1049hab\x1b[?3hX");
+        assert_eq!((t.history_size(), t.cursor()), (0, (1, 0)));
+        assert_eq!(captured(&t), "X");
+    }
+
     /// The whole capture (`-S - -E -`), trailing blank lines dropped.
     fn captured(t: &PaneTerm) -> String {
         let opts = crate::capture::CaptureOpts {
@@ -3944,6 +4099,7 @@ mod tests {
                     | ScanEvent::DcsStart
                     | ScanEvent::RenameStart
                     | ScanEvent::Sync
+                    | ScanEvent::Deccolm
                     | ScanEvent::TitleStack
                     | ScanEvent::Answer
                     | ScanEvent::Skip => None,
