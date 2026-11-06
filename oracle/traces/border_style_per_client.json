@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "devvm51629.rva0.facebook.com",
+  "recorded_host": "mtrojer-mac",
   "name": "border_style_per_client",
   "inputs": {
     "name": "border_style_per_client",
@@ -21,7 +21,8 @@
           "40",
           "-y",
           "9",
-          "cat -"
+          "cat",
+          "-"
         ]
       },
       {
@@ -30,7 +31,8 @@
           "-h",
           "-t",
           "a",
-          "cat -"
+          "cat",
+          "-"
         ]
       },
       {
