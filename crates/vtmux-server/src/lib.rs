@@ -40,6 +40,7 @@ pub mod resize;
 pub mod scrollbar;
 pub mod server;
 pub mod shim;
+pub mod snapshot_term;
 pub mod sys;
 pub mod target;
 pub mod term_queries;

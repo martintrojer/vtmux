@@ -3083,8 +3083,10 @@ impl AltModeScanner {
 /// as many row headers and rows of cells as fit in [`PAGE_GRID_BYTES`],
 /// with the cell array aligned to [`CELLS_ALIGN`]. This is also Ghostty's
 /// smallest line limit (`Limits.minMaxLines`). A width no row fits in gets
-/// a bigger page of `std_capacity`'s 215 rows.
-fn page_rows(cols: u16) -> usize {
+/// a bigger page of `std_capacity`'s 215 rows. Public for importers
+/// that split rows into pages with no recorded layout.
+#[must_use]
+pub fn page_rows(cols: u16) -> usize {
     let row_bytes = CELL_BYTES * (usize::from(cols) + 1);
     let mut rows = (PAGE_GRID_BYTES / row_bytes).min(usize::from(u16::MAX));
     while rows > 0

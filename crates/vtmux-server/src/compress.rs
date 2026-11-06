@@ -134,6 +134,22 @@ impl PaneCompress {
         }
     }
 
+    /// The pane's terminal was just rebuilt from a snapshot (live upgrade,
+    /// restore): history imported as rows is resident, so it is due at
+    /// once rather than after [`IDLE`] (decision 23), and its steps run in
+    /// the loop's quiet turns as any pane's do (starved after [`STARVE`]
+    /// if output keeps coming). Pages that came across compressed are
+    /// skipped by the pass. Output meanwhile postpones the pass as usual.
+    pub fn restored(&mut self, term: &PaneTerm, now: Instant) {
+        *self = Self {
+            activity: Some(term.compression_activity()),
+            size: Some((term.cols(), term.rows())),
+            due: term.has_history().then_some(now),
+            busy_since: Some(now),
+            ..Self::default()
+        };
+    }
+
     /// When the pane next wants a step in a quiet turn: once its history
     /// has been idle for [`IDLE`], or once it is starved.
     #[must_use]
@@ -311,6 +327,36 @@ mod tests {
             assert!(n < 10_000, "compression never completed");
         }
         n
+    }
+
+    /// A pane rebuilt from a snapshot's rows has its history resident:
+    /// `restored` makes it due at once, not after IDLE, and the pass
+    /// compresses it again (live upgrade spec, decision 23).
+    #[test]
+    fn a_restored_pane_is_due_at_once() {
+        use crate::snapshot_term::{Form, term_from_snapshot, term_to_snapshot};
+        let t0 = Instant::now();
+        let mut t = PaneTerm::new(80, 24, 10_000);
+        fill(&mut t, 5000);
+        let mut c = PaneCompress::default();
+        c.observe(&t, t0);
+        drain(&mut c, &mut t, t0 + IDLE);
+        if t.compressed_pages() == 0 {
+            return; // Ghostty can't compress on this target.
+        }
+        let state = term_to_snapshot(&t, Form::Rows);
+        let mut back = term_from_snapshot(&state, vtmux_vt::PATCH_STACK).unwrap();
+        assert_eq!(back.compressed_pages(), 0, "rows come back resident");
+        let mut c = PaneCompress::default();
+        c.restored(&back, t0);
+        assert_eq!(c.due(), Some(t0));
+        assert!(drain(&mut c, &mut back, t0) > 0);
+        assert_eq!(back.compressed_pages(), t.compressed_pages());
+        assert_eq!(capture(&back, all()), capture(&t, all()));
+        // A pane with no history has nothing to do.
+        let mut c = PaneCompress::default();
+        c.restored(&PaneTerm::new(80, 24, 10_000), t0);
+        assert_eq!(c.due(), None);
     }
 
     /// Arm on output, wait out the idle delay, compress, disarm on
