@@ -637,7 +637,7 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "vtmux"
-version = "0.0.0"
+version = "3.8.0-beta.1"
 dependencies = [
  "portable-pty",
  "rustix",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "vtmux-client"
-version = "0.0.0"
+version = "3.8.0-beta.1"
 dependencies = [
  "mio",
  "rustix",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "vtmux-core"
-version = "0.0.0"
+version = "3.8.0-beta.1"
 dependencies = [
  "jiff",
  "rustix",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "vtmux-server"
-version = "0.0.0"
+version = "3.8.0-beta.1"
 dependencies = [
  "libc",
  "mio",
@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "vtmux-vt"
-version = "0.0.0"
+version = "3.8.0-beta.1"
 dependencies = [
  "libghostty-vt",
 ]
@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.0.0"
+version = "3.8.0-beta.1"
 dependencies = [
  "portable-pty",
  "regex",

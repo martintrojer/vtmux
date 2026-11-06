@@ -225,10 +225,10 @@ fn main() -> ExitCode {
     let cli = match cli::parse(&args, &progname) {
         Ok(cli) => cli,
         Err(cli::Early::Version) => {
-            // D21.
+            // D21, D25.
             match invocation {
-                Invocation::Tmux => println!("tmux 3.8"),
-                Invocation::Vtmux => println!("vtmux {} (tmux 3.8)", env!("CARGO_PKG_VERSION")),
+                Invocation::Tmux => println!("tmux {}", vtmux_core::version::TMUX_VERSION),
+                Invocation::Vtmux => println!("vtmux {}", vtmux_core::version::display()),
             }
             return ExitCode::SUCCESS;
         }

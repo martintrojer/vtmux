@@ -6,7 +6,7 @@ members = ["crates/vtmux-core","crates/vtmux-vt","crates/vtmux-server","crates/v
 exclude = ["third_party"]
 
 [workspace.package]
-version = "0.0.0"
+version = "3.8.0-beta.1"
 edition = "2024"
 rust-version = "1.99.1"
 license = "ISC"
