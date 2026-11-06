@@ -16,7 +16,7 @@ use vtmux_core::styled;
 use vtmux_vt::{Cell, CellText, Color, Snapshot, Style, Underline};
 
 use super::blend::PaneBlend;
-use super::scene::{Lines, Scene, SceneCell, Shape};
+use super::scene::{Junction, Lines, Scene, SceneCell, glyph};
 
 /// A client's ten `theme*` colours (`c->theme_colours`,
 /// server-client.c `server_client_update_theme_colours`).
@@ -216,9 +216,6 @@ pub struct Draw {
     /// (`dctx->marked`, screen-redraw.c:1611): the borders next to it are
     /// drawn reversed.
     pub marked: Option<PaneId>,
-    /// Where the window's origin is in the drawn area: 1 cell in under the
-    /// focus ring (D23), else 0.
-    pub offset: u16,
     /// The window's `pane-border-style` and `pane-border-lines`
     /// (`redraw_get_default_border_style`).
     pub border: CellStyle,
@@ -412,7 +409,6 @@ struct DrawKey {
     panes: Vec<PaneKey>,
     active: Option<PaneId>,
     marked: Option<PaneId>,
-    offset: u16,
     border: CellStyle,
     lines: Lines,
     outside: styled::Cell,
@@ -442,7 +438,6 @@ impl DrawKey {
                 .collect(),
             active: d.active,
             marked: d.marked,
-            offset: d.offset,
             border: d.border.clone(),
             lines: d.lines,
             outside: d.outside.clone(),
@@ -514,7 +509,7 @@ fn compose_row(
                     });
                     let text = b
                         .arrow_glyph(d.active)
-                        .map_or_else(|| b.shape().glyph(lines, index), Into::into);
+                        .map_or_else(|| glyph(lines, b.junction(), index), Into::into);
                     // screen-redraw.c:1250-1253: GRID_ATTR_REVERSE toggled
                     // beside the marked pane.
                     let marked = d
@@ -813,15 +808,11 @@ fn draw_line_keeping<T: PartialEq + Clone>(
 
 /// `window_make_pane_status`: the border line under the status line, then
 /// `expanded` (`pane-border-format`) drawn over it in the border style.
-/// `under` is [`Scene::status_line`]. Under the focus ring (D23) the line
-/// cells on the active pane's rectangle take `ring` (the active border
-/// style), so the rectangle stays one colour behind another pane's label.
-/// The line comes with its ranges.
+/// `under` is [`Scene::status_line`]. The line comes with its ranges.
 #[must_use]
 pub fn pane_status(
-    under: &[Option<Shape>],
+    under: &[Option<Junction>],
     border: &CellStyle,
-    ring: &CellStyle,
     lines: Lines,
     index: Option<u32>,
     expanded: &str,
@@ -834,13 +825,10 @@ pub fn pane_status(
     }
     let row = under
         .iter()
-        .map(|j| {
-            let shape = j.unwrap_or_else(|| super::scene::Junction::Horizontal.into());
-            styled::Cell {
-                text: shape.glyph(lines, index),
-                width: 1,
-                style: if shape.heavy() { ring } else { border }.clone(),
-            }
+        .map(|j| styled::Cell {
+            text: glyph(lines, j.unwrap_or(Junction::Horizontal), index),
+            width: 1,
+            style: border.clone(),
         })
         .collect();
     let base = CellStyle {
@@ -853,7 +841,6 @@ pub fn pane_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::scene::Junction;
 
     /// A status line shorter than its format is cut; past its text the
     /// border shows through, in the border style.
@@ -863,10 +850,9 @@ mod tests {
             fg: Colour::Ansi(2),
             ..CellStyle::default()
         };
-        let under = [Some(Junction::Horizontal.into()); 6];
+        let under = [Some(Junction::Horizontal); 6];
         let cells = pane_status(
             &under,
-            &green,
             &green,
             Lines::Single,
             None,
@@ -1004,7 +990,6 @@ mod tests {
                 .collect(),
             indicators: Indicators::Colour,
             two_pane: None,
-            ring: None,
         };
         let scenes = SceneCache::default();
         let mut cache = ComposeCache::default();
@@ -1050,7 +1035,6 @@ mod tests {
                     })
                     .collect(),
                 active: Some(PaneId(1)),
-                offset: 0,
                 border: CellStyle::default(),
                 lines: Lines::Single,
                 outside: space.clone(),

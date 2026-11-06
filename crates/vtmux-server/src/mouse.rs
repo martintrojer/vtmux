@@ -8,11 +8,6 @@
 //! The located event rides on the key batch (tmux's `cmdq_state.event`):
 //! `=` and `{mouse}` targets and the `mouse_*` formats read it.
 //!
-//! Under the focus ring (D23) the window is drawn one cell in from the
-//! corner of its area; a position is moved back by that cell before it is
-//! located, and a click on the ring's frame is the border of the pane it
-//! frames.
-//!
 //! A mouse key with no binding, and `send -M`, reach the pane under the
 //! pointer (`window_pane_key`): its mode, or its program in the encoding it
 //! asked for ([`encode_mouse`], input-keys.c `input_key_get_mouse`).
@@ -126,8 +121,6 @@ pub struct MouseEvent {
     pub status_at: Option<u32>,
     pub status_lines: u32,
     pub target: MouseTarget,
-    /// The focus ring's offset of the window the event was located in.
-    pub offset: u32,
     /// The status line's `range=` under the event, when it is on the
     /// status line (`status_get_range`, for `mouse_status_range`).
     pub status_range: Option<RangeKind>,
@@ -151,8 +144,7 @@ impl MouseEvent {
 
     /// The window position of client position `(x, y)` as the drag
     /// callbacks take it (cmd-resize-pane.c:376-385): below a top status
-    /// line, or clamped above a bottom one; under the focus ring, one cell
-    /// in.
+    /// line, or clamped above a bottom one.
     #[must_use]
     pub fn window_position(&self, (x, y): (u32, u32)) -> (i64, i64) {
         let y = match self.status_at {
@@ -160,8 +152,7 @@ impl MouseEvent {
             Some(at) if at > 0 && y >= at => at - 1,
             _ => y,
         };
-        let off = i64::from(self.offset);
-        (i64::from(x) - off, i64::from(y) - off)
+        (i64::from(x), i64::from(y))
     }
 
     fn at_position(&self, model: &Model, p: PaneId, (x, y): (u32, u32)) -> Option<(u32, u32)> {
@@ -171,7 +162,6 @@ impl MouseEvent {
         if self.status_at == Some(0) && y >= i64::from(self.status_lines) {
             y -= i64::from(self.status_lines);
         }
-        let (x, y) = (x - i64::from(self.offset), y - i64::from(self.offset));
         let r = pane.rect;
         let (xoff, yoff) = (i64::from(r.xoff), i64::from(r.yoff));
         if x < xoff || x >= xoff + i64::from(r.sx) || y < yoff || y >= yoff + i64::from(r.sy) {
@@ -449,7 +439,7 @@ impl Server {
                 _ => vtmux_core::layout::PaneStatus::Off,
             }
         } else {
-            self.model.border_status(w)
+            self.model.pane_status(w)
         };
         let line = match status {
             vtmux_core::layout::PaneStatus::Top => i64::from(rect.yoff) - 1,
@@ -582,7 +572,6 @@ impl Server {
                 session: Some(session),
                 ..MouseTarget::default()
             },
-            offset: 0,
             status_range: None,
             ignore: double,
         };
@@ -655,31 +644,12 @@ impl Server {
                 y
             };
             let win = &self.model.windows[&window];
-            // D23: the window sits one cell in under the focus ring.
-            let ring = self
-                .model
-                .number_option(TreeId::Window(window), "vtmux-focus-ring")
-                != 0;
-            ev.offset = u32::from(ring);
-            let (sx, sy) = (win.sx() + 2 * ev.offset, win.sy() + 2 * ev.offset);
-            if px > sx || py > sy {
+            if px > win.sx() || py > win.sy() {
                 *hover_out = Some((kind, None));
                 return Located::Nothing;
             }
-            // Window coordinates: the ring's frame is one cell outside.
-            let (wx, wy) = (
-                i64::from(px) - i64::from(ev.offset),
-                i64::from(py) - i64::from(ev.offset),
-            );
+            let (wx, wy) = (i64::from(px), i64::from(py));
             hover = Some((wx, wy));
-            // The ring's frame (the cells just outside the window, corners
-            // included) is the border of the pane it frames: the pane at
-            // the nearest window cell.
-            let (wsx, wsy) = (i64::from(win.sx()), i64::from(win.sy()));
-            let frame = ring
-                && (-1..=wsx).contains(&wx)
-                && (-1..=wsy).contains(&wy)
-                && (wx < 0 || wy < 0 || wx >= wsx || wy >= wsy);
             // server-client.c:1058-1085: outside a modal pane only a drag
             // the modal pane started goes on; anything else stops any drag
             // and does nothing, and a press closes a `-C` modal pane.
@@ -714,9 +684,6 @@ impl Server {
             }
             let found = if modal_drag || (kind == MouseKind::Drag && lwp.is_some()) {
                 lwp
-            } else if frame {
-                self.model
-                    .pane_at(window, wx.clamp(0, wsx - 1), wy.clamp(0, wsy - 1))
             } else {
                 self.model.pane_at(window, wx, wy)
             };
@@ -728,8 +695,6 @@ impl Server {
                 Some(p) => {
                     loc = if modal_drag {
                         Some(MouseLocation::Pane)
-                    } else if frame {
-                        Some(MouseLocation::Border)
                     } else {
                         self.mouse_in_pane(window, p, wx, wy, &mut sl_mpos)
                     };
@@ -812,11 +777,8 @@ impl Server {
             }
             st.drag_flag = (b & MOUSE_MASK_BUTTONS) + 1;
             if !st.drag_status && lwp.is_none() {
-                st.last_pane = wp.or_else(|| {
-                    let off = i64::from(ev.offset);
-                    self.model
-                        .pane_at(window, i64::from(px) - off, i64::from(py) - off)
-                });
+                st.last_pane =
+                    wp.or_else(|| self.model.pane_at(window, i64::from(px), i64::from(py)));
             }
             // server-client.c:1222-1231: grabbing the slider.
             if !st.scrolling && loc == Some(MouseLocation::ScrollbarSlider) {
@@ -1158,11 +1120,7 @@ impl Server {
         let Some(p) = c.mouse.last_pane else {
             return;
         };
-        let off = i64::from(ev.offset);
-        let (dx, dy) = (
-            i64::from(c.mouse.drag_x) - off,
-            i64::from(c.mouse.drag_y) - off,
-        );
+        let (dx, dy) = (i64::from(c.mouse.drag_x), i64::from(c.mouse.drag_y));
         let Some(w) = self.model.panes.get(&p).map(|x| x.window) else {
             self.set_drag_action(id, None);
             return;
@@ -1399,8 +1357,7 @@ impl Server {
     /// and the slider's and bar's heights. tmux reads the slider as last
     /// drawn (`wp->sb_slider_h`): with no bar shown, 0 here. `None` with no
     /// client (`window_copy_cmd_scroll_to_mouse` and `copy-mode -S` need
-    /// one). vtmux pans no window, so `tty_oy` is 0; the focus ring's
-    /// offset is taken off.
+    /// one). vtmux pans no window, so `tty_oy` is 0.
     pub(crate) fn slider_input(
         &self,
         id: Option<ClientId>,
@@ -1409,7 +1366,7 @@ impl Server {
     ) -> Option<(i64, i64, u32, u32)> {
         let c = self.clients.get(&id?)?;
         let pane = self.model.panes.get(&p)?;
-        let my = ev.map_or(0, |e| i64::from(e.input.y) - i64::from(e.offset));
+        let my = ev.map_or(0, |e| i64::from(e.input.y));
         let mpos = c.mouse.slider_mpos;
         let slider_h = if self.model.scrollbar_visible(p) {
             self.model.scrollbar_slider(p).1

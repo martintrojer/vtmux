@@ -465,7 +465,7 @@ impl Server {
         }
         let at = mouse
             .filter(|_| key.is_mouse())
-            .map(|m| (self.menu_mouse_position(c, w, m), m.b));
+            .map(|m| (self.menu_mouse_position(c, m), m.b));
         let Some(menu) = self.model.windows.get_mut(&w).and_then(|x| x.menu.as_mut()) else {
             return false;
         };
@@ -507,8 +507,8 @@ impl Server {
 
     /// The window position of mouse report `m` from client `c`
     /// (server-client.c:1730-1745): below a top status line, `u32::MAX`
-    /// on a status line; under the focus ring (D23), one cell in.
-    fn menu_mouse_position(&self, c: ClientId, w: WindowId, m: &MouseInput) -> (u32, u32) {
+    /// on a status line.
+    fn menu_mouse_position(&self, c: ClientId, m: &MouseInput) -> (u32, u32) {
         const NOWHERE: (u32, u32) = (u32::MAX, u32::MAX);
         let (status_at, lines) = self.status_place(c);
         let row = match status_at {
@@ -517,15 +517,7 @@ impl Server {
             Some(at) if m.y >= at => return NOWHERE,
             _ => m.y,
         };
-        let off = u32::from(
-            self.model
-                .number_option(TreeId::Window(w), "vtmux-focus-ring")
-                != 0,
-        );
-        match (m.x.checked_sub(off), row.checked_sub(off)) {
-            (Some(col), Some(row)) => (col, row),
-            _ => NOWHERE,
-        }
+        (m.x, row)
     }
 
     /// `menu_key`'s command (menu.c:520-536): parsed and queued for client

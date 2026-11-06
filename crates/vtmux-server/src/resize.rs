@@ -140,11 +140,11 @@ impl Server {
     }
 
     /// The client's terminal less its status lines (resize.c:194-198),
-    /// and less `frame` cells each way for the focus ring. A control
+    /// A control
     /// client has the size `refresh-client -C` gave it (80x24 before
     /// that), or for window `w` the one it gave that window
     /// (resize.c:189-195).
-    fn client_size(&self, c: &Client, frame: u32, w: Option<WindowId>) -> Option<(u32, u32)> {
+    fn client_size(&self, c: &Client, w: Option<WindowId>) -> Option<(u32, u32)> {
         let (cols, rows) = if let Some(cs) = &c.control {
             w.and_then(|w| cs.window_size(w))
                 .unwrap_or_else(|| cs.size())
@@ -152,17 +152,7 @@ impl Server {
             let tty = c.hello.as_ref()?.tty.as_ref()?;
             (tty.cols, tty.rows.saturating_sub(self.status_line_size(c)))
         };
-        Some((
-            cols.saturating_sub(frame).max(1),
-            rows.saturating_sub(frame).max(1),
-        ))
-    }
-
-    /// D23: under `vtmux-focus-ring` (seen from `tree`) a window fitted to
-    /// a client is 2 cells smaller each way, for the frame drawn round it.
-    /// Manual and `default-size` sizes are the window's own and keep it.
-    fn ring_frame(&self, tree: TreeId) -> u32 {
-        2 * u32::from(self.model.number_option(tree, "vtmux-focus-ring") != 0)
+        Some((cols.max(1), rows.max(1)))
     }
 
     /// `clients_with_window` (resize.c:116-129), counting to two.
@@ -184,7 +174,6 @@ impl Server {
         given: Option<ClientId>,
         among: &Among,
         w: Option<WindowId>,
-        frame: u32,
     ) -> Option<(u32, u32)> {
         let window = w.and_then(|w| self.model.windows.get(&w));
         if policy == SizePolicy::Manual {
@@ -204,7 +193,7 @@ impl Server {
             if only.is_some_and(|latest| latest != Some(id)) {
                 continue;
             }
-            let Some((cx, cy)) = self.client_size(c, frame, w) else {
+            let Some((cx, cy)) = self.client_size(c, w) else {
                 continue;
             };
             size = Some(match (size, policy) {
@@ -257,13 +246,11 @@ impl Server {
                     .number_option(TreeId::GlobalWindow, "window-size"),
             )
         });
-        // A new window has only the global window options yet.
-        let frame = self.ring_frame(w.map_or(TreeId::GlobalWindow, TreeId::Window));
         let given = given.and_then(|id| Some((id, self.clients.get(&id)?)));
         if policy == SizePolicy::Latest
             && let Some((_, c)) = given
             && !self.ignore_client_size(c)
-            && let Some(size) = self.client_size(c, frame, w)
+            && let Some(size) = self.client_size(c, w)
         {
             return clamp_size(size);
         }
@@ -274,13 +261,13 @@ impl Server {
             window: w,
         };
         let size = self
-            .clients_calculate_size(policy, given, &among, w, frame)
+            .clients_calculate_size(policy, given, &among, w)
             .unwrap_or_else(|| self.default_size(TreeId::Session(s)));
         clamp_size(size)
     }
 
     /// `recalculate_size` (resize.c:345-424): work out window `w`'s size
-    /// from its clients (inside the focus ring, D23). Nothing happens when no client gives one or the
+    /// from its clients. Nothing happens when no client gives one or the
     /// size is the one already pending (else the window's own) unless
     /// `now`. `now` or `manual` resize at once; otherwise the size waits
     /// for [`Self::check_window_resizes`].
@@ -294,8 +281,7 @@ impl Server {
             .number_option(TreeId::Window(w), "aggressive-resize")
             != 0;
         let among = Among::Window { window: w, current };
-        let frame = self.ring_frame(TreeId::Window(w));
-        let Some(size) = self.clients_calculate_size(policy, None, &among, Some(w), frame) else {
+        let Some(size) = self.clients_calculate_size(policy, None, &among, Some(w)) else {
             return;
         };
         let window = &self.model.windows[&w];
