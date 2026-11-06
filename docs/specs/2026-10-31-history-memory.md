@@ -119,7 +119,8 @@ A pane is *starved* once its history has kept changing (gaps under `IDLE`, 5 s)
 or kept wanting a pass (one a busy loop holds off) for `STARVE` (10 s). A new
 run starts only from rest: no pass pending and no change for `IDLE`. A starved
 pane's steps also run at the end of busy turns, after the turn's frames are
-written, one step per turn under the same `REST_FACTOR` rest, and in quiet
+written, one step per turn under the same `REST_FACTOR` rest (shared by the
+starved panes since low_compress_many_streaming, below), and in quiet
 turns without waiting out `IDLE`. Ghostty's traversal takes the oldest pages
 first, farthest from the active area; it never touches the viewport or the
 page holding the active area's top row. The pane stays starved until its pass
@@ -139,6 +140,33 @@ quiet; with the override the history panes compress meanwhile): spec +0.5%,
 narrow -1.6% inside the compression window. Steps are unchanged (worst 0.8 ms).
 Streaming RSS: 18.5-19.8 MB at 10 and 1000 lines/s for 20 minutes, against
 106.6-109.8 MB before and tmux's 65.7-66.7 MB.
+
+## Shared rest (low_compress_many_streaming, 2026-11-06)
+
+The rest above was global: about 1% of the loop for compression however many
+panes stream, about 40 spec-page steps a second. Twenty 120x40 panes at 1000
+lines/s fill 52 pages a second, and falling short is a cliff, not a drift:
+each pane's traversal starts at its oldest page, moves slower than its history
+moves towards pruning, and compresses only pages about to be pruned. Measured:
+20 such panes held 1958-1987 MB for 10 minutes, against 202 MB idle.
+
+The rest after a step is now `REST_FACTOR` times the step divided by the number
+of panes starved at the time, up to `MAX_SHARE` (25), and at least `STEP_GAP`
+(`compress.rs` `rest`). Each starved pane gets the steps a lone starved pane
+gets; with none or one starved, nothing changes.
+
+| Decision | Why |
+|---|---|
+| Divide the rest, keep one step per turn | A busy pane's output still meets at most one step in progress; more steps per turn would delay a turn by several |
+| Count starved panes only | Panes merely due (idle for `IDLE`) compress in quiet turns, where the loop has nothing else to do; starvation is what says a pane's output outruns that |
+| `MAX_SHARE` 25 | A rest stays at least four steps, so compression takes at most a fifth of the loop however many panes stream |
+
+Gate (run 2026-11-06, `docs/test-health/2026-11-06-history-compression-many-streaming.md`):
+20 streaming panes at 202.5-230.9 MB (median 216.7) against 202.3 MB idle and
+tmux's 1247-1252 MB; one pane unchanged (18.6-19.5 MB). Busy-pane p95 against
+`nocompress`, GAP_MS 2, inside the compression window: 2 history panes spec
+-9.8%, narrow +0.0%; 20 history panes spec -1.5%, narrow -5.4%. Server CPU
+unchanged (66.9 against 66.7 s at 20 panes over 12 minutes).
 
 ## Implementation checklist
 
