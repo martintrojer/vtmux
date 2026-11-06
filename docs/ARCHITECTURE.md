@@ -63,6 +63,7 @@ The design decisions behind this (D1–D23) are in the [spec](specs/2026-10-29-v
 | `vtmux-vt` | The only FFI crate: a safe wrapper over libghostty-vt. It turns Ghostty's terminal into tmux's shapes: `capture-pane` output, tmux's replies to terminal queries, cursor and history reporting | `libghostty-vt` |
 | `vtmux-server` | The single-threaded event loop and everything stateful: sessions, windows and panes, PTYs and processes, commands, control mode, the compositor and frame encoder. OS calls (`fork`, `openpty`, signals) are confined to `sys/` | core, vt |
 | `vtmux-client` | The attached client: raw tty mode, forwarding input, writing frames, resize and signals, restoring the terminal on exit | core |
+| `vtmux-snapshot` | The live-upgrade and persistence format (D27): versioned, length-prefixed tagged records for the whole server state, rows in vtmux's own run-length encoded cell format, history pages LZ4-compressed and named by their BLAKE3 hash. Its types are its own, not the server's, so a refactor can't change the format | nothing of ours (`lz4_flex`, `blake3`) |
 | `vtmux` | The binary: global flags, connect-or-start, dispatching to a one-shot command, attach or control mode | all |
 | `xtask` | Test tooling: the reference tmux build, the regress runner, the behaviour oracle | core, vt |
 
