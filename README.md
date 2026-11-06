@@ -21,7 +21,9 @@ Measured, not assumed: release builds against tmux 3.8 on the same host ([number
 **Pane blend.** Inactive panes dim, every cell, like Ghostty's unfocused splits. You always know where you're typing, and it costs no screen space ([spec](docs/specs/2026-11-04-pane-blend.md)).
 
 ```tmux
-if -F '#{vtmux_version}' "set -g vtmux-pane-inactive-blend 'fg=bg/25'"
+%if "#{vtmux_version}"
+set -g vtmux-pane-inactive-blend 'fg=bg/25'
+%endif
 ```
 
 **Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached. Opt-in `vtmux-persist` uses the same snapshot to bring sessions and scrollback back after a reboot ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress).
