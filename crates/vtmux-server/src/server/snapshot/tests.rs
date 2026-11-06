@@ -62,12 +62,24 @@ fn connect(server: &mut Server, h: Hello) -> (ClientId, mio::net::UnixStream) {
     (id, peer)
 }
 
-/// Every message the server has written to `peer`.
-fn messages(peer: &mut mio::net::UnixStream) -> Vec<ServerMsg> {
+/// Every message the server has written to `peer`. A socket pair's buffer
+/// is small on macOS, so the server's queue is flushed between reads until
+/// both are empty.
+fn messages(server: &mut Server, id: ClientId, peer: &mut mio::net::UnixStream) -> Vec<ServerMsg> {
     let mut wire = Vec::new();
     let mut buf = vec![0u8; 65536];
-    while let Ok(n @ 1..) = peer.read(&mut buf) {
-        wire.extend_from_slice(&buf[..n]);
+    loop {
+        let before = wire.len();
+        while let Ok(n @ 1..) = peer.read(&mut buf) {
+            wire.extend_from_slice(&buf[..n]);
+        }
+        server.flush_client(id);
+        while let Ok(n @ 1..) = peer.read(&mut buf) {
+            wire.extend_from_slice(&buf[..n]);
+        }
+        if wire.len() == before {
+            break;
+        }
     }
     let mut out = Vec::new();
     let mut at = 0;
@@ -90,7 +102,7 @@ fn run(server: &mut Server, dir: &Path, words: &[&str]) -> String {
     let mut out = String::new();
     let mut err = String::new();
     let mut code = None;
-    for m in messages(&mut peer) {
+    for m in messages(server, id, &mut peer) {
         match m {
             ServerMsg::Stdout(b) => out.push_str(&String::from_utf8_lossy(&b)),
             ServerMsg::Stderr(b) => err.push_str(&String::from_utf8_lossy(&b)),
