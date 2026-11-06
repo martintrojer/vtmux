@@ -321,7 +321,67 @@ a scratch build, not committed):
 read. Each hidden pane's view is dropped at the end of every turn, and the next synchronized update in that pane
 (`?2026h`, ~30 a second per pane in `agent_tui.py`) builds it again from scratch, so every hidden agent pane is read
 whole about 30 times a second. Fewer hidden panes, lower cost: with 2 clients (window 1 shown too) vtmux is cheaper
-than with 1 at every pane count. Not fixed here (a docs refresh); filed in the report.
+than with 1 at every pane count. Fixed in `8a7d31f`, below.
+
+## Agent panes fixed (`8a7d31f`)
+
+`8a7d31f` keeps a hidden pane's screen view until it has had no output for a second (`HIDDEN_VIEW_IDLE`); a pane
+with no output since a client last showed it is still released at the end of the first turn it is hidden. The
+*Agent panes* and *Hidden panes* tables of `PERFORMANCE.md` come from these runs, which replace the ones above.
+
+- **Binaries:** `vtmux` = `8a7d31f` (release, `/tmp/hidrel/vtmux-new`), `base` = `71a14bd` (release, the same tree
+  without the change, `/tmp/hidrel/vtmux-base`), tmux 3.8 from `cargo xtask ref-tmux`. Same host.
+- **Load:** `agent_panes` 23:24-23:35 UTC, 7.9 / 6.2; hidden panes 23:39-23:42 UTC, 6.7 / 8.4 (above the bench's
+  4: the host was busy all evening). Both under `flock /tmp/vtmux-stress.lock`.
+
+```
+RUNS=3 NO_BUILD=1 VTMUX=/tmp/hidrel/vtmux-new BASE=/tmp/hidrel/vtmux-base python3 scripts/bench.py agent_panes
+python3 scripts/bench-hidden-panes.py <binary> rvh<pid><binary><n>     # 4 x tmux, base, vtmux alternating
+```
+
+| case | binary | server CPU % | clients CPU % (sum) | terminal KB/s (sum) | sync frames/s (sum) | server wakeups/s | RSS MB |
+|---|---|---|---|---|---|---|---|
+| 5 panes / 1 clients | tmux | 1.4 | 0.0 | 15.2 | 68 | 264 | 6.1 |
+| 5 panes / 1 clients | base | 6.8 | 0.2 | 14.2 | 67 | 225 | 15.9 |
+| 5 panes / 1 clients | vtmux | 1.6 | 0.2 | 14.3 | 68 | 232 | 17.7 |
+| 5 panes / 2 clients | tmux | 1.5 | 0.0 | 30.4 | 135 | 263 | 6.2 |
+| 5 panes / 2 clients | base | 5.4 | 0.3 | 28.2 | 134 | 285 | 19.2 |
+| 5 panes / 2 clients | vtmux | 2.4 | 0.3 | 28.3 | 134 | 283 | 20.3 |
+| 10 panes / 1 clients | tmux | 2.3 | 0.0 | 15.2 | 68 | 477 | 6.6 |
+| 10 panes / 1 clients | base | 12.2 | 0.2 | 14.3 | 67 | 357 | 17.4 |
+| 10 panes / 1 clients | vtmux | 2.4 | 0.2 | 14.3 | 68 | 395 | 21.7 |
+| 10 panes / 2 clients | tmux | 2.6 | 0.0 | 30.4 | 135 | 471 | 6.7 |
+| 10 panes / 2 clients | base | 11.3 | 0.3 | 28.2 | 134 | 404 | 23.1 |
+| 10 panes / 2 clients | vtmux | 3.5 | 0.3 | 28.2 | 134 | 442 | 24.1 |
+| 20 panes / 1 clients | tmux | 4.4 | 0.0 | 15.2 | 68 | 853 | 8.0 |
+| 20 panes / 1 clients | base | 25.9 | 0.2 | 14.3 | 68 | 559 | 27.1 |
+| 20 panes / 1 clients | vtmux | 4.1 | 0.1 | 14.3 | 68 | 717 | 31.2 |
+| 20 panes / 2 clients | tmux | 4.4 | 0.0 | 30.5 | 136 | 860 | 8.1 |
+| 20 panes / 2 clients | base | 24.7 | 0.3 | 28.2 | 134 | 623 | 27.2 |
+| 20 panes / 2 clients | vtmux | 5.4 | 0.3 | 28.3 | 135 | 753 | 33.7 |
+
+Server CPU against tmux's, unrounded from the JSON: base 4.95x / 3.64x / 5.31x / 4.33x / 5.96x / 5.58x, vtmux
+1.20x / 1.63x / 1.04x / 1.35x / 0.93x / 1.22x (5/1, 5/2, 10/1, 10/2, 20/1, 20/2). 5 panes / 2 clients is the
+`perf_agent_panes` figure again (2.4% against 1.5%); with 2 clients 4 of the 5 panes are shown, so the change does
+little there. RSS rises 1.0-6.5 MB over base (busy hidden panes keep their views).
+
+```
+tmux panes=101 rss_before=5056 rss_after=9820 per_hidden_kb=47.6 switch_ms median=5.18 min=5.03 max=5.33
+vtmux-base panes=101 rss_before=11404 rss_after=19364 per_hidden_kb=79.6 switch_ms median=2.51 min=2.42 max=2.84
+vtmux-new panes=101 rss_before=11220 rss_after=18600 per_hidden_kb=73.8 switch_ms median=2.57 min=2.47 max=2.73
+tmux panes=101 rss_before=5004 rss_after=9772 per_hidden_kb=47.7 switch_ms median=5.13 min=4.98 max=5.23
+vtmux-base panes=101 rss_before=11216 rss_after=18828 per_hidden_kb=76.1 switch_ms median=2.50 min=2.40 max=2.70
+vtmux-new panes=101 rss_before=11400 rss_after=18796 per_hidden_kb=74.0 switch_ms median=2.55 min=2.41 max=3.08
+tmux panes=101 rss_before=5052 rss_after=9808 per_hidden_kb=47.6 switch_ms median=5.08 min=4.96 max=8.69
+vtmux-base panes=101 rss_before=11344 rss_after=19012 per_hidden_kb=76.7 switch_ms median=2.53 min=2.37 max=3.08
+vtmux-new panes=101 rss_before=11348 rss_after=18856 per_hidden_kb=75.1 switch_ms median=2.47 min=2.39 max=2.65
+tmux panes=101 rss_before=5040 rss_after=9808 per_hidden_kb=47.7 switch_ms median=5.10 min=4.95 max=6.00
+vtmux-base panes=101 rss_before=11340 rss_after=18840 per_hidden_kb=75.0 switch_ms median=2.50 min=2.40 max=3.81
+vtmux-new panes=101 rss_before=11344 rss_after=19356 per_hidden_kb=80.1 switch_ms median=2.50 min=2.43 max=2.82
+```
+
+Hidden-pane RSS with 101 windows: vtmux 18.6-19.4 MB against base 18.8-19.4 (every hidden pane there is idle, so
+released at once as before); `C-b n` medians 2.47-2.57 ms against 2.50-2.53.
 
 ## Other changes against the earlier numbers
 
