@@ -3124,8 +3124,14 @@ fn pane_flood_under_a_popup_writes_nothing_into_it() {
         a.wait(|a| pane_text(a).contains("popup"));
         thread::sleep(Duration::from_millis(500));
         let skip = a.bytes.lock().unwrap().len();
-        // Past the start timer (5 s) with the flood still running.
-        while start.elapsed() < Duration::from_millis(7500) {
+        // Past the start timer (5 s) with the flood still running: wait
+        // for the state, not a fixed time. A slow runner (or frame
+        // coalescing) delivers the bytes later; bounded at 30 s.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while (start.elapsed() < Duration::from_millis(7500)
+            || a.bytes.lock().unwrap().len() <= skip + 20_000)
+            && Instant::now() < deadline
+        {
             thread::sleep(Duration::from_millis(50));
         }
         let bytes = a.bytes.lock().unwrap().clone();
