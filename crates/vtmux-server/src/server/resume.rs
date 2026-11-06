@@ -32,6 +32,8 @@ use std::os::unix::net::UnixListener as StdListener;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
+use mio::unix::SourceFd;
+use mio::{Interest, Token};
 use vtmux_snapshot as snap;
 
 use super::{Server, ServerConfig};
@@ -226,6 +228,9 @@ fn run(mut server: Server) -> i32 {
 /// again.
 #[must_use]
 pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
+    // Why the image that switched back to this one failed (it is taken out
+    // of the environment either way).
+    let note = sys::take_failure_note().filter(|_| switched_back);
     let file = sys::inherited(snapshot_fd).ok();
     let bytes = file
         .as_ref()
@@ -262,30 +267,45 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
         }),
         Err(e) => Err(e.clone()),
     };
-    let why = match first {
-        Ok(server) => {
+    let me = this_image();
+    let mut why = match (first, &note) {
+        (Ok(mut server), _) => {
+            if let Some(note) = &note {
+                server.add_message(format!(
+                    "live upgrade failed: {note}; switched back to {me}"
+                ));
+            }
             drop((kept, exe, file));
             return run(server);
         }
-        Err(why) => why,
+        (Err(why), Some(note)) => {
+            format!("{note}; switched back to {me}, which failed too: {why}")
+        }
+        (Err(why), None) => format!("{me}: {why}"),
     };
     // Decision 7: back to the image that wrote the snapshot, on the same
     // descriptors.
     if !switched_back && let Some(file) = &file {
         let keep: Vec<RawFd> = kept.iter().map(|(_, fd)| fd.as_raw_fd()).collect();
         let path = meta.as_ref().and_then(writer_binary);
-        let _ = sys::switch_back(
+        let e = sys::switch_back(
             exe.as_ref().map(AsFd::as_fd),
             path.as_deref(),
             file.as_fd(),
             &keep,
+            &why,
         );
+        let image = path.map_or_else(|| "the image before".into(), |p| p.display().to_string());
+        why = format!("{why}; switching back to {image}: {e}");
     }
     drop(exe);
     // The last resort: serve the panes with no terminal state.
     if let Ok(s) = &decoded
-        && let Ok(server) = guarded(|| restore(&without_terminals(s), &kept, false))
+        && let Ok(mut server) = guarded(|| restore(&without_terminals(s), &kept, false))
     {
+        server.add_message(format!(
+            "live upgrade failed: {why}; panes restored without their terminal state"
+        ));
         drop((kept, file));
         return run(server);
     }
@@ -298,12 +318,22 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
     serve_held(held, &why)
 }
 
+/// This image's executable, for the messages a failed resume logs.
+fn this_image() -> String {
+    std::env::current_exe().map_or_else(
+        |_| "this image".into(),
+        |p| sys::exe_path(&p).display().to_string(),
+    )
+}
+
 /// The very last resort, when no image could rebuild the server: a server
 /// with no session on the listening socket found among `held`, holding
 /// every pane PTY open (`Server::held`) so that no pane process loses its
 /// terminal. The other sockets (clients, `pipe-pane`) are closed: with no
 /// session to show, an attached client is better told its server went
-/// than left frozen. It answers commands (`ls`, `show-messages`, which
+/// than left frozen. The PTYs are read and what comes is discarded
+/// ([`Server::hold`]), so a program printing does not block on a full
+/// terminal. It answers commands (`ls`, `show-messages`, which
 /// says what happened, `kill-server`) and handles signals as any server.
 /// With no listening socket left, the process only holds the descriptors,
 /// ignoring every handled signal but SIGTERM.
@@ -330,7 +360,7 @@ fn serve_held(mut held: Vec<OwnedFd>, why: &str) -> i32 {
                 "live upgrade failed: {why}; no session restored, {} descriptors held open",
                 held.len()
             ));
-            server.held = held;
+            server.hold(held);
             return run(server);
         }
     }
@@ -341,6 +371,55 @@ fn serve_held(mut held: Vec<OwnedFd>, why: &str) -> i32 {
 }
 
 impl Server {
+    /// Hold `held` open (the last resort, [`serve_held`]), reading the
+    /// terminals among them, the pane and popup PTY masters, for
+    /// [`Self::held_readable`] to discard what their programs write.
+    fn hold(&mut self, held: Vec<OwnedFd>) {
+        for (i, fd) in held.iter().enumerate() {
+            let registered = rustix::termios::isatty(fd)
+                && rustix::fs::fcntl_setfl(fd, rustix::fs::OFlags::NONBLOCK).is_ok()
+                && self
+                    .poll
+                    .registry()
+                    .register(
+                        &mut SourceFd(&fd.as_raw_fd()),
+                        Token(super::HELD_BASE + i),
+                        Interest::READABLE,
+                    )
+                    .is_ok();
+            if registered {
+                // Edge-triggered: what is there already is read now.
+                self.held_backlog.insert(i);
+            }
+        }
+        self.held = held;
+    }
+
+    /// Held descriptor `i` is readable: read and discard, at most
+    /// `READS` reads a turn (the rest the next, through the backlog). At
+    /// the end of the terminal (its program's side closed) it leaves the
+    /// poll set, still held.
+    pub(super) fn held_readable(&mut self, i: usize) {
+        const READS: usize = 64;
+        let Some(fd) = self.held.get(i) else { return };
+        let mut buf = [0; 1 << 14];
+        for _ in 0..READS {
+            match rustix::io::read(fd, &mut buf) {
+                Ok(1..) | Err(rustix::io::Errno::INTR) => {}
+                Err(rustix::io::Errno::AGAIN) => return,
+                // EOF, or EIO once the slave side is closed (Linux).
+                Ok(0) | Err(_) => {
+                    let _ = self
+                        .poll
+                        .registry()
+                        .deregister(&mut SourceFd(&fd.as_raw_fd()));
+                    return;
+                }
+            }
+        }
+        self.held_backlog.insert(i);
+    }
+
     /// Sequence steps 3, 4, 5 and 7 (live-upgrade spec): the snapshot
     /// into an anonymous memory file, the dry run of `binary` on it, then
     /// `execve(binary)` with the descriptors it names kept open. Returns
@@ -464,7 +543,11 @@ mod tests {
     fn the_dry_run_rebuilds_the_server_and_leaves_nothing_behind() {
         let d = dir("check");
         let socket = d.0.join("s");
-        let l = crate::sys::daemon::bind_socket(&socket, false).unwrap();
+        // Not `bind_socket`: its umask is the process's, and a test thread
+        // creating a directory meanwhile would make it 0600 (EACCES).
+        let l = StdListener::bind(&socket).unwrap();
+        l.set_nonblocking(true).unwrap();
+        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
         let server = Server::new(l, socket.clone(), ServerConfig::default()).unwrap();
         let shim = server.shim.as_ref().map(|s| s.dir().join("tmux"));
         let taken = server.to_snapshot(snap::Meta::default());

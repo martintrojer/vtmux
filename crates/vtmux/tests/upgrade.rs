@@ -544,10 +544,18 @@ fn a_resume_that_fails_switches_back() {
     assert_eq!(world.pane_pids(), panes);
     assert_eq!(world.observe(), before);
     world.echo("b:x", "back");
+    // The switch back says so, with why.
+    let log = world.run(&["show-messages"]);
+    assert!(
+        log.contains(&format!(
+            "live upgrade failed: {BIN}: test hook; switched back to "
+        )),
+        "{log}"
+    );
 }
 
 /// When the image switched back to fails too, the panes are still served:
-/// rebuilt without terminal state rather than lost.
+/// rebuilt without terminal state rather than lost, and the log says so.
 #[test]
 fn a_switch_back_that_fails_too_still_serves_the_panes() {
     let world = World::new();
@@ -563,6 +571,12 @@ fn a_switch_back_that_fails_too_still_serves_the_panes() {
     assert_eq!(world.pane_pids(), panes);
     assert_eq!(world.observe(), before);
     world.echo("a:w2.0", "last");
+    let log = world.run(&["show-messages"]);
+    assert!(log.contains("which failed too: test hook"), "{log}");
+    assert!(
+        log.contains("; panes restored without their terminal state"),
+        "{log}"
+    );
 }
 
 /// The dry run on its own: `--vtmux-check-snapshot` on a descriptor that
@@ -778,6 +792,54 @@ fn a_server_left_without_a_snapshot_still_answers() {
         .expect("kill-server answered");
     assert!(killed.status.success(), "{killed:?}");
     wait("the server to exit", || test_kill_process(server).is_err());
+}
+
+/// The server left without a snapshot keeps reading the pane terminals it
+/// holds, discarding what comes: a pane printing without pause goes on
+/// (its counter advances far past what a full terminal would let it
+/// write), instead of blocking on a terminal nobody reads.
+#[test]
+fn the_panes_of_a_server_left_without_a_snapshot_keep_printing() {
+    let world = World::new();
+    world.populate(&[]);
+    let count = world.home.path().join("count");
+    // 16 KiB a round: a terminal nobody reads stops it within a few.
+    let printer = format!(
+        "i=0; while :; do i=$((i+1)); echo $i >'{}'; \
+         dd if=/dev/zero bs=4096 count=4 2>/dev/null; done",
+        count.display()
+    );
+    world.run(&["neww", "-d", "-t", "a", "-n", "pr", "sh", "-c", &printer]);
+    let counted = || {
+        std::fs::read_to_string(&count)
+            .ok()
+            .and_then(|c| c.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    wait("the printer to start", || counted() > 2);
+    let wrapper = world.home.path().join("damages");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --vtmux-resume ]; then printf damage >>/dev/fd/$2; fi\n\
+             exec '{BIN}' \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    set_executable(&wrapper);
+
+    assert_eq!(world.upgrade(&wrapper), None);
+
+    let limit = Duration::from_secs(10);
+    let log = world
+        .run_within(&["show-messages"], limit)
+        .expect("show-messages answered");
+    let log = String::from_utf8_lossy(&log.stdout);
+    assert!(log.contains("live upgrade failed: "), "{log}");
+    let at = counted();
+    wait("the printer to go on", || counted() > at + 100);
+    let ls = world.run_within(&["ls"], limit).expect("ls answered");
+    assert!(ls.status.success(), "{ls:?}");
 }
 
 /// The dry run of a server that never upgraded inherits the snapshot and
