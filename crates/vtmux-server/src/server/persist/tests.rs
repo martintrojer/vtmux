@@ -9,6 +9,7 @@ use vtmux_snapshot as snap;
 use super::super::snapshot::tests::{listener, run, temp_dir};
 use super::super::{Server, ServerConfig};
 use super::{Mode, fingerprint};
+use crate::persist::{MANIFEST, MANIFEST_PREV};
 
 /// Text no command line carries: the pane prints it from two halves.
 const SECRET: &str = "SECRET-4242";
@@ -73,15 +74,72 @@ fn shows_secret(s: &snap::Snapshot) -> bool {
     found
 }
 
+/// Plant typed text everywhere a snapshot keeps it, each its own word:
+/// the environment (global and session), the message log (every command
+/// line), prompt history (command and search), the pane's last search
+/// and a title a program set.
+fn plant_typed(server: &mut Server, dir: &std::path::Path) {
+    for words in [
+        &["set-environment", "-g", "MY_API_TOKEN", "ENVSECRET"][..],
+        &[
+            "set-environment",
+            "-t",
+            "a",
+            "SESSION_TOKEN",
+            "SESSIONENVSECRET",
+        ],
+        &["display-message", "-p", "LOGSECRET"],
+    ] {
+        let out = run(server, dir, words);
+        assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    }
+    let limit = 100;
+    server.prompt_history.add(
+        "display PROMPTSECRET",
+        crate::prompt_history::PromptType::Command,
+        limit,
+    );
+    server.prompt_history.add(
+        "SEARCHHISTSECRET",
+        crate::prompt_history::PromptType::Search,
+        limit,
+    );
+    let pane = server.model.panes.get_mut(&PaneId(1)).unwrap();
+    pane.search = Some(("SEARCHSECRET".into(), false));
+    pane.term.feed(b"\x1b]2;TITLESECRET\x07");
+}
+
+/// Every string field of `s`, via its encoding: whether `word` is in it.
+fn holds(s: &snap::Snapshot, word: &str) -> bool {
+    let bytes = snap::encode_manifest(s);
+    bytes.windows(word.len()).any(|w| w == word.as_bytes())
+}
+
 #[test]
 fn a_layout_checkpoint_holds_no_screen_and_nothing_of_the_process() {
-    let (server, _dir) = server("ckpt-layout");
-    // The upgrade snapshot carries the screen (copy mode's frozen grid)
-    // and the process: what the checkpoint must not.
+    let (mut server, dir) = server("ckpt-layout");
+    plant_typed(&mut server, &dir);
+    // The upgrade snapshot carries the screen (copy mode's frozen grid),
+    // the process and everything typed: what the checkpoint must not.
     let upgrade = server.to_snapshot(snap::Meta::default());
     assert!(shows_secret(&upgrade));
     assert!(upgrade.panes.iter().any(|p| p.pipe.is_some()));
     assert_ne!(upgrade.descriptors.len(), 0);
+    let typed = [
+        "ENVSECRET",
+        "SESSIONENVSECRET",
+        "LOGSECRET",
+        "PROMPTSECRET",
+        "SEARCHHISTSECRET",
+        "SEARCHSECRET",
+        "TITLESECRET",
+        "a buffer",
+    ];
+    for word in typed {
+        assert!(holds(&upgrade, word), "{word}");
+    }
+    assert!(upgrade.server.hook_fires.iter().any(|h| h.count > 0));
+    assert_ne!(upgrade.server.cmd_number, 0);
 
     let layout = server.checkpoint_snapshot(Mode::Layout);
     assert_eq!(layout.meta.purpose, snap::Purpose::CheckpointLayout);
@@ -93,19 +151,44 @@ fn a_layout_checkpoint_holds_no_screen_and_nothing_of_the_process() {
         assert!(p.pipe.is_none(), "%{}", p.id);
     }
     assert!(layout.descriptors.is_empty() && layout.clients.is_empty());
-    // Sessions, windows, layout, options and buffers stay.
+    for word in typed {
+        assert!(!holds(&layout, word), "layout: {word}");
+    }
+    let x = &layout.server;
+    assert!(x.messages.is_empty() && x.buffers.is_empty() && x.hook_fires.is_empty());
+    assert_eq!((x.message_next, x.cmd_number, x.next_client), (0, 0, 0));
+    // Sessions, windows, layout and options stay.
     assert_eq!(layout.sessions.len(), 1);
+    assert_eq!(layout.sessions[0].name, upgrade.sessions[0].name);
     assert_eq!(layout.panes.len(), 2);
     assert_eq!(layout.windows, upgrade.windows);
-    assert_eq!(layout.server.buffers, upgrade.server.buffers);
     assert_eq!(layout.server.server_options, upgrade.server.server_options);
+    assert_eq!(layout.server.key_tables, upgrade.server.key_tables);
+    assert_eq!(
+        layout
+            .panes
+            .iter()
+            .map(|p| (&p.argv, &p.cwd))
+            .collect::<Vec<_>>(),
+        upgrade
+            .panes
+            .iter()
+            .map(|p| (&p.argv, &p.cwd))
+            .collect::<Vec<_>>()
+    );
 
-    // `full` keeps the screens; still nothing of the process.
+    // `full` keeps the screens, titles and buffers; still nothing of the
+    // process or typed.
     let full = server.checkpoint_snapshot(Mode::Full);
     assert_eq!(full.meta.purpose, snap::Purpose::CheckpointFull);
     assert!(shows_secret(&full));
     assert!(full.descriptors.is_empty() && full.clients.is_empty());
     assert!(full.panes.iter().all(|p| p.pipe.is_none()));
+    assert_eq!(full.server.buffers, upgrade.server.buffers);
+    for word in typed {
+        let kept = matches!(word, "TITLESECRET" | "a buffer");
+        assert_eq!(holds(&full, word), kept, "full: {word}");
+    }
 }
 
 #[test]
@@ -116,11 +199,11 @@ fn a_checkpoint_is_written_only_when_something_changed() {
     // Copy mode's frozen grid has a history page here only if the pane
     // scrolled; either way its pages are chunks, written once.
     assert_eq!(first.chunks_kept, 0);
-    assert!(state.join(crate::persist::MANIFEST).is_file());
+    assert!(state.join(MANIFEST).is_file());
     // Unchanged: nothing written, though the clock moved.
     std::thread::sleep(std::time::Duration::from_millis(5));
     assert_eq!(server.checkpoint_to(&state, Mode::Full), None);
-    assert!(!state.join(crate::persist::MANIFEST_PREV).exists());
+    assert!(!state.join(MANIFEST_PREV).exists());
     // A change: the next one is written, the previous kept.
     let out = run(
         &mut server,
@@ -129,13 +212,133 @@ fn a_checkpoint_is_written_only_when_something_changed() {
     );
     assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
     assert!(server.checkpoint_to(&state, Mode::Full).is_some());
-    assert!(state.join(crate::persist::MANIFEST_PREV).is_file());
+    assert!(state.join(MANIFEST_PREV).is_file());
     let (back, from) = crate::persist::load(&state).unwrap();
-    assert_eq!(from, crate::persist::MANIFEST);
+    assert_eq!(from, MANIFEST);
     assert_eq!(back.windows[0].name, "renamed");
     // Another mode is another checkpoint.
     assert!(server.checkpoint_to(&state, Mode::Layout).is_some());
     assert_eq!(server.checkpoint_to(&state, Mode::Layout), None);
+}
+
+#[test]
+fn read_only_commands_are_no_change() {
+    let (mut server, dir) = server("ckpt-polled");
+    let state = dir.join("state");
+    assert!(server.checkpoint_to(&state, Mode::Layout).is_some());
+    // Each command is logged, numbered, fires its `after-*` hook and
+    // comes from a new client: none of it is the server's structure.
+    for words in [
+        &["list-sessions"][..],
+        &["list-panes", "-a"],
+        &["display-message", "-p", "#{session_name}"],
+        &["show-messages"],
+        &["has-session", "-t", "a"],
+    ] {
+        let out = run(&mut server, &dir, words);
+        assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    }
+    assert_eq!(server.checkpoint_to(&state, Mode::Layout), None);
+    // Neither is typed text, in `layout`.
+    plant_typed(&mut server, &dir);
+    assert_eq!(server.checkpoint_to(&state, Mode::Layout), None);
+    // A buffer is a change in `full` only.
+    let out = run(&mut server, &dir, &["set-buffer", "more"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    assert_eq!(server.checkpoint_to(&state, Mode::Layout), None);
+    assert!(server.checkpoint_to(&state, Mode::Full).is_some());
+}
+
+/// A first `full` checkpoint writes its chunks a step per loop turn: the
+/// manifest only after the last, the previous one readable meanwhile.
+#[test]
+fn a_periodic_checkpoint_writes_its_chunks_over_several_turns() {
+    let (mut server, dir) = server("ckpt-steps");
+    // Copy mode over panes with history: a page each to write.
+    for _ in 0..3 {
+        let out = run(
+            &mut server,
+            &dir,
+            &["new-window", "-d", "-t", "a", "cat", "-"],
+        );
+        assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    }
+    for id in 1..5 {
+        let pane = server.model.panes.get_mut(&PaneId(id)).unwrap();
+        for n in 0..100 {
+            pane.term.feed(format!("pane {id} line {n}\r\n").as_bytes());
+        }
+        let target = format!("%{id}");
+        let out = run(&mut server, &dir, &["copy-mode", "-t", &target]);
+        assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    }
+    let out = run(&mut server, &dir, &["set", "-s", "vtmux-persist", "full"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    let pages = server.checkpoint_snapshot(Mode::Full).pages().len();
+    assert!(pages >= 4, "{pages}");
+    let state = dir.join("state");
+    server.persist.dir = Some(state.clone());
+    server.persist.step = std::time::Duration::ZERO;
+    let start = Instant::now();
+    server.persist_timers(start);
+    assert!(server.persist_deadline().is_some_and(|d| d > start));
+    let due = start + super::interval();
+    server.persist_timers(due);
+    // One chunk per turn at a zero budget; the loop doesn't sleep.
+    let mut turns = 1;
+    while !state.join(MANIFEST).exists() {
+        assert!(
+            server
+                .persist_deadline()
+                .is_some_and(|d| d <= Instant::now())
+        );
+        let chunks = std::fs::read_dir(state.join(crate::persist::CHUNKS))
+            .unwrap()
+            .count();
+        assert_eq!(chunks, turns, "turn {turns}");
+        server.persist_timers(due);
+        turns += 1;
+        assert!(turns <= pages + 1, "{turns} turns for {pages} pages");
+    }
+    assert_eq!(turns, pages);
+    let (back, from) = crate::persist::load(&state).unwrap();
+    assert_eq!(from, MANIFEST);
+    assert_eq!(back.pages().len(), pages);
+    // Done: back to the interval, and nothing more to write.
+    assert_eq!(server.persist_deadline(), Some(due + super::interval()));
+    assert_eq!(server.checkpoint(), None);
+}
+
+/// Two servers whose checkpoints would share a directory: the first to
+/// write holds its lock, the other writes nothing and says why once.
+#[test]
+fn a_locked_directory_is_not_written() {
+    let (mut one, dir) = server("ckpt-lock-a");
+    let (mut two, dir2) = server("ckpt-lock-b");
+    let state = dir.join("state");
+    assert!(one.checkpoint_to(&state, Mode::Layout).is_some());
+    let out = run(&mut two, &dir2, &["rename-window", "-t", "a:0", "two"]);
+    assert!(out.ends_with("--exit Some(0)--\n"), "{out}");
+    assert_eq!(two.checkpoint_to(&state, Mode::Layout), None);
+    assert_eq!(two.checkpoint_to(&state, Mode::Layout), None);
+    let log = run(&mut two, &dir2, &["show-messages"]);
+    let said: Vec<&str> = log
+        .lines()
+        .filter(|t| t.contains("in use by another server"))
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(!state.join(MANIFEST_PREV).exists());
+    assert_ne!(
+        crate::persist::load(&state).unwrap().0.windows[0].name,
+        "two"
+    );
+    // The first gone, its lock goes with it.
+    drop(one);
+    assert!(two.checkpoint_to(&state, Mode::Layout).is_some());
+    assert_eq!(
+        crate::persist::load(&state).unwrap().0.windows[0].name,
+        "two"
+    );
 }
 
 #[test]
@@ -154,6 +357,12 @@ fn the_fingerprint_ignores_the_clock_alone() {
     b.panes[0].rename_ago_ms = Some(60_010);
     b.sessions[0].lock_in_ms = Some(1);
     b.windows[0].silence_in_ms = None;
+    assert_eq!(fingerprint(&a), fingerprint(&b));
+    b.server.activity += 1;
+    b.sessions[0].activity += 1;
+    b.sessions[0].activity_secs += 60;
+    b.windows[0].activity += 1;
+    b.windows[0].activity_secs += 60;
     assert_eq!(fingerprint(&a), fingerprint(&b));
     b.panes[0].title = "changed".into();
     assert_ne!(fingerprint(&a), fingerprint(&b));
@@ -292,6 +501,25 @@ fn bench_full(server: &Server, dir: &std::path::Path) {
         );
     };
     let s = bench_with_history(server, 0);
+    // The periodic path: a step per loop turn at the server's budget.
+    let stepped = dir.join("stepped");
+    let start = Instant::now();
+    let mut w = crate::persist::Writer::new(&stepped, &s).unwrap();
+    let begun = start.elapsed();
+    let (mut steps, mut longest) = (0, std::time::Duration::ZERO);
+    loop {
+        let t = Instant::now();
+        let done = w.step(Some(super::STEP), &mut |_| Ok(())).unwrap();
+        longest = longest.max(t.elapsed());
+        steps += 1;
+        if done {
+            break;
+        }
+    }
+    println!(
+        "full first, stepped: {:?} in {steps} steps, longest {longest:?}, begun in {begun:?}",
+        start.elapsed()
+    );
     write(&s, "first");
     let start = Instant::now();
     let print = fingerprint(&s);

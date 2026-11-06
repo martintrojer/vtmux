@@ -1,15 +1,21 @@
 //! `vtmux-persist` checkpoints on disk (D27 phase 3,
 //! docs/specs/2026-11-06-live-upgrade.md, decisions 8, 17 and 20; *Design >
-//! Persistence > Writing*). One directory per socket name, private to the
-//! user (scrollback may hold secrets):
+//! Persistence > Writing*). One directory per socket, private to the user
+//! (scrollback may hold secrets):
 //!
 //! ```text
-//! $XDG_STATE_HOME/vtmux/<socket-name>/   0700  (default ~/.local/state)
-//!   manifest       the latest checkpoint  0600
-//!   manifest.prev  the one before it      0600
+//! $XDG_STATE_HOME/vtmux/<socket-name>-<hash>/   0700  (default ~/.local/state)
+//!   lock           held by the server writing here  0600
+//!   manifest       the latest checkpoint            0600
+//!   manifest.prev  the one before it                0600
 //!   chunks/        0700
-//!     <hash>       a history page, LZ4    0600
+//!     <hash>       a history page, LZ4              0600
 //! ```
+//!
+//! The directory's `<hash>` is of the socket's absolute path
+//! ([`state_dir`]); the server writing it holds `lock` ([`Lock`]), so no
+//! two servers share a checkpoint, race on `manifest.tmp` or collect each
+//! other's chunks.
 //!
 //! A manifest is a snapshot stream whose history pages are named, not
 //! inline ([`vtmux_snapshot::encode_manifest`]); each page lives in
@@ -17,20 +23,28 @@
 //! that names it, so after the first checkpoint only new pages are written
 //! (decision 16).
 //!
-//! [`write`] is crash-safe at every point: it writes each missing chunk as
+//! A checkpoint ([`write`], or [`Writer`] a few chunks at a time) is
+//! crash-safe at every point: it writes each missing chunk as
 //! `chunks/<hash>.tmp`, syncs it and renames it, syncs `chunks/`, then
-//! writes `manifest.tmp`, syncs it, renames `manifest` to `manifest.prev`
-//! and `manifest.tmp` to `manifest`, and syncs the directory. Only then
-//! does it delete the chunks neither manifest names, and any `.tmp` a
-//! crash left. A crash before the last rename leaves `manifest` (or, after
-//! the first rename, `manifest.prev`) the previous checkpoint, every chunk
-//! it names still there; [`load`] reads `manifest`, else `manifest.prev`.
+//! writes `manifest.tmp`, flushes it to stable storage, renames `manifest`
+//! to `manifest.prev` and `manifest.tmp` to `manifest`, and syncs the
+//! directory. Only then does it delete the chunks neither manifest names,
+//! and any `.tmp` a crash left. A crash before the last rename leaves
+//! `manifest` (or, after the first rename, `manifest.prev`) the previous
+//! checkpoint, every chunk it names still there; [`load`] reads
+//! `manifest`, else `manifest.prev`.
+//!
+//! One flush to stable storage per checkpoint ([`Flush`]): on macOS
+//! `fsync` stops at the drive's cache and `F_FULLFSYNC` costs a
+//! cache flush of the whole drive, so only the manifest gets it, and it
+//! carries the chunks synced before it to storage too.
 
 use std::collections::BTreeSet;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use vtmux_snapshot as snap;
 
@@ -42,16 +56,22 @@ pub const MANIFEST_PREV: &str = "manifest.prev";
 pub const MANIFEST_TMP: &str = "manifest.tmp";
 /// The history pages, by hash.
 pub const CHUNKS: &str = "chunks";
+/// Held (`flock`) by the server writing the directory ([`Lock`]).
+pub const LOCK: &str = "lock";
 
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 
-/// `$XDG_STATE_HOME/vtmux/<socket-name>` for the server listening on
-/// `socket`: `XDG_STATE_HOME` when it is an absolute path (the XDG base
-/// directory rules ignore a relative one), else `<home>/.local/state`.
-/// The variables are the server process's own, which it inherits from the
-/// client that started it, so a restore at the next start looks in the
-/// same place. `None` without a home or a socket file name.
+/// `$XDG_STATE_HOME/vtmux/<socket-name>-<hash>` for the server listening
+/// on `socket` (absolute): `XDG_STATE_HOME` when it is an absolute path
+/// (the XDG base directory rules ignore a relative one), else
+/// `<home>/.local/state`. `<hash>` is [`path_hash`] of `socket`, so
+/// servers on sockets of one name in two directories (`-S a/s` and
+/// `-S b/s`, one `-L` under two `TMUX_TMPDIR`s) keep apart, while the
+/// name still says whose it is. The variables are the server process's
+/// own, which it inherits from the client that started it, so a restore
+/// at the next start looks in the same place. `None` without a home or a
+/// socket file name.
 #[must_use]
 pub fn state_dir(
     socket: &Path,
@@ -63,11 +83,27 @@ pub fn state_dir(
         Some(x) if x.is_absolute() => x.to_path_buf(),
         _ => home?.join(".local/state"),
     };
-    Some(base.join("vtmux").join(name))
+    let mut leaf = name.to_os_string();
+    leaf.push(format!("-{}", path_hash(socket)));
+    Some(base.join("vtmux").join(leaf))
 }
 
-/// Where [`write`] has got to, for a test to stop it there as a crash
-/// would ([`write`]'s `at`).
+/// 12 hex digits of the 64-bit FNV-1a hash of `path`'s bytes: short, and
+/// fixed forever (a restore finds its directory by it), unlike std's
+/// `DefaultHasher`.
+#[must_use]
+pub fn path_hash(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt as _;
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in path.as_os_str().as_bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{:012x}", h >> 16)
+}
+
+/// Where a checkpoint write has got to, for a test to stop it there as a
+/// crash would ([`write`]'s `at`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     /// Every chunk the manifest names is on disk, the manifest not yet.
@@ -92,9 +128,9 @@ pub struct Written {
     pub bytes: u64,
 }
 
-/// Write `snapshot` as the checkpoint in `dir` (above). `at` is called at
-/// each [`Stage`]; an error from it stops the write there, as a crash
-/// would, and is returned. The server passes `|_| Ok(())`.
+/// Write `snapshot` as the checkpoint in `dir` (above), all at once.
+/// `at` is called at each [`Stage`]; an error from it stops the write
+/// there, as a crash would, and is returned.
 ///
 /// # Errors
 /// A directory, file, sync or rename failed, or `at` failed. Whatever
@@ -104,53 +140,134 @@ pub fn write(
     snapshot: &snap::Snapshot,
     at: &mut dyn FnMut(Stage) -> io::Result<()>,
 ) -> io::Result<Written> {
-    let chunks = dir.join(CHUNKS);
-    private_dir(dir)?;
-    private_dir(&chunks)?;
-    let mut done = Written::default();
-    let mut names = BTreeSet::new();
-    for page in snapshot.pages() {
-        let name = snap::hex(&page.hash);
-        if !names.insert(name.clone()) {
-            continue;
-        }
-        let path = chunks.join(&name);
-        if path.is_file() {
-            done.chunks_kept += 1;
-            continue;
-        }
-        if page.data.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("history page {name} has no data and no chunk"),
-            ));
-        }
-        replace(&chunks.join(format!("{name}.tmp")), &path, &page.data)?;
-        done.chunks_new += 1;
-        done.bytes += page.data.len() as u64;
-    }
-    sync_dir(&chunks)?;
-    at(Stage::ChunksWritten)?;
+    let mut w = Writer::new(dir, snapshot)?;
+    while !w.step(None, at)? {}
+    Ok(w.done)
+}
 
-    let manifest = snap::encode_manifest(snapshot);
-    let tmp = dir.join(MANIFEST_TMP);
-    write_synced(&tmp, &manifest)?;
-    done.bytes += manifest.len() as u64;
-    at(Stage::ManifestWritten)?;
-    let latest = dir.join(MANIFEST);
-    match fs::rename(&latest, dir.join(MANIFEST_PREV)) {
-        Ok(()) => {}
-        // The first checkpoint, or a crash after the rename below's
-        // predecessor: `manifest.prev` already holds the previous one.
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-    at(Stage::PrevKept)?;
-    fs::rename(&tmp, &latest)?;
-    sync_dir(dir)?;
+/// A checkpoint written a few chunks at a time ([`Writer::step`]), so a
+/// first `full` checkpoint (every history page a chunk, each synced:
+/// hundreds of milliseconds at 10 panes x 100k lines) never holds the
+/// server's loop for long. It owns what it writes: the manifest, encoded
+/// when it starts, and the pages not yet on disk.
+#[derive(Debug)]
+pub struct Writer {
+    dir: PathBuf,
+    manifest: Vec<u8>,
+    /// Every chunk the manifest names.
+    names: BTreeSet<String>,
+    /// The chunks still to write, name and data, last first.
+    todo: Vec<(String, Vec<u8>)>,
+    done: Written,
+}
 
-    done.chunks_removed = collect(dir, &names);
-    Ok(done)
+impl Writer {
+    /// Start writing `snapshot` into `dir`: make the directories and find
+    /// the pages already there.
+    ///
+    /// # Errors
+    /// A directory can't be made private, or a page not on disk has no
+    /// data.
+    pub fn new(dir: &Path, snapshot: &snap::Snapshot) -> io::Result<Self> {
+        let chunks = dir.join(CHUNKS);
+        private_dir(dir)?;
+        private_dir(&chunks)?;
+        let mut done = Written::default();
+        let mut names = BTreeSet::new();
+        let mut todo = Vec::new();
+        for page in snapshot.pages() {
+            let name = snap::hex(&page.hash);
+            if !names.insert(name.clone()) {
+                continue;
+            }
+            if chunks.join(&name).is_file() {
+                done.chunks_kept += 1;
+                continue;
+            }
+            if page.data.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("history page {name} has no data and no chunk"),
+                ));
+            }
+            todo.push((name, page.data.clone()));
+        }
+        todo.reverse();
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            manifest: snap::encode_manifest(snapshot),
+            names,
+            todo,
+            done,
+        })
+    }
+
+    /// Chunks still to write.
+    #[must_use]
+    pub fn chunks_left(&self) -> usize {
+        self.todo.len()
+    }
+
+    /// What the write has done so far; all of it once [`Writer::step`]
+    /// returned `true`.
+    #[must_use]
+    pub fn written(&self) -> &Written {
+        &self.done
+    }
+
+    /// Write chunks until `budget` is spent (at least one; `None`: no
+    /// limit). With none left, finish: sync `chunks/`, write the manifest,
+    /// rotate, and collect. `true` once finished.
+    ///
+    /// # Errors
+    /// As [`write`]; the previous checkpoint stays readable.
+    pub fn step(
+        &mut self,
+        budget: Option<Duration>,
+        at: &mut dyn FnMut(Stage) -> io::Result<()>,
+    ) -> io::Result<bool> {
+        let start = Instant::now();
+        let chunks = self.dir.join(CHUNKS);
+        while let Some((name, data)) = self.todo.pop() {
+            replace(
+                &chunks.join(format!("{name}.tmp")),
+                &chunks.join(&name),
+                &data,
+            )?;
+            self.done.chunks_new += 1;
+            self.done.bytes += data.len() as u64;
+            if budget.is_some_and(|b| start.elapsed() >= b) {
+                break;
+            }
+        }
+        if !self.todo.is_empty() {
+            return Ok(false);
+        }
+        // Only renames in `chunks/` need it; the manifest's full flush
+        // below orders the chunks' data before it.
+        if self.done.chunks_new > 0 {
+            sync_dir(&chunks)?;
+        }
+        at(Stage::ChunksWritten)?;
+        let dir = &self.dir;
+        let tmp = dir.join(MANIFEST_TMP);
+        write_file(&tmp, &self.manifest, Flush::Full)?;
+        self.done.bytes += self.manifest.len() as u64;
+        at(Stage::ManifestWritten)?;
+        let latest = dir.join(MANIFEST);
+        match fs::rename(&latest, dir.join(MANIFEST_PREV)) {
+            Ok(()) => {}
+            // The first checkpoint, or a crash after the rename below's
+            // predecessor: `manifest.prev` already holds the previous one.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        at(Stage::PrevKept)?;
+        fs::rename(&tmp, &latest)?;
+        sync_dir(dir)?;
+        self.done.chunks_removed = collect(dir, &self.names);
+        Ok(true)
+    }
 }
 
 /// Delete every entry of `chunks/` that neither manifest names: `names`
@@ -234,9 +351,23 @@ fn private_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// How [`write_file`] syncs.
+#[derive(Clone, Copy)]
+enum Flush {
+    /// `fsync`: to the drive. On macOS that leaves it in the drive's
+    /// cache, so it is cheap there.
+    Data,
+    /// To stable storage: on macOS `F_FULLFSYNC`, which also empties the
+    /// drive's cache of everything synced before it (fcntl(2)); elsewhere
+    /// `fsync` already does. One per checkpoint, on the manifest: the
+    /// chunks synced before it are then on storage before the manifest
+    /// naming them can be.
+    Full,
+}
+
 /// Write `bytes` to a fresh mode-0600 `path` and sync it. A file a crash
 /// left there goes first, so the mode is this one.
-fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+fn write_file(path: &Path, bytes: &[u8], flush: Flush) -> io::Result<()> {
     match fs::remove_file(path) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -248,18 +379,68 @@ fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .mode(FILE_MODE)
         .open(path)?;
     f.write_all(bytes)?;
-    f.sync_all()
+    match flush {
+        Flush::Data => rustix::fs::fsync(&f)?,
+        Flush::Full => full_sync(&f)?,
+    }
+    Ok(())
+}
+
+/// [`Flush::Full`]. A file system without `F_FULLFSYNC` (network ones
+/// answer `ENOTSUP`) gets `fsync`, as SQLite does (`unixSync`).
+#[cfg(target_vendor = "apple")]
+fn full_sync(f: &File) -> io::Result<()> {
+    rustix::fs::fcntl_fullfsync(f).or_else(|_| rustix::fs::fsync(f))?;
+    Ok(())
+}
+
+/// [`Flush::Full`]: `fsync` reaches stable storage here.
+#[cfg(not(target_vendor = "apple"))]
+fn full_sync(f: &File) -> io::Result<()> {
+    rustix::fs::fsync(f)?;
+    Ok(())
 }
 
 /// `bytes` at `path`, through `tmp`: never a partial `path`.
 fn replace(tmp: &Path, path: &Path, bytes: &[u8]) -> io::Result<()> {
-    write_synced(tmp, bytes)?;
+    write_file(tmp, bytes, Flush::Data)?;
     fs::rename(tmp, path)
 }
 
-/// Sync a directory, so the renames in it last.
+/// Sync a directory, so the renames in it reach the drive (plain `fsync`:
+/// a rename lost with the drive's cache leaves the previous manifest,
+/// which [`load`] reads).
 fn sync_dir(dir: &Path) -> io::Result<()> {
-    File::open(dir)?.sync_all()
+    rustix::fs::fsync(File::open(dir)?)?;
+    Ok(())
+}
+
+/// The lock a server holds on its checkpoint directory while it writes
+/// there ([`LOCK`], `flock`), so two servers never write one directory.
+/// Released when dropped, or when the process ends however it ends.
+#[derive(Debug)]
+pub struct Lock {
+    _file: File,
+}
+
+impl Lock {
+    /// Take the lock on `dir` (made private first) without waiting.
+    ///
+    /// # Errors
+    /// `WouldBlock` while another holds it (another process, or another
+    /// [`Lock`] in this one); else the directory or lock file failed.
+    pub fn take(dir: &Path) -> io::Result<Self> {
+        private_dir(dir)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(FILE_MODE)
+            .open(dir.join(LOCK))?;
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
+        Ok(Self { _file: file })
+    }
 }
 
 #[cfg(test)]
