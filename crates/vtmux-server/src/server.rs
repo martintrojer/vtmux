@@ -5189,6 +5189,48 @@ fn int(n: u32) -> i32 {
 mod tests {
     use crate::mode::prompt::tests::setup;
 
+    /// A client of another protocol version (`Speaks::Frozen`) is sent the
+    /// frozen frames and nothing else (protocol module docs).
+    #[test]
+    fn a_frozen_client_is_sent_frozen_frames_only() {
+        use std::io::Read as _;
+        use vtmux_core::protocol::{ServerMsg, Speaks, decode};
+        let (mut server, _, _, _, dir) = setup();
+        let (ours, mut peer) = mio::net::UnixStream::pair().unwrap();
+        let id = super::ClientId(server.next_client);
+        server.next_client += 1;
+        let mut client = super::Client::new(ours, 0);
+        client.speaks = Speaks::Frozen;
+        server.clients.insert(id, client);
+        let sent = [
+            ServerMsg::Ready,
+            ServerMsg::Frame(b"frame".to_vec()),
+            ServerMsg::Stdout(b"out".to_vec()),
+            ServerMsg::WriteClose,
+            ServerMsg::Suspend,
+            ServerMsg::Flags { wait_exit: true },
+            ServerMsg::Stderr(b"err".to_vec()),
+        ];
+        for m in &sent {
+            server.send(id, m);
+        }
+        let mut wire = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n @ 1..) = peer.read(&mut buf) {
+            wire.extend_from_slice(&buf[..n]);
+        }
+        let mut got = Vec::new();
+        let mut at = 0;
+        while at < wire.len() {
+            let (m, used) = decode::<ServerMsg>(&wire[at..]).unwrap();
+            got.push(m);
+            at += used;
+        }
+        let frozen: Vec<ServerMsg> = sent.into_iter().filter(ServerMsg::is_frozen).collect();
+        assert_eq!(got, frozen);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Only a change a flood did not make lifts the pacing: a pane that
     /// started a burst (not in the backlog when read) or one to redraw
     /// whole, in the window shown; flood output alone does not.

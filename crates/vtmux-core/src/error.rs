@@ -179,13 +179,17 @@ impl fmt::Display for EdgeError {
             Self::Message(s) => f.write_str(s),
             Self::NotImplemented(s) => write!(f, "not implemented in vtmux yet: {s}"),
             Self::VersionMismatch { client, server } => {
-                // client.c:659-668's line, then the way out (live-upgrade
-                // spec, decision 3).
+                // client.c:659-668's line. A newer client also gets the way
+                // out (live-upgrade spec, decision 3); for an older one it
+                // would be a downgrade.
                 write!(
                     f,
-                    "protocol version mismatch (client {client}, server {server})\n\
-                     run 'tmux vtmux-upgrade' to move the server onto this binary"
-                )
+                    "protocol version mismatch (client {client}, server {server})"
+                )?;
+                if client > server {
+                    f.write_str("\nrun 'tmux vtmux-upgrade' to move the server onto this binary")?;
+                }
+                Ok(())
             }
             Self::Socket(e) => e.fmt(f),
         }
@@ -350,7 +354,14 @@ mod tests {
                 client: 1,
                 server: 2
             }),
-            "protocol version mismatch (client 1, server 2)\n\
+            "protocol version mismatch (client 1, server 2)"
+        );
+        assert_eq!(
+            s(&EdgeError::VersionMismatch {
+                client: 3,
+                server: 2
+            }),
+            "protocol version mismatch (client 3, server 2)\n\
              run 'tmux vtmux-upgrade' to move the server onto this binary"
         );
     }

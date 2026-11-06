@@ -10,8 +10,8 @@
 //!
 //! A version mismatch is reported the way tmux does (client.c:659-668:
 //! `protocol version mismatch (client N, server M)`, exit 1), with vtmux's
-//! own numbers and a second line naming `vtmux-upgrade`; see
-//! [`Hello::check_version`].
+//! own numbers; a client newer than the server is also told to run
+//! `vtmux-upgrade`. See [`Hello::check_version`].
 //!
 //! # Frozen frames
 //!
@@ -30,6 +30,8 @@
 //! | [`ServerMsg::Stdout`] | `0x00` | bytes |
 //! | [`ServerMsg::Stderr`] | `0x01` | bytes |
 //! | [`ServerMsg::Exit`] | `0x03` | `code` i32, `message` option of string, `hup` bool |
+//! | [`ServerMsg::Exec`] | `0x09` | `command` string, `shell` bytes |
+//! | [`ServerMsg::Flags`] | `0x0c` | `wait_exit` bool |
 //! | [`ServerMsg::UpgradeResult`] | `0x80` | `ok` bool, `message` string |
 //! | [`ServerMsg::UpgradeNotice`] | `0x81` | `binary` bytes, `token` string |
 //!
@@ -47,7 +49,8 @@
 //! - A control client (`-C`) of any version from [`FROZEN_SINCE`] on is
 //!   accepted ([`Speaks::Frozen`]): it sends only `Hello`, `Stdin` and
 //!   `StdinEof`, and the server sends it frozen frames only, dropping the
-//!   rest ([`ServerMsg::is_frozen`]).
+//!   rest ([`ServerMsg::is_frozen`]). `Exec` (`detach-client -E`) and
+//!   `Flags` (`wait-exit`) are frozen so they reach it too.
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -272,6 +275,8 @@ impl ServerMsg {
             Self::Stdout(_)
                 | Self::Stderr(_)
                 | Self::Exit { .. }
+                | Self::Exec { .. }
+                | Self::Flags { .. }
                 | Self::UpgradeResult { .. }
                 | Self::UpgradeNotice { .. }
         )
@@ -1143,18 +1148,30 @@ mod tests {
         ));
     }
 
+    /// client.c:659-668 shape with vtmux numbers; only a newer client is
+    /// told to move the server onto its binary (an older one would be a
+    /// downgrade).
     #[test]
-    fn version_mismatch_has_tmux_shape_and_names_the_upgrade() {
-        let old = Hello {
-            version: 0,
-            ..hello(None)
+    fn version_mismatch_has_tmux_shape_and_names_the_upgrade_to_a_newer_client() {
+        let at = |version| {
+            Hello {
+                version,
+                flags: ClientFlags::default(),
+                ..hello(None)
+            }
+            .check_version()
+            .unwrap_err()
+            .to_string()
         };
-        let err = old.check_version().unwrap_err();
-        // client.c:659-668 shape, vtmux numbers, then the way out.
         assert_eq!(
-            err.to_string(),
+            at(0),
+            format!("protocol version mismatch (client 0, server {PROTOCOL_VERSION})")
+        );
+        let newer = PROTOCOL_VERSION + 1;
+        assert_eq!(
+            at(newer),
             format!(
-                "protocol version mismatch (client 0, server {PROTOCOL_VERSION})\n\
+                "protocol version mismatch (client {newer}, server {PROTOCOL_VERSION})\n\
                  run 'tmux vtmux-upgrade' to move the server onto this binary"
             )
         );
@@ -1210,7 +1227,7 @@ mod tests {
             let tag = encode(&m).unwrap()[4];
             assert_eq!(
                 m.is_frozen(),
-                matches!(tag, 0 | 1 | 3 | 0x80 | 0x81),
+                matches!(tag, 0 | 1 | 3 | 9 | 12 | 0x80 | 0x81),
                 "{m:?}"
             );
         }
@@ -1317,6 +1334,15 @@ mod tests {
                 "0c000000 03 ffffffff 01 01000000 78 01",
             ),
             (
+                ServerMsg::Exec {
+                    command: "ls".into(),
+                    shell: PathBuf::from("/bin/sh"),
+                },
+                "12000000 09 02000000 6c73 07000000 2f62696e2f7368",
+            ),
+            (ServerMsg::Flags { wait_exit: true }, "02000000 0c 01"),
+            (ServerMsg::Flags { wait_exit: false }, "02000000 0c 00"),
+            (
                 ServerMsg::UpgradeResult {
                     ok: false,
                     message: "not implemented".into(),
@@ -1365,7 +1391,7 @@ mod tests {
                     .map(|(_, g)| unhex(g)[4])
                     .collect()
             ),
-            tags(vec![0, 1, 3, 0x80, 0x81])
+            tags(vec![0, 1, 3, 9, 12, 0x80, 0x81])
         );
         for (m, golden) in &frozen_client_goldens() {
             let bytes = unhex(golden);
