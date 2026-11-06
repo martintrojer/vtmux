@@ -402,8 +402,14 @@ fn observe(server: &mut Server, dir: &Path) -> String {
 /// instants).
 fn normalised(mut s: snap::Snapshot) -> snap::Snapshot {
     s.descriptors.clear();
+    for x in &mut s.sessions {
+        x.lock_in_ms = x.lock_in_ms.map(|_| 0);
+    }
     for c in &mut s.clients {
         c.table_ago_ms = 0;
+        if let Some(m) = &mut c.status_message {
+            m.timer_in_ms = m.timer_in_ms.map(|_| 0);
+        }
         c.repeat_in_ms = c.repeat_in_ms.map(|_| 0);
         if let Some(cs) = &mut c.control {
             cs.subs_due_ms = cs.subs_due_ms.map(|_| 0);
@@ -421,6 +427,7 @@ fn normalised(mut s: snap::Snapshot) -> snap::Snapshot {
     for p in &mut s.panes {
         p.output_ago_ms = p.output_ago_ms.map(|_| 0);
         p.resize_in_ms = p.resize_in_ms.map(|_| 0);
+        p.rename_ago_ms = p.rename_ago_ms.map(|_| 0);
         for m in &mut p.modes {
             if let snap::PaneMode::Copy(c) = m {
                 c.refresh_in_ms = c.refresh_in_ms.map(|_| 0);
@@ -533,6 +540,8 @@ fn build(server: &mut Server, dir: &Path) -> Vec<mio::net::UnixStream> {
         &["set-environment", "-t", "main", "SVAR", "sv"],
         &["wait-for", "-L", "chan"],
         &["wait-for", "-S", "signalled"],
+        // Exits when the last end of its socket closes, with both servers.
+        &["pipe-pane", "-t", "%2", "exec cat >/dev/null"],
     ] {
         ok(server, dir, words);
     }
@@ -585,6 +594,25 @@ fn build(server: &mut Server, dir: &Path) -> Vec<mio::net::UnixStream> {
             b"\x1b[?62;22c\x1bP>|xterm(390)\x1b\\\x1b]11;rgb:1010/2020/3030\x1b\\\x1b[?997;2n",
         )
         .unwrap();
+    // Read only when a terminal opens (tty-term.c:457, 619): not this
+    // client's, before or after the snapshot.
+    ok(
+        server,
+        dir,
+        &["set", "-as", "terminal-features", "xterm*:sixel:hyperlinks"],
+    );
+    ok(
+        server,
+        dir,
+        &[
+            "display-message",
+            "-c",
+            "/dev/vtmux-test-tty",
+            "-d",
+            "600000",
+            "on screen",
+        ],
+    );
     let (control, peer) = connect(
         server,
         hello(
@@ -611,6 +639,78 @@ fn dup(fd: impl AsFd) -> OwnedFd {
     fd.as_fd().try_clone_to_owned().unwrap()
 }
 
+/// The descriptor a live upgrade keeps for `role`, here duplicated from
+/// `a`.
+fn adopt(a: &Server, role: &snap::Role) -> Option<OwnedFd> {
+    match role {
+        snap::Role::Client(id) => a
+            .clients
+            .get(&ClientId(*id as usize))
+            .map(|c| dup(&c.stream)),
+        snap::Role::PanePty(p) => a
+            .model
+            .panes
+            .get(&vtmux_core::ids::PaneId(*p))
+            .and_then(|x| x.io.as_ref())
+            .map(|io| dup(io.fd())),
+        snap::Role::PipePane(p) => a
+            .model
+            .panes
+            .get(&vtmux_core::ids::PaneId(*p))
+            .and_then(|x| x.pipe.as_ref())
+            .map(|pipe| dup(pipe.fd())),
+        snap::Role::PopupPty(id) => a
+            .clients
+            .get(&ClientId(*id as usize))
+            .and_then(|c| c.popup.as_ref()?.pty())
+            .map(|io| dup(io.fd())),
+        snap::Role::Listener(()) | snap::Role::Snapshot(()) => None,
+    }
+}
+
+/// `a` snapshotted, encoded, decoded and rebuilt on a listener named
+/// `name`, adopting `a`'s descriptors.
+fn rebuild(a: &Server, dir: &Path, name: &str) -> Server {
+    let taken = a.to_snapshot(snap::Meta::default());
+    let decoded = snap::decode(&snap::encode(&taken)).unwrap();
+    decoded.check().unwrap();
+    let (l, _) = listener(dir, name);
+    Server::from_snapshot(l, ServerConfig::default(), &decoded, &mut |r| adopt(a, r)).unwrap()
+}
+
+/// A fresh server on listener `a` in `dir`.
+fn server(dir: &Path) -> Server {
+    let (l, socket) = listener(dir, "a");
+    Server::new(l, socket, ServerConfig::default()).unwrap()
+}
+
+/// An attached terminal client of `term` with `features`, on `session`.
+fn attach(
+    server: &mut Server,
+    dir: &Path,
+    session: &str,
+    features: &[&str],
+) -> (ClientId, mio::net::UnixStream) {
+    let tty = TtyInfo {
+        name: "/dev/vtmux-test-tty".into(),
+        term: "xterm-256color".into(),
+        cols: 80,
+        rows: 24,
+        features: features.iter().map(|f| (*f).to_owned()).collect(),
+    };
+    let out = connect(
+        server,
+        hello(
+            &["attach-session", "-t", session],
+            dir,
+            Some(tty),
+            ControlMode::None,
+        ),
+    );
+    server.pending_exits.clear();
+    out
+}
+
 #[test]
 fn a_rebuilt_model_answers_every_listing_alike() {
     let dir = temp_dir("rich");
@@ -635,29 +735,16 @@ fn a_rebuilt_model_answers_every_listing_alike() {
     decoded.check().unwrap();
     assert_eq!(decoded, taken);
 
+    assert!(
+        taken
+            .descriptors
+            .iter()
+            .any(|d| matches!(d.role, snap::Role::PipePane(2)))
+    );
     // The descriptors a live upgrade keeps, here duplicated from `a`.
-    let mut fds = |role: &snap::Role| -> Option<OwnedFd> {
-        match role {
-            snap::Role::Client(id) => a
-                .clients
-                .get(&ClientId(*id as usize))
-                .map(|c| dup(&c.stream)),
-            snap::Role::PanePty(p) => a
-                .model
-                .panes
-                .get(&vtmux_core::ids::PaneId(*p))
-                .and_then(|x| x.io.as_ref())
-                .map(|io| dup(io.fd())),
-            snap::Role::PopupPty(id) => a
-                .clients
-                .get(&ClientId(*id as usize))
-                .and_then(|c| c.popup.as_ref()?.pty())
-                .map(|io| dup(io.fd())),
-            _ => None,
-        }
-    };
     let (l, _) = listener(&dir, "b");
-    let mut b = Server::from_snapshot(l, ServerConfig::default(), &decoded, &mut fds).unwrap();
+    let mut b =
+        Server::from_snapshot(l, ServerConfig::default(), &decoded, &mut |r| adopt(&a, r)).unwrap();
     for &(p, bytes) in FED {
         b.model
             .panes
@@ -763,5 +850,303 @@ fn descriptors_name_the_open_sockets_and_ptys() {
             .any(|d| d.role == snap::Role::Listener(()))
     );
     drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The size of pane `p`'s PTY, as its program reads it (`TIOCGWINSZ`).
+fn pty_size(server: &Server, p: u32) -> (u16, u16) {
+    let pane = &server.model.panes[&vtmux_core::ids::PaneId(p)];
+    let ws = rustix::termios::tcgetwinsize(pane.io.as_ref().unwrap().fd()).unwrap();
+    (ws.ws_col, ws.ws_row)
+}
+
+/// Size changes the program hasn't been told yet are carried
+/// (`wp->resize_queue`), so the rebuilt server still sends them
+/// (`server_client_check_pane_resize`, server-client.c:1984-2041).
+#[test]
+fn queued_pane_sizes_reach_the_program_after_a_rebuild() {
+    let dir = temp_dir("resize");
+    let mut a = server(&dir);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    ok(&mut a, &dir, &["split-window", "-h", "-t", "s", "cat", "-"]);
+    let queued = |s: &Server| {
+        s.model
+            .panes
+            .values()
+            .map(|p| (p.id.0, p.resizes.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        queued(&a).iter().all(|(_, q)| !q.is_empty()),
+        "{:?}",
+        queued(&a)
+    );
+    // The first pane's program still thinks it has the whole window.
+    assert_eq!(pty_size(&a, 0), (80, 24));
+
+    let mut b = rebuild(&a, &dir, "b");
+    assert_eq!(queued(&b), queued(&a));
+    b.send_pane_resizes();
+    for p in [0, 1] {
+        let rect = b.model.panes[&vtmux_core::ids::PaneId(p)].rect;
+        let want = (
+            u16::try_from(rect.sx).unwrap(),
+            u16::try_from(rect.sy).unwrap(),
+        );
+        assert_eq!(pty_size(&b, p), want, "%{p}");
+    }
+    assert_eq!(pty_size(&b, 0), (40, 24));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `terminal-features` and `terminal-overrides` are read when a client's
+/// terminal opens (`tty_term_create`, tty-term.c:457, 619), never applied
+/// to a client already attached: the rebuilt client keeps the features it
+/// opened with.
+#[test]
+fn a_client_keeps_the_terminal_features_it_opened_with() {
+    let dir = temp_dir("features");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let _peer = attach(&mut a, &dir, "s", &[]);
+    ok(
+        &mut a,
+        &dir,
+        &["set", "-as", "terminal-features", "xterm*:sixel:hyperlinks"],
+    );
+    ok(
+        &mut a,
+        &dir,
+        &["set", "-as", "terminal-overrides", "xterm*:Ss=\\E[%p1%d q"],
+    );
+    let list = ["list-clients", "-F", "#{client_termfeatures}"];
+    let before = run(&mut a, &dir, &list);
+    assert!(!before.contains("sixel"), "{before}");
+    let mut b = rebuild(&a, &dir, "b");
+    assert_eq!(run(&mut b, &dir, &list), before);
+    let caps = |s: &Server| {
+        let c = s.clients.values().find(|c| c.term.is_some()).unwrap();
+        c.term.as_ref().unwrap().has_name("Ss")
+    };
+    assert_eq!(caps(&b), caps(&a));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Pane output a `pipe-pane` command has not taken yet stays queued for it
+/// (decision 10, keep `pipe-pane` running), and `-I`/`-O` come back as
+/// they were.
+#[test]
+fn pipe_pane_output_not_yet_written_survives() {
+    let dir = temp_dir("pipe");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["split-window", "-t", "s", "cat", "-"]);
+    // Takes nothing until killed, so the socket fills.
+    ok(&mut a, &dir, &["pipe-pane", "-t", "%0", "exec sleep 30"]);
+    ok(
+        &mut a,
+        &dir,
+        &["pipe-pane", "-I", "-t", "%1", "exec sleep 30"],
+    );
+    let flood: Vec<u8> = (0..1_000_000u32).map(|i| b'a' + (i % 26) as u8).collect();
+    a.pipe_write(vtmux_core::ids::PaneId(0), &flood);
+    let pipe = |s: &Server, p: u32| {
+        let x = s.model.panes[&vtmux_core::ids::PaneId(p)]
+            .pipe
+            .as_ref()
+            .unwrap();
+        (x.pid, x.input(), x.output(), x.pending().to_vec())
+    };
+    let pending = pipe(&a, 0).3;
+    assert!(!pending.is_empty() && flood.ends_with(&pending));
+    let taken = a.to_snapshot(snap::Meta::default());
+    let outputs: Vec<bool> = taken
+        .panes
+        .iter()
+        .map(|p| p.pipe.as_ref().unwrap().output)
+        .collect();
+    assert_eq!(outputs, [true, false]);
+
+    let b = rebuild(&a, &dir, "b");
+    for p in [0, 1] {
+        assert_eq!(pipe(&b, p), pipe(&a, p), "%{p}");
+    }
+    for p in [0, 1] {
+        let pid = rustix::process::Pid::from_raw(pipe(&a, p).0).unwrap();
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+    }
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn from_snapshot(dir: &Path, s: &snap::Snapshot) -> std::io::Result<Server> {
+    let (l, _) = listener(dir, "bad");
+    Server::from_snapshot(l, ServerConfig::default(), s, &mut |_| None)
+}
+
+/// A way to spoil a good snapshot.
+type Break = fn(&mut snap::Snapshot);
+
+/// A snapshot that doesn't describe a consistent server is refused with
+/// an error, never a panic or a model that hands out ids twice.
+#[test]
+fn from_snapshot_refuses_inconsistent_input() {
+    let dir = temp_dir("bad");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["new-window", "-d", "-t", "s", "cat", "-"]);
+    let good = a.to_snapshot(snap::Meta::default());
+    assert!(from_snapshot(&dir, &good).is_ok());
+
+    let cases: &[(&str, Break)] = &[
+        ("dangling link", |s| s.sessions[0].windows[0].window = 42),
+        ("window counter", |s| s.server.next_window = 0),
+        ("pane counter", |s| s.server.next_pane = 1),
+        ("session counter", |s| s.server.next_session = 0),
+        ("no active pane", |s| s.windows[0].active = None),
+        ("huge pane", |s| {
+            s.panes[0].geometry.sx = 1_000_000;
+            s.panes[0].geometry.sy = 1_000_000;
+        }),
+        ("bad link tree", |s| {
+            s.sessions[0].link_tree = vec![snap::RbNode { key: 0, red: true }];
+        }),
+        ("link tree keys", |s| {
+            s.sessions[0].link_tree = vec![snap::RbNode { key: 9, red: false }];
+        }),
+        ("deep link tree", |s| {
+            s.sessions[0].link_tree = (0..1_000_000)
+                .rev()
+                .map(|key| snap::RbNode { key, red: false })
+                .collect();
+        }),
+        ("duplicate name", |s| {
+            let mut x = s.sessions[0].clone();
+            x.id = 7;
+            s.server.next_session = 8;
+            s.sessions.push(x);
+        }),
+    ];
+    for (what, f) in cases {
+        let mut s = good.clone();
+        f(&mut s);
+        let got = from_snapshot(&dir, &s);
+        assert!(got.is_err(), "{what}: accepted");
+    }
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Runtime state behind formats and timers is carried: a status-line
+/// message and its timer, `lock-after-time`'s time left, when
+/// `automatic-rename` last renamed, config errors waiting for a client.
+#[test]
+fn timers_and_messages_survive_a_rebuild() {
+    use std::time::{Duration, Instant};
+    let dir = temp_dir("timers");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(&mut a, &dir, &["set", "-g", "lock-after-time", "600"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "display-message",
+            "-c",
+            "/dev/vtmux-test-tty",
+            "-d",
+            "600000",
+            "on screen",
+        ],
+    );
+    let s = vtmux_core::ids::SessionId(0);
+    let soon = Instant::now() + Duration::from_secs(5);
+    a.lock_timers.insert(s, soon);
+    let renamed = Instant::now().checked_sub(Duration::from_millis(100));
+    a.model
+        .panes
+        .get_mut(&vtmux_core::ids::PaneId(0))
+        .unwrap()
+        .last_rename = renamed;
+    a.causes = vec!["/x.conf:1: unknown command: nope".into()];
+
+    let b = rebuild(&a, &dir, "b");
+    assert_eq!(b.clients[&client].status.message(), Some("on screen"));
+    assert!(b.clients[&client].status.is_frozen());
+    let left = b.clients[&client].status.deadline().unwrap();
+    assert!(
+        left <= Instant::now() + Duration::from_secs(600),
+        "{left:?}"
+    );
+    // At most the 5 s it had left, not lock-after-time's 600 s again.
+    let lock = b.lock_timers[&s];
+    assert!(lock <= Instant::now() + Duration::from_secs(5), "{lock:?}");
+    let last = b.model.panes[&vtmux_core::ids::PaneId(0)].last_rename;
+    assert!(last.is_some() && last <= Some(Instant::now()));
+    assert_eq!(b.causes, a.causes);
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// One monitor hook that can't be parsed doesn't shift the last values and
+/// timers of the ones after it onto the wrong monitor.
+#[test]
+fn an_unreadable_monitor_leaves_the_others_alone() {
+    let dir = temp_dir("monitors");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    ok(
+        &mut a,
+        &dir,
+        &["set-hook", "-g", "-B", "@m1:%*:#{pane_id}", "display x"],
+    );
+    ok(
+        &mut a,
+        &dir,
+        &["set-hook", "-g", "-B", "@m2::#{session_name}", "display y"],
+    );
+    a.hook_monitors_sync();
+    let mut taken = a.to_snapshot(snap::Meta::default());
+    assert_eq!(
+        taken.server.monitors.len(),
+        2,
+        "{:?}",
+        taken.server.monitors
+    );
+    let mut bogus = taken.server.monitors[0].clone();
+    bogus.what = "no such target".into();
+    bogus.serial = 999;
+    bogus.due_in_ms = Some(1);
+    taken.server.monitors.insert(0, bogus);
+    let (l, _) = listener(&dir, "b");
+    let b = Server::from_snapshot(l, ServerConfig::default(), &taken, &mut |_| None).unwrap();
+    let serials = |s: &Server| -> Vec<(u64, String)> {
+        s.hook_monitors
+            .parts()
+            .into_iter()
+            .map(|(serial, p, _)| (serial, p.format))
+            .collect()
+    };
+    assert_eq!(serials(&a).len(), 2);
+    assert_eq!(serials(&b), serials(&a));
+    drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }

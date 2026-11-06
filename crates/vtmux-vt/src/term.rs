@@ -412,15 +412,22 @@ impl PaneTerm {
     /// # Panics
     /// Only if libghostty fails to allocate.
     #[must_use]
-    #[allow(clippy::too_many_lines)] // one registration per Ghostty effect
     pub fn new(cols: u16, rows: u16, history_lines: usize) -> Self {
+        Self::try_new(cols, rows, history_lines).expect("libghostty terminal allocation")
+    }
+
+    /// [`Self::new`], or `None` if libghostty can't allocate the terminal
+    /// (a size from untrusted input, such as a snapshot).
+    #[must_use]
+    #[allow(clippy::too_many_lines)] // one registration per Ghostty effect
+    pub fn try_new(cols: u16, rows: u16, history_lines: usize) -> Option<Self> {
         let (cols, rows) = (cols.max(1), rows.max(1));
         let mut term = Terminal::new(TerminalOptions {
             cols,
             rows,
             max_scrollback: if history_lines == 0 { 0 } else { usize::MAX },
         })
-        .expect("libghostty terminal allocation");
+        .ok()?;
 
         let replies: Rc<RefCell<Vec<Reply>>> = Rc::new(RefCell::new(Vec::new()));
         let sink = Rc::clone(&replies);
@@ -533,7 +540,7 @@ impl PaneTerm {
             sync: SyncHold::default(),
         };
         pane.retain();
-        pane
+        Some(pane)
     }
 
     /// Give Ghostty the line limit: one page more than tmux's history can

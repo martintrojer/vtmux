@@ -28,6 +28,8 @@ pub struct PanePipe {
     pub pid: i32,
     /// `-I`: what the command writes goes into the pane (`EV_READ`).
     input: bool,
+    /// `-O`: the command's stdin is the pane's output (else `/dev/null`).
+    output: bool,
     /// Pane output not yet taken by the command (`pipe_event->output`).
     out: Vec<u8>,
 }
@@ -50,17 +52,30 @@ impl PanePipe {
     pub fn pending(&self) -> &[u8] {
         &self.out
     }
+
+    /// The descriptor, borrowed.
+    #[must_use]
+    pub fn fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        use std::os::fd::AsFd;
+        self.fd.as_fd()
+    }
+
+    /// `-O`: the command's stdin is the pane's output.
+    #[must_use]
+    pub fn output(&self) -> bool {
+        self.output
+    }
 }
 
 impl Server {
     /// Take a pipe kept across an upgrade (D27) back onto pane `p`: its
-    /// descriptor, process, `-I` and the output it was still owed.
+    /// descriptor, process, `-I`, `-O` and the output it was still owed.
     pub(crate) fn pipe_adopt(
         &mut self,
         p: PaneId,
         fd: OwnedFd,
         pid: i32,
-        input: bool,
+        (input, output): (bool, bool),
         out: Vec<u8>,
     ) -> std::io::Result<PanePipe> {
         let interest = if input {
@@ -77,6 +92,7 @@ impl Server {
             fd,
             pid,
             input,
+            output,
             out,
         })
     }
@@ -134,6 +150,7 @@ impl Server {
             fd: spawned.fd,
             pid: spawned.pid.as_raw_nonzero().get(),
             input,
+            output,
             out: Vec::new(),
         };
         match self.model.panes.get_mut(&p) {
