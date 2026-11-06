@@ -37,7 +37,7 @@ jobs:
   check-macos:
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'schedule'
     runs-on: macos-15
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
