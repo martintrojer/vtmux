@@ -1393,6 +1393,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             vt::ExtendedKeys::On => 1,
             vt::ExtendedKeys::Always => 2,
         },
+        input_last: p.last_print,
         emulator: snap::term::Emulator {
             status_display: g.status_display.into(),
             previous_char: g.previous_char,
@@ -1604,6 +1605,7 @@ pub fn term_from_snapshot(
             2 => vt::ExtendedKeys::Always,
             _ => return Err(bad("extended-keys")),
         },
+        last_print: t.input_last,
         palette: vt::PaletteState {
             entries: palette_in(&t.palette)?,
             fg: t.fg.map(rgb_in),

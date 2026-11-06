@@ -119,6 +119,11 @@ fn malformed_rows_are_refused() {
     refused("link index past the table", |s| {
         rich_page(s).cells[0].link = u16::MAX;
     });
+    // Past any width a pane can have had (a narrowed screen keeps its
+    // rows' used counts, so up to that is fine).
+    refused("cells used past any width", |s| {
+        rich_page(s).rows[0].used = u16::MAX;
+    });
     refused("row cells past the page's", |s| {
         rich_page(s).rows[0].cell_start = u32::MAX;
     });

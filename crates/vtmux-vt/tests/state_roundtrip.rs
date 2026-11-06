@@ -165,6 +165,37 @@ fn half_parsed_sequences_carry_on() {
     }
 }
 
+/// REP repeats only a character printed right before it (tmux's
+/// `INPUT_LAST`, input.c `INPUT_CSI_REP`): whether one was is carried,
+/// also with the REP half-parsed at the export.
+#[test]
+fn rep_after_a_print_carries_on() {
+    for (head, rest) in [
+        (&b"ab"[..], &b"\x1b[3b"[..]),
+        (b"ab\x1b[3", b"b"),
+        (b"\xe4\xb8\x96", b"\x1b[2b"),
+        (b"ab\r", b"\x1b[3b"),
+        (b"ab\x1b[1m", b"\x1b[3b"),
+    ] {
+        let mut a = pane(20, 4, 10, head);
+        round_trip(&mut a, CompressedPages::Rows, rest, &format!("{head:?}"));
+    }
+}
+
+/// A screen narrowed without a reflow (the alternate screen) keeps its
+/// rows' cells used past the new width, as tmux's grid lines keep
+/// `cellused` when only `grid->sx` changes (screen.c
+/// `screen_resize_cursor` with `reflow` 0).
+#[test]
+fn narrowed_alternate_screen_round_trips() {
+    let mut bytes = b"\x1b[?1049h".to_vec();
+    bytes.extend_from_slice("x".repeat(58).as_bytes());
+    bytes.extend_from_slice(b"\r\nshort");
+    let mut a = pane(58, 6, 0, &bytes);
+    a.resize(48, 6);
+    round_trip(&mut a, CompressedPages::Rows, b"\x1b[?1049l", "narrowed");
+}
+
 #[test]
 fn reflow_resize_and_limits() {
     let mut text = Vec::new();

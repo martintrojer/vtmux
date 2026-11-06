@@ -405,6 +405,9 @@ record! {
         /// 2 always.
         34 => one extended_keys: u32,
         35 => one emulator: Emulator,
+        /// tmux's `INPUT_LAST`: the last thing parsed was a printed
+        /// character, which a REP repeats (input.c `INPUT_CSI_REP`).
+        36 => one input_last: bool,
     }
 }
 
@@ -653,6 +656,7 @@ pub(crate) mod tests {
             saved_shifted: true,
         };
         t.extended_keys = 2;
+        t.input_last = true;
         t.emulator = Emulator {
             status_display: 1,
             previous_char: Some('x' as u32),

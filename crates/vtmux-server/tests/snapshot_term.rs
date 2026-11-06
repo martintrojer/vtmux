@@ -266,6 +266,24 @@ fn page_shapes(t: &PaneTerm) -> Vec<String> {
 
 /// The alternate screen up over primary history, the frozen copy and
 /// marks with it, a sync hold, links with bytes that aren't UTF-8.
+/// What main added to a pane's state after the spike: REP's last print
+/// (also with the REP half-parsed) and a narrowed alternate screen's
+/// cells-used counts past its width.
+#[test]
+fn rep_and_a_narrowed_alternate_screen() {
+    for form in [Form::Rows, Form::SamePin] {
+        for (head, rest) in [(&b"ab"[..], &b"\x1b[3b"[..]), (b"ab\x1b[3", b"b")] {
+            let mut a = pane(20, 4, 10, head);
+            round_trip(&mut a, form, rest, &format!("{form:?} {head:?}"));
+        }
+        let mut bytes = b"\x1b[?1049h".to_vec();
+        bytes.extend_from_slice("x".repeat(58).as_bytes());
+        let mut a = pane(58, 6, 0, &bytes);
+        a.resize(48, 6);
+        round_trip(&mut a, form, b"\x1b[?1049l", &format!("{form:?} narrowed"));
+    }
+}
+
 #[test]
 fn alternate_screen_sync_hold_and_raw_links() {
     let mut bytes = Vec::new();

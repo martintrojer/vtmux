@@ -338,6 +338,9 @@ pub struct PaneState {
     pub mouse: MouseModes,
     pub key_mode: KeyMode,
     pub extended_keys: ExtendedKeys,
+    /// tmux's `INPUT_LAST`: the last thing parsed was a printed character,
+    /// so a REP repeats it (input.c `INPUT_CSI_REP`).
+    pub last_print: bool,
     pub palette: PaletteState,
     /// The server's title over the program's, and tmux's title stack.
     pub title: Option<String>,
@@ -1076,6 +1079,7 @@ impl PaneTerm {
             mouse: self.mouse.get(),
             key_mode: self.scan.key_mode,
             extended_keys: self.scan.extended_keys,
+            last_print: self.scan.last_print,
             palette: self.scan.palette.state(),
             title: titles.server.clone(),
             title_stack: titles.stack.clone(),
@@ -1161,6 +1165,9 @@ impl PaneTerm {
         self.mouse.set(p.mouse);
         self.scan.key_mode = p.key_mode;
         self.scan.extended_keys = p.extended_keys;
+        // Before the continuation is fed: its bytes clear it again as they
+        // did, and set it never (it holds no printed character).
+        self.scan.last_print = p.last_print;
         self.scan.palette.restore(&p.palette);
         {
             let mut titles = self.titles.borrow_mut();

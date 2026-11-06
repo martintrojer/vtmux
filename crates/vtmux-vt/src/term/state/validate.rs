@@ -220,7 +220,11 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
             row.flags & !0x0f == 0 && (row.flags >> 2) & 3 != 3,
             "row flags",
         )?;
-        check(row.used <= cols, "row cells used")?;
+        // tmux's `cellused` outlives a narrowing without a reflow (the
+        // alternate screen: screen.c `screen_resize_cursor` only changes
+        // `grid->sx`), so it may pass the width; Ghostty clamps it to the
+        // row where it reads it (`Row.tmuxCellsUsed`).
+        check(row.used <= MAX_SIZE, "row cells used")?;
         for (x, c) in cells.iter().enumerate() {
             let kind = c.flags & 3;
             let width = (c.flags >> 2) & 3;
