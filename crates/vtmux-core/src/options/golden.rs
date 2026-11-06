@@ -491,3 +491,33 @@ fn vtmux_options_hidden_until_set() {
     assert_eq!(listing(&mut sim, &["show", "-gw"]), fresh[0]);
     assert_eq!(listing(&mut sim, &["show", "-gv", NAME]), "\n");
 }
+
+/// `vtmux-persist` (D27, decision 17): a server option, `off` until set,
+/// `layout` or `full`, hidden from listings until set like every vtmux
+/// option.
+#[test]
+fn vtmux_persist_is_a_hidden_server_choice() {
+    const NAME: &str = "vtmux-persist";
+    let mut sim = Sim::new();
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+    for c in [
+        &["show", "-sv", NAME][..],
+        &["set", "-s", NAME, "layout"],
+        &["show", "-s", NAME],
+        &["set", "-g", NAME, "full"],
+        &["show", "-sv", NAME],
+        &["set", "-s", NAME, "screens"],
+        &["show", "-sv", NAME],
+        &["set", "-su", NAME],
+        &["show", "-s", NAME],
+    ] {
+        sim.argv(c);
+    }
+    assert_eq!(
+        sim.take(),
+        format!("off\n{NAME} layout\nfull\nunknown value: screens\nfull\n{NAME} off\n")
+    );
+    sim.argv(&["show", "-s"]);
+    assert!(!sim.take().contains(NAME));
+}

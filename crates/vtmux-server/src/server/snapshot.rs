@@ -37,7 +37,7 @@
 
 pub(crate) mod rows;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
@@ -544,10 +544,13 @@ pub(super) fn validate(s: &snap::Snapshot) -> io::Result<()> {
     Ok(())
 }
 
-fn mode_out(m: &crate::mode::Mode, now: Instant) -> Option<snap::PaneMode> {
+/// A pane mode as carried, `None` for one the snapshot closes. Without
+/// `screens` (a `vtmux-persist layout` checkpoint) copy mode is closed
+/// too: its frozen grid is the pane's screen.
+fn mode_out(m: &crate::mode::Mode, now: Instant, screens: bool) -> Option<snap::PaneMode> {
     use crate::mode::Mode;
     match m {
-        Mode::Copy(c) => Some(snap::PaneMode::Copy(c.export(now))),
+        Mode::Copy(c) if screens => Some(snap::PaneMode::Copy(c.export(now))),
         Mode::Clock(c) => Some(snap::PaneMode::Clock(crate::mode::copy::key_mode_out(
             c.key_mode,
         ))),
@@ -805,11 +808,16 @@ impl Server {
     /// every client socket, pane PTY and `pipe-pane` descriptor by their
     /// numbers now, for a live upgrade to keep open across `execve`.
     /// Pane terminal state is left out (`Pane::term` is `None`) until
-    /// `lu_pane_state` fills it.
+    /// `lu_pane_state` fills it. A [`snap::Purpose::CheckpointLayout`]
+    /// snapshot holds no screen at all (D27 decision 17): no terminal
+    /// state and no copy mode, which are never exported for it.
     #[must_use]
     #[expect(clippy::too_many_lines, reason = "one record after another")]
     pub fn to_snapshot(&self, meta: snap::Meta) -> snap::Snapshot {
         let now = Instant::now();
+        // Whether screens are carried: pane terminal state (when
+        // `lu_pane_state` exports it, only if this holds) and copy mode.
+        let screens = meta.purpose != snap::Purpose::CheckpointLayout;
         let parts = self.model.options.export();
         let mut trees: BTreeMap<(u8, u32), Vec<snap::OptionEntry>> = BTreeMap::new();
         for (tree, entries) in &parts.trees {
@@ -1098,7 +1106,11 @@ impl Server {
                     focused: p.focused,
                     active_point: p.active_point,
                     options: tree((5, p.id.0)),
-                    modes: p.modes.iter().filter_map(|m| mode_out(m, now)).collect(),
+                    modes: p
+                        .modes
+                        .iter()
+                        .filter_map(|m| mode_out(m, now, screens))
+                        .collect(),
                     search: p.search.clone(),
                     pipe: p.pipe.as_ref().map(|pipe| snap::PipePane {
                         pid: pipe.pid,
@@ -1107,6 +1119,9 @@ impl Server {
                         output: pipe.output(),
                         pending: pipe.pending().to_vec(),
                     }),
+                    // The hook for pane terminal state (`lu_pane_state`):
+                    // `screens.then(|| export(&p.term))`, so a `layout`
+                    // checkpoint never exports it.
                     term: None,
                     over_zoom: p.over_zoom,
                     capture_keys: p.capture_keys,
