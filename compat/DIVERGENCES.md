@@ -188,13 +188,6 @@ product reasons" category.
 - Evidence: reference tmux 3.8, attached client under a PTY, `send-keys -K -c <client> KEY` for `C-F3 BTab Escape F3 C-Up a Tab`, each followed by `send-keys -H 7c`, the pane copying its input to a file: standard mode `||\e|||a|\t` (keys 1, 2, 4, 5 lost), mode 1 nothing at all, mode 2 only `\e[27;2;9~` (BTab) arrives. vtmux gives every key (review_extkeys, `skk2.py`).
 - Category: Do not copy tmux bug (keys are lost).
 
-### D-021: a typed Meta-BSpace with `backspace` set to a keypad key or BTab
-
-- Test / assertion: none yet (`low_typed_m_bspace_with_backspace_kpn`, parked).
-- tmux behaviour: input-keys.c:612 replaces BSpace with the `backspace` key and keeps the typed key's flags, including `KEYC_IMPLIED_META`; with a keypad key (`KP1`, `KPEnter`, ...) or `BTab` there and a typed CSI-u or xterm-modified M-BSpace, tmux sends nothing in all three key modes (BTab: in standard and mode 1).
-- vtmux behaviour: it sends the Escape-prefixed key (`\e1`, `\e[Z`). Named keys that have a Meta table entry (arrows, F-keys, Home, ...) match tmux.
-- Category: Deferred (needs both an unusual `backspace` value and a modifier-encoded typed key).
-
 ### D-022: children's `PATH` starts with the `tmux` shim (spec D5)
 
 - Test / assertion: `crates/vtmux/tests/attach.rs` `tmux_shim_reaches_this_server_from_children` (vtmux only); `vtmux-server` `shim::tests`; regress `new-session-environment.sh` (`PATH=1` became `<shim>:1`).

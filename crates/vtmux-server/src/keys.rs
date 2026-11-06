@@ -359,6 +359,20 @@ pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
             // `backspace BSpace`: no table entry for it, so it is ignored.
             return true;
         }
+        // A keypad key or BTab has no Meta rows in the table
+        // (input_key_defaults), and a key with KEYC_IMPLIED_META is not
+        // looked up again without Meta (input-keys.c:655-656), so tmux
+        // ignores it as a function key (681-685). BTab loses only its
+        // modifiers, not the flag (617-625), except in mode 2, where it is
+        // S-Tab and gets an extended sequence.
+        let no_meta_rows = match new.base {
+            Base::Named(Named::Keypad(_)) => true,
+            Base::Named(Named::BackTab) => modes.key_mode != KeyMode::Extended2,
+            _ => false,
+        };
+        if new.meta && typed_implied && no_meta_rows {
+            return true;
+        }
         key = new;
     }
     // input-keys.c:617-625: BTab is S-Tab in mode 2, and otherwise loses
@@ -902,6 +916,53 @@ mod tests {
                     String::from_utf8_lossy(&got),
                     want,
                     "backspace {option}: {key} {key_mode:?} csi-u={csi_u}"
+                );
+            }
+        }
+    }
+
+    /// A typed modified M-BSpace (CSI-u `\e[127;3u`, xterm
+    /// `\e[27;3;127~`: Meta implied, no Escape prefix) under a keypad or
+    /// `BTab` `backspace`: tmux writes nothing (input-keys.c:612, 655-656,
+    /// 681-685), but `BTab` in mode 2 is M-S-Tab. Columns as above; the bytes
+    /// matched tmux 3.8 for every keypad key and `BTab` in
+    /// `typed_meta_bspace_follows_the_backspace_option` (attach.rs).
+    #[test]
+    fn typed_meta_bspace_under_a_keypad_or_btab_backspace() {
+        let typed = Key {
+            base: Base::Named(Named::Backspace),
+            ctrl: false,
+            meta: true,
+            shift: false,
+            esc_prefix: false,
+        };
+        #[rustfmt::skip]
+        let table: [(&str, [&str; 5]); 4] = [
+            ("KP1", ["", "", "", "", ""]),
+            ("KPEnter", ["", "", "", "", ""]),
+            ("KP*", ["", "", "", "", ""]),
+            ("BTab", ["", "", "", "\x1b[9;4u", "\x1b[27;4;9~"]),
+        ];
+        let column = [
+            (KeyMode::Standard, true),
+            (KeyMode::Extended1, true),
+            (KeyMode::Extended1, false),
+            (KeyMode::Extended2, true),
+            (KeyMode::Extended2, false),
+        ];
+        for (option, want) in table {
+            let backspace = CoreKey::from_name(option).expect(option);
+            for ((key_mode, csi_u), want) in column.into_iter().zip(want) {
+                let modes = KeyModes {
+                    key_mode,
+                    csi_u,
+                    backspace,
+                    ..KeyModes::default()
+                };
+                assert_eq!(
+                    String::from_utf8_lossy(&encode(&typed, modes)),
+                    want,
+                    "backspace {option}: {key_mode:?} csi-u={csi_u}"
                 );
             }
         }

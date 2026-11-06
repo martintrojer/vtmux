@@ -753,9 +753,11 @@ fn send_keys_k_delivers_keys_to_the_pane() {
 
 /// A typed `M-BSpace` (CSI-u or xterm-modified, so `KEYC_IMPLIED_META`) with
 /// a named-key `backspace` option: input-keys.c:612 keeps the typed key's
-/// flags, so Meta is not an Escape before the option's key. An Escape
-/// before a plain DEL is (no implied Meta). Raw bytes through an attached
-/// client, in every key mode and format, against tmux 3.8.
+/// flags, so Meta is not an Escape before the option's key, and a keypad
+/// key or `BTab` (no Meta rows, not looked up again without Meta) sends
+/// nothing (input-keys.c:655-656, 681-685). An Escape before a plain DEL
+/// is (no implied Meta). Raw bytes through an attached client, in every
+/// key mode and format, against tmux 3.8.
 #[test]
 fn typed_meta_bspace_follows_the_backspace_option() {
     const INPUTS: [&[u8]; 12] = [
@@ -775,7 +777,7 @@ fn typed_meta_bspace_follows_the_backspace_option() {
     let mut seen: Vec<Vec<String>> = Vec::new();
     for bin in bins() {
         let mut rows = Vec::new();
-        for option in ["C-h", "Up", "F1", "Home"] {
+        for option in ["C-h", "Up", "F1", "Home", "KP1", "BTab"] {
             for mode in ["", r"\033[>4;1m", r"\033[>4;2m"] {
                 for format in ["csi-u", "xterm"] {
                     let w = World::new(bin.clone());
