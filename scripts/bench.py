@@ -24,7 +24,7 @@ THROUGHPUT_MB (100), OWNER_STARTUP_N (20), OWNER_TMUX_CONF / OWNER_PLUGINS / OWN
 owner's config, plugin and mu-crew dirs that owner_* copy; default ~/.tmux.conf, ~/.tmux/plugins,
 ~/.local/share/mu-crew-dotfiles), HISTORY_SCENARIOS ("spec narrow wide"), HISTORY_TIMEOUT (3600 s), TRICKLE_RATES ("10 1000 fill": lines/s
 per case; `fill` is 150k lines at once), TRICKLE_SECS (1200), TRICKLE_IDLE_SECS (120), TRICKLE_SAMPLE (10 s),
-TRICKLE_LIMIT (100000), TRICKLE_PREFILL (1: every rate case first writes the 150k lines of `fill`, so the history starts at
+TRICKLE_LIMIT (100000), TRICKLE_PANES ("1": streaming panes per case, one window each; "1 5 20" runs each count), TRICKLE_PREFILL (1: every rate case first writes the 150k lines of `fill`, so the history starts at
 the limit; 0: the trickle alone), BLEND=1 (the attached scenarios
 with `vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'` set and the reader answering OSC 10/11, D26;
 tmux ignores the option), AGENT_PANES ("5 10 20"),
@@ -1130,6 +1130,7 @@ def scenario_trickle(env):
     every = float(os.environ.get("TRICKLE_SAMPLE", "10"))
     limit = os.environ.get("TRICKLE_LIMIT", "100000")
     prefill = os.environ.get("TRICKLE_PREFILL", "1") != "0"
+    counts = [int(n) for n in os.environ.get("TRICKLE_PANES", "1").split()]
     gen = os.path.join(env.work, "trickle.py")
     with open(gen, "w") as f:
         f.write(TRICKLE_GEN)
@@ -1142,26 +1143,29 @@ def scenario_trickle(env):
     cases, servers = [], []
     try:
         for which in env.bins:
-            for rate in rates:
-                s = env.server(which)
-                pre = f"cat '{fill}'; " if rate == "fill" or prefill else ""
-                cmd = pre + ("exec cat" if rate == "fill" else f"'{py}' '{gen}' {rate} {secs}; exec cat")
-                s.run("new", "-d", "-s", "keep", "cat", ";", "set", "-g", "history-limit", limit, ";",
-                      "new", "-d", "-s", "t", "-x", "120", "-y", "40", cmd)
-                s.find_pid()
-                servers.append(s)
-                cases.append({"binary": which, "rate": rate, "samples": []})
+            for panes in counts:
+                for rate in rates:
+                    s = env.server(which)
+                    pre = f"cat '{fill}'; " if rate == "fill" or prefill else ""
+                    cmd = pre + ("exec cat" if rate == "fill" else f"'{py}' '{gen}' {rate} {secs}; exec cat")
+                    # One window per streaming pane, all 120x40 (new -x/-y sets the session's default-size).
+                    more = [a for _ in range(panes - 1) for a in (";", "neww", "-d", "-t", "t", cmd)]
+                    s.run("new", "-d", "-s", "keep", "cat", ";", "set", "-g", "history-limit", limit, ";",
+                          "new", "-d", "-s", "t", "-x", "120", "-y", "40", cmd, *more)
+                    s.find_pid()
+                    servers.append(s)
+                    cases.append({"binary": which, "rate": rate, "panes": panes, "samples": []})
         t0 = time.monotonic()
         k = 0
         while True:
             t = k * every
             time.sleep(max(0.0, t0 + t - time.monotonic()))
             for s, c in zip(servers, cases):
-                hs = s.run("display", "-p", "-t", "t", "#{history_size}", check=False).strip()
+                hs = s.run("display", "-p", "-t", "t:0", "#{history_size}", check=False).strip()
                 c["samples"].append([round(time.monotonic() - t0, 1), rss_kb(s.pid), int(hs or -1), footprint_kb(s.pid),
                                      round(cpu_ms(s.pid), 1)])
             print(f"trickle t={t:.0f}s load {os.getloadavg()[0]:.1f} " +
-                  " ".join(f"{c['binary']}/{c['rate']}={_mem(c['samples'][-1])}" for c in cases),
+                  " ".join(f"{_case(c, '/')}={_mem(c['samples'][-1])}" for c in cases),
                   file=sys.stderr, flush=True)
             if t >= secs + idle:
                 break
@@ -1169,11 +1173,18 @@ def scenario_trickle(env):
     finally:
         for s in servers:
             s.kill()
+    per = "" if counts == [1] else ", each case N panes doing it at once (xN), hsize of the first"
     return {"title": f"trickle (120x40, history-limit {limit}, {'150k lines then ' if prefill else ''}{secs:g} s of output then {idle:g} s idle, "
-                     f"RSS every {every:g} s)", "secs": secs, "cases": cases}
+                     f"RSS every {every:g} s{per})", "secs": secs, "cases": cases}
 
 
 OPTIONAL = ["trickle"]  # long (about 22 min): run by name only
+
+
+def _case(c, sep=" "):
+    """binary, rate and (with more than one) the pane count of a trickle case."""
+    n = c.get("panes", 1)
+    return f"{c['binary']}{sep}{c['rate']}" + (f"{sep}x{n}" if n != 1 else "")
 
 
 def _mem(sample):
@@ -1185,7 +1196,7 @@ def _mem(sample):
 def render_trickle(res):
     cases = res["cases"]
     what = "RSS MB (hsize)" if LINUX else "RSS/footprint MB (hsize)"
-    header = ["t s"] + [f"{c['binary']} {c['rate']} {what}" for c in cases]
+    header = ["t s"] + [f"{_case(c)} {what}" for c in cases]
     rows = []
     n = min(len(c["samples"]) for c in cases)
     step = max(1, n // 40)  # about 40 rows; the JSON has every sample

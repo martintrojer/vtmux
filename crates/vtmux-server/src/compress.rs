@@ -23,8 +23,11 @@
 //! Starvation override: a pane whose history has kept changing (gaps
 //! under [`IDLE`]) or kept wanting a pass (held off by a busy loop) for
 //! [`STARVE`] is starved. Its steps also run at the end of busy turns,
-//! after the turn's frames are written, one step per turn under the same
-//! rest, and in quiet turns without waiting out `IDLE`. Ghostty walks the
+//! after the turn's frames are written, one step per turn, and in quiet
+//! turns without waiting out `IDLE`. The rest is shared: with `n` panes
+//! starved it is `REST_FACTOR / n` times the step (`n` up to
+//! [`MAX_SHARE`]), so each starved pane gets the steps a lone one would,
+//! and twenty panes streaming at once keep up as one does. Ghostty walks the
 //! oldest pages first, farthest from the active area. A pane stays starved
 //! until its pass is done and its history quiet for `IDLE`, so each new
 //! page of a streaming pane is compressed soon after it scrolls off, and
@@ -62,6 +65,22 @@ pub const STEP_GAP: Duration = Duration::from_millis(1);
 /// turn; at 1000 lines/s in a 120-column pane it is about 26 pages (10 MB)
 /// before the first one.
 pub const STARVE: Duration = Duration::from_secs(10);
+
+/// The most starved panes the rest is shared by: a rest stays at least
+/// `REST_FACTOR / MAX_SHARE` (4) times the step, so compression never
+/// takes more than a fifth of the loop however many panes stream.
+pub const MAX_SHARE: u32 = 25;
+
+/// The rest after a step that took `took`, with `starved` panes starved
+/// at the time: [`REST_FACTOR`] times the step, shared by the starved
+/// panes (each gets the steps a lone pane gets), at least [`STEP_GAP`].
+/// Each step meets the same rest whatever turn ran it, so a busy pane's
+/// output still meets at most one step in progress.
+#[must_use]
+pub fn rest(took: Duration, starved: usize) -> Duration {
+    let share = u32::try_from(starved).map_or(MAX_SHARE, |n| n.clamp(1, MAX_SHARE));
+    (took * REST_FACTOR / share).max(STEP_GAP)
+}
 
 /// One pane's compression schedule.
 #[derive(Debug, Default)]
@@ -190,6 +209,15 @@ impl Server {
         )
     }
 
+    /// How many panes are starved at `now`: the share of [`rest`].
+    fn starved(&self, now: Instant) -> usize {
+        self.model
+            .panes
+            .values()
+            .filter(|p| p.compress.starved_at().is_some_and(|s| s <= now))
+            .count()
+    }
+
     /// The soonest a pane is due, rest and quiet aside (a starved pane at
     /// once: a quiet turn steps it without waiting out [`IDLE`]).
     fn compress_due(&self) -> Option<Instant> {
@@ -205,7 +233,8 @@ impl Server {
     /// if the turn was `idle` (woke for nothing else) and the loop has been
     /// [`QUIET`], the next due pane after the last one stepped runs one step.
     /// A busy turn (called at its end, after rendering) steps only a
-    /// starved pane ([`STARVE`]).
+    /// starved pane ([`STARVE`]). The rest after the step is shared by the
+    /// panes starved before it ([`rest`]).
     pub(crate) fn compress_turn(&mut self, now: Instant, idle: bool) {
         let reads = vtmux_vt::history_reads();
         if reads != self.compress.reads {
@@ -235,11 +264,12 @@ impl Server {
             return;
         };
         self.compress.last = Some(id);
+        let starved = self.starved(now);
         if let Some(p) = self.model.panes.get_mut(&id) {
             let start = Instant::now();
             p.compress.step(&mut p.term, now);
             let took = start.elapsed();
-            self.compress.rest_until = Some(now + took + (took * REST_FACTOR).max(STEP_GAP));
+            self.compress.rest_until = Some(now + took + rest(took, starved));
         }
     }
 }
@@ -554,6 +584,85 @@ mod tests {
         let rest = server.compress.rest_until;
         server.compress_turn(now, false);
         assert!(server.compress.rest_until > rest, "stepped");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The rest is `REST_FACTOR` times the step for none or one starved
+    /// pane (the single-pane schedule), divided among more, never below
+    /// `REST_FACTOR / MAX_SHARE` times the step, nor `STEP_GAP`.
+    #[test]
+    fn rest_is_shared_by_starved_panes() {
+        let ms = Duration::from_millis;
+        let us = Duration::from_micros;
+        assert_eq!(rest(ms(1), 0), ms(100));
+        assert_eq!(rest(ms(1), 1), ms(100));
+        assert_eq!(rest(ms(1), 2), ms(50));
+        assert_eq!(rest(ms(1), 20), ms(5));
+        assert_eq!(rest(us(250), 20), us(1250));
+        assert_eq!(rest(ms(1), MAX_SHARE as usize), ms(4));
+        assert_eq!(rest(ms(1), 1000), ms(4), "capped at MAX_SHARE");
+        assert_eq!(rest(ms(1), usize::MAX), ms(4));
+        assert_eq!(rest(us(5), 20), STEP_GAP);
+        assert_eq!(rest(Duration::ZERO, 1), STEP_GAP);
+    }
+
+    /// Panes count toward the share once starved, not while merely due,
+    /// and every starved pane is stepped in busy turns, round-robin: the
+    /// passes of several streaming panes all complete.
+    #[test]
+    fn starved_panes_share_the_rest() {
+        let (mut server, p, _, _, dir) = crate::mode::prompt::tests::setup();
+        server.reset_mode_all(p);
+        let mut ids = vec![p];
+        for name in ["b", "c"] {
+            let s = server
+                .create_session(crate::server::NewSession {
+                    name: Some(name.into()),
+                    window_name: Some("w".into()),
+                    argv: vec!["cat".into(), "-".into()],
+                    cwd: dir.clone(),
+                    cols: 20,
+                    rows: 5,
+                    client_env: Vec::new(),
+                    extra_env: Vec::new(),
+                    update_env: false,
+                    default_size: None,
+                    group: None,
+                })
+                .unwrap();
+            ids.push(server.model.current_of(s).unwrap().2);
+        }
+        let t0 = Instant::now();
+        for (i, id) in ids.iter().enumerate() {
+            let pane = server.model.panes.get_mut(id).unwrap();
+            pane.term.set_history_limit(100_000);
+            let page_rows = pane.term.compression_progress().1;
+            fill(&mut pane.term, 3 * page_rows);
+            // The third pane starts its run later: due, not yet starved.
+            let at = if i == 2 { t0 + IDLE } else { t0 };
+            pane.compress.observe(&pane.term, at);
+        }
+        assert_eq!(
+            server.starved(t0 + STARVE.saturating_sub(Duration::from_millis(1))),
+            0
+        );
+        assert_eq!(server.starved(t0 + STARVE), 2);
+        assert_eq!(server.starved(t0 + IDLE + STARVE), 3);
+        let mut now = t0 + IDLE + STARVE;
+        let mut turns = 0;
+        while ids
+            .iter()
+            .any(|id| server.model.panes[id].compress.due.is_some())
+        {
+            server.compress_turn(now, false);
+            now = server.compress.rest_until.unwrap().max(now);
+            turns += 1;
+            assert!(turns < 10_000);
+        }
+        for id in &ids {
+            assert!(server.model.panes[id].term.compressed_pages() > 1, "{id:?}");
+        }
+        assert_eq!(server.starved(now), 0, "passes done: none starved");
         let _ = std::fs::remove_dir_all(dir);
     }
 

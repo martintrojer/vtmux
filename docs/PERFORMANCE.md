@@ -2,7 +2,7 @@
 
 vtmux's goal is to be fast and lean, and that is only claimed where it is measured. This page has the numbers against tmux 3.8, what each scenario measures, and how to reproduce them. Raw runs live in [`docs/test-health/`](test-health/).
 
-**Headline: large scrollback is where vtmux is lean.** Once a pane's output pauses, vtmux compresses its scrollback; a pane that keeps streaming is compressed as it goes. One 120x40 pane holding 100,000 lines settles at 19 MB against tmux's 66 MB, and 1,000,000 lines at 103 MB against 622 MB. A session of 10 panes with 100,000 log lines each settles at 100 MB against 629 MB, and a pane streaming log lines all day at its 100,000-line limit stays at 19 MB against 66 MB. The cost: until the compression pass is done (about 15 s after 100k lines of output, about 70 s after 1M) vtmux holds up to 1.6x tmux's memory, and searching the whole history is 3.4x to 5.0x slower (*Big scrollback*, below).
+**Headline: large scrollback is where vtmux is lean.** Once a pane's output pauses, vtmux compresses its scrollback; a pane that keeps streaming is compressed as it goes. One 120x40 pane holding 100,000 lines settles at 19 MB against tmux's 66 MB, and 1,000,000 lines at 103 MB against 622 MB. A session of 10 panes with 100,000 log lines each settles at 100 MB against 629 MB, and a pane streaming log lines all day at its 100,000-line limit stays at 19 MB against 66 MB (20 such panes: 217 MB against 1.25 GB). The cost: until the compression pass is done (about 15 s after 100k lines of output, about 70 s after 1M) vtmux holds up to 1.6x tmux's memory, and searching the whole history is 3.4x to 5.0x slower (*Big scrollback*, below).
 
 ## Numbers
 
@@ -151,6 +151,16 @@ A pane's screen view (the copied grid and Ghostty's render state, [`ScreenView`]
 | 150k lines, then idle | 66.1 MB | 18.8 MB | 18.8 MB | 0.5 / 0.2 s |
 
 The `hist_compress_busy` run ([`test-health/2026-11-05-history-compression-busy.md`](test-health/2026-11-05-history-compression-busy.md)) measured the same within 0.3 MB (18.5-19.8 MB), against 106.6-109.8 MB for the build before the starvation override, which compressed only once the output stopped; its override cost 0.9 s of server CPU over 22 minutes at 1000 lines/s, and the busy pane's p95 output latency rose at most 0.5% inside the compression window.
+
+**Many panes that never stop.** `TRICKLE_PANES="1 5 20" TRICKLE_RATES="1000 fill" TRICKLE_SECS=600 bench.py trickle`: N panes in one server (one window each), each filled to the limit and then streaming 1000 lines/s for 10 minutes; `fill` is the same N panes idle. Streaming is every 10 s sample from 30 to 600 s ([`test-health/2026-11-06-history-compression-many-streaming.md`](test-health/2026-11-06-history-compression-many-streaming.md), with the curve).
+
+| panes | tmux 3.8, streaming | vtmux, streaming (median) | vtmux, idle | server CPU over 12 min (tmux / vtmux) |
+|---|---|---|---|---|
+| 1 | 66.1-66.4 MB | 18.6-19.5 MB (19.0) | 18.9 MB | 4.5 / 3.9 s |
+| 5 | 315.2-315.6 MB | 57.2-61.0 MB (59.2) | 57.4 MB | 19.8 / 18.0 s |
+| 20 | 1247-1252 MB | 202.5-230.9 MB (216.7) | 202.3 MB | 76.2 / 66.9 s |
+
+Before `low_compress_many_streaming` the rest between compression steps was shared by every pane, about 40 steps a second in all, short of the 52 pages a second 20 such panes fill: the 20 panes held 1958-1987 MB (1.6x tmux) until their output stopped. Now each starved pane gets the steps a lone one gets (up to 25 panes), at the same server CPU (66.7 s before, 66.9 s after), and the busy pane's p95 output latency with 20 panes compressing stayed within noise (-1.5% spec, -5.4% narrow inside the compression window, against a build without compression).
 
 ## Reading the numbers
 
