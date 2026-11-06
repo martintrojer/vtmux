@@ -15,7 +15,7 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 2] = [
+pub(super) static EXTENSIONS: [OptionDef; 3] = [
     // D26: the pane blend.
     OptionDef {
         name: "vtmux-pane-active-blend",
@@ -37,6 +37,19 @@ pub(super) static EXTENSIONS: [OptionDef; 2] = [
         separator: None,
         default: DefaultValue::Str(""),
         text: Some("Colours every cell of the other panes is blended toward."),
+        unit: None,
+    },
+    // D27: checkpoints on disk (docs/specs/2026-11-06-live-upgrade.md,
+    // decision 17).
+    OptionDef {
+        name: "vtmux-persist",
+        scope: Scope::Server,
+        kind: Kind::Choice(&["off", "layout", "full"]),
+        array: false,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Choice(0),
+        text: Some("Checkpoint the server's state to disk: layout only, or with screens."),
         unit: None,
     },
 ];

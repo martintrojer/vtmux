@@ -24,8 +24,9 @@
 //! hash of their rows' encoding (before compression, so the names don't
 //! depend on the compressor): [`encode`] writes them inline (the upgrade
 //! stream), [`encode_manifest`] writes only their names for a checkpoint
-//! whose pages live in `chunks/<hash>` (decision 20), and [`decode_with`]
-//! reads them back from there.
+//! whose pages live in `chunks/<hash>` (decision 20), [`decode_with`]
+//! reads them back from there, and [`page_refs`] lists their names for
+//! the checkpoint's garbage collection.
 //!
 //! The types here are the format's own, not the server's (decision 18).
 //!
@@ -345,17 +346,7 @@ pub fn decode_for(
 ) -> Result<Snapshot, Error> {
     let (found, body) = body(bytes)?;
     let cx = Ctx::for_input(found, body.len());
-    // What the stream requires is known before anything that depends on
-    // it is decoded.
-    let mut r = wire::Reader::new(body);
-    while let Some((tag, field)) = r.field()? {
-        if tag == 1 {
-            let meta = <Meta as wire::Value>::get(field, &cx)?;
-            if let Some(name) = meta.requires.iter().find(|n| !features.understands(n)) {
-                return Err(Error::Unsupported(name.clone()));
-            }
-        }
-    }
+    check_requires(body, &cx, features)?;
     let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
     let mut missing = None;
     s.pages_mut(&mut |p| {
@@ -372,6 +363,35 @@ pub fn decode_for(
     }
     migrate::migrate(&mut s, found)?;
     Ok(s)
+}
+
+/// Refuse a body that requires a feature beyond `features`. What the
+/// stream requires is known before anything that depends on it is decoded.
+fn check_requires(body: &[u8], cx: &Ctx, features: &Features) -> Result<(), Error> {
+    let mut r = wire::Reader::new(body);
+    while let Some((tag, field)) = r.field()? {
+        if tag == 1 {
+            let meta = <Meta as wire::Value>::get(field, cx)?;
+            if let Some(name) = meta.requires.iter().find(|n| !features.understands(n)) {
+                return Err(Error::Unsupported(name.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The names of the history pages a stream refers to, without fetching
+/// any: what a checkpoint's garbage collection keeps of `chunks/`. A
+/// stream this build can't read whole (newer, or requiring a feature it
+/// lacks) is an error, so that a caller keeps every chunk rather than
+/// delete one a page it can't see refers to.
+pub fn page_refs(bytes: &[u8]) -> Result<Vec<Hash>, Error> {
+    let (found, body) = body(bytes)?;
+    let cx = Ctx::for_input(found, body.len());
+    check_requires(body, &cx, &Features::default())?;
+    let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
+    migrate::migrate(&mut s, found)?;
+    Ok(s.pages().iter().map(|p| p.hash).collect())
 }
 
 impl Snapshot {

@@ -56,6 +56,7 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 const HIDDEN_VIEW_IDLE: Duration = Duration::from_secs(1);
 
 pub mod resume;
+pub mod persist;
 pub mod snapshot;
 
 /// A connected client.
@@ -584,6 +585,8 @@ pub struct Server {
     /// Held PTYs with output still to discard when their read budget ran
     /// out: the backlog for [`Self::held`].
     held_backlog: std::collections::BTreeSet<usize>,
+    /// `vtmux-persist` checkpoints ([`persist`]).
+    pub(crate) persist: persist::Persist,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -783,6 +786,7 @@ impl Server {
             exe: None,
             held: Vec::new(),
             held_backlog: std::collections::BTreeSet::new(),
+            persist: persist::Persist::default(),
         };
         // A dry run rebuilds the server only to see that it can: it must
         // not touch the shim the running server's panes use.
@@ -850,6 +854,7 @@ impl Server {
             self.subs_timers(Instant::now());
             self.lock_timer_fire(Instant::now());
             self.exit_timers(Instant::now());
+            self.persist_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
             // queues run the hooks they add.
@@ -997,6 +1002,8 @@ impl Server {
                 .values()
                 .min()
                 .map(|d| d.saturating_duration_since(now)),
+            self.persist_deadline()
+                .map(|d| d.saturating_duration_since(now)),
             self.clients
                 .values()
                 .filter_map(|c| c.exit_deadline)
@@ -1120,6 +1127,9 @@ impl Server {
     /// running the socket stays, as tmux's does until it exits: a client
     /// meanwhile is accepted and dropped (`server_accept`).
     pub(crate) fn begin_shutdown(&mut self) {
+        // D27 decision 16: the checkpoint of a clean shutdown holds the
+        // server as it was, before `send_exit` hangs up every pane.
+        self.checkpoint_exit();
         self.shutdown = true;
         if !self.jobs.still_running() {
             self.shim = None;
@@ -1136,6 +1146,9 @@ impl Server {
     fn exit_clients(&mut self) {
         // Close the socket before the slower teardown below.
         self.close_listener();
+        // The last session gone (`exit-empty`): its checkpoint (D27
+        // decision 16). After `kill-server` or SIGTERM it is written.
+        self.checkpoint_exit();
         // server_exit -> job_kill_all (server.c:260), prompt_save_history.
         self.jobs_kill_all();
         if let Some(path) = self.history_file() {

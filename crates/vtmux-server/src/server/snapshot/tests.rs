@@ -15,7 +15,7 @@ use vtmux_snapshot as snap;
 use super::super::{Client, ClientId, Server, ServerConfig};
 
 /// A temp directory per test thread.
-fn temp_dir(tag: &str) -> PathBuf {
+pub(crate) fn temp_dir(tag: &str) -> PathBuf {
     let thread = format!("{:?}", std::thread::current().id()).replace(['(', ')'], "");
     let dir =
         std::env::temp_dir().join(format!("vtmux-snap-{tag}-{}-{thread}", std::process::id()));
@@ -24,7 +24,7 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn listener(dir: &Path, name: &str) -> (std::os::unix::net::UnixListener, PathBuf) {
+pub(crate) fn listener(dir: &Path, name: &str) -> (std::os::unix::net::UnixListener, PathBuf) {
     let socket = dir.join(name);
     let _ = std::fs::remove_file(&socket);
     (
@@ -93,7 +93,7 @@ fn messages(server: &mut Server, id: ClientId, peer: &mut mio::net::UnixStream) 
 
 /// Run one command as a command client: its stdout, stderr and exit
 /// code, as one text.
-fn run(server: &mut Server, dir: &Path, words: &[&str]) -> String {
+pub(crate) fn run(server: &mut Server, dir: &Path, words: &[&str]) -> String {
     let (id, mut peer) = connect(server, hello(words, dir, None, ControlMode::None));
     let pending = std::mem::take(&mut server.pending_exits);
     for (c, code) in pending {

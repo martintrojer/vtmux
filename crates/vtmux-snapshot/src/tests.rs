@@ -130,6 +130,29 @@ fn a_manifest_names_pages_and_reads_them_from_chunks() {
 }
 
 #[test]
+fn page_refs_names_a_manifests_pages_without_their_chunks() {
+    let s = sample();
+    let want: Vec<Hash> = s.pages().iter().map(|p| p.hash).collect();
+    assert_eq!(page_refs(&encode_manifest(&s)).unwrap(), want);
+    assert_eq!(page_refs(&encode(&s)).unwrap(), want);
+    // What can't be read whole is an error: its caller keeps every chunk.
+    let mut newer = encode_manifest(&s);
+    newer[8..12].copy_from_slice(&(FORMAT_VERSION + 1).to_le_bytes());
+    assert!(matches!(page_refs(&newer), Err(Error::Newer { .. })));
+    let mut future = sample();
+    future.meta.requires = vec!["from-the-future".into()];
+    assert!(matches!(
+        page_refs(&encode_manifest(&future)),
+        Err(Error::Unsupported(_))
+    ));
+    let manifest = encode_manifest(&s);
+    assert_eq!(
+        page_refs(&manifest[..manifest.len() - 1]),
+        Err(Error::Truncated)
+    );
+}
+
+#[test]
 fn newer_versions_are_refused_older_ones_too_old_and_junk_is_not_a_snapshot() {
     let mut bytes = encode(&sample());
     bytes[8..12].copy_from_slice(&(FORMAT_VERSION + 1).to_le_bytes());
