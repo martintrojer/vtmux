@@ -1,0 +1,356 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "devvm25742.scu0.facebook.com",
+  "name": "tree_da_redraw_once",
+  "inputs": {
+    "name": "tree_da_redraw_once",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "aaa",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-interval",
+          "0"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:1",
+          "-n",
+          "w1",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "aaa:1",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "aaa:1",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0",
+          ";",
+          "select-pane",
+          "-t",
+          "%1",
+          "-T",
+          "t1",
+          ";",
+          "select-pane",
+          "-t",
+          "%2",
+          "-T",
+          "t2",
+          ";",
+          "select-pane",
+          "-t",
+          "%3",
+          "-T",
+          "t3"
+        ]
+      },
+      {
+        "attach": {
+          "session": "aaa"
+        }
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "kill-pane",
+          "-t",
+          "%3"
+        ]
+      },
+      {
+        "keys": "\u001b[?62;22c"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "kill-pane",
+          "-t",
+          "%2"
+        ]
+      },
+      {
+        "keys": "\u001b[?62;22c"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u001b[?62;22c"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[30m\\e[43m(2) │   └─→ 0: cat*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)     ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)     └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ 0 (sort: index) (view: preview) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[30m\\e[43m(2) │   └─→ 0: cat*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)     ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)     └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ 0 (sort: index) (view: preview) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(search) 62;22c\\e[37m\\e[40m────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          15,
+          22
+        ]
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[31m-\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[30m\\e[43m(2) │   └─→ 0: cat*: \"t0\"\\e[39m",
+          "\\e[37m\\e[49m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mw1",
+          "\\e[37m(4)     ├─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t1\"\\e[39m",
+          "\\e[37m(5)     └─→ \\e[39m1\\e[37m: \\e[39mcat\\e[37m: \"t2\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ 0 (sort: index) (view: preview) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                                                                            \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                                                                              \\e[37m\\e[40m│",
+          "\\e[30m\\e[43m(search) 62;22c?62;22c\\e[37m\\e[40m─────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1\\e[39m                                                               \\e[30mR"
+        ],
+        "cursor": [
+          22,
+          22
+        ]
+      }
+    }
+  ]
+}

@@ -280,21 +280,45 @@ impl Decoder {
                     decode(&self.bytes, expired, self.tilde_home_end)
                 }
             };
-            let Some((mut event, used)) = decoded else {
+            let Some((event, mut used)) = decoded else {
                 self.pending.get_or_insert(now);
                 break;
             };
-            self.bytes.drain(..used);
-            self.pending = None;
-            let answers = match event {
+            let reply = match event {
                 Event::Sync(_) => QUERY_SYNC,
                 Event::DeviceAttributes(_) => QUERY_DA,
                 Event::DeviceAttributes2(_) => QUERY_DA2,
                 Event::ExtendedDeviceAttributes(_) => QUERY_XDA,
-                Event::Paste(start) => {
-                    self.pasting = start;
-                    0
+                _ => 0,
+            };
+            // A reply to a query already answered (or given up on) is no
+            // reply: each tty_keys_* parser returns -1 once its TTY_HAVE*
+            // flag is set, no key matches, so Escape and the byte after it
+            // are that byte with Meta and the rest are keys of their own
+            // (tty-keys.c:924-933): `ESC [ ? 6 2 ; 2 2 c` is M-[, `?`, ...
+            let event = if reply != 0 && self.answered & reply != 0 {
+                used = 2;
+                let mut k = key(Base::Char(char::from(self.bytes[1])));
+                k.meta = true;
+                k.esc_prefix = true;
+                Event::Key(k)
+            } else {
+                event
+            };
+            self.bytes.drain(..used);
+            self.pending = None;
+            match event {
+                Event::Sync(_)
+                | Event::DeviceAttributes(_)
+                | Event::DeviceAttributes2(_)
+                | Event::ExtendedDeviceAttributes(_) => {
+                    // Partial keys wait until all four are in.
+                    self.answered |= reply;
+                    if self.answered == ALL_QUERIES {
+                        self.queries_until = None;
+                    }
                 }
+                Event::Paste(start) => self.pasting = start,
                 Event::Colour(fg, _) => {
                     if fg {
                         self.colours_answered.0 = true;
@@ -304,21 +328,8 @@ impl Decoder {
                     if self.colours_answered == (true, true) {
                         self.colours_until = None;
                     }
-                    0
                 }
-                _ => 0,
-            };
-            if answers != 0 {
-                // A second reply is swallowed and changes nothing (each
-                // tty_keys_* parser returns -1 once its TTY_HAVE* flag is
-                // set); partial keys wait until all four are in.
-                if self.answered & answers != 0 {
-                    event = Event::Ignore;
-                }
-                self.answered |= answers;
-                if self.answered == ALL_QUERIES {
-                    self.queries_until = None;
-                }
+                _ => {}
             }
             events.push(event);
         }
@@ -1002,9 +1013,21 @@ mod tests {
         assert_eq!(d.drain(now), vec![Event::Colour(false, (0, 0, 0))]);
         assert_eq!(d.deadline(), Some(now + ms(10)));
         assert_eq!(d.start_deadline(), None);
-        // A second reply changes nothing.
+        // A second reply is no reply (tty-keys.c:1476-1477): M-[ and keys.
+        let meta_bracket = || {
+            let mut k = key(Base::Char('['));
+            k.meta = true;
+            k.esc_prefix = true;
+            Event::Key(k)
+        };
+        let chars = |s: &'static str| s.chars().map(|c| Event::Key(key(Base::Char(c))));
         d.feed(b"[?62;52c");
-        assert_eq!(d.drain(now), vec![Event::Ignore]);
+        assert_eq!(
+            d.drain(now),
+            std::iter::once(meta_bracket())
+                .chain(chars("?62;52c"))
+                .collect::<Vec<_>>()
+        );
         // Unanswered queries time out after TTY_QUERY_TIMEOUT.
         let mut d = Decoder::default();
         d.query_sent(now);
@@ -1013,14 +1036,19 @@ mod tests {
         assert_eq!(d.deadline(), Some(now + ms(5010)));
         // The start timer (tty_start_timer_callback): due at the same time,
         // it says whether none of DA, DA2 and XTVERSION was answered, and
-        // later replies are swallowed.
+        // later replies are keys (TTY_ALL_REQUEST_FLAGS).
         let mut d = Decoder::default();
         d.query_sent(now);
         assert_eq!(d.start_deadline(), Some(now + ms(5000)));
         assert!(d.queries_expired());
         assert_eq!(d.start_deadline(), None);
         d.feed(b"\x1b[?62c");
-        assert_eq!(d.drain(now), vec![Event::Ignore]);
+        assert_eq!(
+            d.drain(now),
+            std::iter::once(meta_bracket())
+                .chain(chars("?62c"))
+                .collect::<Vec<_>>()
+        );
         let mut d = Decoder::default();
         d.query_sent(now);
         d.feed(b"\x1b[>0c");
