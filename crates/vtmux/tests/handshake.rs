@@ -118,39 +118,36 @@ fn an_upgrade_request_is_answered_without_a_hello() {
     assert_eq!(server.run(&["has", "-t", "a"]).2, 0, "the server runs on");
 }
 
+/// A command client of another version is refused; a newer one is also
+/// told how to move the server onto its binary, an older one not (that
+/// would be a downgrade).
 #[test]
-fn a_command_client_of_another_version_is_told_to_upgrade() {
+fn a_command_client_of_another_version_is_refused_and_a_newer_one_told_to_upgrade() {
     let server = Server::start();
-    let mut stream = server.connect();
-    let version = PROTOCOL_VERSION + 1;
-    protocol::write_msg(
-        &mut stream,
-        &server.hello(version, ControlMode::None, &["ls"]),
-    )
-    .unwrap();
-    assert_eq!(
-        read(&mut stream),
-        Some(ServerMsg::Stderr(
-            format!(
-                "protocol version mismatch (client {version}, server {PROTOCOL_VERSION})\n\
-                 run 'tmux vtmux-upgrade' to move the server onto this binary\n"
-            )
-            .into_bytes()
-        ))
-    );
-    assert_eq!(
-        read(&mut stream),
-        Some(ServerMsg::Exit {
-            code: 1,
-            message: None,
-            hup: false,
-        })
-    );
+    let hint = "run 'tmux vtmux-upgrade' to move the server onto this binary\n";
+    for (version, hint) in [(PROTOCOL_VERSION + 1, hint), (PROTOCOL_VERSION - 1, "")] {
+        let mut stream = server.connect();
+        let hello = server.hello(version, ControlMode::None, &["ls"]);
+        protocol::write_msg(&mut stream, &hello).unwrap();
+        let line =
+            format!("protocol version mismatch (client {version}, server {PROTOCOL_VERSION})\n");
+        assert_eq!(
+            read(&mut stream),
+            Some(ServerMsg::Stderr(format!("{line}{hint}").into_bytes()))
+        );
+        assert_eq!(
+            read(&mut stream),
+            Some(ServerMsg::Exit {
+                code: 1,
+                message: None,
+                hup: false,
+            })
+        );
+    }
 }
 
-/// A control client sets `wait-exit` (which the server answers with the
-/// unfrozen `Flags`), runs a command and leaves. Returns every frame it
-/// was sent.
+/// A control client sets `wait-exit` (which the server answers with
+/// `Flags`), runs a command and leaves. Returns every frame it was sent.
 fn control_session(server: &Server, version: u32) -> Vec<ServerMsg> {
     let mut stream = server.connect();
     let hello = server.hello(version, ControlMode::Control, &["attach", "-t", "a"]);
@@ -182,17 +179,41 @@ fn control_session(server: &Server, version: u32) -> Vec<ServerMsg> {
 }
 
 #[test]
-fn a_control_client_of_another_version_is_served_frozen_frames_only() {
+fn a_control_client_of_another_version_is_served_frozen_frames_with_flags() {
     let server = Server::start();
-    // This build's control client is sent `Flags`: the filter below is
-    // what keeps it from another version's.
-    let same = control_session(&server, PROTOCOL_VERSION);
-    assert!(
-        same.iter().any(|m| matches!(m, ServerMsg::Flags { .. })),
-        "{same:?}"
-    );
-    for version in [PROTOCOL_VERSION + 1, u32::MAX] {
-        let other = control_session(&server, version);
-        assert!(other.iter().all(ServerMsg::is_frozen), "{other:?}");
+    for version in [PROTOCOL_VERSION, PROTOCOL_VERSION + 1, u32::MAX] {
+        let frames = control_session(&server, version);
+        assert!(frames.iter().all(ServerMsg::is_frozen), "{frames:?}");
+        assert!(
+            frames.contains(&ServerMsg::Flags { wait_exit: true }),
+            "{version}: {frames:?}"
+        );
     }
+}
+
+/// `detach-client -E` replaces a control client of another version too.
+#[test]
+fn a_control_client_of_another_version_gets_exec() {
+    let server = Server::start();
+    let mut stream = server.connect();
+    let hello = server.hello(
+        PROTOCOL_VERSION + 1,
+        ControlMode::Control,
+        &["attach", "-t", "a"],
+    );
+    protocol::write_msg(&mut stream, &hello).unwrap();
+    let line = ClientMsg::Stdin(b"detach-client -E 'exit 3'\n".to_vec());
+    protocol::write_msg(&mut stream, &line).unwrap();
+    let mut frames = Vec::new();
+    while let Some(msg) = read(&mut stream) {
+        let exec = matches!(msg, ServerMsg::Exec { .. });
+        frames.push(msg);
+        if exec {
+            break;
+        }
+    }
+    assert!(
+        matches!(frames.last(), Some(ServerMsg::Exec { command, .. }) if command == "exit 3"),
+        "{frames:?}"
+    );
 }
