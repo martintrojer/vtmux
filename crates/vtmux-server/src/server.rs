@@ -1059,11 +1059,33 @@ impl Server {
         }
     }
 
-    fn exit_clients(&mut self) {
-        // Close the socket before the slower teardown below.
+    /// `server_exit = 1` (server.c:442-446): the server is going away. With
+    /// no job to wait for (`job_still_running`) it leaves within this turn,
+    /// so the listening socket and the shim go now, before any client is
+    /// told (`kill-server`'s own is answered later in the turn): a client
+    /// that starts after that is refused and starts a fresh server, instead
+    /// of connecting to this one and losing it ("server exited
+    /// unexpectedly"). The shim goes with the socket, or this server's
+    /// exit would remove the fresh server's `.<socket>.bin`. With a job
+    /// running the socket stays, as tmux's does until it exits: a client
+    /// meanwhile is accepted and dropped (`server_accept`).
+    pub(crate) fn begin_shutdown(&mut self) {
+        self.shutdown = true;
+        if !self.jobs.still_running() {
+            self.shim = None;
+            self.close_listener();
+        }
+    }
+
+    fn close_listener(&mut self) {
         if let Some(mut l) = self.listener.take() {
             let _ = self.poll.registry().deregister(&mut l);
         }
+    }
+
+    fn exit_clients(&mut self) {
+        // Close the socket before the slower teardown below.
+        self.close_listener();
         // server_exit -> job_kill_all (server.c:260), prompt_save_history.
         self.jobs_kill_all();
         if let Some(path) = self.history_file() {
@@ -4919,7 +4941,7 @@ impl Server {
             match sig {
                 SIGCHLD => self.reap_children(),
                 // server_signal: SIGTERM/SIGINT exit (server.c:442-446).
-                SIGTERM | SIGINT => self.shutdown = true,
+                SIGTERM | SIGINT => self.begin_shutdown(),
                 SIGUSR1 => self.recreate_socket(),
                 // SIGUSR2 toggles tmux's debug log, which vtmux does not
                 // have; the rest are caught and ignored like server_signal.

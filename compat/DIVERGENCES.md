@@ -306,3 +306,11 @@ product reasons" category.
 - vtmux behaviour: Ghostty's reflow copies a row into rows of the new width, so the cells past it are gone: the same line is red to column 10, then default. Narrowing itself matches (patch 0013 measures the line by tmux's `cellused` and keeps the background cells up to the new width).
 - Evidence: reference tmux 3.8, `printf 'ab\033[41m\033[K\033[0m\r\nnext'` on 20x8, `resize-window -x 10`, then `-x 20`: `capture-pane -pe` `ab\e[41m` / `\e[49mnext`; vtmux `ab\e[41m        \e[49m` / `next` (eight red cells, then the default background).
 - Category: Ghostty grid (a row holds as many cells as the pane is wide).
+
+### D-037: a client that starts as `kill-server` finishes finds no server, not a dropped connection
+
+- Test / assertion: cli `kill_server_closes_the_socket_before_it_answers` (vtmux only); oracle `format_loops` and `config_errors` start a server right after `kill-server`.
+- tmux behaviour: `kill-server` raises SIGTERM; the listening socket stays open until the process exits (`server_loop`, server.c:268-306), and a client that connects meanwhile is accepted and closed (`server_accept`, server.c:396-399): `server exited unexpectedly`, and a following `new`/`start-server` never starts a server. The window is a few ms.
+- vtmux behaviour: with no job the server waits for (`job_still_running`), the socket and the `tmux` shim are closed before `kill-server`'s client is answered, so the next client is refused and starts a fresh server. With a job running the socket stays open as in tmux (`kill_server_with_running_job`).
+- Evidence: `kill-server` then `start-server ; set -g exit-empty off` at once, 8 busy loops, 150 rounds each: vtmux 11/150 failed (`server exited unexpectedly`, then `no server running`), reference tmux 0/450 (its window is shorter; vtmux's turn runs render and compression between the reply and the socket close). With the change, the cli test passes 60/60 under load; without it, 37 of 81 runs fail.
+- Category: Do not copy tmux bug (a command that follows `kill-server` is lost to a server that is already leaving).

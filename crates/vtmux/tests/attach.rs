@@ -623,8 +623,19 @@ fn pane_requests_reach_the_terminal_and_back() {
 fn split_terminal_replies_are_swallowed() {
     for bin in bins() {
         let w = World::new(bin);
-        let mut a = w.attach(&["new", "-s", "a", "sh", "-c", "stty raw -echo; exec cat -v"]);
-        a.wait(|a| a.text().contains("\x1b[?1049h"));
+        // The pane signals once `stty raw` has run: a `|` typed earlier sits
+        // in the cooked line and is echoed and then read by `cat`, twice.
+        let mut a = w.attach(&[
+            "new",
+            "-s",
+            "a",
+            "sh",
+            "-c",
+            "stty raw -echo; printf R; exec cat -v",
+        ]);
+        // The last startup query (OSC 11) is out: replies are now expected.
+        a.wait(|a| a.text().contains("\x1b]11;?\x1b\\"));
+        a.wait(|_| pane_line(&w) == "R");
         for reply in [
             &b"\x1b[?62;4c"[..],
             b"\x1b]11;rgb:0000/0000/0000\x1b\\",
@@ -635,7 +646,7 @@ fn split_terminal_replies_are_swallowed() {
             a.keys(&reply[4..]);
             a.keys(b"|");
         }
-        a.wait(|_| pane_line(&w) == "|||");
+        a.wait(|_| pane_line(&w) == "R|||");
     }
 }
 

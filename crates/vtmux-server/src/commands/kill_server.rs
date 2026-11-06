@@ -4,5 +4,5 @@
 use crate::server::Server;
 
 pub fn exec(server: &mut Server) {
-    server.shutdown = true;
+    server.begin_shutdown();
 }
