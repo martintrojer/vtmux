@@ -1,0 +1,150 @@
+# Live upgrade, with persistence as the side effect
+
+## Problem
+
+Moving a running vtmux server onto a new binary means `kill-server`: every pane's process dies. The owner hit this on 2026-11-06: the dogfood binary spoke protocol 8, the running server 7, so a client of the new binary could not even talk to the old server (`protocol version mismatch`), and the only way forward was to lose every shell, agent and build. vtmux ships several times a day; each dogfood build costs a full restart.
+
+tmux has the same defect: upgrading tmux while a server runs ends in the same mismatch error, and the advice is to kill the server (tmux FAQ, "protocol version mismatch"). The tmux answer to losing state, tmux-resurrect and tmux-continuum, saves layout, working directories and a guess at each pane's command, and at best plain-text scrollback scraped through `capture-pane`, and restores after the processes are gone.
+
+vtmux owns every pane's grid (libghostty-vt) and its server is one process that owns every pane's pty and child. It can do better than both: replace its own binary without the panes noticing, and, from the same serialized state, restore sessions with their exact screens after a crash or reboot.
+
+## Approach
+
+One mechanism, three phases built in order:
+
+1. **Snapshot.** A versioned, stable encoding of the whole server state: sessions, windows, layouts, panes, options, environment, hooks, key tables, buffers, clients' attachments, control-client state, and every pane's terminal state (screen, history, cursor, modes, the tmux row flags) cell for cell.
+2. **Live upgrade.** `vtmux-upgrade` makes the server write a snapshot, check that the new binary can read it, and replace itself with that binary in the same process (`execve`), keeping the listening socket, every client connection, every pane and popup pty and every `pipe-pane` descriptor open. The new image reads the snapshot and carries on. Pane processes never notice; attached clients re-exec themselves onto the new binary and redraw; control clients stay connected without noticing.
+3. **Persistence.** With `vtmux-persist` on, the same snapshot is checkpointed to disk. A server that starts and finds one for its socket restores it: sessions, windows and layout come back, panes come back dead with their last screen and history, and `respawn-pane` restarts them. Nothing can bring processes back after a reboot; this restores everything else.
+
+Live upgrade is the motivation and qualifies as a fix (feature policy, *Paper-cut fixes*): it fixes a defect in something tmux already does (upgrading loses sessions), it is invisible to scripts (the server keeps its pid, socket, sessions and ids), it has a source (the tmux FAQ entry and the 2026-11-06 restart), and it gets a PAPERCUTS row. Persistence is a new capability, so it is opt-in (`vtmux-persist`, default `off`) and amends the non-goals: restoring state is allowed, while launching commands to recreate it stays out. This is D27.
+
+## Decisions
+
+Owner decisions are marked (owner); the rest are the orchestrator's calls, with the reason.
+
+| # | Decision | Why |
+|---|---|---|
+| 1 | One spec, three phases: snapshot, live upgrade, persistence (owner) | They share one format; persistence waits without blocking the upgrade. |
+| 2 | Upgrade replaces the server in place with `execve`, same pid (owner) | Pane processes stay the server's children, so SIGCHLD and exit statuses keep working; a second process would leave them re-parented to init/launchd and lose their exit statuses. Same on Linux and macOS. |
+| 3 | Explicit trigger only: the vtmux-only command `vtmux-upgrade [-b binary]`; the protocol-mismatch error names it; no automatic upgrade (owner) | Automatic upgrade on a newer client would surprise; it can come later as an option. |
+| 4 | Attached clients re-exec onto the new binary and re-attach on the same tty; clients older than this feature are detached with a message (owner) | Nothing visibly drops for the user from the first upgradable build on. |
+| 5 | Screen state is exact, not replayed as escape sequences (owner) | Replay loses wrap flags, cells-used and pending-wrap, which were made to match tmux on 2026-11-05/06. |
+| 6 | Newer reads older; older refuses newer; an unreadable snapshot aborts the upgrade with the old server still running (owner) | An upgrade may fail; it must never lose sessions. |
+| 7 | Dry run before exec; switch back if the restore still fails after exec (owner) | The dry run catches nearly every failure while the old image is intact; switching back covers the rest. |
+| 8 | Persistence opt-in; restored panes are dead panes showing their last screen and history; no automatic command relaunch; files private to the user (owner) | The dependable part of resurrect without its fragile command guessing; scrollback may hold secrets. |
+| 9 | Control clients (mu, murmur) stay connected across the upgrade, with their subscriptions, pause state and flags (owner) | See decision 26 for how: their frames are frozen. |
+| 10 | Short-lived children: wait a few seconds for pending `run-shell` / `if-shell` jobs, then refuse with a message if any remain; re-run `#()` format jobs after the upgrade; keep `pipe-pane` running (owner) | Killing a running job silently is worse than refusing; `#()` jobs are cheap to restart. |
+| 11 | The snapshot uses a vtmux-defined, versioned row/cell format, not raw Ghostty page memory (owner) | Survives Ghostty pin bumps (five patches landed in one day). A raw-page fast path can come later if encoding is slow. |
+| 12 | `vtmux-upgrade [-b <binary>]` is in the command table (bindable, `tmux vtmux-upgrade` works); a small upgrade handshake is frozen forever so a newer client can ask an older server to upgrade (owner) | Without a frozen handshake every upgrade would meet the same protocol mismatch. Default binary: the one the requesting client runs as (`bin/tmux`'s target after a relink). |
+| 13 | Success: 10 panes x 100k lines, 1 attached client, 2 control clients upgrade in < 1 s from command to redraw, screens and history byte-identical, no pane process killed; CI upgrades the server to itself under load (owner) | Self-upgrade is the cheapest end-to-end test and runs on every build. The 1 s budget is a target, not yet measured. |
+| 14 | Servers running binaries from before this feature need one last manual restart (owner) | The handshake can't be retrofitted onto shipped binaries. |
+| 15 | Restore is automatic at server start when `vtmux-persist` is on and a snapshot exists for the socket; no restore command (owner) | That is what continuum users want; the option keeps it opt-in. |
+| 16 | Checkpoints on clean shutdown (`kill-server`, SIGTERM, last session gone) and every 60 s while something changed, writing only changed panes and new history pages (owner) | Full history pages never change, so after the first save checkpoints are small. |
+| 17 | `vtmux-persist off\|layout\|full`, default `off`: `layout` = sessions, windows, layout, options, no screens; `full` adds screens and history. Files in `$XDG_STATE_HOME/vtmux/<socket-name>/`, mode 0700/0600, latest and previous snapshot kept (owner) | `layout` for users who don't want scrollback on disk; the previous snapshot covers a crash mid-write. |
+| 18 | One encoding: hand-written, length-prefixed, tagged records (unknown tags skipped, explicit version, migrations for older versions); rows run-length encoded; history pages LZ4-compressed; no serde (orchestrator) | Explicit and stable by construction: the snapshot types are their own module, not the server's structs, so internal refactors can't change the format by accident. |
+| 19 | Upgrade carries the snapshot as one stream in an anonymous memory file (Linux `memfd_create`, macOS an unlinked file in the socket directory) passed across `execve` by descriptor number (orchestrator) | No disk, no chunking, nothing left behind. |
+| 20 | On disk: a directory per socket name: `manifest` (written to a temp file and renamed), `manifest.prev`, and `chunks/<hash>` content-addressed compressed history pages written once and garbage-collected when no manifest references them (orchestrator) | Incremental checkpoints and crash-safe writes without SQLite (bundled C, schema migrations) or rewriting the whole history every 60 s. A JSON dump command can come later for debugging. |
+| 21 | A re-attaching client rebinds to its old client record through a one-time token carried in `UpgradeNotice`: same client id, `client_created`, flags and key table; no `client-attached`/`client-detached` hooks and no `%client-*` notifications fire (orchestrator, from the builder check) | Decision 13 needs byte-identical `list-clients` and formats; a plain re-attach would be a new client. |
+| 22 | `-b` default: the command name the requester was invoked as (`tmux` or `vtmux`), looked up on `PATH` at request time skipping the server's shim directory, then resolved through symlinks. The shim (`.<label>.bin/tmux`) points at that stable path name, not at the resolved file, so after a relink a `tmux vtmux-upgrade` typed in a pane or bound to a key finds the new binary (orchestrator, from the builder check) | Today the shim resolves the server's own executable, so an upgrade requested from inside a pane would upgrade the server to itself. |
+| 23 | Upgrade-only fast path: when both binaries report the same Ghostty patch-stack hash, history pages that are compressed in memory travel in Ghostty's compressed form inside the upgrade stream; otherwise, and always on disk, they are decoded into the vtmux row format. After a restore from the vtmux format the new image recompresses cold history immediately, in the background steps of the existing compressor (orchestrator, from the builder check; refines decision 11, whose 'raw fast path later if slow' is now known to be needed) | Decoding every compressed page on every upgrade makes the 1 s budget unreachable at 10 x 100k lines and doubles the memory peak. |
+| 24 | Spike verdict: no-go if `capture-pane -e -S -`, cursor, modes and row flags can't round-trip byte-identically, if export plus import of 10 panes x 100k lines takes over 2 s, or if the patch has to change Ghostty's page or row layout beyond adding read/write functions and the reserved row bits. The orchestrator decides from the spike's evidence and tells the owner (orchestrator) | Makes the fallback trigger checkable instead of a judgement call. |
+| 25 | A client binary from before this feature, attached at upgrade time: `vtmux-upgrade` lists such clients in its result as a warning and proceeds; they are detached with `[server upgraded: re-attach]` (orchestrator) | Only the first transition has such clients; refusing would block the upgrade on a client that can never follow. |
+| 26 | Control clients: the frames control mode and command I/O use (connect/Hello, Stdin, StdinEof, Stdout, Stderr, Exit) are frozen like the upgrade handshake, so `vtmux -C` processes of any older feature-carrying binary keep talking to the new server; other command clients still in flight (`wait-for`, `load-buffer -`) get up to 3 s in preflight, then the upgrade refuses (owner, corrects decision 9's reason) | `vtmux -C` is a client process using vtmux's binary frames, not raw text on the socket. Freezing six small frames keeps mu and murmur connected with no restart; keeping old decoders forever or re-execing control clients would cost more and risk buffered input. |
+| 27 | Restore order: snapshot first (sessions, windows, panes, buffers, runtime options), then the config runs on top, so config edits since the save win and runtime-only settings survive unless the config sets them (owner) | The config stays the source of truth, as at any startup. |
+| 28 | `attach` with no server and a snapshot present starts a server, restores and attaches; `new-session` and `start-server` restore first; `list-sessions` does not start a server (owner, behind `vtmux-persist`) | `tmux attach` after a reboot just works. |
+| 29 | tmux-session-picker (tsesh) adapts, vtmux keeps decision 28: tsesh's `create()` re-checks `has-session` after starting the server so a restored session is switched to, not created twice ("duplicate session" crashed it); with no server running, the picker starts one in its own systemd scope before listing, so restored sessions show as live. A separate change in ~/hacking/crew/tmux-session-picker (owner) | Restoring on any command (`ls`, `has-session`) would make whatever runs first after a reboot the server's parent, which on Linux can put the server in a user service's cgroup: the exact problem tsesh's scope logic avoids. |
+| 30 | Stale per-session state from tools: a session option `vtmux-persist-drop` (glob list of user options not restored, default empty); the owner's dotfiles set `@murmur_*` so tsesh doesn't show restored agent states for dead panes until murmur recomputes them (owner agreed to dropping `@murmur_*` on restore; the generic option instead of a hard-coded prefix is the orchestrator's call, to keep agent integration out of vtmux per the non-goals) | murmur owns `@murmur_session_state` and sets it again when it runs. |
+
+## Design
+
+### Snapshot (phase 1)
+
+The snapshot module (new crate `vtmux-snapshot`, `#![forbid(unsafe_code)]`) owns the format: record types, encoder, decoder, version migrations. It does not depend on `vtmux-server`; the server converts its model to and from snapshot types.
+
+What it carries, at minimum:
+
+- **Server:** server options, global session/window/pane options, environment, hooks, key tables and bindings, aliases, paste buffers (with names and order), message log, id counters (`$`, `@`, `%`, client), the start time, prompt history, wait-for channels' state.
+- **Sessions, windows, panes:** every field the formats and commands can observe (names, ids, indexes, flags, groups, last/active stacks, layout tree, zoom, floating panes, modal panes, marked pane, synchronize, `remain-on-exit` state, dead status and exit info, titles, cwd, the start command and environment, pane pid, the tty name, alert flags, activity/silence timestamps, pipe-pane state).
+- **Pane terminal state:** the primary and alternate screens and history, cell for cell, in the vtmux row/cell format: text (graphemes), width, every attribute and colour (including the 256-colour form of palette 0-15), hyperlinks, the tmux row flags (wrapped, cells-used, prompt marks), cursor (position, shape, visibility, pending wrap, saved cursor), modes (DEC private and ANSI modes, mouse, keyboard protocols, bracketed paste, focus, sync hold), charsets, tab stops, scroll region, title stack, palette overrides, colour replies held, and the compression state of history pages.
+- **Clients:** each attached client's session/window, flags, size, terminal features, key table, prefix state, read-only/ignore-size flags, and control clients' subscriptions, pause-after, paused panes, output offsets and flags.
+- **Modes in progress:** copy mode, tree modes, view mode, prompts, menus and popups. Copy mode keeps its frozen grid (it is a snapshot of the pane by D-010) and position; tree modes, menus and prompts may be closed by the upgrade instead (the user re-opens them) if carrying them is costly: the builder decides per mode and records it.
+
+The exact field list is the builder's job, driven by one rule: after a self-upgrade, every format variable, every `show-*`/`list-*` output and every client screen is byte-identical (decision 13). An oracle step type `upgrade` (see Tests) enforces it.
+
+**Ghostty access.** Encoding and decoding a pane's terminal state needs a libghostty-vt export/import API: rows with cells, styles and row flags, plus terminal state Ghostty owns (modes, charsets, tab stops, saved cursor). That is a new vendored patch, scoped to reading and writing that state through public functions, never by copying Ghostty's internal layout (decision 11). History pages that are LZ4-compressed in memory are exported compressed when their content is already in the row format the snapshot uses; otherwise they are decoded and re-encoded.
+
+**Spike first.** The first unit proves the Ghostty export/import on one pane with history (round-trip byte-identical `capture-pane -e -S -` and screen) and measures it at 100k lines. If the patch turns out too invasive, the fallback (decision 5) is replay through escape sequences plus a side channel for the row flags and modes replay cannot express; that is an orchestrator escalation, not a builder choice.
+
+### Live upgrade (phase 2)
+
+**Handshake.** A new frame type, `UpgradeRequest { binary: path }`, is recognized before the protocol version check and documented as frozen: its encoding never changes. A client of any newer binary sends it to a server of any binary that has the feature. The server answers with a frozen `UpgradeResult { ok, message }`. Everything else stays version-checked.
+
+**Command.** `vtmux-upgrade [-b binary]` is a server command (bindable; `tmux vtmux-upgrade` from a shell). From the CLI, a client whose version differs from the server's sends the frozen `UpgradeRequest` instead of the normal command path. `-b` defaults as decision 22 says (the invoked command name on `PATH`, skipping the shim, resolved at request time). The protocol-mismatch error adds: `run 'tmux vtmux-upgrade' to move the server onto this binary`.
+
+**Sequence (server):**
+
+1. **Preflight:** refuse with a message if `run-shell` / `if-shell` jobs are still pending after waiting up to 3 s, if the binary is missing or not executable, or if another upgrade is running.
+2. **Quiesce:** stop reading pane ptys and client sockets (data stays in the kernel buffers; pane programs block briefly, nothing is lost); flush pending client output.
+3. **Snapshot** into an anonymous memory file (decision 19).
+4. **Dry run:** fork and exec `<binary> --vtmux-check-snapshot <fd>`. The child decodes the snapshot fully, verifies it, and exits 0, or non-zero with a message. On failure, resume (undo the quiesce) and report the message to the requester. The old server keeps running.
+5. **Prepare descriptors:** clear close-on-exec on the listening socket, every client socket, every pane/popup pty master, every `pipe-pane` descriptor and the snapshot file; record their numbers in the snapshot's descriptor table. Everything else (signal pipe, `#()` job pipes, timers) is recreated by the new image.
+6. **Notify clients:** send attached clients the frozen `UpgradeNotice { binary }` and keep their sockets open. Control clients get nothing.
+7. **Exec:** `execve(<binary>, [argv0, "--vtmux-resume", <fd>], env)`. On `execve` failure (returns), restore close-on-exec, resume and report.
+
+**Sequence (new image):** `--vtmux-resume <fd>` decodes the snapshot, adopts the descriptors by number, rebuilds the model and pane terminals, reaps any child that exited during the exec (`waitpid(-1, WNOHANG)` matched to pane pids), re-runs `#()` jobs, re-arms timers, then resumes reading ptys and sockets and redraws every client. If decoding or adoption fails here, it execs the previous binary (its path is in the snapshot) with the same descriptors and snapshot (decision 7). If that fails too, it keeps the descriptors open and serves the panes with no history rather than exit: panes never die because of an upgrade.
+
+**Clients.** On `UpgradeNotice { binary, token }`, an attached client execs `<binary>` with its original arguments rewritten to a re-attach carrying the token, on the same tty, reconnecting through the same socket path. The new server rebinds it to its old client record (decision 21): same id, session, flags, key table and creation time, no attach/detach hooks or notifications. Its terminal is re-initialised as at any attach and fully redrawn. A client binary from before this feature ignores the notice; the new server detaches it with `[server upgraded: re-attach]`.
+
+**Ids and observable state.** The server keeps its pid, socket path and inode, session/window/pane/client ids and every option. `#{pid}`, `#{start_time}`, `#{socket_path}` and `#{version}` are unchanged, except that `#{version}`/`-V` report the new binary's version: that is the point.
+
+### Persistence (phase 3)
+
+**Writing.** With `vtmux-persist` set to `layout` or `full`, the server writes a checkpoint on clean shutdown and every 60 s when something changed (decision 16). A checkpoint encodes the snapshot (with pane terminal state only for `full`), writes every history page not already in `chunks/` (named by content hash, compressed), writes `manifest.tmp`, fsyncs, renames `manifest` to `manifest.prev` and `manifest.tmp` to `manifest`, then deletes chunks no manifest references. The directory is `$XDG_STATE_HOME/vtmux/<socket-name>/` (default `~/.local/state`), created mode 0700, files 0600.
+
+**Restoring.** A server starting with `vtmux-persist` not `off` (the option is read from the config before the first session is created) and a readable `manifest` (else `manifest.prev`) restores it: sessions, windows, layout, options, buffers. Every pane comes back dead (`#{pane_dead}` 1, exit status unknown) showing its saved screen and history (for `full`) or empty (for `layout`), with `remain-on-exit`'s dead-pane line. `respawn-pane` (or `respawn-window`) restarts the pane's saved start command in its saved cwd. A config that creates sessions (`new-session` in `.tmux.conf`) runs after the restore; a name collision keeps the restored session and reports the config error as tmux would for a duplicate.
+
+**Tools that read session state** (tsesh, murmur): see decisions 29 and 30. During a live upgrade nothing changes for them: the listening socket stays open across the exec, so a command arriving mid-upgrade waits in the kernel's accept queue.
+
+**Non-goals here:** no automatic relaunch of commands, no restore of processes, no cross-machine restore, no restore when the option is off (files stay until the user removes them).
+
+## Tests
+
+- **Round trip (unit):** encode, decode and compare every snapshot record type; decode every older version kept as a golden file under `crates/vtmux-snapshot/tests/golden/` (one per format version; never edited after release).
+- **Terminal state (unit + property):** for random terminal programs (escape-sequence fuzzer seeds), export, import into a fresh terminal and compare `capture-pane -e -S -`, cursor, modes and row flags exactly.
+- **Oracle step `upgrade`:** the oracle harness gains a step that runs `vtmux-upgrade -b <same binary>` on the vtmux side only (the reference tmux skips it) and then continues; scenarios that already pass must pass with an `upgrade` step inserted at any point. A replay mode that inserts an upgrade after every Nth step of every scenario runs in CI.
+- **Upgrade under load (integration):** 10 panes streaming output, one PTY client, two control clients reading `%output`: upgrade; no pane process restarted (pids equal), no output byte lost or duplicated in the control clients' streams, the PTY client's rendered screen equal to a fresh attach, time to redraw recorded (target < 1 s, decision 13).
+- **Failure paths:** a binary that fails the dry run (garbage file); a binary that fails after exec (test hook makes `--vtmux-resume` fail) and switches back; an old client that ignores `UpgradeNotice`; a pending `run-shell` refusal.
+- **Persistence:** checkpoint, `kill -9` the server, start it: sessions, layout and dead panes with screens match the checkpoint; crash in the middle of writing (test hook between chunk writes and the manifest rename) restores the previous manifest; `layout` writes no screen content (grep the directory for a pane's text: none).
+- **Bench:** `scripts/bench.py upgrade`: time from request to redraw and snapshot size at 1/10 panes x 10k/100k lines, recorded in `docs/PERFORMANCE.md`.
+
+## Scope
+
+In: everything above, Linux and macOS.
+
+Out: automatic upgrade on a newer client (decision 3, later option); restoring processes; relaunching commands on restore; cross-machine or cross-user restore; a JSON dump command (later, for debugging); Windows.
+
+## Open questions
+
+- Whether tree modes, menus, prompts and popups survive an upgrade or are closed by it (the builder decides per mode in phase 1 and records it; popups' processes always survive since popups are ptys).
+- The real upgrade time at 10 panes x 100k lines: the first bench sets whether a raw-page fast path is needed (decision 11).
+
+## Implementation checklist
+
+Phase 1, snapshot:
+1. Spike: libghostty-vt export/import patch for one pane, round-trip test, 100k-line timing (go/no-go for decision 5).
+2. `vtmux-snapshot` crate: record format, encoder/decoder, version header, golden file v1.
+3. Server model to and from snapshot (sessions, windows, panes, options, clients, buffers, hooks, keys, ids).
+4. Pane terminal state through the patch; history pages, compression state.
+
+Phase 2, live upgrade:
+5. Frozen handshake frames (`UpgradeRequest`, `UpgradeResult`, `UpgradeNotice`) and the mismatch hint.
+6. `vtmux-upgrade` command, preflight, quiesce, dry run, descriptor table, `execve`, resume, switch-back.
+7. Client re-exec on `UpgradeNotice`; control clients carried.
+8. Oracle `upgrade` step and the upgrade-under-load test; CI self-upgrade; bench.
+
+Phase 3, persistence:
+9. `vtmux-persist` option, checkpoint writer (manifest, chunks, GC, fsync/rename), 60 s timer, clean-shutdown write.
+10. Restore at server start, dead panes with screens, `respawn-pane` from the saved command and cwd; `vtmux-persist-drop`.
+11. tsesh (separate repo, ~/hacking/crew/tmux-session-picker): re-check `has-session` after starting the server; start the server in its scope before listing when none runs (decision 29).
+
+Docs: D27 in the main spec (and the non-goals amendment), a PAPERCUTS row for live upgrade, `vtmux-persist` in the vtmux options reference, ARCHITECTURE (the snapshot crate and the upgrade sequence).
