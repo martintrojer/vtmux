@@ -253,8 +253,9 @@ fn glob(p: &[char], t: &[char]) -> bool {
     }
 }
 
-/// `cmd_find_get_session` (cmd-find.c:410-466). Client names are not
-/// matched (no named clients in M0).
+/// `cmd_find_get_session` (cmd-find.c:263-310): an ID, a session name,
+/// an attached client's name or tty (its session), then a prefix or a
+/// pattern.
 fn find_session(model: &Model, part: &Part) -> Option<SessionId> {
     let name = part.text.as_str();
     if name.starts_with('$') {
@@ -263,6 +264,17 @@ fn find_session(model: &Model, part: &Part) -> Option<SessionId> {
     }
     if let Some(s) = model.session_named(name) {
         return Some(s.id);
+    }
+    // cmd-find.c:284-289: `cmd_find_client(NULL, session, 1)`, which drops
+    // one trailing colon.
+    let client = name.strip_suffix(':').unwrap_or(name);
+    if let Some(c) = model
+        .client_targets
+        .iter()
+        .find(|c| crate::model::ClientTarget::matches(&c.name, &c.tty, client))
+        .filter(|c| model.sessions.contains_key(&c.session))
+    {
+        return Some(c.session);
     }
     if part.exact {
         return None;

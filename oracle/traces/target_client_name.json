@@ -1,0 +1,258 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "devvm25742.scu0.facebook.com",
+  "name": "target_client_name",
+  "inputs": {
+    "name": "target_client_name",
+    "size": [
+      60,
+      20
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "60",
+          "-y",
+          "19",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "v",
+          "-x",
+          "60",
+          "-y",
+          "19",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-h",
+          "-t",
+          "b",
+          "cat -"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%1",
+          "-T",
+          "t1"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%2",
+          "-T",
+          "t2"
+        ]
+      },
+      {
+        "attach": {
+          "session": "b"
+        }
+      },
+      {
+        "run": [
+          "run-shell",
+          "c=$(tmux lsc -F '##{client_tty}'); tmux display -p -t \"$c\" '##{session_name} ##{pane_id}'; tmux display -p -t \"${c#/dev/}:\" '##{session_name} ##{window_name}'; tmux display -p -t \"$c:.0\" '##{pane_id}'"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "nonexistent",
+          "#{session_name}"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux display-panes -d 0 -t \"$(tmux lsc -F '##{client_tty}')\""
+        ]
+      },
+      {
+        "run": [
+          "list-panes",
+          "-a",
+          "-F",
+          "#{pane_id} [#{pane_mode}]"
+        ]
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "b %2\nb v\n%1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 []\n%1 []\n%2 [panes-mode]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "                         \\e[34m30x19\\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[31m29x19",
+          "\\e[39m                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "            \\e[44m     \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[41m \\e[49m",
+          "            \\e[44m \\e[49m   \\e[44m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[41m \\e[49m",
+          "            \\e[44m \\e[49m   \\e[44m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[41m \\e[49m",
+          "            \\e[44m \\e[49m   \\e[44m \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[41m \\e[49m",
+          "            \\e[44m     \\e[49m             \\e[37m\\e[40m│\\e[39m\\e[49m                \\e[41m \\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "                              \\e[37m\\e[40m│\\e[39m\\e[49m",
+          "\\e[30m\\e[42m[b] \\e[4m0:v*Z\\e[0m\\e[42m                                                  \\e[30mR"
+        ],
+        "cursor": [
+          31,
+          18
+        ]
+      }
+    }
+  ]
+}
