@@ -220,6 +220,11 @@ record! {
         /// its version ([`Features::understands`]; the crate docs,
         /// *Changing the format*).
         6 => many requires: Vec<String>,
+        /// Upgrade only: the descriptor the writer's executable is open
+        /// on across `execve`, where a failed resume switches back to
+        /// whatever its path holds by then (decision 7). A hint: a reader
+        /// that skips it switches back by [`Meta::binary`].
+        7 => opt binary_fd: Option<i32>,
     }
 }
 

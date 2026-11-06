@@ -291,6 +291,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         environ: env.clone(),
         cwd: Some(cwd.clone()),
         default_socket,
+        dry_run: false,
     };
     let mut stream = match connect_or_start(&path, start, default_socket, config) {
         Ok(s) => s,

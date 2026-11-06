@@ -198,6 +198,11 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     // SAFETY: forkpty succeeded, so `master` is a fresh fd we now own.
     let master = unsafe { OwnedFd::from_raw_fd(master) };
     rustix::fs::fcntl_setfl(&master, rustix::fs::OFlags::NONBLOCK)?;
+    // forkpty makes the master without close-on-exec. With it, nothing
+    // the server starts inherits a pane's terminal (a dry run, a
+    // `Command`), and only a live upgrade clears it, for the descriptors
+    // it keeps (sys::upgrade).
+    rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC)?;
     Ok(Spawned {
         master,
         pid: Pid::from_raw(pid).expect("forkpty returned a positive pid"),
@@ -608,5 +613,36 @@ mod tests {
             "b".into(),
         ])));
         assert_eq!(out, "a b\r\n");
+    }
+
+    /// The master is close-on-exec, so nothing else the server starts
+    /// inherits a pane's terminal; and a pane started while the server
+    /// has the handled signals blocked (a live upgrade's new image, until
+    /// its handlers are in) starts with none blocked (`clear_signals`).
+    #[test]
+    fn a_pane_has_a_private_master_and_no_signal_blocked() {
+        let spec = SpawnSpec {
+            program: Program::Argv(vec![
+                "sh".into(),
+                "-c".into(),
+                "kill -HUP $$; echo blocked".into(),
+            ]),
+            shell: PathBuf::from("/bin/sh"),
+            cwd: PathBuf::from("/"),
+            home: None,
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            cols: 20,
+            rows: 4,
+        };
+        let spawned = spawn(&spec).expect("spawn");
+        let flags = rustix::io::fcntl_getfd(&spawned.master).unwrap();
+        assert!(flags.contains(rustix::io::FdFlags::CLOEXEC));
+        let _ = rustix::process::kill_process(spawned.pid, rustix::process::Signal::KILL);
+        let _ = rustix::process::waitpid(Some(spawned.pid), rustix::process::WaitOptions::empty());
+
+        let mask = super::super::signal::block_handled();
+        let out = output(&spec);
+        super::super::signal::restore_mask(mask);
+        assert_eq!(out, "");
     }
 }

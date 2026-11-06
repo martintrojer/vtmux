@@ -47,6 +47,9 @@ pub(crate) fn sample() -> Snapshot {
             written_us: 1_790_000_300_000_000,
             // Nothing beyond v1 (a_stream_requiring_an_unknown_feature_is_refused).
             requires: Vec::new(),
+            // Added within v1: out of the golden sample
+            // (the_writer_executable_descriptor_round_trips).
+            binary_fd: None,
         },
         server: sample_server(),
         sessions: vec![sample_session()],
@@ -78,6 +81,17 @@ fn a_snapshot_round_trips() {
         decode(&encode(&Snapshot::default())).unwrap(),
         Snapshot::default()
     );
+}
+
+/// `Meta::binary_fd`, added within v1, round-trips; a reader of v1 that
+/// predates it skips it (unknown tags are skipped) and keeps the rest.
+#[test]
+fn the_writer_executable_descriptor_round_trips() {
+    let mut s = sample();
+    s.meta.binary_fd = Some(17);
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(back.meta.binary_fd, Some(17));
+    assert_eq!(back.meta.binary, s.meta.binary);
 }
 
 #[test]

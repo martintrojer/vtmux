@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use mio::net::{UnixListener, UnixStream};
 use mio::{Events, Interest, Poll, Token};
-use signal_hook::consts::{SIGCHLD, SIGCONT, SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGWINCH};
+use signal_hook::consts::{SIGCHLD, SIGINT, SIGTERM, SIGUSR1};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::cmd::{self, CmdError, ConfigEnv};
 use vtmux_core::error::EdgeError;
@@ -75,6 +75,10 @@ pub struct ServerConfig {
     /// The socket is the default `-L` one, not `-S` (`CLIENT_DEFAULTSOCKET`):
     /// it decides the permissions SIGUSR1 recreates it with.
     pub default_socket: bool,
+    /// A live upgrade's dry run (`server/resume.rs`): the server is built
+    /// to prove the snapshot rebuilds, never run, and leaves nothing
+    /// behind (no shim).
+    pub dry_run: bool,
 }
 
 #[expect(
@@ -563,6 +567,16 @@ pub struct Server {
     pub(crate) hook_monitors: crate::control_subs::HookMonitors,
     /// Who may connect (server-acl.c, `server-access`).
     pub(crate) acl: crate::acl::Acl,
+    /// This image's executable, open since it started: a live upgrade
+    /// passes it on, so a failed resume switches back to this very file
+    /// (`sys::upgrade::own_exe`). `None` in a dry run and on macOS.
+    pub(crate) exe: Option<std::os::fd::OwnedFd>,
+    /// Descriptors a live upgrade's last resort could not attach to any
+    /// pane or client (`resume.rs`, `serve_held`): held open so that no
+    /// pane's process loses its terminal. While any are held the server
+    /// does not exit for want of sessions; `kill-server` and SIGTERM
+    /// still end it.
+    pub(crate) held: Vec<std::os::fd::OwnedFd>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -690,9 +704,7 @@ impl Server {
         // proc_set_signals (proc.c:244-276): PIPE, TSTP, TTIN, TTOU and QUIT
         // are ignored; the rest are handled in `on_signals`.
         sys::signal::ignore_job_control();
-        let mut signals = Signals::new([
-            SIGCHLD, SIGTERM, SIGINT, SIGHUP, SIGUSR1, SIGUSR2, SIGWINCH, SIGCONT,
-        ])?;
+        let mut signals = Signals::new(sys::signal::HANDLED)?;
         poll.registry()
             .register(&mut signals, SIGNALS, Interest::READABLE)?;
         let mut global_env = Environ::from_pairs(config.environ.clone());
@@ -761,9 +773,16 @@ impl Server {
             lock_timers: BTreeMap::new(),
             hook_monitors: crate::control_subs::HookMonitors::default(),
             acl: crate::acl::Acl::new(rustix::process::getuid().as_raw()),
+            exe: None,
+            held: Vec::new(),
         };
-        server.shim = crate::shim::own_exe()
-            .and_then(|exe| crate::shim::Shim::create(&server.socket, &exe).ok());
+        // A dry run rebuilds the server only to see that it can: it must
+        // not touch the shim the running server's panes use.
+        if !server.config.dry_run {
+            server.shim = crate::shim::own_exe()
+                .and_then(|exe| crate::shim::Shim::create(&server.socket, &exe).ok());
+            server.exe = sys::upgrade::own_exe();
+        }
         // server_start: the hourly tidy (server.c:157-172, `evtimer_add`).
         server.format_jobs_start_tidy();
         server.update_width_cache();
@@ -1026,7 +1045,8 @@ impl Server {
     fn exit_empty(&self) -> bool {
         // A client that left before saying Hello (`-CC` without a tty)
         // still counts: tmux exits once it has no sessions and no clients.
-        (self.config_loaded || self.next_client > 0)
+        self.held.is_empty()
+            && (self.config_loaded || self.next_client > 0)
             && matches!(
                 self.model
                     .options

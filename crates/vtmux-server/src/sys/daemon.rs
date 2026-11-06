@@ -95,7 +95,7 @@ pub fn fork_daemon() -> io::Result<Forked> {
 }
 
 /// In the daemon, before the server starts: close every descriptor but
-/// stdio and the listener, which ends up as fd 3. A starting client can
+/// stdio and the listener, which ends up as fd 3, close-on-exec. A starting client can
 /// hold descriptors it never meant to pass on: where `pipe2` is missing
 /// (macOS) a pipe gets `FD_CLOEXEC` only after it is made, so a client
 /// spawned by another thread in that window inherits it, and a server
@@ -117,7 +117,12 @@ pub fn close_inherited(listener: UnixListener) -> UnixListener {
             libc::close(fd);
         }
         super::pty::close_from(LISTENER_FD + 1, super::pty::fd_limit());
-        UnixListener::from_raw_fd(LISTENER_FD)
+        let listener = UnixListener::from_raw_fd(LISTENER_FD);
+        // dup2 clears close-on-exec: set it again, so nothing the server
+        // starts inherits the socket; only a live upgrade clears it, for
+        // the descriptors it keeps (sys::upgrade).
+        let _ = rustix::io::fcntl_setfd(&listener, rustix::io::FdFlags::CLOEXEC);
+        listener
     }
 }
 
