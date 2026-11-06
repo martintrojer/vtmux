@@ -449,8 +449,6 @@ pub struct Server {
     pub global_env: Environ,
     /// The theme colours last worked out ([`crate::render::window::Source::theme`]).
     pub(crate) themes: crate::render::window::ThemeCache,
-    /// Each pane's border style as last expanded.
-    pub(crate) border_styles: crate::render::window::BorderStyles,
     /// `kill-server` ran: exit once replies are out.
     pub shutdown: bool,
     /// Nesting of `source-file`: with no client (cmd-source-file.c
@@ -706,7 +704,6 @@ impl Server {
             info,
             global_env,
             themes: crate::render::window::ThemeCache::default(),
-            border_styles: crate::render::window::BorderStyles::default(),
             shutdown: false,
             source_depths: BTreeMap::new(),
             focus_stale: std::collections::BTreeSet::new(),
@@ -2601,12 +2598,12 @@ impl Server {
     /// `CLIENT_REDRAWSTATUS`. `redraw_draw` then expands the border styles of
     /// its window's panes again (screen-redraw.c:1726-1731).
     fn redraw_pending(&self, id: ClientId, s: SessionId) -> bool {
-        let pending = self
-            .clients
-            .get(&id)
-            .is_some_and(|c| c.status.redraw_pending());
+        let Some(client) = self.clients.get(&id) else {
+            return false;
+        };
+        let pending = client.status.redraw_pending();
         if pending && let Some((_, w, _)) = self.model.current_of(s) {
-            self.border_styles.forget(&self.model, w);
+            client.window_cache.borders.forget(&self.model, w);
         }
         pending
     }
@@ -3126,14 +3123,8 @@ impl Server {
     ) -> bool {
         let source = self.render_source();
         let cache = self.clients.get(&id).map(|c| &c.window_cache);
-        let Some((scene, mut draw)) = source.window(
-            s,
-            screen.cols,
-            rows,
-            caps,
-            Some(jobs),
-            cache.map(|c| &c.scene),
-        ) else {
+        let Some((scene, mut draw)) = source.window(s, screen.cols, rows, caps, Some(jobs), cache)
+        else {
             // Nothing to draw: the rows are blank, as from a fresh buffer.
             crate::render::compose::ComposeCache::default().copy_rows(screen, y, rows, tags);
             return true;
@@ -3566,7 +3557,7 @@ impl Server {
                     let Some(s) = c.attached else { return false };
                     match r {
                         Redraw::Session(x) | Redraw::SessionStatus(x) => x == s,
-                        Redraw::Window(w) => {
+                        Redraw::Window(w) | Redraw::WindowBorders(w) => {
                             self.model.current_of(s).is_some_and(|(_, cw, _)| cw == w)
                         }
                         Redraw::WindowStatus(w) => self
@@ -3578,12 +3569,17 @@ impl Server {
                 })
                 .map(|(id, _)| *id)
                 .collect();
-            let full = matches!(r, Redraw::Session(_) | Redraw::Window(_));
             for id in ids {
-                if full {
-                    self.redraw_client(id);
-                } else {
-                    self.status_redraw_client(id);
+                match r {
+                    Redraw::Session(_) | Redraw::Window(_) => self.redraw_client(id),
+                    Redraw::WindowBorders(_) => {
+                        if let Some(c) = self.clients.get_mut(&id) {
+                            c.status.request_borders_redraw();
+                        }
+                    }
+                    Redraw::SessionStatus(_) | Redraw::WindowStatus(_) => {
+                        self.status_redraw_client(id);
+                    }
                 }
             }
         }
@@ -3606,7 +3602,6 @@ impl Server {
             clients: crate::render::window::Clients::new(|| self.client_views()),
             themes: &self.themes,
             keys: &self.key_bindings,
-            borders: &self.border_styles,
         }
     }
 
@@ -4698,6 +4693,12 @@ impl Server {
         if toggled_alternate && self.model.scrollbars(window) != crate::scrollbar::Scrollbars::Off {
             self.model.fix_panes(window);
             self.model.redraw(crate::model::Redraw::Window(window));
+        }
+        // ...and server_redraw_window_borders: a border style reading
+        // #{alternate_on} is expanded again.
+        if toggled_alternate {
+            self.model
+                .redraw(crate::model::Redraw::WindowBorders(window));
         }
         if !flooding {
             self.burst_started.insert(p);

@@ -306,6 +306,9 @@ pub struct Pane {
 pub enum Redraw {
     /// `server_redraw_window`: clients whose current window this is.
     Window(WindowId),
+    /// `server_redraw_window_borders`: the borders of clients whose current
+    /// window this is.
+    WindowBorders(WindowId),
     /// `server_status_window`: clients of every session that has it.
     WindowStatus(WindowId),
     /// `server_redraw_session`.

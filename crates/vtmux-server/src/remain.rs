@@ -78,7 +78,9 @@ impl Server {
             if notify {
                 self.fire_pane_exit("pane-died", p);
             }
-            self.draw_dead_line(p);
+            if self.draw_dead_line(p) {
+                self.dead_line_queued(p);
+            }
             // server-fn.c:419: PANE_REDRAW.
             self.model.redraw_panes.insert(p);
             return;
@@ -92,8 +94,9 @@ impl Server {
     /// server-fn.c:403-417: the whole screen is the scroll region, the
     /// screen scrolls up a line from the bottom, and the expanded
     /// `remain-on-exit-format` is drawn (`format_draw`, default cell) on the
-    /// new last line; the cursor stays at its start, hidden.
-    fn draw_dead_line(&mut self, p: PaneId) {
+    /// new last line; the cursor stays at its start, hidden. False when
+    /// the format is empty and nothing is drawn.
+    fn draw_dead_line(&mut self, p: PaneId) -> bool {
         let template = self
             .model
             .options
@@ -101,7 +104,7 @@ impl Server {
             .map(|e| e.value.to_text(e.def, None, false))
             .unwrap_or_default();
         let Some(window) = self.model.panes.get(&p).map(|x| x.window) else {
-            return;
+            return false;
         };
         let mut bytes = Vec::new();
         if !template.is_empty() {
@@ -153,6 +156,35 @@ impl Server {
         drop(pane.term.take_passthrough());
         pane.term.take_bells();
         pane.term.take_title_events();
+        !template.is_empty()
+    }
+
+    /// The dead line is written to the terminal of each client showing pane
+    /// `p` as it is drawn (`tty_write`, unless the client is frozen or
+    /// already redrawing its window: `tty_client_ready`, tty.c:1630-1649),
+    /// so `server_client_check_redraw` finds output still queued there and
+    /// defers the pane's `PANE_REDRAW` as `CLIENT_REDRAWWINDOW`
+    /// (server-client.c:2537-2556). The whole window is drawn again, its
+    /// borders too: a border style reading `#{pane_dead}` changes.
+    fn dead_line_queued(&mut self, p: PaneId) {
+        let Some(w) = self.model.panes.get(&p).map(|x| x.window) else {
+            return;
+        };
+        if !self.model.windows.get(&w).is_some_and(|x| x.is_visible(p)) {
+            return;
+        }
+        let model = &self.model;
+        for client in self.clients.values_mut() {
+            let shows = client.control.is_none()
+                && !client.status.is_frozen()
+                && client
+                    .attached
+                    .and_then(|s| model.current_of(s))
+                    .is_some_and(|(_, cw, _)| cw == w);
+            if shows {
+                client.status.request_window_redraw();
+            }
+        }
     }
 
     /// `server_client_handle_dead_key`: a key (not a mouse event or paste

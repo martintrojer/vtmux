@@ -172,6 +172,8 @@ pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis
 #[derive(Debug, Default)]
 pub struct WindowCache {
     pub scene: scene::SceneCache,
+    /// Each pane's border style as this client last expanded it.
+    pub borders: window::BorderStyles,
     pub compose: std::cell::RefCell<compose::ComposeCache>,
     /// The window's drawing buffer, kept for the next frame.
     pub buffer: std::cell::RefCell<Option<Snapshot>>,

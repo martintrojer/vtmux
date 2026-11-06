@@ -65,6 +65,9 @@ pub struct StatusLine {
     /// `CLIENT_REDRAWWINDOW`: the pane area is drawn again at the next
     /// frame even while frozen.
     redraw_window: bool,
+    /// `CLIENT_REDRAWBORDERS`: the pane borders and their styles are drawn
+    /// again at the next frame (`server_redraw_window_borders`).
+    redraw_borders: bool,
     /// `CLIENT_STATUSFORCE`: the next status redraw runs its `#()` jobs again
     /// (`refresh-client`, cmd-refresh-client.c:275-280).
     force: bool,
@@ -117,6 +120,7 @@ impl Default for StatusLine {
         Self {
             redraw: true,
             redraw_window: false,
+            redraw_borders: false,
             force: false,
             screen: Vec::new(),
             active: Vec::new(),
@@ -181,10 +185,15 @@ impl StatusLine {
         self.redraw_window = true;
     }
 
+    /// `server_redraw_window_borders` (`CLIENT_REDRAWBORDERS`).
+    pub fn request_borders_redraw(&mut self) {
+        self.redraw_borders = true;
+    }
+
     /// Any of `CLIENT_ALLREDRAWFLAGS` is set: the next frame redraws.
     #[must_use]
     pub fn redraw_pending(&self) -> bool {
-        self.redraw || self.redraw_window
+        self.redraw || self.redraw_window || self.redraw_borders
     }
 
     /// `CLIENT_REDRAWWINDOW` is set.
@@ -203,6 +212,9 @@ impl StatusLine {
     /// and no full redraw asked for); the window redraw request is used up.
     pub fn hold_window(&mut self) -> bool {
         let redraw = std::mem::take(&mut self.redraw_window);
+        // CLIENT_REDRAWBORDERS is used up by the same frame and does not
+        // draw through TTY_FREEZE.
+        self.redraw_borders = false;
         self.frozen && !redraw
     }
 
