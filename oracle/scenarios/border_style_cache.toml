@@ -9,8 +9,8 @@ size = [40, 10]
 # client), select-pane and a mode change (server_redraw_window_borders)
 # expand it again.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat -"] },
-  { run = ["splitw", "-h", "-t", "a", "cat -"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },
   { run = ["select-pane", "-t", "%1", "-T", "t"] },
   { run = ["set", "-g", "status-right", "x"] },

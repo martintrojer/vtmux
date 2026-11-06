@@ -10,9 +10,9 @@ size = [40, 10]
 #   queued and turns the pane's PANE_REDRAW into CLIENT_REDRAWWINDOW
 #   (server-client.c:2537-2556); respawn-pane (cmd-respawn-pane.c:93).
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat -"] },
-  { run = ["splitw", "-h", "-t", "a", "cat -"] },
-  { run = ["splitw", "-v", "-t", "a", "cat -"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
+  { run = ["splitw", "-v", "-t", "a", "cat", "-"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },
   { run = ["select-pane", "-t", "%1", "-T", "t"] },
   { run = ["select-pane", "-t", "%2", "-T", "t"] },
@@ -55,7 +55,7 @@ steps = [
   { wait_for = "died" },
   { settle = { react = true } },
   { screen = {} },
-  { run = ["respawn-pane", "-t", "%0", "cat -"] },
+  { run = ["respawn-pane", "-t", "%0", "cat", "-"] },
   { settle = { react = true } },
   { screen = {} },
   { feed = { pane = "%2", bytes = "\u001b[?1049h\r" } },
