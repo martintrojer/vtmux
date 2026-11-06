@@ -56,3 +56,14 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   reference, 1/40 and 3/80 on vtmux; `cursor-test2` 2/40 on vtmux. The patch
   polls `display` (max 10 s) until it prints the result file's first line;
   patched, 40/40 each on both. Seen once in CI (GitHub run 42048753774).
+- `copy-mode-test-vi.sh`, `copy-mode-test-emacs.sh`
+  (`0004-copy-mode-tests-wait-for-pane-output.patch`): each runs `copy-mode`
+  right after `new -d "cat …"`, and copy mode copies the screen when it starts
+  (tmux `window_copy_init`), so a pane that has not printed yet leaves an
+  empty copy. In `copy-mode-test-vi.sh`'s second part (`printf 'abc中\nxyz\n'`)
+  three `cursor-right` on the empty copy give `0,3`, not `3,0`; the reference
+  gives `0,3` on an empty pane too. Under 8 parallel runs plus 8 busy loops
+  (macOS laptop, debug build), unpatched: 4/48 on vtmux, 0/48 on the
+  reference. The patch polls `display` (max 10 s) for the printf's cursor
+  position before `copy-mode`; patched, 96/96 vi and 48/48 emacs on vtmux,
+  48/48 vi on the reference. Seen once in CI (GitHub run 42157716129, macOS).
