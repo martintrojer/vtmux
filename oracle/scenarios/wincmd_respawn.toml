@@ -1,11 +1,11 @@
 name = "wincmd_respawn"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
-  { run = ["new", "-d", "-s", "keep", "cat"] },
-  { run = ["neww", "-d", "-t", "a", "-n", "two", "cat"] },
-  { run = ["neww", "-d", "-t", "a", "-n", "three", "cat"] },
-  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
-  { run = ["splitw", "-d", "-t", "a:1", "-h", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "keep", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "two", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "three", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:1", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:1", "-h", "cat", "-"] },
   { run = ["selectp", "-t", "a:1.1"] },
   { run = ["lsw", "-t", "a", "-F", "#{window_index} #{window_id} #{window_active}#{window_last_flag} #{window_panes} #{window_name}"] },
   { run = ["lsp", "-t", "a:1", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
@@ -22,7 +22,7 @@ steps = [
   { run = ["lsp", "-t", "a:1", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top} #{pane_start_command} #{pane_dead}"] },
   { run = ["display", "-p", "-t", "a:1", "#{pane_current_command}"] },
   # New panes after a respawn get fresh ids.
-  { run = ["splitw", "-d", "-t", "a:1", "cat"] },
+  { run = ["splitw", "-d", "-t", "a:1", "cat", "-"] },
   { run = ["lsp", "-t", "a:1", "-F", "#{pane_index} #{pane_id} #{pane_active}#{pane_last} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}"] },
   # No command reuses the last one. (A zoomed window is left out: tmux
   # frees the saved layout and dies on the next read, D-008.)

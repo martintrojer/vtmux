@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "panes_select_swap",
   "inputs": {
     "name": "panes_select_swap",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -36,7 +37,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -61,7 +63,8 @@
           "-d",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -70,7 +73,8 @@
           "-d",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -262,7 +266,8 @@
           "-d",
           "-t",
           "b",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

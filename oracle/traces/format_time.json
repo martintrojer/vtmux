@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "format_time",
   "inputs": {
     "name": "format_time",
@@ -21,7 +21,8 @@
           "5",
           "-e",
           "TS=1781000000",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

@@ -8,7 +8,7 @@
 name = "prompt_pane_hooks"
 size = [40, 8]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat", "-"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "@log", ""] },
@@ -35,7 +35,7 @@ steps = [
   { screen = {} },
   { run = ["show", "-gqv", "@z"] },
   { run = ["show", "-gv", "@log"] },
-  { run = ["split-window", "-t", "a", "cat"] },
+  { run = ["split-window", "-t", "a", "cat", "-"] },
   { run = ["command-prompt", "-b", "-P", "-p", "k", "set -g @k '%%'"] },
   { settle = { react = true } },
   { screen = {} },

@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "panes_mode_screens",
   "inputs": {
     "name": "panes_mode_screens",
@@ -21,7 +21,8 @@
           "60",
           "-y",
           "19",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -95,7 +96,8 @@
           "-h",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -156,7 +158,8 @@
           "-v",
           "-t",
           "%1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -199,7 +202,8 @@
           "-v",
           "-t",
           "%0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

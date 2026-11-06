@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "devvm51629.rva0.facebook.com",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "tree_mouse_menu",
   "inputs": {
     "name": "tree_mouse_menu",
@@ -21,7 +21,8 @@
           "60",
           "-y",
           "23",
-          "cat -"
+          "cat",
+          "-"
         ]
       },
       {
@@ -56,7 +57,8 @@
           "aaa:1",
           "-n",
           "w1",
-          "cat -"
+          "cat",
+          "-"
         ]
       },
       {
@@ -71,7 +73,8 @@
           "60",
           "-y",
           "23",
-          "cat -"
+          "cat",
+          "-"
         ]
       },
       {

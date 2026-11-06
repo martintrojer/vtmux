@@ -9,7 +9,7 @@ size = [60, 14]
 # theme changes, once the colours come back (server_client_report_theme ->
 # tty_repeat_requests -> tty_keys_colours -> session_theme_changed).
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "13", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "13", "cat", "-"] },
   { run = ["set", "-g", "status-right", ""] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["set-hook", "-g", "client-light-theme", "set -g @t light"] },

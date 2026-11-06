@@ -6,7 +6,7 @@ size = [40, 8]
 # title (the inner OSC 2 of the payload, `title` steps) shows what arrived:
 # off and on leave it empty, all sets it. Nothing is drawn either way.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat", "-"] },
   { run = ["set", "-g", "status-right", ""] },
   { run = ["select-pane", "-t", "a:w", "-T", "ptitle"] },
   { run = ["neww", "-d", "-n", "bg", "sh", "-c", "tmux wait-for -S up; read x; printf 'X\\033Ptmux;\\033\\033]52;c;aGVsbG8=\\007\\033\\033]2;INNER\\007\\033\\033[31m\\033\\\\Y'; printf '\\033Ptmux;\\033\\033_Gi=7,a=q,s=1,v=1,f=24;AAAA\\033\\033\\\\\\033\\\\Z\\n'; tmux wait-for -S done; exec cat"] },

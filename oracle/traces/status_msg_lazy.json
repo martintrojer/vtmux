@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "status_msg_lazy",
   "inputs": {
     "name": "status_msg_lazy",
@@ -17,7 +17,8 @@
           "a",
           "-n",
           "w",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -28,7 +29,8 @@
           "a",
           "-n",
           "x",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -37,7 +39,8 @@
           "-d",
           "-t",
           "a:1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

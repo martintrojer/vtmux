@@ -10,9 +10,9 @@ name = "hooks_focus"
 # client-detached.
 size = [80, 24]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
-  { run = ["splitw", "-d", "-t", "a:0", "cat"] },
-  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat", "-"] },
   { run = ["set", "-g", "focus-events", "on"] },
   { run = ["set", "-g", "@log", ""] },
   { run = ["set-hook", "-g", "pane-focus-in", "set -agF @log '|#{hook}:#{hook_pane}'"] },

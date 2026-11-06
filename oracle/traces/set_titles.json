@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "set_titles",
   "inputs": {
     "name": "set_titles",
@@ -21,7 +21,8 @@
           "40",
           "-y",
           "5",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -49,7 +50,8 @@
           "b",
           "-n",
           "bw",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -116,7 +118,8 @@
           "-d",
           "-n",
           "other",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

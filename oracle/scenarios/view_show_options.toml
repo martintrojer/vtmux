@@ -6,7 +6,7 @@
 name = "view_show_options"
 size = [60, 15]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "14", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "14", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },

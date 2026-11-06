@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "devvm51629.rva0.facebook.com",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "choose_buffer_edit",
   "inputs": {
     "name": "choose_buffer_edit",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "23",
-          "cat -"
+          "cat",
+          "-"
         ]
       },
       {

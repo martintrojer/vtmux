@@ -1,10 +1,10 @@
 name = "status_msg_freeze"
 size = [40, 6]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
   { run = ["select-pane", "-t", "a", "-T", "t"] },
   { run = ["set", "-g", "status-right", "R"] },
-  { run = ["splitw", "-h", "-d", "-t", "a", "cat"] },
+  { run = ["splitw", "-h", "-d", "-t", "a", "cat", "-"] },
   { attach = { session = "a" } },
   { screen = {} },
   # status_message_set without no_freeze: TTY_FREEZE holds pane output.

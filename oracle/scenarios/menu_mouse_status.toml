@@ -12,8 +12,8 @@
 name = "menu_mouse_status"
 size = [60, 20]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "one", "-x", "60", "-y", "19", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "bw", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "one", "-x", "60", "-y", "19", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "bw", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "mouse", "on"] },
   # The menus' splits run the default command: a fixed program, not the
@@ -21,9 +21,9 @@ steps = [
   { run = ["set", "-g", "default-command", "cat"] },
   { run = ["select-pane", "-t", "a", "-T", "p0"] },
   { run = ["select-pane", "-t", "b", "-T", "pb"] },
-  { run = ["neww", "-d", "-t", "a:1", "-n", "two", "cat"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "two", "cat", "-"] },
   { run = ["select-pane", "-t", "a:1", "-T", "p1"] },
-  { run = ["neww", "-d", "-t", "a:2", "-n", "three", "cat"] },
+  { run = ["neww", "-d", "-t", "a:2", "-n", "three", "cat", "-"] },
   { run = ["select-pane", "-t", "a:2", "-T", "p2"] },
   { attach = { session = "a" } },
   { settle = { quiet_ms = 1000 } },

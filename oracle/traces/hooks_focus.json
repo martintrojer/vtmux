@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "hooks_focus",
   "inputs": {
     "name": "hooks_focus",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -30,7 +31,8 @@
           "-d",
           "-t",
           "a:0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -41,7 +43,8 @@
           "a:1",
           "-n",
           "w1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

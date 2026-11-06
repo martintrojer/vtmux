@@ -2,7 +2,7 @@
 name = "choose_buffer_edit"
 size = [80, 24]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat -"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["select-pane", "-t", "%0", "-T", "t0"] },

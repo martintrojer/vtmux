@@ -1,13 +1,13 @@
 name = "format_loops"
 # S W P L loops (two-client sorting is pinned by crates/vtmux-core/tests/loop_cases.sh), sort letters, the all,active form, window neighbours and the no-session abort.
 steps = [
-  { run = ["-f", "/dev/null", "new", "-d", "-s", "zeta", "-n", "charlie", "-x", "80", "-y", "24", "cat", ";",
-           "new", "-d", "-s", "alpha", "-n", "w", "cat", ";",
-           "new", "-d", "-s", "mike", "-n", "w", "cat", ";",
-           "new-window", "-d", "-t", "zeta:2", "-n", "bravo", "cat", ";",
-           "new-window", "-d", "-t", "zeta:4", "-n", "delta", "cat", ";",
-           "split-window", "-d", "-h", "-t", "zeta:2.0", "cat", ";",
-           "split-window", "-d", "-b", "-h", "-t", "zeta:2.0", "cat", ";",
+  { run = ["-f", "/dev/null", "new", "-d", "-s", "zeta", "-n", "charlie", "-x", "80", "-y", "24", "cat", "-", ";",
+           "new", "-d", "-s", "alpha", "-n", "w", "cat", "-", ";",
+           "new", "-d", "-s", "mike", "-n", "w", "cat", "-", ";",
+           "new-window", "-d", "-t", "zeta:2", "-n", "bravo", "cat", "-", ";",
+           "new-window", "-d", "-t", "zeta:4", "-n", "delta", "cat", "-", ";",
+           "split-window", "-d", "-h", "-t", "zeta:2.0", "cat", "-", ";",
+           "split-window", "-d", "-b", "-h", "-t", "zeta:2.0", "cat", "-", ";",
            "select-window", "-t", "zeta:2", ";",
            "set", "-w", "-t", "zeta:4", "@tag", "d4"] },
   { run = ["select-pane", "-t", "%0", "-T", "t0"] },

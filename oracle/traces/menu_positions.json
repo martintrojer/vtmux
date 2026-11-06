@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "menu_positions",
   "inputs": {
     "name": "menu_positions",
@@ -21,7 +21,8 @@
           "40",
           "-y",
           "11",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -57,7 +58,8 @@
           "a:1",
           "-n",
           "x",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -75,7 +77,8 @@
           "-h",
           "-t",
           "a:0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

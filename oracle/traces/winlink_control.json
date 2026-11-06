@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "winlink_control",
   "inputs": {
     "name": "winlink_control",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -32,7 +33,8 @@
           "a:1",
           "-n",
           "w1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -47,7 +49,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

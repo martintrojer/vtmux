@@ -4,7 +4,7 @@
 name = "view_resize"
 size = [30, 8]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "7", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "7", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}/#{copy_position_limit}]"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },

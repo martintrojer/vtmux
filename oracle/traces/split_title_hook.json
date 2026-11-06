@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "split_title_hook",
   "inputs": {
     "name": "split_title_hook",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -73,7 +74,8 @@
           "a:0",
           "-T",
           "t-#{window_name}",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -84,7 +86,8 @@
           "a:0",
           "-T",
           "",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

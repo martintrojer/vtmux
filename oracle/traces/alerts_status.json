@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "macmini",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "alerts_status",
   "inputs": {
     "name": "alerts_status",
@@ -21,7 +21,8 @@
           "60",
           "-y",
           "6",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

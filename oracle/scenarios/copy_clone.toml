@@ -1,7 +1,7 @@
 name = "copy_clone"
 size = [40, 10]
 steps = [
-  { run = ["new", "-d", "-s", "z", "cat"] },
+  { run = ["new", "-d", "-s", "z", "cat", "-"] },
   { run = ["set", "-g", "history-limit", "30"] },
   { run = ["set", "-g", "copy-mode-position-format", "#[align=right][#{copy_position}/#{copy_position_limit}]"] },
   { run = ["set", "-g", "automatic-rename-format", "#{?pane_in_mode,[tmux],plain}"] },
@@ -33,7 +33,7 @@ steps = [
   { run = ["send-keys", "-t", "a", "-X", "cancel"] },
   { settle = { quiet_ms = 1500 } },
   { run = ["display", "-p", "-t", "a", "#{window_name}"] },
-  { run = ["splitw", "-d", "-t", "a", "-l", "4", "cat"] },
+  { run = ["splitw", "-d", "-t", "a", "-l", "4", "cat", "-"] },
   { run = ["copy-mode", "-s", "%1", "-t", "%2"] },
   { run = ["send-keys", "-t", "%2", "-X", "history-top"] },
   { run = ["display", "-p", "-t", "%2", "[#{e|>:#{top_line_time},0}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_line}]"] },

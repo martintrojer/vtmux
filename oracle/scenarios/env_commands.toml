@@ -1,6 +1,6 @@
 name = "env_commands"
 steps = [
-  { run = ["new", "-d", "-s", "main", "cat"] },
+  { run = ["new", "-d", "-s", "main", "cat", "-"] },
   { run = ["setenv", "FOO", "bar"] },
   { run = ["showenv", "FOO"] },
   { run = ["setenv", "-g", "GVAR", "gval"] },

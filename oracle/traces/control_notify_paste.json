@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "control_notify_paste",
   "inputs": {
     "name": "control_notify_paste",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

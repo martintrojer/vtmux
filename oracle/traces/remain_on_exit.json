@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "remain_on_exit",
   "inputs": {
     "name": "remain_on_exit",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -295,7 +296,8 @@
           "respawnp",
           "-t",
           "a:won",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -303,7 +305,8 @@
           "respawnw",
           "-t",
           "a:won",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

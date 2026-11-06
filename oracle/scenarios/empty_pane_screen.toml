@@ -6,7 +6,7 @@ size = [40, 10]
 # pane empty. (What display-message -I writes into one is a cli test:
 # empty_panes_and_input.)
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
   { run = ["set", "-g", "status-right", "x"] },
   { run = ["select-pane", "-t", "%0", "-T", "t"] },
   { run = ["splitw", "-h", "-E", "-t", "a"] },

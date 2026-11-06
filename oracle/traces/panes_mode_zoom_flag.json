@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "panes_mode_zoom_flag",
   "inputs": {
     "name": "panes_mode_zoom_flag",
@@ -43,7 +43,8 @@
           "-h",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -52,7 +53,8 @@
           "-v",
           "-t",
           "%1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

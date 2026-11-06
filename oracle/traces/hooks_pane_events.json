@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "macmini",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "hooks_pane_events",
   "inputs": {
     "name": "hooks_pane_events",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -195,7 +196,8 @@
           "-h",
           "-t",
           "a:w.0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -269,7 +271,8 @@
           "-k",
           "-t",
           "a:w.2",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -280,7 +283,8 @@
           "a:5",
           "-n",
           "r",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -289,7 +293,8 @@
           "-k",
           "-t",
           "a:r",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -674,7 +679,7 @@
       "step": 33,
       "observation": {
         "kind": "cli",
-        "stdout": "0|%1:cat:0:1:0|%3:cat:0:0:5|%3:cat:0:1:5\n",
+        "stdout": "0|%1:cat -:0:1:0|%3:cat -:0:0:5|%3:cat -:0:1:5\n",
         "stderr": "",
         "exit": 0
       }

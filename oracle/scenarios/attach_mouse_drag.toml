@@ -3,7 +3,7 @@ size = [40, 10]
 steps = [
   { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "stty raw -echo; printf 'alpha beta-gamma\\r\\nsecond line here\\r\\n'; exec cat"] },
   { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
-  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
   { run = ["set", "-g", "status-right", ""] },
   { attach = { session = "a" } },

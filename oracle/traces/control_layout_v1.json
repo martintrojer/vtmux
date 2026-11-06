@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "macmini",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "control_layout_v1",
   "inputs": {
     "name": "control_layout_v1",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -30,7 +31,8 @@
           "-h",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

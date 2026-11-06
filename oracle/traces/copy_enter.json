@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "copy_enter",
   "inputs": {
     "name": "copy_enter",
@@ -388,7 +388,8 @@
           "-d",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

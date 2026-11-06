@@ -7,7 +7,7 @@
 name = "floating_mouse"
 size = [60, 20]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "mouse", "on"] },
   { run = ["set", "-g", "default-command", "cat"] },

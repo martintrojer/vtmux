@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "control_attached_display",
   "inputs": {
     "name": "control_attached_display",
@@ -17,7 +17,8 @@
             "c",
             "-n",
             "w",
-            "cat"
+            "cat",
+            "-"
           ],
           "id": "c1"
         }

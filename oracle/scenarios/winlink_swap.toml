@@ -1,9 +1,9 @@
 name = "winlink_swap"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
-  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat"] },
-  { run = ["neww", "-d", "-t", "a:2", "-n", "w2", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a:2", "-n", "w2", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "b0", "-x", "80", "-y", "24", "cat", "-"] },
   { run = ["swapw", "-s", "a:0", "-t", "a:2"] },
   { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_id} #{window_name} [#{window_flags}] #{window_panes}"] },
   { run = ["display", "-p", "-t", "a", "#{session_name}:#{window_index} #{window_id}"] },

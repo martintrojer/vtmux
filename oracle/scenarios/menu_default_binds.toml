@@ -9,15 +9,15 @@
 name = "menu_default_binds"
 size = [80, 24]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["select-pane", "-t", "a", "-T", "p0"] },
-  { run = ["neww", "-d", "-t", "a:1", "-n", "x", "cat"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "x", "cat", "-"] },
   { run = ["select-pane", "-t", "a:1.0", "-T", "p3"] },
-  { run = ["splitw", "-h", "-t", "a:0", "cat"] },
+  { run = ["splitw", "-h", "-t", "a:0", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.1", "-T", "p1"] },
-  { run = ["splitw", "-v", "-t", "a:0.1", "cat"] },
+  { run = ["splitw", "-v", "-t", "a:0.1", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.2", "-T", "p2"] },
   { attach = { session = "a" } },
   { settle = { quiet_ms = 1000 } },

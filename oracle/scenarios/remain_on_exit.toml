@@ -8,7 +8,7 @@ name = "remain_on_exit"
 # without -k takes a dead pane (spawn.c:312-320) and clears its status;
 # kill-pane of a dead pane fires nothing, and its window goes with it.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
   { run = ["set", "-g", "@log", ""] },
   { run = ["set-hook", "-g", "pane-died", "set -agF @log '|died:#{hook_pane}:#{hook_exit_status}:#{hook_exit_success}:#{pane_dead}'"] },
   { run = ["set-hook", "-ga", "pane-died", "wait-for -S died"] },
@@ -48,8 +48,8 @@ steps = [
   # respawn-pane takes a dead pane without -k; a live one needs it.
   { run = ["respawnp", "-t", "a:won", "printf again; exec cat"] },
   { run = ["display", "-p", "-t", "a:won", "#{pane_dead} [#{pane_dead_status}] [#{?pane_dead_time,t,}]"] },
-  { run = ["respawnp", "-t", "a:won", "cat"] },
-  { run = ["respawnw", "-t", "a:won", "cat"] },
+  { run = ["respawnp", "-t", "a:won", "cat", "-"] },
+  { run = ["respawnw", "-t", "a:won", "cat", "-"] },
   { run = ["respawnw", "-t", "a:wbad", "exec cat"] },
   { run = ["display", "-p", "-t", "a:wbad", "#{pane_dead} [#{pane_dead_status}]"] },
   # kill-pane of a dead pane fires nothing; the last one takes its window.

@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "keys_tables",
   "inputs": {
     "name": "keys_tables",
@@ -17,7 +17,8 @@
           "a",
           "-n",
           "w",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -28,7 +29,8 @@
           "b",
           "-n",
           "w",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

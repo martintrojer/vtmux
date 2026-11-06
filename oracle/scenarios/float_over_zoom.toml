@@ -7,14 +7,14 @@
 name = "float_over_zoom"
 size = [60, 20]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "19", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["select-pane", "-t", "%0", "-T", "p0"] },
-  { run = ["splitw", "-dh", "-t", "%0", "cat"] },
+  { run = ["splitw", "-dh", "-t", "%0", "cat", "-"] },
   { run = ["select-pane", "-t", "%1", "-T", "p1"] },
-  { run = ["new-pane", "-Ad", "-T", "over", "-x", "20", "-y", "6", "-X", "20", "-Y", "8", "cat"] },
-  { run = ["new-pane", "-d", "-T", "under", "-x", "16", "-y", "5", "-X", "2", "-Y", "2", "cat"] },
+  { run = ["new-pane", "-Ad", "-T", "over", "-x", "20", "-y", "6", "-X", "20", "-Y", "8", "cat", "-"] },
+  { run = ["new-pane", "-d", "-T", "under", "-x", "16", "-y", "5", "-X", "2", "-Y", "2", "cat", "-"] },
   { attach = { session = "a" } },
   { run = ["resize-pane", "-Z", "-t", "%0"] },
   { settle = { react = true } },
@@ -30,7 +30,7 @@ steps = [
   { run = ["select-pane", "-t", "%0"] },
   { run = ["display", "-p", "-t", "a", "#{pane_id} #{window_zoomed_flag}"] },
   { run = ["select-pane", "-t", "%2"] },
-  { run = ["new-pane", "-A", "-T", "again", "-x", "12", "-y", "4", "-X", "40", "-Y", "2", "cat"] },
+  { run = ["new-pane", "-A", "-T", "again", "-x", "12", "-y", "4", "-X", "40", "-Y", "2", "cat", "-"] },
   { settle = { react = true } },
   { screen = {} },
   { run = ["list-panes", "-t", "a", "-F", "#{pane_id} f#{pane_floating_flag} z#{pane_z} a#{pane_active} #{pane_flags}"] },

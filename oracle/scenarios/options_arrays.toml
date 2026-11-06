@@ -1,6 +1,6 @@
 name = "options_arrays"
 steps = [
-  { run = ["new", "-d", "-s", "a", "cat"] },
+  { run = ["new", "-d", "-s", "a", "cat", "-"] },
   { run = ["show", "-g", "terminal-features"] },
   { run = ["set", "-g", "terminal-features[10]", "xterm*:RGB:usstyle:hyperlinks"] },
   { run = ["show", "-gv", "terminal-features[10]"] },

@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "env_panes_and_update",
   "inputs": {
     "name": "env_panes_and_update",
@@ -19,7 +19,8 @@
           "30",
           "-y",
           "3",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -121,7 +122,8 @@
           "b",
           "-e",
           "X=1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -145,7 +147,8 @@
           "-d",
           "-s",
           "c",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

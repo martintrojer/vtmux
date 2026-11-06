@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "options_spawn_defaults",
   "inputs": {
     "name": "options_spawn_defaults",
@@ -15,7 +15,8 @@
           "-d",
           "-s",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -36,7 +37,8 @@
           "20",
           "-y",
           "3",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

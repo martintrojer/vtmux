@@ -7,12 +7,12 @@
 name = "floating_swap"
 size = [80, 24]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "23", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["set-hook", "-g", "after-split-window", "select-pane -T new"] },
   { run = ["select-pane", "-t", "a", "-T", "p0"] },
-  { run = ["split-window", "-h", "-t", "a", "cat"] },
+  { run = ["split-window", "-h", "-t", "a", "cat", "-"] },
   { run = ["new-pane", "-t", "a", "-x", "30", "-y", "10", "-X", "10", "-Y", "5", "sh", "-c", "printf AAAA; exec cat"] },
   { run = ["new-pane", "-t", "a", "sh", "-c", "printf BBBB; exec cat"] },
   { attach = { session = "a" } },

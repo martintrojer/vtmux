@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "screen_zoom",
   "inputs": {
     "name": "screen_zoom",
@@ -21,7 +21,8 @@
           "40",
           "-y",
           "9",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -30,7 +31,8 @@
           "-h",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -39,7 +41,8 @@
           "-v",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

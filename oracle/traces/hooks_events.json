@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "hooks_events",
   "inputs": {
     "name": "hooks_events",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -120,7 +121,8 @@
           "t",
           "-n",
           "t0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -131,7 +133,8 @@
           "t:1",
           "-n",
           "t1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -150,7 +153,9 @@
           "t:2",
           "-n",
           "t2",
-          "sh -c 'exit 3'"
+          "sh",
+          "-c",
+          "exit 3"
         ]
       },
       {

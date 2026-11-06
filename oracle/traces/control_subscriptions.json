@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "control_subscriptions",
   "inputs": {
     "name": "control_subscriptions",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -49,7 +50,7 @@
       {
         "control_send": {
           "id": "c1",
-          "line": "new-window -d -n two cat"
+          "line": "new-window -d -n two cat -"
         }
       },
       {

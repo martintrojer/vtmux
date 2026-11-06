@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "status_draw_default",
   "inputs": {
     "name": "status_draw_default",
@@ -17,7 +17,8 @@
           "a",
           "-n",
           "w",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -37,7 +38,8 @@
           "a",
           "-n",
           "x",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -55,7 +57,8 @@
           "-d",
           "-t",
           "a:0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

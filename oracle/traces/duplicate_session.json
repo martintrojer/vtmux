@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "duplicate_session",
   "inputs": {
     "name": "duplicate_session",
@@ -15,7 +15,8 @@
           "-d",
           "-s",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -24,7 +25,8 @@
           "-d",
           "-s",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

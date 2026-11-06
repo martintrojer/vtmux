@@ -7,7 +7,7 @@
 name = "menu_keys"
 size = [40, 14]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "13", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "13", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["select-pane", "-t", "a", "-T", "p0"] },

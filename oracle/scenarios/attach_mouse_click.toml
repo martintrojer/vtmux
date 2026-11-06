@@ -1,11 +1,11 @@
 name = "attach_mouse_click"
 size = [40, 10]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
-  { run = ["splitw", "-h", "-t", "a", "cat"] },
+  { run = ["splitw", "-h", "-t", "a", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
-  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat"] },
+  { run = ["neww", "-d", "-t", "a", "-n", "x", "cat", "-"] },
   { run = ["select-pane", "-t", "a:1.0", "-T", "t"] },
   { run = ["set", "-g", "status-right", ""] },
   { attach = { session = "a" } },

@@ -1,7 +1,7 @@
 name = "client_flags_control"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat"] },
-  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
   { control = { argv = ["attach", "-t", "a"], id = "c1" } },
   { control_send = { id = "c1", line = "display -p 'f=#{client_flags} ro=#{client_readonly}'" } },
   { control_wait = { id = "c1", until = "%end" } },

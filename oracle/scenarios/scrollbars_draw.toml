@@ -15,7 +15,7 @@ steps = [
   { settle = { react = true } },
   { screen = {} },
   # A split: the shared border runs past the left pane's bar.
-  { run = ["splitw", "-h", "-t", "a:0.0", "cat"] },
+  { run = ["splitw", "-h", "-t", "a:0.0", "cat", "-"] },
   { run = ["select-pane", "-t", "a:0.1", "-T", "t"] },
   { settle = { react = true } },
   { screen = {} },

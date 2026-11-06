@@ -4,7 +4,7 @@ name = "control_notify_paste"
 # paste_rename both (old deleted, new changed); a replaced or evicted
 # buffer is deleted first.
 steps = [
-  { run = ["new", "-d", "-s", "s", "-n", "w", "-x", "80", "-y", "24", "cat"] },
+  { run = ["new", "-d", "-s", "s", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
   { control = { argv = ["attach", "-t", "s"], id = "c1" } },
   { control_send = { id = "c1", line = "set-buffer a" } },
   { control_wait = { id = "c1", until = "%end" } },

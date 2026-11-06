@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "panes_mode_timeout_cli",
   "inputs": {
     "name": "panes_mode_timeout_cli",
@@ -21,7 +21,8 @@
           "60",
           "-y",
           "19",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -30,7 +31,8 @@
           "-h",
           "-t",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -41,7 +43,8 @@
           "a",
           "-n",
           "x",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -50,7 +53,8 @@
           "-v",
           "-t",
           "a:x",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -59,7 +63,8 @@
           "-v",
           "-t",
           "a:x",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -437,7 +442,8 @@
           "-k",
           "-t",
           "%0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

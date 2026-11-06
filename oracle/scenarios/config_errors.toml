@@ -12,7 +12,7 @@ size = [60, 8]
 # (D-009, not done for config causes), so no scenario attaches one. Line numbers count
 # lines of the file, also after a %if.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "cat", "-"] },
   { run = ["set-buffer", "-b", "b-bad.conf", "set -g @one 1\nset -g nosuchopt 1\nset -g @two 2\nset -g status-interval notanumber\nbind -n nosuchkey x\nbind-key -T nosuchtab y display\nset -g @three 3\nif-shell 'true' 'set -g nosuchopt2 x'\nrun-shell 'exit 3'\n%if \"1\"\nset -g @four 4\ndisplay-message -p \"ok-after\"\n%endif\nset-hook -g nosuchhook 'display -p x'\nswitch-client -t nosuchsession\nset -g @five 5\n"] },
   { run = ["save-buffer", "-b", "b-bad.conf", "bad.conf"] },
   { run = ["set-buffer", "-b", "b-parse.conf", "set -g @p1 1\nnosuchcmd arg\nset -g @p2 2\n"] },
@@ -73,7 +73,7 @@ steps = [
   { run = ["set-buffer", "-b", "c", "set -g @p1 1\nnosuchcmd arg\nset -g @p2 2\n"] },
   { run = ["save-buffer", "-b", "c", "start-parse.conf"] },
   { run = ["kill-server"] },
-  { control = { argv = ["-f", "start-bad.conf", "new", "-s", "a", "-n", "w", "cat"], id = "c1" } },
+  { control = { argv = ["-f", "start-bad.conf", "new", "-s", "a", "-n", "w", "cat", "-"], id = "c1" } },
   { control_send = { id = "c1", line = "display-message -p ready" } },
   { control_wait = { id = "c1", until = "ready" } },
   { control_send = { id = "c1", line = "show-options -g @one" } },

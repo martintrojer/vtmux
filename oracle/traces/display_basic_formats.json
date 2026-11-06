@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "display_basic_formats",
   "inputs": {
     "name": "display_basic_formats",
@@ -19,7 +19,8 @@
           "20",
           "-y",
           "5",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

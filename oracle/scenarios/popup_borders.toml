@@ -6,7 +6,7 @@
 name = "popup_borders"
 size = [40, 12]
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "11", "cat", "-"] },
   { run = ["set", "-g", "status-right", "R"] },
   { run = ["set", "-s", "escape-time", "0"] },
   { run = ["set", "-g", "@fg", "red"] },

@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "hooks_layout_close",
   "inputs": {
     "name": "hooks_layout_close",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -29,7 +30,8 @@
           "splitw",
           "-t",
           "a:0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -37,7 +39,8 @@
           "splitw",
           "-t",
           "a:0",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -117,7 +120,8 @@
           "-d",
           "-t",
           "a:1",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

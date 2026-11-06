@@ -9,8 +9,8 @@ size = [60, 8]
 # in show-messages (newest first, client ids and times removed), -v printing
 # each command with its line number, -n parsing only.
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "7", "cat"] },
-  { run = ["set", "-g", "status-right", "", ";", "select-pane", "-t", "a", "-T", "t", ";", "split-window", "-d", "-T", "t2", "-t", "a", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "7", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "", ";", "select-pane", "-t", "a", "-T", "t", ";", "split-window", "-d", "-T", "t2", "-t", "a", "cat", "-"] },
   { run = ["set-buffer", "-b", "c", "# comment line\nset -g @a 1\n%hidden X=hello\n%if \"#{==:#{@a},1}\"\nset -g @b \"yes-#{X}\"\n%elif \"1\"\nset -g @b elif\n%else\nset -g @b no\n%endif\nbind -n F7 set -g @k f7\nbind -N \"my note\" -T mytab x display-message \"hi\"\nbind -r -T mytab y send-keys -X cancel\nunbind -n F5\nset-hook -g after-select-pane 'set -g @hook fired'\nset-hook -ga after-select-pane 'set -ga @hook +'\nrun-shell 'echo ran-from-run'\nif-shell 'true' 'set -g @c ifyes' 'set -g @c ifno'\nif-shell -F '0' 'set -g @d yes' 'set -g @d no'\nset -g @e \"5 6 7\"\nset -ag @e \" 8\"\nset -g terminal-features[3] 'xterm*:RGB'\nset -g status-left '[#S] '\nbind -n F9 { display-message \"braced\" ; set -g @br 1 }\nbind -T mytab z run-shell 'true' ; bind -n F6 switch-client -T mytab\nset -g @multi 'one \\\ntwo'\n"] },
   { run = ["save-buffer", "-b", "c", "good.conf"] },
   { run = ["source-file", "-n", "good.conf"] },

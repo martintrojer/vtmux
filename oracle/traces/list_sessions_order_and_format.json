@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "list_sessions_order_and_format",
   "inputs": {
     "name": "list_sessions_order_and_format",
@@ -15,7 +15,8 @@
           "-d",
           "-s",
           "b",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -24,7 +25,8 @@
           "-d",
           "-s",
           "a",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -33,7 +35,8 @@
           "-d",
           "-s",
           "c",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {

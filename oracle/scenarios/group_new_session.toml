@@ -1,8 +1,8 @@
 # Session groups (session.c session_group_*, cmd-new-session.c:143-160, 313-327): new-session -t a session (the group takes its name), a member (joins its group) or a name no session has (a group of one, even an invalid session name); generated names after the group's name; -t with a command or window name refused; the group formats; kill-session of one member leaves the rest grouped, the last member keeps a group of one; kill-session -g takes the whole group; the hooks in the order tmux fires them.
 name = "group_new_session"
 steps = [
-  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat"] },
-  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat"] },
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat", "-"] },
   { run = ["set", "-g", "@log", ""] },
   { run = ["set", "-g", "automatic-rename", "off"] },
   { run = ["set-hook", "-g", "session-added-to-group", "set -gaF @log '[add #{hook_session_name} #{hook_group} #{hook_group_size}]'"] },
@@ -13,7 +13,7 @@ steps = [
   { run = ["set-hook", "-g", "session-closed", "set -gaF @log '[cl #{hook_session_name}]'"] },
   { run = ["new", "-d", "-t", "a", "-x", "80", "-y", "24"] },
   { run = ["new", "-d", "-t", "a-1", "-s", "b"] },
-  { run = ["new", "-d", "-t", "a", "-s", "c", "cat"] },
+  { run = ["new", "-d", "-t", "a", "-s", "c", "cat", "-"] },
   { run = ["new", "-d", "-t", "a", "-s", "c", "-n", "x"] },
   { run = ["new", "-d", "-t", "a", "-s", "b"] },
   { run = ["show", "-gv", "@log"] },

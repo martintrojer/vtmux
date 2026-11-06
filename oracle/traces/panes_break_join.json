@@ -1,6 +1,6 @@
 {
   "tmux_version": "3.8",
-  "recorded_host": "linuxpc",
+  "recorded_host": "devvm25742.scu0.facebook.com",
   "name": "panes_break_join",
   "inputs": {
     "name": "panes_break_join",
@@ -21,7 +21,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -36,7 +37,8 @@
           "80",
           "-y",
           "24",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -45,7 +47,8 @@
           "-t",
           "a",
           "-d",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
@@ -54,7 +57,8 @@
           "-t",
           "a",
           "-d",
-          "cat"
+          "cat",
+          "-"
         ]
       },
       {
