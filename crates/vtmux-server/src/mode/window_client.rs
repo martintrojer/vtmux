@@ -272,7 +272,7 @@ fn client_ctx<'a>(source: &Source<'a>, view: &ClientView) -> crate::format_ctx::
         .session
         .map_or_else(Found::default, |s| Found::from_session(source.model, s));
     let mut ctx = crate::format_ctx::Ctx::new(source.model, source.info, source.env, found);
-    ctx.clients = std::rc::Rc::clone(&source.clients);
+    ctx.clients = std::rc::Rc::clone(source.clients.views());
     ctx.client = Some(view.clone());
     ctx
 }
@@ -343,7 +343,7 @@ impl TreeMode for ClientMode {
         filter: Option<&str>,
     ) -> Option<ClientId> {
         let source = server.render_source();
-        for view in sorted(&source.clients, server, sort) {
+        for view in sorted(source.clients.views(), server, sort) {
             let ctx = client_ctx(&source, &view);
             if let Some(f) = filter
                 && !vtmux_core::format::is_true(&vtmux_core::format::expand_time(f, &ctx))
@@ -366,6 +366,7 @@ impl TreeMode for ClientMode {
         let source = server.render_source();
         let view = source
             .clients
+            .views()
             .iter()
             .find(|v| v.order as usize == data.id.0)?;
         let mut ctx = client_ctx(&source, view);
@@ -471,6 +472,7 @@ impl TreeMode for ClientMode {
     ) {
         let Some(view) = source
             .clients
+            .views()
             .iter()
             .find(|v| v.order as usize == data.id.0)
         else {

@@ -449,6 +449,8 @@ pub struct Server {
     pub global_env: Environ,
     /// The theme colours last worked out ([`crate::render::window::Source::theme`]).
     pub(crate) themes: crate::render::window::ThemeCache,
+    /// Each pane's border style as last expanded.
+    pub(crate) border_styles: crate::render::window::BorderStyles,
     /// `kill-server` ran: exit once replies are out.
     pub shutdown: bool,
     /// Nesting of `source-file`: with no client (cmd-source-file.c
@@ -704,6 +706,7 @@ impl Server {
             info,
             global_env,
             themes: crate::render::window::ThemeCache::default(),
+            border_styles: crate::render::window::BorderStyles::default(),
             shutdown: false,
             source_depths: BTreeMap::new(),
             focus_stale: std::collections::BTreeSet::new(),
@@ -2593,6 +2596,21 @@ impl Server {
         false
     }
 
+    /// Client `id` (on session `s`) redraws more than its panes this
+    /// frame: `CLIENT_REDRAWWINDOW`, `CLIENT_REDRAWBORDERS` or
+    /// `CLIENT_REDRAWSTATUS`. `redraw_draw` then expands the border styles of
+    /// its window's panes again (screen-redraw.c:1726-1731).
+    fn redraw_pending(&self, id: ClientId, s: SessionId) -> bool {
+        let pending = self
+            .clients
+            .get(&id)
+            .is_some_and(|c| c.status.redraw_pending());
+        if pending && let Some((_, w, _)) = self.model.current_of(s) {
+            self.border_styles.forget(&self.model, w);
+        }
+        pending
+    }
+
     fn render_clients(&mut self) {
         let attached: Vec<_> = self
             .clients
@@ -2650,8 +2668,7 @@ impl Server {
             // content it shows until a full redraw (server_redraw_client)
             // or the message clears. Borders and pane status lines still
             // draw (CLIENT_REDRAWBORDERS is not frozen).
-            let client = self.clients.get_mut(&id).expect("client");
-            let redrawing = client.status.redraw_pending();
+            let redrawing = self.redraw_pending(id, s);
             let (jobs, window_jobs) = self.redraw_jobs(id, redrawing);
             let client = self.clients.get_mut(&id).expect("client");
             let frozen = client.status.hold_window();
@@ -3586,9 +3603,10 @@ impl Server {
             model: &self.model,
             info: &self.info,
             env: &self.global_env,
-            clients: self.client_views(),
+            clients: crate::render::window::Clients::new(|| self.client_views()),
             themes: &self.themes,
             keys: &self.key_bindings,
+            borders: &self.border_styles,
         }
     }
 
