@@ -4,18 +4,38 @@
 
 A drop-in replacement for tmux 3.8, written in Rust on [libghostty-vt](https://github.com/ghostty-org/ghostty). Same CLI, config, formats, hooks and control mode, so your `.tmux.conf`, plugins and scripts work unchanged.
 
-- **All the baggage.** The quirks plugins and scripts depend on are kept, byte for byte. Not a re-imagining: if you want a new multiplexer model, use Zellij. vtmux is for keeping your tmux setup and putting a better core under it.
-- **Fast and lean.** That's the goal, and it's measured, not assumed: big scrollback settles at a sixth to a third of tmux's memory, pane output costs under half of tmux's CPU, and a bare server or an idle pane uses a few MB more than tmux's (speed over a few MB, as Ghostty does). The comparison with tmux 3.8 is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
-- **Fewer paper cuts.** Long-standing tmux annoyances fixed without breaking compliance: each fix is opt-in or invisible to scripts ([docs/PAPERCUTS.md](docs/PAPERCUTS.md)). The first two make the active pane obvious, both opt-in: a focus ring instead of tmux's half-coloured border, and a pane blend that dims the other panes the way Ghostty dims unfocused splits. Real tmux bugs (data loss, hangs) are fixed by default and documented in [compat/DIVERGENCES.md](compat/DIVERGENCES.md).
-- **Better rendering.** The server composites one frame per client and sends only what changed, inside synchronized output, with the cursor placed once, so heavy output doesn't make the cursor jump around ([how it works](docs/ARCHITECTURE.md)).
-- **Live upgrades.** `tmux vtmux-upgrade` moves a running server onto a new binary in place: every pane's program keeps running, attached clients follow onto the new binary, and control clients (scripts, mu, murmur) stay connected. The same snapshot can, opt-in (`vtmux-persist`), restore sessions, layout and each pane's last screen after a crash or reboot; commands are never relaunched for you ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress, M2).
+## Compared with tmux 3.8
 
-Just the core: no agent integration, no extra TUI, no animations. Images pass through to your terminal.
+Measured, not assumed: release builds against tmux 3.8 on the same host ([numbers and method](docs/PERFORMANCE.md)).
+
+| | vtmux vs tmux 3.8 |
+|---|---|
+| **Big scrollback** | 1M lines settle at 103 MB vs 622 MB; 10 panes x 100k lines at 100 MB vs 629 MB; 20 panes streaming nonstop at their 100k limit at 217 MB vs 1.25 GB. Scrollback is compressed once it goes quiet, or in small steps while a pane keeps streaming. |
+| **CPU** | Pane output costs 0.37-0.46x tmux's server CPU with no client and 0.42-0.62x with one attached; 8 clients 0.06-0.19x; an idle server with a real config (TPM, a status poller) 0.28x. Busy agent TUIs (5-20 panes): 0.85-1.3x. |
+| **Rendering** | One composed frame per client, only what changed, inside synchronized output, the cursor placed once: no cursor jumping under heavy output. A redraw-heavy benchmark sends 0.07 MB to the terminal where tmux sends 10.1 MB, at 0.3x the CPU. |
+| **Compatibility** | Same CLI, config, formats, hooks and control mode. All 272 behaviour-oracle scenarios recorded from real tmux 3.8 pass, and 158 of tmux's own 174 regress tests (12 expected failures, each recorded, 1 skipped). |
+| **What it costs** | Speed over a few MB, as Ghostty does: an idle server uses 9.0 MB vs 4.2 MB and each idle pane 18 KB vs 5.4 KB; a key's echo takes 0.33 ms vs 0.21 ms (both far below what you can see); searching all of a 1M-line history in copy mode is 3-5x slower. |
+
+## What tmux can't do
+
+**Pane blend: see which pane is active, without spending a cell.** tmux marks the active pane with a half-coloured border and an arrow, and its `window-style` only recolours cells that use default colours, so TUIs that paint their own colours look the same in every pane. vtmux blends every cell of the inactive panes toward the terminal's own background in its compositor, explicit colours included, the way Ghostty dims unfocused splits. Nothing on screen moves and no row or column is spent:
+
+```tmux
+if -F '#{vtmux_version}' "set -g vtmux-pane-inactive-blend 'fg=bg/25'"
+```
+
+`vtmux-pane-active-blend` does the same for the active pane; both are off unless set ([spec](docs/specs/2026-11-04-pane-blend.md)).
+
+**Live upgrades: a new binary without losing a pane.** Upgrading tmux under a running server ends in `protocol version mismatch` and a `kill-server` that takes every shell, editor and build with it. `tmux vtmux-upgrade` snapshots the server, checks that the new binary can read the snapshot, and replaces itself in place: every pane's program keeps running, attached clients follow onto the new binary, and control clients (scripts, mu, murmur) stay connected. If anything fails, the old server keeps running. The same snapshot, opt-in with `vtmux-persist`, brings back sessions, layout and each pane's last screen and scrollback after a crash or reboot; commands are never relaunched for you ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress, M2).
+
+## Also
+
+- **All the baggage.** The quirks plugins and scripts depend on are kept, byte for byte. Not a re-imagining: if you want a new multiplexer model, use Zellij. vtmux is for keeping your tmux setup and putting a better core under it.
+- **Paper cuts, not features.** Long-standing tmux annoyances are fixed only where scripts can't tell: each fix is opt-in (a `vtmux-*` option) or invisible ([docs/PAPERCUTS.md](docs/PAPERCUTS.md)). Real tmux bugs (data loss, hangs) are fixed by default and documented in [compat/DIVERGENCES.md](compat/DIVERGENCES.md).
+- **Just the core.** No agent integration, no extra TUI, no animations. Images pass through to your terminal.
 
 Compliance is checked against tmux's own regress suite and a behaviour oracle recorded from real tmux 3.8. Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
 
-**Status:** early, not a daily tmux yet. M0 (the walking skeleton) is done; M1 (daily use) is well along. Working today: sessions, windows, panes and layouts, attach/detach, control mode (`-C`), options, formats, key bindings, hooks, the status line and messages, the command prompt, copy mode (search, selection, copy-pipe), `choose-tree` with its preview, clock mode, `display-panes`, paste buffers, popups, `run-shell`/`if-shell`, `#()` in formats, `%if` in configs, `set-titles`, `synchronize-panes`, the focus ring, and the mouse (clicks, the status line, the wheel, drag-select and border resize, forwarding to mouse-aware programs). Still missing: the other choose modes, menus. It passes all 272 behaviour-oracle scenarios recorded from real tmux 3.8 and 158 of tmux's 174 regress tests (12 are expected failures, each recorded in compat/expected.toml, and one is skipped). See the [spec](docs/specs/2026-10-29-vtmux.md) and [how it works](docs/ARCHITECTURE.md).
-
-**Big scrollback is the lean story** (vs tmux 3.8, release build, Linux, a 96-cpu devserver at load 2.6-4.9; [numbers and method](docs/PERFORMANCE.md)): one pane with 1,000,000 lines of scrollback settles at 103 MB against tmux's 622 MB, one with 100,000 lines at 19 MB against 66 MB, and a session of 10 panes with 100,000 log lines each at 100 MB against 629 MB; a pane that keeps streaming at its 100,000-line limit stays at 19 MB. Until the idle history is compressed (about 15 s after 100,000 lines, 70 s after 1,000,000) vtmux holds up to 1.6x tmux's memory, and a search through all of it in copy mode is 3.4-5.0x slower (8 s against 1.7 s on 1,000,000 lines; entering copy mode is faster, 57 ms against 220 ms). Elsewhere: an idle server uses 9.0 MB against 4.2 MB and an idle pane 18 KB against 5.4 KB. Consuming 100 MB of pane output with no client takes 0.89 s of server CPU against 2.38 s (plain text); with a 200x50 client attached a flood takes 0.4-0.6x of tmux's server CPU, and with 8 clients 0.06-0.19x; a key's echo takes 0.33 ms against 0.21 ms (0.49 against 0.52 ms next to a flood). Many synthetic agent TUIs (5 to 20 panes, one or two clients) cost 0.85-1.3x tmux's server CPU. With the owner's config (TPM plugins and the mu-crew poller) the idle server uses 9.7 MB against 4.6 MB and 47 ms of CPU a minute against 171 ms; sourcing the config takes about 100 ms for both.
+**Status:** unreleased. M1 (daily use) is done: every tmux 3.8 command is implemented and the author uses vtmux as their tmux every day. M2 (live upgrade and persistence, then hardening from daily use) is in progress. See the [spec](docs/specs/2026-10-29-vtmux.md) and [how it works](docs/ARCHITECTURE.md).
 
 Linux first, macOS second: CI runs the full gate, including the tmux comparison suites, on both. ISC license.
