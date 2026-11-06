@@ -15,19 +15,7 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 3] = [
-    // D23: the focus ring.
-    OptionDef {
-        name: "vtmux-focus-ring",
-        scope: Scope::Window,
-        kind: Kind::Flag,
-        array: false,
-        hook: false,
-        separator: None,
-        default: DefaultValue::Flag(false),
-        text: Some("Whether to draw a ring around the active pane."),
-        unit: None,
-    },
+pub(super) static EXTENSIONS: [OptionDef; 2] = [
     // D26: the pane blend.
     OptionDef {
         name: "vtmux-pane-active-blend",

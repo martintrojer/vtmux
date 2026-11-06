@@ -2913,11 +2913,6 @@ impl Server {
         let Some(window) = self.model.windows.get(&w) else {
             return;
         };
-        let offset = i64::from(
-            self.model
-                .number_option(TreeId::Window(w), "vtmux-focus-ring")
-                != 0,
-        );
         let Some(client) = self.clients.get_mut(&id) else {
             return;
         };
@@ -2929,12 +2924,12 @@ impl Server {
                 continue;
             }
             let rect = pane.rect;
-            let left = i64::from(rect.xoff) + offset;
+            let left = i64::from(rect.xoff);
             let (Ok(left), Ok(width)) = (u16::try_from(left), u16::try_from(rect.sx)) else {
                 continue;
             };
             for (py, _) in rows.iter().enumerate().filter(|(_, d)| **d) {
-                let wy = i64::from(rect.yoff) + offset + i64::try_from(py).unwrap_or(i64::MAX);
+                let wy = i64::from(rect.yoff) + i64::try_from(py).unwrap_or(i64::MAX);
                 if let Ok(wy) = u16::try_from(wy)
                     && wy < area
                 {
@@ -3203,8 +3198,8 @@ impl Server {
                 }
             }
         }
-        self.draw_pane_prompts(s, &source, &theme, &draw, caps, &mut window);
-        self.draw_menu(s, &source, &theme, caps, draw.offset, &mut window);
+        self.draw_pane_prompts(s, &source, &theme, caps, &mut window);
+        self.draw_menu(s, &source, &theme, caps, &mut window);
         let at = usize::from(y) * cols;
         // A swap, not a copy: the window buffer is blanked before its next
         // use anyway.
@@ -3287,7 +3282,6 @@ impl Server {
         source: &crate::render::window::Source<'_>,
         theme: &crate::render::compose::Theme,
         caps: crate::render::Caps,
-        offset: u16,
         window: &mut vtmux_vt::Snapshot,
     ) {
         let Some((_, w, _)) = self.model.current_of(s) else {
@@ -3306,14 +3300,12 @@ impl Server {
             theme,
             caps.clear(),
             window,
-            offset,
             (win.sx(), win.sy()),
         );
         let (cx, cy) = menu.cursor();
-        let off = u32::from(offset);
-        window.cursor = u16::try_from(cx + off)
+        window.cursor = u16::try_from(cx)
             .ok()
-            .zip(u16::try_from(cy + off).ok())
+            .zip(u16::try_from(cy).ok())
             .filter(|&(x, y)| x < window.cols && y < window.rows);
         window.cursor_visible = false;
     }
@@ -3328,7 +3320,6 @@ impl Server {
         s: SessionId,
         source: &crate::render::window::Source<'_>,
         theme: &crate::render::compose::Theme,
-        draw: &crate::render::compose::Draw,
         caps: crate::render::Caps,
         window: &mut vtmux_vt::Snapshot,
     ) {
@@ -3352,9 +3343,8 @@ impl Server {
             if !win.is_visible(p) || sx == 0 || sy == 0 {
                 continue;
             }
-            let offset = i32::from(draw.offset);
-            let wy = pane.rect.yoff + offset + if top { 0 } else { int(sy) - 1 };
-            let xoff = pane.rect.xoff + offset;
+            let wy = pane.rect.yoff + if top { 0 } else { int(sy) - 1 };
+            let xoff = pane.rect.xoff;
             let (Ok(wy), Ok(width)) = (usize::try_from(wy), usize::try_from(sx)) else {
                 continue;
             };
@@ -3362,7 +3352,7 @@ impl Server {
                 continue;
             }
             let (row, cx) = crate::render::status::pane_prompt_row(source, tree, prompt, width);
-            // Columns left of the scene are cut off (`offset`), and the
+            // Columns left of the scene are cut off (`xoff`), and the
             // line ends at the scene's edge.
             let skip = usize::try_from(-xoff).unwrap_or(0);
             let px = usize::try_from(xoff).unwrap_or(0);

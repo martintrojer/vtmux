@@ -300,11 +300,16 @@ mod tests {
     #[test]
     fn vtmux_options_match_exactly() {
         assert!(
-            matches!(match_name("vtmux-focus-ring"), Ok(Matched::Table(d, None)) if d.name == "vtmux-focus-ring")
+            matches!(match_name("vtmux-pane-active-blend"), Ok(Matched::Table(d, None)) if d.name == "vtmux-pane-active-blend")
         );
-        for prefix in ["vt", "vtm", "vtmux", "vtmux-focus"] {
+        for prefix in ["vt", "vtm", "vtmux", "vtmux-pane"] {
             assert_eq!(match_name(prefix), Err(MatchError::Unknown), "{prefix}");
         }
-        assert!(find("vtmux-focus-ring").is_none(), "not in tmux's table");
+        assert!(
+            find("vtmux-pane-active-blend").is_none(),
+            "not in tmux's table"
+        );
+        // The removed focus ring (D23) is unknown, as any other name.
+        assert_eq!(match_name("vtmux-focus-ring"), Err(MatchError::Unknown));
     }
 }

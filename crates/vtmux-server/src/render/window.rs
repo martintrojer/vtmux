@@ -258,10 +258,6 @@ impl Source<'_> {
         let window = self.model.windows.get(&w)?;
         let active = window.active();
         let wtree = TreeId::Window(w);
-        // D23: under the focus ring the window sits 1 cell in from the
-        // drawn area's corner, inside a frame the scene draws.
-        let ring = self.model.number_option(wtree, "vtmux-focus-ring") != 0;
-        let offset = u16::from(ring);
         let marked_pane = self.model.marked().and_then(|m| m.pane);
         let generation = self.model.options.generation();
         let mut panes = Vec::new();
@@ -280,9 +276,7 @@ impl Source<'_> {
                     .modes
                     .first()
                     .is_some_and(crate::mode::Mode::hides_pane_status);
-            let mut rect = pane.rect;
-            rect.xoff += i32::from(offset);
-            rect.yoff += i32::from(offset);
+            let rect = pane.rect;
             let placement = self.model.scrollbar_placement(p);
             panes.push(ScenePane {
                 id: p,
@@ -338,29 +332,20 @@ impl Source<'_> {
         }
         let status_rows: BTreeMap<PaneId, PaneStatus> =
             panes.iter().map(|p| (p.id, p.status)).collect();
-        let frame = 2 * u32::from(offset);
         let view = WindowView {
-            sx: window.sx() + frame,
-            sy: window.sy() + frame,
+            sx: window.sx(),
+            sy: window.sy(),
             panes,
-            // D23: pane-border-indicators is ignored under the ring.
-            indicators: if ring {
-                Indicators::Off
-            } else {
-                Indicators::from_choice(self.model.number_option(wtree, "pane-border-indicators"))
-            },
+            indicators: Indicators::from_choice(
+                self.model.number_option(wtree, "pane-border-indicators"),
+            ),
             two_pane: two_pane(self.model, w),
-            ring: ring.then_some(active),
         };
         let order: Vec<PaneId> = view.panes.iter().map(|p| p.id).collect();
         let scene = match cache {
             Some(cache) => Scene::cached(&cache.scene, view, cols, rows),
             None => Rc::new(Scene::build(&view, cols, rows)),
         };
-        let ring_style = draws
-            .get(&active)
-            .map(|d| d.border.clone())
-            .unwrap_or_default();
         for p in order {
             let mut under = scene.status_line(p);
             // redraw_mark_menu goes over the scene first, so the status
@@ -394,7 +379,7 @@ impl Source<'_> {
             let format = self.string(TreeId::Pane(p), "pane-border-format");
             let expanded = vtmux_core::format::expand_time(&format, &ctx);
             let d = draws.get_mut(&p).expect("drawn pane");
-            let line = pane_status(&under, &d.border, &ring_style, d.lines, d.index, &expanded);
+            let line = pane_status(&under, &d.border, d.lines, d.index, &expanded);
             (d.status, d.status_ranges) = (line.cells, line.ranges);
         }
         let ctx = self.ctx(found, caps);
@@ -416,7 +401,6 @@ impl Source<'_> {
             panes: draws,
             active: Some(active),
             marked,
-            offset,
             border: self.style(wtree, "pane-border-style", &ctx),
             lines: Lines::from_choice(self.model.number_option(wtree, "pane-border-lines")),
             // Expanded only when drawn: `fill-character` is a format.
@@ -708,12 +692,10 @@ impl Source<'_> {
         Lines::from_choice(self.model.number_option(tree, "pane-border-lines"))
     }
 
-    /// `window_pane_get_pane_status` (window.c:2930). Read from the option,
-    /// not the layout's, which is off under the focus ring (the ring's edge
-    /// carries the line).
+    /// `window_pane_get_pane_status` (window.c:2930).
     fn pane_status(&self, w: WindowId, p: PaneId, floating: bool, lines: Lines) -> PaneStatus {
         if !floating {
-            return self.model.border_status(w);
+            return self.model.pane_status(w);
         }
         if lines == Lines::None {
             return PaneStatus::Off;
@@ -811,8 +793,8 @@ pub fn cursor_of(draw: &Draw, model: &Model, cols: u16, rows: u16) -> (Option<(u
     let Some((cx, cy)) = d.content.cursor else {
         return (None, false);
     };
-    let x = pane.rect.xoff + i32::from(cx) + i32::from(draw.offset);
-    let y = pane.rect.yoff + i32::from(cy) + i32::from(draw.offset);
+    let x = pane.rect.xoff + i32::from(cx);
+    let y = pane.rect.yoff + i32::from(cy);
     // server_client_reset_state (server-client.c:2243-2276): a cursor off
     // the window (a floating pane moved past its left or top edge) is
     // hidden at 0,0.

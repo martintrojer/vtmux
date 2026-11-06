@@ -3949,18 +3949,20 @@ fn buffers_cli() {
     });
 }
 
-/// D23 off-state: `vtmux-focus-ring` is invisible until set. Listings on a
-/// fresh server are byte-identical to tmux's (`show -g`, `-gw`, `-s`,
-/// `-A`, `-wA`, `-pA`), the window keeps its size, and prefixes of the name
-/// keep tmux's errors. A config guarding it with `%if "#{vtmux_version}"`
-/// loads cleanly in both. Then, vtmux only: a named lookup prints the
-/// default, the guarded `set` took effect, and once set it is listed at
-/// that scope.
+/// vtmux options are invisible until set. Listings on a fresh server are
+/// byte-identical to tmux's (`show -g`, `-gw`, `-s`, `-A`, `-wA`, `-pA`),
+/// the window keeps its size, and prefixes of the name keep tmux's errors.
+/// A config guarding one with `%if "#{vtmux_version}"` loads cleanly in
+/// both. `vtmux-focus-ring` (D23, removed 2026-11-06, superseded by pane
+/// blend, D26) is an unknown option like any other, set or shown, from the
+/// command line or a config: tmux's `invalid option` error, byte-identical
+/// to tmux 3.8. Then, vtmux only: a named lookup prints the default, the
+/// guarded `set` took effect, and once set it is listed at that scope.
 #[test]
 fn vtmux_options_invisible_while_unset() {
     compare("vtmux_options_invisible_while_unset", |w| {
         vec![
-            w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]),
+            w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat", "-"]),
             w.run(&["show", "-g"]),
             w.run(&["show", "-gw"]),
             w.run(&["show", "-s"]),
@@ -3972,6 +3974,14 @@ fn vtmux_options_invisible_while_unset() {
             w.run(&["show", "-g", "vtm"]),
             w.run(&["set", "-gw", "vtmux", "on"]),
             w.run(&["source", &guarded_config(w)]),
+            w.run(&["set", "-g", "vtmux-focus-ring", "on"]),
+            w.run(&["set", "-gw", "vtmux-focus-ring", "on"]),
+            w.run(&["set", "-w", "vtmux-focus-ring", "off"]),
+            w.run(&["set", "-gu", "vtmux-focus-ring"]),
+            w.run(&["show", "-gv", "vtmux-focus-ring"]),
+            w.run(&["show", "-wA", "vtmux-focus-ring"]),
+            w.run(&["display", "-p", "[#{vtmux-focus-ring}]"]),
+            w.run(&["source", &focus_ring_config(w)]),
             // A failed set of a tmux string option: tmux writes the old
             // value back, so it is listed afterwards (options.c:1286).
             w.run(&["set", "-w", "window-status-style", "garbage"]),
@@ -3979,7 +3989,7 @@ fn vtmux_options_invisible_while_unset() {
         ]
     });
     let w = World::new(&vtmux_bin());
-    w.run(&["new", "-d", "-s", "a", "cat"]);
+    w.run(&["new", "-d", "-s", "a", "cat", "-"]);
     let out = |args: &[&str]| w.run(args).stdout;
     // A failed set leaves a vtmux option unset, at every scope, and keeps
     // a value that was set.
@@ -4000,17 +4010,16 @@ fn vtmux_options_invisible_while_unset() {
     w.run(&["set", "-gu", blend]);
     assert!(!out(&["show", "-gw"]).contains(blend));
     w.run(&["source", &guarded_config(&w)]);
-    assert_eq!(out(&["show", "-gv", "vtmux-focus-ring"]), "on\n");
-    w.run(&["set", "-gwu", "vtmux-focus-ring"]);
-    assert_eq!(out(&["show", "-gv", "vtmux-focus-ring"]), "off\n");
-    assert_eq!(out(&["show", "-w", "vtmux-focus-ring"]), "");
-    assert_eq!(out(&["display", "-p", "[#{vtmux-focus-ring}]"]), "[]\n");
+    assert_eq!(out(&["show", "-gv", blend]), "fg=bg/25\n");
+    assert!(out(&["show", "-gw"]).ends_with(&format!("{blend} fg=bg/25\n")));
+    assert_eq!(out(&["show", "-wv", blend]), "");
+    assert_eq!(out(&["show", "-wAv", blend]), "fg=bg/25\n");
+    // The removed ring is no option here either.
     let r = w.run(&["set", "-gw", "vtmux-focus-ring", "on"]);
-    assert_eq!((r.code, r.stderr.as_str()), (0, ""));
-    assert!(out(&["show", "-gw"]).ends_with("vtmux-focus-ring on\n"));
-    assert_eq!(out(&["show", "-wv", "vtmux-focus-ring"]), "");
-    assert_eq!(out(&["show", "-wAv", "vtmux-focus-ring"]), "on\n");
-    assert_eq!(out(&["display", "-p", "[#{vtmux-focus-ring}]"]), "[1]\n");
+    assert_eq!(
+        (r.code, r.stderr.as_str()),
+        (1, "invalid option: vtmux-focus-ring\n")
+    );
 }
 
 /// D26: the blend options are empty strings until set (and then invisible
@@ -4067,14 +4076,21 @@ fn vtmux_pane_blend_options() {
     );
 }
 
-/// The D23 config guard: real tmux skips the vtmux option.
+/// The config guard: real tmux skips the vtmux option.
 fn guarded_config(w: &World) -> String {
     let path = w.dir().join("guard.conf");
     std::fs::write(
         &path,
-        "set -g pane-border-lines heavy\n%if \"#{vtmux_version}\"\nset -g vtmux-focus-ring on\n%endif\n",
+        "set -g pane-border-lines heavy\n%if \"#{vtmux_version}\"\nset -g vtmux-pane-inactive-blend fg=bg/25\n%endif\n",
     )
     .expect("write");
+    path.to_str().expect("utf-8").to_owned()
+}
+
+/// A config that still sets the removed `vtmux-focus-ring`, unguarded.
+fn focus_ring_config(w: &World) -> String {
+    let path = w.dir().join("ring.conf");
+    std::fs::write(&path, "set -g vtmux-focus-ring on\n").expect("write");
     path.to_str().expect("utf-8").to_owned()
 }
 

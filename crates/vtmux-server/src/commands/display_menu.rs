@@ -120,7 +120,6 @@ pub fn exec(
     clippy::many_single_char_names,
     reason = "cmd-display-menu.c's w/h/sx/sy"
 )]
-#[expect(clippy::too_many_lines, reason = "one variable per popup_* format")]
 fn position(
     server: &Server,
     item: &Item,
@@ -150,9 +149,7 @@ fn position(
             Some(at) if y >= i64::from(at) => sy - 1,
             _ => y,
         };
-        // D23: the window sits one cell in under the focus ring.
-        let off = i64::from(m.offset);
-        let (mx, my) = ((x - off).max(0), (my - off).max(0));
+        let (mx, my) = (x, my.max(0));
         vars.push(("popup_mouse_x", mx));
         vars.push(("popup_mouse_y", my));
         vars.push(("popup_mouse_centre_x", (mx - w / 2).max(0)));
