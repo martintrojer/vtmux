@@ -298,7 +298,7 @@ pub(crate) mod tests {
     fn round_trip<T: Value + PartialEq + std::fmt::Debug>(v: &T) {
         let mut out = Vec::new();
         v.put(&mut out);
-        assert_eq!(&T::get(&out, &Ctx { version: 1 }).unwrap(), v);
+        assert_eq!(&T::get(&out, &Ctx::new(1)).unwrap(), v);
     }
 
     fn charsets() -> Charsets {
@@ -480,6 +480,6 @@ pub(crate) mod tests {
     fn unknown_enum_number_is_an_error() {
         let mut out = Vec::new();
         crate::wire::put_varint(&mut out, 99);
-        assert!(Charset::get(&out, &Ctx { version: 1 }).is_err());
+        assert!(Charset::get(&out, &Ctx::new(1)).is_err());
     }
 }

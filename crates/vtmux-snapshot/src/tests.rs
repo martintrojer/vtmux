@@ -5,6 +5,7 @@ use super::*;
 use crate::model::tests::{
     sample_client, sample_layout, sample_pane, sample_server, sample_session, sample_window,
 };
+use crate::row::tests::sample_row;
 use crate::wire::{Value as _, put_field, put_varint};
 
 /// A consistent snapshot with every record type in it.
@@ -44,6 +45,8 @@ pub(crate) fn sample() -> Snapshot {
             binary: "/usr/local/bin/vtmux".into(),
             ghostty_patches: "0123abcd".into(),
             written_us: 1_790_000_300_000_000,
+            // Nothing beyond v1 (a_stream_requiring_an_unknown_feature_is_refused).
+            requires: Vec::new(),
         },
         server: sample_server(),
         sessions: vec![sample_session()],
@@ -147,33 +150,196 @@ fn unknown_tags_are_skipped_at_every_level() {
     s.sessions[0].put(&mut session);
     put_field(&mut session, 77, |o| o.extend_from_slice(b"future"));
     put_field(&mut body, 3, |o| o.extend_from_slice(&session));
-    let mut bytes = header();
-    bytes.extend_from_slice(&body);
-    let got = decode(&bytes).unwrap();
+    let got = decode(&frame(&body)).unwrap();
     let mut want = s.clone();
     want.sessions.push(s.sessions[0].clone());
     assert_eq!(got, want);
 }
 
 #[test]
-fn damaged_streams_fail_without_panicking() {
+fn every_cut_and_every_bit_flip_is_an_error() {
     let bytes = encode(&sample());
-    for cut in (12..bytes.len()).step_by(17) {
-        // A cut may land on a field boundary and decode; it must not panic.
-        let _ = decode(&bytes[..cut]).map(|s| s.check());
+    // A cut at a record boundary used to decode as a smaller snapshot.
+    for cut in 0..bytes.len() {
+        assert!(decode(&bytes[..cut]).is_err(), "cut at {cut}");
     }
-    for at in (12..bytes.len()).step_by(13) {
-        for bit in [0x01, 0x80] {
+    for at in 0..bytes.len() {
+        for bit in 0..8 {
             let mut b = bytes.clone();
+            b[at] ^= 1 << bit;
+            assert!(decode(&b).is_err(), "bit {bit} of byte {at}");
+        }
+    }
+    let mut long = bytes.clone();
+    long.push(0);
+    assert_eq!(
+        decode(&long),
+        Err(Error::Malformed("bytes after the snapshot"))
+    );
+    assert_eq!(decode(&bytes[..bytes.len() - 1]), Err(Error::Truncated));
+    let mut flipped = bytes.clone();
+    *flipped.last_mut().unwrap() ^= 1;
+    assert_eq!(decode(&flipped), Err(Error::Corrupt));
+}
+
+#[test]
+fn a_cut_or_damaged_manifest_is_an_error() {
+    let s = sample();
+    let chunks: std::collections::BTreeMap<Hash, Vec<u8>> =
+        s.pages().iter().map(|p| (p.hash, p.data.clone())).collect();
+    let manifest = encode_manifest(&s);
+    let fetch = |h: &Hash| chunks.get(h).cloned();
+    for cut in 0..manifest.len() {
+        assert!(
+            decode_with(&manifest[..cut], fetch).is_err(),
+            "cut at {cut}"
+        );
+    }
+    for at in (0..manifest.len()).step_by(3) {
+        let mut b = manifest.clone();
+        b[at] ^= 0x10;
+        assert!(decode_with(&b, fetch).is_err(), "byte {at}");
+    }
+}
+
+#[test]
+fn damaged_bodies_with_a_matching_hash_fail_without_panicking() {
+    // A writer bug, not damage in transit: the hash is right, the body
+    // wrong. Decoding and checking must fail cleanly or succeed.
+    let mut body = Vec::new();
+    sample().put(&mut body);
+    for cut in (0..body.len()).step_by(7) {
+        let _ = decode(&frame(&body[..cut])).map(|s| s.check());
+    }
+    for at in (0..body.len()).step_by(5) {
+        for bit in [0x01, 0x80] {
+            let mut b = body.clone();
             b[at] ^= bit;
-            let _ = decode(&b).map(|s| s.check());
+            let _ = decode(&frame(&b)).map(|s| s.check());
         }
     }
     // A length running past the end.
-    let mut bytes = header();
-    put_varint(&mut bytes, 2);
-    put_varint(&mut bytes, 1_000_000);
-    assert_eq!(decode(&bytes), Err(Error::Truncated));
+    let mut body = Vec::new();
+    put_varint(&mut body, 2);
+    put_varint(&mut body, 1_000_000);
+    assert_eq!(decode(&frame(&body)), Err(Error::Truncated));
+}
+
+#[test]
+fn a_stream_requiring_an_unknown_feature_is_refused() {
+    let mut s = sample();
+    s.meta.requires = vec!["from-the-future".into()];
+    assert_eq!(
+        decode(&encode(&s)),
+        Err(Error::Unsupported("from-the-future".into()))
+    );
+
+    // Decision 23's pages need the same Ghostty patch stack.
+    let mut s = sample();
+    s.meta.requires = vec![ghostty_pages_feature("0123abcd")];
+    let bytes = encode(&s);
+    assert_eq!(
+        decode(&bytes),
+        Err(Error::Unsupported("ghostty-pages-0123abcd".into()))
+    );
+    let other = Features {
+        ghostty_patches: Some("feedf00d".into()),
+    };
+    assert!(matches!(
+        decode_for(&bytes, &other, |_| None),
+        Err(Error::Unsupported(_))
+    ));
+    let same = Features {
+        ghostty_patches: Some("0123abcd".into()),
+    };
+    assert_eq!(decode_for(&bytes, &same, |_| None).unwrap(), s);
+}
+
+/// A window whose layout nests `depth` nodes deep.
+fn nested_layout(depth: usize) -> Snapshot {
+    let mut cell = LayoutCell::Pane(Leaf::default());
+    for _ in 0..depth {
+        cell = LayoutCell::Node(Node {
+            children: vec![cell],
+            ..Node::default()
+        });
+    }
+    Snapshot {
+        windows: vec![Window {
+            layout: Layout {
+                root: cell,
+                ..Layout::default()
+            },
+            ..Window::default()
+        }],
+        ..Snapshot::default()
+    }
+}
+
+#[test]
+fn layouts_nest_over_a_hundred_levels_but_not_without_end() {
+    let deep = nested_layout(120);
+    assert_eq!(decode(&encode(&deep)).unwrap(), deep);
+    assert_eq!(
+        decode(&encode(&nested_layout(130))),
+        Err(Error::Malformed("records nest too deeply"))
+    );
+    // Built as bytes: a value this deep overflows the encoder's stack too.
+    let mut cell = Vec::new();
+    put_field(&mut cell, 1, |_| {});
+    for _ in 0..20_000 {
+        let mut node = Vec::new();
+        put_field(&mut node, 3, |o| o.extend_from_slice(&cell));
+        cell.clear();
+        put_field(&mut cell, 3, |o| o.extend_from_slice(&node));
+    }
+    let mut layout = Vec::new();
+    put_field(&mut layout, 3, |o| o.extend_from_slice(&cell));
+    let mut window = Vec::new();
+    put_field(&mut window, 5, |o| o.extend_from_slice(&layout));
+    let mut body = Vec::new();
+    put_field(&mut body, 4, |o| o.extend_from_slice(&window));
+    assert_eq!(
+        decode(&frame(&body)),
+        Err(Error::Malformed("records nest too deeply"))
+    );
+}
+
+#[test]
+fn records_repeated_empty_cost_their_size_against_a_budget() {
+    // 2 MB of empty client records: a default `Client` each.
+    let mut body = Vec::new();
+    for _ in 0..1_000_000 {
+        put_field(&mut body, 6, |_| {});
+    }
+    assert_eq!(
+        decode(&frame(&body)),
+        Err(Error::Malformed(
+            "snapshot decodes far larger than its bytes"
+        ))
+    );
+    // Wide blank screen rows, a few bytes each.
+    let blank = Row {
+        cells: vec![Cell::default(); row::MAX_COLS],
+        ..Row::default()
+    };
+    let mut screen = Vec::new();
+    let row = blank.encode();
+    for _ in 0..100_000 {
+        put_field(&mut screen, 1, |o| o.extend_from_slice(&row));
+    }
+    let mut body = Vec::new();
+    put_field(&mut body, 5, |o| {
+        put_field(o, 24, |o| put_field(o, 3, |o| o.extend_from_slice(&screen)));
+    });
+    assert_eq!(
+        decode(&frame(&body)),
+        Err(Error::Malformed(
+            "snapshot decodes far larger than its bytes"
+        ))
+    );
+    // A real snapshot is far inside it.
+    decode(&encode(&sample())).unwrap();
 }
 
 #[test]
@@ -201,6 +367,15 @@ fn check_catches_dangling_references() {
     let mut s = sample();
     s.pages_mut(&mut |p| p.raw_len += 1);
     assert!(s.check().is_err());
+
+    // A page whose data doesn't match its name.
+    let mut s = sample();
+    s.pages_mut(&mut |p| {
+        let mut raw = p.raw().unwrap();
+        raw[0] ^= 1;
+        p.data = lz4_flex::block::compress(&raw);
+    });
+    assert!(matches!(s.check(), Err(Error::MissingChunk(_))));
 }
 
 fn golden(version: u32) -> std::path::PathBuf {
@@ -209,27 +384,38 @@ fn golden(version: u32) -> std::path::PathBuf {
         .join(format!("v{version}.snap"))
 }
 
+/// `s` with its history pages' bytes dropped: what it means, whatever
+/// LZ4 encoder compressed its pages. Pages keep their names, which are
+/// their content's hashes.
+fn meaning(s: &Snapshot) -> Snapshot {
+    let mut s = s.clone();
+    s.pages_mut(&mut |p| p.data = Vec::new());
+    s
+}
+
 /// Golden v1: written from [`sample`] when v1 was current. When the format
 /// moves on, freeze today's `sample` as `sample_v1` (as it decodes under
-/// the new version) and keep this test on it; never edit `v1.snap`.
+/// the new version) and keep this test on it; never edit `v1.snap`. Pages
+/// compare by name, so another LZ4 encoder can't fail it.
 #[test]
 fn golden_v1_decodes() {
     let bytes = std::fs::read(golden(1)).expect("tests/golden/v1.snap");
     assert_eq!(version(&bytes).unwrap(), 1);
     let s = decode(&bytes).unwrap();
     s.check().unwrap();
-    assert_eq!(s, sample());
+    assert_eq!(meaning(&s), meaning(&sample()));
 }
 
 /// The current version's encoding is pinned by its golden file, so a change
-/// to the bytes can't go unnoticed. `VTMUX_SNAPSHOT_BLESS=1` writes the
-/// file for a new version; it never overwrites one.
+/// to the bytes can't go unnoticed: the golden snapshot encodes to the
+/// golden bytes, and [`sample`] encodes as it does except for its pages'
+/// compressed bytes (those are the LZ4 encoder's). `VTMUX_SNAPSHOT_BLESS=1`
+/// writes the file for a new version; it never overwrites one.
 #[test]
 fn the_current_version_encodes_to_its_golden_file() {
     let path = golden(FORMAT_VERSION);
-    let bytes = encode(&sample());
     if !path.exists() && std::env::var_os("VTMUX_SNAPSHOT_BLESS").is_some() {
-        std::fs::write(&path, &bytes).unwrap();
+        std::fs::write(&path, encode(&sample())).unwrap();
     }
     let want = std::fs::read(&path).unwrap_or_else(|_| {
         panic!(
@@ -237,11 +423,53 @@ fn the_current_version_encodes_to_its_golden_file() {
             path.display()
         )
     });
+    let golden = decode(&want).unwrap();
     assert!(
-        want == bytes,
+        encode(&golden) == want && encode_manifest(&sample()) == encode_manifest(&golden),
         "the encoding of format {FORMAT_VERSION} changed: bump FORMAT_VERSION and add a \
          golden file (or, before v{FORMAT_VERSION} is released, delete it and bless again)"
     );
+}
+
+#[test]
+fn page_names_hash_the_rows_not_the_compressed_bytes() {
+    let rows = vec![sample_row(); 10];
+    let page = HistoryPage::from_rows(&rows, true);
+    let mut raw = Vec::new();
+    for r in &rows {
+        r.encode_into(&mut raw);
+    }
+    assert_eq!(page.hash, *blake3::hash(&raw).as_bytes());
+    // The same rows compressed by another encoder (here: stored as LZ4
+    // literals only) keep the name and read back the same.
+    let literal = lz4_literals(&raw);
+    assert_ne!(literal, page.data);
+    let restored = HistoryPage {
+        data: literal,
+        ..page.clone()
+    };
+    assert!(restored.verified());
+    assert_eq!(restored.decode_rows().unwrap(), rows);
+}
+
+/// `raw` as one LZ4 block of literals and no matches: valid LZ4 that no
+/// compressing encoder writes.
+fn lz4_literals(raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let n = raw.len();
+    if n < 15 {
+        out.push(u8::try_from(n << 4).unwrap());
+    } else {
+        out.push(0xf0);
+        let mut rest = n - 15;
+        while rest >= 255 {
+            out.push(255);
+            rest -= 255;
+        }
+        out.push(u8::try_from(rest).unwrap());
+    }
+    out.extend_from_slice(raw);
+    out
 }
 
 /// `cargo test --release -p vtmux-snapshot -- --ignored --nocapture`:
