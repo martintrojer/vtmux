@@ -224,8 +224,11 @@ fn a_hello_with_a_later_extension_area_is_served() {
         ControlMode::Control,
         &["display", "-p", "hi"],
     );
+    // No StdinEof: a control client that is not attached leaves when its
+    // command is done (tmux server-client.c `server_client_command_done`),
+    // so the server may have closed the socket before a later write, which
+    // then fails with EPIPE. The frames it sent are still read below.
     std::io::Write::write_all(&mut stream, &with_ext(&hello)).unwrap();
-    protocol::write_msg(&mut stream, &ClientMsg::StdinEof).unwrap();
     let mut stdout = Vec::new();
     let mut last = None;
     while let Some(msg) = read(&mut stream) {
