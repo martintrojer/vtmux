@@ -1,6 +1,6 @@
 # vtmux
 
-**tmux on a modern stack: all the baggage, fast and lean, fewer paper cuts, better rendering.**
+**Drop-in tmux replacement. Modern stack. Better rendering. Live upgrades.**
 
 A drop-in replacement for tmux 3.8, written in Rust on [libghostty-vt](https://github.com/ghostty-org/ghostty). Same CLI, config, formats, hooks and control mode, so your `.tmux.conf`, plugins and scripts work unchanged.
 
@@ -8,6 +8,7 @@ A drop-in replacement for tmux 3.8, written in Rust on [libghostty-vt](https://g
 - **Fast and lean.** That's the goal, and it's measured, not assumed: big scrollback settles at a sixth to a third of tmux's memory, pane output costs under half of tmux's CPU, and a bare server or an idle pane uses a few MB more than tmux's (speed over a few MB, as Ghostty does). The comparison with tmux 3.8 is in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 - **Fewer paper cuts.** Long-standing tmux annoyances fixed without breaking compliance: each fix is opt-in or invisible to scripts ([docs/PAPERCUTS.md](docs/PAPERCUTS.md)). The first two make the active pane obvious, both opt-in: a focus ring instead of tmux's half-coloured border, and a pane blend that dims the other panes the way Ghostty dims unfocused splits. Real tmux bugs (data loss, hangs) are fixed by default and documented in [compat/DIVERGENCES.md](compat/DIVERGENCES.md).
 - **Better rendering.** The server composites one frame per client and sends only what changed, inside synchronized output, with the cursor placed once, so heavy output doesn't make the cursor jump around ([how it works](docs/ARCHITECTURE.md)).
+- **Live upgrades.** `tmux vtmux-upgrade` moves a running server onto a new binary in place: every pane's program keeps running, attached clients follow onto the new binary, and control clients (scripts, mu, murmur) stay connected. The same snapshot can, opt-in (`vtmux-persist`), restore sessions, layout and each pane's last screen after a crash or reboot; commands are never relaunched for you ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress, M2).
 
 Just the core: no agent integration, no extra TUI, no animations. Images pass through to your terminal.
 
