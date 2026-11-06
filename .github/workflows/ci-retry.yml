@@ -8,7 +8,12 @@ name: ci-retry
 # to three times, each after the run completes again. Re-runs made with
 # GITHUB_TOKEN start no new workflow_run event, so this job waits for them
 # itself.
-# workflow_run fires only for this file as it is on the default branch.
+# workflow_run fires only for this file as it is on the default branch. The
+# `branches` filter matches the head branch name only, so a fork's `main`
+# passes it too: the job runs only for runs of this repository's own
+# commits. A manual re-run of a ci run completes it again and fires a second
+# event for the same run; one concurrency group per run queues that instance
+# behind the first instead of letting both re-run the same job.
 on:
   workflow_run:
     workflows: [ci]
@@ -17,9 +22,14 @@ on:
 permissions:
   actions: write
   checks: read
+concurrency:
+  group: ci-retry-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
 jobs:
   rerun-unacquired:
-    if: github.event.workflow_run.conclusion != 'success'
+    if: >-
+      github.event.workflow_run.conclusion != 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
