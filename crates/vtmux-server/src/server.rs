@@ -22,7 +22,7 @@ use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::layout::{Geometry, Layout as CoreLayout, WindowPanes};
 use vtmux_core::options::{Defaults, OptionValue, OptionsStore, TreeId, Value};
-use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg};
+use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg, Speaks};
 use vtmux_vt::PaneTerm;
 
 use crate::alerts;
@@ -104,6 +104,10 @@ pub(crate) struct Client {
     /// checked against the server's access list.
     peer: Option<(u32, u32)>,
     pub(crate) hello: Option<Hello>,
+    /// Which frames the client reads: a control client of another
+    /// protocol version is sent the frozen ones only (protocol module
+    /// docs).
+    speaks: Speaks,
     pub(crate) attached: Option<SessionId>,
     /// Control mode (`-C`) state; `None` for terminal and command clients.
     pub(crate) control: Option<crate::control::ControlState>,
@@ -205,6 +209,7 @@ impl Client {
             dead: false,
             suspended: false,
             hello: None,
+            speaks: Speaks::Full,
             attached: None,
             control: None,
             activity,
@@ -1346,7 +1351,10 @@ impl Server {
 
     /// Queue a message; write what the socket takes now.
     pub(crate) fn send(&mut self, id: ClientId, msg: &ServerMsg) {
-        let kind = if matches!(msg, ServerMsg::Exit { .. } | ServerMsg::Exec { .. }) {
+        let kind = if matches!(
+            msg,
+            ServerMsg::Exit { .. } | ServerMsg::Exec { .. } | ServerMsg::UpgradeResult { .. }
+        ) {
             OutKind::Last
         } else {
             OutKind::Other
@@ -1359,6 +1367,11 @@ impl Server {
         let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead) else {
             return;
         };
+        // Another version's control client could misread anything but the
+        // frozen frames (`MSG_FLAGS`, `MSG_EXEC`), so it gets none of them.
+        if c.speaks == Speaks::Frozen && !msg.is_frozen() {
+            return;
+        }
         // A suspended client's terminal is not tmux's to write
         // (TTY_STARTED is off: tty_client_ready, tty.c:1634).
         if c.suspended && matches!(msg, ServerMsg::Frame(_)) {
@@ -1485,7 +1498,27 @@ impl Server {
                     c.unacked.ack(seq);
                 }
             }
+            ClientMsg::UpgradeRequest { binary } => self.upgrade_request(id, &binary),
         }
+    }
+
+    /// The frozen upgrade handshake (live-upgrade spec, *Handshake*): a
+    /// client of any version asks the server to move onto `binary`, with no
+    /// [`Hello`] and no version check, and gets one
+    /// [`ServerMsg::UpgradeResult`] before the connection closes. The
+    /// upgrade itself is not there yet.
+    fn upgrade_request(&mut self, id: ClientId, _binary: &std::path::Path) {
+        self.send(
+            id,
+            &ServerMsg::UpgradeResult {
+                ok: false,
+                message: "not implemented".to_owned(),
+            },
+        );
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.closing = true;
+        }
+        self.flush_client(id);
     }
 
     fn fail_client(&mut self, id: ClientId, e: &EdgeError) {
@@ -1563,9 +1596,15 @@ impl Server {
         if let Some(tty) = hello.tty.as_mut() {
             (tty.cols, tty.rows) = tty_size(tty.cols, tty.rows);
         }
-        if let Err(e) = hello.check_version() {
-            self.fail_client(id, &e);
-            return;
+        let speaks = match hello.check_version() {
+            Ok(speaks) => speaks,
+            Err(e) => {
+                self.fail_client(id, &e);
+                return;
+            }
+        };
+        if let Some(c) = self.clients.get_mut(&id) {
+            c.speaks = speaks;
         }
         // server_accept (server.c:401-405): a client the access list does
         // not let in leaves with nothing run.

@@ -10,7 +10,44 @@
 //!
 //! A version mismatch is reported the way tmux does (client.c:659-668:
 //! `protocol version mismatch (client N, server M)`, exit 1), with vtmux's
-//! own numbers; see [`Hello::check_version`].
+//! own numbers and a second line naming `vtmux-upgrade`; see
+//! [`Hello::check_version`].
+//!
+//! # Frozen frames
+//!
+//! Most frames change freely: both ends run the same build, and
+//! [`PROTOCOL_VERSION`] turns everyone else away. A few frames are frozen
+//! (live-upgrade spec, decisions 12 and 26): their tag and encoding never
+//! change, so binaries of different versions can still speak them. They are
+//! the upgrade handshake and the frames control mode and command I/O use:
+//!
+//! | frame | tag | payload after the tag byte |
+//! |---|---|---|
+//! | [`ClientMsg::Hello`] | `0x00` | `version` u32, `invocation` u8 (0 `tmux`, 1 `vtmux`), `pid` u32, `argv` (u32 count, then bytes each), `cwd` bytes, `env` (u32 count, then key string and value string each), `tty` option of (`name` string, `term` string, `cols` u32, `rows` u32, `features` u32 count + strings), `control` u8 (0 none, 1 `-C`, 2 `-CC`), `utf8` bool, `no_start` bool |
+//! | [`ClientMsg::Stdin`] | `0x03` | bytes |
+//! | [`ClientMsg::StdinEof`] | `0x04` | nothing |
+//! | [`ClientMsg::UpgradeRequest`] | `0x80` | `binary` bytes |
+//! | [`ServerMsg::Stdout`] | `0x00` | bytes |
+//! | [`ServerMsg::Stderr`] | `0x01` | bytes |
+//! | [`ServerMsg::Exit`] | `0x03` | `code` i32, `message` option of string, `hup` bool |
+//! | [`ServerMsg::UpgradeResult`] | `0x80` | `ok` bool, `message` string |
+//! | [`ServerMsg::UpgradeNotice`] | `0x81` | `binary` bytes, `token` string |
+//!
+//! With the frame header, that is every byte: u32/i32 little-endian, bytes
+//! and strings a u32 length then the bytes (strings UTF-8), a bool or an
+//! option's presence one byte 0 or 1. Paths travel as their raw bytes.
+//! `tests::frozen_frames_never_change` pins each frame byte for byte: never
+//! edit its goldens. To carry something new, add a new frame (new frozen
+//! frames take tags from `0x80` up); never change a frozen one.
+//!
+//! What the frozen set buys:
+//! - [`ClientMsg::UpgradeRequest`] is answered ahead of any version check, so
+//!   a client of any newer binary can ask a server of any older one (from
+//!   [`FROZEN_SINCE`]) to move onto it.
+//! - A control client (`-C`) of any version from [`FROZEN_SINCE`] on is
+//!   accepted ([`Speaks::Frozen`]): it sends only `Hello`, `Stdin` and
+//!   `StdinEof`, and the server sends it frozen frames only, dropping the
+//!   rest ([`ServerMsg::is_frozen`]).
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -20,8 +57,15 @@ use std::path::PathBuf;
 use crate::error::EdgeError;
 use crate::socket::Invocation;
 
-/// Bumped on any incompatible wire change.
-pub const PROTOCOL_VERSION: u32 = 8;
+/// Bumped on any incompatible wire change. The frozen frames (module docs)
+/// never change, whatever this says.
+pub const PROTOCOL_VERSION: u32 = 9;
+
+/// The first protocol version with the frozen frames: a control client of
+/// this version or later talks to any server of this version or later.
+/// Never changes (live-upgrade spec, decision 14: servers from before it
+/// need one last manual restart).
+pub const FROZEN_SINCE: u32 = 9;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
@@ -77,12 +121,26 @@ pub enum ControlMode {
     ControlControl,
 }
 
+/// Which frames a client can read, as its [`Hello`] tells.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Speaks {
+    /// This build's protocol: every frame.
+    #[default]
+    Full,
+    /// Another version's control client: the frozen frames only (module
+    /// docs).
+    Frozen,
+}
+
 impl Hello {
-    /// `Err` if the client speaks a different protocol version than this
-    /// build.
-    pub fn check_version(&self) -> Result<(), EdgeError> {
+    /// Which frames the client reads; `Err` if it can't be served: a
+    /// different protocol version, unless it is a control client of
+    /// [`FROZEN_SINCE`] or later.
+    pub fn check_version(&self) -> Result<Speaks, EdgeError> {
         if self.version == PROTOCOL_VERSION {
-            Ok(())
+            Ok(Speaks::Full)
+        } else if self.version >= FROZEN_SINCE && self.flags.control != ControlMode::None {
+            Ok(Speaks::Frozen)
         } else {
             Err(EdgeError::VersionMismatch {
                 client: self.version,
@@ -125,6 +183,12 @@ pub enum ClientMsg {
     /// `MSG_UNLOCK`: the [`ServerMsg::Lock`] command has exited and the
     /// client has its raw terminal back.
     Unlock,
+    /// Frozen (module docs): move the server onto `binary` (`vtmux-upgrade
+    /// -b`). Sent instead of [`ClientMsg::Hello`] and answered whatever the
+    /// client's version, with [`ServerMsg::UpgradeResult`].
+    UpgradeRequest {
+        binary: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -181,6 +245,37 @@ pub enum ServerMsg {
     Flags {
         wait_exit: bool,
     },
+    /// Frozen (module docs): the answer to [`ClientMsg::UpgradeRequest`],
+    /// the last frame on that connection. `message` is what the requester
+    /// prints: the reason when `ok` is false, warnings when it is true.
+    UpgradeResult {
+        ok: bool,
+        message: String,
+    },
+    /// Frozen (module docs): the server is about to replace itself with
+    /// `binary`. An attached client re-executes `binary` and re-attaches
+    /// with `token`, which rebinds it to its client record (live-upgrade
+    /// spec, decision 21).
+    UpgradeNotice {
+        binary: PathBuf,
+        token: String,
+    },
+}
+
+impl ServerMsg {
+    /// Whether the frame is frozen (module docs): the only frames a client
+    /// of another protocol version is sent.
+    #[must_use]
+    pub fn is_frozen(&self) -> bool {
+        matches!(
+            self,
+            Self::Stdout(_)
+                | Self::Stderr(_)
+                | Self::Exit { .. }
+                | Self::UpgradeResult { .. }
+                | Self::UpgradeNotice { .. }
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -561,6 +656,7 @@ impl Message for ClientMsg {
             Self::Resize { .. } | Self::FrameAck { .. } => 8,
             Self::FileDone { .. } => 4,
             Self::StdinEof | Self::Detach | Self::Wakeup | Self::Unlock => 0,
+            Self::UpgradeRequest { binary } => 4 + binary.as_os_str().len(),
         }
     }
 
@@ -599,6 +695,10 @@ impl Message for ClientMsg {
             }
             Self::Wakeup => out.push(9),
             Self::Unlock => out.push(10),
+            Self::UpgradeRequest { binary } => {
+                out.push(0x80);
+                put_bytes(out, binary.as_os_str().as_bytes());
+            }
         }
     }
 
@@ -618,6 +718,7 @@ impl Message for ClientMsg {
             8 => Self::FileDone { error: r.i32()? },
             9 => Self::Wakeup,
             10 => Self::Unlock,
+            0x80 => Self::UpgradeRequest { binary: r.path()? },
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -632,6 +733,8 @@ impl Message for ServerMsg {
             Self::Lock { command } => 4 + command.len(),
             Self::Ready | Self::WriteClose | Self::Suspend => 0,
             Self::Flags { .. } => 1,
+            Self::UpgradeResult { message, .. } => 1 + 4 + message.len(),
+            Self::UpgradeNotice { binary, token } => 4 + binary.as_os_str().len() + 4 + token.len(),
             Self::ReadOpen { path } => option_len(path.as_ref(), |p| 4 + p.as_os_str().len()),
             Self::WriteOpen { path, .. } => 4 + path.as_os_str().len() + 1,
         }
@@ -688,6 +791,16 @@ impl Message for ServerMsg {
                 out.push(12);
                 out.push(u8::from(*wait_exit));
             }
+            Self::UpgradeResult { ok, message } => {
+                out.push(0x80);
+                out.push(u8::from(*ok));
+                put_bytes(out, message.as_bytes());
+            }
+            Self::UpgradeNotice { binary, token } => {
+                out.push(0x81);
+                put_bytes(out, binary.as_os_str().as_bytes());
+                put_bytes(out, token.as_bytes());
+            }
         }
     }
 
@@ -721,6 +834,14 @@ impl Message for ServerMsg {
             },
             12 => Self::Flags {
                 wait_exit: r.flag()?,
+            },
+            0x80 => Self::UpgradeResult {
+                ok: r.flag()?,
+                message: r.string()?,
+            },
+            0x81 => Self::UpgradeNotice {
+                binary: r.path()?,
+                token: r.string()?,
             },
             t => return Err(ProtocolError::UnknownTag(t)),
         })
@@ -787,6 +908,9 @@ mod tests {
             ClientMsg::FileDone { error: 32 },
             ClientMsg::Wakeup,
             ClientMsg::Unlock,
+            ClientMsg::UpgradeRequest {
+                binary: PathBuf::from("/opt/v\u{e9}/bin/vtmux"),
+            },
         ]
     }
 
@@ -831,6 +955,18 @@ mod tests {
             },
             ServerMsg::Flags { wait_exit: true },
             ServerMsg::Flags { wait_exit: false },
+            ServerMsg::UpgradeResult {
+                ok: false,
+                message: "not implemented".into(),
+            },
+            ServerMsg::UpgradeResult {
+                ok: true,
+                message: String::new(),
+            },
+            ServerMsg::UpgradeNotice {
+                binary: PathBuf::from("/usr/bin/vtmux"),
+                token: "3f9a".into(),
+            },
         ]
     }
 
@@ -1008,17 +1144,244 @@ mod tests {
     }
 
     #[test]
-    fn version_mismatch_has_tmux_shape() {
-        assert!(hello(None).check_version().is_ok());
+    fn version_mismatch_has_tmux_shape_and_names_the_upgrade() {
         let old = Hello {
             version: 0,
             ..hello(None)
         };
         let err = old.check_version().unwrap_err();
-        // client.c:659-668 shape, vtmux numbers.
+        // client.c:659-668 shape, vtmux numbers, then the way out.
         assert_eq!(
             err.to_string(),
-            "protocol version mismatch (client 0, server 8)"
+            format!(
+                "protocol version mismatch (client 0, server {PROTOCOL_VERSION})\n\
+                 run 'tmux vtmux-upgrade' to move the server onto this binary"
+            )
         );
+    }
+
+    /// The same version speaks everything; another version is served only
+    /// as a control client from [`FROZEN_SINCE`] on, and then frozen
+    /// frames only.
+    #[test]
+    fn other_versions_are_served_only_as_control_clients_with_frozen_frames() {
+        let with = |version, control| Hello {
+            version,
+            flags: ClientFlags {
+                control,
+                ..ClientFlags::default()
+            },
+            ..hello(None)
+        };
+        for control in [
+            ControlMode::None,
+            ControlMode::Control,
+            ControlMode::ControlControl,
+        ] {
+            assert_eq!(
+                with(PROTOCOL_VERSION, control).check_version().unwrap(),
+                Speaks::Full
+            );
+        }
+        for version in (FROZEN_SINCE..PROTOCOL_VERSION).chain([PROTOCOL_VERSION + 1, u32::MAX]) {
+            for control in [ControlMode::Control, ControlMode::ControlControl] {
+                assert_eq!(
+                    with(version, control).check_version().unwrap(),
+                    Speaks::Frozen,
+                    "{version}"
+                );
+            }
+            assert!(matches!(
+                with(version, ControlMode::None).check_version(),
+                Err(EdgeError::VersionMismatch { client, .. }) if client == version
+            ));
+        }
+        // Before the frozen frames: one last manual restart (decision 14).
+        assert!(
+            with(FROZEN_SINCE - 1, ControlMode::Control)
+                .check_version()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn exactly_the_frozen_server_frames_are_frozen() {
+        for m in all_server() {
+            let tag = encode(&m).unwrap()[4];
+            assert_eq!(
+                m.is_frozen(),
+                matches!(tag, 0 | 1 | 3 | 0x80 | 0x81),
+                "{m:?}"
+            );
+        }
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().fold(String::new(), |mut s, b| {
+            use fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+    }
+
+    /// A golden: hex digits, spaces between fields.
+    fn unhex(golden: &str) -> Vec<u8> {
+        let digits: Vec<u8> = golden.bytes().filter(|b| *b != b' ').collect();
+        digits
+            .chunks(2)
+            .map(|d| u8::from_str_radix(std::str::from_utf8(d).unwrap(), 16).unwrap())
+            .collect()
+    }
+
+    /// The frozen client frames and their goldens (module docs): hex, a
+    /// space between fields, the frame header first.
+    fn frozen_client_goldens() -> Vec<(ClientMsg, &'static str)> {
+        vec![
+            (
+                ClientMsg::Hello(Hello {
+                    version: 9,
+                    invocation: Invocation::Tmux,
+                    pid: 0x0102_0304,
+                    argv: vec![b"ls".to_vec(), b"\xff".to_vec()],
+                    cwd: PathBuf::from("/"),
+                    env: vec![("A".into(), "b".into())],
+                    tty: None,
+                    flags: ClientFlags {
+                        control: ControlMode::Control,
+                        utf8: true,
+                        no_start: false,
+                    },
+                }),
+                "30000000 00 09000000 00 04030201 02000000 02000000 6c73 01000000 ff 01000000 2f 01000000 01000000 41 01000000 62 00 01 01 00",
+            ),
+            (
+                ClientMsg::Hello(Hello {
+                    version: 9,
+                    invocation: Invocation::Vtmux,
+                    pid: 7,
+                    argv: Vec::new(),
+                    cwd: PathBuf::from("/h"),
+                    env: Vec::new(),
+                    tty: Some(TtyInfo {
+                        name: "/dev/pts/1".into(),
+                        term: "xterm".into(),
+                        cols: 80,
+                        rows: 24,
+                        features: vec!["RGB".into()],
+                    }),
+                    flags: ClientFlags {
+                        control: ControlMode::ControlControl,
+                        utf8: false,
+                        no_start: true,
+                    },
+                }),
+                "46000000 00 09000000 01 07000000 00000000 02000000 2f68 00000000 01 0a000000 2f6465762f7074732f31 05000000 787465726d 50000000 18000000 01000000 03000000 524742 02 00 01",
+            ),
+            (
+                ClientMsg::Stdin(b"ls\n".to_vec()),
+                "08000000 03 03000000 6c730a",
+            ),
+            (ClientMsg::Stdin(Vec::new()), "05000000 03 00000000"),
+            (ClientMsg::StdinEof, "01000000 04"),
+            (
+                ClientMsg::UpgradeRequest {
+                    binary: PathBuf::from("/bin/vtmux"),
+                },
+                "0f000000 80 0a000000 2f62696e2f76746d7578",
+            ),
+        ]
+    }
+
+    /// The frozen server frames and their goldens.
+    fn frozen_server_goldens() -> Vec<(ServerMsg, &'static str)> {
+        vec![
+            (
+                ServerMsg::Stdout(b"hi\n".to_vec()),
+                "08000000 00 03000000 68690a",
+            ),
+            (ServerMsg::Stderr(b"e".to_vec()), "06000000 01 01000000 65"),
+            (
+                ServerMsg::Exit {
+                    code: 1,
+                    message: None,
+                    hup: false,
+                },
+                "07000000 03 01000000 00 00",
+            ),
+            (
+                ServerMsg::Exit {
+                    code: -1,
+                    message: Some("x".into()),
+                    hup: true,
+                },
+                "0c000000 03 ffffffff 01 01000000 78 01",
+            ),
+            (
+                ServerMsg::UpgradeResult {
+                    ok: false,
+                    message: "not implemented".into(),
+                },
+                "15000000 80 00 0f000000 6e6f7420696d706c656d656e746564",
+            ),
+            (
+                ServerMsg::UpgradeResult {
+                    ok: true,
+                    message: String::new(),
+                },
+                "06000000 80 01 00000000",
+            ),
+            (
+                ServerMsg::UpgradeNotice {
+                    binary: PathBuf::from("/b"),
+                    token: "t1".into(),
+                },
+                "0d000000 81 02000000 2f62 02000000 7431",
+            ),
+        ]
+    }
+
+    /// The frozen frames (module docs), byte for byte. These goldens must
+    /// never change: binaries of other versions decode exactly these bytes.
+    /// A failure here means a frozen frame changed; put it back and add a
+    /// new frame instead.
+    #[test]
+    fn frozen_frames_never_change() {
+        // Every frozen frame has a golden.
+        let tags =
+            |goldens: Vec<u8>| -> std::collections::BTreeSet<u8> { goldens.into_iter().collect() };
+        assert_eq!(
+            tags(
+                frozen_client_goldens()
+                    .iter()
+                    .map(|(_, g)| unhex(g)[4])
+                    .collect()
+            ),
+            tags(vec![0, 3, 4, 0x80])
+        );
+        assert_eq!(
+            tags(
+                frozen_server_goldens()
+                    .iter()
+                    .map(|(_, g)| unhex(g)[4])
+                    .collect()
+            ),
+            tags(vec![0, 1, 3, 0x80, 0x81])
+        );
+        for (m, golden) in &frozen_client_goldens() {
+            let bytes = unhex(golden);
+            assert_eq!(hex(&encode(m).unwrap()), hex(&bytes), "{m:?}");
+            assert_eq!(
+                decode::<ClientMsg>(&bytes).unwrap(),
+                (m.clone(), bytes.len())
+            );
+        }
+        for (m, golden) in &frozen_server_goldens() {
+            let bytes = unhex(golden);
+            assert_eq!(hex(&encode(m).unwrap()), hex(&bytes), "{m:?}");
+            assert_eq!(
+                decode::<ServerMsg>(&bytes).unwrap(),
+                (m.clone(), bytes.len())
+            );
+        }
     }
 }
