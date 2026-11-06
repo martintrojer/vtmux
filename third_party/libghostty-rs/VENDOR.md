@@ -325,9 +325,49 @@ Recorded per commit in git history; the list is kept current:
   follow tmux's cellused (vtmux)`; oracle `reflow_cells_used`. Not an
   upstream candidate (tmux's model).
 
-  With 0013 the full `zig build test-lib-vt -Demit-lib-vt=true
-  -Dapp-runtime=none` gives the known failures only (`tabClear single`,
-  the kitty temporary-file test of 0001).
+- `patches/0014-tmux-pending-wrap.patch` (`Terminal.zig` `backspace`,
+  `cursorLeft`, `horizontalTabBack`, `restoreCursor`, `index`,
+  `printWrap`, `reverseIndex`, `setCursorRow`, `insertLinesTmux`,
+  `deleteLinesTmux`, `insertBlanks`, `deleteChars`, `eraseChars`,
+  `eraseLine`, `eraseDisplay`, `printRepeat`; `stream_terminal.zig`
+  CSI L): Ghostty's pending wrap is tmux's `cx` past the last column,
+  and each sequence treats it as tmux does. BS and CUB move from there
+  (BS to the last column; CUB n to width - n); BS at the first column
+  of a continuation goes to the end of the line above
+  (`screen_write_backspace`). ICH, DCH and ECH do nothing and EL, ED 1
+  and ED 2 clear without dropping the wrap (screen-write.c: no cells
+  past the column, and no clear moves the cursor). LF/IND, RI and VPA
+  move the row and keep it (`screen_write_linefeed`,
+  `screen_write_reverseindex`, `screen_write_cursormove` with px -1);
+  IL and DL leave the cursor where it was, column included, with or
+  without a pending wrap (`screen_write_insertline`,
+  `screen_write_deleteline`; Ghostty moved it to the left margin). CBT
+  starts from the last column (`INPUT_CSI_CBT`). DECRC and leaving
+  ?1049 never restore a pending wrap (`input_restore_state`,
+  `screen_alternate_off`: `screen_write_cursormove` puts a column past
+  the last on it). REP repeats at most to the end of the line
+  (`INPUT_CSI_REP`). vtmux's scroll-on-clear ED (`term.rs`
+  `clear_into_history`) prints a space in the last column before its
+  ED 2 to keep a pending wrap its CUP dropped. Upstream tests that
+  assert xterm's behaviour now assert tmux's (cursorLeft, deleteChars,
+  eraseChars, eraseLine left, insertBlanks outside the margins,
+  linefeed, printRepeat, CBT, saveCursor, the resize of a saved
+  pending cursor; the tests that saved a pending wrap to restore it set
+  it after the restore); the formatter test "Terminal vt cursor
+  preserves pending wrap over a blank cell" is skipped: the VT
+  formatter rebuilds that state with DECSC, ECH and DECRC, which no
+  longer gives it, and vtmux does not use the formatter. The oracle's
+  observer is a `PaneTerm`, so it reads the clients' output with these
+  semantics too, where a real terminal has xterm's; no screen showed it:
+  all 265 earlier traces, recorded with the old observer, replay
+  unchanged. New test `Terminal: tmux cursor past the last column
+  (vtmux)`; oracle `pending_wrap_edges`. Not an upstream candidate.
+
+  With 0013 and 0014 the full `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` gives 3256 pass, 38 skip (the formatter test
+  above is the new one) and the two known failures, `tabClear single`
+  and the kitty temporary-file test of 0001 (whose leak is the one
+  reported).
 
 ## Bumping ghostty
 

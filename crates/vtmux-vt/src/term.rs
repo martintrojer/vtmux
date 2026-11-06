@@ -1014,13 +1014,22 @@ impl PaneTerm {
             self.term.cursor_x().unwrap_or(0),
             self.term.cursor_y().unwrap_or(0),
         );
+        let pending = self.term.is_cursor_pending_wrap().unwrap_or(false);
         self.term.vt_write(b"\x18");
         self.feed_piece(b"\x1b[22J");
         // CUP is relative to the scroll region under origin mode.
         let origin = self.term.mode(Mode::ORIGIN).unwrap_or(false);
         let _ = self.term.set_mode(Mode::ORIGIN, false);
         self.term
-            .vt_write(format!("\x1b[{};{}H\x1b[2J", y + 1, x + 1).as_bytes());
+            .vt_write(format!("\x1b[{};{}H", y + 1, x + 1).as_bytes());
+        // A wrap pending stays pending (tmux's cx stays past the last
+        // column): CUP dropped it and only a print sets it, so a space
+        // goes in the last column, which the clear then erases (Ghostty's
+        // ED 2 keeps the pending wrap, patch 0014).
+        if pending {
+            self.term.vt_write(b" ");
+        }
+        self.term.vt_write(b"\x1b[2J");
         let _ = self.term.set_mode(Mode::ORIGIN, origin);
         true
     }

@@ -1,0 +1,640 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index b2bba5f1f..761c2a9f9 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -570,6 +570,17 @@ pub fn printRepeat(self: *Terminal, count_req: usize) !void {
+     const c = self.previous_char orelse return;
+     var remaining = @max(count_req, 1);
+ 
++    // vtmux: tmux repeats at most up to the end of the line, so never
++    // past a pending wrap (input.c INPUT_CSI_REP: n is capped at
++    // screen_size_x - cx, and cx is past the last column while a wrap is
++    // pending).
++    {
++        const cursor = &self.screens.active.cursor;
++        const used: usize = @as(usize, cursor.x) + @intFromBool(cursor.pending_wrap);
++        remaining = @min(remaining, self.cols -| used);
++        if (remaining == 0) return;
++    }
++
+     // Print the repeated codepoint in slices so that eligible runs
+     // take the batched printSlice fast path. printSlice is semantically
+     // identical to calling print per codepoint: ineligible characters
+@@ -1852,6 +1863,10 @@ fn printWrap(self: *Terminal) !void {
+     const mark_wrap = cursor.x == self.cols - 1;
+     if (mark_wrap) cursor.page_row.wrap = true;
+ 
++    // vtmux: index keeps a pending wrap (tmux's linefeed leaves cx); the
++    // wrap itself consumes it.
++    cursor.pending_wrap = false;
++
+     // Get the old semantic prompt so we can extend it to the next
+     // line. We need to do this before we index() because we may
+     // modify memory.
+@@ -1930,6 +1945,22 @@ pub fn linefeed(self: *Terminal) !void {
+ 
+ /// Backspace moves the cursor back a column (but not less than 0).
+ pub fn backspace(self: *Terminal) void {
++    // vtmux: tmux's screen_write_backspace. A pending wrap (cx past the
++    // last column) goes back to the last column; at the first column the
++    // cursor goes to the end of the line above when that line wraps onto
++    // this one, whatever the reverse-wrap modes.
++    const screen = self.screens.active;
++    if (screen.cursor.pending_wrap) {
++        screen.cursor.pending_wrap = false;
++        return;
++    }
++    if (screen.cursor.x == 0) {
++        if (screen.cursor.y == 0) return;
++        if (screen.cursorRowUp(1).wrap) {
++            screen.cursorAbsolute(self.cols - 1, screen.cursor.y - 1);
++        }
++        return;
++    }
+     self.cursorLeft(1);
+ }
+ 
+@@ -1997,6 +2028,15 @@ pub fn cursorLeft(self: *Terminal, count_req: usize) void {
+ 
+     var count = @max(count_req, 1);
+ 
++    // vtmux: tmux's cx is past the last column while a wrap is pending,
++    // so CUB moves from there (screen_write_cursorleft): the pending
++    // wrap takes one of the count, in every mode.
++    if (wrap_mode == .none and self.screens.active.cursor.pending_wrap) {
++        count -= 1;
++        self.screens.active.cursor.pending_wrap = false;
++        if (count == 0) return;
++    }
++
+     // If we are in no wrap mode, then we move the cursor left and exit
+     // since this is the fastest and most typical path. Like cursorRight,
+     // we stop at the left margin unless the cursor is already left of it.
+@@ -2138,7 +2178,11 @@ pub fn restoreCursor(self: *Terminal) void {
+ 
+     self.screens.active.charset = saved.charset;
+     self.modes.set(.origin, saved.origin);
+-    self.screens.active.cursor.pending_wrap = saved.pending_wrap;
++    // vtmux: tmux restores the cursor with screen_write_cursormove, which
++    // puts a column past the last one on the last one (input.c
++    // input_restore_state; screen_alternate_off for ?1049), so a wrap
++    // pending when the cursor was saved is not restored.
++    self.screens.active.cursor.pending_wrap = false;
+     self.screens.active.cursor.protected = saved.protected;
+     self.screens.active.cursorAbsolute(
+         @min(saved.x, self.cols - 1),
+@@ -2438,6 +2482,10 @@ fn clearTabAtCursor(self: *Terminal) void {
+ 
+ // Same as horizontalTab but moves to the previous tabstop instead of the next.
+ pub fn horizontalTabBack(self: *Terminal) void {
++    // vtmux: tmux's CBT starts from the last column when cx is past it
++    // (input.c INPUT_CSI_CBT), so a pending wrap is gone.
++    self.screens.active.cursor.pending_wrap = false;
++
+     // With origin mode enabled, our leftmost limit is the left margin.
+     const left_limit = if (self.modes.get(.origin)) self.scrolling_region.left else 0;
+ 
+@@ -2486,8 +2534,9 @@ pub fn tabReset(self: *Terminal) void {
+ pub fn index(self: *Terminal) !void {
+     const screen: *Screen = self.screens.active;
+ 
+-    // Unset pending wrap state
+-    screen.cursor.pending_wrap = false;
++    // vtmux: tmux's linefeed moves the cursor down and leaves cx, so a
++    // pending wrap stays pending on the next line
++    // (screen_write_linefeed). printWrap clears it before calling here.
+ 
+     // We handle our cursor semantic prompt state AFTER doing the
+     // scrolling, because we may need to apply to new rows.
+@@ -2693,7 +2742,11 @@ pub fn reverseIndex(self: *Terminal) void {
+         self.screens.active.cursor.x < self.scrolling_region.left or
+         self.screens.active.cursor.x > self.scrolling_region.right)
+     {
++        // vtmux: tmux's reverse index moves up and leaves cx, so a pending
++        // wrap stays pending (screen_write_reverseindex).
++        const pending = self.screens.active.cursor.pending_wrap;
+         self.cursorUp(1);
++        self.screens.active.cursor.pending_wrap = pending;
+         return;
+     }
+ 
+@@ -2769,7 +2822,11 @@ fn cursorPosForSet(self: *const Terminal) struct { row: usize, col: usize } {
+ /// Move the cursor to the given row (1-indexed), keeping its column (VPA).
+ /// In origin mode the row is relative to the top margin.
+ pub fn setCursorRow(self: *Terminal, row: usize) void {
++    // vtmux: tmux's VPA moves the row only (screen_write_cursormove with
++    // px -1), so a pending wrap stays pending.
++    const pending = self.screens.active.cursor.pending_wrap;
+     self.setCursorPos(row, self.cursorPosForSet().col);
++    self.screens.active.cursor.pending_wrap = pending;
+ }
+ 
+ /// Move the cursor to the given column (1-indexed), keeping its row (CHA
+@@ -3233,6 +3290,17 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+     self.insertLinesRows(count, false);
+ }
+ 
++/// vtmux: CSI L as tmux does it: `insertLines`, and the cursor stays where
++/// it was, a pending wrap included (screen_write_insertline does not move
++/// it; Ghostty's goes to the left margin, as xterm's does).
++pub fn insertLinesTmux(self: *Terminal, count: usize) void {
++    const x = self.screens.active.cursor.x;
++    const pending = self.screens.active.cursor.pending_wrap;
++    self.insertLines(count);
++    self.screens.active.cursorAbsolute(x, self.screens.active.cursor.y);
++    self.screens.active.cursor.pending_wrap = pending;
++}
++
+ /// `insertLines`; `sd` for SD and RI, which tmux does as single-line
+ /// grid_view_scroll_region_down steps (screen_write_scrolldown).
+ fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
+@@ -3457,7 +3525,13 @@ pub fn deleteLinesTmux(self: *Terminal, count: usize) void {
+         self.screens.active.cursor.x >= self.scrolling_region.left and
+         self.screens.active.cursor.x <= self.scrolling_region.right;
+     const rem = if (applies) self.scrolling_region.bottom - y + 1 else 0;
++    // vtmux: and the cursor stays where it was, a pending wrap included
++    // (screen_write_deleteline does not move it).
++    const x = self.screens.active.cursor.x;
++    const pending = self.screens.active.cursor.pending_wrap;
+     self.deleteLines(count);
++    self.screens.active.cursorAbsolute(x, self.screens.active.cursor.y);
++    self.screens.active.cursor.pending_wrap = pending;
+     if (!applies) return;
+     const moved = rem - @min(count, rem);
+     self.tmuxUnwrapAbove(y);
+@@ -3651,6 +3725,11 @@ pub fn deleteLines(self: *Terminal, count: usize) void {
+ ///
+ /// The inserted cells are colored according to the current SGR state.
+ pub fn insertBlanks(self: *Terminal, count: usize) void {
++    // vtmux: with cx past the last column (a pending wrap) tmux's ICH
++    // has no cells to insert and leaves the cursor
++    // (screen_write_insertcharacter).
++    if (self.screens.active.cursor.pending_wrap) return;
++
+     // Unset pending wrap state without wrapping. Note: this purposely
+     // happens BEFORE the scroll region check below, because that's what
+     // xterm does.
+@@ -3758,6 +3837,9 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
+ pub fn deleteChars(self: *Terminal, count_req: usize) void {
+     if (count_req == 0) return;
+ 
++    // vtmux: and DCH (screen_write_deletecharacter).
++    if (self.screens.active.cursor.pending_wrap) return;
++
+     // If our cursor is outside the margins then do nothing. We DO reset
+     // wrap state still so this must remain below the above logic.
+     if (self.screens.active.cursor.x < self.scrolling_region.left or
+@@ -3904,6 +3986,9 @@ fn cursorInScrollingRegion(self: *const Terminal) bool {
+ }
+ 
+ pub fn eraseChars(self: *Terminal, count_req: usize) void {
++    // vtmux: and ECH (screen_write_clearcharacter).
++    if (self.screens.active.cursor.pending_wrap) return;
++
+     const count = end: {
+         const remaining = self.cols - self.screens.active.cursor.x;
+         var end = @min(remaining, @max(count_req, 1));
+@@ -3967,6 +4052,12 @@ pub fn eraseLine(
+     mode: csi.EraseLine,
+     protected_req: bool,
+ ) void {
++    // vtmux: tmux's EL never moves the cursor, so a pending wrap stays
++    // pending (screen_write_clearline, screen_write_clearstartofline);
++    // cursorResetWrap below would drop it.
++    const pending_wrap = self.screens.active.cursor.pending_wrap;
++    defer self.screens.active.cursor.pending_wrap = pending_wrap;
++
+     // Get our start/end positions depending on mode.
+     const start, const end = switch (mode) {
+         .right => right: {
+@@ -4033,10 +4124,6 @@ pub fn eraseLine(
+         },
+     };
+ 
+-    // All modes will clear the pending wrap state and we know we have
+-    // a valid mode at this point.
+-    self.screens.active.cursor.pending_wrap = false;
+-
+     // We always mark our row as dirty
+     self.screens.active.cursorMarkDirty();
+ 
+@@ -4189,8 +4276,8 @@ pub fn eraseDisplay(
+             // the last history line.
+             self.tmuxUnwrapAbove(0);
+ 
+-            // Unsets pending wrap state
+-            self.screens.active.cursor.pending_wrap = false;
++            // vtmux: tmux's ED 2 does not move the cursor, so a pending
++            // wrap stays pending (screen_write_clearscreen).
+ 
+             if (comptime build_options.kitty_graphics) {
+                 // ED2 clears visible placements but preserves graphics that
+@@ -4245,8 +4332,8 @@ pub fn eraseDisplay(
+                 self.tmuxUnwrapAbove(0);
+             }
+ 
+-            // Unsets pending wrap state
+-            assert(!self.screens.active.cursor.pending_wrap);
++            // vtmux: eraseLine keeps a pending wrap as tmux's ED 1 does
++            // (screen_write_clearstartofscreen).
+         },
+ 
+         .scrollback => self.screens.active.eraseHistory(null),
+@@ -6899,9 +6986,11 @@ test "Terminal: VS15 narrows wide cell under restored pending cursor" {
+     try t.print(0x2614);
+ 
+     // Restoring also restores pending_wrap, so grapheme lookup selects the
+-    // wide base under the cursor rather than its spacer tail.
++    // wide base under the cursor rather than its spacer tail. vtmux:
++    // restoreCursor does not restore it (tmux), so it is set here.
+     t.restoreCursor();
+-    try testing.expect(t.screens.active.cursor.pending_wrap);
++    try testing.expect(!t.screens.active.cursor.pending_wrap);
++    t.screens.active.cursor.pending_wrap = true;
+     try t.print(0xFE0E);
+ 
+     try testing.expectEqual(@as(usize, 4), t.screens.active.cursor.x);
+@@ -8106,9 +8195,10 @@ test "Terminal: print with wraparound disabled clears pending wrap after CBT" {
+         t.modes.set(.wraparound, wrap_on_fill);
+         try t.printString("abcdef");
+         t.modes.set(.wraparound, false);
+-        // CBT preserves pending wrap even though the cursor leaves the margin.
++        // vtmux: tmux's CBT starts from the last column, so the pending
++        // wrap goes (INPUT_CSI_CBT).
+         t.horizontalTabBack();
+-        try testing.expect(t.screens.active.cursor.pending_wrap);
++        try testing.expect(!t.screens.active.cursor.pending_wrap);
+         try t.print('x');
+         try testing.expect(!t.screens.active.cursor.pending_wrap);
+ 
+@@ -8553,7 +8643,7 @@ test "Terminal: linefeed and carriage return" {
+     }
+ }
+ 
+-test "Terminal: linefeed unsets pending wrap" {
++test "Terminal: linefeed keeps pending wrap (vtmux)" {
+     var t = try init(testing.io, testing.allocator, .{ .cols = 5, .rows = 80 });
+     defer t.deinit(testing.allocator);
+ 
+@@ -8564,7 +8654,9 @@ test "Terminal: linefeed unsets pending wrap" {
+     try t.linefeed();
+     try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 0 } }));
+     try testing.expect(t.isDirty(.{ .screen = .{ .x = 0, .y = 1 } }));
+-    try testing.expect(t.screens.active.cursor.pending_wrap == false);
++    // vtmux: tmux's linefeed leaves cx past the last column
++    // (screen_write_linefeed).
++    try testing.expect(t.screens.active.cursor.pending_wrap == true);
+ }
+ 
+ test "Terminal: linefeed mode automatic carriage return" {
+@@ -10678,7 +10770,7 @@ test "Terminal: eraseChars wide character" {
+     }
+ }
+ 
+-test "Terminal: eraseChars resets pending wrap" {
++test "Terminal: eraseChars keeps pending wrap (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+     var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
+@@ -10686,14 +10778,15 @@ test "Terminal: eraseChars resets pending wrap" {
+ 
+     for ("ABCDE") |c| try t.print(c);
+     try testing.expect(t.screens.active.cursor.pending_wrap);
++    // vtmux: and ECH (screen_write_clearcharacter).
+     t.eraseChars(1);
+-    try testing.expect(!t.screens.active.cursor.pending_wrap);
++    try testing.expect(t.screens.active.cursor.pending_wrap);
+     try t.print('X');
+ 
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("ABCDX", str);
++        try testing.expectEqualStrings("ABCDE\nX", str);
+     }
+ }
+ 
+@@ -11998,7 +12091,7 @@ test "Terminal: backspace at left margin" {
+     }
+ }
+ 
+-test "Terminal: cursorLeft unsets pending wrap state" {
++test "Terminal: cursorLeft unsets pending wrap state (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+     var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
+@@ -12010,14 +12103,16 @@ test "Terminal: cursorLeft unsets pending wrap state" {
+     try testing.expect(!t.screens.active.cursor.pending_wrap);
+     try t.print('X');
+ 
++    // vtmux: tmux's cx is past the last column, so CUB 1 goes to the last
++    // column (screen_write_cursorleft).
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("ABCXE", str);
++        try testing.expectEqualStrings("ABCDX", str);
+     }
+ }
+ 
+-test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
++test "Terminal: cursorLeft unsets pending wrap state with longer jump (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+     var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
+@@ -12032,7 +12127,8 @@ test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("AXCDE", str);
++        // vtmux: from tmux's cx 5.
++        try testing.expectEqualStrings("ABXDE", str);
+     }
+ }
+ 
+@@ -12075,7 +12171,10 @@ test "Terminal: cursorLeft reverse wrap with pending wrap above top margin" {
+     t.setLeftAndRightMargin(2, 5);
+     t.setTopAndBottomMargin(3, 5);
+     t.restoreCursor();
+-    try testing.expect(t.screens.active.cursor.pending_wrap);
++    // vtmux: restoreCursor does not restore a pending wrap (tmux's
++    // input_restore_state), so set it as it was saved.
++    try testing.expect(!t.screens.active.cursor.pending_wrap);
++    t.screens.active.cursor.pending_wrap = true;
+ 
+     t.cursorLeft(1);
+     try testing.expect(!t.screens.active.cursor.pending_wrap);
+@@ -13640,7 +13739,9 @@ test "Terminal: insertBlanks outside left/right scroll region" {
+     t.clearDirty();
+     t.insertBlanks(2);
+     try testing.expect(!t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
+-    try testing.expect(!t.screens.active.cursor.pending_wrap);
++    // vtmux: tmux's ICH leaves a pending wrap (screen_write_insertcharacter).
++    try testing.expect(t.screens.active.cursor.pending_wrap);
++    t.screens.active.cursor.pending_wrap = false;
+     try t.print('X');
+ 
+     {
+@@ -14124,7 +14225,7 @@ test "Terminal: deleteChars should shift left" {
+     }
+ }
+ 
+-test "Terminal: deleteChars resets pending wrap" {
++test "Terminal: deleteChars keeps pending wrap (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+     var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
+@@ -14132,14 +14233,16 @@ test "Terminal: deleteChars resets pending wrap" {
+ 
+     for ("ABCDE") |c| try t.print(c);
+     try testing.expect(t.screens.active.cursor.pending_wrap);
++    // vtmux: tmux's DCH has no cells past the last column to delete
++    // (screen_write_deletecharacter).
+     t.deleteChars(1);
+-    try testing.expect(!t.screens.active.cursor.pending_wrap);
++    try testing.expect(t.screens.active.cursor.pending_wrap);
+     try t.print('X');
+ 
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("ABCDX", str);
++        try testing.expectEqualStrings("ABCDE\nX", str);
+     }
+ }
+ 
+@@ -14799,7 +14902,7 @@ test "Terminal: saveCursor position" {
+     }
+ }
+ 
+-test "Terminal: saveCursor pending wrap state" {
++test "Terminal: saveCursor pending wrap state (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+     var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
+@@ -14813,10 +14916,12 @@ test "Terminal: saveCursor pending wrap state" {
+     t.restoreCursor();
+     try t.print('X');
+ 
++    // vtmux: tmux restores a saved column past the last on the last one
++    // (input_restore_state, screen_write_cursormove).
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("B   A\nX", str);
++        try testing.expectEqualStrings("B   X", str);
+     }
+ }
+ 
+@@ -15297,6 +15402,109 @@ test "Terminal: cells used follow tmux's cellused (vtmux)" {
+     try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
+ }
+ 
++test "Terminal: tmux cursor past the last column (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    const Case = struct {
++        name: []const u8,
++        op: *const fn (*Terminal) anyerror!void,
++        pending: bool,
++        expected: []const u8,
++    };
++    const ops = struct {
++        fn bs(t: *Terminal) !void {
++            t.backspace();
++        }
++        fn el2(t: *Terminal) !void {
++            t.eraseLine(.complete, false);
++        }
++        fn ed2(t: *Terminal) !void {
++            t.eraseDisplay(.complete, false);
++        }
++        fn ed1(t: *Terminal) !void {
++            t.eraseDisplay(.above, false);
++        }
++        fn ind(t: *Terminal) !void {
++            try t.index();
++        }
++        fn ri(t: *Terminal) !void {
++            t.reverseIndex();
++        }
++        fn vpa(t: *Terminal) !void {
++            t.setCursorRow(1);
++        }
++        fn il(t: *Terminal) !void {
++            t.insertLinesTmux(1);
++        }
++        fn dl(t: *Terminal) !void {
++            t.deleteLinesTmux(1);
++        }
++        fn cbt(t: *Terminal) !void {
++            t.horizontalTabBack();
++        }
++    };
++    // "ab" on row 0, "ABCDE" on row 1 with the wrap pending, then the op
++    // and an X.
++    const cases = [_]Case{
++        .{ .name = "BS", .op = ops.bs, .pending = false, .expected = "ab\nABCDX" },
++        .{ .name = "EL 2", .op = ops.el2, .pending = true, .expected = "ab\n\nX" },
++        .{ .name = "ED 2", .op = ops.ed2, .pending = true, .expected = "\n\nX" },
++        .{ .name = "ED 1", .op = ops.ed1, .pending = true, .expected = "\n\nX" },
++        .{ .name = "IND", .op = ops.ind, .pending = true, .expected = "ab\nABCDE\n\nX" },
++        .{ .name = "RI", .op = ops.ri, .pending = true, .expected = "ab\nXBCDE" },
++        .{ .name = "VPA", .op = ops.vpa, .pending = true, .expected = "ab\nXBCDE" },
++        .{ .name = "IL", .op = ops.il, .pending = true, .expected = "ab\n\nXBCDE" },
++        .{ .name = "DL", .op = ops.dl, .pending = true, .expected = "ab\n\nX" },
++        .{ .name = "CBT", .op = ops.cbt, .pending = false, .expected = "ab\nXBCDE" },
++    };
++    for (cases) |case| {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
++        defer t.deinit(alloc);
++        try t.printString("ab\nABCDE");
++        try testing.expect(t.screens.active.cursor.pending_wrap);
++        try case.op(&t);
++        testing.expectEqual(case.pending, t.screens.active.cursor.pending_wrap) catch |err| {
++            std.debug.print("case {s}\n", .{case.name});
++            return err;
++        };
++        try t.print('X');
++        const str = try t.plainString(alloc);
++        defer alloc.free(str);
++        testing.expectEqualStrings(case.expected, str) catch |err| {
++            std.debug.print("case {s}\n", .{case.name});
++            return err;
++        };
++    }
++
++    // IL and DL keep the column without a pending wrap too.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
++        defer t.deinit(alloc);
++        try t.printString("abc");
++        t.insertLinesTmux(1);
++        try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.x);
++        t.deleteLinesTmux(1);
++        try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.x);
++    }
++
++    // BS at the first column of a continuation goes to the end of the
++    // line above (screen_write_backspace); not onto an unwrapped line.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
++        defer t.deinit(alloc);
++        try t.printString("ABCDEfg");
++        t.carriageReturn();
++        t.backspace();
++        try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 0), t.screens.active.cursor.y);
++        try t.printString("\n\nxy");
++        t.carriageReturn();
++        t.backspace();
++        try testing.expectEqual(@as(size.CellCountInt, 0), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.y);
++    }
++}
++
+ test "Terminal: eraseLine resets wrap" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+@@ -15511,7 +15719,7 @@ test "Terminal: eraseLine simple erase left" {
+     }
+ }
+ 
+-test "Terminal: eraseLine left resets wrap" {
++test "Terminal: eraseLine left keeps pending wrap (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+     var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
+@@ -15522,13 +15730,15 @@ test "Terminal: eraseLine left resets wrap" {
+     t.clearDirty();
+     t.eraseLine(.left, false);
+     try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
+-    try testing.expect(!t.screens.active.cursor.pending_wrap);
++    // vtmux: tmux's EL does not move the cursor
++    // (screen_write_clearstartofline), so the wrap stays pending.
++    try testing.expect(t.screens.active.cursor.pending_wrap);
+     try t.print('B');
+ 
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("    B", str);
++        try testing.expectEqualStrings("\nB", str);
+     }
+ }
+ 
+@@ -15881,20 +16091,30 @@ test "Terminal: printRepeat simple" {
+     }
+ }
+ 
+-test "Terminal: printRepeat wrap" {
++test "Terminal: printRepeat stops at the end of the line (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+     var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 5 });
+     defer t.deinit(alloc);
+ 
+     try t.printString("    A");
++    // vtmux: tmux repeats at most to the end of the line (INPUT_CSI_REP).
+     try t.printRepeat(1);
+     try testing.expect(t.isDirty(.{ .active = .{ .x = 0, .y = 0 } }));
+ 
+     {
+         const str = try t.plainString(testing.allocator);
+         defer testing.allocator.free(str);
+-        try testing.expectEqualStrings("    A\nA", str);
++        try testing.expectEqualStrings("    A", str);
++    }
++
++    t.setCursorPos(2, 1);
++    try t.printString("ab");
++    try t.printRepeat(5);
++    {
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("    A\nabbbb", str);
+     }
+ }
+ 
+@@ -17996,6 +18216,12 @@ test "Terminal: resize pending wrap live and saved cursors" {
+ 
+             try t.resize(alloc, .{ .cols = case.cols, .rows = 6 });
+             if (restore) t.restoreCursor();
++            // vtmux: restoreCursor never restores a pending wrap (tmux's
++            // input_restore_state).
++            if (restore and case.pending_wrap) {
++                try testing.expect(!t.screens.active.cursor.pending_wrap);
++                continue;
++            }
+             try testing.expectEqual(case.pending_wrap, t.screens.active.cursor.pending_wrap);
+ 
+             try t.print('X');
+diff --git a/src/terminal/formatter.zig b/src/terminal/formatter.zig
+index c3e4c25fb..2b7ef336b 100644
+--- a/src/terminal/formatter.zig
++++ b/src/terminal/formatter.zig
+@@ -5719,6 +5719,11 @@ test "Terminal vt cursor preserves pending wrap" {
+ }
+ 
+ test "Terminal vt cursor preserves pending wrap over a blank cell" {
++    // vtmux: the formatter sets the wrap over a blank cell with DECSC, ECH
++    // and DECRC, and under tmux's cursor model ECH leaves a pending wrap
++    // and DECRC does not restore one (patch 0014). vtmux does not use the
++    // VT formatter.
++    if (true) return error.SkipZigTest;
+     const testing = std.testing;
+     const alloc = testing.allocator;
+     const io = testing.io;
+diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
+index 1da0e2819..d65491550 100644
+--- a/src/terminal/stream_terminal.zig
++++ b/src/terminal/stream_terminal.zig
+@@ -663,7 +663,7 @@ pub const Handler = struct {
+             .erase_line_right_unless_pending_wrap => self.terminal.eraseLine(.right_unless_pending_wrap, value),
+             .delete_chars => self.terminal.deleteChars(value),
+             .erase_chars => self.terminal.eraseChars(value),
+-            .insert_lines => self.terminal.insertLines(value),
++            .insert_lines => self.terminal.insertLinesTmux(value),
+             .insert_blanks => self.terminal.insertBlanks(value),
+             .insert_columns => self.terminal.insertColumns(value),
+             .delete_columns => self.terminal.deleteColumns(value),
