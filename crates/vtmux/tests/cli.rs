@@ -1117,6 +1117,35 @@ fn source_file_conditions() {
     assert_eq!(w.run(&["display", "-p", "#{@v}"]).stdout, "vtmux\n");
 }
 
+/// With no job to wait for, `kill-server` answers its client only once the
+/// server has stopped listening, so a command that follows at once starts a
+/// fresh server instead of connecting to the dying one ("server exited
+/// unexpectedly", then "no server running"). vtmux only: tmux closes the
+/// listener at exit (server.c `server_accept` drops a late client), a window
+/// of a few ms that `format_loops` and `config_errors` hit on a loaded host.
+#[test]
+fn kill_server_closes_the_socket_before_it_answers() {
+    let w = World::new(&vtmux_bin());
+    let sock = w.run(&["new", "-d", "-s", "a", "cat", "-"]);
+    assert_eq!(sock.code, 0, "{sock:?}");
+    let sock = w.run(&["display", "-p", "#{socket_path}"]).stdout;
+    let sock = sock.trim().replace("TMP", &w.dir().to_string_lossy());
+    for i in 0..20 {
+        let up = w.run(&["start-server", ";", "set", "-g", "exit-empty", "off"]);
+        assert_eq!(up.code, 0, "round {i}: {up:?}");
+        w.run(&["new", "-d", "-s", "a", "cat", "-"]);
+        let down = w.run(&["kill-server"]);
+        assert_eq!(down.code, 0, "round {i}: {down:?}");
+        // No wait: the socket refuses at once.
+        let err = std::os::unix::net::UnixStream::connect(&sock).expect_err("still listening");
+        assert_eq!(
+            err.kind(),
+            std::io::ErrorKind::ConnectionRefused,
+            "round {i}"
+        );
+    }
+}
+
 /// A startup config runs before the first command, without a client:
 /// `new` in it is detached, errors are kept for an attached session and
 /// never reach a command client (cfg.c `start_cfg`, `cfg_show_causes`).
