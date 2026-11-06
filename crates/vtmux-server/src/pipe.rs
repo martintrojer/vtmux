@@ -33,6 +33,56 @@ pub struct PanePipe {
 }
 
 impl PanePipe {
+    /// The descriptor a live upgrade keeps open (D27).
+    #[must_use]
+    pub fn raw_fd(&self) -> std::os::fd::RawFd {
+        self.fd.as_raw_fd()
+    }
+
+    /// `-I`: the command's output goes into the pane.
+    #[must_use]
+    pub fn input(&self) -> bool {
+        self.input
+    }
+
+    /// Bytes of pane output the command has not taken yet.
+    #[must_use]
+    pub fn pending(&self) -> &[u8] {
+        &self.out
+    }
+}
+
+impl Server {
+    /// Take a pipe kept across an upgrade (D27) back onto pane `p`: its
+    /// descriptor, process, `-I` and the output it was still owed.
+    pub(crate) fn pipe_adopt(
+        &mut self,
+        p: PaneId,
+        fd: OwnedFd,
+        pid: i32,
+        input: bool,
+        out: Vec<u8>,
+    ) -> std::io::Result<PanePipe> {
+        let interest = if input {
+            Interest::READABLE | Interest::WRITABLE
+        } else {
+            Interest::WRITABLE
+        };
+        self.poll.registry().register(
+            &mut SourceFd(&fd.as_raw_fd()),
+            Token(PIPE_BASE + p.0 as usize),
+            interest,
+        )?;
+        Ok(PanePipe {
+            fd,
+            pid,
+            input,
+            out,
+        })
+    }
+}
+
+impl PanePipe {
     /// Nothing is waiting to be written (`EVBUFFER_LENGTH(output) == 0`).
     #[must_use]
     pub fn drained(&self) -> bool {

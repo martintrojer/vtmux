@@ -145,6 +145,16 @@ impl<I: Id> IdAllocator<I> {
         self.next = self.next.checked_add(1).expect("id space exhausted");
         id
     }
+
+    /// An allocator whose next ID is `next` (a server restored from a
+    /// snapshot, D27: IDs are never reused across an upgrade).
+    #[must_use]
+    pub fn starting_at(next: u32) -> Self {
+        Self {
+            next,
+            kind: PhantomData,
+        }
+    }
 }
 
 impl<I: Id> Default for IdAllocator<I> {

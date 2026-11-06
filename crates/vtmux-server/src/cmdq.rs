@@ -143,6 +143,18 @@ pub struct Message {
 }
 
 impl Cmdq {
+    /// The message log, oldest first, and the next message's number.
+    #[must_use]
+    pub fn message_log(&self) -> (&VecDeque<Message>, u32) {
+        (&self.messages, self.message_next)
+    }
+
+    /// Put a message log in place (a snapshot's, D27).
+    pub fn set_message_log(&mut self, messages: VecDeque<Message>, next: u32) {
+        self.messages = messages;
+        self.message_next = next;
+    }
+
     fn step_id(&mut self) -> StepId {
         self.next_step += 1;
         StepId(self.next_step)

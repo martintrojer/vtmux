@@ -48,7 +48,53 @@ pub struct WaitChannels {
     channels: BTreeMap<String, Channel>,
 }
 
+/// One channel's state as a snapshot carries it (D27).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChannelParts {
+    pub name: String,
+    pub locked: bool,
+    pub woken: bool,
+    pub waiters: Vec<ClientId>,
+    pub lockers: Vec<ClientId>,
+}
+
 impl WaitChannels {
+    /// Every channel, in name order.
+    #[must_use]
+    pub fn parts(&self) -> Vec<ChannelParts> {
+        self.channels
+            .iter()
+            .map(|(name, c)| ChannelParts {
+                name: name.clone(),
+                locked: c.locked,
+                woken: c.woken,
+                waiters: c.waiters.clone(),
+                lockers: c.lockers.clone(),
+            })
+            .collect()
+    }
+
+    /// Channels from [`Self::parts`].
+    #[must_use]
+    pub fn from_parts(parts: Vec<ChannelParts>) -> Self {
+        Self {
+            channels: parts
+                .into_iter()
+                .map(|p| {
+                    (
+                        p.name,
+                        Channel {
+                            locked: p.locked,
+                            woken: p.woken,
+                            waiters: p.waiters,
+                            lockers: p.lockers,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
     fn remove_if(&mut self, name: &str, rule: fn(&Channel) -> bool) {
         if self.channels.get(name).is_some_and(rule) {
             self.channels.remove(name);

@@ -34,6 +34,11 @@ impl Environ {
         );
     }
 
+    /// Put `entry` under `name` as it is (a snapshot's, D27).
+    pub fn put(&mut self, name: &str, entry: Entry) {
+        self.0.insert(name.to_owned(), entry);
+    }
+
     /// `environ_clear`: present but removed.
     pub fn clear(&mut self, name: &str) {
         self.0.insert(

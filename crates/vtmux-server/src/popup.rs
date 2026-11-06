@@ -148,6 +148,85 @@ impl std::fmt::Debug for Popup {
 }
 
 impl Popup {
+    /// The popup as a snapshot carries it (D27); its terminal state is
+    /// left to `lu_pane_state` (`term` `None`). An editor popup
+    /// (`customize-mode`, `choose-buffer` editing) is not carried.
+    #[must_use]
+    pub fn export(&self) -> Option<vtmux_snapshot::Popup> {
+        if self.editor.is_some() {
+            return None;
+        }
+        let (ppx, ppy, psx, psy) = self.preferred;
+        Some(vtmux_snapshot::Popup {
+            pid: self.pid.unwrap_or(0),
+            argv: Vec::new(),
+            cwd: String::new(),
+            x: i32::from(self.px),
+            y: i32::from(self.py),
+            sx: u32::from(self.sx),
+            sy: u32::from(self.sy),
+            title: self.title.clone(),
+            style: self.style.clone(),
+            border_style: self.border_style.clone(),
+            border_lines: BoxLines::NAMES[self.lines as usize].to_owned(),
+            close_on_exit: if self.rules.on_exit_zero {
+                2
+            } else {
+                u32::from(self.rules.on_exit)
+            },
+            term: None,
+            pane: None,
+            exited: !self.running,
+            status: None,
+            preferred: (
+                (u32::from(ppx), u32::from(ppy)),
+                (u32::from(psx), u32::from(psy)),
+            ),
+            any_key: self.rules.any_key,
+            status_code: self.status,
+            caller: self.caller.map(|c| u32::try_from(c.0).unwrap_or(u32::MAX)),
+        })
+    }
+
+    /// The descriptor of its PTY, while the job has it open.
+    #[must_use]
+    pub fn pty(&self) -> Option<&PaneIo> {
+        self.io.as_ref()
+    }
+
+    /// A popup from [`Self::export`] with its PTY `io` (`None` once the job
+    /// closed it) and terminal `term`.
+    #[must_use]
+    pub fn import(r: &vtmux_snapshot::Popup, io: Option<PaneIo>, term: PaneTerm) -> Self {
+        let n = |x: u32| u16::try_from(x).unwrap_or(u16::MAX);
+        let ((ppx, ppy), (psx, psy)) = r.preferred;
+        Self {
+            preferred: (n(ppx), n(ppy), n(psx), n(psy)),
+            px: u16::try_from(r.x).unwrap_or(0),
+            py: u16::try_from(r.y).unwrap_or(0),
+            sx: n(r.sx),
+            sy: n(r.sy),
+            lines: BoxLines::from_name(&r.border_lines).unwrap_or(BoxLines::Single),
+            rules: CloseRules {
+                on_exit: r.close_on_exit == 1,
+                on_exit_zero: r.close_on_exit == 2,
+                any_key: r.any_key,
+            },
+            title: r.title.clone(),
+            style: r.style.clone(),
+            border_style: r.border_style.clone(),
+            term,
+            redrawn: false,
+            io,
+            pid: (r.pid != 0).then_some(r.pid),
+            running: !r.exited,
+            status: r.status_code,
+            step: None,
+            caller: r.caller.map(|c| ClientId(c as usize)),
+            editor: None,
+        }
+    }
+
     /// The job's terminal size: inside the box, or the whole popup with no
     /// border.
     #[must_use]

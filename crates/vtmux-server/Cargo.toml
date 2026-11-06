@@ -15,6 +15,7 @@ signal-hook-mio = { version = "0.2", features = ["support-v1_0"] }
 unicode-width = "0.2"
 vtmux-core.workspace = true
 vtmux-vt.workspace = true
+vtmux-snapshot.workspace = true
 
 [lints]
 workspace = true

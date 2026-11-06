@@ -62,6 +62,60 @@ impl Subs {
     pub fn deadline(&self) -> Option<Instant> {
         self.due
     }
+
+    /// Every subscription by name, and the timer, for a snapshot (D27).
+    #[must_use]
+    pub fn parts(&self) -> (Vec<(String, SubParts)>, Option<Instant>) {
+        let items = self
+            .items
+            .iter()
+            .map(|(n, s)| (n.clone(), s.parts()))
+            .collect();
+        (items, self.due)
+    }
+
+    /// Subscriptions from [`Self::parts`].
+    #[must_use]
+    pub fn from_parts(items: Vec<(String, SubParts)>, due: Option<Instant>) -> Self {
+        Self {
+            items: items
+                .into_iter()
+                .map(|(n, p)| (n, Sub::from_parts(p)))
+                .collect(),
+            due,
+        }
+    }
+}
+
+/// A subscription or monitor hook and its last values, as a snapshot
+/// carries them (D27).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubParts {
+    pub what: What,
+    pub format: String,
+    pub last: Option<String>,
+    /// The last value per (id, winlink index).
+    pub each: Vec<((u32, u32), String)>,
+}
+
+impl Sub {
+    fn parts(&self) -> SubParts {
+        SubParts {
+            what: self.what,
+            format: self.format.clone(),
+            last: self.last.clone(),
+            each: self.each.iter().map(|(k, v)| (*k, v.clone())).collect(),
+        }
+    }
+
+    fn from_parts(p: SubParts) -> Self {
+        Self {
+            what: p.what,
+            format: p.format,
+            last: p.last,
+            each: p.each.into_iter().collect(),
+        }
+    }
 }
 
 /// The monitor hooks' last values and timers (`hm->set` of each hook), by
@@ -81,6 +135,37 @@ impl HookMonitors {
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
         self.sets.values().map(|s| s.due).min()
+    }
+
+    /// Each monitor hook's last values and timer, by its serial.
+    #[must_use]
+    pub fn parts(&self) -> Vec<(u64, SubParts, Instant)> {
+        let mut out: Vec<_> = self
+            .sets
+            .iter()
+            .map(|(serial, s)| (*serial, s.sub.parts(), s.due))
+            .collect();
+        out.sort_by_key(|(serial, ..)| *serial);
+        out
+    }
+
+    /// Monitor hooks from [`Self::parts`].
+    #[must_use]
+    pub fn from_parts(parts: Vec<(u64, SubParts, Instant)>) -> Self {
+        Self {
+            sets: parts
+                .into_iter()
+                .map(|(serial, p, due)| {
+                    (
+                        serial,
+                        HookSet {
+                            sub: Sub::from_parts(p),
+                            due,
+                        },
+                    )
+                })
+                .collect(),
+        }
     }
 }
 

@@ -63,6 +63,28 @@ pub struct PasteStore {
 }
 
 impl PasteStore {
+    /// Every buffer (by name), `paste_next_index` and `paste_next_order`,
+    /// for a snapshot (D27).
+    #[must_use]
+    pub fn parts(&self) -> (Vec<&PasteBuffer>, u32, u64) {
+        (
+            self.by_name.values().collect(),
+            self.next_index,
+            self.next_order,
+        )
+    }
+
+    /// A store from [`Self::parts`].
+    #[must_use]
+    pub fn from_parts(buffers: Vec<PasteBuffer>, next_index: u32, next_order: u64) -> Self {
+        Self {
+            by_name: buffers.into_iter().map(|b| (b.name.clone(), b)).collect(),
+            next_index,
+            next_order,
+            changes: Vec::new(),
+        }
+    }
+
     /// `paste_get_name`: an empty name is no buffer.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&PasteBuffer> {

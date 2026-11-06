@@ -58,6 +58,24 @@ impl KeyTable {
         self.defaults.get(&key.without_flags())
     }
 
+    /// The bindings the table started with, in key-code order.
+    pub fn defaults(&self) -> impl Iterator<Item = &Binding> {
+        self.defaults.values()
+    }
+
+    /// A table with these bindings and defaults (a snapshot's, D27).
+    #[must_use]
+    pub fn from_parts(
+        bindings: impl IntoIterator<Item = Binding>,
+        defaults: impl IntoIterator<Item = Binding>,
+    ) -> Self {
+        let by_key = |b: Binding| (b.key.without_flags(), b);
+        Self {
+            bindings: bindings.into_iter().map(by_key).collect(),
+            defaults: defaults.into_iter().map(by_key).collect(),
+        }
+    }
+
     /// The binding for `key` to change in place (customize-mode sets its
     /// command, note and repeat flag).
     pub fn get_mut(&mut self, key: Key) -> Option<&mut Binding> {
@@ -144,6 +162,11 @@ impl KeyBindings {
             table.defaults = table.bindings.clone();
         }
         kb
+    }
+
+    /// Put a whole table in place (a snapshot's, D27).
+    pub fn insert_table(&mut self, name: &str, table: KeyTable) {
+        self.tables.insert(name.to_owned(), table);
     }
 
     /// `key_bindings_get_table(name, 0)`.

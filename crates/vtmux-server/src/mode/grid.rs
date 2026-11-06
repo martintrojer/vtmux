@@ -53,6 +53,9 @@ struct Line {
     /// marked the line. Reflow keeps them on a line's first part.
     prompt: bool,
     output: bool,
+    /// The hyperlinks of a line restored from a snapshot (D27), by column:
+    /// it has no entry copy to ask.
+    links: Box<[(usize, String)]>,
 }
 
 impl Line {
@@ -228,6 +231,7 @@ impl Grid {
             },
             prompt: false,
             output: false,
+            links: Box::default(),
         }));
         for (y, mark) in src.line_marks() {
             if let Some(line) = lines_at(&mut self.lines, y, from) {
@@ -299,7 +303,74 @@ impl Grid {
     #[must_use]
     pub fn hyperlink(&self, x: usize, y: usize) -> Option<String> {
         let line = self.lines.get(y)?;
+        if line.src.is_none() {
+            return line
+                .links
+                .iter()
+                .find(|(col, _)| *col == x)
+                .map(|(_, uri)| uri.clone());
+        }
         self.source.as_ref()?.hyperlink(x, line.src?)
+    }
+
+    /// The copy as a snapshot carries it (D27): its lines as rows (time,
+    /// OSC 133 marks and hyperlinks with them), `hsize` of them history;
+    /// `hscrolled`, `sx` and `sy`.
+    #[must_use]
+    pub fn export(&self) -> (Vec<vtmux_snapshot::Row>, usize, usize, usize, usize) {
+        let rows = (0..self.lines.len())
+            .map(|y| {
+                let line = &self.lines[y];
+                let row = self.peek(y);
+                let mut out =
+                    crate::server::snapshot::rows::row_out(&row, |x| self.hyperlink(x, y));
+                out.time = line.time;
+                let flags = if line.prompt { 0x8 } else { 0 } | if line.output { 0x40 } else { 0 };
+                if flags != 0 {
+                    out.mark = Some(vtmux_snapshot::Osc133 {
+                        flags,
+                        ..vtmux_snapshot::Osc133::default()
+                    });
+                }
+                out
+            })
+            .collect();
+        (rows, self.hsize, self.hscrolled, self.sx, self.sy)
+    }
+
+    /// A copy of the rows [`Self::export`] gave.
+    #[must_use]
+    pub fn import(
+        rows: &[vtmux_snapshot::Row],
+        hsize: usize,
+        hscrolled: usize,
+        sx: usize,
+        sy: usize,
+    ) -> Self {
+        let lines = rows
+            .iter()
+            .map(|r| {
+                let (row, links) = crate::server::snapshot::rows::row_in(r);
+                let flags = r.mark.map_or(0, |m| m.flags);
+                Line {
+                    row: OnceCell::from(row),
+                    src: None,
+                    time: r.time,
+                    prompt: flags & 0x8 != 0,
+                    output: flags & 0x40 != 0,
+                    links: links.into_boxed_slice(),
+                }
+            })
+            .collect();
+        Self {
+            lines,
+            source: None,
+            hsize: hsize.min(rows.len()),
+            hscrolled,
+            sx,
+            sy,
+            peeked: RefCell::default(),
+        }
     }
 
     fn line_row<'a>(&self, line: &'a Line) -> &'a Row {
@@ -323,6 +394,8 @@ impl Grid {
         for line in &mut lines {
             self.line_row(line);
             line.src = None;
+            // A reflowed line has no hyperlinks, restored or not.
+            line.links = Box::default();
         }
         self.lines = lines;
     }
