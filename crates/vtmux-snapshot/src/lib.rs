@@ -2,28 +2,65 @@
 //! the whole server state as one versioned stream, which a live upgrade
 //! hands to the new binary and persistence writes to disk.
 //!
-//! A stream is [`MAGIC`], the format version as a little-endian `u32`, then
-//! the [`Snapshot`] record. Records are length-prefixed tagged fields
-//! ([`wire`]); unknown tags are skipped. A reader takes every version from
-//! [`MIN_VERSION`] to [`FORMAT_VERSION`] and refuses a newer one (decision
-//! 6); an older stream is decoded with its version in hand and then
-//! brought forward by the migration steps (`migrate.rs`).
+//! A stream is a header of [`HEADER_LEN`] bytes, then the [`Snapshot`]
+//! record (the body):
+//!
+//! ```text
+//! MAGIC (8) | version (u32 LE) | body length (u64 LE) | BLAKE3 of the body (32) | body
+//! ```
+//!
+//! A reader refuses a stream whose body is shorter or longer than its
+//! length or doesn't match its hash, so a short memory file or a torn
+//! manifest is an error, never a smaller snapshot. Records are
+//! length-prefixed tagged fields ([`wire`]); unknown tags are skipped. A
+//! reader takes every version from [`MIN_VERSION`] to [`FORMAT_VERSION`]
+//! and refuses a newer one (decision 6); an older stream is decoded with
+//! its version in hand and then brought forward by the migration steps
+//! (`migrate.rs`). Within a version, [`Meta::requires`] names what a
+//! reader must understand to read the stream (below).
 //!
 //! Rows use the vtmux row format ([`row`]), not Ghostty's page memory
 //! (decision 11). History pages are LZ4-compressed and named by the BLAKE3
-//! hash of their compressed bytes: [`encode`] writes them inline (the
-//! upgrade stream), [`encode_manifest`] writes only their names for a
-//! checkpoint whose pages live in `chunks/<hash>` (decision 20), and
-//! [`decode_with`] reads them back from there.
+//! hash of their rows' encoding (before compression, so the names don't
+//! depend on the compressor): [`encode`] writes them inline (the upgrade
+//! stream), [`encode_manifest`] writes only their names for a checkpoint
+//! whose pages live in `chunks/<hash>` (decision 20), and [`decode_with`]
+//! reads them back from there.
 //!
 //! The types here are the format's own, not the server's (decision 18).
 //!
+//! A decoder bounds what a stream with a valid hash but crafted contents
+//! can cost: records nest at most [`wire::MAX_DEPTH`] deep, a decode builds
+//! at most a budget of memory relative to its input
+//! ([`wire::BUDGET_BASE`]), and a page holds at most [`row::MAX_PAGE_ROWS`]
+//! rows, [`row::MAX_PAGE_CELLS`] cells and [`row::MAX_PAGE_BYTES`] bytes.
+//!
 //! # Changing the format
 //!
-//! Adding a field under a new tag is compatible within a version. Anything
-//! else (a tag's meaning, the row codec) bumps [`FORMAT_VERSION`], adds a
-//! migration step and a golden file `tests/golden/v<N>.snap`; earlier
-//! golden files are never edited once released.
+//! - A field under a new tag that a reader may lose without changing what
+//!   it restores (a hint it can work out again) needs nothing more: older
+//!   readers of the version skip it.
+//! - A field under a new tag that carries state (losing it would change a
+//!   format, a screen or a `show-*`/`list-*` output after the restore)
+//!   needs either a new [`FORMAT_VERSION`] or a feature name: the writer
+//!   lists the name in [`Meta::requires`] whenever it writes the field, and
+//!   the reader that understands it lists it in [`KNOWN_FEATURES`] (or
+//!   [`Features`], for a name that depends on the binary). A reader refuses
+//!   a stream that requires a name it doesn't know ([`Error::Unsupported`]),
+//!   so the dry run (decision 6) fails and the old server keeps running.
+//!   Decision 23's pages in Ghostty's own form are such a field:
+//!   [`ghostty_pages_feature`].
+//! - A new `oneof!` variant or `value_enum!` number ([`wire`]) is
+//!   state by that rule, unless the enum names an `unknown` fallback
+//!   ([`PaneMode::Closed`]).
+//! - Anything else (a tag's meaning, the row codec, the header) bumps
+//!   [`FORMAT_VERSION`] and adds a migration step and a golden file
+//!   `tests/golden/v<N>.snap`.
+//!
+//! A golden file holds what its version wrote when it was released, and
+//! is never edited after that. A field added within a version stays out
+//! of the test sample the golden file pins (it gets its own round trip),
+//! so the golden file keeps pinning every reader of the version.
 
 #![forbid(unsafe_code)]
 
@@ -51,6 +88,44 @@ pub const FORMAT_VERSION: u32 = 1;
 /// The oldest version this build reads.
 pub const MIN_VERSION: u32 = 1;
 
+/// Length of a stream's header: magic, version, body length, body hash.
+pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
+
+/// The [`Meta::requires`] names every reader of this build understands;
+/// none yet.
+pub const KNOWN_FEATURES: &[&str] = &[];
+
+/// The [`Meta::requires`] name of history pages in Ghostty's own
+/// compressed form, which only a binary with the same Ghostty patch stack
+/// (`patches`, its hash) can read (decision 23). No page is written that
+/// way yet: the name holds the place, so that a reader that can't take
+/// them refuses the stream rather than lose the history they hold.
+#[must_use]
+pub fn ghostty_pages_feature(patches: &str) -> String {
+    format!("ghostty-pages-{patches}")
+}
+
+/// What a reader understands beyond [`KNOWN_FEATURES`], from the binary it
+/// runs in.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Features {
+    /// The reading binary's Ghostty patch-stack hash: it understands
+    /// [`ghostty_pages_feature`] of that hash.
+    pub ghostty_patches: Option<String>,
+}
+
+impl Features {
+    /// Whether a stream that requires `name` can be read.
+    #[must_use]
+    pub fn understands(&self, name: &str) -> bool {
+        KNOWN_FEATURES.contains(&name)
+            || self
+                .ghostty_patches
+                .as_deref()
+                .is_some_and(|h| name == ghostty_pages_feature(h))
+    }
+}
+
 /// Why a snapshot can't be read.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -66,8 +141,14 @@ pub enum Error {
         found: u32,
         oldest: u32,
     },
-    /// The stream ends inside a value.
+    /// The stream ends inside a value, or before the length its header
+    /// gives.
     Truncated,
+    /// The body doesn't match the hash in the header.
+    Corrupt,
+    /// The stream requires a feature this reader doesn't understand
+    /// ([`Meta::requires`]).
+    Unsupported(String),
     Malformed(&'static str),
     /// A history page whose bytes are missing or don't match its hash.
     MissingChunk(Hash),
@@ -88,6 +169,10 @@ impl std::fmt::Display for Error {
                 "snapshot format {found} is older than the oldest supported, {oldest}"
             ),
             Self::Truncated => f.write_str("snapshot is truncated"),
+            Self::Corrupt => f.write_str("snapshot is corrupt: its hash does not match"),
+            Self::Unsupported(name) => {
+                write!(f, "snapshot requires `{name}`, which this binary lacks")
+            }
             Self::Malformed(what) => write!(f, "malformed snapshot: {what}"),
             Self::MissingChunk(h) => write!(f, "history chunk {} missing or corrupt", hex(h)),
             Self::Inconsistent(what) => write!(f, "inconsistent snapshot: {what}"),
@@ -131,6 +216,10 @@ record! {
         4 => one ghostty_patches: String,
         /// Microseconds since the epoch.
         5 => one written_us: i64,
+        /// Features a reader must understand to read the stream, beyond
+        /// its version ([`Features::understands`]; the crate docs,
+        /// *Changing the format*).
+        6 => many requires: Vec<String>,
     }
 }
 
@@ -151,8 +240,10 @@ record! {
 /// The stream for a live upgrade: every history page inline.
 #[must_use]
 pub fn encode(s: &Snapshot) -> Vec<u8> {
-    let mut out = header();
+    let mut out = Vec::with_capacity(4096);
+    out.resize(HEADER_LEN, 0);
     wire::Value::put(s, &mut out);
+    seal(&mut out);
     out
 }
 
@@ -162,15 +253,25 @@ pub fn encode(s: &Snapshot) -> Vec<u8> {
 pub fn encode_manifest(s: &Snapshot) -> Vec<u8> {
     let mut by_ref = s.clone();
     by_ref.pages_mut(&mut |p| p.data = Vec::new());
-    let mut out = header();
-    wire::Value::put(&by_ref, &mut out);
-    out
+    encode(&by_ref)
 }
 
-fn header() -> Vec<u8> {
-    let mut out = Vec::with_capacity(4096);
-    out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+/// Fill in the header of `out`, whose body follows [`HEADER_LEN`] bytes
+/// of room for it.
+fn seal(out: &mut [u8]) {
+    let (head, body) = out.split_at_mut(HEADER_LEN);
+    head[..8].copy_from_slice(MAGIC);
+    head[8..12].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+    head[12..20].copy_from_slice(&(body.len() as u64).to_le_bytes());
+    head[20..].copy_from_slice(blake3::hash(body).as_bytes());
+}
+
+/// `body` behind its header.
+#[cfg(test)]
+fn frame(body: &[u8]) -> Vec<u8> {
+    let mut out = vec![0; HEADER_LEN];
+    out.extend_from_slice(body);
+    seal(&mut out);
     out
 }
 
@@ -183,17 +284,9 @@ pub fn version(bytes: &[u8]) -> Result<u32, Error> {
     Ok(u32::from_le_bytes(head[8..12].try_into().expect("4 bytes")))
 }
 
-/// Decode a stream whose history pages are inline.
-pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
-    decode_with(bytes, |_| None)
-}
-
-/// Decode a stream, fetching each page that is not inline from `chunk`
-/// (by its hash). Every page is checked against its hash.
-pub fn decode_with(
-    bytes: &[u8],
-    mut chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
-) -> Result<Snapshot, Error> {
+/// The body of a stream of a version this build reads, checked against
+/// the length and hash in its header.
+fn body(bytes: &[u8]) -> Result<(u32, &[u8]), Error> {
     let found = version(bytes)?;
     if found > FORMAT_VERSION {
         return Err(Error::Newer {
@@ -207,17 +300,65 @@ pub fn decode_with(
             oldest: MIN_VERSION,
         });
     }
-    let cx = Ctx { version: found };
-    let mut s = <Snapshot as wire::Value>::get(&bytes[12..], &cx)?;
+    let head = bytes.get(..HEADER_LEN).ok_or(Error::Truncated)?;
+    let len = u64::from_le_bytes(head[12..20].try_into().expect("8 bytes"));
+    let body = &bytes[HEADER_LEN..];
+    match (body.len() as u64).cmp(&len) {
+        std::cmp::Ordering::Less => return Err(Error::Truncated),
+        std::cmp::Ordering::Greater => {
+            return Err(Error::Malformed("bytes after the snapshot"));
+        }
+        std::cmp::Ordering::Equal => {}
+    }
+    if blake3::hash(body).as_bytes() != &head[20..HEADER_LEN] {
+        return Err(Error::Corrupt);
+    }
+    Ok((found, body))
+}
+
+/// Decode a stream whose history pages are inline.
+pub fn decode(bytes: &[u8]) -> Result<Snapshot, Error> {
+    decode_with(bytes, |_| None)
+}
+
+/// Decode a stream, fetching each page that is not inline from `chunk`
+/// (by its hash), and checking each fetched page against its hash (the
+/// stream's own hash covers the inline ones). A stream that requires a
+/// feature beyond [`KNOWN_FEATURES`] is refused.
+pub fn decode_with(
+    bytes: &[u8],
+    chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
+) -> Result<Snapshot, Error> {
+    decode_for(bytes, &Features::default(), chunk)
+}
+
+/// [`decode_with`] for a reader that understands `features` too.
+pub fn decode_for(
+    bytes: &[u8],
+    features: &Features,
+    mut chunk: impl FnMut(&Hash) -> Option<Vec<u8>>,
+) -> Result<Snapshot, Error> {
+    let (found, body) = body(bytes)?;
+    let cx = Ctx::for_input(found, body.len());
+    // What the stream requires is known before anything that depends on
+    // it is decoded.
+    let mut r = wire::Reader::new(body);
+    while let Some((tag, field)) = r.field()? {
+        if tag == 1 {
+            let meta = <Meta as wire::Value>::get(field, &cx)?;
+            if let Some(name) = meta.requires.iter().find(|n| !features.understands(n)) {
+                return Err(Error::Unsupported(name.clone()));
+            }
+        }
+    }
+    let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
     let mut missing = None;
     s.pages_mut(&mut |p| {
-        if missing.is_some() {
+        if missing.is_some() || !p.data.is_empty() {
             return;
         }
-        if p.data.is_empty() {
-            p.data = chunk(&p.hash).unwrap_or_default();
-        }
-        if !p.verified() {
+        p.data = chunk(&p.hash).unwrap_or_default();
+        if p.raw().is_err() {
             missing = Some(p.hash);
         }
     });
@@ -288,14 +429,12 @@ impl Snapshot {
     }
 
     /// Everything the dry run (`--vtmux-check-snapshot`) verifies beyond
-    /// decoding: every page decompresses into its rows, and the records
-    /// refer to each other consistently.
+    /// decoding: every page decompresses into its rows within the page
+    /// limits and matches its name, and the records refer to each other
+    /// consistently.
     pub fn check(&self) -> Result<(), Error> {
         for p in self.pages() {
-            if !p.verified() {
-                return Err(Error::MissingChunk(p.hash));
-            }
-            p.each_row(|_| {})?;
+            p.each_row_verified(|_| {})?;
         }
         let bad = |what: String| Err(Error::Inconsistent(what));
         let windows: std::collections::BTreeMap<u32, &Window> =

@@ -3,10 +3,12 @@
 //!
 //! A record is a run of fields. Each field is `tag` (varint), `len`
 //! (varint) and `len` bytes of payload. A decoder skips the tags it does not
-//! know, so a field can be added without breaking an older reader of the
-//! same format version. Changing what an existing tag means needs a new
-//! [`crate::FORMAT_VERSION`] and a decoder that looks at [`Ctx::version`]
-//! or a migration step (`crate::migrate`).
+//! know, so an older reader of the same format version reads a stream with
+//! a new field, without it; whether that is allowed is the crate's
+//! versioning rule (*Changing the format* in the crate docs). Changing what
+//! an existing tag means needs a new [`crate::FORMAT_VERSION`] and a
+//! decoder that looks at [`Ctx::version`] or a migration step
+//! (`crate::migrate`).
 //!
 //! Field modes, chosen per field where the record is declared:
 //!
@@ -15,12 +17,87 @@
 //! - `many`: a `Vec`, one field per element in order.
 
 use crate::Error;
+use std::cell::Cell;
 
-/// What a decoder may need to know about the stream it reads.
-#[derive(Clone, Copy, Debug)]
+/// Deepest nesting of records a decoder accepts. A snapshot's own records
+/// nest about eight deep; the rest is for the layout tree, two records a
+/// level (a cell and its node), so a tree may be some 120 levels deep. A
+/// crafted stream nests deeper only to overflow the decoder's stack (and
+/// `check`'s and `drop`'s after it).
+pub const MAX_DEPTH: u32 = 256;
+
+/// Memory a decode may build, beyond the input it copies: this much,
+/// plus [`BUDGET_PER_BYTE`] for each byte of input. A real snapshot comes
+/// nowhere near it (visible rows, the densest records, are at most a few
+/// hundred bytes decoded per byte encoded and few); an empty record
+/// repeated two bytes at a time costs its full size each time.
+pub const BUDGET_BASE: u64 = 128 << 20;
+
+/// See [`BUDGET_BASE`].
+pub const BUDGET_PER_BYTE: u64 = 64;
+
+/// What a decoder may need to know about the stream it reads, and the
+/// limits that keep a crafted stream from costing more than a real one
+/// ([`MAX_DEPTH`], [`BUDGET_BASE`]).
+#[derive(Debug)]
 pub struct Ctx {
     /// The format version in the stream's header.
     pub version: u32,
+    depth: Cell<u32>,
+    budget: Cell<u64>,
+}
+
+impl Ctx {
+    /// A context for a value decoded on its own: the base budget.
+    #[must_use]
+    pub fn new(version: u32) -> Self {
+        Self::for_input(version, 0)
+    }
+
+    /// A context for decoding `len` bytes of input.
+    #[must_use]
+    pub fn for_input(version: u32, len: usize) -> Self {
+        Self {
+            version,
+            depth: Cell::new(0),
+            budget: Cell::new(
+                BUDGET_BASE.saturating_add((len as u64).saturating_mul(BUDGET_PER_BYTE)),
+            ),
+        }
+    }
+
+    /// Enter a nested record; the guard leaves it.
+    pub fn enter(&self) -> Result<Nested<'_>, Error> {
+        let d = self.depth.get() + 1;
+        if d > MAX_DEPTH {
+            return Err(Error::Malformed("records nest too deeply"));
+        }
+        self.depth.set(d);
+        Ok(Nested(&self.depth))
+    }
+
+    /// Account for `bytes` of decoded memory.
+    pub fn charge(&self, bytes: usize) -> Result<(), Error> {
+        let left = self
+            .budget
+            .get()
+            .checked_sub(bytes as u64)
+            .ok_or(Error::Malformed(
+                "snapshot decodes far larger than its bytes",
+            ))?;
+        self.budget.set(left);
+        Ok(())
+    }
+}
+
+/// A level of nesting entered with [`Ctx::enter`].
+#[derive(Debug)]
+pub struct Nested<'a>(&'a Cell<u32>);
+
+impl Drop for Nested<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
 }
 
 /// A type with a fixed wire encoding.
@@ -191,6 +268,8 @@ pub mod many {
     }
 
     pub fn get<T: Value>(slot: &mut Vec<T>, buf: &[u8], cx: &Ctx) -> Result<(), Error> {
+        // Each element costs its size, however few bytes encode it.
+        cx.charge(size_of::<T>())?;
         slot.push(T::get(buf, cx)?);
         Ok(())
     }
@@ -344,6 +423,7 @@ macro_rules! record {
             }
 
             fn get(buf: &[u8], cx: &$crate::wire::Ctx) -> Result<Self, $crate::Error> {
+                let _nested = cx.enter()?;
                 let mut v = Self::default();
                 let mut r = $crate::wire::Reader::new(buf);
                 while let Some((tag, body)) = r.field()? {
@@ -360,7 +440,8 @@ macro_rules! record {
 
 /// Declare a field-less enum stored as a varint. The first variant is the
 /// default. An unknown number is an error: a reader of the same version
-/// knows every number that version writes.
+/// knows every number that version writes, so a new number needs a new
+/// [`crate::FORMAT_VERSION`] or a [`crate::Meta::requires`] entry.
 macro_rules! value_enum {
     (
         $(#[$m:meta])*
@@ -409,12 +490,21 @@ macro_rules! value_enum {
 /// Declare an enum whose variants each carry one value: written as a
 /// one-field record whose tag names the variant. The first variant (with
 /// its payload's default) is the default.
+///
+/// A variant's tag is not like a record's: a reader that knows none of the
+/// tags in a value can't decode it, and the whole decode fails. So a new
+/// variant needs a new [`crate::FORMAT_VERSION`] or a
+/// [`crate::Meta::requires`] entry, unless the enum names a fallback with
+/// `unknown => Variant` after its body: an unknown tag then decodes as
+/// that variant with its payload's default (`PaneMode::Closed`: a mode
+/// this reader doesn't have is closed).
 macro_rules! oneof {
     (
         $(#[$m:meta])*
         pub enum $name:ident {
             $( $(#[$vm:meta])* $tag:literal => $variant:ident($ty:ty) ),+ $(,)?
         }
+        $(unknown => $fallback:ident)?
     ) => {
         $(#[$m])*
         #[derive(Clone, Debug, PartialEq, Eq)]
@@ -438,6 +528,7 @@ macro_rules! oneof {
             }
 
             fn get(buf: &[u8], cx: &$crate::wire::Ctx) -> Result<Self, $crate::Error> {
+                let _nested = cx.enter()?;
                 let mut r = $crate::wire::Reader::new(buf);
                 let mut found = None;
                 while let Some((tag, body)) = r.field()? {
@@ -445,7 +536,11 @@ macro_rules! oneof {
                         $( $tag => found = Some(Self::$variant(
                             <$ty as $crate::wire::Value>::get(body, cx)?,
                         )), )+
-                        _ => {}
+                        _ => {
+                            $( if found.is_none() {
+                                found = Some(Self::$fallback(Default::default()));
+                            } )?
+                        }
                     }
                 }
                 found.ok_or($crate::Error::Malformed(concat!("no known ", stringify!($name))))
@@ -465,8 +560,6 @@ pub(crate) use {first, oneof, record, value_enum};
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const CX: Ctx = Ctx { version: 1 };
 
     #[test]
     fn varints_round_trip_at_the_edges() {
@@ -515,11 +608,11 @@ mod tests {
 
     #[test]
     fn scalars_reject_bad_payloads() {
-        assert!(bool::get(&[2], &CX).is_err());
-        assert!(u8::get(&[0x80, 0x02], &CX).is_err());
-        assert!(String::get(&[0xff], &CX).is_err());
-        assert!(<[u8; 32]>::get(&[0; 31], &CX).is_err());
+        assert!(bool::get(&[2], &Ctx::new(1)).is_err());
+        assert!(u8::get(&[0x80, 0x02], &Ctx::new(1)).is_err());
+        assert!(String::get(&[0xff], &Ctx::new(1)).is_err());
+        assert!(<[u8; 32]>::get(&[0; 31], &Ctx::new(1)).is_err());
         // A number field with bytes after its varint.
-        assert!(u32::get(&[1, 2], &CX).is_err());
+        assert!(u32::get(&[1, 2], &Ctx::new(1)).is_err());
     }
 }

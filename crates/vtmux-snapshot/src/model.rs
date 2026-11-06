@@ -10,8 +10,10 @@
 //! Modes carried across an upgrade: copy mode (its frozen grid, D-010, and
 //! position), view mode and clock mode. Tree, buffer, client, customize,
 //! switch and display-panes modes, prompts and menus are closed by the
-//! upgrade and re-opened by the user (spec, *Modes in progress*). Popups
-//! are carried with their pty.
+//! upgrade and re-opened by the user (spec, *Modes in progress*); a mode
+//! a reader doesn't know reads as [`PaneMode::Closed`], so carrying a new
+//! mode later doesn't make older readers refuse the stream. Popups are
+//! carried with their pty.
 
 use crate::row::{HistoryPage, Row};
 use crate::term::TermState;
@@ -232,6 +234,13 @@ record! {
         /// Server-wide activity counter (the ordering stamp sessions and
         /// windows take).
         27 => one activity: u64,
+        /// The config files the server started with, in order
+        /// (`#{config_files}`, format.c `format_cb_config_files`).
+        28 => many config_files: Vec<String>,
+        /// Config errors not yet shown, `file:line: message` (cfg.c
+        /// `cfg_add_cause`): the next attach shows them
+        /// (`cfg_show_causes`).
+        29 => many config_causes: Vec<String>,
     }
 }
 
@@ -449,7 +458,11 @@ oneof! {
         /// `window_view_mode`: copy mode over command output.
         2 => View(CopyMode),
         3 => Clock(()),
+        /// A mode this reader doesn't know (a newer writer's), or one the
+        /// writer closed: the restore drops it from the stack.
+        4 => Closed(()),
     }
+    unknown => Closed
 }
 
 record! {
@@ -673,7 +686,7 @@ pub(crate) mod tests {
     pub(crate) fn round_trip<T: crate::wire::Value + PartialEq + std::fmt::Debug>(v: &T) {
         let mut out = Vec::new();
         v.put(&mut out);
-        assert_eq!(&T::get(&out, &Ctx { version: 1 }).unwrap(), v);
+        assert_eq!(&T::get(&out, &Ctx::new(1)).unwrap(), v);
     }
 
     fn opt(name: &str, value: OptionValue) -> OptionEntry {
@@ -817,6 +830,8 @@ pub(crate) mod tests {
             }),
             default_term: "screen".into(),
             activity: 99,
+            config_files: vec!["/etc/tmux.conf".into(), "/home/u/.tmux.conf".into()],
+            config_causes: vec!["/home/u/.tmux.conf:3: unknown command: nope".into()],
         }
     }
 
@@ -1002,6 +1017,7 @@ pub(crate) mod tests {
                 PaneMode::Copy(sample_copy()),
                 PaneMode::View(CopyMode::default()),
                 PaneMode::Clock(()),
+                PaneMode::Closed(()),
             ],
             search: Some(("s".into(), false)),
             pipe: Some(PipePane {
@@ -1221,6 +1237,20 @@ pub(crate) mod tests {
     fn a_oneof_with_no_known_variant_is_an_error() {
         let mut out = Vec::new();
         crate::wire::put_field(&mut out, 99, |_| {});
-        assert!(LayoutCell::get(&out, &Ctx { version: 1 }).is_err());
+        assert!(LayoutCell::get(&out, &Ctx::new(1)).is_err());
+    }
+
+    #[test]
+    fn an_unknown_pane_mode_reads_as_closed() {
+        // A mode from a newer writer, with a payload this reader can't read.
+        let mut out = Vec::new();
+        crate::wire::put_field(&mut out, 99, |o| o.extend_from_slice(b"\xff\xff"));
+        assert_eq!(PaneMode::get(&out, &Ctx::new(1)), Ok(PaneMode::Closed(())));
+        // In a pane's stack, beside the modes it knows.
+        let mut pane = Vec::new();
+        crate::wire::put_field(&mut pane, 21, |o| PaneMode::Clock(()).put(o));
+        crate::wire::put_field(&mut pane, 21, |o| o.extend_from_slice(&out));
+        let p = Pane::get(&pane, &Ctx::new(1)).unwrap();
+        assert_eq!(p.modes, [PaneMode::Clock(()), PaneMode::Closed(())]);
     }
 }

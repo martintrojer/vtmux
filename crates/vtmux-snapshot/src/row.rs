@@ -2,6 +2,11 @@
 //! independent of Ghostty's page memory, and the history pages that hold
 //! rows LZ4-compressed under a content hash.
 //!
+//! A page is named by the BLAKE3 hash of its rows' encoding before
+//! compression, so the name and the snapshot's meaning depend on the row
+//! codec alone: another LZ4 encoder (an `lz4_flex` update) may store the
+//! same page in other bytes under the same name.
+//!
 //! A row is written compactly, not as a tagged record: rows are most of a
 //! snapshot's bytes. Cells are run-length encoded: a run of cells sharing
 //! their attributes writes the attributes once, and a run of identical cells
@@ -645,12 +650,36 @@ fn make_cell(a: &Attrs, text: u64) -> Result<Cell, Error> {
     })
 }
 
+impl Row {
+    /// The memory the row holds beyond its own size.
+    fn heap_size(&self) -> usize {
+        self.cells.len() * size_of::<Cell>()
+            + self.graphemes.len() * size_of::<Grapheme>()
+            + self.links.len() * size_of::<Hyperlink>()
+    }
+
+    /// An upper bound on the length of the row's encoding.
+    fn encoded_bound(&self) -> u64 {
+        // A cell takes at most 32 bytes (run header, every attribute, a
+        // four-byte codepoint), the row's fixed fields under 64.
+        let strings: usize = self
+            .links
+            .iter()
+            .map(|l| 21 + l.uri.len() + l.id.as_ref().map_or(0, String::len))
+            .chain(self.graphemes.iter().map(|g| 13 + g.rest.len()))
+            .sum();
+        (64 + 40 * self.cells.len() + strings) as u64
+    }
+}
+
 impl Value for Row {
     fn put(&self, out: &mut Vec<u8>) {
         self.encode_into(out);
     }
-    fn get(buf: &[u8], _: &Ctx) -> Result<Self, Error> {
-        Self::decode(buf)
+    fn get(buf: &[u8], cx: &Ctx) -> Result<Self, Error> {
+        let row = Self::decode(buf)?;
+        cx.charge(row.heap_size())?;
+        Ok(row)
     }
 }
 
@@ -697,21 +726,31 @@ impl Value for Hyperlink {
     }
 }
 
-/// A page's content hash (BLAKE3 of its compressed bytes): the chunk name
-/// on disk.
+/// A page's content hash (BLAKE3 of its rows' encoding, before
+/// compression): the chunk name on disk.
 pub type Hash = [u8; 32];
 
 /// Largest uncompressed page a decoder accepts.
 pub const MAX_PAGE_BYTES: u64 = 64 << 20;
 
-/// A run of history rows, LZ4-compressed, named by the hash of the
-/// compressed bytes. `data` is empty in a snapshot decoded without its
-/// chunks (see [`crate::decode_with`]).
+/// Most rows in a page a decoder accepts.
+pub const MAX_PAGE_ROWS: u32 = 1 << 16;
+
+/// Most cells in a page a decoder accepts: what bounds the work one page
+/// costs, since LZ4 and run-length encoding together let a few hundred
+/// bytes stand for millions of blank cells. [`PageBuilder::fits`] keeps a
+/// writer under every page limit.
+pub const MAX_PAGE_CELLS: u64 = 1 << 22;
+
+/// A run of history rows, LZ4-compressed, named by the hash of their
+/// encoding. `data` is empty in a snapshot decoded without its chunks (see
+/// [`crate::decode_with`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HistoryPage {
     pub rows: u32,
     /// Length of the rows' encoding before compression.
     pub raw_len: u64,
+    /// BLAKE3 of the rows' encoding.
     pub hash: Hash,
     /// Ghostty held the page compressed in memory when it was exported.
     pub compressed: bool,
@@ -725,6 +764,7 @@ pub struct HistoryPage {
 pub struct PageBuilder {
     raw: Vec<u8>,
     rows: u32,
+    cells: u64,
 }
 
 impl PageBuilder {
@@ -733,14 +773,32 @@ impl PageBuilder {
         Self::default()
     }
 
+    /// Add a row. Check [`PageBuilder::fits`] first: a page past the
+    /// limits encodes, but no reader accepts it.
     pub fn push(&mut self, row: &Row) {
         row.encode_into(&mut self.raw);
         self.rows += 1;
+        self.cells += row.cells.len() as u64;
+    }
+
+    /// Whether `row` can join the page without taking it past
+    /// [`MAX_PAGE_ROWS`], [`MAX_PAGE_CELLS`] or [`MAX_PAGE_BYTES`].
+    #[must_use]
+    pub fn fits(&self, row: &Row) -> bool {
+        self.rows < MAX_PAGE_ROWS
+            && self.cells + row.cells.len() as u64 <= MAX_PAGE_CELLS
+            && self.raw.len() as u64 + row.encoded_bound() <= MAX_PAGE_BYTES
     }
 
     #[must_use]
     pub fn rows(&self) -> u32 {
         self.rows
+    }
+
+    /// Cells pushed so far.
+    #[must_use]
+    pub fn cells(&self) -> u64 {
+        self.cells
     }
 
     /// Bytes encoded so far, before compression.
@@ -756,7 +814,7 @@ impl PageBuilder {
         HistoryPage {
             rows: self.rows,
             raw_len: self.raw.len() as u64,
-            hash: *blake3::hash(&data).as_bytes(),
+            hash: *blake3::hash(&self.raw).as_bytes(),
             compressed,
             data,
         }
@@ -773,19 +831,31 @@ impl HistoryPage {
         b.finish(compressed)
     }
 
-    /// Whether `data` is present and matches `hash`.
+    /// Whether `data` is present, decompresses within the page limits and
+    /// matches `hash`.
     #[must_use]
     pub fn verified(&self) -> bool {
-        !self.data.is_empty() && *blake3::hash(&self.data).as_bytes() == self.hash
+        self.raw().is_ok()
     }
 
-    /// Call `f` with each row in order, reusing one [`Row`].
-    pub fn each_row(&self, mut f: impl FnMut(&Row)) -> Result<(), Error> {
-        if self.data.is_empty() && self.raw_len != 0 {
+    /// The rows' encoding: `data` decompressed, checked against the page's
+    /// sizes, its limits and its hash.
+    pub fn raw(&self) -> Result<Vec<u8>, Error> {
+        let raw = self.inflate()?;
+        if *blake3::hash(&raw).as_bytes() != self.hash {
+            return Err(Error::MissingChunk(self.hash));
+        }
+        Ok(raw)
+    }
+
+    /// [`HistoryPage::raw`] without the hash check.
+    fn inflate(&self) -> Result<Vec<u8>, Error> {
+        if self.data.is_empty() {
             return Err(Error::MissingChunk(self.hash));
         }
         // LZ4 expands at most 255 times; every row takes at least 2 bytes.
         if self.raw_len > MAX_PAGE_BYTES
+            || self.rows > MAX_PAGE_ROWS
             || self.raw_len > self.data.len() as u64 * 255
             || u64::from(self.rows) * 2 > self.raw_len
         {
@@ -797,10 +867,33 @@ impl HistoryPage {
         if n != raw.len() {
             return Err(Error::Malformed("history page shorter than its length"));
         }
-        let mut r = Reader::new(&raw);
+        Ok(raw)
+    }
+
+    /// Call `f` with each row in order, reusing one [`Row`]. Checks the
+    /// page's sizes and limits ([`MAX_PAGE_CELLS`] too), but not its hash:
+    /// decoding checked that, against the stream's hash for an inline page
+    /// and against the page's own for a chunk ([`HistoryPage::each_row_verified`] does
+    /// both).
+    pub fn each_row(&self, f: impl FnMut(&Row)) -> Result<(), Error> {
+        self.rows_of(&self.inflate()?, f)
+    }
+
+    /// [`HistoryPage::each_row`] with the hash checked too.
+    pub fn each_row_verified(&self, f: impl FnMut(&Row)) -> Result<(), Error> {
+        self.rows_of(&self.raw()?, f)
+    }
+
+    fn rows_of(&self, raw: &[u8], mut f: impl FnMut(&Row)) -> Result<(), Error> {
+        let mut r = Reader::new(raw);
         let mut row = Row::default();
+        let mut cells = 0u64;
         for _ in 0..self.rows {
             row.decode_from(&mut r)?;
+            cells += row.cells.len() as u64;
+            if cells > MAX_PAGE_CELLS {
+                return Err(Error::Malformed("history page has too many cells"));
+            }
             f(&row);
         }
         if !r.is_empty() {
@@ -811,7 +904,8 @@ impl HistoryPage {
 
     /// Every row of the page.
     pub fn decode_rows(&self) -> Result<Vec<Row>, Error> {
-        let mut out = Vec::with_capacity(self.rows as usize);
+        // `rows` is the page's own claim: grow as rows arrive.
+        let mut out = Vec::new();
         self.each_row(|r| out.push(r.clone()))?;
         Ok(out)
     }
@@ -833,6 +927,9 @@ impl Value for HistoryPage {
                 3 => one::get(&mut p.hash, body, cx)?,
                 4 => one::get(&mut p.compressed, body, cx)?,
                 5 => one::get(&mut p.data, body, cx)?,
+                // 6: reserved for the page in Ghostty's compressed form
+                // (decision 23), written only behind the `requires` entry
+                // `crate::ghostty_pages_feature`.
                 _ => {}
             }
         }
@@ -1029,7 +1126,7 @@ pub(crate) mod tests {
         assert_eq!(HistoryPage::from_rows(&rows, true).hash, page.hash);
         assert_ne!(HistoryPage::from_rows(&rows[1..], true).hash, page.hash);
 
-        let cx = Ctx { version: 1 };
+        let cx = Ctx::new(1);
         let mut out = Vec::new();
         page.put(&mut out);
         assert_eq!(HistoryPage::get(&out, &cx).unwrap(), page);
@@ -1051,5 +1148,65 @@ pub(crate) mod tests {
         let mut huge = HistoryPage::from_rows(&[sample_row()], false);
         huge.raw_len = MAX_PAGE_BYTES + 1;
         assert!(huge.decode_rows().is_err());
+    }
+
+    #[test]
+    fn a_page_claiming_endless_rows_fails_before_allocating_for_them() {
+        // `rows` is the manifest's claim, not covered by the page's hash.
+        let mut page = HistoryPage::from_rows(&[Row::default()], false);
+        page.rows = u32::MAX;
+        assert!(page.decode_rows().is_err());
+        let many = vec![Row::default(); MAX_PAGE_ROWS as usize + 1];
+        assert!(HistoryPage::from_rows(&many, false).decode_rows().is_err());
+        let most = HistoryPage::from_rows(&many[1..], false);
+        assert_eq!(most.decode_rows().unwrap().len(), MAX_PAGE_ROWS as usize);
+    }
+
+    #[test]
+    fn a_page_of_too_many_cells_is_refused_and_the_builder_stops_short_of_it() {
+        // A few hundred bytes compressed, billions of cells unbounded.
+        let blank = Row {
+            cells: vec![Cell::default(); MAX_COLS],
+            ..Row::default()
+        };
+        let mut b = PageBuilder::new();
+        while b.fits(&blank) {
+            b.push(&blank);
+        }
+        assert_eq!(
+            b.cells(),
+            MAX_PAGE_CELLS / MAX_COLS as u64 * MAX_COLS as u64
+        );
+        let full = b.finish(false);
+        assert_eq!(full.decode_rows().unwrap().len(), full.rows as usize);
+        let mut over = PageBuilder::new();
+        for _ in 0..=full.rows {
+            over.push(&blank);
+        }
+        let over = over.finish(false);
+        assert!(over.data.len() < 4096);
+        assert_eq!(
+            over.each_row(|_| {}),
+            Err(Error::Malformed("history page has too many cells"))
+        );
+        // The rows limit, and the bytes limit for rows that encode long.
+        let mut b = PageBuilder::new();
+        while b.fits(&Row::default()) {
+            b.push(&Row::default());
+        }
+        assert_eq!(b.rows(), MAX_PAGE_ROWS);
+        let mut b = PageBuilder::new();
+        let long = Row {
+            links: vec![Hyperlink {
+                id: None,
+                uri: "x".repeat(1 << 20),
+            }],
+            ..sample_row()
+        };
+        while b.fits(&long) {
+            b.push(&long);
+        }
+        assert!(b.raw_len() as u64 <= MAX_PAGE_BYTES);
+        assert!(b.finish(false).decode_rows().is_ok());
     }
 }

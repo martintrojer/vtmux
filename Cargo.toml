@@ -32,6 +32,13 @@ module_name_repetitions = "allow"
 opt-level = 3
 debug = false
 
+# Snapshot tests hash and compress every damaged copy of a stream.
+[profile.dev.package.blake3]
+opt-level = 3
+
+[profile.dev.package.lz4_flex]
+opt-level = 3
+
 # The backreference long-text test takes ~8 s in a debug build, ~1 s optimised.
 [profile.dev.package.vtmux-core]
 opt-level = 2
