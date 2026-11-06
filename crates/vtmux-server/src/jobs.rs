@@ -78,6 +78,8 @@ struct Job {
     status: Option<JobStatus>,
     /// `JOB_NOWAIT`: the server may exit with it running.
     nowait: bool,
+    /// [`JobSpec::blocks_upgrade`].
+    blocks_upgrade: bool,
     update: Option<Update>,
     complete: Option<Complete>,
 }
@@ -87,7 +89,9 @@ struct Job {
 pub struct Jobs {
     next: usize,
     running: BTreeMap<JobId, Job>,
-    timers: Vec<(Instant, Deferred)>,
+    /// When each fires, what it runs, and for a `run-shell -d` timer the
+    /// command it will run (a live upgrade waits for it, decision 10).
+    timers: Vec<(Instant, Deferred, Option<String>)>,
 }
 
 impl std::fmt::Debug for Jobs {
@@ -138,7 +142,22 @@ impl Jobs {
     /// The soonest timer.
     #[must_use]
     pub fn deadline(&self) -> Option<Instant> {
-        self.timers.iter().map(|(at, _)| *at).min()
+        self.timers.iter().map(|(at, ..)| *at).min()
+    }
+
+    /// The `run-shell` and `if-shell` work still to finish, by command: a
+    /// job still running or a `run-shell -d` timer still pending. A live
+    /// upgrade waits for it (live-upgrade spec, decision 10): it can't
+    /// carry a job's callback across `execve`.
+    #[must_use]
+    pub fn upgrade_blockers(&self) -> Vec<String> {
+        let jobs = self
+            .running
+            .values()
+            .filter(|j| j.blocks_upgrade && (j.fd.is_some() || j.pid.is_some()))
+            .map(|j| j.command.clone());
+        let timers = self.timers.iter().filter_map(|(.., what)| what.clone());
+        jobs.chain(timers).collect()
     }
 }
 
@@ -156,6 +175,10 @@ pub struct JobSpec {
     pub show_stderr: bool,
     /// `JOB_NOWAIT`.
     pub nowait: bool,
+    /// A `run-shell` or `if-shell` job: a live upgrade waits for it to
+    /// finish (decision 10). `#()` jobs and `copy-pipe` are not waited
+    /// for: a `#()` job runs again after the upgrade.
+    pub blocks_upgrade: bool,
     /// `updatecb`: told of output as it arrives.
     pub update: Option<Update>,
 }
@@ -192,6 +215,7 @@ impl Server {
                 input_done: false,
                 status: None,
                 nowait: spec.nowait,
+                blocks_upgrade: spec.blocks_upgrade,
                 update: spec.update.clone(),
                 complete: Some(complete),
             },
@@ -387,16 +411,22 @@ impl Server {
 
     /// Run `f` at `at` (`evtimer_add`, or `event_active` for now).
     pub(crate) fn timer_add(&mut self, at: Instant, f: Deferred) {
-        self.jobs.timers.push((at, f));
+        self.jobs.timers.push((at, f, None));
+    }
+
+    /// [`Self::timer_add`] for `run-shell -d`, whose `command` will run: a
+    /// live upgrade waits for it ([`Jobs::upgrade_blockers`]).
+    pub(crate) fn command_timer_add(&mut self, at: Instant, command: String, f: Deferred) {
+        self.jobs.timers.push((at, f, Some(command)));
     }
 
     /// Fire every timer that is due, in the order they were added.
     pub(crate) fn jobs_timers(&mut self, now: Instant) {
         let (due, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.jobs.timers)
             .into_iter()
-            .partition(|(at, _)| *at <= now);
+            .partition(|(at, ..)| *at <= now);
         self.jobs.timers = rest;
-        for (_, f) in due {
+        for (_, f, _) in due {
             f(self);
         }
     }

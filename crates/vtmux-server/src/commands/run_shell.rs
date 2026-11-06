@@ -212,8 +212,12 @@ pub fn exec(
                 &server.format_ctx(found, tc),
             ))
         });
-        server.timer_add(
+        let what = value
+            .as_ref()
+            .map_or_else(String::new, |v| v.text().into_owned());
+        server.command_timer_add(
             at,
+            what,
             Box::new(move |server| {
                 if let Some(value) = value {
                     done.queue(server, &value);
@@ -238,10 +242,15 @@ pub fn exec(
             input: Vec::new(),
             show_stderr: args.flag('E'),
             nowait: !wait,
+            blocks_upgrade: true,
             update: None,
         });
-        server.timer_add(
+        let what = spec
+            .as_ref()
+            .map_or_else(String::new, |s| s.command.clone());
+        server.command_timer_add(
             at,
+            what,
             Box::new(move |server| start_job(server, spec, &done, to_pane)),
         );
     }
@@ -391,6 +400,7 @@ pub fn if_shell(
         input: Vec::new(),
         show_stderr: false,
         nowait: false,
+        blocks_upgrade: true,
         update: None,
     };
     let job_done = done.clone();

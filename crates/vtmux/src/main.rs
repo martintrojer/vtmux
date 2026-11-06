@@ -209,6 +209,38 @@ fn connect_or_start(
     }
 }
 
+/// The global options (tmux.c `main`'s getopt loop), or how to exit:
+/// `-V`, `-h` and usage errors end here.
+fn parse_cli(
+    args: &[OsString],
+    progname: &str,
+    invocation: Invocation,
+) -> Result<cli::Cli, ExitCode> {
+    match cli::parse(args, progname) {
+        Ok(cli) => Ok(cli),
+        Err(cli::Early::Version) => {
+            // D21, D25.
+            match invocation {
+                Invocation::Tmux => println!("tmux {}", vtmux_core::version::TMUX_VERSION),
+                Invocation::Vtmux => println!("vtmux {}", vtmux_core::version::display()),
+            }
+            Err(ExitCode::SUCCESS)
+        }
+        Err(cli::Early::Help) => {
+            print!("{}", cli::usage(progname));
+            Err(ExitCode::SUCCESS)
+        }
+        Err(cli::Early::Usage(msg)) => {
+            let mut err = io::stderr().lock();
+            if let Some(m) = msg {
+                let _ = writeln!(err, "{m}");
+            }
+            let _ = err.write_all(cli::usage(progname).as_bytes());
+            Err(ExitCode::from(1))
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().collect();
     upgrade_image(args.get(1..).unwrap_or_default()).unwrap_or_else(|| client_main(args))
@@ -227,28 +259,9 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         .map_or_else(|| "vtmux".to_owned(), |n| n.to_string_lossy().into_owned());
     let progname = progname.trim_start_matches('-').to_owned();
 
-    let cli = match cli::parse(&args, &progname) {
+    let cli = match parse_cli(&args, &progname, invocation) {
         Ok(cli) => cli,
-        Err(cli::Early::Version) => {
-            // D21, D25.
-            match invocation {
-                Invocation::Tmux => println!("tmux {}", vtmux_core::version::TMUX_VERSION),
-                Invocation::Vtmux => println!("vtmux {}", vtmux_core::version::display()),
-            }
-            return ExitCode::SUCCESS;
-        }
-        Err(cli::Early::Help) => {
-            print!("{}", cli::usage(&progname));
-            return ExitCode::SUCCESS;
-        }
-        Err(cli::Early::Usage(msg)) => {
-            let mut err = io::stderr().lock();
-            if let Some(m) = msg {
-                let _ = writeln!(err, "{m}");
-            }
-            let _ = err.write_all(cli::usage(&progname).as_bytes());
-            return ExitCode::from(1);
-        }
+        Err(code) => return code,
     };
     if cli.shell_command.is_some() || cli.no_fork {
         write_err(b"not implemented in vtmux yet: -c and -D");
@@ -292,6 +305,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         cwd: Some(cwd.clone()),
         default_socket,
         dry_run: false,
+        binary: start_binary(&argv0),
     };
     let mut stream = match connect_or_start(&path, start, default_socket, config) {
         Ok(s) => s,
@@ -305,7 +319,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         invocation,
         pid: std::process::id(),
         argv: cli.command.clone(),
-        cwd,
+        cwd: cwd.clone(),
         env,
         tty: tty_info(&cli.features),
         flags: ClientFlags {
@@ -318,8 +332,11 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);
     }
-    match cli.control {
-        ControlMode::None => relay(&mut stream),
+    match (cli.control, lone_upgrade(&cli.command)) {
+        (ControlMode::None, Some(up)) => {
+            upgrade_relay(&mut stream, &path, up.flag.map(|b| cwd.join(b)), &argv0)
+        }
+        (ControlMode::None, None) => relay(&mut stream, None),
         _ => control_relay(&mut stream),
     }
 }
@@ -348,6 +365,76 @@ fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
         }),
         _ => None,
     }
+}
+
+/// The path this binary was started as, for a server it starts
+/// (live-upgrade spec, decision 22).
+fn start_binary(argv0: &std::ffi::OsStr) -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let path = std::env::var("PATH").ok();
+    vtmux_server::server::upgrade::start_binary(argv0, path.as_deref(), &cwd)
+        .or_else(|| std::env::current_exe().ok())
+}
+
+/// A command line that is `vtmux-upgrade` alone.
+struct LoneUpgrade {
+    /// Its `-b`.
+    flag: Option<PathBuf>,
+}
+
+fn lone_upgrade(command: &[Vec<u8>]) -> Option<LoneUpgrade> {
+    let calls = cmd::parse_argv_bytes(command).ok()?;
+    let [call] = calls.as_slice() else {
+        return None;
+    };
+    (call.entry.name == "vtmux-upgrade").then(|| LoneUpgrade {
+        flag: call.args.value('b').map(PathBuf::from),
+    })
+}
+
+/// `vtmux-upgrade` on the command line (live-upgrade spec, *Command*): a
+/// server of this protocol runs it as any command. One of another version
+/// answers the `Hello` with the version mismatch; then the frozen
+/// `UpgradeRequest` asks it to move onto `flag` (`-b`, from the client's
+/// directory) or, without one, onto this binary, the one the mismatch
+/// hint means.
+fn upgrade_relay(
+    stream: &mut UnixStream,
+    socket: &Path,
+    flag: Option<PathBuf>,
+    argv0: &std::ffi::OsStr,
+) -> ExitCode {
+    let mismatch = match protocol::read_msg::<ServerMsg>(stream) {
+        Ok(Some(ServerMsg::Stderr(b))) if b.starts_with(b"protocol version mismatch") => b,
+        Ok(Some(first)) => return relay(stream, Some(first)),
+        Ok(None) | Err(_) => return relay(stream, None),
+    };
+    let Some(binary) =
+        flag.or_else(|| std::env::current_exe().ok().or_else(|| start_binary(argv0)))
+    else {
+        let _ = io::stderr().lock().write_all(&mismatch);
+        return ExitCode::from(1);
+    };
+    let answer = connect(socket).ok().and_then(|mut s| {
+        protocol::write_msg(&mut s, &ClientMsg::UpgradeRequest { binary }).ok()?;
+        loop {
+            match protocol::read_msg::<ServerMsg>(&mut s) {
+                Ok(Some(ServerMsg::UpgradeResult { ok, message })) => return Some((ok, message)),
+                Ok(Some(_)) | Err(protocol::ProtocolError::UnknownTag(_)) => {}
+                Ok(None) | Err(_) => return None,
+            }
+        }
+    });
+    // No answer: a server from before the handshake (decision 14), and
+    // the mismatch is all there is to say.
+    let Some((ok, message)) = answer else {
+        let _ = io::stderr().lock().write_all(&mismatch);
+        return ExitCode::from(1);
+    };
+    if !message.is_empty() {
+        write_err(message.as_bytes());
+    }
+    ExitCode::from(u8::from(!ok))
 }
 
 /// client.c:343-348: `-CC` puts stdin's terminal in raw mode, after the
@@ -480,12 +567,16 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 
-/// Print what the server sends until `Exit`, doing the file I/O it asks
-/// for (file.c, client side).
-fn relay(stream: &mut UnixStream) -> ExitCode {
+/// Print what the server sends until `Exit`, `first` (already read) then
+/// the rest, doing the file I/O it asks for (file.c, client side).
+fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>) -> ExitCode {
     let mut writing: Option<files::Write> = None;
     loop {
-        match protocol::read_msg::<ServerMsg>(stream) {
+        let next = match first.take() {
+            Some(m) => Ok(Some(m)),
+            None => protocol::read_msg::<ServerMsg>(stream),
+        };
+        match next {
             Ok(Some(ServerMsg::Stdout(b) | ServerMsg::Frame(b))) => {
                 let mut out = io::stdout().lock();
                 let _ = out.write_all(&b);

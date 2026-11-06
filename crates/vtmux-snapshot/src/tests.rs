@@ -487,6 +487,22 @@ fn the_current_version_encodes_to_its_golden_file() {
     );
 }
 
+/// `Server::start_binary` came within v1, so the golden sample leaves it
+/// empty: it gets its own round trip, and a stream without it decodes
+/// with it empty.
+#[test]
+fn the_start_binary_round_trips_and_defaults_to_empty() {
+    let mut s = sample();
+    assert_eq!(s.server.start_binary, "");
+    s.server.start_binary = "/home/u/bin/tmux".into();
+    assert_eq!(
+        decode(&encode(&s)).unwrap().server.start_binary,
+        "/home/u/bin/tmux"
+    );
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert_eq!(golden.server.start_binary, "");
+}
+
 #[test]
 fn page_names_hash_the_rows_not_the_compressed_bytes() {
     let rows = vec![sample_row(); 10];

@@ -262,6 +262,11 @@ record! {
         33 => opt marked_elsewhere: Option<u32>,
         /// `server-access` entries (server-acl.c).
         34 => many access: Vec<Access>,
+        /// The path the server was started as, absolute, symlinks kept
+        /// (live-upgrade spec, decision 22): `vtmux-upgrade` without `-b`
+        /// resolves it when asked. Added within v1 and empty in the golden
+        /// sample: a v1 reader without it falls back to its own binary.
+        35 => one start_binary: String,
     }
 }
 
@@ -935,6 +940,7 @@ pub(crate) mod tests {
         ]
     }
 
+    #[expect(clippy::too_many_lines, reason = "one field after another")]
     pub(crate) fn sample_server() -> Server {
         let bind = Binding {
             key: "C-b".into(),
@@ -1035,6 +1041,8 @@ pub(crate) mod tests {
                     read_only: true,
                 },
             ],
+            // Added within v1, so out of the sample the golden file pins.
+            start_binary: String::new(),
         }
     }
 

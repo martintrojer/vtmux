@@ -338,6 +338,7 @@ fn run_pipe(server: &mut Server, found: Found, pipe: Pipe) {
         input: pipe.data,
         show_stderr: false,
         nowait: true,
+        blocks_upgrade: false,
         update: None,
     };
     // A job that cannot start is silently dropped, as in tmux.

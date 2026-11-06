@@ -18,8 +18,8 @@
 //!   decode and the whole rebuild [`resume`] does, on placeholder
 //!   descriptors.
 //!
-//! Not here yet: the preflight and quiesce (steps 1-2) and telling
-//! attached clients to re-execute (step 6). An attached client of the
+//! The preflight and quiesce (steps 1-2) are `upgrade.rs`'s. Not here
+//! yet: telling attached clients to re-execute (step 6). An attached client of the
 //! same build stays connected through the exec, since its socket is kept;
 //! the server redraws it from scratch. Pane terminal state is not carried
 //! yet (`snapshot.rs`, `restore_term`): panes come back with blank
@@ -200,6 +200,8 @@ fn restore(
         environ,
         default_socket: default_socket(Path::new(&s.server.socket_path)),
         dry_run,
+        // The snapshot carries it (`Server::start_binary`).
+        binary: None,
     };
     let mut server = Server::from_snapshot(listener, config, s, &mut |role| dup(role))?;
     if !dry_run {
@@ -364,6 +366,7 @@ fn serve_held(mut held: Vec<OwnedFd>, why: &str) -> i32 {
             cwd: std::env::current_dir().ok(),
             default_socket: default_socket(&socket),
             dry_run: false,
+            binary: None,
         };
         if listener.set_nonblocking(true).is_ok()
             && let Ok(mut server) = Server::new(listener, socket, config)
@@ -437,22 +440,11 @@ impl Server {
     /// Sequence steps 3, 4, 5 and 7 (live-upgrade spec): the snapshot
     /// into an anonymous memory file, the dry run of `binary` on it, then
     /// `execve(binary)` with the descriptors it names kept open. Returns
-    /// only if the server is still this image, with why.
+    /// only if the server is still this image, with why. The preflight and
+    /// quiesce before it are `upgrade.rs`'s.
     pub(crate) fn exec_upgrade(&mut self, binary: &Path) -> String {
-        if !self.held.is_empty() {
-            // `serve_held`: the snapshot can't name them, so the exec
-            // would close them, and the panes' terminals with them.
-            return format!(
-                "{} descriptors held from a failed upgrade: kill-server releases them",
-                self.held.len()
-            );
-        }
         let fail =
             |e: &io::Error| format!("{}: {}", binary.display(), vtmux_core::error::strerror(e));
-        let ids: Vec<_> = self.clients.keys().copied().collect();
-        for id in ids {
-            self.flush_client(id);
-        }
         let exe = std::env::current_exe()
             .map(|p| sys::exe_path(&p))
             .unwrap_or_default();
@@ -486,7 +478,7 @@ impl Server {
             .map(|d| d.fd)
             .chain(binary_fd)
             .collect();
-        fail(&sys::exec_in_place(binary, file, &keep))
+        fail(&(self.upgrade.exec)(binary, file, &keep))
     }
 }
 

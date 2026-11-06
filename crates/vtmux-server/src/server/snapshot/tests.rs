@@ -33,7 +33,12 @@ pub(crate) fn listener(dir: &Path, name: &str) -> (std::os::unix::net::UnixListe
     )
 }
 
-fn hello(words: &[&str], dir: &Path, tty: Option<TtyInfo>, control: ControlMode) -> Hello {
+pub(crate) fn hello(
+    words: &[&str],
+    dir: &Path,
+    tty: Option<TtyInfo>,
+    control: ControlMode,
+) -> Hello {
     Hello {
         version: PROTOCOL_VERSION,
         invocation: vtmux_core::socket::Invocation::Vtmux,
@@ -52,7 +57,7 @@ fn hello(words: &[&str], dir: &Path, tty: Option<TtyInfo>, control: ControlMode)
 
 /// A client connected through a socket pair, its hello handled; the peer
 /// end of its socket.
-fn connect(server: &mut Server, h: Hello) -> (ClientId, mio::net::UnixStream) {
+pub(crate) fn connect(server: &mut Server, h: Hello) -> (ClientId, mio::net::UnixStream) {
     let (ours, peer) = mio::net::UnixStream::pair().unwrap();
     let id = ClientId(server.next_client);
     server.next_client += 1;
@@ -65,7 +70,11 @@ fn connect(server: &mut Server, h: Hello) -> (ClientId, mio::net::UnixStream) {
 /// Every message the server has written to `peer`. A socket pair's buffer
 /// is small on macOS, so the server's queue is flushed between reads until
 /// both are empty.
-fn messages(server: &mut Server, id: ClientId, peer: &mut mio::net::UnixStream) -> Vec<ServerMsg> {
+pub(crate) fn messages(
+    server: &mut Server,
+    id: ClientId,
+    peer: &mut mio::net::UnixStream,
+) -> Vec<ServerMsg> {
     let mut wire = Vec::new();
     let mut buf = vec![0u8; 65536];
     loop {
@@ -458,7 +467,7 @@ const FED: &[(u32, &[u8])] = &[
     (2, b"pane two\r\n"),
 ];
 
-fn ok(server: &mut Server, dir: &Path, words: &[&str]) {
+pub(crate) fn ok(server: &mut Server, dir: &Path, words: &[&str]) {
     let out = run(server, dir, words);
     assert!(
         out.ends_with("--stderr--\n--exit Some(0)--\n"),
@@ -653,7 +662,7 @@ fn dup(fd: impl AsFd) -> OwnedFd {
 
 /// The descriptor a live upgrade keeps for `role`, here duplicated from
 /// `a`.
-fn adopt(a: &Server, role: &snap::Role) -> Option<OwnedFd> {
+pub(crate) fn adopt(a: &Server, role: &snap::Role) -> Option<OwnedFd> {
     match role {
         snap::Role::Client(id) => a
             .clients
@@ -682,7 +691,7 @@ fn adopt(a: &Server, role: &snap::Role) -> Option<OwnedFd> {
 
 /// `a` snapshotted, encoded, decoded and rebuilt on a listener named
 /// `name`, adopting `a`'s descriptors.
-fn rebuild(a: &Server, dir: &Path, name: &str) -> Server {
+pub(crate) fn rebuild(a: &Server, dir: &Path, name: &str) -> Server {
     let taken = a.to_snapshot(snap::Meta::default());
     let decoded = snap::decode(&snap::encode(&taken)).unwrap();
     decoded.check().unwrap();
@@ -691,13 +700,13 @@ fn rebuild(a: &Server, dir: &Path, name: &str) -> Server {
 }
 
 /// A fresh server on listener `a` in `dir`.
-fn server(dir: &Path) -> Server {
+pub(crate) fn server(dir: &Path) -> Server {
     let (l, socket) = listener(dir, "a");
     Server::new(l, socket, ServerConfig::default()).unwrap()
 }
 
 /// An attached terminal client of `term` with `features`, on `session`.
-fn attach(
+pub(crate) fn attach(
     server: &mut Server,
     dir: &Path,
     session: &str,

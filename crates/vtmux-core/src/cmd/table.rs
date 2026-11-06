@@ -213,12 +213,27 @@ pub static TMUX_COMMANDS: [CmdEntry; 92] = [
     cmd("wait-for", Some("wait"), "EF:LSUlvw:", 1, Some(1), "[-ELSUlv] [-F format] [-w waiter] name", None, None, false, true),
 ];
 
-/// Look up a typed command name. A port of `cmd_find` (cmd.c:469-506): walk
-/// the table in order; an exact alias wins at once; otherwise a name that
+/// vtmux's own commands. Like its options (spec D23), they match by their
+/// exact name only and `list-commands` without a name leaves them out, so
+/// abbreviations, `ambiguous command` lists and the command listing stay
+/// tmux's; `list-commands <name>` shows one. The `vtmux-` prefix can't
+/// collide with a future tmux command.
+#[rustfmt::skip]
+pub static VTMUX_COMMANDS: [CmdEntry; 1] = [
+    // Live upgrade (D27, docs/specs/2026-11-06-live-upgrade.md decision 12).
+    cmd("vtmux-upgrade", None, "b:", 0, Some(0), "[-b binary]", None, None, false, true),
+];
+
+/// Look up a typed command name. One of [`VTMUX_COMMANDS`] by its exact
+/// name; otherwise a port of `cmd_find` (cmd.c:469-506): walk the table in
+/// order; an exact alias wins at once; otherwise a name that
 /// starts with the typed text is a candidate, and an exact name match stops
 /// the walk. Two candidates are ambiguous and the message lists every name
 /// with that prefix in table order.
 pub fn find(name: &str) -> Result<&'static CmdEntry, EdgeError> {
+    if let Some(entry) = VTMUX_COMMANDS.iter().find(|e| e.name == name) {
+        return Ok(entry);
+    }
     let mut found: Option<&'static CmdEntry> = None;
     let mut ambiguous = false;
     for entry in &TMUX_COMMANDS {
@@ -390,6 +405,23 @@ impl CmdEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// vtmux's own commands match by exact name only, so tmux's
+    /// abbreviations and errors are unchanged.
+    #[test]
+    fn vtmux_commands_match_by_exact_name_only() {
+        let e = find("vtmux-upgrade").expect("found");
+        assert_eq!(
+            (e.name, e.usage, e.template),
+            ("vtmux-upgrade", "[-b binary]", "b:")
+        );
+        assert!(!e.starts_server && e.implemented && !e.read_only() && !e.after_hook());
+        assert_eq!(err("vtmux-up"), "unknown command: vtmux-up");
+        assert_eq!(err("vtmux"), "unknown command: vtmux");
+        // `v` is no prefix of a tmux command; `u` stays ambiguous as in tmux.
+        assert_eq!(err("v"), "unknown command: v");
+        assert!(err("u").starts_with("ambiguous command: u, could be: unbind-key"));
+    }
 
     fn found(name: &str) -> &'static str {
         find(name).expect("found").name

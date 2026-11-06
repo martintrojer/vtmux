@@ -74,6 +74,7 @@ mod split_window;
 mod swap_pane;
 mod swap_window;
 mod unlink_window;
+mod vtmux_upgrade;
 mod wait_for;
 
 use std::path::PathBuf;
@@ -480,6 +481,7 @@ fn dispatch(
             kill_server::exec(server);
             Ok(())
         }
+        "vtmux-upgrade" => vtmux_upgrade::exec(server, item, args),
         "list-clients" => list_clients::exec(server, item, args, found),
         "list-sessions" => list_sessions::exec(server, item, args),
         "split-window" => split_window::exec(server, item, args, found, false),

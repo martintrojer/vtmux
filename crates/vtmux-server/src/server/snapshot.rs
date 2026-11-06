@@ -857,6 +857,11 @@ impl Server {
             pid: i32::try_from(self.info.pid).unwrap_or(0),
             socket_path: self.info.socket_path.clone(),
             start_time_us: self.info.start_secs.saturating_mul(1_000_000),
+            start_binary: self
+                .start_binary
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
             server_options: tree((0, 0)),
             session_options: tree((1, 0)),
             window_options: tree((2, 0)),
@@ -1288,6 +1293,7 @@ impl Server {
         server.causes.clone_from(&s.config_causes);
         server.info = info;
         server.global_env = env_in(&s.environment);
+        server.start_binary = (!s.start_binary.is_empty()).then(|| PathBuf::from(&s.start_binary));
 
         // Options: every tree, then the hook bookkeeping.
         let mut trees = vec![

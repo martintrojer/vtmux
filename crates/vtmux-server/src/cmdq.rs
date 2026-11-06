@@ -289,6 +289,26 @@ impl Cmdq {
             .is_some_and(|s| s.iter().any(|s| Some(s.id) != current))
     }
 
+    /// Every queue with a step in it. A live upgrade can't carry the work
+    /// in a queue across `execve`, so its preflight waits for them
+    /// (live-upgrade spec, decision 26).
+    #[must_use]
+    pub fn busy_queues(&self) -> Vec<QueueId> {
+        self.queues
+            .iter()
+            .filter(|(_, steps)| !steps.is_empty())
+            .map(|(&q, _)| q)
+            .collect()
+    }
+
+    /// The queue step `id` is in, while it is queued.
+    #[must_use]
+    pub fn queue_of(&self, id: StepId) -> Option<QueueId> {
+        self.queues
+            .iter()
+            .find_map(|(&q, steps)| steps.iter().any(|s| s.id == id).then_some(q))
+    }
+
     /// Whether a pass would do something now.
     #[must_use]
     pub fn runnable(&self) -> bool {

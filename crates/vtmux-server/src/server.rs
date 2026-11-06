@@ -59,6 +59,9 @@ pub mod persist;
 pub mod restore;
 pub mod resume;
 pub mod snapshot;
+pub mod upgrade;
+
+pub use resume::{check_snapshot, resume};
 
 /// A connected client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -85,6 +88,10 @@ pub struct ServerConfig {
     /// to prove the snapshot rebuilds, never run, and leaves nothing
     /// behind (no shim).
     pub dry_run: bool,
+    /// The path the server was started as ([`upgrade::start_binary`]):
+    /// what `vtmux-upgrade` without `-b` resolves (live-upgrade spec,
+    /// decision 22).
+    pub binary: Option<PathBuf>,
 }
 
 #[expect(
@@ -588,6 +595,11 @@ pub struct Server {
     held_backlog: std::collections::BTreeSet<usize>,
     /// `vtmux-persist` checkpoints ([`persist`]).
     pub(crate) persist: persist::Persist,
+    /// A live upgrade in its preflight ([`upgrade`]).
+    pub(crate) upgrade: upgrade::Upgrade,
+    /// The path the server was started as, carried across upgrades
+    /// ([`ServerConfig::binary`]).
+    pub(crate) start_binary: Option<PathBuf>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -795,7 +807,10 @@ impl Server {
             held: Vec::new(),
             held_backlog: std::collections::BTreeSet::new(),
             persist: persist::Persist::default(),
+            upgrade: upgrade::Upgrade::default(),
+            start_binary: None,
         };
+        server.start_binary.clone_from(&server.config.binary);
         // A dry run rebuilds the server only to see that it can: it must
         // not touch the shim the running server's panes use.
         if !server.config.dry_run {
@@ -889,6 +904,8 @@ impl Server {
             self.control_tick();
             // A monitor hook set or removed this turn: its timer.
             self.hook_monitors_sync();
+            // Last, once this turn's output is queued: a waiting upgrade.
+            self.upgrade_turn(Instant::now());
             if self.wants_flush() {
                 // server_loop / server_send_exit: release every waiter.
                 for c in self.waits.flush() {
@@ -1011,6 +1028,8 @@ impl Server {
                 .min()
                 .map(|d| d.saturating_duration_since(now)),
             self.persist_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.upgrade_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.clients
                 .values()
@@ -1582,33 +1601,6 @@ impl Server {
             }
             ClientMsg::UpgradeRequest { binary } => self.upgrade_request(id, &binary),
         }
-    }
-
-    /// The frozen upgrade handshake (live-upgrade spec, *Handshake*): a
-    /// client of any version asks the server to move onto `binary`, with no
-    /// [`Hello`] and no version check, and gets one
-    /// [`ServerMsg::UpgradeResult`] before the connection closes. Only a
-    /// peer the access list lets write may ask (it would run `binary` as
-    /// the server's owner), and `binary` must be absolute (the server's
-    /// cwd is not the requester's). A granted request execs `binary`
-    /// ([`Self::exec_upgrade`]); the requester is not carried across it,
-    /// so a request that succeeds ends with the connection closed and no
-    /// result (the preflight and the result after the exec are
-    /// `vtmux-upgrade`'s).
-    fn upgrade_request(&mut self, id: ClientId, binary: &std::path::Path) {
-        let peer = self.clients.get(&id).and_then(|c| c.peer);
-        let message = if self.acl.check(peer) != crate::acl::Access::Write {
-            "access denied".to_owned()
-        } else if !binary.is_absolute() {
-            "binary must be an absolute path".to_owned()
-        } else {
-            self.exec_upgrade(binary)
-        };
-        self.send(id, &ServerMsg::UpgradeResult { ok: false, message });
-        if let Some(c) = self.clients.get_mut(&id) {
-            c.closing = true;
-        }
-        self.flush_client(id);
     }
 
     fn fail_client(&mut self, id: ClientId, e: &EdgeError) {
@@ -5357,21 +5349,20 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         };
-        // A writer's request runs the dry run, which fails for a binary
-        // that is not there.
-        let missing = dir.join("no-vtmux");
+        let missing = dir.join("missing");
+        let missing = missing.to_str().unwrap();
         assert_eq!(
-            answer(&mut server, missing.to_str().unwrap()),
-            format!("{}: No such file or directory", missing.display())
+            answer(&mut server, missing),
+            format!("{missing}: No such file or directory")
         );
         assert_eq!(
             answer(&mut server, "vtmux"),
             "binary must be an absolute path"
         );
         server.acl.set_read_only(Subject::User(uid), true);
-        assert_eq!(answer(&mut server, "/bin/vtmux"), "access denied");
+        assert_eq!(answer(&mut server, missing), "access denied");
         server.acl.deny(Subject::User(uid));
-        assert_eq!(answer(&mut server, "/bin/vtmux"), "access denied");
+        assert_eq!(answer(&mut server, missing), "access denied");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

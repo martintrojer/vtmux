@@ -436,6 +436,7 @@ impl Server {
             input: Vec::new(),
             show_stderr: false,
             nowait: true,
+            blocks_upgrade: false,
             update: Some(update),
         };
         let started = self.job_run(&spec, complete);
