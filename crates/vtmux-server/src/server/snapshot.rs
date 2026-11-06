@@ -4,11 +4,14 @@
 //! `list-*` and `show-*` command and expands every format as the model it
 //! came from did.
 //!
+//! Pane and popup terminal state (`Pane.term`, `Popup.term`) goes as
+//! `Meta.purpose` says ([`Server::to_snapshot`]): rows for a full
+//! checkpoint, rows or Ghostty's compressed pages for an upgrade, none for
+//! a layout checkpoint, after which [`restore_term`] gives a pane a fresh
+//! terminal of its size, history limit and title.
+//!
 //! What a snapshot leaves out, by design:
 //!
-//! - Pane terminal state (`Pane::term`): restored by `lu_pane_state` through
-//!   [`restore_term`], the one hook; until then a pane comes back with a
-//!   fresh terminal of its size, history limit and title.
 //! - Modes: copy and clock mode are carried; view mode (its backing terminal
 //!   is terminal state), the tree modes (`choose-tree`, `choose-buffer`,
 //!   `choose-client`, `customize-mode`, `switch-mode`), `display-panes`,
@@ -60,6 +63,7 @@ use crate::environ::Environ;
 use crate::format_ctx::ServerInfo;
 use crate::model::{Pane, Session, Window, Zoom};
 use crate::pane_io::PaneIo;
+use crate::snapshot_term::{Form, ghostty_pages_requirement, term_from_snapshot, term_to_snapshot};
 
 /// A reply of a client terminal that changed its features, kept so the
 /// terminal opened again after a restore has them too.
@@ -428,15 +432,29 @@ fn status_in(s: &snap::ExitStatus) -> crate::jobs::JobStatus {
     }
 }
 
-/// The pane's terminal from the snapshot: the hook pane terminal state
-/// (`lu_pane_state`) plugs into. With `p.term` it will be
-/// `PaneTerm::import(term)`; until then (and for a `vtmux-persist layout`
-/// checkpoint, which has none) a fresh terminal the pane's size, with its
-/// history limit, title and an empty pane's modes, made as `spawn_pane`
-/// makes one.
-pub(crate) fn restore_term(server: &Server, p: &snap::Pane) -> io::Result<PaneTerm> {
+/// The pane's terminal from the snapshot: `p.term` imported
+/// ([`term_from_snapshot`], pages in Ghostty's form read only if
+/// `ghostty_patches`, the writer's stack, is this binary's), which must be
+/// the pane's size. Without one (a `vtmux-persist layout` checkpoint) a
+/// fresh terminal the pane's size, with its history limit, title and an
+/// empty pane's modes, made as `spawn_pane` makes one.
+pub(crate) fn restore_term(
+    server: &Server,
+    p: &snap::Pane,
+    ghostty_patches: &str,
+) -> io::Result<PaneTerm> {
     let cols = u16::try_from(p.geometry.sx).unwrap_or(u16::MAX).max(1);
     let rows = u16::try_from(p.geometry.sy).unwrap_or(u16::MAX).max(1);
+    if let Some(t) = &p.term {
+        let mut term = term_from_snapshot(t, ghostty_patches)
+            .map_err(|e| invalid(format!("%{}: {e}", p.id)))?;
+        if (term.cols(), term.rows()) != (cols, rows) {
+            return Err(invalid(format!("%{}: terminal not the pane's size", p.id)));
+        }
+        // The colour-name table is the server's, not terminal state.
+        term.set_colour_names(vtmux_core::colour::x11_rgb);
+        return Ok(term);
+    }
     let mut term = PaneTerm::try_new(
         cols,
         rows,
@@ -454,14 +472,19 @@ pub(crate) fn restore_term(server: &Server, p: &snap::Pane) -> io::Result<PaneTe
     Ok(term)
 }
 
-/// A popup's terminal: the hook `lu_pane_state` plugs into, as
-/// [`restore_term`]; until then a fresh terminal of the job's size with no
-/// history, as `popup_display` makes one.
+/// A popup's terminal: `p.term` imported, as [`restore_term`] does (its
+/// size may lag the popup's, as `popup_resize` leaves it); without one a
+/// fresh terminal of the job's size with no history, as `popup_display`
+/// makes one.
 fn restore_popup_term(
     server: &Server,
     popup: &crate::popup::Popup,
-    _p: &snap::Popup,
+    p: &snap::Popup,
+    ghostty_patches: &str,
 ) -> io::Result<PaneTerm> {
+    if let Some(t) = &p.term {
+        return term_from_snapshot(t, ghostty_patches).map_err(|e| invalid(format!("popup: {e}")));
+    }
     let (jx, jy) = popup.inner();
     let mut term = PaneTerm::try_new(jx.max(1), jy.max(1), 0)
         .ok_or_else(|| invalid(format!("no popup terminal of {jx}x{jy}")))?;
@@ -810,16 +833,35 @@ impl Server {
     /// writes it and why; the descriptor table lists the listening socket,
     /// every client socket, pane PTY and `pipe-pane` descriptor by their
     /// numbers now, for a live upgrade to keep open across `execve`.
-    /// Pane terminal state is left out (`Pane::term` is `None`) until
-    /// `lu_pane_state` fills it. A [`snap::Purpose::CheckpointLayout`]
-    /// snapshot holds no screen at all (D27 decision 17): no terminal
-    /// state and no copy mode, which are never exported for it.
+    /// Terminal state goes as `meta.purpose` says: an upgrade keeps pages
+    /// Ghostty holds compressed in its form ([`Form::SamePin`], decision
+    /// 23), a full checkpoint writes rows, a layout checkpoint none (see
+    /// [`Server::to_snapshot_with`]).
+    #[must_use]
+    pub fn to_snapshot(&self, meta: snap::Meta) -> snap::Snapshot {
+        let form = match meta.purpose {
+            snap::Purpose::Upgrade => Some(Form::SamePin),
+            snap::Purpose::CheckpointFull => Some(Form::Rows),
+            snap::Purpose::CheckpointLayout => None,
+        };
+        self.to_snapshot_with(meta, form)
+    }
+
+    /// [`Server::to_snapshot`] with every pane's and popup's terminal in
+    /// `form`, or none. `meta.ghostty_patches` becomes this binary's stack
+    /// and, when a page went in Ghostty's form, `meta.requires` names
+    /// [`ghostty_pages_requirement`], so a reader of another stack refuses
+    /// the stream instead of losing that history: an upgrade to such a
+    /// binary writes [`Form::Rows`] (decision 23).
+    ///
+    /// Each terminal's per-turn events (replies, bells, title changes)
+    /// must have been drained: the end of a loop turn.
     #[must_use]
     #[expect(clippy::too_many_lines, reason = "one record after another")]
-    pub fn to_snapshot(&self, meta: snap::Meta) -> snap::Snapshot {
+    pub fn to_snapshot_with(&self, mut meta: snap::Meta, form: Option<Form>) -> snap::Snapshot {
         let now = Instant::now();
-        // Whether screens are carried: pane terminal state (when
-        // `lu_pane_state` exports it, only if this holds) and copy mode.
+        // Whether copy mode's frozen screen is carried: not in a `layout`
+        // checkpoint, which holds no screen at all (D27 decision 17).
         let screens = meta.purpose != snap::Purpose::CheckpointLayout;
         let parts = self.model.options.export();
         let mut trees: BTreeMap<(u8, u32), Vec<snap::OptionEntry>> = BTreeMap::new();
@@ -1076,7 +1118,7 @@ impl Server {
                 role: snap::Role::Listener(()),
             });
         }
-        let panes = self
+        let panes: Vec<snap::Pane> = self
             .model
             .panes
             .values()
@@ -1127,10 +1169,7 @@ impl Server {
                         output: pipe.output(),
                         pending: pipe.pending().to_vec(),
                     }),
-                    // The hook for pane terminal state (`lu_pane_state`):
-                    // `screens.then(|| export(&p.term))`, so a `layout`
-                    // checkpoint never exports it.
-                    term: None,
+                    term: form.map(|f| term_to_snapshot(&p.term, f)),
                     over_zoom: p.over_zoom,
                     capture_keys: p.capture_keys,
                     close_on_click: p.close_on_click,
@@ -1144,7 +1183,7 @@ impl Server {
             })
             .collect();
 
-        let clients = self
+        let clients: Vec<snap::Client> = self
             .clients
             .iter()
             .filter(|(_, c)| !c.dead && !c.closing)
@@ -1160,10 +1199,20 @@ impl Server {
                         role: snap::Role::PopupPty(small(id.0)),
                     });
                 }
-                Some(self.client_out(id, c, hello, now))
+                Some(self.client_out(id, c, hello, form, now))
             })
             .collect();
 
+        vtmux_vt::PATCH_STACK.clone_into(&mut meta.ghostty_patches);
+        let need = ghostty_pages_requirement();
+        let mut terms = panes.iter().filter_map(|p| p.term.as_ref()).chain(
+            clients
+                .iter()
+                .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
+        );
+        if !meta.requires.contains(&need) && terms.any(crate::snapshot_term::has_ghostty_pages) {
+            meta.requires.push(need);
+        }
         snap::Snapshot {
             meta,
             server,
@@ -1180,6 +1229,7 @@ impl Server {
         id: ClientId,
         c: &Client,
         hello: &vtmux_core::protocol::Hello,
+        form: Option<Form>,
         now: Instant,
     ) -> snap::Client {
         use vtmux_core::protocol::ControlMode;
@@ -1223,7 +1273,11 @@ impl Server {
                 out.level = level;
                 out
             }),
-            popup: c.popup.as_ref().and_then(crate::popup::Popup::export),
+            popup: c.popup.as_ref().and_then(|p| {
+                let mut out = p.export()?;
+                out.term = form.map(|f| term_to_snapshot(&p.term, f));
+                Some(out)
+            }),
             token: 0,
             fg: c.reported.fg.map(rgb_out),
             bg: c.reported.bg.map(rgb_out),
@@ -1540,7 +1594,7 @@ impl Server {
         }
 
         for x in &snapshot.panes {
-            let pane = server.pane_in(x, fds, now)?;
+            let pane = server.pane_in(x, fds, &snapshot.meta.ghostty_patches, now)?;
             server.model.panes.insert(pane.id, pane);
         }
 
@@ -1561,7 +1615,7 @@ impl Server {
             };
             let id = ClientId(x.id as usize);
             let popup = fds(&snap::Role::PopupPty(x.id));
-            let client = server.client_in(x, fd, popup, now)?;
+            let client = server.client_in(x, fd, popup, &snapshot.meta.ghostty_patches, now)?;
             server.clients.insert(id, client);
         }
 
@@ -1583,7 +1637,13 @@ impl Server {
         Ok(server)
     }
 
-    fn pane_in(&mut self, x: &snap::Pane, fds: &mut Adopt<'_>, now: Instant) -> io::Result<Pane> {
+    fn pane_in(
+        &mut self,
+        x: &snap::Pane,
+        fds: &mut Adopt<'_>,
+        patches: &str,
+        now: Instant,
+    ) -> io::Result<Pane> {
         let id = PaneId(x.id);
         let io = match fds(&snap::Role::PanePty(x.id)) {
             Some(fd) => {
@@ -1600,10 +1660,10 @@ impl Server {
             _ => None,
         };
         let (sx, sy) = (x.geometry.sx as usize, x.geometry.sy as usize);
-        Ok(Pane {
+        let mut pane = Pane {
             id,
             window: WindowId(x.window),
-            term: restore_term(self, x)?,
+            term: restore_term(self, x, patches)?,
             io,
             pid: x.pid,
             tty: x.tty.clone(),
@@ -1644,7 +1704,13 @@ impl Server {
             close_on_click: x.close_on_click,
             close_on_cancel: x.close_on_cancel,
             requests: crate::term_queries::PaneRequests::default(),
-        })
+        };
+        // History imported as rows is resident: due for the compressor at
+        // once (decision 23).
+        if x.term.is_some() {
+            pane.compress.restored(&pane.term, now);
+        }
+        Ok(pane)
     }
 
     #[expect(clippy::too_many_lines, reason = "one field after another")]
@@ -1653,6 +1719,7 @@ impl Server {
         x: &snap::Client,
         fd: OwnedFd,
         popup_fd: Option<OwnedFd>,
+        patches: &str,
         now: Instant,
     ) -> io::Result<Client> {
         use vtmux_core::protocol::{ClientFlags, ControlMode, Hello, TtyInfo};
@@ -1782,7 +1849,7 @@ impl Server {
                 None => None,
             };
             let mut popup = crate::popup::Popup::import(p, io, PaneTerm::new(1, 1, 0));
-            popup.term = restore_popup_term(self, &popup, p)?;
+            popup.term = restore_popup_term(self, &popup, p, patches)?;
             c.popup = Some(popup);
         }
         Ok(c)

@@ -6,6 +6,7 @@
 use std::io::Read as _;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use vtmux_core::protocol::{
     ClientFlags, ControlMode, Hello, PROTOCOL_VERSION, ServerMsg, TtyInfo, decode,
@@ -365,6 +366,20 @@ fn observations(dir: &Path) -> Vec<Vec<String>> {
     .iter()
     .map(|w| w.iter().map(|s| (*s).to_owned()).collect())
     .collect();
+    // Every pane's screen and history as its program left it (copy mode's
+    // frozen grid aside): escapes, joined wraps, trailing spaces.
+    for p in ["%0", "%1", "%2", "%3", "%6"] {
+        for flags in [
+            &["-e", "-S", "-"][..],
+            &["-J", "-N", "-S", "-"],
+            &["-a", "-q"],
+        ] {
+            let mut w = vec!["capture-pane".to_owned(), "-p".to_owned()];
+            w.extend(flags.iter().map(|f| (*f).to_owned()));
+            w.extend(["-t".to_owned(), p.to_owned()]);
+            out.push(w);
+        }
+    }
     let _ = dir;
     for f in [
         vec!["list-sessions", "-F", &all],
@@ -458,14 +473,20 @@ fn normalised(mut s: snap::Snapshot) -> snap::Snapshot {
     s
 }
 
-/// The bytes fed to each pane's terminal by hand: pane terminal state is
-/// not in the snapshot yet (`lu_pane_state`), so the rebuilt server's
-/// terminals get the same bytes, standing in for it.
+/// The bytes fed to each pane's terminal by hand (`cat -` prints only
+/// what it is sent): screens with styles, links, wide characters, a
+/// wrapped line, history, modes, a scroll region and a cursor away from
+/// the end. Only the snapshot brings them to the rebuilt server.
 const FED: &[(u32, &[u8])] = &[
     (0, b"hello world\r\nsecond \x1b[1;31mred\x1b[m line\r\n\x1b]8;;http://x\x1b\\link\x1b]8;;\x1b\\ \xe6\xbc\xa2\r\n"),
     (1, b"\x1b]8;;http://y\x1b\\L\x1b]8;;\x1b\\ink\r\n"),
-    (2, b"pane two\r\n"),
+    (2, b"pane two\r\n\x1b[?1h\x1b[?2004h\x1b[4l\x1b[2;5r\x1b[3;1H\x1b[38;5;200mstyled\x1b[m"),
+    (3, b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9\r\n10\r\n11\r\n12\r\n13\r\n14\r\n15\r\n16\r\n17\r\n18\r\n19\r\n20\r\n21\r\n22\r\n23\r\n24\r\n25\r\n26\r\n27\r\n28\r\n29\r\n30\r\n31\r\n32\r\n33\r\n34\r\n35\r\n36\r\n37\r\n38\r\n39\r\n40\r\n\x1b[?1049h\x1b[5;5Halternate\x1b[6 q"),
+    (6, b"a long line that wraps past the edge of a narrow pane\x1b[?25l"),
 ];
+
+/// Fed to the popup's terminal by hand.
+const POPUP_FED: &[u8] = b"in the \x1b[7mpopup\x1b[m\r\n";
 
 pub(crate) fn ok(server: &mut Server, dir: &Path, words: &[&str]) {
     let out = run(server, dir, words);
@@ -573,6 +594,7 @@ fn build(server: &mut Server, dir: &Path) -> Vec<mio::net::UnixStream> {
             .get_mut(&vtmux_core::ids::PaneId(p))
             .unwrap();
         pane.term.feed(bytes);
+        let _ = pane.term.take_title_events();
     }
     for words in [
         &["select-pane", "-T", "t0", "-t", "%0"][..],
@@ -651,6 +673,12 @@ fn build(server: &mut Server, dir: &Path) -> Vec<mio::net::UnixStream> {
         control,
         b"display-popup -c /dev/vtmux-test-tty -w 30 -h 8 -T pop -b rounded cat -\n",
     );
+    let popup = server
+        .clients
+        .values_mut()
+        .find_map(|c| c.popup.as_mut())
+        .unwrap();
+    popup.term.feed(POPUP_FED);
     server.pending_exits.clear();
     // The clients' ends stay open while the servers live.
     vec![term_peer, peer]
@@ -766,14 +794,6 @@ fn a_rebuilt_model_answers_every_listing_alike() {
     let (l, _) = listener(&dir, "b");
     let mut b =
         Server::from_snapshot(l, ServerConfig::default(), &decoded, &mut |r| adopt(&a, r)).unwrap();
-    for &(p, bytes) in FED {
-        b.model
-            .panes
-            .get_mut(&vtmux_core::ids::PaneId(p))
-            .unwrap()
-            .term
-            .feed(bytes);
-    }
 
     // Everything the snapshot carries comes back.
     assert_eq!(
@@ -783,12 +803,22 @@ fn a_rebuilt_model_answers_every_listing_alike() {
     assert_eq!(b.model.options, a.model.options);
     assert_eq!(b.key_bindings, a.key_bindings);
     let popup = |s: &Server| {
-        s.clients
-            .values()
-            .find_map(|c| c.popup.as_ref())
-            .map(|p| (p.title.clone(), p.sx, p.sy, p.pty().is_some()))
+        s.clients.values().find_map(|c| c.popup.as_ref()).map(|p| {
+            let opts = vtmux_vt::CaptureOpts {
+                escapes: true,
+                ..vtmux_vt::CaptureOpts::default()
+            };
+            let screen = vtmux_vt::capture(&p.term, opts);
+            (p.title.clone(), p.sx, p.sy, p.pty().is_some(), screen)
+        })
     };
-    assert_eq!(popup(&a), Some(("pop".to_owned(), 30, 8, true)));
+    let shown = popup(&a).unwrap();
+    assert_eq!(shown.0, "pop");
+    assert_eq!((shown.1, shown.2, shown.3), (30, 8, true));
+    assert!(
+        shown.4.starts_with(b"in the \x1b[7mpopup\x1b[0m\n"),
+        "{shown:?}"
+    );
     assert_eq!(popup(&b), popup(&a));
 
     let before = observe(&mut a, &dir);
@@ -810,6 +840,11 @@ fn a_rebuilt_model_answers_every_listing_alike() {
         "custom x",
         "HIDDEN=1",
         "hello world",
+        "\x1b[38;5;200mstyled",
+        "alternate_on=1",
+        "\n40\n",
+        "alternate",
+        "a long line that wraps past the edge of a narrow pane",
         "copy_cursor_hyperlink=http://y",
         "client_termtype=",
     ] {
@@ -817,9 +852,46 @@ fn a_rebuilt_model_answers_every_listing_alike() {
     }
     let a_pid = a.info.pid;
     assert_eq!(b.info.pid, a_pid);
+
+    carry_on_alike(&mut a, &mut b, &dir);
     drop(b);
     drop(a);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The rebuilt terminals carry on as the old ones do: the scroll region,
+/// insert mode, the pending wrap and leaving the alternate screen back to
+/// its history.
+fn carry_on_alike(old: &mut Server, new: &mut Server, dir: &Path) {
+    let mut captures = Vec::new();
+    for server in [old, new] {
+        for (p, more) in [
+            (2, &b"\r\nx\r\ny\r\nz\r\n\x1b[4hAB"[..]),
+            (3, b"\x1b[?1049lback\r\n"),
+            (6, b"!"),
+        ] {
+            let pane = server
+                .model
+                .panes
+                .get_mut(&vtmux_core::ids::PaneId(p))
+                .unwrap();
+            pane.term.feed(more);
+        }
+        captures.push(
+            ["%2", "%3", "%6"]
+                .iter()
+                .map(|p| {
+                    run(
+                        server,
+                        dir,
+                        &["capture-pane", "-p", "-e", "-S", "-", "-t", p],
+                    )
+                })
+                .collect::<String>(),
+        );
+    }
+    assert!(captures[0].contains("\n40\nback\n"), "{}", captures[0]);
+    assert_eq!(captures[0], captures[1]);
 }
 
 /// Every default key binding and every command option survives the trip
@@ -1080,7 +1152,6 @@ fn from_snapshot_refuses_inconsistent_input() {
 /// `automatic-rename` last renamed, config errors waiting for a client.
 #[test]
 fn timers_and_messages_survive_a_rebuild() {
-    use std::time::{Duration, Instant};
     let dir = temp_dir("timers");
     let mut a = server(&dir);
     ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
@@ -1169,5 +1240,194 @@ fn an_unreadable_monitor_leaves_the_others_alone() {
     assert_eq!(serials(&a).len(), 2);
     assert_eq!(serials(&b), serials(&a));
     drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A pane with history `lines` long, compressed where Ghostty can
+/// (whether it did), and its capture, taken before: reading history
+/// restores the pages it reads.
+fn compressed_pane(server: &mut Server, dir: &Path, lines: usize) -> (bool, String) {
+    ok(server, dir, &["set", "-g", "history-limit", "10000"]);
+    ok(
+        server,
+        dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    let pane = server
+        .model
+        .panes
+        .get_mut(&vtmux_core::ids::PaneId(0))
+        .unwrap();
+    crate::compress::fill(&mut pane.term, lines);
+    let want = pane_capture(server, dir);
+    let pane = server
+        .model
+        .panes
+        .get_mut(&vtmux_core::ids::PaneId(0))
+        .unwrap();
+    let now = Instant::now();
+    pane.compress.observe(&pane.term, now);
+    let later = now + Duration::from_secs(60);
+    for _ in 0..10_000 {
+        match pane.compress.step(&mut pane.term, later) {
+            Some(vtmux_vt::Compression::Pending) => {}
+            _ => break,
+        }
+    }
+    (pane.term.compressed_pages() > 0, want)
+}
+
+fn pane_capture(server: &mut Server, dir: &Path) -> String {
+    run(
+        server,
+        dir,
+        &["capture-pane", "-p", "-e", "-S", "-", "-t", "%0"],
+    )
+}
+
+/// A server rebuilt from `snapshot` on listener `name`, adopting nothing.
+fn restore(dir: &Path, name: &str, snapshot: &snap::Snapshot) -> std::io::Result<Server> {
+    let (listening, _) = listener(dir, name);
+    Server::from_snapshot(listening, ServerConfig::default(), snapshot, &mut |_| None)
+}
+
+fn pane0(server: &Server) -> &crate::model::Pane {
+    &server.model.panes[&vtmux_core::ids::PaneId(0)]
+}
+
+/// Terminal state goes as the snapshot's purpose says (D27 decisions 17
+/// and 23): an upgrade keeps compressed pages in Ghostty's form and says
+/// a reader needs this binary's patch stack for them; a full checkpoint
+/// writes rows any reader takes; a layout checkpoint writes no screen,
+/// and the pane comes back with a fresh terminal.
+#[test]
+fn terminal_state_goes_as_the_purpose_says() {
+    let dir = temp_dir("purpose");
+    let mut old = server(&dir);
+    let (compressed, want) = compressed_pane(&mut old, &dir, 5000);
+    assert!(want.contains("line 4999 some log text"), "{want}");
+    let need = crate::snapshot_term::ghostty_pages_requirement();
+    let meta = |purpose| snap::Meta {
+        purpose,
+        ghostty_patches: "stale".into(),
+        ..snap::Meta::default()
+    };
+    let pages = |taken: &snap::Snapshot| -> (usize, usize) {
+        let history = &taken.panes[0].term.as_ref().unwrap().primary.history;
+        let ghostty = history.iter().filter(|p| p.is_ghostty()).count();
+        (ghostty, history.len())
+    };
+
+    // Upgrade.
+    let up = old.to_snapshot(meta(snap::Purpose::Upgrade));
+    assert_eq!(up.meta.ghostty_patches, vtmux_vt::PATCH_STACK);
+    let (ghostty, all) = pages(&up);
+    assert!(all > 0);
+    if compressed {
+        assert!(ghostty > 0);
+        assert_eq!(up.meta.requires, vec![need.clone()]);
+        assert_eq!(
+            snap::decode(&snap::encode(&up)),
+            Err(snap::Error::Unsupported(need.clone()))
+        );
+    }
+    let features = crate::snapshot_term::reader_features();
+    let back = snap::decode_for(&snap::encode(&up), &features, |_| None).unwrap();
+    let mut upgraded = restore(&dir, "b", &back).unwrap();
+    assert_eq!(
+        pane0(&upgraded).term.compressed_pages(),
+        pane0(&old).term.compressed_pages()
+    );
+    assert_eq!(pane_capture(&mut upgraded, &dir), want);
+    // Only this binary's stack reads Ghostty's pages; another's is refused
+    // with an error, not a panic.
+    if compressed {
+        let mut foreign = back.clone();
+        foreign.meta.ghostty_patches = "another build".into();
+        let err = restore(&dir, "c", &foreign).err().unwrap();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("another Ghostty build"), "{err}");
+    }
+
+    // Full checkpoint: rows only, readable by any reader; the history is
+    // resident again and due for the compressor at once.
+    let full = old.to_snapshot(meta(snap::Purpose::CheckpointFull));
+    assert_eq!(pages(&full).0, 0);
+    assert_eq!(full.meta.requires, Vec::<String>::new());
+    let before = Instant::now();
+    let mut checkpointed =
+        restore(&dir, "d", &snap::decode(&snap::encode(&full)).unwrap()).unwrap();
+    let pane = pane0(&checkpointed);
+    assert_eq!(pane.term.compressed_pages(), 0);
+    assert!(
+        pane.compress
+            .due()
+            .is_some_and(|t| t >= before && t <= Instant::now())
+    );
+    assert_eq!(pane_capture(&mut checkpointed, &dir), want);
+
+    // Layout checkpoint: no terminal; a fresh one, empty, of the pane's
+    // size.
+    let layout = old.to_snapshot(meta(snap::Purpose::CheckpointLayout));
+    assert!(layout.panes.iter().all(|p| p.term.is_none()));
+    let mut fresh = restore(&dir, "e", &layout).unwrap();
+    assert!(!pane_capture(&mut fresh, &dir).contains("log text"));
+    let term = &pane0(&fresh).term;
+    assert_eq!((term.cols(), term.rows(), term.history_size()), (80, 24, 0));
+    drop((old, upgraded, checkpointed, fresh));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A pane terminal that isn't the pane's size, or doesn't decode, is
+/// refused as invalid data.
+#[test]
+fn a_pane_terminal_that_does_not_fit_is_refused() {
+    let dir = temp_dir("badterm");
+    let mut old = server(&dir);
+    ok(
+        &mut old,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    let good = old.to_snapshot(snap::Meta::default());
+    let other = vtmux_vt::PaneTerm::new(40, 10, 100);
+    let mut wrong = good.clone();
+    wrong.panes[0].term = Some(crate::snapshot_term::term_to_snapshot(
+        &other,
+        crate::snapshot_term::Form::Rows,
+    ));
+    let mut short = good.clone();
+    short.panes[0].term.as_mut().unwrap().primary.rows.pop();
+    for (what, bad) in [("size", wrong), ("rows", short)] {
+        let err = restore(&dir, "b", &bad)
+            .err()
+            .unwrap_or_else(|| panic!("{what}: accepted"));
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData, "{what}");
+        assert!(err.to_string().starts_with("%0: "), "{what}: {err}");
+    }
+    assert!(restore(&dir, "b", &good).is_ok());
+    drop(old);
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -15,21 +15,21 @@
 //! [`term_from_snapshot`] builds the pane back, again one page at a time
 //! ([`pages_of`] assembles Ghostty pages from the snapshot's history pages
 //! and visible rows). A pane imported from rows has its history resident;
-//! [`crate::model::Pane::import_term`] queues it for the compressor at once
-//! (decision 23).
+//! `Server::from_snapshot` queues it for the compressor at once
+//! (`PaneCompress::restored`, decision 23).
 //!
 //! Exporting reads no event the server drains each loop turn: replies,
 //! bells, title changes, passthrough and renames must have been taken
 //! (the end of a loop turn) before a pane is exported.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use vtmux_snapshot::{self as snap, PageBuilder};
 use vtmux_vt::{
     self as vt, CellState, CompressedPages, FrozenCell, FrozenLinkId, FrozenRowState,
-    GhosttyCharset, GhosttyCursor, GhosttyState, LinkId, LinkState, ModeState, PageBlob,
-    ImportCheck, PageCapacity, PageRows, PageState, PaneState, PaneTerm, RowState, SavedCursor,
+    GhosttyCharset, GhosttyCursor, GhosttyState, ImportCheck, LinkId, LinkState, ModeState,
+    PageBlob, PageCapacity, PageRows, PageState, PaneState, PaneTerm, RowState, SavedCursor,
     ScreenKind, ScreenState, StateError, StateImport, StyleState, TermState,
 };
 
@@ -1636,54 +1636,4 @@ pub fn term_from_snapshot(
         })?;
     }
     Ok(import.finish()?)
-}
-
-// ---------------------------------------------------------------------
-// The model's hooks (`Server::to_snapshot` / `from_snapshot`).
-
-impl crate::model::Pane {
-    /// The pane's terminal for the snapshot's `Pane.term` (see
-    /// [`term_to_snapshot`]).
-    #[must_use]
-    pub fn export_term(&self, form: Form) -> snap::TermState {
-        term_to_snapshot(&self.term, form)
-    }
-
-    /// Replace the pane's terminal with `t` (a snapshot's `Pane.term`) and
-    /// queue its history for the compressor at once: an import from rows
-    /// comes back resident (decision 23).
-    ///
-    /// # Errors
-    /// As [`term_from_snapshot`]; the pane is unchanged.
-    pub fn import_term(
-        &mut self,
-        t: &snap::TermState,
-        ghostty_patches: &str,
-        now: Instant,
-    ) -> Result<(), TermError> {
-        self.term = term_from_snapshot(t, ghostty_patches)?;
-        self.compress.restored(&self.term, now);
-        Ok(())
-    }
-}
-
-impl crate::popup::Popup {
-    /// The popup's terminal for the snapshot's `Popup.term`.
-    #[must_use]
-    pub fn export_term(&self, form: Form) -> snap::TermState {
-        term_to_snapshot(&self.term, form)
-    }
-
-    /// Replace the popup's terminal with `t`. Popups keep no compressor.
-    ///
-    /// # Errors
-    /// As [`term_from_snapshot`]; the popup is unchanged.
-    pub fn import_term(
-        &mut self,
-        t: &snap::TermState,
-        ghostty_patches: &str,
-    ) -> Result<(), TermError> {
-        self.term = term_from_snapshot(t, ghostty_patches)?;
-        Ok(())
-    }
 }

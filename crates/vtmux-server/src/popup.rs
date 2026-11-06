@@ -148,8 +148,8 @@ impl std::fmt::Debug for Popup {
 }
 
 impl Popup {
-    /// The popup as a snapshot carries it (D27); its terminal state is
-    /// left to `lu_pane_state` (`term` `None`). An editor popup
+    /// The popup as a snapshot carries it (D27), but its terminal
+    /// (`term` `None`), which `Server::to_snapshot` adds. An editor popup
     /// (`customize-mode`, `choose-buffer` editing) is not carried.
     #[must_use]
     pub fn export(&self) -> Option<vtmux_snapshot::Popup> {

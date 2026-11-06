@@ -15,8 +15,8 @@ use std::collections::HashMap;
 
 use harness::{Fuzz, PROBE, exported, exported_flat, fuzz_seeds, observe, oracle_programs};
 use vtmux_server::snapshot_term::{
-    Form, TermError, ghostty_pages_requirement, has_ghostty_pages, reader_features, term_from_snapshot,
-    term_to_snapshot,
+    Form, TermError, ghostty_pages_requirement, has_ghostty_pages, reader_features,
+    term_from_snapshot, term_to_snapshot,
 };
 use vtmux_snapshot as snap;
 use vtmux_vt::{Compression, PATCH_STACK, PaneTerm, StateError};
