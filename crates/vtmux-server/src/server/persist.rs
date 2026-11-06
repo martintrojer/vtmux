@@ -7,40 +7,53 @@
 //! SIGINT, the last session gone with `exit-empty`) and every 60 s while
 //! something changed since the last one. "Changed" is the checkpoint's own
 //! content: [`fingerprint`] leaves out what moves with the clock alone
-//! (the write time, timers kept as "due in"/"ago"), so an idle server
-//! writes nothing, and a field added to the snapshot is noticed without
-//! anyone remembering to mark it dirty.
+//! (the write time, timers kept as "due in"/"ago", activity stamps), and
+//! the checkpoint holds nothing a read-only command changes (no message
+//! log, no command counter), so an idle server writes nothing however
+//! often tools poll it, and a field added to the snapshot is noticed
+//! without anyone remembering to mark it dirty.
 //!
-//! What a checkpoint holds ([`Server::checkpoint_snapshot`]) is the
-//! upgrade snapshot without what can't outlive the process: descriptors,
-//! clients (their sockets, popups, control queues and status messages),
-//! `pipe-pane` processes and the clients blocked in `wait-for`. With
-//! `layout` it also holds no screen (decision 17): [`Server::to_snapshot`]
-//! leaves out pane terminal state and copy mode's frozen grid for a
-//! [`snap::Purpose::CheckpointLayout`] snapshot, so a layout checkpoint
-//! never pays for exporting them. `full` keeps both, and their history
-//! pages go to `chunks/`.
+//! What a checkpoint holds ([`Server::checkpoint_snapshot`], decision 17):
+//! the structure the user built, never what was typed or shown.
 //!
-//! Full mode needs nothing here beyond what [`Server::to_snapshot`]
-//! exports: once pane terminal state fills `Pane::term` (`lu_pane_state`),
-//! a `full` checkpoint carries each pane's screens and history, and only
-//! history pages not yet in `chunks/` are written.
+//! - Both modes: sessions, windows (names, layout, zoom, flags), panes
+//!   (start command, cwd, geometry, dead status), options (with user
+//!   options and hooks), key bindings, id counters. Never the message log
+//!   (it records every command line: `send-keys` text), the environment
+//!   (tokens), prompt history, the last search string, the command
+//!   counter, hook and monitor run counts, config errors, or anything of
+//!   the process: descriptors,
+//!   clients (their sockets, popups, control queues and status messages),
+//!   `pipe-pane` processes and `wait-for` channels.
+//! - `layout` also leaves out every pane's screen, history and title (a
+//!   program sets it, often to a command line or path), copy mode (its
+//!   frozen grid is a screen) and paste buffers (copied screen text):
+//!   [`Server::to_snapshot`] never exports terminal state or copy mode
+//!   for a [`snap::Purpose::CheckpointLayout`] snapshot.
+//! - `full` adds the screens and history (pane terminal state, once
+//!   `lu_pane_state` fills `Pane::term`; copy mode), titles and paste
+//!   buffers. Its history pages go to `chunks/`, a few per loop turn
+//!   ([`crate::persist::Writer`]), so a first `full` checkpoint of
+//!   hundreds of new pages never holds the loop for long; the shutdown
+//!   checkpoint is written at once.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use vtmux_core::options::TreeId;
 use vtmux_snapshot as snap;
 
 use super::Server;
+use crate::persist::{Lock, Writer, Written};
 
-/// What a checkpoint holds (`vtmux-persist`).
+/// What a checkpoint holds (`vtmux-persist`; module docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// Sessions, windows, layout, panes (dead on restore), options,
-    /// buffers: no screen.
+    /// Sessions, windows, layout, panes (dead on restore), options: no
+    /// screen, title or buffer.
     Layout,
-    /// [`Mode::Layout`] plus every pane's screens and history.
+    /// [`Mode::Layout`] plus every pane's screens, history and title, and
+    /// the paste buffers.
     Full,
 }
 
@@ -58,8 +71,11 @@ pub fn interval() -> Duration {
     })
 }
 
+/// How long one loop turn writes chunks of a periodic checkpoint.
+const STEP: Duration = Duration::from_millis(5);
+
 /// The checkpoint timer and what was last written.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Persist {
     /// The next periodic checkpoint, while `vtmux-persist` is on.
     due: Option<Instant>,
@@ -68,6 +84,31 @@ pub struct Persist {
     /// The shutdown checkpoint is written: nothing after it may replace it
     /// with the emptied server.
     exited: bool,
+    /// The checkpoint directory, found once ([`Server::persist_dir`]).
+    pub(crate) dir: Option<PathBuf>,
+    /// The lock held on a checkpoint directory.
+    lock: Option<(PathBuf, Lock)>,
+    /// Another server holds the lock: said once in the message log.
+    refused: bool,
+    /// A periodic checkpoint being written, and its fingerprint.
+    writing: Option<(Writer, Vec<u8>)>,
+    /// How long a loop turn writes its chunks ([`STEP`]).
+    pub(crate) step: Duration,
+}
+
+impl Default for Persist {
+    fn default() -> Self {
+        Self {
+            due: None,
+            last: None,
+            exited: false,
+            dir: None,
+            lock: None,
+            refused: false,
+            writing: None,
+            step: STEP,
+        }
+    }
 }
 
 impl Server {
@@ -80,27 +121,55 @@ impl Server {
         }
     }
 
-    /// When the loop must wake for the next periodic checkpoint.
+    /// When the loop must wake for the persistence: now while a
+    /// checkpoint is being written, else the next periodic one.
     pub(crate) fn persist_deadline(&self) -> Option<Instant> {
+        if self.persist.writing.is_some() {
+            return Some(Instant::now());
+        }
         self.persist.due
     }
 
-    /// The periodic checkpoint: armed while `vtmux-persist` is on, written
-    /// when due if anything changed.
+    /// The periodic checkpoint: armed while `vtmux-persist` is on, started
+    /// when due if anything changed, and written a step per turn.
     pub(crate) fn persist_timers(&mut self, now: Instant) {
         if self.persist.exited || self.persist_mode().is_none() {
             self.persist.due = None;
+            self.persist.writing = None;
+            self.persist.lock = None;
             return;
         }
+        self.persist_step();
         let due = *self.persist.due.get_or_insert(now + interval());
         if now >= due {
             self.persist.due = Some(now + interval());
-            self.checkpoint();
+            // One at a time: a write still going takes this turn's place.
+            if self.persist.writing.is_none() {
+                self.checkpoint_begin();
+                self.persist_step();
+            }
+        }
+    }
+
+    /// One step of the checkpoint being written, if one is.
+    fn persist_step(&mut self) {
+        let Some((w, _)) = &mut self.persist.writing else {
+            return;
+        };
+        match w.step(Some(self.persist.step), &mut |_| Ok(())) {
+            Ok(false) => {}
+            Ok(true) => {
+                self.persist.last = self.persist.writing.take().map(|(_, print)| print);
+            }
+            Err(e) => {
+                self.persist.writing = None;
+                self.persist_error(&e);
+            }
         }
     }
 
     /// The checkpoint of a clean shutdown, before the panes are hung up;
-    /// once.
+    /// once, and all at once.
     pub(crate) fn checkpoint_exit(&mut self) {
         if std::mem::replace(&mut self.persist.exited, true) {
             return;
@@ -109,53 +178,126 @@ impl Server {
         self.checkpoint();
     }
 
-    /// Write a checkpoint if `vtmux-persist` is on and the server changed
-    /// since the last one. A failure goes to the message log
-    /// (`show-messages`); the next one tries again.
-    pub(crate) fn checkpoint(&mut self) -> Option<crate::persist::Written> {
-        let mode = self.persist_mode()?;
-        let Some(dir) = self.persist_dir() else {
-            self.add_message("vtmux-persist: no state directory (no home)".to_owned());
-            return None;
-        };
+    /// Write a checkpoint now, all at once, if `vtmux-persist` is on and
+    /// the server changed since the last one ([`Server::checkpoint_to`]).
+    pub(crate) fn checkpoint(&mut self) -> Option<Written> {
+        let (dir, mode) = self.checkpoint_target()?;
         self.checkpoint_to(&dir, mode)
     }
 
-    /// [`Server::checkpoint`] of `mode` into `dir`.
-    pub(crate) fn checkpoint_to(
-        &mut self,
-        dir: &std::path::Path,
-        mode: Mode,
-    ) -> Option<crate::persist::Written> {
-        let s = self.checkpoint_snapshot(mode);
-        let print = fingerprint(&s);
-        if self.persist.last.as_ref() == Some(&print) {
-            return None;
-        }
-        match crate::persist::write(dir, &s, &mut |_| Ok(())) {
-            Ok(w) => {
+    /// Write a checkpoint of `mode` into `dir` now, all at once, if this
+    /// server holds the directory's lock and changed since the last one; a
+    /// periodic one still being written is dropped for it (the chunks it
+    /// wrote count as on disk). A failure goes to the message log
+    /// (`show-messages`); the next one tries again.
+    pub(crate) fn checkpoint_to(&mut self, dir: &Path, mode: Mode) -> Option<Written> {
+        self.persist.writing = None;
+        let (mut w, print) = self.checkpoint_writer(dir, mode)?;
+        match w.step(None, &mut |_| Ok(())) {
+            Ok(_) => {
                 self.persist.last = Some(print);
-                Some(w)
+                Some(w.written().clone())
             }
             Err(e) => {
-                self.add_message(format!("vtmux-persist: {}: {e}", dir.display()));
+                self.persist_error(&e);
                 None
             }
         }
     }
 
-    /// This server's checkpoint directory, from the process's own
-    /// `XDG_STATE_HOME` and `HOME` (else the passwd home).
-    pub(crate) fn persist_dir(&self) -> Option<PathBuf> {
-        let home = std::env::var_os("HOME")
-            .filter(|h| !h.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| crate::sys::user::current_user().map(|p| p.home));
-        crate::persist::state_dir(
-            &self.socket,
-            std::env::var_os("XDG_STATE_HOME").as_deref(),
-            home.as_deref(),
-        )
+    /// Start the periodic checkpoint ([`Server::persist_step`] writes it).
+    fn checkpoint_begin(&mut self) {
+        self.persist.writing = self
+            .checkpoint_target()
+            .and_then(|(dir, mode)| self.checkpoint_writer(&dir, mode));
+    }
+
+    /// The directory and mode a checkpoint goes to, while `vtmux-persist`
+    /// is on.
+    fn checkpoint_target(&mut self) -> Option<(PathBuf, Mode)> {
+        let mode = self.persist_mode()?;
+        let Some(dir) = self.persist_dir() else {
+            self.add_message("vtmux-persist: no state directory (no home)".to_owned());
+            return None;
+        };
+        Some((dir, mode))
+    }
+
+    /// A writer for a checkpoint of `mode` into `dir`, if one is wanted:
+    /// this server holding the directory's lock, and the server changed.
+    fn checkpoint_writer(&mut self, dir: &Path, mode: Mode) -> Option<(Writer, Vec<u8>)> {
+        if !self.persist_lock(dir) {
+            return None;
+        }
+        let s = self.checkpoint_snapshot(mode);
+        let print = fingerprint(&s);
+        if self.persist.last.as_ref() == Some(&print) {
+            return None;
+        }
+        match Writer::new(dir, &s) {
+            Ok(w) => Some((w, print)),
+            Err(e) => {
+                self.persist_error(&e);
+                None
+            }
+        }
+    }
+
+    /// Hold the lock on `dir`, taking it if needed. Another server holding
+    /// it is said in the message log once, and nothing is written while
+    /// it does.
+    fn persist_lock(&mut self, dir: &Path) -> bool {
+        if self.persist.lock.as_ref().is_some_and(|(d, _)| d == dir) {
+            return true;
+        }
+        self.persist.lock = None;
+        match Lock::take(dir) {
+            Ok(l) => {
+                self.persist.lock = Some((dir.to_path_buf(), l));
+                self.persist.refused = false;
+                true
+            }
+            Err(e) => {
+                if !std::mem::replace(&mut self.persist.refused, true) {
+                    let why = if e.kind() == std::io::ErrorKind::WouldBlock {
+                        "in use by another server, not written".to_owned()
+                    } else {
+                        e.to_string()
+                    };
+                    self.add_message(format!("vtmux-persist: {}: {why}", dir.display()));
+                }
+                false
+            }
+        }
+    }
+
+    fn persist_error(&mut self, e: &std::io::Error) {
+        let dir = self
+            .persist
+            .lock
+            .as_ref()
+            .map(|(d, _)| d.display().to_string())
+            .unwrap_or_default();
+        self.add_message(format!("vtmux-persist: {dir}: {e}"));
+    }
+
+    /// This server's checkpoint directory ([`crate::persist::state_dir`] of
+    /// its socket's absolute path), from the process's own
+    /// `XDG_STATE_HOME` and `HOME` (else the passwd home); found once.
+    pub(crate) fn persist_dir(&mut self) -> Option<PathBuf> {
+        if self.persist.dir.is_none() {
+            let home = std::env::var_os("HOME")
+                .filter(|h| !h.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| crate::sys::user::current_user().map(|p| p.home));
+            let socket = std::path::absolute(&self.socket).ok()?;
+            self.persist.dir = crate::persist::state_dir(
+                &socket,
+                std::env::var_os("XDG_STATE_HOME").as_deref(),
+                home.as_deref(),
+            );
+        }
+        self.persist.dir.clone()
     }
 
     /// The snapshot a checkpoint of `mode` writes (module docs).
@@ -177,33 +319,73 @@ impl Server {
             ..snap::Meta::default()
         };
         let mut s = self.to_snapshot(meta);
+        // The process: gone with it.
         s.descriptors.clear();
         s.clients.clear();
+        s.server.next_client = 0;
+        s.server.wait_channels.clear();
+        // What was typed or ran: the message log records every command
+        // line (cmd-queue.c `cmdq_add_message`), the environment holds
+        // tokens, prompt history and search strings are typed text.
+        let x = &mut s.server;
+        x.messages.clear();
+        x.message_next = 0;
+        x.environment.clear();
+        x.command_history.clear();
+        x.search_history.clear();
+        x.config_causes.clear();
+        x.cmd_number = 0;
+        // Run-time counters every command moves (`after-*` hooks fire
+        // for each), and what monitors last saw (formatted values).
+        x.hook_fires.clear();
+        for m in &mut x.monitors {
+            m.fire_count = 0;
+            m.fire_time = 0;
+            m.last = None;
+            m.each.clear();
+            m.due_in_ms = None;
+        }
+        for x in &mut s.sessions {
+            x.environment.clear();
+        }
+        for w in &mut s.windows {
+            // `window-size latest`: a client, gone.
+            w.latest_client = None;
+        }
         for p in &mut s.panes {
             p.pipe = None;
+            p.search = None;
+            p.environment.clear();
         }
-        for c in &mut s.server.wait_channels {
-            c.waiters.clear();
-            c.lockers.clear();
+        if mode == Mode::Layout {
+            // Copied screen text, and titles programs set.
+            s.server.buffers.clear();
+            s.server.buffer_next_index = 0;
+            s.server.buffer_next_order = 0;
+            for p in &mut s.panes {
+                p.title.clear();
+            }
         }
         s
     }
 }
 
 /// `s` as a checkpoint compares with the last: its manifest encoding with
-/// the write time and the clock-relative timers cleared. History pages
-/// count by name.
+/// the write time, the clock-relative timers and the activity stamps
+/// (which pane output alone moves) cleared. History pages count by name.
 fn fingerprint(s: &snap::Snapshot) -> Vec<u8> {
     let mut f = s.clone();
     f.meta.written_us = 0;
-    for m in &mut f.server.monitors {
-        m.due_in_ms = None;
-    }
+    f.server.activity = 0;
     for x in &mut f.sessions {
         x.lock_in_ms = None;
+        x.activity = 0;
+        x.activity_secs = 0;
     }
     for w in &mut f.windows {
         w.silence_in_ms = None;
+        w.activity = 0;
+        w.activity_secs = 0;
     }
     for p in &mut f.panes {
         p.output_ago_ms = None;

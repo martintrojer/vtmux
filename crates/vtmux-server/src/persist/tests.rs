@@ -212,18 +212,83 @@ fn nothing_is_collected_while_the_previous_manifest_cant_be_listed() {
 fn the_state_dir_follows_xdg_state_home_else_home() {
     let socket = Path::new("/tmp/tmux-1000/work");
     let home = Path::new("/home/u");
+    let leaf = format!("work-{}", path_hash(socket));
     assert_eq!(
         state_dir(socket, Some("/x/state".as_ref()), Some(home)),
-        Some(PathBuf::from("/x/state/vtmux/work"))
+        Some(PathBuf::from("/x/state/vtmux").join(&leaf))
     );
     // A relative XDG_STATE_HOME is ignored (XDG base directory rules).
     for xdg in [None, Some("rel/state"), Some("")] {
         assert_eq!(
             state_dir(socket, xdg.map(AsRef::as_ref), Some(home)),
-            Some(PathBuf::from("/home/u/.local/state/vtmux/work")),
+            Some(PathBuf::from("/home/u/.local/state/vtmux").join(&leaf)),
             "{xdg:?}"
         );
     }
     assert_eq!(state_dir(socket, None, None), None);
     assert_eq!(state_dir(Path::new("/"), None, Some(home)), None);
+}
+
+/// Sockets of one name in two directories (`-S a/s`, `-S b/s`; one `-L`
+/// under two `TMUX_TMPDIR`s) get two directories, each still named for
+/// the socket; the hash is fixed forever (a restore looks it up).
+#[test]
+fn the_state_dir_is_one_per_socket_path() {
+    let home = Some(Path::new("/home/u"));
+    let a = state_dir(Path::new("/t/a/rvsock"), None, home).unwrap();
+    let b = state_dir(Path::new("/t/b/rvsock"), None, home).unwrap();
+    assert_ne!(a, b);
+    for d in [&a, &b] {
+        let leaf = d.file_name().unwrap().to_str().unwrap();
+        let hash = leaf.strip_prefix("rvsock-").unwrap();
+        assert_eq!(hash.len(), 12, "{leaf}");
+        assert!(hash.bytes().all(|c| c.is_ascii_hexdigit()), "{leaf}");
+    }
+    // FNV-1a 64 of the bytes, top 48 bits (checked by hand in Python).
+    assert_eq!(
+        path_hash(Path::new("/tmp/tmux-1000/default")),
+        "79301cf9592f"
+    );
+}
+
+#[test]
+fn the_lock_is_held_by_one_at_a_time() {
+    let dir = temp_dir("lock");
+    let first = Lock::take(&dir).unwrap();
+    assert_eq!(mode(&dir), 0o700);
+    assert_eq!(mode(&dir.join(LOCK)), 0o600);
+    assert_eq!(
+        Lock::take(&dir).unwrap_err().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    drop(first);
+    let again = Lock::take(&dir).unwrap();
+    // The lock file is no chunk and no manifest: a checkpoint leaves it.
+    write(&dir, &snapshot("one", &["alpha"]), &mut ok()).unwrap();
+    assert!(dir.join(LOCK).is_file());
+    drop(again);
+}
+
+/// [`Writer`] a chunk per step at a zero budget; the manifest last.
+#[test]
+fn a_writer_writes_a_chunk_per_step_then_the_manifest() {
+    let dir = temp_dir("steps");
+    let s1 = snapshot("one", &["alpha"]);
+    write(&dir, &s1, &mut ok()).unwrap();
+    let s2 = snapshot("two", &["alpha", "beta", "gamma", "delta"]);
+    let mut w = Writer::new(&dir, &s2).unwrap();
+    assert_eq!((w.chunks_left(), w.written().chunks_kept), (3, 1));
+    for left in [2, 1, 0] {
+        assert!(!w.step(Some(Duration::ZERO), &mut ok()).unwrap() || left == 0);
+        assert_eq!(w.chunks_left(), left);
+        if left > 0 {
+            assert_eq!(load(&dir).unwrap(), (s1.clone(), MANIFEST));
+        }
+    }
+    assert_eq!(load(&dir).unwrap(), (s2.clone(), MANIFEST));
+    let done = w.written();
+    assert_eq!(
+        (done.chunks_new, done.chunks_kept, done.chunks_removed),
+        (3, 1, 0)
+    );
 }
