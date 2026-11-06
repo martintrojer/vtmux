@@ -34,6 +34,12 @@ pub const SWITCHED_BACK_FLAG: &str = "--vtmux-switched-back";
 /// that follows, exit 0 or non-zero with a message on stderr.
 pub const CHECK_FLAG: &str = "--vtmux-check-snapshot";
 
+/// The environment variable a switch back passes why the resume failed in,
+/// for the image it lands in to log ([`take_failure_note`]). Not an
+/// argument: an image from before it was added must still parse its
+/// command line.
+pub const FAILED_ENV: &str = "VTMUX_UPGRADE_FAILED";
+
 /// How long the dry run may take before it counts as failed.
 const DRY_RUN_LIMIT: Duration = Duration::from_secs(30);
 
@@ -244,7 +250,7 @@ fn resume_argv(argv0: &OsString, fd: RawFd, back: bool) -> io::Result<Vec<CStrin
 /// `snapshot` is closed.
 #[must_use]
 pub fn exec_in_place(binary: &Path, snapshot: OwnedFd, keep: &[RawFd]) -> io::Error {
-    let e = exec_resume(Target::Path(binary), snapshot.as_fd(), keep, false);
+    let e = exec_resume(Target::Path(binary), snapshot.as_fd(), keep, None);
     drop(snapshot);
     e
 }
@@ -255,21 +261,30 @@ pub fn exec_in_place(binary: &Path, snapshot: OwnedFd, keep: &[RawFd]) -> io::Er
 /// open from its start ([`own_exe`]): it is exec'd whatever its path
 /// holds by now (a relinked build, a binary from before the feature).
 /// Without it, or when it can't be exec'd, `path` is, but only once its
-/// dry run on `snapshot` passes.
+/// dry run on `snapshot` passes. `why` (the resume's failure) reaches
+/// that image in [`FAILED_ENV`].
 #[must_use]
 pub fn switch_back(
     exe: Option<BorrowedFd<'_>>,
     path: Option<&Path>,
     snapshot: BorrowedFd<'_>,
     keep: &[RawFd],
+    why: &str,
 ) -> io::Error {
-    let mut e = io::Error::other("no image to switch back to");
-    if let Some(fd) = exe {
-        e = exec_resume(Target::Fd(fd), snapshot, keep, true);
-    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let e = match exe {
+        Some(fd) => exec_resume(Target::Fd(fd), snapshot, keep, Some(why)),
+        None => io::Error::other("no image to switch back to"),
+    };
+    // No `fexecve` here, so no executable is kept open (`own_exe`).
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let e = {
+        let _ = exe;
+        io::Error::other("no image to switch back to")
+    };
     let Some(path) = path else { return e };
     match dry_run(path, snapshot) {
-        Ok(Ok(())) => exec_resume(Target::Path(path), snapshot, keep, true),
+        Ok(Ok(())) => exec_resume(Target::Path(path), snapshot, keep, Some(why)),
         Ok(Err(message)) => io::Error::other(message),
         Err(e) => e,
     }
@@ -278,8 +293,8 @@ pub fn switch_back(
 /// What [`exec_resume`] runs.
 enum Target<'a> {
     Path(&'a Path),
-    /// An open executable (`fexecve`; Linux only, elsewhere the exec
-    /// fails as unsupported).
+    /// An open executable (`fexecve`, which macOS lacks).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     Fd(BorrowedFd<'a>),
 }
 
@@ -303,9 +318,12 @@ pub fn own_exe() -> Option<OwnedFd> {
     .ok()
 }
 
-/// This process's environment as `execve` takes it.
-fn environ() -> Vec<CString> {
+/// This process's environment as `execve` takes it, with [`FAILED_ENV`]
+/// set to `note` (and only then).
+fn environ(note: Option<&str>) -> Vec<CString> {
     std::env::vars_os()
+        .filter(|(k, _)| k != FAILED_ENV)
+        .chain(note.map(|n| (FAILED_ENV.into(), n.replace('\0', " ").into())))
         .filter_map(|(k, v)| {
             let mut kv = k.into_vec();
             kv.push(b'=');
@@ -315,17 +333,32 @@ fn environ() -> Vec<CString> {
         .collect()
 }
 
+/// [`FAILED_ENV`], taken out of the environment so that nothing this
+/// image starts or execs inherits it: why the image that switched back
+/// to this one failed to resume.
+#[must_use]
+pub fn take_failure_note() -> Option<String> {
+    let note = std::env::var_os(FAILED_ENV)?;
+    // SAFETY: called by the new image at its start, before it has
+    // started a thread, so nothing reads the environment concurrently.
+    unsafe { std::env::remove_var(FAILED_ENV) };
+    Some(note.to_string_lossy().into_owned())
+}
+
+/// `execve` of `target` resuming from `snapshot`; `back` is a switch back
+/// (`Some(why)`).
 fn exec_resume(
     target: Target<'_>,
     snapshot: BorrowedFd<'_>,
     keep: &[RawFd],
-    back: bool,
+    back: Option<&str>,
 ) -> io::Error {
     let argv0 = std::env::args_os().next().unwrap_or_else(|| match target {
         Target::Path(p) => p.as_os_str().to_owned(),
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         Target::Fd(_) => "vtmux".into(),
     });
-    let argv = match resume_argv(&argv0, snapshot.as_raw_fd(), back) {
+    let argv = match resume_argv(&argv0, snapshot.as_raw_fd(), back.is_some()) {
         Ok(argv) => argv,
         Err(e) => return e,
     };
@@ -334,9 +367,10 @@ fn exec_resume(
             Ok(path) => Some(path),
             Err(e) => return io::Error::other(e),
         },
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         Target::Fd(_) => None,
     };
-    let env = environ();
+    let env = environ(back);
     let mut ptrs: Vec<*const libc::c_char> = argv.iter().map(|a| a.as_ptr()).collect();
     ptrs.push(std::ptr::null());
     let mut envp: Vec<*const libc::c_char> = env.iter().map(|a| a.as_ptr()).collect();

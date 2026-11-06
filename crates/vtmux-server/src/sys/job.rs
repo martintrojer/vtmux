@@ -90,12 +90,12 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
 
     // job.c:108-109: every signal blocked across the fork.
     // SAFETY: sigset_t is a plain C struct, all-zero is a valid value, and
-    // sigfillset/sigprocmask only read and write the two sets.
+    // sigfillset/pthread_sigmask only read and write the two sets.
     let old = unsafe {
         let mut all: libc::sigset_t = std::mem::zeroed();
         let mut old: libc::sigset_t = std::mem::zeroed();
         libc::sigfillset(&raw mut all);
-        libc::sigprocmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
         old
     };
     // SAFETY: the server is single-threaded; the child runs only
@@ -133,7 +133,7 @@ pub fn spawn(spec: &JobSpec) -> io::Result<Spawned> {
     }
     // SAFETY: restores the mask saved above.
     unsafe {
-        libc::sigprocmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
     }
     drop(theirs);
     if pid == -1 {
@@ -173,12 +173,12 @@ pub fn spawn_pipe(command: &str, input: bool, output: bool) -> io::Result<Spawne
 
     // cmd-pipe-pane.c:121-122: every signal blocked across the fork.
     // SAFETY: sigset_t is a plain C struct, all-zero is a valid value, and
-    // sigfillset/sigprocmask only read and write the two sets.
+    // sigfillset/pthread_sigmask only read and write the two sets.
     let old = unsafe {
         let mut all: libc::sigset_t = std::mem::zeroed();
         let mut old: libc::sigset_t = std::mem::zeroed();
         libc::sigfillset(&raw mut all);
-        libc::sigprocmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
         old
     };
     // SAFETY: the server is single-threaded; the child runs only
@@ -209,7 +209,7 @@ pub fn spawn_pipe(command: &str, input: bool, output: bool) -> io::Result<Spawne
     }
     // SAFETY: restores the mask saved above.
     unsafe {
-        libc::sigprocmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
     }
     drop(theirs);
     if pid == -1 {

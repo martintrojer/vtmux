@@ -153,14 +153,17 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     };
 
     // spawn.c:454-456: block every signal across the fork so no handler
-    // runs in the child before it resets them.
+    // runs in the child before it resets them. pthread_sigmask, not
+    // sigprocmask: XNU's sigprocmask sets the mask of every thread in the
+    // process (`block_procsigmask`), which in a threaded test binary
+    // leaks the block into the others.
     // SAFETY: sigset_t is a plain C struct, all-zero is a valid value, and
-    // sigfillset/sigprocmask only read and write the two sets.
+    // sigfillset/pthread_sigmask only read and write the two sets.
     let old = unsafe {
         let mut all: libc::sigset_t = std::mem::zeroed();
         let mut old: libc::sigset_t = std::mem::zeroed();
         libc::sigfillset(&raw mut all);
-        libc::sigprocmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &raw const all, &raw mut old);
         old
     };
     let mut master: libc::c_int = -1;
@@ -190,7 +193,7 @@ pub fn spawn(spec: &SpawnSpec) -> io::Result<Spawned> {
     }
     // SAFETY: restores the mask saved above.
     unsafe {
-        libc::sigprocmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const old, std::ptr::null_mut());
     }
     if pid == -1 {
         return Err(fork_error);
@@ -357,7 +360,7 @@ unsafe fn child(c: &mut Child<'_>) -> ! {
 /// # Safety
 /// Only call in a forked child before exec.
 pub(super) unsafe fn clear_signals() {
-    // SAFETY: signal(2) to SIG_DFL and sigprocmask on a local set.
+    // SAFETY: signal(2) to SIG_DFL and pthread_sigmask on a local set.
     unsafe {
         for sig in [
             libc::SIGPIPE,
@@ -378,7 +381,7 @@ pub(super) unsafe fn clear_signals() {
         }
         let mut set: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&raw mut set);
-        libc::sigprocmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
     }
 }
 

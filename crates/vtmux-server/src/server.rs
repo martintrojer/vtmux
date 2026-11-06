@@ -41,6 +41,10 @@ const SIGNALS: Token = Token(1);
 /// Client tokens start here; pane tokens are `PANE_BASE + pane id`.
 const CLIENT_BASE: usize = 1 << 32;
 const PANE_BASE: usize = 16;
+/// Tokens of the PTYs a live upgrade's last resort holds
+/// (`resume::Server::hold`): `HELD_BASE + index in held`, above any
+/// client's.
+const HELD_BASE: usize = 1 << 48;
 
 /// `NAME_INTERVAL` (tmux.h:119): automatic-rename runs at most this often.
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
@@ -577,6 +581,9 @@ pub struct Server {
     /// does not exit for want of sessions; `kill-server` and SIGTERM
     /// still end it.
     pub(crate) held: Vec<std::os::fd::OwnedFd>,
+    /// Held PTYs with output still to discard when their read budget ran
+    /// out: the backlog for [`Self::held`].
+    held_backlog: std::collections::BTreeSet<usize>,
 }
 
 /// tmux.c `checkshell`: absolute, not tmux itself, executable.
@@ -775,6 +782,7 @@ impl Server {
             acl: crate::acl::Acl::new(rustix::process::getuid().as_raw()),
             exe: None,
             held: Vec::new(),
+            held_backlog: std::collections::BTreeSet::new(),
         };
         // A dry run rebuilds the server only to see that it can: it must
         // not touch the shim the running server's panes use.
@@ -802,7 +810,7 @@ impl Server {
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(e),
             }
-            let idle = events.is_empty() && self.backlog.is_empty();
+            let idle = events.is_empty() && self.backlog.is_empty() && self.held_backlog.is_empty();
             // Woken only for a compression step: nothing else is due, so
             // the rest of the turn (a full render among it) would do
             // nothing a turn without compression would have done. The
@@ -817,6 +825,9 @@ impl Server {
             self.dispatch(&events);
             for p in std::mem::take(&mut self.backlog) {
                 self.pane_readable(p, true);
+            }
+            for i in std::mem::take(&mut self.held_backlog) {
+                self.held_readable(i);
             }
             self.expire_repeat(Instant::now());
             self.start_timers(Instant::now());
@@ -906,6 +917,7 @@ impl Server {
                     self.job_writable(id);
                     self.job_readable(id);
                 }
+                Token(t) if t >= HELD_BASE => self.held_readable(t - HELD_BASE),
                 Token(t) if t >= CLIENT_BASE => {
                     let id = ClientId(t - CLIENT_BASE);
                     if event.is_readable() || event.is_read_closed() {
@@ -1004,6 +1016,7 @@ impl Server {
 
     fn own_timeout(&self) -> Option<Duration> {
         if !self.backlog.is_empty()
+            || !self.held_backlog.is_empty()
             || !self.pending_exits.is_empty()
             || self.cmdq.runnable()
             || !self.format_jobs.borrow().actions.is_empty()
