@@ -1,0 +1,68 @@
+name = "border_style_redraws"
+size = [40, 10]
+# A kept border style (window_pane_get_border_style, window-border.c:151-177)
+# is expanded again by the pane changes that redraw the borders:
+# - entering and leaving the alternate screen (screen_write_alternateon/off,
+#   screen-write.c:3167, 3192: server_redraw_window_borders);
+# - a new path (OSC 7, input.c:2738) and select-pane -d/-e;
+# - a pane dying under remain-on-exit: its dead line is written to the
+#   client's terminal (tty_write), so server_client_check_redraw finds output
+#   queued and turns the pane's PANE_REDRAW into CLIENT_REDRAWWINDOW
+#   (server-client.c:2537-2556); respawn-pane (cmd-respawn-pane.c:93).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat -"] },
+  { run = ["splitw", "-h", "-t", "a", "cat -"] },
+  { run = ["splitw", "-v", "-t", "a", "cat -"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "status-interval", "0"] },
+  { run = ["set", "-g", "remain-on-exit", "on"] },
+  { run = ["set", "-g", "remain-on-exit-format", "dead"] },
+  { run = ["set-hook", "-g", "pane-died", "wait-for -S died"] },
+  { run = ["set", "-g", "pane-border-style", "fg=#{?alternate_on,red,#{?#{m:*rvp*,#{pane_path}},green,#{?pane_input_off,cyan,#{?pane_dead,white,blue}}}}"] },
+  { run = ["set", "-g", "pane-active-border-style", "fg=#{?alternate_on,red,#{?#{m:*rvp*,#{pane_path}},green,#{?pane_input_off,cyan,#{?pane_dead,white,yellow}}}}"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # cat copies the sequence to its terminal: the pane switches screens.
+  { feed = { pane = "%1", bytes = "\u001b[?1049h\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%1", bytes = "\u001b[?1049l\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%2", bytes = "\u001b[?1049h\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%2", bytes = "\u001b[?1049l\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%1", bytes = "\u001b]7;file://h/rvp\u0007\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%1", bytes = "\u001b]7;file://h/zz\u0007\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["select-pane", "-d", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["select-pane", "-e", "-t", "%0"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # EOF: cat exits and the pane stays dead.
+  { feed = { pane = "%0", bytes = "\u0004" } },
+  { wait_for = "died" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["respawn-pane", "-t", "%0", "cat -"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { feed = { pane = "%2", bytes = "\u001b[?1049h\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  # A title pushed and popped (OSC 2 between): still the alternate screen.
+  { feed = { pane = "%2", bytes = "\u001b[22;0t\u001b]2;Q\u0007\u001b[23;0t\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+]

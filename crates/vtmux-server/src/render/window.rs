@@ -17,7 +17,7 @@ use vtmux_vt::{Color, Snapshot};
 use super::Caps;
 use super::blend::{TermColours, resolve};
 use super::compose::{BarDraw, Draw, PaneDraw, Theme, pane_status};
-use super::scene::{Indicators, Lines, Scene, SceneCache, ScenePane, WindowView};
+use super::scene::{Indicators, Lines, Scene, ScenePane, WindowView};
 use crate::environ::Environ;
 use crate::format_ctx::{ClientView, Ctx, ServerInfo};
 use crate::format_jobs::{JobHandle, TAG_PANE};
@@ -36,8 +36,6 @@ pub struct Source<'a> {
     pub themes: &'a ThemeCache,
     /// The key tables (customize-mode's preview).
     pub keys: &'a vtmux_core::keys::KeyBindings,
-    /// Each pane's expanded border style ([`BorderStyles`]).
-    pub borders: &'a BorderStyles,
 }
 
 /// The attached clients as formats see them, worked out on first use:
@@ -61,16 +59,21 @@ impl<'a> Clients<'a> {
     }
 }
 
-/// Each pane's border style as last expanded (`wp->border_gc`,
+/// Each pane's border style as a client last expanded it (`wp->border_gc`,
 /// `wp->active_border_gc`). tmux expands `pane-border-style` or
 /// `pane-active-border-style` once and keeps it until a client draws the
 /// borders or the status again (`window_pane_get_border_style`,
 /// window-border.c:151-177; reset in `redraw_draw`,
 /// screen-redraw.c:1726-1731), so pane output alone, a moved cursor say,
-/// does not change a border. [`BorderStyles::forget`] is that reset; the
-/// [`BorderKey`] also expands it again on the changes tmux redraws the
-/// borders for (an option, the active or marked pane, a mode, the layout),
-/// whether or not vtmux asks for a redraw there.
+/// does not change a border. tmux keeps one per pane, but only a draw that
+/// resets it first draws a border with it: a client's terminal shows the
+/// style its own last border or status redraw expanded, with its own
+/// session and client (`format_create_defaults(NULL, c, s, ...)`). So each
+/// client keeps its own ([`crate::render::WindowCache`]).
+/// [`BorderStyles::forget`] is the reset; the [`BorderKey`] also expands
+/// it again on the changes tmux redraws the borders for (an option, the
+/// active or marked pane, a mode, the layout), whether or not vtmux asks
+/// for a redraw there.
 #[derive(Debug, Default)]
 pub struct BorderStyles(std::cell::RefCell<BTreeMap<PaneId, (BorderKey, CellStyle)>>);
 
@@ -248,7 +251,7 @@ impl Source<'_> {
         rows: u16,
         caps: Caps,
         jobs: Option<&JobHandle>,
-        cache: Option<&SceneCache>,
+        cache: Option<&super::WindowCache>,
     ) -> Option<(Rc<Scene>, Draw)> {
         let found = Found::from_session(self.model, s);
         let w = found.window?;
@@ -308,7 +311,7 @@ impl Source<'_> {
                 modal: window.panes.modal,
                 rect: pane.rect,
             };
-            let border = self.border_style(p, key, &ctx);
+            let border = self.border_style(cache.map(|c| &c.borders), p, key, &ctx);
             let (content, stamps, selected) =
                 self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
             let defaults = self.pane_defaults(p, p == active, &ctx);
@@ -351,7 +354,7 @@ impl Source<'_> {
         };
         let order: Vec<PaneId> = view.panes.iter().map(|p| p.id).collect();
         let scene = match cache {
-            Some(cache) => Scene::cached(cache, view, cols, rows),
+            Some(cache) => Scene::cached(&cache.scene, view, cols, rows),
             None => Rc::new(Scene::build(&view, cols, rows)),
         };
         let ring_style = draws
@@ -432,14 +435,20 @@ impl Source<'_> {
         Some((scene, draw))
     }
 
-    /// `window_pane_get_border_style`: pane `p`'s kept border style, else
-    /// `pane-active-border-style` (`key.active`) or `pane-border-style`
-    /// expanded and kept.
-    fn border_style(&self, p: PaneId, key: BorderKey, ctx: &Ctx<'_>) -> CellStyle {
-        if let Some((k, style)) = self.borders.0.borrow().get(&p)
-            && *k == key
+    /// `window_pane_get_border_style`: pane `p`'s border style kept in
+    /// `kept` (the drawing client's), else `pane-active-border-style`
+    /// (`key.active`) or `pane-border-style` expanded and kept.
+    fn border_style(
+        &self,
+        kept: Option<&BorderStyles>,
+        p: PaneId,
+        key: BorderKey,
+        ctx: &Ctx<'_>,
+    ) -> CellStyle {
+        if let Some((k, style)) = kept.and_then(|b| b.0.borrow().get(&p).cloned())
+            && k == key
         {
-            return style.clone();
+            return style;
         }
         let option = if key.active {
             "pane-active-border-style"
@@ -447,7 +456,9 @@ impl Source<'_> {
             "pane-border-style"
         };
         let style = self.style(TreeId::Pane(p), option, ctx);
-        self.borders.0.borrow_mut().insert(p, (key, style.clone()));
+        if let Some(b) = kept {
+            b.0.borrow_mut().insert(p, (key, style.clone()));
+        }
         style
     }
 

@@ -1,0 +1,39 @@
+name = "border_style_per_client"
+size = [40, 10]
+# tmux keeps one border style per pane (window_pane_get_border_style,
+# window-border.c:151-177), but every draw of a border resets it first
+# (redraw_draw, screen-redraw.c:1726-1731) and expands it with the drawing
+# client and its session (format_create_defaults(NULL, c, s, ...)). Two
+# clients on grouped sessions show the same panes with each their own
+# style; one client's refresh or a pane's output does not change the other's.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "cat -"] },
+  { run = ["splitw", "-h", "-t", "a", "cat -"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { run = ["new", "-d", "-t", "a", "-s", "b"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { run = ["set", "-g", "status-interval", "0"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { run = ["set", "-g", "pane-border-style", "fg=#{?#{==:#{session_name},a},red,green}"] },
+  { run = ["set", "-g", "pane-active-border-style", "fg=#{?#{==:#{session_name},a},red,green}"] },
+  { attach = { session = "a" } },
+  { attach = { session = "b", id = "b" } },
+  { screen = {} },
+  { screen = { id = "b" } },
+  # C-b r: refresh-client.
+  { keys = "\u0002r" },
+  { settle = {} },
+  { screen = {} },
+  { screen = { id = "b" } },
+  { keys_to = { id = "b", keys = "\u0002r" } },
+  { settle = {} },
+  { screen = {} },
+  { screen = { id = "b" } },
+  { keys = "\u0002r" },
+  { settle = {} },
+  { feed = { pane = "%1", bytes = "hello\r" } },
+  { settle = { react = true } },
+  { screen = {} },
+  { screen = { id = "b" } },
+]
