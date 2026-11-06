@@ -1537,7 +1537,10 @@ impl Server {
         self.flush_client(id);
     }
 
-    fn on_hello(&mut self, id: ClientId, hello: Hello) {
+    fn on_hello(&mut self, id: ClientId, mut hello: Hello) {
+        if let Some(tty) = hello.tty.as_mut() {
+            (tty.cols, tty.rows) = tty_size(tty.cols, tty.rows);
+        }
         if let Err(e) = hello.check_version() {
             self.fail_client(id, &e);
             return;
@@ -1904,15 +1907,14 @@ impl Server {
         let mut old = None;
         if let Some(tty) = client.hello.as_mut().and_then(|h| h.tty.as_mut()) {
             old = Some((tty.cols, tty.rows));
-            tty.cols = cols.max(1);
-            tty.rows = rows.max(1);
+            (tty.cols, tty.rows) = tty_size(cols, rows);
         }
         // server-client.c:2730-2731: client-resized once it has a session.
         if let Some((ox, oy)) = old
             && client.attached.is_some()
             && client.was_attached
         {
-            let (nx, ny) = (cols.max(1), rows.max(1));
+            let (nx, ny) = tty_size(cols, rows);
             let ev = self
                 .client_event("client-resized", id)
                 .int("width", nx)
@@ -5041,6 +5043,16 @@ impl Server {
             }
         }
     }
+}
+
+/// A terminal's size as the server takes it (tty.c `tty_resize`,
+/// 130-143): a dimension the terminal reports as 0 (a PTY nobody sized)
+/// is 80 columns or 24 rows.
+fn tty_size(cols: u32, rows: u32) -> (u32, u32) {
+    (
+        if cols == 0 { 80 } else { cols },
+        if rows == 0 { 24 } else { rows },
+    )
 }
 
 fn cmd_error_bytes(e: &CmdError) -> Vec<u8> {

@@ -7538,3 +7538,44 @@ fn colour_queries_at_attach_and_on_a_theme_report() {
         a.exited(0);
     }
 }
+
+/// tty.c `tty_resize` (130-143): a terminal that reports 0 columns or 0
+/// rows (a PTY nobody sized) is taken as 80 columns or 24 rows, so the
+/// window it attaches to is 80x23, not shrunk to a column; the same
+/// after a resize (`MSG_RESIZE`, server-client.c:2712-2730).
+#[test]
+fn zero_size_terminal_is_80x24() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        assert!(w.cli(&["new", "-d", "-s", "a", "cat -"]).status.success());
+        let mut a = w.attach_sized(&["attach", "-t", "a"], 0, 0);
+        let client = || {
+            String::from_utf8_lossy(
+                &w.cli(&["lsc", "-F", "#{client_width}x#{client_height}"])
+                    .stdout,
+            )
+            .trim()
+            .to_owned()
+        };
+        a.wait(|_| !client().is_empty());
+        assert_eq!(client(), "80x24", "{}", bin.display());
+        let window = || {
+            display(
+                &w,
+                "#{window_width}x#{window_height} #{pane_width}x#{pane_height}",
+            )
+        };
+        a.wait_labelled(&bin.display().to_string(), Duration::from_secs(5), |_| {
+            window() == "80x23 80x23"
+        });
+        // A later resize to 0x0 (MSG_RESIZE) is taken the same way.
+        a.resize(40, 10);
+        a.wait_labelled(&bin.display().to_string(), Duration::from_secs(5), |_| {
+            client() == "40x10"
+        });
+        a.resize(0, 0);
+        a.wait_labelled(&bin.display().to_string(), Duration::from_secs(5), |_| {
+            client() == "80x24"
+        });
+    }
+}
