@@ -118,6 +118,183 @@ fn an_upgrade_request_is_answered_without_a_hello() {
     assert_eq!(server.run(&["has", "-t", "a"]).2, 0, "the server runs on");
 }
 
+/// The server's working directory is not the requester's: a relative
+/// binary is refused (protocol module docs, *Frozen frames*).
+#[test]
+fn an_upgrade_request_with_a_relative_binary_is_refused() {
+    let server = Server::start();
+    let mut stream = server.connect();
+    let request = ClientMsg::UpgradeRequest {
+        binary: PathBuf::from("vtmux"),
+    };
+    protocol::write_msg(&mut stream, &request).unwrap();
+    assert_eq!(
+        read(&mut stream),
+        Some(ServerMsg::UpgradeResult {
+            ok: false,
+            message: "binary must be an absolute path".into(),
+        })
+    );
+}
+
+/// `frame` (one encoded frame) with its payload changed by `f` and the
+/// length fixed.
+fn reframe(frame: &[u8], f: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+    let mut payload = frame[4..].to_vec();
+    f(&mut payload);
+    let mut out = u32::try_from(payload.len()).unwrap().to_le_bytes().to_vec();
+    out.extend_from_slice(&payload);
+    out
+}
+
+/// A Hello's version is read first (protocol module docs): a Hello of
+/// another version that this server can't decode (bytes past its fields,
+/// an invocation byte it doesn't know) still gets the mismatch, with the
+/// upgrade hint for a newer client, not a dropped connection.
+#[test]
+fn a_hello_of_another_version_that_does_not_decode_gets_the_mismatch() {
+    let server = Server::start();
+    let hint = "run 'tmux vtmux-upgrade' to move the server onto this binary\n";
+    let newer = PROTOCOL_VERSION + 1;
+    let older = PROTOCOL_VERSION - 1;
+    for (version, hint, how) in [
+        (newer, hint, "trailing"),
+        (newer, hint, "invocation"),
+        (u32::MAX, hint, "trailing"),
+        (older, "", "trailing"),
+    ] {
+        for control in [ControlMode::None, ControlMode::Control] {
+            let hello = protocol::encode(&server.hello(version, control, &["ls"])).unwrap();
+            let raw = reframe(&hello, |p| match how {
+                "trailing" => p.push(b'x'),
+                _ => p[5] = 2,
+            });
+            assert!(protocol::decode::<ClientMsg>(&raw).is_err());
+            let mut stream = server.connect();
+            std::io::Write::write_all(&mut stream, &raw).unwrap();
+            let line = format!(
+                "protocol version mismatch (client {version}, server {PROTOCOL_VERSION})\n"
+            );
+            assert_eq!(
+                read(&mut stream),
+                Some(ServerMsg::Stderr(format!("{line}{hint}").into_bytes())),
+                "{version} {how} {control:?}"
+            );
+            assert_eq!(
+                read(&mut stream),
+                Some(ServerMsg::Exit {
+                    code: 1,
+                    message: None,
+                    hup: false,
+                })
+            );
+        }
+    }
+    assert_eq!(server.run(&["has", "-t", "a"]).2, 0, "the server runs on");
+}
+
+/// A later version's Hello fields go in the extension area, which this
+/// server skips: such a control client is served, and so is a command
+/// client of this version.
+#[test]
+fn a_hello_with_a_later_extension_area_is_served() {
+    let server = Server::start();
+    let with_ext = |msg: &ClientMsg| {
+        reframe(&protocol::encode(msg).unwrap(), |p| {
+            p.truncate(p.len() - 4);
+            p.extend_from_slice(&5u32.to_le_bytes());
+            p.extend_from_slice(b"later");
+        })
+    };
+    let mut stream = server.connect();
+    let hello = server.hello(
+        PROTOCOL_VERSION,
+        ControlMode::None,
+        &["display", "-p", "hi"],
+    );
+    std::io::Write::write_all(&mut stream, &with_ext(&hello)).unwrap();
+    assert_eq!(read(&mut stream), Some(ServerMsg::Stdout(b"hi\n".to_vec())));
+    assert!(
+        matches!(read(&mut stream), Some(ServerMsg::Exit { code: 0, .. })),
+        "command client"
+    );
+    let mut stream = server.connect();
+    let hello = server.hello(
+        PROTOCOL_VERSION + 1,
+        ControlMode::Control,
+        &["display", "-p", "hi"],
+    );
+    std::io::Write::write_all(&mut stream, &with_ext(&hello)).unwrap();
+    protocol::write_msg(&mut stream, &ClientMsg::StdinEof).unwrap();
+    let mut stdout = Vec::new();
+    let mut last = None;
+    while let Some(msg) = read(&mut stream) {
+        if let ServerMsg::Stdout(b) = &msg {
+            stdout.extend_from_slice(b);
+        }
+        last = Some(msg);
+    }
+    assert!(
+        stdout.windows(8).any(|w| w == b"hi\n%end "),
+        "{}",
+        String::from_utf8_lossy(&stdout)
+    );
+    assert!(
+        matches!(last, Some(ServerMsg::Exit { code: 0, .. })),
+        "{last:?}"
+    );
+}
+
+/// A control client skips a server frame it doesn't know (a later server's
+/// new frozen frame) and goes on: here a fake server sends tag `0x82`,
+/// then output and `Exit 0`, which the client prints and exits with.
+#[test]
+fn a_control_client_skips_a_frame_it_does_not_know() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("fake");
+    let listener = std::os::unix::net::UnixListener::bind(&path).expect("bind");
+    let fake = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let hello = protocol::read_msg::<ClientMsg>(&mut stream).expect("a Hello");
+        assert!(matches!(hello, Some(ClientMsg::Hello(_))), "{hello:?}");
+        let mut out = vec![6, 0, 0, 0, 0x82, 1, 0, 0, 0, 0xff];
+        out.extend(protocol::encode(&ServerMsg::Stdout(b"after\n".to_vec())).unwrap());
+        out.extend(
+            protocol::encode(&ServerMsg::Exit {
+                code: 0,
+                message: None,
+                hup: false,
+            })
+            .unwrap(),
+        );
+        std::io::Write::write_all(&mut stream, &out).unwrap();
+        // Wait for the client to leave.
+        let mut rest = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut stream, &mut rest);
+    });
+    let out = Command::new(env!("CARGO_BIN_EXE_vtmux"))
+        .arg("-S")
+        .arg(&path)
+        .args(["-C", "attach"])
+        .current_dir(dir.path())
+        .env_clear()
+        .env("HOME", dir.path())
+        .env("TERM", "xterm-256color")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run vtmux");
+    fake.join().unwrap();
+    assert_eq!(
+        (String::from_utf8_lossy(&out.stdout), out.status.code()),
+        ("after\n%exit\n".into(), Some(0)),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// A command client of another version is refused; a newer one is also
 /// told how to move the server onto its binary, an older one not (that
 /// would be a downgrade).
@@ -178,12 +355,16 @@ fn control_session(server: &Server, version: u32) -> Vec<ServerMsg> {
     frames
 }
 
+/// A control client of another version is accepted and gets `Flags` and
+/// `Exit 0`. That it gets only frozen frames is not checked here: the
+/// server sends a control client of any version nothing else, so such a
+/// check could not fail. vtmux-server's unit test
+/// `a_frozen_client_is_sent_frozen_frames_only` covers the filter.
 #[test]
-fn a_control_client_of_another_version_is_served_frozen_frames_with_flags() {
+fn a_control_client_of_another_version_is_accepted_with_flags_and_exit() {
     let server = Server::start();
     for version in [PROTOCOL_VERSION, PROTOCOL_VERSION + 1, u32::MAX] {
         let frames = control_session(&server, version);
-        assert!(frames.iter().all(ServerMsg::is_frozen), "{frames:?}");
         assert!(
             frames.contains(&ServerMsg::Flags { wait_exit: true }),
             "{version}: {frames:?}"

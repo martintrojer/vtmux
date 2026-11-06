@@ -23,17 +23,17 @@
 //!
 //! | frame | tag | payload after the tag byte |
 //! |---|---|---|
-//! | [`ClientMsg::Hello`] | `0x00` | `version` u32, `invocation` u8 (0 `tmux`, 1 `vtmux`), `pid` u32, `argv` (u32 count, then bytes each), `cwd` bytes, `env` (u32 count, then key string and value string each), `tty` option of (`name` string, `term` string, `cols` u32, `rows` u32, `features` u32 count + strings), `control` u8 (0 none, 1 `-C`, 2 `-CC`), `utf8` bool, `no_start` bool |
+//! | [`ClientMsg::Hello`] | `0x00` | `version` u32, `invocation` u8 (0 `tmux`, 1 `vtmux`), `pid` u32, `argv` (u32 count, then bytes each), `cwd` bytes, `env` (u32 count, then key string and value string each), `tty` option of (`name` string, `term` string, `cols` u32, `rows` u32, `features` u32 count + strings), `control` u8 (0 none, 1 `-C`, 2 `-CC`), `utf8` bool, `no_start` bool, `ext` bytes |
 //! | [`ClientMsg::Stdin`] | `0x03` | bytes |
 //! | [`ClientMsg::StdinEof`] | `0x04` | nothing |
-//! | [`ClientMsg::UpgradeRequest`] | `0x80` | `binary` bytes |
+//! | [`ClientMsg::UpgradeRequest`] | `0x80` | `binary` bytes (an absolute path) |
 //! | [`ServerMsg::Stdout`] | `0x00` | bytes |
 //! | [`ServerMsg::Stderr`] | `0x01` | bytes |
 //! | [`ServerMsg::Exit`] | `0x03` | `code` i32, `message` option of string, `hup` bool |
 //! | [`ServerMsg::Exec`] | `0x09` | `command` string, `shell` bytes |
 //! | [`ServerMsg::Flags`] | `0x0c` | `wait_exit` bool |
 //! | [`ServerMsg::UpgradeResult`] | `0x80` | `ok` bool, `message` string |
-//! | [`ServerMsg::UpgradeNotice`] | `0x81` | `binary` bytes, `token` string |
+//! | [`ServerMsg::UpgradeNotice`] | `0x81` | `binary` bytes (an absolute path), `token` string (`[A-Za-z0-9]{16,64}`) |
 //!
 //! With the frame header, that is every byte: u32/i32 little-endian, bytes
 //! and strings a u32 length then the bytes (strings UTF-8), a bool or an
@@ -42,15 +42,45 @@
 //! edit its goldens. To carry something new, add a new frame (new frozen
 //! frames take tags from `0x80` up); never change a frozen one.
 //!
+//! Also frozen:
+//! - [`MAX_FRAME`], 16 MiB: no frame's payload is longer, in either
+//!   direction, and a longer one is refused ([`ProtocolError::Oversized`]).
+//! - `Hello`'s `version` sits at payload bytes 1-4, right after the tag. A
+//!   server reads it before the rest ([`hello_version`]), so a `Hello` of
+//!   another version gets the version mismatch even when the rest of it
+//!   does not decode.
+//! - `Hello`'s `ext` is its extension area, empty from protocol 9 on. A
+//!   later version appends its new `Hello` fields there in version order;
+//!   a reader takes the fields it knows and ignores the rest (protocol 9
+//!   ignores it all). Bytes after `ext` are still an error.
+//! - The `UpgradeRequest` and `UpgradeNotice` paths are absolute, since
+//!   the server's working directory is not the client's: the server refuses
+//!   a request with a relative one, and a client refuses such a notice
+//!   ([`ProtocolError::Malformed`]), as it does a notice whose token is not
+//!   16 to 64 ASCII letters and digits ([`is_upgrade_token`]): the token
+//!   goes on the re-executed client's command line.
+//! - A control client, the one client served across versions, skips a
+//!   server frame whose tag it doesn't know (it has read the whole frame),
+//!   so a later server can add frozen frames without ending older control
+//!   clients' sessions.
+//!
 //! What the frozen set buys:
 //! - [`ClientMsg::UpgradeRequest`] is answered ahead of any version check, so
 //!   a client of any newer binary can ask a server of any older one (from
-//!   [`FROZEN_SINCE`]) to move onto it.
+//!   [`FROZEN_SINCE`]) to move onto it. A peer the server access list
+//!   denies or makes read-only is answered `access denied`.
 //! - A control client (`-C`) of any version from [`FROZEN_SINCE`] on is
 //!   accepted ([`Speaks::Frozen`]): it sends only `Hello`, `Stdin` and
 //!   `StdinEof`, and the server sends it frozen frames only, dropping the
 //!   rest ([`ServerMsg::is_frozen`]). `Exec` (`detach-client -E`) and
 //!   `Flags` (`wait-exit`) are frozen so they reach it too.
+//!
+//! Known limit: no frozen frame tells a client the server's version. A
+//! control client learns it only through a command,
+//! `display -p '#{version}'` on its stdin, so a newer control client must
+//! not send anything but the three frozen client frames: an older server
+//! drops a connection that sends a tag it doesn't know, and reads the other
+//! non-frozen tags as its own frames.
 
 use std::fmt;
 use std::io::{self, Read, Write};
@@ -72,7 +102,36 @@ pub const FROZEN_SINCE: u32 = 9;
 
 /// Largest payload accepted (16 MiB). Frames of terminal output are far
 /// smaller; this only bounds what a corrupt length can make us allocate.
+/// Frozen (module docs): binaries of other versions refuse a longer frame.
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
+
+/// The shortest and longest [`ServerMsg::UpgradeNotice`] token (module
+/// docs, *Frozen frames*).
+pub const UPGRADE_TOKEN_LEN: std::ops::RangeInclusive<usize> = 16..=64;
+
+/// Whether `token` is a valid [`ServerMsg::UpgradeNotice`] token: 16 to
+/// 64 ASCII letters and digits, so it is safe on a command line (no `-`
+/// in front, no NUL, no shell or option syntax).
+#[must_use]
+pub fn is_upgrade_token(token: &str) -> bool {
+    UPGRADE_TOKEN_LEN.contains(&token.len()) && token.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// The protocol version a [`ClientMsg::Hello`] frame at the front of `buf`
+/// declares, read without decoding the rest of it: `None` if the frame is
+/// not a `Hello` or its first 9 bytes have not come. Frozen (module docs):
+/// the version is the four bytes after the tag, so a server can answer a
+/// `Hello` of another version that it cannot decode with the mismatch.
+#[must_use]
+pub fn hello_version(buf: &[u8]) -> Option<u32> {
+    let len = u32::from_le_bytes(buf.get(..4)?.try_into().expect("4 bytes"));
+    if len < 5 || buf.get(4) != Some(&0) {
+        return None;
+    }
+    Some(u32::from_le_bytes(
+        buf.get(5..9)?.try_into().expect("4 bytes"),
+    ))
+}
 
 /// The client's terminal, when it has one.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -187,8 +246,9 @@ pub enum ClientMsg {
     /// client has its raw terminal back.
     Unlock,
     /// Frozen (module docs): move the server onto `binary` (`vtmux-upgrade
-    /// -b`). Sent instead of [`ClientMsg::Hello`] and answered whatever the
-    /// client's version, with [`ServerMsg::UpgradeResult`].
+    /// -b`), an absolute path. Sent instead of [`ClientMsg::Hello`] and
+    /// answered whatever the client's version, with
+    /// [`ServerMsg::UpgradeResult`].
     UpgradeRequest {
         binary: PathBuf,
     },
@@ -256,9 +316,10 @@ pub enum ServerMsg {
         message: String,
     },
     /// Frozen (module docs): the server is about to replace itself with
-    /// `binary`. An attached client re-executes `binary` and re-attaches
-    /// with `token`, which rebinds it to its client record (live-upgrade
-    /// spec, decision 21).
+    /// `binary`, an absolute path. An attached client re-executes `binary`
+    /// and re-attaches with `token` ([`is_upgrade_token`]), which rebinds
+    /// it to its client record (live-upgrade spec, decision 21). A notice
+    /// breaking either rule does not decode.
     UpgradeNotice {
         binary: PathBuf,
         token: String,
@@ -594,6 +655,8 @@ impl Hello {
         });
         out.push(u8::from(self.flags.utf8));
         out.push(u8::from(self.flags.no_start));
+        // ext: empty from protocol 9 on (module docs).
+        put_len(out, 0);
     }
 
     fn len(&self) -> usize {
@@ -611,6 +674,7 @@ impl Hello {
                 .sum::<usize>()
             + option_len(self.tty.as_ref(), TtyInfo::len)
             + 3
+            + 4
     }
 
     fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
@@ -640,6 +704,9 @@ impl Hello {
             utf8: r.flag()?,
             no_start: r.flag()?,
         };
+        // ext: a later version's fields, none of which this one knows.
+        let n = r.u32()? as usize;
+        r.take(n)?;
         Ok(Self {
             version,
             invocation,
@@ -844,10 +911,17 @@ impl Message for ServerMsg {
                 ok: r.flag()?,
                 message: r.string()?,
             },
-            0x81 => Self::UpgradeNotice {
-                binary: r.path()?,
-                token: r.string()?,
-            },
+            0x81 => {
+                let binary = r.path()?;
+                if !binary.is_absolute() {
+                    return Err(ProtocolError::Malformed("upgrade binary not absolute"));
+                }
+                let token = r.string()?;
+                if !is_upgrade_token(&token) {
+                    return Err(ProtocolError::Malformed("bad upgrade token"));
+                }
+                Self::UpgradeNotice { binary, token }
+            }
             t => return Err(ProtocolError::UnknownTag(t)),
         })
     }
@@ -970,7 +1044,7 @@ mod tests {
             },
             ServerMsg::UpgradeNotice {
                 binary: PathBuf::from("/usr/bin/vtmux"),
-                token: "3f9a".into(),
+                token: "3f9aB7c2d4E5f6a8".into(),
             },
         ]
     }
@@ -1085,8 +1159,8 @@ mod tests {
     fn bad_flag_bytes_are_errors() {
         let mut f = encode(&ClientMsg::Hello(hello(None))).unwrap();
         let n = f.len();
-        // control, utf8, no_start are the last three payload bytes.
-        for (at, bad) in [(n - 3, 3), (n - 2, 2), (n - 1, 2)] {
+        // control, utf8, no_start come before the (empty) ext's length.
+        for (at, bad) in [(n - 7, 3), (n - 6, 2), (n - 5, 2)] {
             let saved = f[at];
             f[at] = bad;
             assert!(matches!(
@@ -1269,7 +1343,7 @@ mod tests {
                         no_start: false,
                     },
                 }),
-                "30000000 00 09000000 00 04030201 02000000 02000000 6c73 01000000 ff 01000000 2f 01000000 01000000 41 01000000 62 00 01 01 00",
+                "34000000 00 09000000 00 04030201 02000000 02000000 6c73 01000000 ff 01000000 2f 01000000 01000000 41 01000000 62 00 01 01 00 00000000",
             ),
             (
                 ClientMsg::Hello(Hello {
@@ -1292,7 +1366,7 @@ mod tests {
                         no_start: true,
                     },
                 }),
-                "46000000 00 09000000 01 07000000 00000000 02000000 2f68 00000000 01 0a000000 2f6465762f7074732f31 05000000 787465726d 50000000 18000000 01000000 03000000 524742 02 00 01",
+                "4a000000 00 09000000 01 07000000 00000000 02000000 2f68 00000000 01 0a000000 2f6465762f7074732f31 05000000 787465726d 50000000 18000000 01000000 03000000 524742 02 00 01 00000000",
             ),
             (
                 ClientMsg::Stdin(b"ls\n".to_vec()),
@@ -1359,9 +1433,9 @@ mod tests {
             (
                 ServerMsg::UpgradeNotice {
                     binary: PathBuf::from("/b"),
-                    token: "t1".into(),
+                    token: "t0123456789abcdE".into(),
                 },
-                "0d000000 81 02000000 2f62 02000000 7431",
+                "1b000000 81 02000000 2f62 10000000 74303132333435363738396162636445",
             ),
         ]
     }
@@ -1407,6 +1481,112 @@ mod tests {
             assert_eq!(
                 decode::<ServerMsg>(&bytes).unwrap(),
                 (m.clone(), bytes.len())
+            );
+        }
+    }
+
+    /// The first Hello golden with `ext` set to `ext` and `tail` after it.
+    fn hello_golden_with(version: u32, invocation: u8, ext: &[u8], tail: &[u8]) -> Vec<u8> {
+        let golden = unhex(frozen_client_goldens()[0].1);
+        let mut payload = golden[4..golden.len() - 4].to_vec();
+        payload[1..5].copy_from_slice(&version.to_le_bytes());
+        payload[5] = invocation;
+        put_bytes(&mut payload, ext);
+        payload.extend_from_slice(tail);
+        let mut frame = u32::try_from(payload.len()).unwrap().to_le_bytes().to_vec();
+        frame.extend_from_slice(&payload);
+        frame
+    }
+
+    /// Hello's extension area (module docs): what a later version puts
+    /// there is ignored; bytes after it are still an error.
+    #[test]
+    fn a_hello_reads_past_its_extension_area() {
+        let ClientMsg::Hello(want) = frozen_client_goldens()[0].0.clone() else {
+            unreachable!()
+        };
+        let frame = hello_golden_with(9, 0, b"later fields", b"");
+        assert_eq!(
+            decode::<ClientMsg>(&frame).unwrap(),
+            (ClientMsg::Hello(want), frame.len())
+        );
+        assert!(matches!(
+            decode::<ClientMsg>(&hello_golden_with(9, 0, b"", b"x")),
+            Err(ProtocolError::TrailingBytes)
+        ));
+    }
+
+    /// The version comes first (module docs): it is read from a Hello that
+    /// does not decode, and from nothing else.
+    #[test]
+    fn a_hello_version_is_read_without_decoding_the_rest() {
+        let trailing = hello_golden_with(10, 0, b"", b"x");
+        assert!(decode::<ClientMsg>(&trailing).is_err());
+        assert_eq!(hello_version(&trailing), Some(10));
+        let invocation = hello_golden_with(10, 2, b"", b"");
+        assert!(matches!(
+            decode::<ClientMsg>(&invocation),
+            Err(ProtocolError::Malformed(_))
+        ));
+        assert_eq!(hello_version(&invocation), Some(10));
+        assert_eq!(hello_version(&trailing[..9]), Some(10));
+        assert_eq!(hello_version(&trailing[..8]), None, "not all there");
+        // Tag 0 with less than a version is no Hello version.
+        assert_eq!(hello_version(&[1, 0, 0, 0, 0]), None);
+        assert_eq!(hello_version(&[4, 0, 0, 0, 0, 10, 0, 0, 0]), None);
+        for m in all_client()
+            .iter()
+            .filter(|m| !matches!(m, ClientMsg::Hello(_)))
+        {
+            assert_eq!(hello_version(&encode(m).unwrap()), None, "{m:?}");
+        }
+    }
+
+    /// An `UpgradeNotice`'s token is `[A-Za-z0-9]{16,64}` and its binary an
+    /// absolute path (module docs); a client refuses anything else.
+    #[test]
+    fn an_upgrade_notice_needs_a_safe_token_and_an_absolute_binary() {
+        let notice = |binary: &str, token: &str| {
+            let mut payload = vec![0x81];
+            put_bytes(&mut payload, binary.as_bytes());
+            put_bytes(&mut payload, token.as_bytes());
+            let mut frame = u32::try_from(payload.len()).unwrap().to_le_bytes().to_vec();
+            frame.extend_from_slice(&payload);
+            decode::<ServerMsg>(&frame).map(|(m, _)| m)
+        };
+        let ok = "0123456789abcdefABCDEFxyzXYZ";
+        for token in ["a".repeat(16), "Z9".repeat(32), ok.to_owned()] {
+            assert!(is_upgrade_token(&token), "{token}");
+            assert_eq!(
+                notice("/usr/bin/vtmux", &token).unwrap(),
+                ServerMsg::UpgradeNotice {
+                    binary: PathBuf::from("/usr/bin/vtmux"),
+                    token,
+                }
+            );
+        }
+        for token in [
+            String::new(),
+            "a".repeat(15),
+            "a".repeat(65),
+            format!("-{}", &ok[1..]),
+            format!("{}\0", &ok[1..]),
+            format!("{} ", &ok[1..]),
+            format!("{}\u{e9}", &ok[2..]),
+        ] {
+            assert!(!is_upgrade_token(&token), "{token:?}");
+            assert!(
+                matches!(
+                    notice("/usr/bin/vtmux", &token),
+                    Err(ProtocolError::Malformed(_))
+                ),
+                "{token:?}"
+            );
+        }
+        for binary in ["vtmux", "bin/vtmux", "-x", ""] {
+            assert!(
+                matches!(notice(binary, ok), Err(ProtocolError::Malformed(_))),
+                "{binary:?}"
             );
         }
     }

@@ -415,7 +415,10 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
             Ok(Some(ServerMsg::Flags { wait_exit })) => wait = wait_exit,
             // A control client's file I/O is the server's (file.c:321). It
             // stays connected across an upgrade, and only a requester gets
-            // a result (live-upgrade spec, decision 26).
+            // a result (live-upgrade spec, decision 26). An unknown tag is a
+            // frame a later server added (new frozen frames take new tags,
+            // protocol module docs): `read_msg` has read all of it, so the
+            // stream is still in step.
             Ok(Some(
                 ServerMsg::Ready
                 | ServerMsg::ReadOpen { .. }
@@ -426,7 +429,8 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
                 | ServerMsg::Lock { .. }
                 | ServerMsg::UpgradeNotice { .. }
                 | ServerMsg::UpgradeResult { .. },
-            )) => {}
+            ))
+            | Err(protocol::ProtocolError::UnknownTag(_)) => {}
             Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
         }
     };

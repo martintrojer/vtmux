@@ -1168,7 +1168,23 @@ impl Server {
                 }
                 Err(ProtocolError::Truncated) => break,
                 Err(_) => {
-                    closed = true;
+                    // A Hello of another version that this build can't
+                    // decode still gets the mismatch: the version comes
+                    // first and is frozen (protocol module docs).
+                    if c.hello.is_none()
+                        && !c.closing
+                        && let Some(client) = protocol::hello_version(&c.inbuf)
+                        && client != protocol::PROTOCOL_VERSION
+                    {
+                        c.inbuf.clear();
+                        let e = EdgeError::VersionMismatch {
+                            client,
+                            server: protocol::PROTOCOL_VERSION,
+                        };
+                        self.fail_client(id, &e);
+                    } else {
+                        closed = true;
+                    }
                     break;
                 }
             }
@@ -1505,14 +1521,24 @@ impl Server {
     /// The frozen upgrade handshake (live-upgrade spec, *Handshake*): a
     /// client of any version asks the server to move onto `binary`, with no
     /// [`Hello`] and no version check, and gets one
-    /// [`ServerMsg::UpgradeResult`] before the connection closes. The
-    /// upgrade itself is not there yet.
-    fn upgrade_request(&mut self, id: ClientId, _binary: &std::path::Path) {
+    /// [`ServerMsg::UpgradeResult`] before the connection closes. Only a
+    /// peer the access list lets write may ask (it would run `binary` as
+    /// the server's owner), and `binary` must be absolute (the server's
+    /// cwd is not the requester's). The upgrade itself is not there yet.
+    fn upgrade_request(&mut self, id: ClientId, binary: &std::path::Path) {
+        let peer = self.clients.get(&id).and_then(|c| c.peer);
+        let message = if self.acl.check(peer) != crate::acl::Access::Write {
+            "access denied"
+        } else if !binary.is_absolute() {
+            "binary must be an absolute path"
+        } else {
+            "not implemented"
+        };
         self.send(
             id,
             &ServerMsg::UpgradeResult {
                 ok: false,
-                message: "not implemented".to_owned(),
+                message: message.to_owned(),
             },
         );
         if let Some(c) = self.clients.get_mut(&id) {
@@ -5228,6 +5254,46 @@ mod tests {
         }
         let frozen: Vec<ServerMsg> = sent.into_iter().filter(ServerMsg::is_frozen).collect();
         assert_eq!(got, frozen);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// An `UpgradeRequest` would run a binary as the server's owner, so a
+    /// peer the access list denies or makes read-only is refused
+    /// (server-acl.c `server_acl_check`, as `server_accept` does for any
+    /// client); a writer with a relative binary is refused too.
+    #[test]
+    fn an_upgrade_request_needs_write_access_and_an_absolute_binary() {
+        use crate::acl::Subject;
+        use std::io::Read as _;
+        use vtmux_core::protocol::{ClientMsg, ServerMsg, decode};
+        let (mut server, _, _, _, dir) = setup();
+        let uid = rustix::process::getuid().as_raw();
+        let answer = |server: &mut super::Server, binary: &str| {
+            let (ours, mut peer) = mio::net::UnixStream::pair().unwrap();
+            let id = super::ClientId(server.next_client);
+            server.next_client += 1;
+            server.clients.insert(id, super::Client::new(ours, 0));
+            let binary = std::path::PathBuf::from(binary);
+            server.on_message(id, ClientMsg::UpgradeRequest { binary });
+            let mut wire = Vec::new();
+            let mut buf = [0u8; 4096];
+            while let Ok(n @ 1..) = peer.read(&mut buf) {
+                wire.extend_from_slice(&buf[..n]);
+            }
+            match decode::<ServerMsg>(&wire).unwrap() {
+                (ServerMsg::UpgradeResult { ok: false, message }, n) if n == wire.len() => message,
+                other => panic!("{other:?}"),
+            }
+        };
+        assert_eq!(answer(&mut server, "/bin/vtmux"), "not implemented");
+        assert_eq!(
+            answer(&mut server, "vtmux"),
+            "binary must be an absolute path"
+        );
+        server.acl.set_read_only(Subject::User(uid), true);
+        assert_eq!(answer(&mut server, "/bin/vtmux"), "access denied");
+        server.acl.deny(Subject::User(uid));
+        assert_eq!(answer(&mut server, "/bin/vtmux"), "access denied");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
