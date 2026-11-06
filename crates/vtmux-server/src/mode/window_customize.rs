@@ -1230,7 +1230,7 @@ impl CustomizeMode {
             return;
         }
         let mut ctx = crate::format_ctx::Ctx::new(model, source.info, source.env, found);
-        ctx.clients = source.clients.clone();
+        ctx.clients = source.clients.views().clone();
         if def.is_none_or(|d| matches!(d.kind, Kind::String(_))) {
             let expanded = vtmux_core::format::expand_str(&value, &ctx);
             if expanded != value {

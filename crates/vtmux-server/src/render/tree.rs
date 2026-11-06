@@ -783,7 +783,7 @@ impl Source<'_> {
                 "window_format"
             };
             let mut ctx = crate::format_ctx::Ctx::new(model, self.info, self.env, *found);
-            ctx.clients = self.clients.clone();
+            ctx.clients = self.clients.views().clone();
             for name in ["session_format", "window_format", "pane_format"] {
                 ctx.extra
                     .push((name.into(), if name == ty { "1" } else { "0" }.into()));
@@ -841,7 +841,7 @@ impl Source<'_> {
         }
         sections.push(session_info_lines());
         let mut ctx = crate::format_ctx::Ctx::new(self.model, self.info, self.env, found);
-        ctx.clients = self.clients.clone();
+        ctx.clients = self.clients.views().clone();
         // window_tree_border_cell with no format: the mode's window.
         let plain = crate::format_ctx::Ctx::new(self.model, self.info, self.env, Found::default());
         let border = self.style(mode_tree, "tree-mode-border-style", &plain);

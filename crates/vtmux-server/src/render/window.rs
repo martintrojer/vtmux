@@ -19,7 +19,7 @@ use super::blend::{TermColours, resolve};
 use super::compose::{BarDraw, Draw, PaneDraw, Theme, pane_status};
 use super::scene::{Indicators, Lines, Scene, SceneCache, ScenePane, WindowView};
 use crate::environ::Environ;
-use crate::format_ctx::{Ctx, ServerInfo};
+use crate::format_ctx::{ClientView, Ctx, ServerInfo};
 use crate::format_jobs::{JobHandle, TAG_PANE};
 use crate::mode::copy::Paint;
 use crate::model::Model;
@@ -31,11 +31,77 @@ pub struct Source<'a> {
     pub info: &'a ServerInfo,
     pub env: &'a Environ,
     /// The attached clients (`#{session_attached_list}`).
-    pub clients: std::rc::Rc<[crate::format_ctx::ClientView]>,
+    pub clients: Clients<'a>,
     /// The last [`Source::theme`], for the option values it came from.
     pub themes: &'a ThemeCache,
     /// The key tables (customize-mode's preview).
     pub keys: &'a vtmux_core::keys::KeyBindings,
+    /// Each pane's expanded border style ([`BorderStyles`]).
+    pub borders: &'a BorderStyles,
+}
+
+/// The attached clients as formats see them, worked out on first use:
+/// only the tree modes read them, and a frame is drawn far more often.
+pub struct Clients<'a> {
+    make: Box<dyn Fn() -> Rc<[ClientView]> + 'a>,
+    views: std::cell::OnceCell<Rc<[ClientView]>>,
+}
+
+impl<'a> Clients<'a> {
+    pub fn new(make: impl Fn() -> Rc<[ClientView]> + 'a) -> Self {
+        Self {
+            make: Box::new(make),
+            views: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The clients, in connection order.
+    pub fn views(&self) -> &Rc<[ClientView]> {
+        self.views.get_or_init(&self.make)
+    }
+}
+
+/// Each pane's border style as last expanded (`wp->border_gc`,
+/// `wp->active_border_gc`). tmux expands `pane-border-style` or
+/// `pane-active-border-style` once and keeps it until a client draws the
+/// borders or the status again (`window_pane_get_border_style`,
+/// window-border.c:151-177; reset in `redraw_draw`,
+/// screen-redraw.c:1726-1731), so pane output alone, a moved cursor say,
+/// does not change a border. [`BorderStyles::forget`] is that reset; the
+/// [`BorderKey`] also expands it again on the changes tmux redraws the
+/// borders for (an option, the active or marked pane, a mode, the layout),
+/// whether or not vtmux asks for a redraw there.
+#[derive(Debug, Default)]
+pub struct BorderStyles(std::cell::RefCell<BTreeMap<PaneId, (BorderKey, CellStyle)>>);
+
+/// What a kept border style was expanded under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BorderKey {
+    /// The active pane's style or the other one (tmux keeps both).
+    active: bool,
+    /// [`vtmux_core::options::OptionsStore::generation`]: every option
+    /// change redraws every client (`options_push_changes`).
+    options: u64,
+    /// `#{pane_in_mode}`: `window_pane_set_mode` and
+    /// `window_pane_reset_mode` redraw the borders (window.c:1788, 1831).
+    in_mode: bool,
+    /// `#{pane_marked}` (select-pane -m redraws the borders).
+    marked: Option<PaneId>,
+    /// `#{pane_modal_flag}`.
+    modal: Option<PaneId>,
+    /// `layout_fix_panes` and a redraw follow every layout change.
+    rect: vtmux_core::layout::Geometry,
+}
+
+impl BorderStyles {
+    /// `redraw_draw` with `REDRAW_PANE_BORDER` or `REDRAW_PANE_STATUS`
+    /// (screen-redraw.c:1726-1731): the styles of window `w`'s panes are
+    /// expanded again. Panes that are gone go too.
+    pub fn forget(&self, model: &Model, w: WindowId) {
+        self.0
+            .borrow_mut()
+            .retain(|p, _| model.panes.get(p).is_some_and(|pane| pane.window != w));
+    }
 }
 
 /// [`Source::theme`]'s last result and its inputs: the `theme` option, the
@@ -193,6 +259,8 @@ impl Source<'_> {
         // drawn area's corner, inside a frame the scene draws.
         let ring = self.model.number_option(wtree, "vtmux-focus-ring") != 0;
         let offset = u16::from(ring);
+        let marked_pane = self.model.marked().and_then(|m| m.pane);
+        let generation = self.model.options.generation();
         let mut panes = Vec::new();
         let mut draws = BTreeMap::new();
         for &p in window.panes.z_order.iter().rev() {
@@ -232,11 +300,15 @@ impl Source<'_> {
                 },
                 caps,
             );
-            let option = if p == active {
-                "pane-active-border-style"
-            } else {
-                "pane-border-style"
+            let key = BorderKey {
+                active: p == active,
+                options: generation,
+                in_mode: !pane.modes.is_empty(),
+                marked: marked_pane,
+                modal: window.panes.modal,
+                rect: pane.rect,
             };
+            let border = self.border_style(p, key, &ctx);
             let (content, stamps, selected) =
                 self.pane_screen(pane, TreeId::Session(s), &ctx, caps);
             let defaults = self.pane_defaults(p, p == active, &ctx);
@@ -249,7 +321,7 @@ impl Source<'_> {
                     index: self.model.pane_index(p),
                     defaults,
                     lines,
-                    border: self.style(TreeId::Pane(p), option, &ctx),
+                    border,
                     status: Vec::new(),
                     status_ranges: Vec::new(),
                     scrollbar: placement.map(|placement| BarDraw {
@@ -358,6 +430,25 @@ impl Source<'_> {
             clear: caps.clear(),
         };
         Some((scene, draw))
+    }
+
+    /// `window_pane_get_border_style`: pane `p`'s kept border style, else
+    /// `pane-active-border-style` (`key.active`) or `pane-border-style`
+    /// expanded and kept.
+    fn border_style(&self, p: PaneId, key: BorderKey, ctx: &Ctx<'_>) -> CellStyle {
+        if let Some((k, style)) = self.borders.0.borrow().get(&p)
+            && *k == key
+        {
+            return style.clone();
+        }
+        let option = if key.active {
+            "pane-active-border-style"
+        } else {
+            "pane-border-style"
+        };
+        let style = self.style(TreeId::Pane(p), option, ctx);
+        self.borders.0.borrow_mut().insert(p, (key, style.clone()));
+        style
     }
 
     /// tty.c `tty_default_colours` (`tty_style_changed`): pane `p`'s
