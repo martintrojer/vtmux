@@ -484,17 +484,27 @@ fn compose_row(
     let line_cols = u16::try_from(line.len()).unwrap_or(u16::MAX);
     let mut ended_written = false;
     {
-        for x in 0..scene.cols.min(line_cols) {
+        let width = scene.cols.min(line_cols);
+        let mut x = 0;
+        while x < width {
             let cell = match scene.get(x, y) {
-                SceneCell::Pane { pane, px, py } => d
-                    .panes
-                    .get(pane)
-                    .and_then(|p| {
-                        p.content
-                            .cell(u16::try_from(*px).ok()?, u16::try_from(*py).ok()?)
-                    })
-                    .cloned()
-                    .unwrap_or_default(),
+                SceneCell::Pane { pane, px, py } => {
+                    // A span of the pane's row is copied whole, reusing
+                    // the cells' text buffers.
+                    let key = span_key(scene.get(x, y), x);
+                    let end = (x + 1..width)
+                        .find(|&e| span_key(scene.get(e, y), e) != key)
+                        .unwrap_or(width);
+                    let to = &mut line[usize::from(x)..usize::from(end)];
+                    let from = d
+                        .panes
+                        .get(pane)
+                        .map_or(&[][..], |p| pane_row(&p.content, *px, *py, to.len()));
+                    to[..from.len()].clone_from_slice(from);
+                    to[from.len()..].fill(Cell::default());
+                    x = end;
+                    continue;
+                }
                 SceneCell::Outside => theme.cell(&fill(&d.border, &d.outside)),
                 SceneCell::Empty => theme.cell(&fill(&d.border, &d.inside)),
                 SceneCell::Border(b) => {
@@ -533,10 +543,10 @@ fn compose_row(
                     .map_or_else(Cell::default, |(b, def)| b.cell(theme, def, *col, *row)),
             };
             line[usize::from(x)] = cell;
+            x += 1;
         }
         // Pane and pane status spans go through `tty_draw_line`; borders and
         // fill are drawn cell by cell (`tty_cell`) and keep their text.
-        let width = scene.cols.min(line_cols);
         let mut x = 0;
         while x < width {
             let Some(key) = span_key(scene.get(x, y), x) else {
@@ -628,8 +638,31 @@ fn draw_pane_span(
     written
 }
 
-/// Which cells of the span `x..end` of row `y` are [`PaneDraw::selected`].
+/// Up to `n` cells of `content`'s row `py` from column `px`: what of them
+/// is on the screen.
+fn pane_row(content: &Snapshot, px: u32, py: u32, n: usize) -> &[Cell] {
+    let (Ok(px), Ok(py)) = (u16::try_from(px), u16::try_from(py)) else {
+        return &[];
+    };
+    if px >= content.cols || py >= content.rows {
+        return &[];
+    }
+    let cols = usize::from(content.cols);
+    let at = usize::from(py) * cols + usize::from(px);
+    let n = n.min(cols - usize::from(px));
+    content.cells.get(at..at + n).unwrap_or(&[])
+}
+
+/// Which cells of the span `x..end` of row `y` are [`PaneDraw::selected`];
+/// empty when none can be (the span's pane has no selection).
 fn selected_span(d: &Draw, scene: &Scene, x: u16, end: u16, y: u16) -> Vec<bool> {
+    let selecting = match scene.get(x, y) {
+        SceneCell::Pane { pane, .. } => d.panes.get(pane).is_some_and(|p| !p.selected.is_empty()),
+        _ => false,
+    };
+    if !selecting {
+        return Vec::new();
+    }
     (x..end)
         .map(|x| match scene.get(x, y) {
             SceneCell::Pane { pane, px, py } => d.panes.get(pane).is_some_and(|p| {

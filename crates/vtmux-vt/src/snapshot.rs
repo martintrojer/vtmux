@@ -365,9 +365,19 @@ fn update_cursor(view: &mut Rc<Snapshot>, snap: &libghostty_vt::render::Snapshot
 
 /// Read one cell into `slot`, reusing its text buffer; whether it changed.
 fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String) -> bool {
-    let mut style: Style = cell.style().map(Style::from).unwrap_or_default();
+    let raw = cell.raw_cell();
+    // Most cells are unstyled: Ghostty's style lookup is the dear part of
+    // a read.
+    let styled = raw
+        .as_ref()
+        .map_or(true, |r| r.has_styling().unwrap_or(true));
+    let mut style: Style = if styled {
+        cell.style().map(Style::from).unwrap_or_default()
+    } else {
+        Style::default()
+    };
     let (mut width, mut acs, mut link) = (1, false, false);
-    if let Ok(raw) = cell.raw_cell() {
+    if let Ok(raw) = raw {
         // A cell erased with a background has no text and carries the
         // colour in its content tag instead of its style.
         match raw.content_tag() {
@@ -414,6 +424,22 @@ fn read_cell(cell: &CellIteration<'_, '_>, slot: &mut Cell, scratch: &mut String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An unstyled cell skips Ghostty's style lookup ([`read_cell`]): it
+    /// reads as the default style, a styled one beside it does not.
+    #[test]
+    fn unstyled_cells_read_as_the_default_style() {
+        let mut t = PaneTerm::new(10, 2, 100);
+        t.feed(b"\x1b[1;31ma\x1b[0mb\x1b[4mc\x1b[24md");
+        let s = snapshot(&t);
+        let a = &s.cell(0, 0).unwrap().style;
+        assert!(a.bold);
+        assert_eq!(a.fg, Color::Palette(1));
+        assert_eq!(s.cell(1, 0).unwrap().style, Style::default());
+        assert_ne!(s.cell(2, 0).unwrap().style, Style::default());
+        assert_eq!(s.cell(3, 0).unwrap().style, Style::default());
+        assert_eq!(s.cell(5, 1).unwrap().style, Style::default());
+    }
 
     #[test]
     fn snapshot_reads_text_style_and_cursor() {
