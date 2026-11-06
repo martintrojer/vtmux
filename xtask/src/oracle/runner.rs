@@ -636,15 +636,29 @@ impl<'a> Runner<'a> {
         );
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
         self.expect_after = Some(self.act.total.load(Ordering::SeqCst));
-        self.attaches.insert(
-            id,
-            Attach {
-                master: pair.master,
-                writer,
-                child,
-                events,
-            },
-        );
+        let mut attach = Attach {
+            master: pair.master,
+            writer,
+            child,
+            events,
+        };
+        // The server lists clients in connect order (server_client_create,
+        // server-client.c:320), and a client draws only after the server
+        // answered its attach. Wait for that first draw (or an early exit)
+        // so two attaches never race to connect.
+        let start = Instant::now();
+        while start.elapsed() < WAIT_TIMEOUT
+            && !attach
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, Event::Bytes(_)))
+            && matches!(attach.child.try_wait(), Ok(None))
+        {
+            thread::sleep(POLL);
+        }
+        self.attaches.insert(id, attach);
         Ok(())
     }
 
