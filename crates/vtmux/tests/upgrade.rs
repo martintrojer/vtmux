@@ -26,6 +26,11 @@ struct World {
     label: String,
     home: tempfile::TempDir,
     sockets: tempfile::TempDir,
+    /// The server pid, once seen: the teardown kills it when it no
+    /// longer answers.
+    server: Mutex<Option<rustix::process::Pid>>,
+    /// The socket path, once an upgrade asked for it.
+    socket: Mutex<Option<PathBuf>>,
 }
 
 impl World {
@@ -43,6 +48,8 @@ impl World {
                 .prefix("vtu")
                 .tempdir_in("/tmp")
                 .unwrap(),
+            server: Mutex::new(None),
+            socket: Mutex::new(None),
         }
     }
 
@@ -58,7 +65,12 @@ impl World {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new(BIN);
+        self.command_of(Path::new(BIN), args)
+    }
+
+    /// [`Self::command`] run by `binary`.
+    fn command_of(&self, binary: &Path, args: &[&str]) -> Command {
+        let mut cmd = Command::new(binary);
         cmd.args(["-L", &self.label, "-f", "/dev/null"])
             .args(args)
             .current_dir(self.home.path())
@@ -82,13 +94,21 @@ impl World {
     /// kind the listings show. `server_env` goes to the server's process
     /// environment (the test hooks).
     fn populate(&self, server_env: &[(&str, &str)]) {
-        let out = self
-            .command(&[
-                "new", "-d", "-s", "a", "-n", "w1", "-x", "80", "-y", "24", "cat", "-",
-            ])
-            .envs(server_env.iter().copied())
-            .output()
-            .unwrap();
+        self.populate_from(Path::new(BIN), server_env);
+    }
+
+    /// [`Self::populate`] with the server started from `binary`.
+    fn populate_from(&self, binary: &Path, server_env: &[(&str, &str)]) {
+        let out = output_retrying(|| {
+            let mut cmd = self.command_of(
+                binary,
+                &[
+                    "new", "-d", "-s", "a", "-n", "w1", "-x", "80", "-y", "24", "cat", "-",
+                ],
+            );
+            cmd.envs(server_env.iter().copied());
+            cmd
+        });
         assert!(out.status.success(), "{out:?}");
         for args in [
             &["set", "-g", "status-right", "R"][..],
@@ -115,7 +135,31 @@ impl World {
     }
 
     fn pid(&self) -> String {
-        self.run(&["display", "-p", "#{pid}"]).trim().to_owned()
+        let pid = self.run(&["display", "-p", "#{pid}"]).trim().to_owned();
+        *self.server.lock().unwrap() = common::parse_pid(&pid);
+        pid
+    }
+
+    /// A command's output, or `None` when it has not finished within
+    /// `limit` (it is killed): for a server that may not answer.
+    fn run_within(&self, args: &[&str], limit: Duration) -> Option<std::process::Output> {
+        let mut child = self
+            .command(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let end = Instant::now() + limit;
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= end {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        Some(child.wait_with_output().unwrap())
     }
 
     /// Every listing an upgrade must leave as it was.
@@ -183,7 +227,20 @@ impl World {
     /// (the server execed).
     fn upgrade(&self, binary: &Path) -> Option<ServerMsg> {
         let path = self.run(&["display", "-p", "#{socket_path}"]);
-        let mut stream = UnixStream::connect(path.trim_end()).unwrap();
+        *self.socket.lock().unwrap() = Some(PathBuf::from(path.trim_end()));
+        self.upgrade_at(binary)
+    }
+
+    /// [`Self::upgrade`] on the socket an earlier one used, for a server
+    /// with no session to expand `#{socket_path}` in.
+    fn upgrade_at(&self, binary: &Path) -> Option<ServerMsg> {
+        let path = self
+            .socket
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("an earlier upgrade");
+        let mut stream = UnixStream::connect(path).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(60)))
             .unwrap();
@@ -218,13 +275,32 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
+        // Bounded: a server that no longer answers is killed by its pid.
+        let limit = Duration::from_secs(10);
         let pid = self
-            .command(&["display", "-p", "#{pid}"])
-            .output()
-            .ok()
-            .and_then(|o| common::parse_pid(&String::from_utf8_lossy(&o.stdout)));
-        let _ = self.command(&["kill-server"]).output();
+            .run_within(&["display", "-p", "#{pid}"], limit)
+            .and_then(|o| common::parse_pid(&String::from_utf8_lossy(&o.stdout)))
+            .or(*self.server.lock().unwrap());
+        let _ = self.run_within(&["kill-server"], limit);
         common::reap(pid);
+    }
+}
+
+/// `make()`'s output, spawned again while the binary is busy: a binary
+/// written a moment ago can still be open for writing in a child another
+/// test thread forked (`ETXTBSY`).
+fn output_retrying(make: impl Fn() -> Command) -> std::process::Output {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        match make().output() {
+            Err(e)
+                if e.raw_os_error() == Some(rustix::io::Errno::TXTBSY.raw_os_error())
+                    && Instant::now() < end =>
+            {
+                thread::sleep(Duration::from_millis(50));
+            }
+            other => return other.unwrap(),
+        }
     }
 }
 
@@ -519,6 +595,221 @@ fn the_dry_run_flag_refuses_what_is_no_snapshot() {
         String::from_utf8_lossy(&out.stderr).starts_with("snapshot descriptor 250: "),
         "{out:?}"
     );
+}
+
+/// A signal storm through 20 upgrades: SIGHUP (caught and ignored) and
+/// SIGUSR2 (caught, tmux's debug-log toggle) sent every 200 us, so some
+/// land between `execve` and the new image's handlers. Neither may kill
+/// the server or, through its PTYs closing, a pane (proc.c
+/// `proc_set_signals` catches both in every image).
+#[test]
+fn a_signal_storm_through_twenty_upgrades_kills_nothing() {
+    use rustix::process::{Pid, Signal, kill_process};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let world = World::new();
+    world.populate(&[]);
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let before = world.observe();
+    let target = Pid::from_raw(pid.parse().unwrap()).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let storm = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let mut sent = 0u64;
+            while !stop.load(Ordering::Relaxed) {
+                let sig = if sent.is_multiple_of(2) {
+                    Signal::HUP
+                } else {
+                    Signal::USR2
+                };
+                if kill_process(target, sig).is_err() {
+                    break;
+                }
+                sent += 1;
+                thread::sleep(Duration::from_micros(200));
+            }
+            sent
+        })
+    };
+    for i in 0..20 {
+        assert_eq!(world.upgrade(&bin()), None, "upgrade {i}");
+        assert_eq!(world.pid(), pid, "upgrade {i}");
+    }
+    stop.store(true, Ordering::Relaxed);
+    assert!(storm.join().unwrap() > 0);
+    assert!(
+        world.server_args().contains("--vtmux-resume"),
+        "{}",
+        world.server_args()
+    );
+    assert_eq!(world.pane_pids(), panes);
+    assert_eq!(world.observe(), before);
+    world.echo("a:w1", "stormed");
+}
+
+/// Decision 7's switch back lands on the image that wrote the snapshot,
+/// not on whatever its path holds by then: here a binary from before the
+/// feature (a script that exits 1) installed over it. The server and its
+/// panes carry on.
+#[test]
+fn a_switch_back_ignores_what_the_old_path_holds_now() {
+    let world = World::new();
+    let old = world.home.path().join("old");
+    if std::fs::hard_link(BIN, &old).is_err() {
+        std::fs::copy(BIN, &old).unwrap();
+    }
+    world.populate_from(&old, &[("VTMUX_TEST_RESUME_FAIL", "1")]);
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let before = world.observe();
+    std::fs::remove_file(&old).unwrap();
+    std::fs::write(&old, "#!/bin/sh\nexit 1\n").unwrap();
+    set_executable(&old);
+
+    assert_eq!(world.upgrade(&bin()), None);
+
+    assert_eq!(world.pid(), pid);
+    // Linux switches back through the executable kept open; macOS has no
+    // fexecve, so its dry run refuses the script and the new image serves
+    // through the last resort.
+    #[cfg(target_os = "linux")]
+    {
+        let args = world.server_args();
+        assert!(args.contains("--vtmux-switched-back"), "{args}");
+    }
+    assert_eq!(world.pane_pids(), panes);
+    assert_eq!(world.observe(), before);
+    world.echo("b:x", "back");
+}
+
+/// A panic while the new image rebuilds the server (the test hook) is a
+/// failed resume like any other: it switches back, and no pane dies with
+/// the process.
+#[test]
+fn a_panic_in_the_new_image_switches_back() {
+    let world = World::new();
+    world.populate(&[("VTMUX_TEST_RESUME_FAIL", "panic")]);
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let before = world.observe();
+
+    assert_eq!(world.upgrade(&bin()), None);
+
+    assert_eq!(world.pid(), pid);
+    let args = world.server_args();
+    assert!(args.contains("--vtmux-switched-back"), "{args}");
+    assert_eq!(world.pane_pids(), panes);
+    assert_eq!(world.observe(), before);
+    world.echo("a:w2.1", "caught");
+}
+
+/// The dry run rebuilds the server, not only decodes the snapshot: a
+/// rebuild that fails (the test hook, which fails it only in the dry
+/// run) refuses the upgrade while the old image is intact.
+#[test]
+fn the_dry_run_rebuilds_the_server() {
+    let world = World::new();
+    world.populate(&[("VTMUX_TEST_RESUME_FAIL", "check")]);
+    let pid = world.pid();
+    let before = world.observe();
+
+    let Some(ServerMsg::UpgradeResult { ok: false, message }) = world.upgrade(&bin()) else {
+        panic!("not refused");
+    };
+    assert!(message.contains("test hook"), "{message}");
+
+    assert_eq!(world.pid(), pid);
+    assert!(!world.server_args().contains("--vtmux-resume"));
+    assert_eq!(world.observe(), before);
+    world.echo("a:w1", "intact");
+}
+
+/// When no image can read the snapshot (a wrapper damages it after the
+/// dry run), the server that is left still accepts and answers commands,
+/// still ignores SIGHUP, keeps every pane process alive and exits on
+/// `kill-server`.
+#[test]
+fn a_server_left_without_a_snapshot_still_answers() {
+    use rustix::process::{Pid, Signal, kill_process, test_kill_process};
+    let world = World::new();
+    world.populate(&[]);
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let wrapper = world.home.path().join("damages");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --vtmux-resume ]; then printf damage >>/dev/fd/$2; fi\n\
+             exec '{BIN}' \"$@\"\n"
+        ),
+    )
+    .unwrap();
+    set_executable(&wrapper);
+
+    assert_eq!(world.upgrade(&wrapper), None);
+
+    let limit = Duration::from_secs(10);
+    let ls = world.run_within(&["ls"], limit).expect("ls answered");
+    assert!(ls.status.success(), "{ls:?}");
+    let log = world
+        .run_within(&["show-messages"], limit)
+        .expect("show-messages answered");
+    let log = String::from_utf8_lossy(&log.stdout);
+    assert!(log.contains("live upgrade failed: "), "{log}");
+    // Another upgrade would close the panes' terminals, which no snapshot
+    // names now: refused.
+    let Some(ServerMsg::UpgradeResult { ok: false, message }) = world.upgrade_at(&wrapper) else {
+        panic!("not refused");
+    };
+    assert!(message.contains("held from a failed upgrade"), "{message}");
+    let server = Pid::from_raw(pid.parse().unwrap()).unwrap();
+    kill_process(server, Signal::HUP).unwrap();
+    let ls = world
+        .run_within(&["ls"], limit)
+        .expect("ls answered after SIGHUP");
+    assert!(ls.status.success(), "{ls:?}");
+    for p in &panes {
+        let p = Pid::from_raw(p.parse().unwrap()).unwrap();
+        assert!(test_kill_process(p).is_ok(), "pane {p:?} gone");
+    }
+    let killed = world
+        .run_within(&["kill-server"], limit)
+        .expect("kill-server answered");
+    assert!(killed.status.success(), "{killed:?}");
+    wait("the server to exit", || test_kill_process(server).is_err());
+}
+
+/// The dry run of a server that never upgraded inherits the snapshot and
+/// nothing else: the listening socket and the pane PTYs are close-on-exec
+/// from the start, so every upgrade starts its children alike.
+#[test]
+fn the_dry_run_inherits_only_the_snapshot() {
+    let world = World::new();
+    world.populate(&[]);
+    let seen = world.home.path().join("fds");
+    let lister = world.home.path().join("lister");
+    std::fs::write(
+        &lister,
+        format!(
+            "#!/bin/sh\nfor n in 3 4 5 6 7 8 9; do\n\
+             [ \"$n\" = \"$2\" ] && continue\n\
+             if (: <&\"$n\") 2>/dev/null; then echo \"$n\"; fi\n\
+             done >'{}'\necho listed >&2\nexit 1\n",
+            seen.display()
+        ),
+    )
+    .unwrap();
+    set_executable(&lister);
+
+    assert_eq!(
+        world.upgrade(&lister),
+        Some(ServerMsg::UpgradeResult {
+            ok: false,
+            message: "listed".into(),
+        })
+    );
+    assert_eq!(std::fs::read_to_string(&seen).unwrap(), "");
 }
 
 fn set_executable(path: &Path) {

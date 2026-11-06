@@ -29,3 +29,108 @@ pub fn default_stop_on_tstp() {
         libc::signal(libc::SIGTSTP, libc::SIG_DFL);
     }
 }
+
+/// The signals the server catches (`server_signal`, server.c:438-470;
+/// proc.c `proc_set_signals`): the server's `Signals` set and what a live
+/// upgrade blocks across `execve`.
+pub const HANDLED: [libc::c_int; 8] = [
+    libc::SIGCHLD,
+    libc::SIGTERM,
+    libc::SIGINT,
+    libc::SIGHUP,
+    libc::SIGUSR1,
+    libc::SIGUSR2,
+    libc::SIGWINCH,
+    libc::SIGCONT,
+];
+
+/// A signal mask saved by [`block_handled`], for [`restore_mask`].
+#[derive(Clone, Copy)]
+pub struct Mask(libc::sigset_t);
+
+/// Block every signal of [`HANDLED`] in the calling thread; the mask
+/// before. A blocked signal stays pending, across `execve` too, until
+/// [`unblock_handled`] (or [`restore_mask`]) lets it in: a live upgrade
+/// blocks them for the window between `execve` and the new image's
+/// handlers, where most of them would kill the process by default.
+#[must_use]
+pub fn block_handled() -> Mask {
+    // SAFETY: sigset_t is a plain C struct, all-zero is a valid value, and
+    // sigemptyset/sigaddset/pthread_sigmask only read and write the sets.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        let mut old: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&raw mut set);
+        for sig in HANDLED {
+            libc::sigaddset(&raw mut set, sig);
+        }
+        libc::pthread_sigmask(libc::SIG_BLOCK, &raw const set, &raw mut old);
+        Mask(old)
+    }
+}
+
+/// Put back a mask [`block_handled`] returned.
+pub fn restore_mask(mask: Mask) {
+    // SAFETY: sets the calling thread's mask from a valid saved set.
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_SETMASK, &raw const mask.0, std::ptr::null_mut());
+    }
+}
+
+/// Unblock every signal of [`HANDLED`]: the new image of a live upgrade,
+/// once it has handlers for them, takes what arrived meanwhile.
+pub fn unblock_handled() {
+    // SAFETY: as in `block_handled`.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&raw mut set);
+        for sig in HANDLED {
+            libc::sigaddset(&raw mut set, sig);
+        }
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &raw const set, std::ptr::null_mut());
+    }
+}
+
+/// Whether `sig` is blocked in the calling thread.
+#[must_use]
+pub fn blocked(sig: libc::c_int) -> bool {
+    // SAFETY: reads the calling thread's mask into a local set.
+    unsafe {
+        let mut cur: libc::sigset_t = std::mem::zeroed();
+        libc::pthread_sigmask(libc::SIG_BLOCK, std::ptr::null(), &raw mut cur);
+        libc::sigismember(&raw const cur, sig) == 1
+    }
+}
+
+/// Ignore every signal of [`HANDLED`] but SIGTERM and SIGCHLD, and let
+/// them in: for a process that keeps a server's descriptors with no
+/// server to handle signals (the live upgrade's very last resort), so a
+/// stray SIGHUP does not end it and its panes; SIGTERM still does.
+pub fn ignore_handled_but_term() {
+    for sig in HANDLED {
+        if sig != libc::SIGTERM && sig != libc::SIGCHLD {
+            // SAFETY: SIG_IGN installs no handler code.
+            unsafe {
+                libc::signal(sig, libc::SIG_IGN);
+            }
+        }
+    }
+    unblock_handled();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocking_the_handled_signals_is_undone_by_the_saved_mask() {
+        assert!(!blocked(libc::SIGHUP));
+        let old = block_handled();
+        assert!(HANDLED.iter().all(|&s| blocked(s)));
+        restore_mask(old);
+        assert!(!blocked(libc::SIGHUP));
+        let _ = block_handled();
+        unblock_handled();
+        assert!(!HANDLED.iter().any(|&s| blocked(s)));
+    }
+}
