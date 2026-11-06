@@ -123,8 +123,8 @@ pub fn row_out(row: &vt::Row, link: impl Fn(usize) -> Option<String>) -> snap::R
             let uri = link(x).unwrap_or_default();
             let at = *known.entry(uri).or_insert_with_key(|uri| {
                 out.links.push(snap::Hyperlink {
-                    id: None,
-                    uri: uri.clone(),
+                    uri: uri.clone().into_bytes(),
+                    ..snap::Hyperlink::default()
                 });
                 out.links.len() - 1
             });
@@ -183,7 +183,9 @@ pub fn row_in(row: &snap::Row) -> (vt::Row, Vec<(usize, String)>) {
                 && let Some(l) = row.links.get(usize::from(c.link) - 1)
                 && !l.uri.is_empty()
             {
-                links.push((x, l.uri.clone()));
+                // Copy mode keeps a link's URI as text (`vt::Rows`), and
+                // wrote it so.
+                links.push((x, String::from_utf8_lossy(&l.uri).into_owned()));
             }
             vt::Cell {
                 text: text.into(),

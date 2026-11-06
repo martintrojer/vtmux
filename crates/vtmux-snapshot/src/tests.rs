@@ -328,6 +328,29 @@ fn a_stream_requiring_an_unknown_feature_is_refused() {
     assert_eq!(decode_for(&bytes, &same, |_| None).unwrap(), s);
 }
 
+/// Pages in Ghostty's own form (decision 23) travel inline in an upgrade
+/// stream: decoding fetches no chunk for them and `check` leaves their
+/// bytes to Ghostty, while their rows-form neighbours are still verified.
+#[test]
+fn ghostty_pages_decode_without_chunks_and_pass_check() {
+    let mut s = sample();
+    s.meta.requires = vec![ghostty_pages_feature("0123abcd")];
+    let term = s.panes[0].term.as_mut().unwrap();
+    term.primary
+        .history
+        .insert(0, HistoryPage::from_ghostty(vec![7; 300]));
+    let same = Features {
+        ghostty_patches: Some("0123abcd".into()),
+    };
+    let back = decode_for(&encode(&s), &same, |_| panic!("no chunk wanted")).unwrap();
+    assert_eq!(back, s);
+    back.check().unwrap();
+    let page = &back.panes[0].term.as_ref().unwrap().primary.history[0];
+    assert!(page.is_ghostty() && page.compressed && page.data.is_empty());
+    // Without the feature the stream is refused, never read without them.
+    assert!(matches!(decode(&encode(&s)), Err(Error::Unsupported(_))));
+}
+
 /// A window whose layout nests `depth` nodes deep.
 fn nested_layout(depth: usize) -> Snapshot {
     let mut cell = LayoutCell::Pane(Leaf::default());

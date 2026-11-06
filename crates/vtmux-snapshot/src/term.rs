@@ -3,10 +3,16 @@
 //! state Ghostty and `vtmux-vt`'s `PaneTerm` keep beside the grid.
 //!
 //! The record is typed but opaque to everything except the pane-state
-//! conversion (task `lu_pane_state`): the server only moves it between a
-//! pane and the snapshot. Deadlines are carried as the milliseconds left,
-//! past instants as the milliseconds since; both count from the moment the
-//! snapshot was taken.
+//! conversion (`vtmux_server::snapshot_term`): the server only moves it
+//! between a pane and the snapshot. Deadlines are carried as the
+//! milliseconds left, past instants as the milliseconds since; both count
+//! from the moment the snapshot was taken.
+//!
+//! Rows of a screen are numbered as the emulator numbers them: history
+//! first, oldest row 0, then the visible rows. A screen's history pages
+//! and visible rows are cut where the writer liked; [`Screen::pages`]
+//! records how the emulator split them into its own pages, a hint the
+//! reader follows when it adds up.
 
 use crate::row::{HistoryPage, Hyperlink, Osc133, Row, Style};
 use crate::wire::{oneof, record, value_enum};
@@ -19,6 +25,8 @@ value_enum! {
         2 => British,
         3 => DecSupplemental,
         4 => DecTechnical,
+        /// No 94-character set: UTF-8 as received (Ghostty's default).
+        5 => Utf8,
     }
 }
 
@@ -53,6 +61,10 @@ record! {
         6 => opt link: Option<Hyperlink>,
         /// The pen's OSC 133 content kind: 0 output, 1 input, 2 prompt.
         7 => one semantic: u32,
+        /// The emulator's cursor shape (Ghostty's `CursorStyle` number).
+        8 => one visual: u32,
+        /// The pen's content kind ends at the end of the line (OSC 133).
+        9 => one semantic_clear_eol: bool,
     }
 }
 
@@ -80,8 +92,36 @@ record! {
         3 => one cursor: Cursor,
         4 => opt saved_cursor: Option<SavedCursor>,
         5 => one charsets: Charsets,
-        /// The kitty keyboard flags stack, oldest first.
+        /// The kitty keyboard flags stack as the emulator keeps it: a ring
+        /// of eight entries, [`Screen::kitty_index`] the current one.
         6 => many kitty_keyboard: Vec<u32>,
+        7 => one kitty_index: u32,
+        /// DECSCA / SPA protection in force: 0 off, 1 ISO, 2 DEC.
+        8 => one protected_mode: u32,
+        /// OSC 133 click handling: kind and value (Ghostty's numbers).
+        9 => one semantic_click_kind: u32,
+        10 => one semantic_click_value: u32,
+        /// The next implicit OSC 8 hyperlink id.
+        11 => one hyperlink_counter: u32,
+        /// The emulator's pages, oldest first: how its rows (history, then
+        /// the visible ones) were split. Pages in the emulator's own form
+        /// ([`HistoryPage::ghostty`]) are not listed: they are pages of
+        /// their own.
+        12 => many pages: Vec<PageLayout>,
+    }
+}
+
+record! {
+    /// One of the emulator's pages of rows: how many, how wide, and the
+    /// allocation it had (hints; zero when unknown).
+    pub struct PageLayout {
+        1 => one rows: u32,
+        2 => one cols: u32,
+        3 => one capacity_rows: u32,
+        4 => one capacity_styles: u32,
+        5 => one capacity_hyperlink_bytes: u32,
+        6 => one capacity_grapheme_bytes: u32,
+        7 => one capacity_string_bytes: u32,
     }
 }
 
@@ -94,11 +134,15 @@ value_enum! {
 }
 
 record! {
-    /// One DEC private (`?n`) or ANSI mode that differs from its default.
+    /// One DEC private (`?n`) or ANSI mode.
     pub struct Mode {
         1 => one number: u32,
         2 => one ansi: bool,
         3 => one on: bool,
+        /// Its value saved by XTSAVE (`CSI ? n s`).
+        4 => one saved: bool,
+        /// Its value at reset, when the writer knew it.
+        5 => opt default: Option<bool>,
     }
 }
 
@@ -144,8 +188,8 @@ record! {
 }
 
 record! {
-    /// A row OSC 133 marked while the history was frozen for the alternate
-    /// screen: its index in [`AltEntry::history`].
+    /// A row OSC 133 marked: its number in the primary screen
+    /// ([`TermState::marks`]), or its index in [`AltEntry::history`].
     pub struct FrozenMark {
         1 => one row: u64,
         2 => one mark: Osc133Rec,
@@ -192,6 +236,14 @@ record! {
         5 => one clear_primary_history: bool,
         /// Rows `set_history_limit` collected meanwhile.
         6 => one collected: u64,
+        /// The primary row tmux's history started at when the alternate
+        /// screen came up, while the emulator still has it.
+        7 => opt entry_row: Option<u64>,
+        /// Whether [`AltEntry::saved`] and [`AltEntry::history`] were
+        /// taken (the alternate screen came up since the last return to
+        /// the primary one).
+        8 => one has_saved: bool,
+        9 => one has_history: bool,
     }
 }
 
@@ -202,6 +254,10 @@ record! {
         1 => many rows: Vec<Row>,
         /// Since the last `?2026h` (the 1 s timer re-arms on each).
         2 => one since_ms: u64,
+        /// The held screen's width, cursor and whether it was shown.
+        3 => one cols: u32,
+        4 => opt cursor: Option<(u32, u32)>,
+        5 => one cursor_visible: bool,
     }
 }
 
@@ -233,6 +289,61 @@ record! {
         6 => opt line_limit: Option<u64>,
         /// History rows read since the compressor last looked.
         7 => one reads: u64,
+        /// The history id [`HistoryState::times`] starts at.
+        8 => one times_base: u64,
+        /// When each history row from `times_base` on scrolled in
+        /// (`grid_line_time`), as runs.
+        9 => many times: Vec<TimeRun>,
+        /// The emulator's history byte budget.
+        10 => opt max_bytes: Option<u64>,
+    }
+}
+
+record! {
+    /// `count` history rows that scrolled in at `time`, epoch seconds.
+    pub struct TimeRun {
+        1 => one time: i64,
+        2 => one count: u64,
+    }
+}
+
+record! {
+    /// tmux's own charset state (`s->mode`'s ACS bits, input.c): G0 and G1
+    /// line drawing, SO in force, and what DECSC saved of them.
+    pub struct TmuxCharset {
+        1 => one g0_acs: bool,
+        2 => one g1_acs: bool,
+        3 => one shifted: bool,
+        4 => one saved_g0_acs: bool,
+        5 => one saved_g1_acs: bool,
+        6 => one saved_shifted: bool,
+    }
+}
+
+record! {
+    /// Emulator state tmux has no counterpart for, in Ghostty's numbers at
+    /// the writer's pin. A reader of another pin takes what it knows.
+    pub struct Emulator {
+        1 => one status_display: u32,
+        /// The last printed character, for REP.
+        2 => opt previous_char: Option<u32>,
+        3 => one cursor_is_default: bool,
+        4 => one cursor_default_style: u32,
+        5 => opt cursor_default_blink: Option<bool>,
+        6 => one shell_redraw: u32,
+        7 => one modify_other_keys_2: bool,
+        8 => one mouse_event: u32,
+        9 => one mouse_format: u32,
+        10 => opt mouse_shift_capture: Option<bool>,
+        11 => one mouse_shape: u32,
+        12 => one password_input: bool,
+        13 => one xt_checksum: u32,
+        /// The emulator's own palette overrides and OSC 10/11/12 colours
+        /// (tmux's are [`TermState::palette`] and the rest).
+        14 => many palette: Vec<PaletteEntry>,
+        15 => opt fg: Option<u32>,
+        16 => opt bg: Option<u32>,
+        17 => opt cursor_colour: Option<u32>,
     }
 }
 
@@ -244,7 +355,8 @@ record! {
         3 => one primary: Screen,
         4 => opt alternate: Option<Screen>,
         5 => one active: ActiveScreen,
-        /// Modes not at their default.
+        /// Every mode the writer's emulator knows; a reader keeps its own
+        /// value for one not listed.
         6 => many modes: Vec<Mode>,
         /// Columns with a tab stop.
         7 => many tab_stops: Vec<u32>,
@@ -285,6 +397,14 @@ record! {
         30 => one bells: u32,
         /// A full redraw is due (`PANE_REDRAW`).
         31 => one redraw: bool,
+        /// OSC 133 marks on the primary screen, in the order they were
+        /// made (rows carry no mark of their own here).
+        32 => many marks: Vec<FrozenMark>,
+        33 => one tmux_charset: TmuxCharset,
+        /// The `extended-keys` option the pane last had: 0 off, 1 on,
+        /// 2 always.
+        34 => one extended_keys: u32,
+        35 => one emulator: Emulator,
     }
 }
 
@@ -292,7 +412,7 @@ record! {
 pub(crate) mod tests {
     use super::*;
     use crate::row::tests::sample_row;
-    use crate::row::{Color, HistoryPage};
+    use crate::row::{Color, HistoryPage, Row};
     use crate::wire::{Ctx, Value};
 
     fn round_trip<T: Value + PartialEq + std::fmt::Debug>(v: &T) {
@@ -333,8 +453,10 @@ pub(crate) mod tests {
                 link: Some(Hyperlink {
                     id: None,
                     uri: "file:///x".into(),
+                    implicit: 0,
                 }),
                 semantic: 1,
+                ..Cursor::default()
             },
             saved_cursor: Some(SavedCursor {
                 x: 1,
@@ -347,6 +469,7 @@ pub(crate) mod tests {
             }),
             charsets: charsets(),
             kitty_keyboard: vec![1, 3],
+            ..Screen::default()
         }
     }
 
@@ -366,16 +489,19 @@ pub(crate) mod tests {
                     number: 1049,
                     ansi: false,
                     on: true,
+                    ..Mode::default()
                 },
                 Mode {
                     number: 4,
                     ansi: true,
                     on: true,
+                    ..Mode::default()
                 },
                 Mode {
                     number: 7,
                     ansi: false,
                     on: false,
+                    ..Mode::default()
                 },
             ],
             tab_stops: vec![0, 8, 16],
@@ -416,6 +542,7 @@ pub(crate) mod tests {
                 generation: 2,
                 line_limit: Some(0),
                 reads: 4,
+                ..HistoryState::default()
             },
             alt_entry: Some(AltEntry {
                 saved: vec![sample_row()],
@@ -427,10 +554,12 @@ pub(crate) mod tests {
                 ghostty_history: 1,
                 clear_primary_history: true,
                 collected: 2,
+                ..AltEntry::default()
             }),
             sync: Some(SyncHold {
                 rows: vec![sample_row()],
                 since_ms: 300,
+                ..SyncHold::default()
             }),
             replies: vec![
                 HeldReply::Bytes(b"\x1b[0n".to_vec()),
@@ -444,6 +573,9 @@ pub(crate) mod tests {
             scroll_on_clear: true,
             bells: 2,
             redraw: true,
+            // Fields added after the golden file stay out of it (lib.rs,
+            // *Changing the format*): `later_fields` covers them.
+            ..TermState::default()
         }
     }
 
@@ -467,6 +599,104 @@ pub(crate) mod tests {
         round_trip(&t.replies[0]);
         round_trip(&t.replies[1]);
         round_trip(&TermState::default());
+    }
+
+    /// Every field added after the golden file was written, set.
+    #[test]
+    fn later_fields() {
+        let mut t = sample_term();
+        t.primary.cursor.visual = 2;
+        t.primary.cursor.semantic_clear_eol = true;
+        t.primary.charsets.g1 = Charset::Utf8;
+        t.primary.kitty_keyboard = vec![1, 3, 0, 0, 0, 0, 0, 9];
+        t.primary.kitty_index = 7;
+        t.primary.protected_mode = 2;
+        t.primary.semantic_click_kind = 1;
+        t.primary.semantic_click_value = 3;
+        t.primary.hyperlink_counter = 12;
+        t.primary.pages = vec![PageLayout {
+            rows: 3,
+            cols: 20,
+            capacity_rows: 200,
+            capacity_styles: 16,
+            capacity_hyperlink_bytes: 64,
+            capacity_grapheme_bytes: 128,
+            capacity_string_bytes: 256,
+        }];
+        t.modes[0].saved = true;
+        t.modes[0].default = Some(false);
+        t.modes[1].default = Some(true);
+        t.history.times_base = 3;
+        t.history.times = vec![TimeRun {
+            time: 1_790_000_000,
+            count: 7,
+        }];
+        t.history.max_bytes = Some(1 << 20);
+        let alt = t.alt_entry.as_mut().unwrap();
+        alt.entry_row = Some(4);
+        alt.has_saved = true;
+        alt.has_history = true;
+        let sync = t.sync.as_mut().unwrap();
+        sync.cols = 20;
+        sync.cursor = Some((1, 2));
+        sync.cursor_visible = true;
+        t.marks = vec![FrozenMark {
+            row: 9,
+            mark: sample_row().mark.unwrap().into(),
+        }];
+        t.tmux_charset = TmuxCharset {
+            g0_acs: true,
+            g1_acs: true,
+            shifted: true,
+            saved_g0_acs: true,
+            saved_g1_acs: true,
+            saved_shifted: true,
+        };
+        t.extended_keys = 2;
+        t.emulator = Emulator {
+            status_display: 1,
+            previous_char: Some('x' as u32),
+            cursor_is_default: true,
+            cursor_default_style: 2,
+            cursor_default_blink: Some(true),
+            shell_redraw: 1,
+            modify_other_keys_2: true,
+            mouse_event: 3,
+            mouse_format: 2,
+            mouse_shift_capture: Some(false),
+            mouse_shape: 4,
+            password_input: true,
+            xt_checksum: 1,
+            palette: vec![PaletteEntry {
+                index: 200,
+                rgb: 0x0001_0203,
+            }],
+            fg: Some(1),
+            bg: Some(2),
+            cursor_colour: Some(3),
+        };
+        let link = Hyperlink {
+            id: Some(vec![0xfe, b'k']),
+            uri: b"http://\xff".to_vec(),
+            implicit: 0,
+        };
+        let mut row = sample_row();
+        row.links = vec![
+            link.clone(),
+            Hyperlink {
+                id: None,
+                uri: vec![0xc3],
+                implicit: 41,
+            },
+        ];
+        row.cells[0].link = 2;
+        t.primary.rows.push(row.clone());
+        t.primary.cursor.link = Some(link);
+        round_trip(&t);
+        round_trip(&t.primary.pages[0]);
+        round_trip(&t.emulator);
+        round_trip(&t.tmux_charset);
+        assert_eq!(Row::decode(&row.encode()).unwrap(), row);
     }
 
     #[test]

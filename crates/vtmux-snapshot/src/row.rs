@@ -158,12 +158,16 @@ pub struct Grapheme {
     pub rest: String,
 }
 
-/// An OSC 8 hyperlink.
+/// An OSC 8 hyperlink. URI and id are bytes: a terminal keeps what the
+/// program sent, UTF-8 or not.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Hyperlink {
     /// The `id=` parameter, if the program gave one.
-    pub id: Option<String>,
-    pub uri: String,
+    pub id: Option<Vec<u8>>,
+    pub uri: Vec<u8>,
+    /// Without an `id=`: the emulator's own id for the OSC 8 that opened
+    /// the link, which keeps two links to one URI apart.
+    pub implicit: u32,
 }
 
 /// Ghostty's row prompt state from OSC 133.
@@ -398,8 +402,12 @@ fn get_attrs(r: &mut Reader<'_>, links: usize) -> Result<Attrs, Error> {
 }
 
 fn put_string(out: &mut Vec<u8>, s: &str) {
-    put_varint(out, s.len() as u64);
-    out.extend_from_slice(s.as_bytes());
+    put_bytes(out, s.as_bytes());
+}
+
+fn put_bytes(out: &mut Vec<u8>, b: &[u8]) {
+    put_varint(out, b.len() as u64);
+    out.extend_from_slice(b);
 }
 
 fn get_string(r: &mut Reader<'_>) -> Result<String, Error> {
@@ -451,13 +459,17 @@ impl Row {
             put_varint(out, self.links.len() as u64);
             for l in &self.links {
                 match &l.id {
-                    None => out.push(0),
+                    None if l.implicit == 0 => out.push(0),
+                    None => {
+                        out.push(2);
+                        put_varint(out, u64::from(l.implicit));
+                    }
                     Some(id) => {
                         out.push(1);
-                        put_string(out, id);
+                        put_bytes(out, id);
                     }
                 }
-                put_string(out, &l.uri);
+                put_bytes(out, &l.uri);
             }
         }
         if !self.graphemes.is_empty() {
@@ -565,13 +577,14 @@ impl Row {
                 return Err(Error::Malformed("more links than cells"));
             }
             for _ in 0..n {
-                let id = match r.byte()? {
-                    0 => None,
-                    1 => Some(get_string(r)?),
+                let (id, implicit) = match r.byte()? {
+                    0 => (None, 0),
+                    1 => (Some(r.chunk()?.to_vec()), 0),
+                    2 => (None, r.u32()?),
                     _ => return Err(Error::Malformed("bad hyperlink")),
                 };
-                let uri = get_string(r)?;
-                self.links.push(Hyperlink { id, uri });
+                let uri = r.chunk()?.to_vec();
+                self.links.push(Hyperlink { id, uri, implicit });
             }
         }
         self.graphemes.clear();
@@ -665,7 +678,7 @@ impl Row {
         let strings: usize = self
             .links
             .iter()
-            .map(|l| 21 + l.uri.len() + l.id.as_ref().map_or(0, String::len))
+            .map(|l| 21 + l.uri.len() + l.id.as_ref().map_or(0, Vec::len))
             .chain(self.graphemes.iter().map(|g| 13 + g.rest.len()))
             .sum();
         (64 + 40 * self.cells.len() + strings) as u64
@@ -711,6 +724,7 @@ impl Value for Hyperlink {
     fn put(&self, out: &mut Vec<u8>) {
         crate::wire::opt::put(out, 1, &self.id);
         crate::wire::one::put(out, 2, &self.uri);
+        crate::wire::one::put(out, 3, &self.implicit);
     }
     fn get(buf: &[u8], cx: &Ctx) -> Result<Self, Error> {
         let mut h = Self::default();
@@ -719,6 +733,7 @@ impl Value for Hyperlink {
             match tag {
                 1 => crate::wire::opt::get(&mut h.id, body, cx)?,
                 2 => crate::wire::one::get(&mut h.uri, body, cx)?,
+                3 => crate::wire::one::get(&mut h.implicit, body, cx)?,
                 _ => {}
             }
         }
@@ -756,6 +771,12 @@ pub struct HistoryPage {
     pub compressed: bool,
     /// The LZ4 block.
     pub data: Vec<u8>,
+    /// The page in Ghostty's own compressed form instead of rows (decision
+    /// 23): only a binary of the same Ghostty patch stack reads it, so a
+    /// stream with one requires [`crate::ghostty_pages_feature`]. Upgrade
+    /// streams only, never a checkpoint. `rows`, `raw_len`, `hash` and
+    /// `data` are then unset.
+    pub ghostty: Vec<u8>,
 }
 
 /// Builds a [`HistoryPage`] one row at a time, so a pane's history never
@@ -817,6 +838,7 @@ impl PageBuilder {
             hash: *blake3::hash(&self.raw).as_bytes(),
             compressed,
             data,
+            ghostty: Vec::new(),
         }
     }
 }
@@ -927,9 +949,9 @@ impl Value for HistoryPage {
                 3 => one::get(&mut p.hash, body, cx)?,
                 4 => one::get(&mut p.compressed, body, cx)?,
                 5 => one::get(&mut p.data, body, cx)?,
-                // 6: reserved for the page in Ghostty's compressed form
-                // (decision 23), written only behind the `requires` entry
-                // `crate::ghostty_pages_feature`.
+                // Written only behind the `requires` entry
+                // `crate::ghostty_pages_feature` (decision 23).
+                6 => one::get(&mut p.ghostty, body, cx)?,
                 _ => {}
             }
         }
@@ -949,6 +971,23 @@ impl HistoryPage {
         if inline {
             one::put(out, 5, &self.data);
         }
+        one::put(out, 6, &self.ghostty);
+    }
+
+    /// A page in Ghostty's own compressed form ([`HistoryPage::ghostty`]).
+    #[must_use]
+    pub fn from_ghostty(bytes: Vec<u8>) -> Self {
+        Self {
+            compressed: true,
+            ghostty: bytes,
+            ..Self::default()
+        }
+    }
+
+    /// Whether the page is in Ghostty's own form rather than rows.
+    #[must_use]
+    pub fn is_ghostty(&self) -> bool {
+        !self.ghostty.is_empty()
     }
 }
 
@@ -1012,6 +1051,7 @@ pub(crate) mod tests {
             links: vec![Hyperlink {
                 id: Some("x1".into()),
                 uri: "https://example.com/".into(),
+                implicit: 0,
             }],
             wrapped: true,
             continuation: true,
@@ -1199,7 +1239,8 @@ pub(crate) mod tests {
         let long = Row {
             links: vec![Hyperlink {
                 id: None,
-                uri: "x".repeat(1 << 20),
+                uri: "x".repeat(1 << 20).into(),
+                implicit: 0,
             }],
             ..sample_row()
         };

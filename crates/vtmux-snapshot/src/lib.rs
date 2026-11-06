@@ -97,10 +97,11 @@ pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 pub const KNOWN_FEATURES: &[&str] = &[];
 
 /// The [`Meta::requires`] name of history pages in Ghostty's own
-/// compressed form, which only a binary with the same Ghostty patch stack
-/// (`patches`, its hash) can read (decision 23). No page is written that
-/// way yet: the name holds the place, so that a reader that can't take
-/// them refuses the stream rather than lose the history they hold.
+/// compressed form ([`HistoryPage::ghostty`]), which only a binary with
+/// the same Ghostty patch stack (`patches`, its hash) can read (decision
+/// 23). A writer lists it whenever it writes such a page, so that a reader
+/// that can't take them refuses the stream rather than lose the history
+/// they hold.
 #[must_use]
 pub fn ghostty_pages_feature(patches: &str) -> String {
     format!("ghostty-pages-{patches}")
@@ -286,6 +287,8 @@ pub fn encode(s: &Snapshot) -> Vec<u8> {
 
 /// A checkpoint manifest: history pages by name only. The caller stores
 /// each page of [`Snapshot::pages`] as `chunks/<hex(hash)>` (its `data`).
+/// A checkpoint holds rows only: pages in Ghostty's form are for upgrade
+/// streams (decision 23), and a writer exports rows for a checkpoint.
 #[must_use]
 pub fn encode_manifest(s: &Snapshot) -> Vec<u8> {
     let mut by_ref = s.clone();
@@ -381,7 +384,7 @@ pub fn decode_for(
     let mut s = <Snapshot as wire::Value>::get(body, &cx)?;
     let mut missing = None;
     s.pages_mut(&mut |p| {
-        if missing.is_some() || !p.data.is_empty() {
+        if missing.is_some() || !p.data.is_empty() || p.is_ghostty() {
             return;
         }
         p.data = chunk(&p.hash).unwrap_or_default();
@@ -427,7 +430,8 @@ pub fn page_refs(bytes: &[u8]) -> Result<Vec<Hash>, Error> {
 
 impl Snapshot {
     /// Every history page, wherever it is: pane screens, the history frozen
-    /// for an alternate screen, copy and view modes, popups.
+    /// for an alternate screen, copy and view modes, popups. Pages in
+    /// Ghostty's form ([`HistoryPage::is_ghostty`]) have no chunk.
     #[must_use]
     pub fn pages(&self) -> Vec<&HistoryPage> {
         fn term<'a>(t: &'a TermState, out: &mut Vec<&'a HistoryPage>) {
@@ -489,7 +493,9 @@ impl Snapshot {
     /// limits and matches its name, and the records refer to each other
     /// consistently.
     pub fn check(&self) -> Result<(), Error> {
-        for p in self.pages() {
+        // A page in Ghostty's form is covered by the stream's hash; only
+        // Ghostty can read further into it.
+        for p in self.pages().into_iter().filter(|p| !p.is_ghostty()) {
             p.each_row_verified(|_| {})?;
         }
         let bad = |what: String| Err(Error::Inconsistent(what));
