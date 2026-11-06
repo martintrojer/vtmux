@@ -19,6 +19,21 @@
 //!   preflight refuses while any is pending (decisions 10 and 26).
 //! - Caches and timers the loop rebuilds: compositor state, frames not yet
 //!   acknowledged, `#()` job output, pane queries waiting on a terminal.
+//! - Not yet carried: the auto-hide scrollbar's state (it shows again on
+//!   the next scroll), and bytes still queued for a client socket the
+//!   quiesce couldn't flush (the upgrade's quiesce must flush them or
+//!   carry them, phase 2).
+//!
+//! Carried runtime state that is easy to miss: each pane's size changes
+//! the program hasn't been told yet (`wp->resize_queue`), output a
+//! `pipe-pane` command hasn't taken yet, each client's
+//! `terminal-features`/`terminal-overrides` as its terminal opened with
+//! them, the status-line message and its timer, `lock-after-time`'s and
+//! `automatic-rename`'s timers, and config errors waiting for a client.
+//!
+//! [`Server::from_snapshot`] refuses (an error, never a panic) a snapshot
+//! that fails [`snap::Snapshot::check`] or the server's own checks
+//! (`validate`: id counters, active panes, sizes, winlink trees).
 
 pub(crate) mod rows;
 #[cfg(test)]
@@ -416,14 +431,15 @@ fn status_in(s: &snap::ExitStatus) -> crate::jobs::JobStatus {
 /// checkpoint, which has none) a fresh terminal the pane's size, with its
 /// history limit, title and an empty pane's modes, made as `spawn_pane`
 /// makes one.
-pub(crate) fn restore_term(server: &Server, p: &snap::Pane) -> PaneTerm {
+pub(crate) fn restore_term(server: &Server, p: &snap::Pane) -> io::Result<PaneTerm> {
     let cols = u16::try_from(p.geometry.sx).unwrap_or(u16::MAX).max(1);
     let rows = u16::try_from(p.geometry.sy).unwrap_or(u16::MAX).max(1);
-    let mut term = PaneTerm::new(
+    let mut term = PaneTerm::try_new(
         cols,
         rows,
         usize::try_from(p.history_limit).unwrap_or(usize::MAX),
-    );
+    )
+    .ok_or_else(|| invalid(format!("%{}: no terminal of {cols}x{rows}", p.id)))?;
     term.set_colour_names(vtmux_core::colour::x11_rgb);
     term.set_extended_keys(server.model.extended_keys());
     term.reset_key_mode();
@@ -432,18 +448,100 @@ pub(crate) fn restore_term(server: &Server, p: &snap::Pane) -> PaneTerm {
     }
     term.set_title(&p.title);
     term.take_title_events();
-    term
+    Ok(term)
 }
 
 /// A popup's terminal: the hook `lu_pane_state` plugs into, as
 /// [`restore_term`]; until then a fresh terminal of the job's size with no
 /// history, as `popup_display` makes one.
-fn restore_popup_term(server: &Server, popup: &crate::popup::Popup, _p: &snap::Popup) -> PaneTerm {
+fn restore_popup_term(
+    server: &Server,
+    popup: &crate::popup::Popup,
+    _p: &snap::Popup,
+) -> io::Result<PaneTerm> {
     let (jx, jy) = popup.inner();
-    let mut term = PaneTerm::new(jx.max(1), jy.max(1), 0);
+    let mut term = PaneTerm::try_new(jx.max(1), jy.max(1), 0)
+        .ok_or_else(|| invalid(format!("no popup terminal of {jx}x{jy}")))?;
     term.set_extended_keys(server.model.extended_keys());
     term.reset_key_mode();
-    term
+    Ok(term)
+}
+
+fn invalid(what: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, what)
+}
+
+/// tmux's `WINDOW_MAXIMUM` (tmux.h): no window, pane or popup is larger.
+const SIZE_MAX: u32 = 10_000;
+
+/// What [`snap::Snapshot::check`] leaves to the server: the id counters
+/// are past every id in use (or ids would be handed out twice and a new
+/// window or pane would replace an old one), every session has a window
+/// and a unique name and index per window, every window has an active
+/// pane, sizes are within `WINDOW_MAXIMUM`, every session's winlink tree
+/// is a red-black tree of its window indexes, and client ids are unique.
+fn validate(s: &snap::Snapshot) -> io::Result<()> {
+    s.check().map_err(|e| invalid(e.to_string()))?;
+    let past = |what: &str, next: u32, ids: &mut dyn Iterator<Item = u32>| match ids.max() {
+        Some(max) if next <= max => Err(invalid(format!("next {what} id {next} not past {max}"))),
+        _ => Ok(()),
+    };
+    let sv = &s.server;
+    past(
+        "session",
+        sv.next_session,
+        &mut s.sessions.iter().map(|x| x.id),
+    )?;
+    past(
+        "window",
+        sv.next_window,
+        &mut s.windows.iter().map(|x| x.id),
+    )?;
+    past("pane", sv.next_pane, &mut s.panes.iter().map(|x| x.id))?;
+    past(
+        "client",
+        sv.next_client,
+        &mut s.clients.iter().map(|x| x.id),
+    )?;
+    let mut names = BTreeSet::new();
+    for x in &s.sessions {
+        if !names.insert(x.name.as_str()) {
+            return Err(invalid(format!("duplicate session name {}", x.name)));
+        }
+        let indexes: BTreeSet<u32> = x.windows.iter().map(|l| l.index).collect();
+        if x.windows.is_empty() || indexes.len() != x.windows.len() {
+            return Err(invalid(format!("${}: no or duplicate winlinks", x.id)));
+        }
+        let shape: Vec<(u32, bool)> = x.link_tree.iter().map(|n| (n.key, n.red)).collect();
+        if !shape.is_empty()
+            && crate::model::rb::Tree::from_shape(&shape)
+                .is_none_or(|t| t.keys().into_iter().ne(indexes.iter().copied()))
+        {
+            return Err(invalid(format!("${}: winlink tree", x.id)));
+        }
+    }
+    for w in &s.windows {
+        if w.active.is_none() {
+            return Err(invalid(format!("@{} has no active pane", w.id)));
+        }
+    }
+    for p in &s.panes {
+        if p.geometry.sx > SIZE_MAX || p.geometry.sy > SIZE_MAX {
+            return Err(invalid(format!("%{} too large", p.id)));
+        }
+    }
+    let mut clients = BTreeSet::new();
+    for c in &s.clients {
+        if !clients.insert(c.id) {
+            return Err(invalid(format!("duplicate client {}", c.id)));
+        }
+        if let Some(p) = &c.popup
+            && (p.sx > SIZE_MAX || p.sy > SIZE_MAX)
+        {
+            return Err(invalid(format!("client {} popup too large", c.id)));
+        }
+    }
+    Ok(())
 }
 
 fn mode_out(m: &crate::mode::Mode, now: Instant) -> Option<snap::PaneMode> {
@@ -876,14 +974,14 @@ impl Server {
                     .filter(|s| self.model.sessions.contains_key(s)),
             );
         }
-        let rest: Vec<SessionId> = self
-            .model
-            .sessions
-            .keys()
-            .filter(|s| !order.contains(s))
-            .copied()
-            .collect();
-        order.extend(rest);
+        let grouped: BTreeSet<SessionId> = order.iter().copied().collect();
+        order.extend(
+            self.model
+                .sessions
+                .keys()
+                .filter(|s| !grouped.contains(s))
+                .copied(),
+        );
         let sessions = order
             .iter()
             .map(|id| {
@@ -917,6 +1015,7 @@ impl Server {
                         .into_iter()
                         .map(|(key, red)| snap::RbNode { key, red })
                         .collect(),
+                    lock_in_ms: self.lock_timers.get(&s.id).map(|&t| until(now, t)),
                 }
             })
             .collect();
@@ -1005,7 +1104,8 @@ impl Server {
                         pid: pipe.pid,
                         command: String::new(),
                         input: pipe.input(),
-                        output: false,
+                        output: pipe.output(),
+                        pending: pipe.pending().to_vec(),
                     }),
                     term: None,
                     over_zoom: p.over_zoom,
@@ -1015,6 +1115,8 @@ impl Server {
                     title: p.term.title(),
                     output_ago_ms: p.output_at.map(|t| since(now, t)),
                     resize_in_ms: p.resize_timer.map(|t| until(now, t)),
+                    resizes: p.resizes.clone(),
+                    rename_ago_ms: p.last_rename.map(|t| since(now, t)),
                 }
             })
             .collect();
@@ -1120,6 +1222,18 @@ impl Server {
             tmux_invocation: hello.invocation == vtmux_core::socket::Invocation::Tmux,
             left_session: c.left_session.map(|s| s.0),
             has_tty: tty.is_some(),
+            open_features: c.term_options.0.clone(),
+            open_overrides: c.term_options.1.clone(),
+            status_message: {
+                let m = c.status.message_parts();
+                (m != crate::render::status::MessageParts::default()).then(|| snap::StatusMessage {
+                    text: m.text,
+                    ignore_styles: m.ignore_styles,
+                    ignore_keys: m.ignore_keys,
+                    frozen: m.frozen,
+                    timer_in_ms: m.timer.map(|t| until(now, t)),
+                })
+            },
         }
     }
 
@@ -1131,7 +1245,9 @@ impl Server {
     /// loaded it.
     ///
     /// # Errors
-    /// The poll or a descriptor can't be set up.
+    /// The snapshot is inconsistent (`InvalidData`: it fails
+    /// [`snap::Snapshot::check`] or `validate`), or the poll or a
+    /// descriptor can't be set up.
     #[expect(clippy::too_many_lines, reason = "one record after another")]
     pub fn from_snapshot(
         listener: StdListener,
@@ -1139,6 +1255,7 @@ impl Server {
         snapshot: &snap::Snapshot,
         fds: &mut Adopt<'_>,
     ) -> io::Result<Self> {
+        validate(snapshot)?;
         let now = Instant::now();
         let s = &snapshot.server;
         let mut server = Self::new(listener, PathBuf::from(&s.socket_path), config)?;
@@ -1178,13 +1295,39 @@ impl Server {
                 .iter()
                 .map(|x| (TreeId::Pane(PaneId(x.id)), options_in(&x.options))),
         );
-        let monitors: Vec<_> = s
+        // Each monitor with what it watches parsed; one that doesn't
+        // parse is dropped with its last values and timer.
+        let parsed: Vec<_> = s
             .monitors
             .iter()
             .filter_map(|m| {
                 let text = format!("x:{}:{}", m.what, m.format);
                 let (_, what, _) = vtmux_core::options::monitor::parse_monitor(&text)?;
-                Some((
+                Some((m, what))
+            })
+            .collect();
+        server.hook_monitors = crate::control_subs::HookMonitors::from_parts(
+            parsed
+                .iter()
+                .filter_map(|&(m, what)| {
+                    let due = after(now, m.due_in_ms?);
+                    Some((
+                        m.serial,
+                        crate::control_subs::SubParts {
+                            what,
+                            format: m.format.clone(),
+                            last: m.last.clone(),
+                            each: each_in(&m.each),
+                        },
+                        due,
+                    ))
+                })
+                .collect(),
+        );
+        let monitors: Vec<_> = parsed
+            .into_iter()
+            .map(|(m, what)| {
+                (
                     scope_in(&m.scope),
                     m.name.clone(),
                     vtmux_core::options::monitor::Monitor {
@@ -1195,28 +1338,9 @@ impl Server {
                         serial: m.serial,
                         fires: (m.fire_count, m.fire_time),
                     },
-                ))
+                )
             })
             .collect();
-        server.hook_monitors = crate::control_subs::HookMonitors::from_parts(
-            s.monitors
-                .iter()
-                .zip(&monitors)
-                .filter_map(|(m, (_, _, parsed))| {
-                    let due = after(now, m.due_in_ms?);
-                    Some((
-                        m.serial,
-                        crate::control_subs::SubParts {
-                            what: parsed.what,
-                            format: m.format.clone(),
-                            last: m.last.clone(),
-                            each: each_in(&m.each),
-                        },
-                        due,
-                    ))
-                })
-                .collect(),
-        );
         server.model.options = OptionsStore::import(StoreParts {
             trees,
             pane_window: snapshot
@@ -1336,12 +1460,14 @@ impl Server {
                     .map(|l| (l.index, u8::try_from(l.alerts).unwrap_or(0)))
                     .collect(),
                 link_seq: x.windows.iter().map(|l| (l.index, l.seq)).collect(),
+                // Checked by `validate`.
                 link_tree: crate::model::rb::Tree::from_shape(
                     &x.link_tree
                         .iter()
                         .map(|n| (n.key, n.red))
                         .collect::<Vec<_>>(),
-                ),
+                )
+                .unwrap_or_default(),
                 last_attached: x.last_attached,
             };
             server.model.by_name.insert(session.name.clone(), id);
@@ -1419,9 +1545,15 @@ impl Server {
         vtmux_core::cmd::set_command_aliases(server.array_option(TreeId::Server, "command-alias"));
         server.update_width_cache();
         server.refresh_client_targets();
+        // `lock-after-time` goes on from where it was.
         let attached: BTreeSet<SessionId> = server.attached_sessions();
-        for s in attached {
-            server.arm_lock_timer(s);
+        for x in &snapshot.sessions {
+            let id = SessionId(x.id);
+            if let Some(ms) = x.lock_in_ms
+                && attached.contains(&id)
+            {
+                server.lock_timers.insert(id, after(now, ms));
+            }
         }
         server.status_timer_start_all();
         Ok(server)
@@ -1438,14 +1570,16 @@ impl Server {
             None => None,
         };
         let pipe = match (&x.pipe, fds(&snap::Role::PipePane(x.id))) {
-            (Some(p), Some(fd)) => Some(self.pipe_adopt(id, fd, p.pid, p.input, Vec::new())?),
+            (Some(p), Some(fd)) => {
+                Some(self.pipe_adopt(id, fd, p.pid, (p.input, p.output), p.pending.clone())?)
+            }
             _ => None,
         };
         let (sx, sy) = (x.geometry.sx as usize, x.geometry.sy as usize);
         Ok(Pane {
             id,
             window: WindowId(x.window),
-            term: restore_term(self, x),
+            term: restore_term(self, x)?,
             io,
             pid: x.pid,
             tty: x.tty.clone(),
@@ -1460,13 +1594,13 @@ impl Server {
             changed: x.changed,
             unseen_changes: x.unseen_changes,
             output_at: x.output_ago_ms.map(|m| before(now, m)),
-            last_rename: None,
+            last_rename: x.rename_ago_ms.map(|m| before(now, m)),
             rect: geometry_in(&x.geometry),
             history_limit: usize::try_from(x.history_limit).unwrap_or(usize::MAX),
             input_off: x.input_off,
             focused: x.focused,
             active_point: x.active_point,
-            resizes: Vec::new(),
+            resizes: x.resizes.clone(),
             resize_timer: x.resize_in_ms.map(|m| after(now, m)),
             modes: x
                 .modes
@@ -1575,10 +1709,12 @@ impl Server {
             .as_ref()
             .map(|cs| control_in(cs, &mut self.control_streams, now));
         // An attached terminal client's terminal is opened again as at
-        // attach (`tty_open`), then told what it replied.
+        // attach (`tty_open`), with the `terminal-features` and
+        // `terminal-overrides` it was opened with (tty-term.c:457, 619
+        // read them only then), then told what it replied.
         if c.attached.is_some() && c.control.is_none() {
-            let features = self.array_option(TreeId::Server, "terminal-features");
-            let overrides = self.array_option(TreeId::Server, "terminal-overrides");
+            let features = x.open_features.clone();
+            let overrides = x.open_overrides.clone();
             if let Some((mut term, caps)) =
                 crate::render::Caps::open_term(&hello, &features, &overrides)
             {
@@ -1594,8 +1730,19 @@ impl Server {
                 c.decoder.set_terminal(&term);
                 c.caps = Some(caps);
                 c.term = Some(Rc::new(term));
+                c.term_options = (features, overrides);
                 c.update_theme();
             }
+        }
+        if let Some(m) = &x.status_message {
+            c.status
+                .restore_message(crate::render::status::MessageParts {
+                    text: m.text.clone(),
+                    ignore_styles: m.ignore_styles,
+                    ignore_keys: m.ignore_keys,
+                    frozen: m.frozen,
+                    timer: m.timer_in_ms.map(|ms| after(now, ms)),
+                });
         }
         c.hello = Some(hello);
         if let Some(p) = &x.popup {
@@ -1611,7 +1758,7 @@ impl Server {
                 None => None,
             };
             let mut popup = crate::popup::Popup::import(p, io, PaneTerm::new(1, 1, 0));
-            popup.term = restore_popup_term(self, &popup, p);
+            popup.term = restore_popup_term(self, &popup, p)?;
             c.popup = Some(popup);
         }
         Ok(c)

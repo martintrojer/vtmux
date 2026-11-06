@@ -147,6 +147,10 @@ pub(crate) struct Client {
     /// The client's terminal once attached (`tty_open`): its features and
     /// capabilities after `terminal-features` and `terminal-overrides`.
     pub(crate) term: Option<std::rc::Rc<vtmux_core::term_features::Term>>,
+    /// `terminal-features` and `terminal-overrides` as `term` was opened
+    /// with: a snapshot opens it again from these, not from the options
+    /// now (D27).
+    pub(crate) term_options: (Vec<String>, Vec<String>),
     /// The hello's environment (`c->environ`), shared with every
     /// [`ClientView`] of the client instead of copied into each.
     environ: std::rc::Rc<[(String, String)]>,
@@ -239,6 +243,7 @@ impl Client {
             decoder: crate::input::Decoder::default(),
             caps: None,
             term: None,
+            term_options: (Vec::new(), Vec::new()),
             environ: std::rc::Rc::from([]),
             compositor: crate::render::Compositor::default(),
             window_cache: crate::render::WindowCache::default(),
@@ -1849,6 +1854,7 @@ impl Server {
             })?;
         client.decoder.set_terminal(&term);
         client.caps = Some(caps);
+        client.term_options = (features, overrides);
         // server-client.c:356: server_client_update_theme_colours.
         client.update_theme();
         // tty_apply_features (tty-features.c:562-563): the utf8 feature

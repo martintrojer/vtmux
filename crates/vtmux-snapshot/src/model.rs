@@ -315,6 +315,8 @@ record! {
         12 => many options: Vec<OptionEntry>,
         13 => opt group: Option<String>,
         14 => many link_tree: Vec<RbNode>,
+        /// When `lock-after-time` locks it (`s->lock_timer`), if armed.
+        15 => opt lock_in_ms: Option<u64>,
     }
 }
 
@@ -430,11 +432,17 @@ record! {
 record! {
     pub struct PipePane {
         1 => one pid: i32,
+        /// Unused: tmux keeps no command text (`#{pane_pipe}` is 0 or 1,
+        /// format.c:2589), nor does vtmux.
         2 => one command: String,
         /// `-I`: the command's output goes to the pane.
         3 => one input: bool,
-        /// `-O`: the pane's output goes to the command.
+        /// `-O`: the command's stdin is the pane's output (else
+        /// `/dev/null`).
         4 => one output: bool,
+        /// Pane output the command has not taken yet
+        /// (`wp->pipe_event`'s output buffer).
+        5 => one pending: Vec<u8>,
     }
 }
 
@@ -563,7 +571,9 @@ record! {
         5 => many argv: Vec<String>,
         6 => one shell: String,
         7 => one cwd: String,
-        /// The environment the process started with.
+        /// Unused: tmux keeps no environment per pane (`struct
+        /// window_pane` has none; the spawn environment is built and
+        /// freed in spawn.c), nor does vtmux.
         8 => many environment: Vec<EnvVar>,
         /// Made without a process (`split-window ''`).
         9 => one empty: bool,
@@ -593,6 +603,11 @@ record! {
         29 => one title: String,
         30 => opt output_ago_ms: Option<u64>,
         31 => opt resize_in_ms: Option<u64>,
+        /// Size changes not yet told to the program (`wp->resize_queue`),
+        /// each `(from, to)`.
+        32 => many resizes: Vec<((u32, u32), (u32, u32))>,
+        /// How long ago `automatic-rename` last renamed its window from it.
+        33 => opt rename_ago_ms: Option<u64>,
     }
 }
 
@@ -769,6 +784,28 @@ record! {
         /// The client has a terminal (`tty` may still be empty: a
         /// terminal without a name).
         40 => one has_tty: bool,
+        /// `terminal-features` and `terminal-overrides` as they were when
+        /// the terminal opened (`tty_term_create` reads them only then,
+        /// tty-term.c:457, 619).
+        41 => many open_features: Vec<String>,
+        42 => many open_overrides: Vec<String>,
+        /// The status-line message on its screen and its timer.
+        43 => opt status_message: Option<StatusMessage>,
+    }
+}
+
+record! {
+    /// A client's status-line message (`c->message_string`) and timer
+    /// (`c->message_timer`, which outlives a cleared message).
+    pub struct StatusMessage {
+        1 => opt text: Option<String>,
+        /// `#[...]` in the text is literal.
+        2 => one ignore_styles: bool,
+        /// `c->message_ignore_keys`.
+        3 => one ignore_keys: bool,
+        /// `TTY_FREEZE`: the pane area is held under it (not `-C`).
+        4 => one frozen: bool,
+        5 => opt timer_in_ms: Option<u64>,
     }
 }
 
@@ -1030,6 +1067,7 @@ pub(crate) mod tests {
             options: sample_options(),
             group: Some("g".into()),
             link_tree: vec![RbNode { key: 0, red: false }, RbNode { key: 4, red: true }],
+            lock_in_ms: Some(1500),
         }
     }
 
@@ -1219,6 +1257,7 @@ pub(crate) mod tests {
                 command: "cat >/tmp/log".into(),
                 input: true,
                 output: true,
+                pending: b"not yet taken".to_vec(),
             }),
             term: Some(sample_term()),
             over_zoom: true,
@@ -1228,6 +1267,8 @@ pub(crate) mod tests {
             title: "t".into(),
             output_ago_ms: Some(30),
             resize_in_ms: Some(250),
+            resizes: vec![((80, 24), (40, 24)), ((40, 24), (39, 24))],
+            rename_ago_ms: Some(120),
         }
     }
 
@@ -1372,6 +1413,15 @@ pub(crate) mod tests {
             tmux_invocation: true,
             left_session: Some(2),
             has_tty: true,
+            open_features: vec!["xterm*:sixel".into()],
+            open_overrides: vec!["xterm*:Tc".into()],
+            status_message: Some(StatusMessage {
+                text: Some("hello".into()),
+                ignore_styles: true,
+                ignore_keys: false,
+                frozen: true,
+                timer_in_ms: Some(900),
+            }),
         }
     }
 

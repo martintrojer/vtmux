@@ -2254,37 +2254,75 @@ pub mod rb {
             out
         }
 
-        /// A tree of the shape [`Self::shape`] gave.
+        /// A tree of the shape [`Self::shape`] gave, or `None` if `shape`
+        /// is not a red-black tree's preorder: every node used, keys in
+        /// strictly ascending order, a black root, no red node under a red
+        /// one, as many black nodes on every path. Built without recursion
+        /// (a snapshot is untrusted input).
         #[must_use]
-        pub fn from_shape(shape: &[(u32, bool)]) -> Self {
-            fn build(
-                t: &mut Tree,
-                shape: &[(u32, bool)],
-                at: &mut usize,
-                parent: Option<usize>,
-                below: Option<u32>,
-            ) -> Option<usize> {
-                let &(key, red) = shape.get(*at)?;
+        pub fn from_shape(shape: &[(u32, bool)]) -> Option<Self> {
+            // Slots still open, the next one on top: (parent and whether
+            // it is the left child, the bound every key in it stays below).
+            type Slot = (Option<(usize, bool)>, Option<u32>);
+            let mut t = Tree::default();
+            let mut slots: Vec<Slot> = vec![(None, None)];
+            let mut keys = shape.iter();
+            let mut next = keys.next();
+            while let (Some(&(key, red)), Some((at, below))) = (next, slots.pop()) {
                 if below.is_some_and(|b| key >= b) {
-                    return None;
+                    continue;
                 }
-                *at += 1;
                 let n = t.nodes.len();
                 t.nodes.push(Node {
                     key,
                     colour: if red { Colour::Red } else { Colour::Black },
                     left: None,
                     right: None,
-                    parent,
+                    parent: at.map(|(p, _)| p),
                 });
-                t.nodes[n].left = build(t, shape, at, Some(n), Some(key));
-                t.nodes[n].right = build(t, shape, at, Some(n), below);
-                Some(n)
+                match at {
+                    None => t.root = Some(n),
+                    Some((p, true)) => t.nodes[p].left = Some(n),
+                    Some((p, false)) => t.nodes[p].right = Some(n),
+                }
+                slots.push((Some((n, false)), below));
+                slots.push((Some((n, true)), Some(key)));
+                next = keys.next();
             }
-            let mut t = Tree::default();
-            let mut at = 0;
-            t.root = build(&mut t, shape, &mut at, None, None);
-            t
+            (next.is_none() && t.valid()).then_some(t)
+        }
+
+        /// The red-black and search-tree rules hold.
+        fn valid(&self) -> bool {
+            let keys = self.keys();
+            if keys.len() != self.nodes.len() || keys.windows(2).any(|w| w[0] >= w[1]) {
+                return false;
+            }
+            if self
+                .root
+                .is_some_and(|r| self.nodes[r].colour == Colour::Red)
+            {
+                return false;
+            }
+            // Black nodes from the root to each missing child.
+            let mut height = None;
+            let mut stack = vec![(self.root, 0usize, false)];
+            while let Some((at, blacks, parent_red)) = stack.pop() {
+                let Some(a) = at else {
+                    if *height.get_or_insert(blacks) != blacks {
+                        return false;
+                    }
+                    continue;
+                };
+                let red = self.nodes[a].colour == Colour::Red;
+                if red && parent_red {
+                    return false;
+                }
+                let blacks = blacks + usize::from(!red);
+                stack.push((self.nodes[a].left, blacks, red));
+                stack.push((self.nodes[a].right, blacks, red));
+            }
+            true
         }
 
         fn root_key(&self) -> Option<u32> {

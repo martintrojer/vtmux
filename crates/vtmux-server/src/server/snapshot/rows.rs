@@ -99,6 +99,8 @@ pub fn row_out(row: &vt::Row, link: impl Fn(usize) -> Option<String>) -> snap::R
     };
     // Columns still covered by the last tab.
     let mut tab_left = 0usize;
+    // Each URI's place in `out.links`.
+    let mut known: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (x, c) in row.cells.iter().enumerate() {
         let mut chars = c.text.as_str().chars();
         let codepoint = chars.next().map_or(0, u32::from);
@@ -119,14 +121,13 @@ pub fn row_out(row: &vt::Row, link: impl Fn(usize) -> Option<String>) -> snap::R
         };
         let link = if c.link {
             let uri = link(x).unwrap_or_default();
-            let at = out
-                .links
-                .iter()
-                .position(|l| l.uri == uri)
-                .unwrap_or_else(|| {
-                    out.links.push(snap::Hyperlink { id: None, uri });
-                    out.links.len() - 1
+            let at = *known.entry(uri).or_insert_with_key(|uri| {
+                out.links.push(snap::Hyperlink {
+                    id: None,
+                    uri: uri.clone(),
                 });
+                out.links.len() - 1
+            });
             u16::try_from(at + 1).unwrap_or(0)
         } else {
             0
@@ -153,6 +154,13 @@ pub fn row_out(row: &vt::Row, link: impl Fn(usize) -> Option<String>) -> snap::R
 /// The vtmux-vt row of a snapshot row, and its hyperlinks by column.
 pub fn row_in(row: &snap::Row) -> (vt::Row, Vec<(usize, String)>) {
     let mut links = Vec::new();
+    // Each column's grapheme tail: the first one listed for it.
+    let mut rests: Vec<Option<&str>> = vec![None; row.cells.len()];
+    for g in &row.graphemes {
+        if let Some(slot @ None) = rests.get_mut(usize::from(g.col)) {
+            *slot = Some(&g.rest);
+        }
+    }
     let cells = row
         .cells
         .iter()
@@ -162,8 +170,8 @@ pub fn row_in(row: &snap::Row) -> (vt::Row, Vec<(usize, String)>) {
                 .filter(|_| c.codepoint != 0)
                 .map(String::from)
                 .unwrap_or_default();
-            if let Some(g) = row.graphemes.iter().find(|g| usize::from(g.col) == x) {
-                text.push_str(&g.rest);
+            if let Some(rest) = rests[x] {
+                text.push_str(rest);
             }
             let (width, tab) = match (c.tab, c.wide) {
                 (snap::Tab::Start(n), _) => (n, true),
@@ -235,5 +243,55 @@ mod tests {
         let (back, links) = row_in(&out);
         assert_eq!(back, row);
         assert_eq!(links, [(5, "http://x".to_owned())]);
+    }
+
+    /// Graphemes in any order, the first listed for a column winning, and
+    /// one hyperlink entry per URI however many cells carry it.
+    #[test]
+    fn graphemes_and_links_are_looked_up_by_column_and_uri() {
+        let mut row = snap::Row {
+            cells: vec![snap::Cell::default(); 3],
+            ..snap::Row::default()
+        };
+        for c in &mut row.cells {
+            c.codepoint = u32::from('e');
+        }
+        row.graphemes = vec![
+            snap::Grapheme {
+                col: 2,
+                rest: "\u{301}".into(),
+            },
+            snap::Grapheme {
+                col: 0,
+                rest: "\u{300}".into(),
+            },
+            snap::Grapheme {
+                col: 2,
+                rest: "\u{302}".into(),
+            },
+            snap::Grapheme {
+                col: 9,
+                rest: "\u{303}".into(),
+            },
+        ];
+        let (back, _) = row_in(&row);
+        let texts: Vec<&str> = back.cells.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(texts, ["e\u{300}", "e", "e\u{301}"]);
+
+        let linked = |text: &str| vt::Cell {
+            text: text.into(),
+            width: 1,
+            link: true,
+            ..vt::Cell::default()
+        };
+        let row = vt::Row {
+            cells: vec![linked("a"), linked("b"), linked("c"), linked("d")],
+            wrapped: false,
+        };
+        let uris = ["http://a", "http://b", "http://a", "http://b"];
+        let out = row_out(&row, |x| Some(uris[x].to_owned()));
+        let refs: Vec<u16> = out.cells.iter().map(|c| c.link).collect();
+        assert_eq!(refs, [1, 2, 1, 2]);
+        assert_eq!(out.links.len(), 2);
     }
 }

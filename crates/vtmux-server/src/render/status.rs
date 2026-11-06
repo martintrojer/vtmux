@@ -52,6 +52,17 @@ pub struct MessageFlags {
     pub no_freeze: bool,
 }
 
+/// A status line's message state (`c->message_string`, its flags and
+/// `c->message_timer`), as a snapshot carries it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MessageParts {
+    pub text: Option<String>,
+    pub ignore_styles: bool,
+    pub ignore_keys: bool,
+    pub frozen: bool,
+    pub timer: Option<Instant>,
+}
+
 /// A client's status line state (`struct status_line` plus the client's
 /// status flags and timers).
 #[expect(
@@ -313,6 +324,33 @@ impl StatusLine {
     #[must_use]
     pub fn message(&self) -> Option<&str> {
         self.message.as_ref().map(|m| m.text.as_str())
+    }
+
+    /// The message and its timer, for a snapshot (D27). A prompt is not
+    /// carried, so the pane area counts as frozen only under a message.
+    #[must_use]
+    pub fn message_parts(&self) -> MessageParts {
+        MessageParts {
+            text: self.message.as_ref().map(|m| m.text.clone()),
+            ignore_styles: self.message.as_ref().is_some_and(|m| m.ignore_styles),
+            ignore_keys: self.ignore_keys,
+            frozen: self.message.is_some() && self.frozen,
+            timer: self.message_timer,
+        }
+    }
+
+    /// The message and timer of [`Self::message_parts`], on a status line
+    /// with no prompt.
+    pub fn restore_message(&mut self, parts: MessageParts) {
+        self.message_timer = parts.timer;
+        self.ignore_keys = parts.ignore_keys;
+        self.nocursor = parts.text.is_some();
+        self.frozen = parts.text.is_some() && parts.frozen;
+        self.message = parts.text.map(|text| Message {
+            text,
+            ignore_styles: parts.ignore_styles,
+        });
+        self.redraw = true;
     }
 
     /// A key arrived (server-client.c:1786-1790): `true` when the message
