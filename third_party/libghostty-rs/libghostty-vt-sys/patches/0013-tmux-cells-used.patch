@@ -1,0 +1,475 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index af2828d0a..10da16c03 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1749,6 +1749,21 @@ const ReflowCursor = struct {
+         const prev_wrap = self.prev_wrap;
+         defer self.prev_wrap = src_row.wrap;
+ 
++        // vtmux: where the destination cursor is: 0 starts a line (deferred
++        // line breaks and pending wrap reset the column), anything else
++        // joins this row to the wrapped line before it.
++        const dst_x = if (self.new_rows > 0 or self.pending_wrap) 0 else self.x;
++
++        // vtmux: tmux measures an unwrapped line by its cellused
++        // (grid_reflow): the cells it wrote, erased or not
++        // (Row.tmux_used). Background cells past them (an erase with a
++        // background, grid_clear) stay on a line that fits the new width
++        // (grid_reflow_move keeps the line's cells, cut at the width
++        // when drawn), but a line split over several rows
++        // (grid_reflow_split) or joined to the one before it
++        // (grid_reflow_join) takes only its cellused cells.
++        const used: usize = if (src_row.wrap) src_page.size.cols else src_row.tmuxCellsUsed(cells);
++
+         // Calculate the columns in this row. First up we trim non-semantic
+         // rightmost blanks.
+         var cols_len = src_page.size.cols;
+@@ -1758,11 +1773,37 @@ const ReflowCursor = struct {
+                 cols_len -= 1;
+             }
+ 
++            // vtmux: see `used` above.
++            const new_cols = self.page.size.cols;
++            cols_len = @intCast(if (dst_x > 0 or used > new_cols)
++                used
++            else
++                @max(used, @min(cols_len, new_cols)));
++
+             // If the row has a semantic prompt then the blank row is meaningful
+             // so we just consider pretend the first cell of the row isn't empty.
+             if (cols_len == 0 and src_row.semantic_prompt != .none) cols_len = 1;
+         }
+-        const blank = cols_len == 0;
++
++        // vtmux: an unwrapped row under a wrapped line with no cells used
++        // is tmux's empty line (cellused 0, grid_empty_line), where
++        // grid_reflow_join stops: the wrapped line ends above it and it
++        // stays a line of its own, with any background it was cleared
++        // with. A row erased after it was written (ECH, EL 1) has its
++        // erased cells counted in `used` and joins with them. Upstream
++        // dropped a blank row under a wrapped line, and the line break
++        // with it.
++        if (!src_row.wrap and prev_wrap and used == 0) {
++            // tmux keeps the line above wrapped (capture-pane -J joins the
++            // empty line to it), so the next reflow sees the same pair.
++            self.page_row.wrap = true;
++            self.new_rows += 1;
++            if (src_row.semantic_prompt == .none) {
++                var bg_len = src_page.size.cols;
++                while (bg_len > 0 and cells[bg_len - 1].isEmpty()) bg_len -= 1;
++                cols_len = @min(bg_len, self.page.size.cols);
++            }
++        }
+ 
+         // Handle tracked pin adjustments. We also note whether any
+         // tracked pin is on this row at all so that the per-cell loop
+@@ -1774,7 +1815,7 @@ const ReflowCursor = struct {
+         var row_has_pins = false;
+         {
+             // Deferred line breaks and pending wrap reset the destination column.
+-            const dst_x = if (self.new_rows > 0 or self.pending_wrap) 0 else self.x;
++            const pin_dst_x = if (self.new_rows > 0 or self.pending_wrap) 0 else self.x;
+ 
+             const pin_keys = list.tracked_pins.keys();
+             for (pin_keys) |p| {
+@@ -1790,7 +1831,7 @@ const ReflowCursor = struct {
+                 // col width instead.
+                 if (p.x >= cols_len) p.x = @min(
+                     p.x,
+-                    self.page.size.cols - 1 - dst_x,
++                    self.page.size.cols - 1 - pin_dst_x,
+                 );
+ 
+                 // We increase our col len to at least include this pin.
+@@ -1804,32 +1845,14 @@ const ReflowCursor = struct {
+         // before the next write and must reflow with it.
+         if (cursor_pin) |p| {
+             if (p.node == row.node and p.y == src_y) {
++                // vtmux: tmux puts a cursor past the cells its line used
++                // at the end of the line (grid_wrap_position gives it
++                // UINT_MAX, grid_unwrap_position the line's cellused).
++                if (!src_row.wrap and p.x > used) p.x = @intCast(used);
+                 cols_len = @max(cols_len, p.x + 1);
+             }
+         }
+ 
+-        // vtmux: a blank row under a wrapped line is one of two lines in
+-        // tmux, told apart here by the continuation flag (patch 0011 keeps
+-        // it on rows that move and leaves it unset on the blank rows a
+-        // scroll adds). A continuation is a line erased with ECH or EL 1:
+-        // tmux keeps the erased cells (cellused), so grid_reflow_join joins
+-        // them, one blank cell here, and the line ends after them. Any
+-        // other blank row is tmux's empty line (cellused 0), where
+-        // grid_reflow_join stops: the wrapped line ends above it and it
+-        // stays a blank line of its own. Upstream dropped a blank
+-        // continuation, and the line break with it.
+-        if (blank) {
+-            if (src_row.wrap_continuation) {
+-                cols_len = @max(cols_len, 1);
+-            } else if (prev_wrap) {
+-                // tmux keeps the line above wrapped (capture-pane -J
+-                // joins the empty line to it), so the next reflow sees the
+-                // same pair.
+-                self.page_row.wrap = true;
+-                self.new_rows += 1;
+-            }
+-        }
+-
+         // Defer processing of blank rows so that blank rows
+         // at the end of the page list are never written.
+         if (cols_len == 0) {
+@@ -1882,7 +1905,12 @@ const ReflowCursor = struct {
+                 );
+                 const window = cells[x..][0..max_run];
+                 const run = bulkRunLength(window);
++                const run_x = self.x;
+                 if (run > 0 and self.copyRun(window[0..run], src_page)) {
++                    // vtmux: the cells this row used are used in the new one.
++                    if (x < used) self.page_row.tmuxRaiseUsed(
++                        @as(usize, run_x) + @min(run, used - x),
++                    );
+                     x += run;
+                     continue;
+                 }
+@@ -1902,11 +1930,27 @@ const ReflowCursor = struct {
+                 }
+             }
+ 
+-            if (self.writeCell(
++            const write_x = self.x;
++            const write_result = self.writeCell(
+                 list,
+                 &cells[x],
+                 src_page,
+-            )) |result| switch (result) {
++            );
++
++            // vtmux: the cells this row used are used in the new one.
++            // A cell was written if the cursor moved on (a spacer head
++            // in the source is skipped without a write).
++            if (write_result) |result| {
++                if (result != .repeat and x < used and
++                    (self.pending_wrap or self.x != write_x))
++                {
++                    self.page_row.tmuxRaiseUsed(
++                        if (self.pending_wrap) @as(usize, self.x) + 1 else self.x,
++                    );
++                }
++            } else |_| {}
++
++            if (write_result) |result| switch (result) {
+                 // Wrote the cell, move to the next.
+                 .success => x += 1,
+ 
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index 0c48df85d..17a3bc130 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -9193,8 +9193,11 @@ test "Screen: resize less cols reflows cursor after empty cells" {
+ 
+     try s.resize(.{ .cols = 5, .rows = 3 });
+ 
+-    try testing.expectEqual(@as(usize, 1), s.cursor.y);
+-    try testing.expectEqual(@as(usize, 4), s.cursor.x);
++    // vtmux: tmux puts a cursor past the cells its line used at the end
++    // of the line (grid_wrap_position, grid_unwrap_position); upstream
++    // reflowed the empty cells before it onto a second row.
++    try testing.expectEqual(@as(usize, 0), s.cursor.y);
++    try testing.expectEqual(@as(usize, 3), s.cursor.x);
+ }
+ 
+ test "Screen: resize more cols with wide spacer head" {
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 09f762d33..b2bba5f1f 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -1252,6 +1252,8 @@ fn printSliceFill(
+         if (k > 0) {
+             assert(k % cells_per_cp == 0);
+             cursor.page_row.dirty = true;
++            // vtmux: tmux's cellused (grid_set_cells).
++            cursor.page_row.tmuxRaiseUsed(@as(usize, cursor.x) + k);
+             if (style_id != style.default_id) cursor.page_row.styled = true;
+             self.previous_char = @intCast(cps[printed + k / cells_per_cp - 1]);
+             printed += k / cells_per_cp;
+@@ -1701,6 +1703,12 @@ fn writeCell(
+     // vtmux: writing over part of a tab clears all of it.
+     if (cell.tab != 0) self.clearTabAtCursor();
+ 
++    // vtmux: tmux's cellused (grid_set_cell). A spacer head is the cell
++    // tmux leaves unwritten when a wide character wraps.
++    if (wide != .spacer_head) self.screens.active.cursor.page_row.tmuxRaiseUsed(
++        @as(usize, self.screens.active.cursor.x) + 1,
++    );
++
+     // If the wide property of this cell is the same, then we don't
+     // need to do the special handling here because the structure will
+     // be the same. If it is NOT the same, then we may need to clear some
+@@ -2409,6 +2417,8 @@ fn markTab(self: *Terminal, from: usize, to: usize) void {
+ 
+     row[from].tab = @intCast(width);
+     for (from + 1..to) |x| row[x].tab = Cell.tab_continuation;
++    // vtmux: tmux writes the tab as one cell of its width (cellused).
++    self.screens.active.cursor.page_row.tmuxRaiseUsed(to);
+     self.screens.active.cursorMarkDirty();
+ }
+ 
+@@ -3724,6 +3734,10 @@ pub fn insertBlanks(self: *Terminal, count: usize) void {
+             const dst: *Cell = @ptrCast(x + adjusted_count);
+             page.swapCells(src, dst);
+         }
++
++        // vtmux: tmux's grid_move_cells counts the cells it moved to as
++        // used, up to the end of the line (grid_view_insert_cells).
++        self.screens.active.cursor.page_row.tmuxRaiseUsed(self.scrolling_region.right + 1);
+     }
+ 
+     // Insert blanks. The blanks preserve the background color.
+@@ -3779,6 +3793,12 @@ pub fn deleteChars(self: *Terminal, count_req: usize) void {
+             const dst: *Cell = @ptrCast(x);
+             page.swapCells(src, dst);
+         }
++
++        // vtmux: tmux's grid_move_cells counts the cells it moved to as
++        // used (grid_view_delete_cells).
++        self.screens.active.cursor.page_row.tmuxRaiseUsed(
++            @as(usize, self.screens.active.cursor.x) + scroll_amount,
++        );
+     }
+ 
+     // Insert blanks. The blanks preserve the background color.
+@@ -3909,6 +3929,13 @@ pub fn eraseChars(self: *Terminal, count_req: usize) void {
+     // Reset our row's soft-wrap.
+     self.screens.active.cursorResetWrap();
+ 
++    // vtmux: ECH over the whole line is tmux's grid_clear_lines: the line
++    // is emptied (cellused 0) and the line above unwrapped.
++    if (self.screens.active.cursor.x == 0 and count >= self.cols) {
++        self.screens.active.cursor.page_row.tmux_used = 0;
++        self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++    }
++
+     // Mark our cursor row as dirty
+     self.screens.active.cursorMarkDirty();
+ 
+@@ -3955,6 +3982,7 @@ pub fn eraseLine(
+             if (x == 0) {
+                 self.screens.active.cursorResetWrap();
+                 self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++                self.screens.active.cursor.page_row.tmux_used = 0;
+             }
+ 
+             // If our X is a wide spacer tail then we need to erase the
+@@ -3974,6 +4002,7 @@ pub fn eraseLine(
+             if (x >= self.cols - 1) {
+                 self.screens.active.cursorResetWrap();
+                 self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++                self.screens.active.cursor.page_row.tmux_used = 0;
+             }
+ 
+             // If our x is a wide char we need to delete the tail too.
+@@ -3990,8 +4019,10 @@ pub fn eraseLine(
+             // continue onto the next row.
+             self.screens.active.cursorResetWrap();
+ 
+-            // vtmux: tmux's grid_clear_lines also unwraps the line above.
++            // vtmux: tmux's grid_clear_lines also unwraps the line above,
++            // and empties the line (cellused 0).
+             self.tmuxUnwrapAbove(self.screens.active.cursor.y);
++            self.screens.active.cursor.page_row.tmux_used = 0;
+ 
+             break :complete .{ 0, self.cols };
+         },
+@@ -15132,6 +15163,140 @@ test "Terminal: reflow keeps an empty line under a wrapped line (vtmux)" {
+     try testing.expect(!r1.wrap_continuation);
+ }
+ 
++test "Terminal: reflow measures a line by the cells it used (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // ab, then EL 0 with a red background: tmux's cellused stays 2, so
++    // the line fits 10 columns and keeps its background up to the width.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("ab");
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        try t.printString("\nnext");
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("ab\nnext", str);
++        try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.y);
++        const c9 = t.screens.active.pages.getCell(.{ .active = .{ .x = 9, .y = 0 } }).?;
++        try testing.expect(c9.cell.content_tag == .bg_color_rgb);
++        try testing.expectEqual(@as(size.CellCountInt, 2), c9.row.tmux_used);
++    }
++
++    // Text past the new width and a background after it: the line splits
++    // at its cellused, so the second row has no background.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefghijklm");
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        try t.printString("\nnext");
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("abcdefghij\nklm\nnext", str);
++        const c3 = t.screens.active.pages.getCell(.{ .active = .{ .x = 3, .y = 1 } }).?;
++        try testing.expect(c3.cell.isEmpty());
++        try testing.expectEqual(@as(size.CellCountInt, 3), c3.row.tmux_used);
++    }
++
++    // Written cells erased with the default background still count: the
++    // line takes two rows, the second blank.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 8, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("abcdefghijklmno");
++        t.setCursorPos(1, 4);
++        t.eraseLine(.right, false);
++        try t.printString("\nnext");
++        try t.resize(alloc, .{ .cols = 10, .rows = 8 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("abc\n\nnext", str);
++    }
++
++    // A screen erased with a background was never written: each line
++    // keeps one row.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseDisplay(.complete, false);
++        try t.setAttribute(.unset);
++        t.setCursorPos(1, 1);
++        try t.printString("ab");
++        try t.resize(alloc, .{ .cols = 10, .rows = 4 });
++        try testing.expectEqual(t.screens.active.pages.rows, t.screens.active.pages.total_rows);
++        const c9 = t.screens.active.pages.getCell(.{ .active = .{ .x = 9, .y = 3 } }).?;
++        try testing.expect(c9.cell.content_tag == .bg_color_rgb);
++    }
++
++    // A cursor past the used cells goes to the end of the line.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("ab");
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 255, .g = 0, .b = 0 } });
++        t.eraseLine(.right, false);
++        try t.setAttribute(.unset);
++        t.setCursorPos(1, 15);
++        try t.resize(alloc, .{ .cols = 10, .rows = 4 });
++        try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.x);
++        try testing.expectEqual(@as(usize, 0), t.screens.active.cursor.y);
++    }
++}
++
++test "Terminal: cells used follow tmux's cellused (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 20 });
++    defer t.deinit(alloc);
++    const used = struct {
++        fn at(term: *Terminal, y: usize) size.CellCountInt {
++            return term.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = @intCast(y) } }).?.row.tmux_used;
++        }
++    }.at;
++
++    // print raises it, ECH and a partial EL do not lower it.
++    try t.printString("abcde");
++    try testing.expectEqual(@as(size.CellCountInt, 5), used(&t, 0));
++    t.setCursorPos(1, 2);
++    t.eraseChars(2);
++    t.eraseLine(.right, false);
++    try testing.expectEqual(@as(size.CellCountInt, 5), used(&t, 0));
++    // DCH counts the cells it moved to (grid_move_cells): sx - n.
++    t.deleteChars(3);
++    try testing.expectEqual(@as(size.CellCountInt, 17), used(&t, 0));
++    // A full-line clear empties the line.
++    t.eraseLine(.complete, false);
++    try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 0));
++    // ICH counts up to the end of the line.
++    try t.printString("ab");
++    t.setCursorPos(1, 1);
++    t.insertBlanks(1);
++    try testing.expectEqual(@as(size.CellCountInt, 20), used(&t, 0));
++    // A tab over blanks is a written cell of its width.
++    t.setCursorPos(2, 1);
++    t.horizontalTab();
++    try testing.expectEqual(@as(size.CellCountInt, 8), used(&t, 1));
++    // A wide character counts both its cells, through either print path.
++    t.setCursorPos(3, 1);
++    try t.print(0x4E00);
++    try testing.expectEqual(@as(size.CellCountInt, 2), used(&t, 2));
++    try t.printString("\u{4E00}\u{4E00}");
++    try testing.expectEqual(@as(size.CellCountInt, 6), used(&t, 2));
++    // ECH over the whole line from its start is a line clear.
++    t.setCursorPos(3, 1);
++    t.eraseChars(20);
++    try testing.expectEqual(@as(size.CellCountInt, 0), used(&t, 2));
++}
++
+ test "Terminal: eraseLine resets wrap" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+index 1f26a2c3c..b71717388 100644
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -2109,7 +2109,18 @@ pub const Row = packed struct(u64) {
+     /// screen.
+     dirty: bool = false,
+ 
+-    _padding: u23 = 0,
++    /// vtmux: tmux's `cellused` (grid.c `struct grid_line`): how far the
++    /// row has been written, a high-water mark that printing raises and
++    /// erasing does not lower (grid_set_cell raises it, grid_clear keeps
++    /// it), so a cell written then erased with a background still counts
++    /// and a cell only erased does not. A full-row clear resets it with
++    /// the rest of the row (grid_clear_lines). Reflow measures an
++    /// unwrapped row by it (grid_reflow). Readers take the larger of this
++    /// and the row's text extent (`tmuxCellsUsed`), so a row that came
++    /// from somewhere that does not keep it measures by its text.
++    tmux_used: size.CellCountInt = 0,
++
++    _padding: u7 = 0,
+ 
+     /// The semantic prompt state of the row. See `semantic_prompt`.
+     pub const SemanticPrompt = enum(u2) {
+@@ -2166,6 +2177,27 @@ pub const Row = packed struct(u64) {
+         assert(!self.managedMemory());
+         self.* = .{ .cells = self.cells, .dirty = true };
+     }
++
++    /// vtmux: cells up to `end` (exclusive) have been written
++    /// (grid_set_cell's `cellused` update).
++    pub inline fn tmuxRaiseUsed(self: *Row, end: usize) void {
++        const e: size.CellCountInt = @intCast(@min(end, std.math.maxInt(size.CellCountInt)));
++        if (e > self.tmux_used) self.tmux_used = e;
++    }
++
++    /// vtmux: tmux's `cellused` for this row: the high-water mark, or
++    /// the row's text extent where that is further (a row whose cells
++    /// came from somewhere that does not keep the mark). `cells` is the
++    /// row's cells.
++    pub fn tmuxCellsUsed(self: Row, cells: []const Cell) size.CellCountInt {
++        var end = cells.len;
++        while (end > 0) : (end -= 1) {
++            const c = cells[end - 1];
++            if (c.hasText() or c.wide == .wide or c.wide == .spacer_tail) break;
++        }
++        const used = @min(@as(usize, self.tmux_used), cells.len);
++        return @intCast(@max(used, end));
++    }
+ };
+ 
+ /// A cell represents a single terminal grid cell.

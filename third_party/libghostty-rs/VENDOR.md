@@ -294,6 +294,41 @@ Recorded per commit in git history; the list is kept current:
   candidate for the first half (a blank continuation keeping its line
   break); the empty-line half is tmux's model.
 
+- `patches/0013-tmux-cells-used.patch` (`page.zig` `Row.tmux_used`,
+  `tmuxRaiseUsed`, `tmuxCellsUsed`; `Terminal.zig` `writeCell`,
+  `printSliceFill`, `markTab`, `insertBlanks`, `deleteChars`,
+  `eraseChars`, `eraseLine`; `PageList.zig` `ReflowCursor.reflowRow`):
+  tmux's `cellused` per row (grid.c `struct grid_line`), in 16 of the
+  Row's 23 spare bits. Printing raises it (`grid_set_cell`,
+  `grid_set_cells`; a tab over blanks counts its width, a spacer head
+  does not), ICH and DCH raise it to the cells they moved to
+  (`grid_move_cells`: the width, and the width less the count), a
+  partial erase leaves it and a full-line clear (EL 2, EL 0 from column
+  0, EL 1 from the last column, ED's whole lines, ECH over a whole line
+  from column 0, which also unwraps the line above) empties it with the
+  row. Readers take the larger of it and the row's text extent, so a row
+  from elsewhere (Ghostty's snapshot codec drops the field) measures by
+  its text. Reflow measures an unwrapped row by it as `grid_reflow` does:
+  a row that fits the new width keeps its background cells up to the
+  width (`grid_reflow_move`), one that splits or joins the wrapped line
+  above takes only its used cells (`grid_reflow_split`,
+  `grid_reflow_join`), so a line erased with a background no longer
+  takes extra rows and written cells erased with the default background
+  still do; a row under a wrapped line with none used is tmux's empty
+  line (replacing patch 0012's continuation-flag test), and an erased
+  continuation joins with all its erased cells (0012 joined one); a
+  cursor past the used cells goes to their end (`grid_wrap_position`).
+  The new rows get the used count of the cells copied into them. The
+  upstream test "Screen: resize less cols reflows cursor after empty
+  cells" now expects tmux's cursor (3,0); new tests `Terminal: reflow
+  measures a line by the cells it used (vtmux)`, `Terminal: cells used
+  follow tmux's cellused (vtmux)`; oracle `reflow_cells_used`. Not an
+  upstream candidate (tmux's model).
+
+  With 0013 the full `zig build test-lib-vt -Demit-lib-vt=true
+  -Dapp-runtime=none` gives the known failures only (`tabClear single`,
+  the kitty temporary-file test of 0001).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
