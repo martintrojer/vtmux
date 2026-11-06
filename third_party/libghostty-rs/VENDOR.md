@@ -392,6 +392,22 @@ Recorded per commit in git history; the list is kept current:
   (vtmux)`; `zig build test-lib-vt -Dtest-filter=PageList` (348 pass).
   Not an upstream candidate (tmux's model).
 
+- `patches/0016-tmux-decawm.patch` (`Terminal.zig` `print`, `resize`):
+  DECAWM as tmux's `screen_write_cell` has it. A print that reaches the
+  last column sets the pending wrap only under autowrap (with it reset,
+  tmux's `cx` stays on the column, `not_wrap`), so a pending wrap is
+  always tmux's `cx` past the last column (patch 0014); a character
+  printed with the wrap pending and autowrap reset since does not fit and
+  is dropped ("Sanity check cursor position"), where upstream replaced
+  the last cell as xterm does. The main screen reflows on a resize
+  whatever DECAWM says (window.c `window_pane_resize`); upstream reflowed
+  only under wraparound. vtmux's `tmux_cursor` reports the column count
+  whenever the wrap is pending, and the scroll-on-clear ED sets autowrap
+  around the space that keeps one (closes D-030). Upstream tests: "resize
+  with wraparound off" now expects the reflow, "resize less cols without
+  reflow cutting wide char tail" resizes the alternate screen. New test
+  `Terminal: DECAWM as tmux (vtmux)`. Not an upstream candidate.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

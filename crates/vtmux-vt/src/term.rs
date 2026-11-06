@@ -1035,11 +1035,15 @@ impl PaneTerm {
         self.term
             .vt_write(format!("\x1b[{};{}H", y + 1, x + 1).as_bytes());
         // A wrap pending stays pending (tmux's cx stays past the last
-        // column): CUP dropped it and only a print sets it, so a space
-        // goes in the last column, which the clear then erases (Ghostty's
-        // ED 2 keeps the pending wrap, patch 0014).
+        // column): CUP dropped it and only a print under autowrap sets it
+        // (patch 0016), so a space goes in the last column with autowrap
+        // on, which the clear then erases (Ghostty's ED 2 keeps the
+        // pending wrap, patch 0014).
         if pending {
+            let wrap = self.term.mode(Mode::WRAPAROUND).unwrap_or(true);
+            let _ = self.term.set_mode(Mode::WRAPAROUND, true);
             self.term.vt_write(b" ");
+            let _ = self.term.set_mode(Mode::WRAPAROUND, wrap);
         }
         self.term.vt_write(b"\x1b[2J");
         let _ = self.term.set_mode(Mode::ORIGIN, origin);
@@ -3210,13 +3214,10 @@ fn keep_clustering(term: &mut Terminal<'_, '_>) {
 /// column leaves tmux's `cx` at the column count only under autowrap; with
 /// DECAWM reset it stays on the last column (screen-write.c
 /// `screen_write_cell`, `not_wrap`). Ghostty keeps the last column plus a
-/// pending-wrap flag either way, so the flag counts only while the mode is
-/// set. A wrap already pending when `?7l` arrives is the one case this gets
-/// wrong: tmux keeps the column count (`compat/DIVERGENCES.md` D-030).
+/// pending-wrap flag, which it sets only under autowrap (patch 0016), so
+/// the flag is tmux's `cx` past the last column, whatever the mode is now.
 fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
-    let x = if term.is_cursor_pending_wrap().unwrap_or(false)
-        && term.mode(Mode::WRAPAROUND).unwrap_or(true)
-    {
+    let x = if term.is_cursor_pending_wrap().unwrap_or(false) {
         term.cols().unwrap_or(0)
     } else {
         term.cursor_x().unwrap_or(0)

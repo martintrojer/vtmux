@@ -1,0 +1,6 @@
+kind=capture
+cols=10
+bytes=l0\nabcdefghij\033[?7l\033[2JX\033[?7hY
+flags=-p -S -
+command=new-session -d -x 10 -y 5 'sh -c 'printf '"'"'l0\nabcdefghij\033[?7l\033[2JX\033[?7hY'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; capturep -p -S -
+expected=l0\nabcdefghij\n\n\nY\n\n\n
