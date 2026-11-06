@@ -78,3 +78,51 @@ run-length encoding, LZ4 and BLAKE3); it is the checkpoint and cross-pin path, a
   implicit id 0; Ghostty always reads both for a linked cell.
 - Whether a history page was compressed travels only for pages in Ghostty's form; rows come back resident and
   are recompressed.
+
+## Rebased onto main (lu_stack_rebase)
+
+The spike, its import validation and streaming (455b790), this conversion and the snapshot crate's terminal
+records were rebased onto main `3ae218e`: the Ghostty patch is now 0017, after main's 0015 (REP, DECCOLM, tab
+reflow) and 0016 (DECAWM). The conversion uses the streaming API (`PaneTerm::export_state_head` +
+`export_pages`, `StateImport`) in place of the stopgap per-page callback it was written against; snapshot-side
+failures are `TermError::Snapshot`, vtmux-vt's refusals `TermError::State`. `Server::to_snapshot` now fills
+`Pane.term` and `Popup.term` (Upgrade: `SamePin`; CheckpointFull: `Rows`; CheckpointLayout: none;
+`to_snapshot_with` takes the form), sets `meta.ghostty_patches` and lists `ghostty_pages_requirement()` in
+`meta.requires` when a page went in Ghostty's form; `restore_term` / `restore_popup_term` import them.
+
+The 4000-seed round trip found two pieces of state main added after the spike, both fixed with tests: tmux's
+`INPUT_LAST` (REP after a print, patch 0015's scanner flag; `PaneState.last_print`, snapshot `TermState`
+tag 36 `input_last`), and an alternate screen narrowed without a reflow keeping cells-used counts past its
+width (tmux's `cellused` outlives `grid->sx`), which validation refused.
+
+Ghostty (EMULATOR RULE): all 17 patches apply in order to the pinned commit; the full `zig build test-lib-vt
+-Demit-lib-vt=true -Dapp-runtime=none` (Debug) gives 3258 pass, 38 skip, and per test binary the two known
+failures (`tabClear single`, kitty's temporary-file test under `/tmp`), as on main plus the spike's tests.
+
+Same host, load 4-9 outside the stress runs:
+
+| check | result |
+|---|---|
+| `state_roundtrip` / `snapshot_term` fuzz, `VTMUX_STATE_FUZZ_SEEDS=4000` (2000 per form in `snapshot_term`) | pass (64 s / 76 s); seeds 126 and 466 failed before the fix |
+| `state_fuzz` (ReleaseSafe Zig) rows, state, blob, blob-full, seeds 0-1199 each | 0 Zig crashes, 0 Rust panics; imported 44 / 291 / 13 / 12, the rest refused |
+| state, snapshot crate, `snapshot_term` and `server::snapshot` + `compress::` tests, 5x under 48 busy loops (`flock /tmp/vtmux-stress.lock`, load 37-54) | 5/5 pass, 56-57 s each |
+
+Streamed bench, 10 panes x 100k lines, 120x40, release:
+
+| bench | path | time | memory |
+|---|---|---|---|
+| `STATE_BENCH_STREAMED=1 state_bench` | Blob | 346 ms | +56 MB, peak 1956 MB |
+| | Rows (compressed / resident) | 1267 / 1118 ms | +929 / +930 MB |
+| `snapshot_bench samepin` | write 219 ms (convert 180 + encode 40), read 210 ms (decode 24 + import 185) | 429 ms | stream 48.7 MB, write peak +92 MB, read peak 177 MB, 2580/2580 pages compressed |
+| `snapshot_bench rows` | write 1641 ms, read 1618 ms | 3259 ms | stream 22.3 MB, +57 MB / 999 MB |
+| `snapshot_bench resident` | write 1428 ms, read 1284 ms | 2712 ms | stream 22.3 MB, +57 MB / 999 MB |
+
+`SamePin` takes 429 ms against 101 ms on the stopgap. The difference is the blob checks from 455b790 (an
+XxHash3 checksum and the `initBuf` layout check on every blob): 455b790's own note has whole-state blobs at
+362 ms against the spike's 37 ms. That is still inside decision 13's 1 s budget. Every import captures as its
+source does.
+
+PERF GATE (compress.rs gains `PaneCompress::restored`, which only a restore calls): `bench.py agent_panes
+key_echo`, AGENT_PANES "5 20", AGENT_CLIENTS "1 2", release, base main `3ae218e` against the tip, load 9.
+Server CPU: 5/1 1.5 -> 1.5 %, 5/2 2.1 -> 2.3 %, 20/1 3.5 -> 3.7 %, 20/2 4.6 -> 4.6 %. RSS is unchanged.
+key_echo p50: 0.32 -> 0.30 ms (idle), 0.44 -> 0.45 ms (flood). All within noise.

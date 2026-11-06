@@ -486,10 +486,12 @@ Recorded per commit in git history; the list is kept current:
   only a `check` import decodes and refuses)
   (`zig build test-lib-vt -Dtest-filter="vtmux state"`);
   the full `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none`
-  (Debug) gives 3256 pass, 38 skip and two known failures per test
-  binary: `tabClear single`, and the kitty `temporary file outside
-  directory prefix is rejected` of patch 0001's note (it fails whenever
-  the checkout is under `/tmp`, as this run's was);
+  (Debug) over 0001-0017 gives 3258 pass, 38 skip and two known failures
+  per test binary: `tabClear single`, and the kitty `temporary file
+  outside directory prefix is rejected` of patch 0001's note (it fails
+  whenever the checkout is under `/tmp`, as this run's was). Written as
+  0015 before main's 0015 and 0016; renumbered on the rebase, no hunk
+  changed;
   vtmux's `crates/vtmux-vt/tests/state_roundtrip.rs`. Not an upstream
   candidate as is (it carries vtmux's patch bits).
 
