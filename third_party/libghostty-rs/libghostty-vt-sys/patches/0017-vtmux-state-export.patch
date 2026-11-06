@@ -1,0 +1,1731 @@
+diff --git a/include/ghostty/vt.h b/include/ghostty/vt.h
+index cfa1017e7..a78a5f7a8 100644
+--- a/include/ghostty/vt.h
++++ b/include/ghostty/vt.h
+@@ -169,6 +169,7 @@ extern "C" {
+ #include <ghostty/vt/size_report.h>
+ #include <ghostty/vt/snapshot.h>
+ #include <ghostty/vt/unicode.h>
++#include <ghostty/vt/vtmux_state.h>
+ #include <ghostty/vt/wasm.h>
+ 
+ #ifdef __cplusplus
+diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+new file mode 100644
+index 000000000..fa9f50ffa
+--- /dev/null
++++ b/include/ghostty/vt/vtmux_state.h
+@@ -0,0 +1,313 @@
++/**
++ * @file vtmux_state.h
++ *
++ * vtmux: export and import the whole state of a terminal.
++ *
++ * Every page of both screens comes out as rows of cells (or, for a page
++ * compressed in memory, as an opaque blob only a library of the same build
++ * can read back), together with the terminal and screen state that is not
++ * in the grid. A fresh terminal of the same size imports it and is then
++ * the same terminal: same cells, row flags, cursor, modes, charsets, tab
++ * stops, scroll region, colours.
++ *
++ * The cell and row records are this header's own: they are filled through
++ * the page's accessors, never copied from Ghostty's memory layout, so they
++ * keep their meaning when Ghostty's layout changes. Only blobs are tied to
++ * the build that wrote them.
++ */
++
++#ifndef GHOSTTY_VT_VTMUX_STATE_H
++#define GHOSTTY_VT_VTMUX_STATE_H
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <ghostty/vt/types.h>
++#include <ghostty/vt/style.h>
++#include <ghostty/vt/terminal.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/** Screen keys: 0 primary, 1 alternate. */
++#define GHOSTTY_VTMUX_PRIMARY 0
++#define GHOSTTY_VTMUX_ALTERNATE 1
++
++/** Row flags. Bits 2-3 are the row's semantic prompt (0 none, 1 prompt,
++ * 2 prompt continuation). */
++#define GHOSTTY_VTMUX_ROW_WRAP 0x01
++#define GHOSTTY_VTMUX_ROW_WRAP_CONTINUATION 0x02
++
++/**
++ * One row. Its cells are `cells[cell_start .. cell_start + cell_count]`
++ * of the page; the row's remaining columns are default cells (all zero).
++ */
++typedef struct {
++  uint32_t cell_start;
++  uint16_t cell_count;
++  /** tmux's cells used (`Row.tmux_used`, patch 0013). */
++  uint16_t used;
++  uint8_t flags;
++  uint8_t reserved[3];
++} GhosttyVtmuxRow;
++
++/**
++ * One cell.
++ *
++ * flags: bits 0-1 the content kind (0 a codepoint, 1 a codepoint with more
++ * codepoints in the page's graphemes, 2 a palette background with no text,
++ * 3 an RGB background with no text), bits 2-3 the width (0 narrow, 1 wide,
++ * 2 spacer tail, 3 spacer head), bit 4 protected, bit 5 the palette
++ * background in its 256-colour form (patch 0010), bits 6-7 the semantic
++ * content (0 output, 1 input, 2 prompt).
++ *
++ * content: the codepoint (kinds 0 and 1), the palette index (kind 2) or
++ * 0xRRGGBB (kind 3). style and link index the page's tables; 0 is the
++ * default style and no link. tab is the tab mark (patch 0002).
++ */
++typedef struct {
++  uint32_t content;
++  uint16_t style;
++  uint16_t link;
++  uint16_t flags;
++  uint8_t tab;
++  uint8_t reserved;
++} GhosttyVtmuxCell;
++
++/**
++ * A hyperlink: the URI and, when explicit, the OSC 8 id, as offsets into
++ * the page's bytes; an implicit link has Ghostty's implicit id instead.
++ */
++typedef struct {
++  uint32_t uri_offset;
++  uint32_t uri_len;
++  uint32_t id_offset;
++  uint32_t id_len;
++  uint32_t implicit_id;
++  uint8_t explicit_id;
++  uint8_t reserved[3];
++} GhosttyVtmuxLink;
++
++/** A page's allocation sizes: hints, all zero when unknown. */
++typedef struct {
++  uint32_t rows;
++  uint32_t styles;
++  uint32_t hyperlink_bytes;
++  uint32_t grapheme_bytes;
++  uint32_t string_bytes;
++} GhosttyVtmuxCapacity;
++
++/**
++ * One page: a run of rows of one width, or a compressed page's blob.
++ *
++ * Export: the caller sets `size`, the buffers and their capacities; each
++ * `*_len` comes back as the count needed, and if any is over its capacity
++ * the call returns GHOSTTY_OUT_OF_SPACE and the caller grows the buffers
++ * and calls again. Import: the `*_len` say how much of each buffer holds
++ * the page; capacities are ignored.
++ *
++ * graphemes: for every cell of kind 1, in cell order, the cell's index in
++ * `cells`, the number of codepoints after the first, then those codepoints.
++ * styles: entry 0 is unused. links: entry 0 is unused. bytes: the links'
++ * strings, or the blob.
++ */
++typedef struct {
++  size_t size;
++  GhosttyVtmuxRow* rows;
++  size_t rows_cap;
++  size_t rows_len;
++  GhosttyVtmuxCell* cells;
++  size_t cells_cap;
++  size_t cells_len;
++  uint32_t* graphemes;
++  size_t graphemes_cap;
++  size_t graphemes_len;
++  GhosttyStyle* styles;
++  size_t styles_cap;
++  size_t styles_len;
++  GhosttyVtmuxLink* links;
++  size_t links_cap;
++  size_t links_len;
++  uint8_t* bytes;
++  size_t bytes_cap;
++  size_t bytes_len;
++  uint16_t cols;
++  /** The page is a blob: `bytes` holds it and nothing else is set. */
++  bool blob;
++  GhosttyVtmuxCapacity capacity;
++} GhosttyVtmuxPage;
++
++/** G0-G3 (0 UTF-8, 1 ASCII, 2 British, 3 DEC special graphics), GL and GR
++ * (slot numbers), and the single shift (0xff for none). */
++typedef struct {
++  uint8_t g[4];
++  uint8_t gl;
++  uint8_t gr;
++  uint8_t single_shift;
++  uint8_t reserved;
++} GhosttyVtmuxCharset;
++
++/** One screen's state outside its grid. */
++typedef struct {
++  bool present;
++  uint16_t cursor_x;
++  uint16_t cursor_y;
++  uint8_t cursor_style;
++  bool pending_wrap;
++  bool protected_;
++  uint8_t semantic_content;
++  bool semantic_content_clear_eol;
++  GhosttyStyle pen;
++  /** The cursor's hyperlink: 0 none, 1 implicit, 2 explicit. Its URI and
++   * explicit id are in the state's bytes. */
++  uint8_t link_kind;
++  uint32_t link_implicit_id;
++  uint32_t link_uri_offset;
++  uint32_t link_uri_len;
++  uint32_t link_id_offset;
++  uint32_t link_id_len;
++  /** The next implicit hyperlink id. */
++  uint32_t hyperlink_implicit_counter;
++  GhosttyVtmuxCharset charset;
++  uint8_t protected_mode;
++  uint8_t kitty_flags[8];
++  uint8_t kitty_index;
++  uint8_t semantic_click_kind;
++  uint8_t semantic_click_value;
++  bool saved_present;
++  uint16_t saved_x;
++  uint16_t saved_y;
++  GhosttyStyle saved_pen;
++  bool saved_protected;
++  bool saved_pending_wrap;
++  bool saved_origin;
++  GhosttyVtmuxCharset saved_charset;
++} GhosttyVtmuxScreenState;
++
++/** One mode: its number, whether it is an ANSI mode, and its current,
++ * saved (XTSAVE) and default values. */
++typedef struct {
++  uint16_t value;
++  bool ansi;
++  bool current;
++  bool saved;
++  bool default_;
++} GhosttyVtmuxMode;
++
++#define GHOSTTY_VTMUX_MAX_MODES 96
++#define GHOSTTY_VTMUX_MAX_TABSTOP_BYTES 8192
++
++/**
++ * The terminal's state outside its grids.
++ *
++ * Export fills everything; `bytes` (the cursors' hyperlink strings) works
++ * as in GhosttyVtmuxPage. Import applies everything but the size, which
++ * must be the terminal's, and `modes` entries whose number Ghostty does
++ * not know are ignored. Title and working directory have their own
++ * terminal options.
++ */
++typedef struct {
++  size_t size;
++  uint16_t cols;
++  uint16_t rows;
++  uint8_t active_screen;
++  uint16_t scroll_top;
++  uint16_t scroll_bottom;
++  uint16_t scroll_left;
++  uint16_t scroll_right;
++  uint8_t status_display;
++  /** 0xffffffff for none. */
++  uint32_t previous_char;
++  bool cursor_is_default;
++  uint8_t cursor_default_style;
++  /** 0 unset, 1 false, 2 true. */
++  uint8_t cursor_default_blink;
++  uint8_t shell_redraw;
++  bool modify_other_keys_2;
++  uint8_t mouse_event;
++  uint8_t mouse_format;
++  /** 0 unset, 1 false, 2 true. */
++  uint8_t mouse_shift_capture;
++  uint8_t mouse_shape;
++  bool password_input;
++  uint8_t xt_checksum;
++  size_t modes_len;
++  GhosttyVtmuxMode modes[GHOSTTY_VTMUX_MAX_MODES];
++  /** One bit per column, least significant first. */
++  uint8_t tabstops[GHOSTTY_VTMUX_MAX_TABSTOP_BYTES];
++  /** Palette entries changed from the default (bit n of byte n / 8), and
++   * the current palette, RGB. */
++  uint8_t palette_mask[32];
++  uint8_t palette[256 * 3];
++  /** Foreground, background and cursor colour overrides (OSC 10/11/12). */
++  bool fg_set;
++  uint8_t fg[3];
++  bool bg_set;
++  uint8_t bg[3];
++  bool cursor_color_set;
++  uint8_t cursor_color[3];
++  GhosttyVtmuxScreenState screens[2];
++  uint8_t* bytes;
++  size_t bytes_cap;
++  size_t bytes_len;
++} GhosttyVtmuxState;
++
++/** An import in progress. */
++typedef struct GhosttyVtmuxImporterImpl* GhosttyVtmuxImporter;
++
++/**
++ * The number of pages of a screen, history and active area together, or
++ * GHOSTTY_NO_VALUE when the screen does not exist.
++ */
++GHOSTTY_API GhosttyResult ghostty_vtmux_page_count(GhosttyTerminal terminal,
++                                                   uint8_t screen,
++                                                   size_t* out_count);
++
++/**
++ * Export page `index` (0 is the oldest) of a screen. A page compressed in
++ * memory comes out as a blob when `blob_if_compressed`, else as rows (it is
++ * decoded into scratch memory and stays compressed). Pages never change
++ * while the terminal does not.
++ */
++GHOSTTY_API GhosttyResult ghostty_vtmux_page_export(GhosttyTerminal terminal,
++                                                    uint8_t screen,
++                                                    size_t index,
++                                                    bool blob_if_compressed,
++                                                    GhosttyVtmuxPage* page);
++
++/** Export the terminal's state outside its grids. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_state_export(GhosttyTerminal terminal,
++                                                     GhosttyVtmuxState* state);
++
++/**
++ * Start importing into `terminal`, which must be fresh: no tracked grid
++ * references, and the size the state will have.
++ */
++GHOSTTY_API GhosttyResult ghostty_vtmux_importer_new(GhosttyTerminal terminal,
++                                                     GhosttyVtmuxImporter* out);
++
++/** Add the next page (oldest first) of a screen. The page is copied. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_importer_page(GhosttyVtmuxImporter importer,
++                                                      uint8_t screen,
++                                                      const GhosttyVtmuxPage* page);
++
++/**
++ * Replace the terminal's screens with the pages added and apply `state`.
++ * On failure the terminal is unchanged. Free the importer either way.
++ */
++GHOSTTY_API GhosttyResult ghostty_vtmux_importer_finish(GhosttyVtmuxImporter importer,
++                                                        const GhosttyVtmuxState* state);
++
++GHOSTTY_API void ghostty_vtmux_importer_free(GhosttyVtmuxImporter importer);
++
++/** Make a screen the active one, as an import's state does, without the
++ * side effects of a mode switch. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_set_active_screen(GhosttyTerminal terminal,
++                                                          uint8_t screen);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* GHOSTTY_VT_VTMUX_STATE_H */
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 12687a6b3..88cea3e5f 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -381,6 +381,14 @@ comptime {
+         if (features.grid_introspection) {
+             @export(&c.terminal_grid_ref_track, .{ .name = "ghostty_terminal_grid_ref_track" });
+         }
++        @export(&c.vtmux_page_count, .{ .name = "ghostty_vtmux_page_count" });
++        @export(&c.vtmux_page_export, .{ .name = "ghostty_vtmux_page_export" });
++        @export(&c.vtmux_state_export, .{ .name = "ghostty_vtmux_state_export" });
++        @export(&c.vtmux_importer_new, .{ .name = "ghostty_vtmux_importer_new" });
++        @export(&c.vtmux_importer_page, .{ .name = "ghostty_vtmux_importer_page" });
++        @export(&c.vtmux_importer_finish, .{ .name = "ghostty_vtmux_importer_finish" });
++        @export(&c.vtmux_importer_free, .{ .name = "ghostty_vtmux_importer_free" });
++        @export(&c.vtmux_set_active_screen, .{ .name = "ghostty_vtmux_set_active_screen" });
+         if (features.snapshot) {
+             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+             @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index b7ae455c5..d3f1513f2 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -49,6 +49,7 @@ pub const style = @import("style.zig");
+ pub const sys = @import("sys.zig");
+ pub const terminal = @import("terminal.zig");
+ pub const unicode = @import("unicode.zig");
++pub const vtmux_state = @import("vtmux_state.zig");
+ 
+ // The full C API, unexported.
+ pub const build_info = buildpkg.get;
+@@ -242,6 +243,14 @@ pub const snapshot_encode_alloc = snapshot.encode_alloc;
+ pub const snapshot_decoder_new = snapshot.decoder_new;
+ pub const snapshot_decoder_new_buf = snapshot.decoder_new_buf;
+ pub const snapshot_decoder_free = snapshot.decoder_free;
++pub const vtmux_page_count = vtmux_state.page_count;
++pub const vtmux_page_export = vtmux_state.page_export;
++pub const vtmux_state_export = vtmux_state.state_export;
++pub const vtmux_importer_new = vtmux_state.importer_new;
++pub const vtmux_importer_page = vtmux_state.importer_page;
++pub const vtmux_importer_finish = vtmux_state.importer_finish;
++pub const vtmux_importer_free = vtmux_state.importer_free;
++pub const vtmux_set_active_screen = vtmux_state.set_active_screen;
+ pub const snapshot_decoder_set = snapshot.decoder_set;
+ pub const snapshot_decoder_get = snapshot.decoder_get;
+ pub const snapshot_decoder_get_multi = snapshot.decoder_get_multi;
+@@ -298,6 +307,7 @@ test {
+     _ = style;
+     _ = sys;
+     _ = terminal;
++    _ = vtmux_state;
+     _ = types;
+     _ = unicode;
+ 
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+new file mode 100644
+index 000000000..966754bc3
+--- /dev/null
++++ b/src/terminal/c/vtmux_state.zig
+@@ -0,0 +1,1340 @@
++//! vtmux: export and import the whole state of a terminal (see
++//! include/ghostty/vt/vtmux_state.h).
++//!
++//! Pages come out as rows of cells through the page's own accessors, or,
++//! for a page compressed in memory, as a blob of the compressed page that
++//! only this build can read. Import builds the pages with
++//! `PageList.Builder`, as snapshot decoding does, and swaps them into the
++//! terminal's screens with the cursor, saved cursor and terminal state.
++
++const std = @import("std");
++const builtin = @import("builtin");
++const Allocator = std.mem.Allocator;
++const lib = @import("../lib.zig");
++const Result = @import("result.zig").Result;
++const terminal_c = @import("terminal.zig");
++const style_c = @import("style.zig");
++const ZigTerminal = @import("../Terminal.zig");
++const Screen = @import("../Screen.zig");
++const ScreenKey = @import("../ScreenSet.zig").Key;
++const PageList = @import("../PageList.zig");
++const pagepkg = @import("../page.zig");
++const compression = @import("../compress.zig");
++const stylepkg = @import("../style.zig");
++const hyperlink = @import("../hyperlink.zig");
++const modespkg = @import("../modes.zig");
++const charsets = @import("../charsets.zig");
++const BitmapAllocator = @import("../bitmap_allocator.zig").BitmapAllocator;
++
++const Page = pagepkg.Page;
++const Cell = pagepkg.Cell;
++const Row = pagepkg.Row;
++const Capacity = pagepkg.Capacity;
++
++/// C: GhosttyVtmuxRow
++pub const CRow = extern struct {
++    cell_start: u32,
++    cell_count: u16,
++    used: u16,
++    flags: u8,
++    reserved: [3]u8 = @splat(0),
++};
++
++/// C: GhosttyVtmuxCell
++pub const CCell = extern struct {
++    content: u32,
++    style: u16,
++    link: u16,
++    flags: u16,
++    tab: u8,
++    reserved: u8 = 0,
++};
++
++/// C: GhosttyVtmuxLink
++pub const CLink = extern struct {
++    uri_offset: u32,
++    uri_len: u32,
++    id_offset: u32,
++    id_len: u32,
++    implicit_id: u32,
++    explicit_id: u8,
++    reserved: [3]u8 = @splat(0),
++};
++
++/// C: GhosttyVtmuxCapacity
++pub const CCapacity = extern struct {
++    rows: u32 = 0,
++    styles: u32 = 0,
++    hyperlink_bytes: u32 = 0,
++    grapheme_bytes: u32 = 0,
++    string_bytes: u32 = 0,
++};
++
++/// C: GhosttyVtmuxPage
++pub const CPage = extern struct {
++    size: usize,
++    rows: ?[*]CRow,
++    rows_cap: usize,
++    rows_len: usize,
++    cells: ?[*]CCell,
++    cells_cap: usize,
++    cells_len: usize,
++    graphemes: ?[*]u32,
++    graphemes_cap: usize,
++    graphemes_len: usize,
++    styles: ?[*]style_c.Style,
++    styles_cap: usize,
++    styles_len: usize,
++    links: ?[*]CLink,
++    links_cap: usize,
++    links_len: usize,
++    bytes: ?[*]u8,
++    bytes_cap: usize,
++    bytes_len: usize,
++    cols: u16,
++    blob: bool,
++    capacity: CCapacity,
++};
++
++/// C: GhosttyVtmuxCharset
++pub const CCharset = extern struct {
++    g: [4]u8,
++    gl: u8,
++    gr: u8,
++    single_shift: u8,
++    reserved: u8 = 0,
++};
++
++/// C: GhosttyVtmuxScreenState
++pub const CScreenState = extern struct {
++    present: bool,
++    cursor_x: u16,
++    cursor_y: u16,
++    cursor_style: u8,
++    pending_wrap: bool,
++    protected_: bool,
++    semantic_content: u8,
++    semantic_content_clear_eol: bool,
++    pen: style_c.Style,
++    link_kind: u8,
++    link_implicit_id: u32,
++    link_uri_offset: u32,
++    link_uri_len: u32,
++    link_id_offset: u32,
++    link_id_len: u32,
++    hyperlink_implicit_counter: u32,
++    charset: CCharset,
++    protected_mode: u8,
++    kitty_flags: [8]u8,
++    kitty_index: u8,
++    semantic_click_kind: u8,
++    semantic_click_value: u8,
++    saved_present: bool,
++    saved_x: u16,
++    saved_y: u16,
++    saved_pen: style_c.Style,
++    saved_protected: bool,
++    saved_pending_wrap: bool,
++    saved_origin: bool,
++    saved_charset: CCharset,
++};
++
++/// C: GhosttyVtmuxMode
++pub const CMode = extern struct {
++    value: u16,
++    ansi: bool,
++    current: bool,
++    saved: bool,
++    default_: bool,
++};
++
++const max_modes = 96;
++const max_tabstop_bytes = 8192;
++
++/// C: GhosttyVtmuxState
++pub const CState = extern struct {
++    size: usize,
++    cols: u16,
++    rows: u16,
++    active_screen: u8,
++    scroll_top: u16,
++    scroll_bottom: u16,
++    scroll_left: u16,
++    scroll_right: u16,
++    status_display: u8,
++    previous_char: u32,
++    cursor_is_default: bool,
++    cursor_default_style: u8,
++    cursor_default_blink: u8,
++    shell_redraw: u8,
++    modify_other_keys_2: bool,
++    mouse_event: u8,
++    mouse_format: u8,
++    mouse_shift_capture: u8,
++    mouse_shape: u8,
++    password_input: bool,
++    xt_checksum: u8,
++    modes_len: usize,
++    modes: [max_modes]CMode,
++    tabstops: [max_tabstop_bytes]u8,
++    palette_mask: [32]u8,
++    palette: [256 * 3]u8,
++    fg_set: bool,
++    fg: [3]u8,
++    bg_set: bool,
++    bg: [3]u8,
++    cursor_color_set: bool,
++    cursor_color: [3]u8,
++    screens: [2]CScreenState,
++    bytes: ?[*]u8,
++    bytes_cap: usize,
++    bytes_len: usize,
++};
++
++comptime {
++    // The layout the Rust bindings declare (bindings.rs, `Vtmux*`).
++    if (@sizeOf(usize) == 8) {
++        std.debug.assert(@sizeOf(CRow) == 12 and @sizeOf(CCell) == 12);
++        std.debug.assert(@sizeOf(CLink) == 24 and @sizeOf(CCapacity) == 20);
++        std.debug.assert(@sizeOf(CPage) == 176 and @offsetOf(CPage, "capacity") == 156);
++        std.debug.assert(@sizeOf(CScreenState) == 232 and @offsetOf(CScreenState, "saved_pen") == 144);
++        std.debug.assert(@sizeOf(CState) == 10120 and @offsetOf(CState, "screens") == 9632);
++    }
++    // Every mode fits the fixed table.
++    std.debug.assert(@typeInfo(modespkg.Mode).@"enum".field_names.len <= max_modes);
++}
++
++/// A caller buffer that counts what does not fit, so one pass tells the
++/// caller how much to allocate.
++fn Out(comptime T: type) type {
++    return struct {
++        ptr: ?[*]T,
++        cap: usize,
++        len: usize = 0,
++
++        const Self = @This();
++
++        fn push(self: *Self, v: T) void {
++            if (self.len < self.cap) {
++                if (self.ptr) |p| p[self.len] = v;
++            }
++            self.len += 1;
++        }
++
++        fn pushSlice(self: *Self, vs: []const T) void {
++            if (self.len + vs.len <= self.cap) {
++                if (self.ptr) |p| @memcpy(p[self.len..][0..vs.len], vs);
++            }
++            self.len += vs.len;
++        }
++
++        fn fits(self: *const Self) bool {
++            return self.len <= self.cap;
++        }
++    };
++}
++
++fn screenKey(key: u8) ?ScreenKey {
++    return switch (key) {
++        0 => .primary,
++        1 => .alternate,
++        else => null,
++    };
++}
++
++fn screenOf(t: *ZigTerminal, key: u8) ?*Screen {
++    return t.screens.get(screenKey(key) orelse return null);
++}
++
++fn enumFromInt(comptime T: type, raw: anytype) ?T {
++    const Tag = @typeInfo(T).@"enum".tag_type;
++    const value = std.math.cast(Tag, raw) orelse return null;
++    return std.enums.fromInt(T, value);
++}
++
++fn enumByte(e: anytype) u8 {
++    return @intCast(@backingInt(e));
++}
++
++// ---------------------------------------------------------------------
++// Pages
++
++pub fn page_count(
++    terminal_: terminal_c.Terminal,
++    screen_key: u8,
++    out: ?*usize,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const screen = screenOf(wrapper.terminal, screen_key) orelse return .no_value;
++    var n: usize = 0;
++    var node = screen.pages.pages.first;
++    while (node) |current| : (node = current.next) n += 1;
++    if (out) |o| o.* = n;
++    return .success;
++}
++
++pub fn page_export(
++    terminal_: terminal_c.Terminal,
++    screen_key: u8,
++    index: usize,
++    blob_if_compressed: bool,
++    out_: ?*CPage,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const out = out_ orelse return .invalid_value;
++    if (out.size < @sizeOf(CPage)) return .invalid_value;
++    const screen = screenOf(wrapper.terminal, screen_key) orelse return .no_value;
++    var node = screen.pages.pages.first;
++    var i: usize = 0;
++    while (node) |current| : (node = current.next) {
++        if (i == index) break;
++        i += 1;
++    }
++    const n = node orelse return .no_value;
++    const alloc = wrapper.terminal.gpa();
++    switch (n.data) {
++        .resident => |*p| return exportRows(alloc, p, out),
++        .compressed => |*c| {
++            if (blob_if_compressed) {
++                return exportBlob(c, n.owned == .heap, out);
++            }
++            // Decode into scratch memory: the page stays compressed.
++            const scratch = std.heap.page_allocator.alignedAlloc(
++                u8,
++                .fromByteUnits(std.heap.page_size_min),
++                c.page.memory.len,
++            ) catch return .out_of_memory;
++            defer std.heap.page_allocator.free(scratch);
++            const p = c.cloneBuf(scratch) catch return .invalid_value;
++            return exportRows(alloc, &p, out);
++        },
++    }
++}
++
++fn rowFlags(row: *const Row) u8 {
++    var flags: u8 = 0;
++    if (row.wrap) flags |= 0x01;
++    if (row.wrap_continuation) flags |= 0x02;
++    flags |= @as(u8, @backingInt(row.semantic_prompt)) << 2;
++    return flags;
++}
++
++fn exportRows(alloc: Allocator, page: *const Page, out: *CPage) Result {
++    var rows: Out(CRow) = .{ .ptr = out.rows, .cap = out.rows_cap };
++    var cells: Out(CCell) = .{ .ptr = out.cells, .cap = out.cells_cap };
++    var graphemes: Out(u32) = .{ .ptr = out.graphemes, .cap = out.graphemes_cap };
++    var styles: Out(style_c.Style) = .{ .ptr = out.styles, .cap = out.styles_cap };
++    var links: Out(CLink) = .{ .ptr = out.links, .cap = out.links_cap };
++    var bytes: Out(u8) = .{ .ptr = out.bytes, .cap = out.bytes_cap };
++
++    // Page-local style and hyperlink ids to table indexes, in first-use
++    // order.
++    var style_map: std.AutoHashMapUnmanaged(stylepkg.Id, u16) = .empty;
++    defer style_map.deinit(alloc);
++    var link_map: std.AutoHashMapUnmanaged(hyperlink.Id, u16) = .empty;
++    defer link_map.deinit(alloc);
++    styles.push(.default);
++    links.push(std.mem.zeroes(CLink));
++
++    for (0..page.size.rows) |y| {
++        const row = page.getRow(y);
++        const row_cells = page.getCells(row);
++        var count: usize = row_cells.len;
++        while (count > 0 and @as(u64, @bitCast(row_cells[count - 1])) == 0) count -= 1;
++        rows.push(.{
++            .cell_start = @intCast(cells.len),
++            .cell_count = @intCast(count),
++            .used = row.tmux_used,
++            .flags = rowFlags(row),
++        });
++        for (row_cells[0..count]) |*cell| {
++            var flags: u16 = 0;
++            var content: u32 = 0;
++            switch (cell.content_tag) {
++                .codepoint => content = cell.content.codepoint.data,
++                .codepoint_grapheme => {
++                    content = cell.content.codepoint.data;
++                    const cps = page.lookupGrapheme(cell) orelse &.{};
++                    if (cps.len > 0) {
++                        flags |= 1;
++                        graphemes.push(@intCast(cells.len));
++                        graphemes.push(@intCast(cps.len));
++                        for (cps) |cp| graphemes.push(cp);
++                    }
++                },
++                .bg_color_palette => {
++                    flags |= 2;
++                    content = cell.content.color_palette.data;
++                    if (cell.content.color_palette.palette_256) flags |= 1 << 5;
++                },
++                .bg_color_rgb => {
++                    flags |= 3;
++                    const c = cell.content.color_rgb;
++                    content = (@as(u32, c.r) << 16) | (@as(u32, c.g) << 8) | c.b;
++                },
++            }
++            flags |= @as(u16, @backingInt(cell.wide)) << 2;
++            if (cell.protected) flags |= 1 << 4;
++            flags |= @as(u16, @backingInt(cell.semantic_content)) << 6;
++
++            var style_index: u16 = 0;
++            if (cell.style_id != stylepkg.default_id) {
++                const entry = style_map.getOrPut(alloc, cell.style_id) catch
++                    return .out_of_memory;
++                if (!entry.found_existing) {
++                    entry.value_ptr.* = @intCast(styles.len);
++                    styles.push(.fromStyle(page.styles.get(page.memory, cell.style_id).*));
++                }
++                style_index = entry.value_ptr.*;
++            }
++
++            var link_index: u16 = 0;
++            if (cell.hyperlink) link: {
++                const id = page.lookupHyperlink(cell) orelse break :link;
++                const entry = link_map.getOrPut(alloc, id) catch
++                    return .out_of_memory;
++                if (!entry.found_existing) {
++                    entry.value_ptr.* = @intCast(links.len);
++                    const e = page.hyperlink_set.get(page.memory, id);
++                    const uri = e.uri.slice(page.memory);
++                    var link: CLink = .{
++                        .uri_offset = @intCast(bytes.len),
++                        .uri_len = @intCast(uri.len),
++                        .id_offset = 0,
++                        .id_len = 0,
++                        .implicit_id = 0,
++                        .explicit_id = 0,
++                    };
++                    bytes.pushSlice(uri);
++                    switch (e.id) {
++                        .implicit => |v| link.implicit_id = v,
++                        .explicit => |s| {
++                            const id_bytes = s.slice(page.memory);
++                            link.explicit_id = 1;
++                            link.id_offset = @intCast(bytes.len);
++                            link.id_len = @intCast(id_bytes.len);
++                            bytes.pushSlice(id_bytes);
++                        },
++                    }
++                    links.push(link);
++                }
++                link_index = entry.value_ptr.*;
++            }
++
++            cells.push(.{
++                .content = content,
++                .style = style_index,
++                .link = link_index,
++                .flags = flags,
++                .tab = cell.tab,
++            });
++        }
++    }
++
++    out.rows_len = rows.len;
++    out.cells_len = cells.len;
++    out.graphemes_len = graphemes.len;
++    out.styles_len = styles.len;
++    out.links_len = links.len;
++    out.bytes_len = bytes.len;
++    out.cols = page.size.cols;
++    out.blob = false;
++    out.capacity = .{
++        .rows = page.capacity.rows,
++        .styles = page.capacity.styles,
++        .hyperlink_bytes = page.capacity.hyperlink_bytes,
++        .grapheme_bytes = page.capacity.grapheme_bytes,
++        .string_bytes = page.capacity.string_bytes,
++    };
++    if (!(rows.fits() and cells.fits() and graphemes.fits() and
++        styles.fits() and links.fits() and bytes.fits())) return .out_of_space;
++    return .success;
++}
++
++/// The blob of a compressed page: this header, the page's metadata (its
++/// `Page` value, the memory pointer zeroed) and the compressed bytes. Only
++/// a library of the same build reads it back (`Page` is native layout).
++const BlobHeader = extern struct {
++    magic: u32 = blob_magic,
++    page_size: u32 = @sizeOf(Page),
++    memory_len: u64,
++    encoded_len: u64,
++    heap: u8,
++    reserved: [7]u8 = @splat(0),
++};
++const blob_magic: u32 = 0x42505456; // "VTPB"
++
++fn exportBlob(c: *const compression.Page, heap: bool, out: *CPage) Result {
++    const header: BlobHeader = .{
++        .memory_len = c.page.memory.len,
++        .encoded_len = c.encoded.len,
++        .heap = @intFromBool(heap),
++    };
++    var meta = c.page;
++    meta.memory = &.{};
++    var bytes: Out(u8) = .{ .ptr = out.bytes, .cap = out.bytes_cap };
++    bytes.pushSlice(std.mem.asBytes(&header));
++    bytes.pushSlice(std.mem.asBytes(&meta));
++    bytes.pushSlice(c.encoded);
++    out.rows_len = 0;
++    out.cells_len = 0;
++    out.graphemes_len = 0;
++    out.styles_len = 0;
++    out.links_len = 0;
++    out.bytes_len = bytes.len;
++    out.cols = c.page.size.cols;
++    out.blob = true;
++    out.capacity = .{};
++    return if (bytes.fits()) .success else .out_of_space;
++}
++
++// ---------------------------------------------------------------------
++// Import
++
++const Importer = struct {
++    wrapper: @typeInfo(terminal_c.Terminal).optional.child,
++    alloc: Allocator,
++    builders: [2]?PageList.Builder = .{ null, null },
++
++    fn deinit(self: *Importer) void {
++        for (&self.builders) |*b| if (b.*) |*builder| builder.deinit();
++        self.alloc.destroy(self);
++    }
++};
++
++pub const CImporter = ?*Importer;
++
++pub fn importer_new(
++    terminal_: terminal_c.Terminal,
++    out: ?*CImporter,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const o = out orelse return .invalid_value;
++    // A tracked reference would keep a pin into a page list the import
++    // replaces.
++    if (wrapper.tracked_grid_refs.count() != 0) return .invalid_value;
++    const alloc = wrapper.terminal.gpa();
++    const imp = alloc.create(Importer) catch return .out_of_memory;
++    imp.* = .{ .wrapper = wrapper, .alloc = alloc };
++    o.* = imp;
++    return .success;
++}
++
++pub fn importer_free(imp_: CImporter) callconv(lib.calling_conv) void {
++    const imp = imp_ orelse return;
++    imp.deinit();
++}
++
++pub fn importer_page(
++    imp_: CImporter,
++    screen_key: u8,
++    page_: ?*const CPage,
++) callconv(lib.calling_conv) Result {
++    const imp = imp_ orelse return .invalid_value;
++    const page = page_ orelse return .invalid_value;
++    if (page.size < @sizeOf(CPage) or screen_key > 1) return .invalid_value;
++    const t = imp.wrapper.terminal;
++    if (imp.builders[screen_key] == null) {
++        // Alternate screens never keep scrollback (as `screen.decode`);
++        // the primary's limits are copied from the terminal at finish.
++        imp.builders[screen_key] = PageList.Builder.init(imp.alloc, .{
++            .cols = t.cols,
++            .rows = t.rows,
++            .max_size = if (screen_key == 1) 0 else null,
++            .max_lines = if (screen_key == 1) 0 else null,
++        }) catch return .out_of_memory;
++    }
++    const builder = &imp.builders[screen_key].?;
++    if (page.blob) return importBlob(builder, page);
++    importRows(imp.alloc, builder, page) catch |err| return switch (err) {
++        error.OutOfMemory => .out_of_memory,
++        error.Invalid => .invalid_value,
++    };
++    return .success;
++}
++
++const GraphemeBytes = BitmapAllocator(4 * @sizeOf(u21));
++const StringBytes = BitmapAllocator(32);
++/// page.zig `hyperlink_cell_multiplier`.
++const hyperlink_cell_multiplier = 16;
++/// `snapshot/grid.zig` `kitty_virtual_placeholder`.
++const kitty_virtual_placeholder: u21 = 0x10EEEE;
++
++/// The capacity for a page: the exporter's when it gave one (the source
++/// page held exactly this content, so it fits; another build's hint may
++/// not, and the import then fails with out of memory, see vtmux's
++/// `import_state`), else what `Page.exactRowCapacity` would count, and at
++/// least the standard capacity.
++fn capacityFor(page: *const CPage) error{Invalid}!Capacity {
++    if (page.cols == 0 or page.rows_len == 0) return error.Invalid;
++    const rows = std.math.cast(u16, page.rows_len) orelse return error.Invalid;
++    const hint = page.capacity;
++    if (hint.rows != 0) {
++        return .{
++            .cols = page.cols,
++            .rows = @max(rows, std.math.cast(u16, hint.rows) orelse return error.Invalid),
++            .styles = std.math.cast(u16, hint.styles) orelse return error.Invalid,
++            .hyperlink_bytes = std.math.cast(u16, hint.hyperlink_bytes) orelse return error.Invalid,
++            .grapheme_bytes = std.math.cast(u32, hint.grapheme_bytes) orelse return error.Invalid,
++            .string_bytes = std.math.cast(u32, hint.string_bytes) orelse return error.Invalid,
++        };
++    }
++    var cap: Capacity = pagepkg.std_capacity.adjust(.{ .cols = page.cols }) catch
++        .{ .cols = page.cols, .rows = 1 };
++    cap.rows = @max(cap.rows, rows);
++
++    var grapheme_bytes: usize = 0;
++    if (page.graphemes) |g| {
++        var i: usize = 0;
++        while (i + 1 < page.graphemes_len) {
++            const n = g[i + 1];
++            grapheme_bytes += GraphemeBytes.bytesRequired(u21, n);
++            i += 2 + n;
++        }
++    }
++    var string_bytes: usize = 0;
++    var link_cells: usize = 0;
++    if (page.links) |l| {
++        if (page.links_len > 1) for (l[1..page.links_len]) |link| {
++            string_bytes += StringBytes.bytesRequired(u8, link.uri_len);
++            if (link.explicit_id != 0) string_bytes += StringBytes.bytesRequired(u8, link.id_len);
++        };
++    }
++    if (page.cells) |c| {
++        for (c[0..page.cells_len]) |cell| {
++            if (cell.link != 0) link_cells += 1;
++        }
++    }
++    const styles = stylepkg.Set.capacityForCount(page.styles_len -| 1);
++    const links = @max(
++        hyperlink.Set.capacityForCount(page.links_len -| 1),
++        std.math.divCeil(usize, link_cells, hyperlink_cell_multiplier) catch 0,
++    );
++    cap.styles = @intCast(@min(std.math.maxInt(u16), @max(cap.styles, styles)));
++    cap.grapheme_bytes = @intCast(@max(cap.grapheme_bytes, grapheme_bytes));
++    cap.string_bytes = @intCast(@max(cap.string_bytes, string_bytes));
++    cap.hyperlink_bytes = @intCast(@min(
++        std.math.maxInt(u16),
++        @max(cap.hyperlink_bytes, links * @sizeOf(hyperlink.Set.Item)),
++    ));
++    return cap;
++}
++
++fn styleColor(c: style_c.Color) stylepkg.Style.Color {
++    return switch (c.tag) {
++        .none => .none,
++        .palette => .{ .palette = c.value.palette },
++        .rgb => .{ .rgb = .{ .r = c.value.rgb.r, .g = c.value.rgb.g, .b = c.value.rgb.b } },
++    };
++}
++
++fn styleFromC(s: style_c.Style) stylepkg.Style {
++    var flags: @FieldType(stylepkg.Style, "flags") = .{};
++    flags.bold = s.bold;
++    flags.italic = s.italic;
++    flags.faint = s.faint;
++    flags.blink = s.blink;
++    flags.inverse = s.inverse;
++    flags.invisible = s.invisible;
++    flags.strikethrough = s.strikethrough;
++    flags.overline = s.overline;
++    flags.underline = enumFromInt(@FieldType(@TypeOf(flags), "underline"), s.underline) orelse .none;
++    flags.fg_palette_256 = s.fg_palette_256;
++    flags.bg_palette_256 = s.bg_palette_256;
++    return .{
++        .fg_color = styleColor(s.fg_color),
++        .bg_color = styleColor(s.bg_color),
++        .underline_color = styleColor(s.underline_color),
++        .flags = flags,
++    };
++}
++
++fn importRows(
++    alloc: Allocator,
++    builder: *PageList.Builder,
++    src: *const CPage,
++) (Allocator.Error || error{Invalid})!void {
++    const cap = try capacityFor(src);
++    const rows = (src.rows orelse return error.Invalid)[0..src.rows_len];
++    const cells = if (src.cells) |c| c[0..src.cells_len] else &[_]CCell{};
++    const styles = if (src.styles) |s| s[0..src.styles_len] else &[_]style_c.Style{};
++    const links = if (src.links) |l| l[0..src.links_len] else &[_]CLink{};
++    const bytes = if (src.bytes) |b| b[0..src.bytes_len] else &[_]u8{};
++    const graphemes = if (src.graphemes) |g| g[0..src.graphemes_len] else &[_]u32{};
++
++    const page = try builder.allocatePage(cap);
++    page.size = .{ .cols = src.cols, .rows = @intCast(rows.len) };
++    page.pauseIntegrityChecks(true);
++    defer page.pauseIntegrityChecks(false);
++
++    // Table indexes to page ids. Each table entry holds one reference
++    // while the cells take theirs, released at the end (as
++    // `page.decodePayloadBody`).
++    const style_ids = try alloc.alloc(stylepkg.Id, styles.len);
++    defer alloc.free(style_ids);
++    @memset(style_ids, 0);
++    for (styles, 0..) |s, i| {
++        if (i == 0) continue;
++        const value = styleFromC(s);
++        if (value.default()) continue;
++        style_ids[i] = page.styles.add(page.memory, value) catch return error.OutOfMemory;
++    }
++    defer for (style_ids) |id| if (id != 0) page.styles.release(page.memory, id);
++
++    const link_ids = try alloc.alloc(hyperlink.Id, links.len);
++    defer alloc.free(link_ids);
++    @memset(link_ids, 0);
++    for (links, 0..) |l, i| {
++        if (i == 0) continue;
++        if (@as(usize, l.uri_offset) + l.uri_len > bytes.len) return error.Invalid;
++        if (l.explicit_id != 0 and @as(usize, l.id_offset) + l.id_len > bytes.len) return error.Invalid;
++        const link: hyperlink.Hyperlink = .{
++            .uri = bytes[l.uri_offset..][0..l.uri_len],
++            .id = if (l.explicit_id != 0)
++                .{ .explicit = bytes[l.id_offset..][0..l.id_len] }
++            else
++                .{ .implicit = l.implicit_id },
++        };
++        link_ids[i] = page.insertHyperlink(link) catch return error.OutOfMemory;
++    }
++    defer for (link_ids) |id| if (id != 0) page.hyperlink_set.release(page.memory, id);
++
++    for (rows, 0..) |r, y| {
++        const row = page.getRow(y);
++        row.wrap = r.flags & 0x01 != 0;
++        row.wrap_continuation = r.flags & 0x02 != 0;
++        row.semantic_prompt = enumFromInt(Row.SemanticPrompt, (r.flags >> 2) & 0x3) orelse .none;
++        row.tmux_used = r.used;
++        const dst = page.getCells(row);
++        if (r.cell_count > dst.len) return error.Invalid;
++        if (@as(usize, r.cell_start) + r.cell_count > cells.len) return error.Invalid;
++        for (cells[r.cell_start..][0..r.cell_count], dst[0..r.cell_count]) |c, *cell| {
++            var v: Cell = .{};
++            switch (c.flags & 0x3) {
++                0, 1 => v.content = .{ .codepoint = .{ .data = std.math.cast(u21, c.content) orelse return error.Invalid } },
++                2 => {
++                    v.content_tag = .bg_color_palette;
++                    v.content = .{ .color_palette = .{
++                        .data = @truncate(c.content),
++                        .palette_256 = c.flags & (1 << 5) != 0,
++                    } };
++                },
++                else => {
++                    v.content_tag = .bg_color_rgb;
++                    v.content = .{ .color_rgb = .{
++                        .r = @truncate(c.content >> 16),
++                        .g = @truncate(c.content >> 8),
++                        .b = @truncate(c.content),
++                    } };
++                },
++            }
++            v.wide = enumFromInt(Cell.Wide, (c.flags >> 2) & 0x3) orelse .narrow;
++            v.protected = c.flags & (1 << 4) != 0;
++            v.semantic_content = enumFromInt(Cell.SemanticContent, (c.flags >> 6) & 0x3) orelse .output;
++            v.tab = c.tab;
++            if (c.style != 0) {
++                if (c.style >= style_ids.len) return error.Invalid;
++                const id = style_ids[c.style];
++                if (id != 0) {
++                    page.styles.use(page.memory, id);
++                    v.style_id = id;
++                    row.styled = true;
++                }
++            }
++            if (v.content_tag == .codepoint and
++                v.content.codepoint.data == kitty_virtual_placeholder)
++            {
++                row.kitty_virtual_placeholder = true;
++            }
++            cell.* = v;
++            if (c.link != 0) {
++                if (c.link >= link_ids.len) return error.Invalid;
++                const id = link_ids[c.link];
++                page.hyperlink_set.use(page.memory, id);
++                page.setHyperlink(row, cell, id) catch {
++                    page.hyperlink_set.release(page.memory, id);
++                    return error.OutOfMemory;
++                };
++            }
++        }
++    }
++
++    var i: usize = 0;
++    while (i < graphemes.len) {
++        if (i + 1 >= graphemes.len) return error.Invalid;
++        const index = graphemes[i];
++        const n = graphemes[i + 1];
++        if (i + 2 + n > graphemes.len) return error.Invalid;
++        const cps = graphemes[i + 2 ..][0..n];
++        i += 2 + n;
++        // Find the cell's row: rows are in cell order.
++        const y = rowOfCell(rows, index) orelse return error.Invalid;
++        const row = page.getRow(y);
++        const cell = &page.getCells(row)[index - rows[y].cell_start];
++        for (cps) |cp| {
++            const v = std.math.cast(u21, cp) orelse return error.Invalid;
++            page.appendGrapheme(row, cell, v) catch return error.OutOfMemory;
++        }
++    }
++}
++
++fn rowOfCell(rows: []const CRow, index: u32) ?usize {
++    var lo: usize = 0;
++    var hi: usize = rows.len;
++    while (lo < hi) {
++        const mid = (lo + hi) / 2;
++        const r = rows[mid];
++        if (index < r.cell_start) {
++            hi = mid;
++        } else if (index >= r.cell_start + r.cell_count) {
++            lo = mid + 1;
++        } else return mid;
++    }
++    return null;
++}
++
++fn importBlob(builder: *PageList.Builder, src: *const CPage) Result {
++    const bytes = (src.bytes orelse return .invalid_value)[0..src.bytes_len];
++    if (bytes.len < @sizeOf(BlobHeader) + @sizeOf(Page)) return .invalid_value;
++    var header: BlobHeader = undefined;
++    @memcpy(std.mem.asBytes(&header), bytes[0..@sizeOf(BlobHeader)]);
++    if (header.magic != blob_magic or header.page_size != @sizeOf(Page)) return .invalid_value;
++    const rest = bytes[@sizeOf(BlobHeader)..];
++    if (rest.len - @sizeOf(Page) != header.encoded_len) return .invalid_value;
++    var meta: Page = undefined;
++    @memcpy(std.mem.asBytes(&meta), rest[0..@sizeOf(Page)]);
++    const encoded = rest[@sizeOf(Page)..];
++    const len: usize = std.math.cast(usize, header.memory_len) orelse return .invalid_value;
++    if (len != Page.layout(meta.capacity).total_size) return .invalid_value;
++    const heap = header.heap != 0;
++    const std_size = Page.layout(pagepkg.std_capacity).total_size;
++    if (!heap and len > std_size) return .invalid_value;
++
++    // As `PageList.cloneCompressedNode`: fresh backing memory of the same
++    // kind, never touched until the page is first read and decoded.
++    const pool = &builder.pool;
++    const node = pool.nodes.create() catch return .out_of_memory;
++    errdefer pool.nodes.destroy(node);
++    const buf: []align(std.heap.page_size_min) u8 = if (heap)
++        pool.pages.allocator.alignedAlloc(u8, .fromByteUnits(std.heap.page_size_min), len) catch
++            return .out_of_memory
++    else
++        pool.pages.create() catch return .out_of_memory;
++    const encoded_alloc = if (builtin.is_test) pool.alloc else pool.pages.allocator;
++    const owned_encoded = encoded_alloc.dupe(u8, encoded) catch {
++        if (heap) pool.pages.allocator.free(buf) else pool.pages.destroy(@ptrCast(buf.ptr));
++        pool.nodes.destroy(node);
++        return .out_of_memory;
++    };
++    meta.memory = buf[0..len];
++    node.* = .{
++        .data = .{ .compressed = .{ .page = meta, .encoded = owned_encoded, .alloc = encoded_alloc } },
++        .serial = builder.page_serial,
++        .owned = if (heap) .heap else .pool,
++    };
++    builder.page_serial += 1;
++    builder.page_size += buf.len;
++    builder.pages.append(node);
++    return .success;
++}
++
++pub fn importer_finish(
++    imp_: CImporter,
++    state_: ?*const CState,
++) callconv(lib.calling_conv) Result {
++    const imp = imp_ orelse return .invalid_value;
++    defer imp.deinit();
++    const state = state_ orelse return .invalid_value;
++    if (state.size < @sizeOf(CState)) return .invalid_value;
++    const wrapper = imp.wrapper;
++    const t = wrapper.terminal;
++    if (state.cols != t.cols or state.rows != t.rows) return .invalid_value;
++    if (wrapper.tracked_grid_refs.count() != 0) return .invalid_value;
++    if (imp.builders[0] == null) return .invalid_value;
++    if (state.screens[1].present != (imp.builders[1] != null)) return .invalid_value;
++    finish(imp, state) catch |err| return switch (err) {
++        error.OutOfMemory => .out_of_memory,
++        else => .invalid_value,
++    };
++    return .success;
++}
++
++fn finish(imp: *Importer, state: *const CState) !void {
++    const t = imp.wrapper.terminal;
++    const io = t.screens.get(.primary).?.io;
++    const bytes = if (state.bytes) |b| b[0..state.bytes_len] else &[_]u8{};
++
++    // Build both page lists before changing anything.
++    var lists: [2]?PageList = .{ null, null };
++    errdefer for (&lists) |*l| if (l.*) |*list| list.deinit();
++    for (&imp.builders, 0..) |*b, i| {
++        if (b.*) |*builder| lists[i] = try builder.finish();
++    }
++
++    if (lists[1] != null) {
++        _ = try t.screens.getInit(io, imp.alloc, .alternate, .{
++            .cols = t.cols,
++            .rows = t.rows,
++            .max_scrollback_bytes = 0,
++        });
++    }
++
++    for (&lists, 0..) |*l, i| {
++        var list = l.* orelse continue;
++        l.* = null;
++        const screen = t.screens.get(screenKey(@intCast(i)).?).?;
++        list.limits = screen.pages.limits;
++        try installScreen(screen, list, &state.screens[i], bytes);
++    }
++
++    applyTerminal(t, state);
++    t.screens.switchTo(if (state.active_screen == 1 and t.screens.get(.alternate) != null)
++        .alternate
++    else
++        .primary);
++    t.flags.dirty.clear = true;
++}
++
++fn charsetFromC(c: CCharset) Screen.CharsetState {
++    var result: Screen.CharsetState = .{};
++    result.charsets.set(.G0, enumFromInt(charsets.Charset, c.g[0]) orelse .utf8);
++    result.charsets.set(.G1, enumFromInt(charsets.Charset, c.g[1]) orelse .utf8);
++    result.charsets.set(.G2, enumFromInt(charsets.Charset, c.g[2]) orelse .utf8);
++    result.charsets.set(.G3, enumFromInt(charsets.Charset, c.g[3]) orelse .utf8);
++    result.gl = enumFromInt(charsets.Slots, c.gl) orelse .G0;
++    result.gr = enumFromInt(charsets.Slots, c.gr) orelse .G2;
++    result.single_shift = if (c.single_shift == 0xff) null else enumFromInt(charsets.Slots, c.single_shift);
++    return result;
++}
++
++fn charsetToC(s: Screen.CharsetState) CCharset {
++    return .{
++        .g = .{
++            enumByte(s.charsets.get(.G0)),
++            enumByte(s.charsets.get(.G1)),
++            enumByte(s.charsets.get(.G2)),
++            enumByte(s.charsets.get(.G3)),
++        },
++        .gl = enumByte(s.gl),
++        .gr = enumByte(s.gr),
++        .single_shift = if (s.single_shift) |slot| enumByte(slot) else 0xff,
++    };
++}
++
++/// Replace `screen`'s pages with `list` and set its cursor and the rest
++/// of its state, as `snapshot/screen.zig` `decode` assembles a screen.
++fn installScreen(
++    screen: *Screen,
++    list: PageList,
++    s: *const CScreenState,
++    bytes: []const u8,
++) !void {
++    var pages = list;
++    // Locate the cursor before anything is replaced.
++    const y = @min(s.cursor_y, pages.rows - 1);
++    const row_pin = pages.pin(.{ .active = .{ .y = y } }) orelse return error.Invalid;
++    const x = @min(s.cursor_x, row_pin.node.cols() - 1);
++    const pin = try pages.trackPin(.{ .node = row_pin.node, .x = x, .y = row_pin.y });
++    var link: ?struct { uri: []const u8, id: ?[]const u8 } = null;
++    if (s.link_kind != 0) {
++        if (@as(usize, s.link_uri_offset) + s.link_uri_len > bytes.len) return error.Invalid;
++        const uri = bytes[s.link_uri_offset..][0..s.link_uri_len];
++        var id: ?[]const u8 = null;
++        if (s.link_kind == 2) {
++            if (@as(usize, s.link_id_offset) + s.link_id_len > bytes.len) return error.Invalid;
++            id = bytes[s.link_id_offset..][0..s.link_id_len];
++        }
++        link = .{ .uri = uri, .id = id };
++    }
++
++    // No fallible step until the cursor's style and link below.
++    screen.endHyperlink();
++    screen.cursor.style_id = stylepkg.default_id;
++    screen.pages.deinit();
++    screen.pages = pages;
++    screen.selection = null;
++    const rac = pin.rowAndCell();
++    screen.cursor.x = x;
++    screen.cursor.y = y;
++    screen.cursor.page_pin = pin;
++    screen.cursor.page_row = rac.row;
++    screen.cursor.page_cell = rac.cell;
++    screen.cursor.cursor_style = enumFromInt(Screen.CursorStyle, s.cursor_style) orelse .block;
++    // As it was, even off the last column (a resize can leave it so).
++    screen.cursor.pending_wrap = s.pending_wrap;
++    screen.cursor.protected = s.protected_;
++    screen.cursor.semantic_content = enumFromInt(Cell.SemanticContent, s.semantic_content) orelse .output;
++    screen.cursor.semantic_content_clear_eol = s.semantic_content_clear_eol;
++    screen.cursor.style = styleFromC(s.pen);
++    screen.charset = charsetFromC(s.charset);
++    screen.protected_mode = enumFromInt(@TypeOf(screen.protected_mode), s.protected_mode) orelse .off;
++    screen.kitty_keyboard.idx = @intCast(s.kitty_index & 7);
++    for (&screen.kitty_keyboard.flags, s.kitty_flags) |*f, raw| {
++        f.* = @bitCast(@as(u5, @truncate(raw)));
++    }
++    screen.semantic_prompt.click = click: {
++        const Kind = Screen.SemanticPrompt.SemanticClickKind;
++        const kind = enumFromInt(Kind, s.semantic_click_kind) orelse break :click .none;
++        break :click switch (kind) {
++            .none => .none,
++            .click_events => .{ .click_events = enumFromInt(
++                @FieldType(Screen.SemanticPrompt.SemanticClick, "click_events"),
++                s.semantic_click_value,
++            ) orelse break :click .none },
++            .cl => .{ .cl = enumFromInt(
++                @FieldType(Screen.SemanticPrompt.SemanticClick, "cl"),
++                s.semantic_click_value,
++            ) orelse break :click .none },
++        };
++    };
++    screen.saved_cursor = if (s.saved_present) .{
++        .x = @min(s.saved_x, pages.cols - 1),
++        .y = @min(s.saved_y, pages.rows - 1),
++        .style = styleFromC(s.saved_pen),
++        .protected = s.saved_protected,
++        .pending_wrap = s.saved_pending_wrap,
++        .origin = s.saved_origin,
++        .charset = charsetFromC(s.saved_charset),
++    } else null;
++
++    try screen.manualStyleUpdate();
++    if (link) |l| {
++        if (l.id) |id| {
++            try screen.startHyperlink(l.uri, id);
++        } else {
++            screen.cursor.hyperlink_implicit_id = s.link_implicit_id;
++            try screen.startHyperlink(l.uri, null);
++        }
++    }
++    screen.cursor.hyperlink_implicit_id = s.hyperlink_implicit_counter;
++    screen.semantic_prompt.seen = screen.cursor.semantic_content != .output or
++        anyPrompt(&screen.pages);
++    screen.pages.assertIntegrity();
++    screen.assertIntegrity();
++}
++
++fn anyPrompt(pages: *PageList) bool {
++    var node = pages.pages.first;
++    while (node) |n| : (node = n.next) {
++        const page = switch (n.data) {
++            .resident => |*p| p,
++            // Compressed pages are not read for a derived flag.
++            .compressed => continue,
++        };
++        for (0..page.size.rows) |y| {
++            const row = page.getRow(y);
++            if (row.semantic_prompt != .none) return true;
++            for (page.getCells(row)) |cell| {
++                if (cell.semantic_content == .prompt) return true;
++            }
++        }
++    }
++    return false;
++}
++
++fn applyTerminal(t: *ZigTerminal, s: *const CState) void {
++    t.scrolling_region = .{
++        .top = @min(s.scroll_top, t.rows - 1),
++        .bottom = @min(s.scroll_bottom, t.rows - 1),
++        .left = @min(s.scroll_left, t.cols - 1),
++        .right = @min(s.scroll_right, t.cols - 1),
++    };
++    t.status_display = enumFromInt(@TypeOf(t.status_display), s.status_display) orelse .main;
++    t.previous_char = if (s.previous_char == 0xffffffff)
++        null
++    else
++        std.math.cast(u21, s.previous_char);
++    t.cursor.is_default = s.cursor_is_default;
++    t.cursor.default_style = enumFromInt(Screen.CursorStyle, s.cursor_default_style) orelse .block;
++    t.cursor.default_blink = switch (s.cursor_default_blink) {
++        1 => false,
++        2 => true,
++        else => null,
++    };
++    t.flags.shell_redraws_prompt = enumFromInt(@TypeOf(t.flags.shell_redraws_prompt), s.shell_redraw) orelse .true;
++    t.flags.modify_other_keys_2 = s.modify_other_keys_2;
++    t.flags.mouse_event = enumFromInt(@TypeOf(t.flags.mouse_event), s.mouse_event) orelse .none;
++    t.flags.mouse_format = enumFromInt(@TypeOf(t.flags.mouse_format), s.mouse_format) orelse .x10;
++    t.flags.mouse_shift_capture = switch (s.mouse_shift_capture) {
++        1 => .false,
++        2 => .true,
++        else => .null,
++    };
++    t.mouse_shape = enumFromInt(@TypeOf(t.mouse_shape), s.mouse_shape) orelse .text;
++    t.flags.password_input = s.password_input;
++    t.flags.xt_checksum = @bitCast(@as(u5, @truncate(s.xt_checksum)));
++
++    for (s.modes[0..@min(s.modes_len, max_modes)]) |m| {
++        const mode = modespkg.modeFromInt(m.value, m.ansi) orelse continue;
++        setMode(&t.modes, mode, m.current, m.saved, m.default_);
++    }
++
++    t.tabstops.reset(0);
++    for (0..t.cols) |col| {
++        if (col / 8 >= max_tabstop_bytes) break;
++        if (s.tabstops[col / 8] & (@as(u8, 1) << @intCast(col % 8)) != 0) t.tabstops.set(col);
++    }
++
++    for (0..256) |i| {
++        if (s.palette_mask[i / 8] & (@as(u8, 1) << @intCast(i % 8)) != 0) {
++            t.colors.palette.set(@intCast(i), .{
++                .r = s.palette[i * 3],
++                .g = s.palette[i * 3 + 1],
++                .b = s.palette[i * 3 + 2],
++            });
++        }
++    }
++    t.colors.foreground.override = if (s.fg_set) .{ .r = s.fg[0], .g = s.fg[1], .b = s.fg[2] } else null;
++    t.colors.background.override = if (s.bg_set) .{ .r = s.bg[0], .g = s.bg[1], .b = s.bg[2] } else null;
++    t.colors.cursor.override = if (s.cursor_color_set)
++        .{ .r = s.cursor_color[0], .g = s.cursor_color[1], .b = s.cursor_color[2] }
++    else
++        null;
++    t.flags.dirty.palette = true;
++}
++
++fn setMode(state: *modespkg.ModeState, mode: modespkg.Mode, current: bool, saved: bool, default: bool) void {
++    switch (mode) {
++        inline else => |tag| {
++            const name = @tagName(tag);
++            @field(state.values, name) = current;
++            @field(state.saved, name) = saved;
++            @field(state.default, name) = default;
++        },
++    }
++}
++
++// ---------------------------------------------------------------------
++// State export
++
++pub fn state_export(
++    terminal_: terminal_c.Terminal,
++    out_: ?*CState,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const out = out_ orelse return .invalid_value;
++    if (out.size < @sizeOf(CState)) return .invalid_value;
++    const t = wrapper.terminal;
++    var bytes: Out(u8) = .{ .ptr = out.bytes, .cap = out.bytes_cap };
++
++    out.cols = t.cols;
++    out.rows = t.rows;
++    out.active_screen = if (t.screens.active_key == .alternate) 1 else 0;
++    out.scroll_top = t.scrolling_region.top;
++    out.scroll_bottom = t.scrolling_region.bottom;
++    out.scroll_left = t.scrolling_region.left;
++    out.scroll_right = t.scrolling_region.right;
++    out.status_display = enumByte(t.status_display);
++    out.previous_char = if (t.previous_char) |c| c else 0xffffffff;
++    out.cursor_is_default = t.cursor.is_default;
++    out.cursor_default_style = enumByte(t.cursor.default_style);
++    out.cursor_default_blink = if (t.cursor.default_blink) |b| (if (b) 2 else 1) else 0;
++    out.shell_redraw = enumByte(t.flags.shell_redraws_prompt);
++    out.modify_other_keys_2 = t.flags.modify_other_keys_2;
++    out.mouse_event = enumByte(t.flags.mouse_event);
++    out.mouse_format = enumByte(t.flags.mouse_format);
++    out.mouse_shift_capture = switch (t.flags.mouse_shift_capture) {
++        .null => 0,
++        .false => 1,
++        .true => 2,
++    };
++    out.mouse_shape = enumByte(t.mouse_shape);
++    out.password_input = t.flags.password_input;
++    out.xt_checksum = @as(u5, @bitCast(t.flags.xt_checksum));
++
++    out.modes_len = 0;
++    inline for (@typeInfo(modespkg.Mode).@"enum".field_names) |name| {
++        const mode: modespkg.Mode = @field(modespkg.Mode, name);
++        const tag = modespkg.ModeTag.fromMode(mode);
++        out.modes[out.modes_len] = .{
++            .value = tag.value,
++            .ansi = tag.ansi,
++            .current = @field(t.modes.values, name),
++            .saved = @field(t.modes.saved, name),
++            .default_ = @field(t.modes.default, name),
++        };
++        out.modes_len += 1;
++    }
++
++    @memset(&out.tabstops, 0);
++    for (0..t.cols) |col| {
++        if (col / 8 >= max_tabstop_bytes) break;
++        if (t.tabstops.get(col)) out.tabstops[col / 8] |= @as(u8, 1) << @intCast(col % 8);
++    }
++
++    @memset(&out.palette_mask, 0);
++    for (0..256) |i| {
++        const c = t.colors.palette.current[i];
++        out.palette[i * 3] = c.r;
++        out.palette[i * 3 + 1] = c.g;
++        out.palette[i * 3 + 2] = c.b;
++        if (t.colors.palette.mask.isSet(i)) out.palette_mask[i / 8] |= @as(u8, 1) << @intCast(i % 8);
++    }
++    out.fg_set = t.colors.foreground.override != null;
++    out.fg = rgbBytes(t.colors.foreground.override);
++    out.bg_set = t.colors.background.override != null;
++    out.bg = rgbBytes(t.colors.background.override);
++    out.cursor_color_set = t.colors.cursor.override != null;
++    out.cursor_color = rgbBytes(t.colors.cursor.override);
++
++    for (&out.screens, 0..) |*s, i| {
++        const screen = screenOf(t, @intCast(i)) orelse {
++            s.* = std.mem.zeroes(CScreenState);
++            s.pen = .default;
++            s.saved_pen = .default;
++            continue;
++        };
++        exportScreen(screen, s, &bytes);
++    }
++    out.bytes_len = bytes.len;
++    return if (bytes.fits()) .success else .out_of_space;
++}
++
++fn rgbBytes(c: anytype) [3]u8 {
++    const v = c orelse return .{ 0, 0, 0 };
++    return .{ v.r, v.g, v.b };
++}
++
++fn exportScreen(screen: *const Screen, s: *CScreenState, bytes: *Out(u8)) void {
++    const c = &screen.cursor;
++    s.* = std.mem.zeroes(CScreenState);
++    s.present = true;
++    s.cursor_x = c.x;
++    s.cursor_y = c.y;
++    s.cursor_style = enumByte(c.cursor_style);
++    s.pending_wrap = c.pending_wrap;
++    s.protected_ = c.protected;
++    s.semantic_content = @backingInt(c.semantic_content);
++    s.semantic_content_clear_eol = c.semantic_content_clear_eol;
++    s.pen = .fromStyle(c.style);
++    if (c.hyperlink) |link| {
++        s.link_uri_offset = @intCast(bytes.len);
++        s.link_uri_len = @intCast(link.uri.len);
++        bytes.pushSlice(link.uri);
++        switch (link.id) {
++            .implicit => |v| {
++                s.link_kind = 1;
++                s.link_implicit_id = v;
++            },
++            .explicit => |id| {
++                s.link_kind = 2;
++                s.link_id_offset = @intCast(bytes.len);
++                s.link_id_len = @intCast(id.len);
++                bytes.pushSlice(id);
++            },
++        }
++    }
++    s.hyperlink_implicit_counter = c.hyperlink_implicit_id;
++    s.charset = charsetToC(screen.charset);
++    s.protected_mode = enumByte(screen.protected_mode);
++    s.kitty_index = screen.kitty_keyboard.idx;
++    for (screen.kitty_keyboard.flags, &s.kitty_flags) |f, *raw| {
++        raw.* = @as(u5, @bitCast(f));
++    }
++    switch (screen.semantic_prompt.click) {
++        .none => {},
++        .click_events => |v| {
++            s.semantic_click_kind = 1;
++            s.semantic_click_value = enumByte(v);
++        },
++        .cl => |v| {
++            s.semantic_click_kind = 2;
++            s.semantic_click_value = enumByte(v);
++        },
++    }
++    s.saved_pen = .default;
++    if (screen.saved_cursor) |saved| {
++        s.saved_present = true;
++        s.saved_x = saved.x;
++        s.saved_y = saved.y;
++        s.saved_pen = .fromStyle(saved.style);
++        s.saved_protected = saved.protected;
++        s.saved_pending_wrap = saved.pending_wrap;
++        s.saved_origin = saved.origin;
++        s.saved_charset = charsetToC(saved.charset);
++    }
++}
++
++pub fn set_active_screen(
++    terminal_: terminal_c.Terminal,
++    screen_key: u8,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const key = screenKey(screen_key) orelse return .invalid_value;
++    if (wrapper.terminal.screens.get(key) == null) return .no_value;
++    wrapper.terminal.screens.switchTo(key);
++    wrapper.terminal.flags.dirty.clear = true;
++    return .success;
++}
++
++test "vtmux state: rows round trip into a fresh terminal" {
++    const testing = std.testing;
++    var a: terminal_c.Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(null, &a, 10, 3));
++    defer terminal_c.free(a);
++    const input = "\x1b[1;38;5;3mab\x1b[0m\xe4\xb8\x96\x1b]8;id=x;http://e\x1b\\L\x1b]8;;\x1b\\e\xcc\x81\r\n0123456789wrap\x1b7\x1b[2;3H";
++    terminal_c.vt_write(a, input.ptr, input.len);
++
++    var b: terminal_c.Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(null, &b, 10, 3));
++    defer terminal_c.free(b);
++
++    var rows: [64]CRow = undefined;
++    var cells: [640]CCell = undefined;
++    var graphemes: [64]u32 = undefined;
++    var styles: [16]style_c.Style = undefined;
++    var links: [8]CLink = undefined;
++    var bytes: [256]u8 = undefined;
++    var imp: CImporter = null;
++    try testing.expectEqual(Result.success, importer_new(b, &imp));
++    var n: usize = 0;
++    try testing.expectEqual(Result.success, page_count(a, 0, &n));
++    for (0..n) |i| {
++        var page: CPage = .{
++            .size = @sizeOf(CPage),
++            .rows = &rows,
++            .rows_cap = rows.len,
++            .rows_len = 0,
++            .cells = &cells,
++            .cells_cap = cells.len,
++            .cells_len = 0,
++            .graphemes = &graphemes,
++            .graphemes_cap = graphemes.len,
++            .graphemes_len = 0,
++            .styles = &styles,
++            .styles_cap = styles.len,
++            .styles_len = 0,
++            .links = &links,
++            .links_cap = links.len,
++            .links_len = 0,
++            .bytes = &bytes,
++            .bytes_cap = bytes.len,
++            .bytes_len = 0,
++            .cols = 0,
++            .blob = false,
++            .capacity = .{},
++        };
++        try testing.expectEqual(Result.success, page_export(a, 0, i, true, &page));
++        try testing.expectEqual(Result.success, importer_page(imp, 0, &page));
++    }
++    var state: CState = undefined;
++    state.size = @sizeOf(CState);
++    var state_bytes: [256]u8 = undefined;
++    state.bytes = &state_bytes;
++    state.bytes_cap = state_bytes.len;
++    try testing.expectEqual(Result.success, state_export(a, &state));
++    try testing.expectEqual(Result.success, importer_finish(imp, &state));
++
++    const ta = a.?.terminal;
++    const tb = b.?.terminal;
++    const sa = ta.screens.active;
++    const sb = tb.screens.active;
++    try testing.expectEqual(sa.cursor.x, sb.cursor.x);
++    try testing.expectEqual(sa.cursor.y, sb.cursor.y);
++    try testing.expect(sb.saved_cursor != null);
++    const str_a = try sa.dumpStringAlloc(testing.allocator, .{ .screen = .{} });
++    defer testing.allocator.free(str_a);
++    const str_b = try sb.dumpStringAlloc(testing.allocator, .{ .screen = .{} });
++    defer testing.allocator.free(str_b);
++    try testing.expectEqualStrings(str_a, str_b);
++}

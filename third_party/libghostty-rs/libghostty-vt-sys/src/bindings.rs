@@ -5900,3 +5900,227 @@ unsafe extern "C" {
         len: usize,
     ) -> Result::Type;
 }
+#[doc = " One row of an exported page (vtmux patch 0017, vtmux_state.h)."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub struct VtmuxRow {
+    pub cell_start: u32,
+    pub cell_count: u16,
+    pub used: u16,
+    pub flags: u8,
+    pub reserved: [u8; 3],
+}
+#[doc = " One cell of an exported page (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub struct VtmuxCell {
+    pub content: u32,
+    pub style: u16,
+    pub link: u16,
+    pub flags: u16,
+    pub tab: u8,
+    pub reserved: u8,
+}
+#[doc = " A hyperlink of an exported page (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub struct VtmuxLink {
+    pub uri_offset: u32,
+    pub uri_len: u32,
+    pub id_offset: u32,
+    pub id_len: u32,
+    pub implicit_id: u32,
+    pub explicit_id: u8,
+    pub reserved: [u8; 3],
+}
+#[doc = " A page's allocation sizes, hints (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub struct VtmuxCapacity {
+    pub rows: u32,
+    pub styles: u32,
+    pub hyperlink_bytes: u32,
+    pub grapheme_bytes: u32,
+    pub string_bytes: u32,
+}
+#[doc = " One page, exported or to import (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct VtmuxPage {
+    pub size: usize,
+    pub rows: *mut VtmuxRow,
+    pub rows_cap: usize,
+    pub rows_len: usize,
+    pub cells: *mut VtmuxCell,
+    pub cells_cap: usize,
+    pub cells_len: usize,
+    pub graphemes: *mut u32,
+    pub graphemes_cap: usize,
+    pub graphemes_len: usize,
+    pub styles: *mut Style,
+    pub styles_cap: usize,
+    pub styles_len: usize,
+    pub links: *mut VtmuxLink,
+    pub links_cap: usize,
+    pub links_len: usize,
+    pub bytes: *mut u8,
+    pub bytes_cap: usize,
+    pub bytes_len: usize,
+    pub cols: u16,
+    pub blob: bool,
+    pub capacity: VtmuxCapacity,
+}
+#[doc = " Charset state (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub struct VtmuxCharset {
+    pub g: [u8; 4],
+    pub gl: u8,
+    pub gr: u8,
+    pub single_shift: u8,
+    pub reserved: u8,
+}
+#[doc = " One screen's state outside its grid (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct VtmuxScreenState {
+    pub present: bool,
+    pub cursor_x: u16,
+    pub cursor_y: u16,
+    pub cursor_style: u8,
+    pub pending_wrap: bool,
+    pub protected_: bool,
+    pub semantic_content: u8,
+    pub semantic_content_clear_eol: bool,
+    pub pen: Style,
+    pub link_kind: u8,
+    pub link_implicit_id: u32,
+    pub link_uri_offset: u32,
+    pub link_uri_len: u32,
+    pub link_id_offset: u32,
+    pub link_id_len: u32,
+    pub hyperlink_implicit_counter: u32,
+    pub charset: VtmuxCharset,
+    pub protected_mode: u8,
+    pub kitty_flags: [u8; 8],
+    pub kitty_index: u8,
+    pub semantic_click_kind: u8,
+    pub semantic_click_value: u8,
+    pub saved_present: bool,
+    pub saved_x: u16,
+    pub saved_y: u16,
+    pub saved_pen: Style,
+    pub saved_protected: bool,
+    pub saved_pending_wrap: bool,
+    pub saved_origin: bool,
+    pub saved_charset: VtmuxCharset,
+}
+#[doc = " One mode (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub struct VtmuxMode {
+    pub value: u16,
+    pub ansi: bool,
+    pub current: bool,
+    pub saved: bool,
+    pub default_: bool,
+}
+pub const VTMUX_MAX_MODES: usize = 96;
+pub const VTMUX_MAX_TABSTOP_BYTES: usize = 8192;
+#[doc = " The terminal's state outside its grids (vtmux patch 0017)."]
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct VtmuxState {
+    pub size: usize,
+    pub cols: u16,
+    pub rows: u16,
+    pub active_screen: u8,
+    pub scroll_top: u16,
+    pub scroll_bottom: u16,
+    pub scroll_left: u16,
+    pub scroll_right: u16,
+    pub status_display: u8,
+    pub previous_char: u32,
+    pub cursor_is_default: bool,
+    pub cursor_default_style: u8,
+    pub cursor_default_blink: u8,
+    pub shell_redraw: u8,
+    pub modify_other_keys_2: bool,
+    pub mouse_event: u8,
+    pub mouse_format: u8,
+    pub mouse_shift_capture: u8,
+    pub mouse_shape: u8,
+    pub password_input: bool,
+    pub xt_checksum: u8,
+    pub modes_len: usize,
+    pub modes: [VtmuxMode; VTMUX_MAX_MODES],
+    pub tabstops: [u8; VTMUX_MAX_TABSTOP_BYTES],
+    pub palette_mask: [u8; 32],
+    pub palette: [u8; 768],
+    pub fg_set: bool,
+    pub fg: [u8; 3],
+    pub bg_set: bool,
+    pub bg: [u8; 3],
+    pub cursor_color_set: bool,
+    pub cursor_color: [u8; 3],
+    pub screens: [VtmuxScreenState; 2],
+    pub bytes: *mut u8,
+    pub bytes_cap: usize,
+    pub bytes_len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    // vtmux_state.zig asserts the same sizes on its side.
+    ["Size of VtmuxRow"][::std::mem::size_of::<VtmuxRow>() - 12usize];
+    ["Size of VtmuxCell"][::std::mem::size_of::<VtmuxCell>() - 12usize];
+    ["Size of VtmuxLink"][::std::mem::size_of::<VtmuxLink>() - 24usize];
+    ["Size of VtmuxCapacity"][::std::mem::size_of::<VtmuxCapacity>() - 20usize];
+    ["Size of VtmuxPage"][::std::mem::size_of::<VtmuxPage>() - 176usize];
+    ["Offset of VtmuxPage::capacity"][::std::mem::offset_of!(VtmuxPage, capacity) - 156usize];
+    ["Size of VtmuxScreenState"][::std::mem::size_of::<VtmuxScreenState>() - 232usize];
+    ["Offset of VtmuxScreenState::saved_pen"]
+        [::std::mem::offset_of!(VtmuxScreenState, saved_pen) - 144usize];
+    ["Size of VtmuxState"][::std::mem::size_of::<VtmuxState>() - 10120usize];
+    ["Offset of VtmuxState::screens"][::std::mem::offset_of!(VtmuxState, screens) - 9632usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct VtmuxImporterImpl {
+    _unused: [u8; 0],
+}
+pub type VtmuxImporter = *mut VtmuxImporterImpl;
+unsafe extern "C" {
+    #[doc = " Pages of a screen, history and active area (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_page_count(
+        terminal: Terminal,
+        screen: u8,
+        out_count: *mut usize,
+    ) -> Result::Type;
+    #[doc = " Export page `index` (0 the oldest) of a screen (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_page_export(
+        terminal: Terminal,
+        screen: u8,
+        index: usize,
+        blob_if_compressed: bool,
+        page: *mut VtmuxPage,
+    ) -> Result::Type;
+    #[doc = " Export the terminal's state outside its grids (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_state_export(terminal: Terminal, state: *mut VtmuxState) -> Result::Type;
+    #[doc = " Start importing into a fresh terminal (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_importer_new(terminal: Terminal, out: *mut VtmuxImporter) -> Result::Type;
+    #[doc = " Add the next page of a screen to an import (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_importer_page(
+        importer: VtmuxImporter,
+        screen: u8,
+        page: *const VtmuxPage,
+    ) -> Result::Type;
+    #[doc = " Finish an import; frees the importer (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_importer_finish(
+        importer: VtmuxImporter,
+        state: *const VtmuxState,
+    ) -> Result::Type;
+    #[doc = " Free an import not finished (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_importer_free(importer: VtmuxImporter);
+    #[doc = " Make a screen the active one (vtmux patch 0017)."]
+    pub fn ghostty_vtmux_set_active_screen(terminal: Terminal, screen: u8) -> Result::Type;
+}

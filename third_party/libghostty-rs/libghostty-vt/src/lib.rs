@@ -110,6 +110,7 @@ pub mod selection;
 pub mod sgr;
 pub mod style;
 pub mod unicode;
+pub mod vtmux;
 
 #[doc(inline)]
 pub use crate::{

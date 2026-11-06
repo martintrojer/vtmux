@@ -10,6 +10,15 @@ use std::ops::Deref;
 
 pub use bindings::*;
 
+/// vtmux: identifies the Ghostty commit, local patches, optimize mode and
+/// target this library was built from (`build.rs` `emit_patch_stack`).
+/// Two builds with the same value lay out pages alike, so one reads the
+/// other's compressed-page blobs (patch 0017).
+pub const PATCH_STACK: &str = match option_env!("LIBGHOSTTY_VT_PATCH_STACK") {
+    Some(v) => v,
+    None => "unknown",
+};
+
 /// Initialize a "sized" FFI object.
 #[macro_export]
 macro_rules! sized {

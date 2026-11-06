@@ -75,6 +75,8 @@ fn main() {
         return;
     }
 
+    emit_patch_stack();
+
     let link_mode = LinkMode::current();
     // Cargo always sets TARGET for build scripts, so read it once here and
     // hand it to whichever path runs rather than re-reading it per call site.
@@ -107,6 +109,34 @@ fn main() {
     }
 
     build_vendored(link_mode, &target);
+}
+
+/// vtmux: a hash of what decides Ghostty's native page layout in this
+/// build: the pinned commit, every local patch, the Zig optimize mode and
+/// the target (`LIBGHOSTTY_VT_PATCH_STACK`, read by `ffi::PATCH_STACK`).
+/// Compressed-page blobs (patch 0017) are only read back by a binary with
+/// the same value. FNV-1a, so it does not depend on the Rust version.
+fn emit_patch_stack() {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |bytes: &[u8]| {
+        for &b in bytes {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        h ^= 0xff;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    };
+    eat(GHOSTTY_COMMIT.as_bytes());
+    if let Ok(dir) = env::var("GHOSTTY_SOURCE_DIR") {
+        eat(b"source-dir");
+        eat(dir.as_bytes());
+    }
+    for (_, text) in local_patches() {
+        eat(text.as_bytes());
+    }
+    eat(zig_optimize_mode().as_bytes());
+    eat(env::var("TARGET").unwrap_or_default().as_bytes());
+    println!("cargo:rustc-env=LIBGHOSTTY_VT_PATCH_STACK={h:016x}");
 }
 
 /// Build libghostty-vt from source via zig. The zig build itself generates

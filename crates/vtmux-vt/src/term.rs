@@ -20,8 +20,11 @@ use libghostty_vt::terminal::{
 use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
+
+mod state;
 use crate::dcs::{self, Dcs, Dispatch, Step};
 use crate::palette::{self, OscEnd, Palette, Reply};
+pub use state::*;
 
 /// Where a history row is read from.
 pub(crate) enum HistoryRow<'a> {

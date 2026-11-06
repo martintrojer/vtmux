@@ -231,6 +231,11 @@ pub struct ScreenView {
 /// terminal (`respawn-pane`) never looks like an old one.
 static STAMP: AtomicU64 = AtomicU64::new(1);
 
+/// A row stamp no view has used.
+pub(crate) fn fresh_stamp() -> u64 {
+    STAMP.fetch_add(1, Ordering::Relaxed)
+}
+
 impl std::fmt::Debug for ScreenView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScreenView").finish_non_exhaustive()

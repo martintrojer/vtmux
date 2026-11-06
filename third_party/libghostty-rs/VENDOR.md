@@ -408,6 +408,63 @@ Recorded per commit in git history; the list is kept current:
   reflow cutting wide char tail" resizes the alternate screen. New test
   `Terminal: DECAWM as tmux (vtmux)`. Not an upstream candidate.
 
+- `patches/0017-vtmux-state-export.patch` (new `src/terminal/c/vtmux_state.zig`
+  and `include/ghostty/vt/vtmux_state.h`; exports in `c/main.zig`,
+  `lib_vt.zig`, `vt.h`): export and import of a terminal's whole state for
+  live upgrade (vtmux `docs/specs/2026-11-06-live-upgrade.md`, decisions 5,
+  11, 23, 24). Functions only: no struct, page or row layout changes.
+  - `ghostty_vtmux_page_count` / `ghostty_vtmux_page_export`: every page of
+    a screen (history and active area, oldest first) as rows of cells in the
+    header's own records (`GhosttyVtmuxRow`: wrap, continuation, semantic
+    prompt, `tmux_used`; `GhosttyVtmuxCell`: codepoint or background,
+    width, protected, the palette-256 bit, semantic content, the tab mark,
+    style and link indexes), with the page's style table (`GhosttyStyle`,
+    palette-256 flags included), hyperlinks (URI, explicit or implicit id),
+    grapheme codepoints and capacity. Filled through the page's accessors,
+    so the records survive a pin bump. A compressed page is decoded into
+    scratch memory (`compression.Page.cloneBuf`) and stays compressed, or,
+    with `blob_if_compressed`, comes out as a blob: a small header, the
+    native `Page` value and the LZ4 bytes, readable only by the same build
+    (decision 23; vtmux checks `ffi::PATCH_STACK`, the import checks the
+    magic and `@sizeOf(Page)`).
+  - `ghostty_vtmux_state_export`: the state outside the grids
+    (`GhosttyVtmuxState`): every mode by number with its current, saved
+    and default value, tab stops, scroll region, status display, REP's
+    previous character, cursor defaults, mouse/keyboard flags, palette
+    overrides and OSC 10/11/12 colours; per screen the cursor (position,
+    pending wrap, visual style, pen, protected, open hyperlink, implicit
+    hyperlink counter), saved cursor, charsets, protected mode, Kitty
+    keyboard stack and semantic-click state. Title and pwd use the
+    existing options.
+  - `ghostty_vtmux_importer_new` / `_page` / `_finish` / `_free`: build
+    each screen's pages with `PageList.Builder` (rows into fresh pages via
+    `styles.add`, `insertHyperlink`, `setHyperlink`, `appendGrapheme`;
+    blobs as compressed nodes over fresh backing memory, as
+    `cloneCompressedNode` does), then swap them into a fresh terminal's
+    screens (refused while it has tracked grid refs) and rebuild the
+    cursor as `snapshot/screen.zig` `decode` does. A page's capacity is the
+    exporter's when given (it held that content), else what
+    `Page.exactRowCapacity` would count.
+  - `ghostty_vtmux_set_active_screen`: switch screens with no mode side
+    effects (vtmux pins OSC 133 marks on the primary before switching).
+  Ghostty's own snapshot codec (`src/terminal/snapshot`) is not used: its
+  format is still breaking (v1 "work-in-progress"), it drops vtmux's patch
+  bits (`tmux_used`, the palette-256 flags, tab marks), and it cannot carry
+  compressed pages compressed. Wrapper: `libghostty-vt/src/vtmux.rs`
+  (`Terminal::vtmux_page_export`, `vtmux_state_export`, `vtmux_importer`,
+  `Importer`, `vtmux_set_title`, `vtmux_set_pwd`, `vtmux_set_active_screen`),
+  `Vtmux*` structs and functions added by hand to `bindings.rs` with size
+  asserts that `vtmux_state.zig` asserts too. `build.rs` `emit_patch_stack`
+  sets `LIBGHOSTTY_VT_PATCH_STACK` (FNV-1a of the commit, every patch, the
+  Zig optimize mode and the target), read as `ffi::PATCH_STACK`.
+  vtmux-vt's `PaneTerm::export_state` / `import_state` (`term/state.rs`)
+  are the one consumer. Tests: `vtmux state: rows round trip into a
+  fresh terminal` (`zig build test-lib-vt -Dtest-filter="vtmux state"`);
+  the full `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none`
+  gives 3257 pass, 38 skip and the known `tabClear single` failure;
+  vtmux's `crates/vtmux-vt/tests/state_roundtrip.rs`. Not an upstream
+  candidate as is (it carries vtmux's patch bits).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
@@ -425,6 +482,13 @@ Recorded per commit in git history; the list is kept current:
    still compiles), and fix the wrapper.
 4. Re-apply or drop each `libghostty-vt-sys/patches/*.patch` (the build
    fails if one no longer applies).
-5. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES`,
+5. Patch 0017 reads and writes Terminal, Screen and page fields by name:
+   a renamed or new field fails its build, and a new mode or terminal
+   flag that should survive a live upgrade needs adding to
+   `vtmux_state.zig` (`crates/vtmux-vt/tests/state_roundtrip.rs` compares
+   whole exported states, so a field it drops shows there only once a
+   test sets it). The blob format changes with any `Page` change; that is
+   what `PATCH_STACK` is for.
+6. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES`,
    `PAGE_GRID_BYTES`, `CELLS_ALIGN`; `page_rows_matches_ghostty` fails if
    the page layout changed) and run the slow gate.

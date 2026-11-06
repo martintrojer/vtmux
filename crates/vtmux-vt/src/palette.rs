@@ -126,7 +126,46 @@ fn osc_number(p: &[u8]) -> Option<(u32, &[u8])> {
     }
 }
 
+/// tmux's palette as [`crate::TermState`] carries it: the entries OSC 4
+/// set, and the colours OSC 10, 11 and 12 set.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PaletteState {
+    pub entries: Vec<(u8, Rgb)>,
+    pub fg: Option<Rgb>,
+    pub bg: Option<Rgb>,
+    pub cursor: Option<Rgb>,
+}
+
 impl Palette {
+    pub(crate) fn state(&self) -> PaletteState {
+        let entries = self.entries.as_ref().map_or_else(Vec::new, |e| {
+            e.iter()
+                .enumerate()
+                .filter_map(|(i, c)| Some((u8::try_from(i).ok()?, (*c)?)))
+                .collect()
+        });
+        PaletteState {
+            entries,
+            fg: self.fg,
+            bg: self.bg,
+            cursor: self.cursor,
+        }
+    }
+
+    /// Take `state`, keeping the colour name check.
+    pub(crate) fn restore(&mut self, state: &PaletteState) {
+        self.entries = (!state.entries.is_empty()).then(|| {
+            let mut e = Box::new([None; 256]);
+            for &(i, c) in &state.entries {
+                e[usize::from(i)] = Some(c);
+            }
+            e
+        });
+        self.fg = state.fg;
+        self.bg = state.bg;
+        self.cursor = state.cursor;
+    }
+
     pub(crate) fn set_name_check(&mut self, names: NameCheck) {
         self.names = names;
     }

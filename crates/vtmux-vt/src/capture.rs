@@ -749,6 +749,68 @@ impl FrozenRow {
         }
     }
 
+    /// This row as [`crate::TermState`] carries it.
+    pub(crate) fn to_state(&self) -> crate::FrozenRowState {
+        crate::FrozenRowState {
+            cells: self
+                .cells
+                .iter()
+                .map(|c| crate::FrozenCell {
+                    text: c.text.as_str().to_owned(),
+                    style: c.style,
+                    empty: c.empty,
+                    wide: match c.wide {
+                        Width::Narrow => 0,
+                        Width::Double => 1,
+                        Width::SpacerTail => 2,
+                        Width::SpacerHead => 3,
+                    },
+                    acs: c.acs,
+                    link: c.link,
+                    target: c
+                        .target
+                        .as_ref()
+                        .map(|t| (t.uri.clone(), t.id.as_ref().map(crate::FrozenLinkId::from))),
+                    tab: c.tab,
+                })
+                .collect(),
+            len: self.len,
+            wrapped: self.wrapped,
+        }
+    }
+
+    /// The row [`FrozenRow::to_state`] gave.
+    pub(crate) fn from_state(state: &crate::FrozenRowState) -> Self {
+        Self {
+            cells: state
+                .cells
+                .iter()
+                .map(|c| RowCell {
+                    text: CellText::from(c.text.as_str()),
+                    style: c.style,
+                    empty: c.empty,
+                    wide: match c.wide {
+                        1 => Width::Double,
+                        2 => Width::SpacerTail,
+                        3 => Width::SpacerHead,
+                        _ => Width::Narrow,
+                    },
+                    acs: c.acs,
+                    link: c.link,
+                    target: c.target.as_ref().map(|(uri, id)| {
+                        Box::new(LinkTarget {
+                            uri: uri.clone(),
+                            id: id.as_ref().map(HyperlinkId::from),
+                        })
+                    }),
+                    tab: c.tab,
+                })
+                .collect(),
+            len: state.len,
+            wrapped: state.wrapped,
+        }
+    }
+
     fn thaw(&self) -> (Vec<RowCell>, bool) {
         let mut cells = self.cells.clone();
         cells.resize(
