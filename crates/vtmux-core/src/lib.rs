@@ -19,4 +19,5 @@ pub mod style;
 pub mod styled;
 pub mod term_features;
 pub mod time;
+pub mod version;
 pub mod width;

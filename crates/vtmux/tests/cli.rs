@@ -928,7 +928,7 @@ fn kill_server() {
 }
 
 /// Under its own name (D20, D21): `vtmux-UID` socket directory, `vtmux`
-/// in getopt messages and usage, and `-V` naming both versions.
+/// in getopt messages and usage, and `-V` printing the D25 version.
 #[test]
 fn own_name() {
     let w = World::new(&vtmux_bin());
@@ -942,10 +942,7 @@ fn own_name() {
         )
     );
     let v = w.raw(&["-V"]);
-    assert_eq!(
-        v.stdout,
-        format!("vtmux {} (tmux 3.8)\n", env!("CARGO_PKG_VERSION"))
-    );
+    assert_eq!(v.stdout, "vtmux 3.8-beta1\n");
     assert!(
         w.raw(&["-Z"])
             .stderr
@@ -953,6 +950,27 @@ fn own_name() {
     );
     let (_keep, as_tmux) = vtmux_as_tmux();
     assert_eq!(World::new(&as_tmux).raw(&["-V"]).stdout, "tmux 3.8\n");
+}
+
+/// D25: `#{version}` stays tmux's bare `3.8` for plugin gates;
+/// `#{vtmux_version}` is the display version. It must also be true for
+/// `if-shell -F`, which treats a result starting with `0` as false
+/// (cmd-if-shell.c `cmd_if_shell_exec`: `*shellcmd != '0'`), as the old
+/// `0.0.0` did not.
+#[test]
+fn version_formats() {
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a", "cat", "-"]);
+    let r = w.run(&["display", "-p", "#{version} #{vtmux_version}"]);
+    assert_eq!((r.code, r.stdout.as_str()), (0, "3.8 3.8-beta1\n"));
+    let r = w.run(&[
+        "if-shell",
+        "-F",
+        "#{vtmux_version}",
+        "display -p yes",
+        "display -p no",
+    ]);
+    assert_eq!((r.code, r.stdout.as_str()), (0, "yes\n"));
 }
 
 fn uid() -> String {
