@@ -413,7 +413,9 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
                 );
             }
             Ok(Some(ServerMsg::Flags { wait_exit })) => wait = wait_exit,
-            // A control client's file I/O is the server's (file.c:321).
+            // A control client's file I/O is the server's (file.c:321). It
+            // stays connected across an upgrade, and only a requester gets
+            // a result (live-upgrade spec, decision 26).
             Ok(Some(
                 ServerMsg::Ready
                 | ServerMsg::ReadOpen { .. }
@@ -421,7 +423,9 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
                 | ServerMsg::WriteData(_)
                 | ServerMsg::WriteClose
                 | ServerMsg::Suspend
-                | ServerMsg::Lock { .. },
+                | ServerMsg::Lock { .. }
+                | ServerMsg::UpgradeNotice { .. }
+                | ServerMsg::UpgradeResult { .. },
             )) => {}
             Ok(None) | Err(_) => break (1, Some("server exited unexpectedly".to_owned())),
         }
@@ -487,7 +491,15 @@ fn relay(stream: &mut UnixStream) -> ExitCode {
             Ok(Some(ServerMsg::ReadOpen { path })) => files::read(stream, path.as_deref()),
             // Only an attached client is suspended or locked, and only a
             // control client waits to exit.
-            Ok(Some(ServerMsg::Suspend | ServerMsg::Lock { .. } | ServerMsg::Flags { .. })) => {}
+            // Only an attached client is told of an upgrade, and only a
+            // requester (which sends no Hello) gets a result.
+            Ok(Some(
+                ServerMsg::Suspend
+                | ServerMsg::Lock { .. }
+                | ServerMsg::Flags { .. }
+                | ServerMsg::UpgradeNotice { .. }
+                | ServerMsg::UpgradeResult { .. },
+            )) => {}
             Ok(None) | Err(_) => {
                 // client.c: CLIENT_EXIT_LOST_SERVER.
                 write_err(b"server exited unexpectedly");

@@ -484,7 +484,11 @@ impl Socket {
                             | ServerMsg::WriteOpen { .. }
                             | ServerMsg::WriteData(_)
                             | ServerMsg::WriteClose
-                            | ServerMsg::Flags { .. } => {}
+                            | ServerMsg::Flags { .. }
+                            // Re-exec on an upgrade comes with the upgrade
+                            // itself; a result goes to a requester only.
+                            | ServerMsg::UpgradeNotice { .. }
+                            | ServerMsg::UpgradeResult { .. } => {}
                         }
                     }
                     Err(ProtocolError::Truncated) => break,
