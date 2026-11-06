@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Developer tasks: `ref-tmux`, `regress`, `oracle`, `reap`.
+//! Developer tasks: `ref-tmux`, `regress`, `oracle`, `reap`, `sockets`.
 
 mod oracle;
 mod reap;
@@ -14,8 +14,9 @@ fn main() -> ExitCode {
         Some("regress") => regress::run(),
         Some("oracle") => oracle::run(),
         Some("reap") => reap::run(),
+        Some("sockets") => reap::list_sockets(),
         _ => {
-            eprintln!("usage: cargo xtask <ref-tmux|regress|oracle|reap>");
+            eprintln!("usage: cargo xtask <ref-tmux|regress|oracle|reap|sockets>");
             ExitCode::from(2)
         }
     }

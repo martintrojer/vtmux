@@ -6,7 +6,7 @@
 set -euo pipefail
 REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
 env -i PATH=/usr/bin:/bin HOME=/ SHELL=/bin/sh LANG=C.UTF-8 REF="$REF" CASE_KIND="${1:-regex}" python3 - <<'PY'
-import ctypes, json, os, subprocess
+import ctypes, json, os, shutil, subprocess, tempfile
 libc = ctypes.CDLL('libc.so.6')
 libc.setlocale(0, b'en_US.UTF-8') or libc.setlocale(0, b'C.UTF-8')
 class RM(ctypes.Structure):
@@ -72,8 +72,12 @@ cases = [
 if os.environ['CASE_KIND'] == 'format':
     # bash tests/regex_cases.sh format > src/format/matching_golden.in
     sock = 'vtmux-regex-' + str(os.getpid())
+    # A private socket dir: a server leaves its socket file behind, and the
+    # default dir is the owner's /tmp/tmux-<uid>.
+    sockdir = tempfile.mkdtemp(prefix='vtmux-sock.', dir='/tmp')
+    env = dict(os.environ, TMUX_TMPDIR=sockdir)
     def t(*args):
-        return subprocess.check_output([os.environ['REF'], '-L', sock, '-f', '/dev/null', *args], cwd='/').decode().removesuffix('\n')
+        return subprocess.check_output([os.environ['REF'], '-L', sock, '-f', '/dev/null', *args], cwd='/', env=env).decode().removesuffix('\n')
     try:
         t('start-server', ';', 'set', '-g', 'exit-empty', 'off')
         t('set', '-g', '@v', 'ababa')
@@ -111,6 +115,7 @@ if os.environ['CASE_KIND'] == 'format':
         print('] }')
     finally:
         t('kill-server')
+        shutil.rmtree(sockdir, ignore_errors=True)
     raise SystemExit
 if os.environ['CASE_KIND'] == 'fnmatch':
     # bash crates/vtmux-core/tests/regex_cases.sh fnmatch > src/regex/fnmatch_golden.in

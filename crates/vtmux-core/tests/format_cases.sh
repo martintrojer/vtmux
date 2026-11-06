@@ -22,13 +22,16 @@
 set -euo pipefail
 
 REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
-SOCK="vtmux-format-cases-$$"
+# A private socket (-S, not TMUX_TMPDIR: that would show in the server's
+# environment, which the goldens list): a server leaves its socket file behind,
+# and the default dir is the owner's (/tmp/tmux-<uid>).
+SOCKDIR=$(mktemp -d /tmp/vtmux-sock.XXXXXX)
 cd /
 t() {
     env -i PATH=/usr/bin:/bin HOME=/ SHELL=/bin/sh LANG=C.UTF-8 TZ=UTC CL1=x CL2=y \
-        "$REF" -L "$SOCK" -f /dev/null "$@"
+        "$REF" -S "$SOCKDIR/s" -f /dev/null "$@"
 }
-trap 't kill-server 2>/dev/null || true' EXIT
+trap 't kill-server 2>/dev/null || true; rm -rf "$SOCKDIR"' EXIT
 
 VARS=()
 setvar() { t set -g "$1" "$2"; VARS+=("$1"$'\t'"$2"); }

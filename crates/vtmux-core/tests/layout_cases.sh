@@ -17,10 +17,14 @@ set -f
 
 REF="${VTMUX_REFERENCE_TMUX:-${XDG_CACHE_HOME:-$HOME/.cache}/vtmux/tmux-3.8/bin/tmux}"
 SOCK="vtmux-layout-cases-$$"
+# A private socket dir: a server leaves its socket file behind, and the default
+# dir is the owner's (/tmp/tmux-<uid>).
+TMUX_TMPDIR=$(mktemp -d /tmp/vtmux-sock.XXXXXX)
+export TMUX_TMPDIR
 unset EDITOR VISUAL
 export SHELL=/bin/sh
 t() { env -u TMUX -u TMUX_PANE "$REF" -L "$SOCK" -f /dev/null "$@"; }
-trap 't kill-server 2>/dev/null || true' EXIT
+trap 't kill-server 2>/dev/null || true; rm -rf "$TMUX_TMPDIR"' EXIT
 
 rust_str() { sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 

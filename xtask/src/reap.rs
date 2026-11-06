@@ -8,8 +8,18 @@
 //! It kills test-labelled `tmux`/`vtmux` servers that are old and orphaned,
 //! with their pane processes (a flood loop in a pane outlives the server's
 //! death otherwise). `check.sh` runs it first.
+//!
+//! A server leaves its socket file behind when it exits (tmux does too), so
+//! a harness that lets a server use the real socket directory strands one
+//! dead file per run. [`sweep_sockets`] removes the dead test-labelled ones
+//! from `$TMUX_TMPDIR/{tmux,vtmux}-<uid>/` and `/tmp/{tmux,vtmux}-<uid>/`;
+//! `cargo xtask sockets` lists the test-labelled entries there, which is what
+//! `check.sh` diffs around the suites to catch a harness that leaks.
 
 use std::collections::{HashMap, HashSet};
+use std::os::unix::fs::FileTypeExt;
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -121,10 +131,10 @@ fn parse_procs(ps: &str) -> Vec<Proc> {
 }
 
 /// `-L` labels the suites and the usual probe scripts use: `testA$$` and
-/// friends (regress), `cli$$` and `att$$-n` (integration tests), `i$$`,
-/// `covers-*`, and `rv*` (reviewers' probes). The owner's own server uses the
-/// default label and never matches.
-fn is_test_label(l: &str) -> bool {
+/// friends (regress), `cli$$`, `att$$-n` and `ctl$$-n` (integration tests),
+/// `i$$`, `covers-*`, and `rv*` (reviewers' probes). The owner's own server
+/// uses the default label and never matches.
+pub fn is_test_label(l: &str) -> bool {
     let numbered = |prefix: &str| {
         l.strip_prefix(prefix)
             .is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()))
@@ -134,6 +144,7 @@ fn is_test_label(l: &str) -> bool {
         || l.starts_with("covers-")
         || numbered("cli")
         || numbered("att")
+        || numbered("ctl")
         || numbered("i")
 }
 
@@ -245,6 +256,90 @@ fn kill_pids(pids: &[u32]) {
     });
 }
 
+/// The directories a server of user `uid` keeps its sockets in when it is not
+/// given `-S`: `<base>/tmux-<uid>` (tmux) or `<base>/vtmux-<uid>` (vtmux, D20)
+/// for the base `$TMUX_TMPDIR` names and `/tmp` (tmux.h `TMUX_SOCK`,
+/// tmux.c:159-198), deduplicated after `realpath` and only those that exist.
+fn socket_dirs(tmux_tmpdir: Option<&Path>, uid: u32) -> Vec<PathBuf> {
+    let mut bases: Vec<PathBuf> = Vec::new();
+    for base in tmux_tmpdir
+        .filter(|t| !t.as_os_str().is_empty())
+        .into_iter()
+        .chain([Path::new("/tmp")])
+    {
+        if let Ok(real) = base.canonicalize()
+            && !bases.contains(&real)
+        {
+            bases.push(real);
+        }
+    }
+    bases
+        .iter()
+        .flat_map(|b| ["tmux", "vtmux"].map(|n| b.join(format!("{n}-{uid}"))))
+        .filter(|d| d.is_dir())
+        .collect()
+}
+
+fn current_uid() -> Option<u32> {
+    let out = Command::new("id")
+        .arg("-u")
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// [`socket_dirs`] for this user and environment.
+pub fn default_socket_dirs() -> Vec<PathBuf> {
+    let tmpdir = std::env::var_os("TMUX_TMPDIR").map(PathBuf::from);
+    current_uid().map_or_else(Vec::new, |uid| socket_dirs(tmpdir.as_deref(), uid))
+}
+
+/// Test-labelled entries of `dirs`, sorted: what a harness added is what a
+/// later listing has over an earlier one.
+pub fn test_sockets(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = dirs
+        .iter()
+        .filter_map(|d| std::fs::read_dir(d).ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_str().is_some_and(is_test_label))
+        .map(|e| e.path())
+        .collect();
+    found.sort();
+    found
+}
+
+/// Remove the sockets in `dirs` that are test-labelled ([`is_test_label`]),
+/// satisfy `also`, and are dead: a `connect()` is refused, which is what a
+/// socket file with no server behind it gives. Live ones (a connect succeeds
+/// or would block), `default`, other labels and anything that is not a socket
+/// stay. Returns the paths removed, or with `dry` the ones that would be.
+pub fn sweep_sockets(dirs: &[PathBuf], also: impl Fn(&str) -> bool, dry: bool) -> Vec<PathBuf> {
+    test_sockets(dirs)
+        .into_iter()
+        .filter(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(&also)
+                && p.symlink_metadata()
+                    .is_ok_and(|m| m.file_type().is_socket())
+                && matches!(
+                    UnixStream::connect(p),
+                    Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionRefused
+                )
+        })
+        .filter(|p| dry || std::fs::remove_file(p).is_ok())
+        .collect()
+}
+
+/// `cargo xtask sockets`: the test-labelled entries of the default socket
+/// directories, one path per line, sorted.
+pub fn list_sockets() -> ExitCode {
+    for p in test_sockets(&default_socket_dirs()) {
+        println!("{}", p.display());
+    }
+    ExitCode::SUCCESS
+}
+
 /// `cargo xtask reap [--min-age <minutes>] [--dry-run]`.
 pub fn run() -> ExitCode {
     let mut min_age = DEFAULT_MIN_AGE;
@@ -280,6 +375,16 @@ pub fn run() -> ExitCode {
     if !dry {
         kill_pids(&pids);
     }
+    // After the kill: a killed server's socket file is dead too.
+    let socks = sweep_sockets(&default_socket_dirs(), |_| true, dry);
+    for p in &socks {
+        eprintln!("socket {}", p.display());
+    }
+    eprintln!(
+        "{} {} dead test socket(s)",
+        if dry { "would remove" } else { "removed" },
+        socks.len()
+    );
     ExitCode::SUCCESS
 }
 
@@ -309,6 +414,7 @@ mod tests {
             "/c/tmux -LtestA42 -f/dev/null new -d",
             "vtmux -L att99-3 -f /dev/null attach",
             "vtmux -L cli7 -f /dev/null start",
+            "vtmux -L ctl7-0 -f /dev/null -C new",
             "tmux -2 -L i42 new",
             "tmux -S /tmp/vto-a1b2c3/s -f /dev/null new",
         ] {
@@ -448,5 +554,147 @@ mod tests {
         assert!(after.iter().any(|p| p.args.contains(&live)));
         child.kill().unwrap();
         child.wait().unwrap();
+    }
+
+    /// A scratch directory under `/tmp` (socket paths must stay short),
+    /// removed on drop.
+    struct Scratch(PathBuf);
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let dir = PathBuf::from(format!("/tmp/vtx-{}-{tag}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+    }
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A socket file nobody listens on: bound, then the listener dropped (std
+    /// leaves the file behind, as a server that exits does).
+    fn dead_socket(path: &Path) {
+        drop(std::os::unix::net::UnixListener::bind(path).unwrap());
+    }
+
+    fn names(paths: &[PathBuf]) -> Vec<String> {
+        paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn socket_dirs_follow_tmux_tmpdir_then_tmp() {
+        let s = Scratch::new("dirs");
+        let real = s.0.canonicalize().unwrap();
+        for d in ["tmux-7", "vtmux-7", "tmux-8"] {
+            std::fs::create_dir(s.0.join(d)).unwrap();
+        }
+        let got = socket_dirs(Some(&s.0), 7);
+        assert_eq!(got, [real.join("tmux-7"), real.join("vtmux-7")]);
+        // Empty or missing TMUX_TMPDIR falls back to /tmp alone; /tmp named
+        // twice is listed once (the dirs there may or may not exist).
+        let tmp = socket_dirs(None, 7);
+        assert_eq!(socket_dirs(Some(Path::new("")), 7), tmp);
+        assert_eq!(socket_dirs(Some(&s.0.join("missing")), 7), tmp);
+        assert_eq!(socket_dirs(Some(Path::new("/tmp")), 7), tmp);
+        assert!(tmp.iter().all(|d| d.starts_with("/tmp")), "{tmp:?}");
+    }
+
+    #[test]
+    fn sweep_removes_dead_test_sockets_only() {
+        let s = Scratch::new("sweep");
+        let dir = s.0.join("tmux-1");
+        std::fs::create_dir(&dir).unwrap();
+        for dead in [
+            "att99-0",
+            "att99-1",
+            "cli7",
+            "ctl7-0",
+            "i7",
+            "rv1",
+            "rvchk9",
+            "testA5",
+            "covers-x-1",
+            "default",
+            "work",
+            "cliff",
+        ] {
+            dead_socket(&dir.join(dead));
+        }
+        // A server that answers, one that is not a socket at all, a symlink.
+        let live = std::os::unix::net::UnixListener::bind(dir.join("att99-live")).unwrap();
+        std::fs::write(dir.join("att99-file"), "").unwrap();
+        std::os::unix::fs::symlink("att99-live", dir.join("att99-link")).unwrap();
+
+        let dirs = [dir.clone()];
+        let would = sweep_sockets(&dirs, |_| true, true);
+        assert_eq!(would.len(), 9, "{would:?}");
+        assert!(would.iter().all(|p| p.exists()), "dry run removed");
+
+        let mut gone = names(&sweep_sockets(&dirs, |_| true, false));
+        gone.sort();
+        assert_eq!(
+            gone,
+            [
+                "att99-0",
+                "att99-1",
+                "cli7",
+                "covers-x-1",
+                "ctl7-0",
+                "i7",
+                "rv1",
+                "rvchk9",
+                "testA5"
+            ]
+        );
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "att99-file",
+                "att99-link",
+                "att99-live",
+                "cliff",
+                "default",
+                "work"
+            ]
+        );
+        drop(live);
+    }
+
+    #[test]
+    fn sweep_honours_the_extra_filter() {
+        let s = Scratch::new("filter");
+        let dir = s.0.join("vtmux-1");
+        std::fs::create_dir(&dir).unwrap();
+        for n in ["testA10", "testA10-2", "testA11"] {
+            dead_socket(&dir.join(n));
+        }
+        let got = sweep_sockets(
+            std::slice::from_ref(&dir),
+            |n| n.starts_with("testA10"),
+            false,
+        );
+        assert_eq!(names(&got), ["testA10", "testA10-2"]);
+        assert!(dir.join("testA11").exists());
+    }
+
+    #[test]
+    fn listing_shows_test_labels_only() {
+        let s = Scratch::new("list");
+        let dir = s.0.join("tmux-1");
+        std::fs::create_dir(&dir).unwrap();
+        for n in ["att1-0", "default", "rv2", "other"] {
+            dead_socket(&dir.join(n));
+        }
+        assert_eq!(names(&test_sockets(&[dir])), ["att1-0", "rv2"]);
     }
 }

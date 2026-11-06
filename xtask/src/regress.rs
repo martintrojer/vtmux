@@ -381,20 +381,34 @@ fn labelled_pids(ps: &str, tmux: &Path, script_pid: u32, own: u32) -> Vec<u32> {
                 "" => words.get(i + 1).copied(),
                 l => Some(l),
             });
-        let digits: String = label
-            .unwrap_or("")
-            .chars()
-            .skip_while(|c| !c.is_ascii_digit())
-            .take_while(char::is_ascii_digit)
-            .collect();
-        rest.starts_with(' ') && digits == script_pid.to_string()
+        rest.starts_with(' ') && label_is_of(label.unwrap_or(""), script_pid)
     })
 }
 
+/// Does the first number in `label` equal `script_pid`?
+fn label_is_of(label: &str, script_pid: u32) -> bool {
+    let digits: String = label
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits == script_pid.to_string()
+}
+
 /// Kill every server (and attached client) the script `script_pid` left
-/// behind.
+/// behind, then remove the dead socket files of its labels from the real
+/// socket directories: a script that runs a client under `env -i`
+/// (`new-session-environment.sh`, `terminal-feature-utf8.sh`) loses the
+/// private `TMUX_TMPDIR`, so that server's socket lands in
+/// `/tmp/{tmux,vtmux}-<uid>/` and outlives the server.
 fn reap_servers(tmux: &Path, script_pid: u32) {
     reap::kill_matching(|ps| labelled_pids(ps, tmux, script_pid, std::process::id()));
+    sweep_script_sockets(&reap::default_socket_dirs(), script_pid);
+}
+
+/// The dead sockets in `dirs` whose label belongs to `script_pid`.
+fn sweep_script_sockets(dirs: &[PathBuf], script_pid: u32) {
+    reap::sweep_sockets(dirs, |label| label_is_of(label, script_pid), false);
 }
 
 /// A fresh private `TMUX_TMPDIR`. Short and under `/tmp`, never `$TMPDIR` or
@@ -737,6 +751,7 @@ fn run_inner() -> Result<ExitCode> {
 mod tests {
     use super::*;
     use crate::reap::ps;
+    use std::os::unix::net::UnixListener;
 
     #[test]
     fn labels_select_a_scripts_servers() {
@@ -776,6 +791,35 @@ mod tests {
         let tmpdir = fs::read_to_string(base.join("tmpdir")).unwrap();
         assert!(tmpdir.trim().starts_with("/tmp/vtr-"), "{tmpdir}");
         assert!(!Path::new(tmpdir.trim()).exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A script's labelled servers can sit in the real socket directory
+    /// (a client under `env -i` has no private `TMUX_TMPDIR`); once they are
+    /// dead their socket files go, other scripts' and live ones stay.
+    #[test]
+    fn script_sockets_are_swept_by_label() {
+        let base = PathBuf::from(format!("/tmp/vtx-{}-regress", std::process::id()));
+        let dir = base.join("vtmux-1");
+        fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "testA4242",
+            "testA4242-2",
+            "testI4242",
+            "covers-inner-4242-1",
+            "testA4243",
+        ] {
+            drop(UnixListener::bind(dir.join(name)).unwrap());
+        }
+        let live = UnixListener::bind(dir.join("testA4242-live")).unwrap();
+        sweep_script_sockets(std::slice::from_ref(&dir), 4242);
+        let mut left: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["testA4242-live", "testA4243"]);
+        drop(live);
         let _ = fs::remove_dir_all(&base);
     }
 
