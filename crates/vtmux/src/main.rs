@@ -17,7 +17,7 @@ use vtmux_core::cmd;
 use vtmux_core::error::{EdgeError, strerror};
 use vtmux_core::protocol::{
     self, ClientFlags, ClientMsg, ControlMode, Hello, HelloExt, PROTOCOL_VERSION, REATTACH_FLAG,
-    ServerMsg, TtyInfo,
+    REATTACH_TOKEN_ENV, ServerMsg, TtyInfo,
 };
 use vtmux_core::socket::{self, Invocation, RealEnv, RealFs};
 use vtmux_server::ServerConfig;
@@ -245,11 +245,16 @@ fn parse_cli(
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().collect();
+    // Taken out at once, whatever the command line: nothing this process
+    // starts (a server, a pane, a lock command) inherits the token.
+    let token = vtmux_server::sys::upgrade::take_env(REATTACH_TOKEN_ENV);
     upgrade_image(args.get(1..).unwrap_or_default())
         .or_else(|| match args.as_slice() {
-            [argv0, flag, token, socket] if flag == REATTACH_FLAG => {
-                Some(reattach_main(argv0.clone(), token, Path::new(socket)))
-            }
+            [argv0, flag, socket] if flag == REATTACH_FLAG => Some(reattach_main(
+                argv0.clone(),
+                token.as_deref(),
+                Path::new(socket),
+            )),
             _ => None,
         })
         .unwrap_or_else(|| client_main(args))
@@ -364,16 +369,23 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
     }
 }
 
-/// The frozen re-attach command line (`<binary> --vtmux-reattach <token>
-/// <socket>`, protocol module docs) that an attached client of this or
-/// another build runs when an upgrade tells it to (live-upgrade spec,
-/// *Clients*): connect to the same socket, never starting a server, and
-/// present the token, which binds this process to the client record it
-/// had; then go on as that attached client. A token the server no longer
-/// knows is told to attach again.
-fn reattach_main(argv0: OsString, token: &std::ffi::OsStr, socket: &Path) -> ExitCode {
-    let Some(token) = token.to_str().filter(|t| protocol::is_upgrade_token(t)) else {
-        write_err(b"bad re-attach token");
+/// The frozen re-attach command line (`<binary> --vtmux-reattach
+/// <socket>`, the token in `VTMUX_REATTACH_TOKEN`, protocol module docs)
+/// that an attached client of this or another build runs when an upgrade
+/// tells it to (live-upgrade spec, *Clients*): connect to the same socket,
+/// never starting a server, and present the token, which binds this
+/// process to the client record it had; then go on as that attached
+/// client. A token the server no longer knows is told to attach again.
+/// The terminal is the shell's until the server starts it again: the old
+/// image restored it before the notice, so every way out here leaves it
+/// as a detach does.
+fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path) -> ExitCode {
+    let Some(token) = token
+        .and_then(|t| t.to_str())
+        .filter(|t| protocol::is_upgrade_token(t))
+    else {
+        write_err(b"can't re-attach after the server's upgrade: no valid token");
+        println!("[{}]", protocol::UPGRADED_DETACH);
         return ExitCode::from(1);
     };
     let mut stream = match connect(socket) {

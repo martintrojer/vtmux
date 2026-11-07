@@ -122,14 +122,30 @@ pub(crate) struct Pending {
     deadline: Instant,
 }
 
+/// How the upgrade went, held by the image that serves after the exec for
+/// its requester until every client told to re-attach has, or has been
+/// given up on ([`Server::upgrade_answer_due`]), so the answer names the
+/// ones that did not come back.
+#[derive(Debug)]
+pub(crate) struct LaterAnswer {
+    pub(crate) requester: snap::Requester,
+    /// The frozen handshake's connection, kept across the exec.
+    pub(crate) handshake: Option<OwnedFd>,
+    /// `Ok` once the new image serves; `Err` with why when it does not.
+    pub(crate) outcome: Result<(), String>,
+}
+
 /// The server's upgrade state.
 #[derive(Debug)]
 pub(crate) struct Upgrade {
     pub(crate) pending: Option<Pending>,
     pub(crate) exec: ExecFn,
     /// What the requester is warned of once the new image serves: the
-    /// clients it detached ([`Server::detach_unfollowing`]).
+    /// clients it detached ([`Server::detach_unfollowing`]) and those that
+    /// did not come back ([`Server::reattach_timers`]).
     pub(crate) warnings: Vec<String>,
+    /// The requester's answer, waiting for the clients re-attaching.
+    pub(crate) answer: Option<LaterAnswer>,
 }
 
 impl Default for Upgrade {
@@ -138,6 +154,7 @@ impl Default for Upgrade {
             pending: None,
             exec: crate::sys::upgrade::exec_in_place,
             warnings: Vec::new(),
+            answer: None,
         }
     }
 }
@@ -175,6 +192,12 @@ impl Server {
     ) -> Result<(), String> {
         if self.upgrade.pending.is_some() {
             return Err("an upgrade is already running".to_owned());
+        }
+        if self.upgrade.answer.is_some() {
+            // Its requester is not answered yet ([`Self::upgrade_answer_due`]).
+            return Err(
+                "the last upgrade is still waiting for its clients to re-attach".to_owned(),
+            );
         }
         if !self.held.is_empty() {
             // `resume.rs`, `serve_held`: the snapshot can't name them, so
@@ -340,11 +363,35 @@ impl Server {
             let name = self.client_name(id);
             out.push(if name.is_empty() {
                 "a client still connecting".to_owned()
+            } else if let Some(what) = self.open_overlay(id) {
+                // A key binding's command-prompt, confirm-before, menu or
+                // popup waits in the client's queue until it closes
+                // (cmd-command-prompt.c, cmd-display-menu.c).
+                format!("client {name} has {what} open: close it, then run vtmux-upgrade again")
             } else {
                 format!("client {name}")
             });
         }
         out
+    }
+
+    /// What attached client `id` has open that its queue waits for: a
+    /// prompt, a popup or a menu.
+    fn open_overlay(&self, id: ClientId) -> Option<&'static str> {
+        let c = self.clients.get(&id)?;
+        c.attached?;
+        if c.popup.is_some() {
+            Some("a popup")
+        } else if c.status.prompt().is_some() || c.prompt_owner.is_some() {
+            Some("a prompt")
+        } else if self
+            .client_window(id)
+            .is_some_and(|w| self.window_menu(w).is_some())
+        {
+            Some("a menu")
+        } else {
+            None
+        }
     }
 
     /// Step 2, then the snapshot, dry run and exec
@@ -534,18 +581,28 @@ impl Server {
     /// `binary` (the frozen `UpgradeNotice`), and the notices are written
     /// out before the exec, so none is cut in half. Each then has
     /// [`REATTACH_WAIT`] to re-attach, to this image too if the exec fails.
+    ///
+    /// Each terminal is restored first, as for a detach (`tty_stop_tty`):
+    /// the client writes it out before the exec, so a client that does
+    /// not come back (its exec fails, the new binary can't re-attach, its
+    /// token is refused) leaves the terminal as it found it, and the
+    /// re-attach starts it again ([`Server::reattach`]), so each upgrade
+    /// pops the title it pushes.
     pub(crate) fn upgrade_notify(&mut self, binary: &Path) {
-        let now = Instant::now();
         let told: Vec<(ClientId, String)> = self
             .clients
-            .iter_mut()
+            .iter()
             .filter_map(|(&id, c)| {
-                let r = c.reattach.as_mut().filter(|r| r.deadline.is_none())?;
-                r.deadline = Some(now + REATTACH_WAIT);
+                let r = c.reattach.filter(|r| r.deadline.is_none())?;
                 Some((id, r.text()))
             })
             .collect();
+        let deadline = Instant::now() + REATTACH_WAIT;
         for (id, token) in told {
+            self.send_teardown(id);
+            if let Some(r) = self.clients.get_mut(&id).and_then(|c| c.reattach.as_mut()) {
+                r.deadline = Some(deadline);
+            }
             self.send(
                 id,
                 &ServerMsg::UpgradeNotice {
@@ -606,6 +663,16 @@ impl Server {
             self.finish_client_with(new, 1, Some(UPGRADED_DETACH.to_owned()));
             return;
         };
+        // The token is the record's only to the user it was sent to: a
+        // connection of another user is refused, and leaves it waiting.
+        // Access to the record is as the access list gives it now
+        // (`on_hello` checked it): one made read-only since stays so.
+        let uid = |id: ClientId| self.clients.get(&id).and_then(|c| c.peer).map(|p| p.0);
+        if uid(new).is_none() || uid(new) != uid(old) {
+            self.refuse_client(new);
+            return;
+        }
+        let read_only = self.clients.get(&new).is_some_and(|c| c.flags.read_only);
         // What the old connection still holds (keys typed before the
         // notice was read) is taken first.
         self.client_readable(old);
@@ -629,6 +696,7 @@ impl Server {
         c.out = super::Outbox::default();
         c.unacked = super::Unacked::default();
         c.peer = fresh.peer;
+        c.flags.read_only |= read_only;
         c.speaks = vtmux_core::protocol::Speaks::Full;
         c.reattach = None;
         c.exit_deadline = None;
@@ -692,38 +760,122 @@ impl Server {
         true
     }
 
-    /// When the loop must look at a client re-attaching again.
+    /// When the loop must look at a client re-attaching again: its
+    /// deadline, and while one is re-executing, every [`RECHECK`] to see
+    /// whether its process has exited instead.
     pub(crate) fn reattach_deadline(&self) -> Option<Instant> {
+        let reexecuting = self
+            .clients
+            .values()
+            .any(|c| c.reattach.is_some_and(|r| r.gone));
         self.clients
             .values()
             .filter_map(|c| c.reattach?.deadline)
+            .chain(reexecuting.then(|| Instant::now() + RECHECK))
             .min()
     }
 
-    /// Clients that did not re-attach within [`REATTACH_WAIT`]: one whose
-    /// old connection closed has gone (lost as any client); one still on
+    /// Clients that did not re-attach: within [`REATTACH_WAIT`], or one
+    /// whose old connection closed and whose process has exited (an exec
+    /// that failed, a binary that can't re-attach, a refused token: the
+    /// process is the same across its exec, so it is not coming back).
+    /// One whose old connection closed is lost as any client; one still on
     /// it did not act on its notice and is detached with
-    /// `[server upgraded: re-attach]`.
+    /// `[server upgraded: re-attach]`. Each is named in the requester's
+    /// answer while it waits ([`Self::upgrade_answer_due`]) and in the
+    /// message log.
     pub(crate) fn reattach_timers(&mut self, now: Instant) {
         let due: Vec<(ClientId, bool)> = self
             .clients
             .iter_mut()
             .filter_map(|(&id, c)| {
-                let r = c
-                    .reattach
-                    .filter(|r| r.deadline.is_some_and(|d| d <= now))?;
+                let r = c.reattach?;
+                let exited = r.gone
+                    && c.hello
+                        .as_ref()
+                        .and_then(|h| rustix::process::Pid::from_raw(i32::try_from(h.pid).ok()?))
+                        .is_some_and(|pid| {
+                            rustix::process::test_kill_process(pid) == Err(rustix::io::Errno::SRCH)
+                        });
+                if !exited && r.deadline.is_none_or(|d| d > now) {
+                    return None;
+                }
                 c.reattach = None;
                 Some((id, r.gone))
             })
             .collect();
         for (id, gone) in due {
-            if gone {
+            let name = self.client_name(id);
+            let warning = if gone {
                 self.drop_client(id);
+                format!(
+                    "warning: client {name} did not re-attach after the upgrade: its \
+                     session is still there, attach again"
+                )
             } else {
                 self.exit_attached(id, 1, Some(UPGRADED_DETACH.to_owned()), false);
+                format!(
+                    "warning: client {name} did not act on the upgrade: detached with \
+                     [{UPGRADED_DETACH}]"
+                )
+            };
+            self.add_message(warning.clone());
+            if self.upgrade.answer.is_some() {
+                self.upgrade.warnings.push(warning);
             }
         }
     }
+
+    /// In the image that serves after the exec: answer the requester
+    /// (`resume.rs`) once no client told to re-attach is still on its
+    /// way, so the answer names those that did not come back.
+    pub(crate) fn upgrade_answer_later(&mut self, answer: LaterAnswer) {
+        self.upgrade.answer = Some(answer);
+        self.upgrade_answer_due();
+    }
+
+    /// The held answer goes out when no client is re-attaching any more:
+    /// `Ok` with the warnings, one a line, or `Err` with why. The frozen
+    /// handshake gets `UpgradeResult` on its connection, a client is told
+    /// by [`Self::upgrade_answer`].
+    pub(crate) fn upgrade_answer_due(&mut self) {
+        if self.upgrade.answer.is_none()
+            || self
+                .clients
+                .values()
+                .any(|c| !c.dead && c.reattach.is_some_and(|r| r.deadline.is_some()))
+        {
+            return;
+        }
+        let Some(answer) = self.upgrade.answer.take() else {
+            return;
+        };
+        let warnings = std::mem::take(&mut self.upgrade.warnings).join("\n");
+        let outcome = answer.outcome.map(|()| warnings);
+        match answer.requester {
+            snap::Requester::Handshake(_) => {
+                if let Some(fd) = answer.handshake {
+                    write_result(fd, outcome);
+                }
+            }
+            snap::Requester::Client(id) => {
+                self.upgrade_answer(ClientId(id as usize), outcome);
+            }
+        }
+    }
+}
+
+/// The frozen `UpgradeResult` for `outcome` on the handshake connection
+/// `fd`, written at once, the connection closed after: the requester is
+/// waiting for this one small frame, so the socket has room; a requester
+/// that went is no matter.
+pub(crate) fn write_result(fd: OwnedFd, outcome: Result<String, String>) {
+    let (ok, message) = match outcome {
+        Ok(warnings) => (true, warnings),
+        Err(m) => (false, m),
+    };
+    let mut stream = std::os::unix::net::UnixStream::from(fd);
+    let _ = vtmux_core::protocol::write_msg(&mut stream, &ServerMsg::UpgradeResult { ok, message });
 }
 
 /// Step 1's check of the binary: absolute (the server's working directory

@@ -498,11 +498,19 @@ fn environ(note: Option<&str>) -> Vec<CString> {
 /// to this one failed to resume.
 #[must_use]
 pub fn take_failure_note() -> Option<String> {
-    let note = std::env::var_os(FAILED_ENV)?;
-    // SAFETY: called by the new image at its start, before it has
-    // started a thread, so nothing reads the environment concurrently.
-    unsafe { std::env::remove_var(FAILED_ENV) };
-    Some(note.to_string_lossy().into_owned())
+    take_env(FAILED_ENV).map(|note| note.to_string_lossy().into_owned())
+}
+
+/// Environment variable `name`, taken out of the environment so that
+/// nothing this process starts or execs inherits it. Call it only at the
+/// start of `main`, before any thread is started.
+#[must_use]
+pub fn take_env(name: &str) -> Option<std::ffi::OsString> {
+    let value = std::env::var_os(name)?;
+    // SAFETY: called by the process at its start, before it has started
+    // a thread, so nothing reads the environment concurrently.
+    unsafe { std::env::remove_var(name) };
+    Some(value)
 }
 
 /// `execve` of `target` resuming from `snapshot`; `back` is a switch back

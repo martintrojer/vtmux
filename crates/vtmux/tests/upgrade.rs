@@ -92,8 +92,10 @@ impl World {
         let out = self.command(args).output().unwrap();
         assert!(
             out.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
+            "{args:?}: {}, stderr {:?}, stdout {:?}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
         );
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
@@ -211,6 +213,22 @@ impl World {
             out.push_str(&self.run(args));
         }
         out
+    }
+
+    /// [`Self::observe`], taken again (up to 5 times) while it differs
+    /// from `want`: tmux cuts a format expansion short after 100 ms
+    /// (format.c `format_check_time`), which a loaded host can make a
+    /// listing hit, leaving the end of a line out. A real difference stays.
+    fn observe_like(&self, want: &str) -> String {
+        let mut got = self.observe();
+        for _ in 0..4 {
+            if got == want {
+                break;
+            }
+            thread::sleep(Duration::from_millis(100));
+            got = self.observe();
+        }
+        got
     }
 
     /// The pane pids, each still running.
@@ -528,7 +546,7 @@ fn a_server_execs_itself_and_everything_carries_on() {
         world.server_args()
     );
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
 
     // The image that resumed upgrades again, from where it stands. (Before
     // any pane output: pane terminal state is not carried yet.)
@@ -539,7 +557,7 @@ fn a_server_execs_itself_and_everything_carries_on() {
     );
     assert_eq!(world.pid(), pid);
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
 
     // The panes, the attached client showing one of them, and the control
     // client.
@@ -607,7 +625,7 @@ fn tmux_vtmux_upgrade_follows_a_relink_of_the_start_path() {
         std::fs::canonicalize(&copy).unwrap()
     );
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     let b = world.run(&["display", "-p", "-t", "b", "#{pane_id}"]);
     let b = b.trim();
     let at = attached.len();
@@ -648,7 +666,7 @@ fn a_control_client_upgrades_and_reads_on() {
     let args = world.server_args();
     assert!(args.contains("--vtmux-resume"), "{args}");
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     assert!(!control.has("%error"));
 }
 
@@ -693,7 +711,7 @@ fn a_binary_that_fails_the_dry_run_leaves_the_server_as_it_was() {
 
     assert_eq!(world.pid(), pid);
     assert!(!world.server_args().contains("--vtmux-resume"));
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     world.echo("a:w1", "still");
 }
 
@@ -720,7 +738,7 @@ fn a_resume_that_fails_switches_back() {
     let args = world.server_args();
     assert!(args.contains("--vtmux-switched-back"), "{args}");
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     world.echo("b:x", "back");
     // The switch back says so, with why.
     let log = world.run(&["show-messages"]);
@@ -751,7 +769,7 @@ fn a_switch_back_that_fails_too_still_serves_the_panes() {
     assert_eq!(world.pid(), pid);
     assert!(world.server_args().contains("--vtmux-switched-back"));
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     world.echo("a:w2.0", "last");
     let log = world.run(&["show-messages"]);
     assert!(log.contains("which failed too: test hook"), "{log}");
@@ -840,7 +858,7 @@ fn a_signal_storm_through_twenty_upgrades_kills_nothing() {
         world.server_args()
     );
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     world.echo("a:w1", "stormed");
 }
 
@@ -876,7 +894,7 @@ fn a_switch_back_ignores_what_the_old_path_holds_now() {
         assert!(args.contains("--vtmux-switched-back"), "{args}");
     }
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     world.echo("b:x", "back");
 }
 
@@ -898,7 +916,7 @@ fn a_panic_in_the_new_image_switches_back() {
     let args = world.server_args();
     assert!(args.contains("--vtmux-switched-back"), "{args}");
     assert_eq!(world.pane_pids(), panes);
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     world.echo("a:w2.1", "caught");
 }
 
@@ -919,7 +937,7 @@ fn the_dry_run_rebuilds_the_server() {
 
     assert_eq!(world.pid(), pid);
     assert!(!world.server_args().contains("--vtmux-resume"));
-    assert_eq!(world.observe(), before);
+    assert_eq!(world.observe_like(&before), before);
     world.echo("a:w1", "intact");
 }
 
@@ -1197,13 +1215,19 @@ fn clients(world: &World) -> String {
     ])
 }
 
-/// The client's command line has moved on from `was`: it has re-executed
-/// with a re-attach (each upgrade sends a new token).
-fn reexecuted(attached: &Attached, was: &str) -> String {
+/// The client has re-executed with a re-attach since its terminal had
+/// taken `at` bytes, and is back: its terminal was restored (the
+/// alternate screen left) and then started again, which only a re-attach
+/// with the token does. Its command line, now the re-attach's.
+fn reexecuted(attached: &Attached, at: usize) -> String {
     let mut now = String::new();
     wait("the client to re-execute", || {
+        let since = attached.since(at);
         now = attached.args();
-        now != was && now.contains(protocol::REATTACH_FLAG)
+        now.contains(protocol::REATTACH_FLAG)
+            && since
+                .find("\u{1b}[?1049l")
+                .is_some_and(|i| since[i..].contains("\u{1b}[?996n"))
     });
     now
 }
@@ -1259,7 +1283,6 @@ fn an_attached_client_re_executes_and_comes_back_as_it_was() {
         attached.screen().contains("before")
     });
     let pid = attached.pid();
-    let was = attached.args();
     let listed = clients(&world);
     let fired = world.run(&["show", "-gv", "@fired"]);
     let notified = |c: &Control| {
@@ -1275,7 +1298,15 @@ fn an_attached_client_re_executes_and_comes_back_as_it_was() {
 
     let at = attached.len();
     assert_eq!(world.upgrade(&bin()), Some(upgraded()));
-    reexecuted(&attached, &was);
+    let now = reexecuted(&attached, at);
+    // The token is not on the command line, where any user's `ps` shows
+    // it: `<argv0> --vtmux-reattach <socket>`.
+    let words: Vec<&str> = now.split_whitespace().collect();
+    assert_eq!(
+        (words.len(), words.get(1).copied()),
+        (3, Some(protocol::REATTACH_FLAG)),
+        "{now}"
+    );
     assert_eq!(attached.pid(), pid, "the same process");
     wait("the terminal started again", || {
         attached.since(at).contains("\u{1b}[?996n")
@@ -1320,15 +1351,14 @@ fn an_attached_client_follows_twenty_upgrades_in_a_row() {
     world.echo("a:w1", "first");
     let pid = attached.pid();
     let listed = clients(&world);
-    let mut was = attached.args();
     for i in 0..20 {
         let binary = if i % 2 == 0 { copy.clone() } else { bin() };
         let at = attached.len();
         assert_eq!(world.upgrade(&binary), Some(upgraded()), "upgrade {i}");
-        was = reexecuted(&attached, &was);
+        let args = reexecuted(&attached, at);
         assert!(
-            was.contains(&format!(" {} ", protocol::REATTACH_FLAG)),
-            "upgrade {i}: {was}"
+            args.contains(&format!(" {} ", protocol::REATTACH_FLAG)),
+            "upgrade {i}: {args}"
         );
         assert_eq!(attached.pid(), pid, "upgrade {i}");
         wait("the terminal started again", || {
@@ -1348,6 +1378,223 @@ fn an_attached_client_follows_twenty_upgrades_in_a_row() {
             "upgrade {i}: the client runs the binary it was told to"
         );
     }
+    // Each upgrade pops the title it pushes (`tty_stop_tty` before the
+    // notice, `tty_start_tty` at the re-attach): one push, the attach's.
+    let (pushed, popped) = titles(&attached);
+    assert_eq!(pushed, popped + 1, "title pushes and pops");
+    // A detach after them all leaves the terminal as it was.
+    world.run(&["detach-client", "-s", "a"]);
+    wait("the detach", || attached.since(0).contains("[detached"));
+    assert_eq!(
+        modes_left_on(&attached.bytes.lock().unwrap()),
+        Vec::<String>::new()
+    );
+    assert_eq!(titles(&attached), (pushed, pushed));
+}
+
+/// The xterm title stack pushes (`CSI 22;0;0t`) and pops (`CSI 23;0;0t`)
+/// a client's terminal was sent.
+fn titles(attached: &Attached) -> (usize, usize) {
+    let text = attached.since(0);
+    (
+        text.matches("\u{1b}[22;0;0t").count(),
+        text.matches("\u{1b}[23;0;0t").count(),
+    )
+}
+
+/// The terminal modes `bytes` leave on, of those a server puts a client's
+/// terminal in: DEC private modes (the alternate screen, mouse, bracketed
+/// paste, focus reports, cursor keys, theme reports; not 25, the cursor
+/// shown, which is how a terminal starts), the keypad (`ESC =`) and
+/// xterm's modified keys (`CSI > 4 ; n m`). Whatever the last sequence
+/// for each did.
+fn modes_left_on(bytes: &[u8]) -> Vec<String> {
+    let mut on = std::collections::BTreeMap::<String, bool>::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != 0x1b {
+            i += 1;
+            continue;
+        }
+        match bytes.get(i + 1) {
+            Some(b'=') => {
+                on.insert("keypad".into(), true);
+                i += 2;
+            }
+            Some(b'>') => {
+                on.insert("keypad".into(), false);
+                i += 2;
+            }
+            Some(b'[') => {
+                let mut j = i + 2;
+                let prefix = bytes.get(j).copied().filter(|b| b"?><=".contains(b));
+                if prefix.is_some() {
+                    j += 1;
+                }
+                let start = j;
+                while j < bytes.len() && (bytes[j].is_ascii_digit() || bytes[j] == b';') {
+                    j += 1;
+                }
+                let params =
+                    String::from_utf8_lossy(&bytes[start..j.min(bytes.len())]).into_owned();
+                let Some(&end) = bytes.get(j) else { break };
+                let list: Vec<&str> = params.split(';').collect();
+                match (prefix, end) {
+                    (Some(b'?'), b'h' | b'l') => {
+                        for p in list.iter().filter(|p| !p.is_empty() && **p != "25") {
+                            on.insert(format!("?{p}"), end == b'h');
+                        }
+                    }
+                    (Some(b'>'), b'm') if list.first() == Some(&"4") => {
+                        let level = list.get(1).copied().unwrap_or("0");
+                        on.insert("modifyOtherKeys".into(), level != "0" && !level.is_empty());
+                    }
+                    _ => {}
+                }
+                i = j + 1;
+            }
+            _ => i += 1,
+        }
+    }
+    on.into_iter().filter(|(_, v)| *v).map(|(k, _)| k).collect()
+}
+
+/// A binary to upgrade onto: this build, except as `case` says for the
+/// command lines it is given (a `sh` `case` body on `"$1"`, `$BIN` this
+/// build).
+fn wrapper(world: &World, name: &str, case: &str) -> PathBuf {
+    let path = world.home.path().join(name);
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\nBIN='{BIN}'\ncase \"$1\" in\n{case}\nesac\nexec \"$BIN\" \"$@\"\n"),
+    )
+    .unwrap();
+    set_executable(&path);
+    path
+}
+
+/// The upgrade onto `binary` with `attached` attached, asked from another
+/// thread while this one reaps the client once it exits (a process that
+/// has exited and is not reaped still exists): the answer, and the
+/// client's exit status.
+fn upgrade_losing(
+    world: &World,
+    binary: &Path,
+    attached: &mut Attached,
+) -> (Option<ServerMsg>, u32) {
+    let path = world.run(&["display", "-p", "#{socket_path}"]);
+    *world.socket.lock().unwrap() = Some(PathBuf::from(path.trim_end()));
+    thread::scope(|scope| {
+        let asked = scope.spawn(|| world.upgrade_at(binary));
+        let mut status = None;
+        wait("the client to exit", || {
+            status = attached.exited();
+            status.is_some()
+        });
+        (asked.join().unwrap(), status.unwrap())
+    })
+}
+
+/// The review finding of `medium_reexec_teardown`: an attached client
+/// told to re-execute that can't re-attach gets its terminal back as a
+/// detach leaves it (no alternate screen, mouse, bracketed paste, focus
+/// reports or keypad left on), says why, and the requester is warned,
+/// naming it; the session is unharmed. `case` makes the binary fail the
+/// re-attach.
+fn a_lost_client_gets_its_terminal_back(case: &str, says: &str) {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.echo("a:w1", "before");
+    wait("the client's draw", || attached.screen().contains("before"));
+    assert!(
+        modes_left_on(&attached.bytes.lock().unwrap()).contains(&"?1049".to_owned()),
+        "attached, the terminal is on the alternate screen"
+    );
+    let name = world.run(&["lsc", "-F", "#{client_name}"]);
+    let binary = wrapper(&world, "vtmux-new", case);
+    let (answer, status) = upgrade_losing(&world, &binary, &mut attached);
+    assert_eq!(
+        answer,
+        Some(ServerMsg::UpgradeResult {
+            ok: true,
+            message: format!(
+                "warning: client {} did not re-attach after the upgrade: its session is \
+                 still there, attach again",
+                name.trim_end()
+            ),
+        })
+    );
+    assert_eq!(status, 1);
+    assert_eq!(
+        modes_left_on(&attached.bytes.lock().unwrap()),
+        Vec::<String>::new()
+    );
+    let (pushed, popped) = titles(&attached);
+    assert_eq!(pushed, popped, "the title popped");
+    wait("why, on the terminal", || attached.since(0).contains(says));
+    assert!(world.server_args().contains("--vtmux-resume"));
+    assert_eq!(world.run(&["lsc"]), "");
+    world.echo("a:w1", "after");
+}
+
+/// A binary from before clients followed upgrades (a downgrade) doesn't
+/// know the re-attach command line.
+#[test]
+fn a_client_whose_new_binary_cannot_re_attach_gets_its_terminal_back() {
+    a_lost_client_gets_its_terminal_back(
+        "--vtmux-reattach) echo 'usage: vtmux [-2CDlNuVv]' >&2; exit 1;;",
+        "usage: vtmux",
+    );
+}
+
+/// The new image refuses the token the client presents.
+#[test]
+fn a_client_whose_token_is_refused_gets_its_terminal_back() {
+    a_lost_client_gets_its_terminal_back(
+        "--vtmux-reattach) VTMUX_REATTACH_TOKEN=0123456789abcdef; \
+         export VTMUX_REATTACH_TOKEN;;",
+        "[server upgraded: re-attach]",
+    );
+}
+
+/// The client's exec of the new binary fails (here the binary stops being
+/// executable once its dry run has passed, so the server's `execve` fails
+/// too, after the notices): the client gets its terminal back and says
+/// why; the requester hears the upgrade failed, and the old image serves
+/// on.
+#[test]
+fn a_client_whose_exec_fails_gets_its_terminal_back() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.echo("a:w1", "before");
+    wait("the client's draw", || attached.screen().contains("before"));
+    let pid = world.pid();
+    let binary = wrapper(
+        &world,
+        "vtmux-new",
+        "--vtmux-check-snapshot) chmod -x \"$0\";;",
+    );
+    let (answer, status) = upgrade_losing(&world, &binary, &mut attached);
+    let why = failed(answer);
+    assert!(why.starts_with(&binary.display().to_string()), "{why}");
+    assert_eq!(status, 1);
+    assert_eq!(
+        modes_left_on(&attached.bytes.lock().unwrap()),
+        Vec::<String>::new()
+    );
+    wait("why, on the terminal", || {
+        attached
+            .since(0)
+            .contains("can't follow the server's upgrade")
+    });
+    assert_eq!(world.pid(), pid);
+    assert!(!world.server_args().contains("--vtmux-resume"));
+    wait("the client given up on", || world.run(&["lsc"]).is_empty());
+    world.echo("a:w1", "after");
 }
 
 /// `%output` payloads of pane `pane` in a control client's lines, octal
@@ -1505,13 +1752,17 @@ fn a_client_that_does_not_follow_is_detached_and_named_to_the_requester() {
     let old = Raw::new(&world, "/dev/vtu-old", false);
     let deaf = Raw::new(&world, "/dev/vtu-deaf", true);
     wait("three clients", || world.run(&["lsc"]).lines().count() == 3);
-    let was = attached.args();
+    let at = attached.len();
 
+    // The answer waits for the clients told to re-attach: this build's
+    // comes back, the deaf one is given up on after its 10 s.
     assert_eq!(
         world.upgrade(&bin()),
         Some(ServerMsg::UpgradeResult {
             ok: true,
             message: "warning: client /dev/vtu-old can't follow an upgrade: detached \
+                      with [server upgraded: re-attach]\n\
+                      warning: client /dev/vtu-deaf did not act on the upgrade: detached \
                       with [server upgraded: re-attach]"
                 .into(),
         })
@@ -1523,8 +1774,8 @@ fn a_client_that_does_not_follow_is_detached_and_named_to_the_requester() {
     });
     wait("the old client's detach", || old.exit().is_some());
     assert_eq!(old.exit(), detached);
-    reexecuted(&attached, &was);
-    assert!(deaf.noticed() && deaf.exit().is_none());
+    reexecuted(&attached, at);
+    assert!(deaf.noticed());
     wait("the deaf client's detach", || deaf.exit().is_some());
     assert_eq!(deaf.exit(), detached);
     wait("the clients left", || {

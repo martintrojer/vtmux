@@ -11,7 +11,7 @@ use mio::{Events, Interest, Poll, Token};
 use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
 use vtmux_core::protocol::{
-    self, ClientMsg, ProtocolError, REATTACH_FLAG, ServerMsg, UPGRADED_DETACH,
+    self, ClientMsg, ProtocolError, REATTACH_FLAG, REATTACH_TOKEN_ENV, ServerMsg, UPGRADED_DETACH,
 };
 
 use crate::tty::RawTty;
@@ -107,18 +107,24 @@ pub fn exec(shell: &Path, command: &str) -> i32 {
 /// The server is replacing itself with `binary` (live-upgrade spec,
 /// decision 4): become `binary`, re-attaching with `token` on the same
 /// terminal through the same socket (the frozen re-attach command line,
-/// protocol module docs). Only returns, with the exit status, if the exec
-/// fails: the client can't follow, so it says what the server would have.
+/// protocol module docs: the token in the environment, where other users
+/// can't read it). The server restored the terminal before the notice, as
+/// for a detach, so it is the shell's whatever happens next. Only returns,
+/// with the exit status, if the exec fails: the client can't follow, so it
+/// says why and what the server would have.
 #[must_use]
 pub fn reexec(binary: &Path, token: &str, how: &Reattach) -> i32 {
     use std::os::unix::process::CommandExt;
     let err = std::process::Command::new(binary)
         .arg0(&how.argv0)
         .arg(REATTACH_FLAG)
-        .arg(token)
         .arg(&how.socket)
+        .env(REATTACH_TOKEN_ENV, token)
         .exec();
-    eprintln!("{}: {err}", binary.display());
+    eprintln!(
+        "can't follow the server's upgrade: {}: {err}",
+        binary.display()
+    );
     println!("[{UPGRADED_DETACH}]");
     1
 }

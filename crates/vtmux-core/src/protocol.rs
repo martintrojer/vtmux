@@ -58,14 +58,18 @@
 //!   option of string (the notice's token). A `Hello` whose fields are all
 //!   unset has an empty `ext`, as before them.
 //! - The re-attach command line, which a client of one build runs to
-//!   start the binary of another: `<binary> --vtmux-reattach <token>
-//!   <socket path>` ([`REATTACH_FLAG`]), `argv[0]` the client's own.
+//!   start the binary of another: `<binary> --vtmux-reattach <socket
+//!   path>` ([`REATTACH_FLAG`]), `argv[0]` the client's own, with the
+//!   token in the environment variable [`REATTACH_TOKEN_ENV`], not on the
+//!   command line, where any user's `ps` would show it. The new process
+//!   takes it out of its environment at once.
 //! - The `UpgradeRequest` and `UpgradeNotice` paths are absolute, since
 //!   the server's working directory is not the client's: the server refuses
 //!   a request with a relative one, and a client refuses such a notice
 //!   ([`ProtocolError::Malformed`]), as it does a notice whose token is not
-//!   16 to 64 ASCII letters and digits ([`is_upgrade_token`]): the token
-//!   goes on the re-executed client's command line.
+//!   16 to 64 ASCII letters and digits ([`is_upgrade_token`]): the binary
+//!   goes on the re-executed client's command line, the token in its
+//!   environment.
 //! - A control client, the one client served across versions, skips a
 //!   server frame whose tag it doesn't know (it has read the whole frame),
 //!   so a later server can add frozen frames without ending older control
@@ -114,9 +118,14 @@ pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 
 /// The flag of the re-attach command line (module docs, *Frozen
 /// frames*): on an [`ServerMsg::UpgradeNotice`] an attached client execs
-/// `<binary> --vtmux-reattach <token> <socket path>`, which connects to
-/// `socket path` and sends a [`Hello`] with [`HelloExt::reattach`] set.
+/// `<binary> --vtmux-reattach <socket path>` with the token in
+/// [`REATTACH_TOKEN_ENV`], which connects to `socket path` and sends a
+/// [`Hello`] with [`HelloExt::reattach`] set.
 pub const REATTACH_FLAG: &str = "--vtmux-reattach";
+
+/// The environment variable the re-attach command line carries its token
+/// in (module docs, *Frozen frames*).
+pub const REATTACH_TOKEN_ENV: &str = "VTMUX_REATTACH_TOKEN";
 
 /// What a client that can't follow an upgrade is detached with
 /// (live-upgrade spec, decisions 4 and 25); the client prints it in

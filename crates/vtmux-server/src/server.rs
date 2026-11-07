@@ -882,6 +882,7 @@ impl Server {
             self.lock_timer_fire(Instant::now());
             self.exit_timers(Instant::now());
             self.reattach_timers(Instant::now());
+            self.upgrade_answer_due();
             self.persist_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
@@ -1482,8 +1483,11 @@ impl Server {
         }
         // A suspended client's terminal is not tmux's to write
         // (TTY_STARTED is off: tty_client_ready, tty.c:1634), nor is that
-        // of a client re-attaching across an upgrade.
-        if (c.suspended || c.reattach.is_some()) && matches!(msg, ServerMsg::Frame(_)) {
+        // of a client told to re-attach across an upgrade (its teardown
+        // goes just before the notice).
+        if (c.suspended || c.reattach.is_some_and(|r| r.deadline.is_some()))
+            && matches!(msg, ServerMsg::Frame(_))
+        {
             return;
         }
         // Large payloads are split so no frame exceeds MAX_FRAME.

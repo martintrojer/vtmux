@@ -371,41 +371,31 @@ fn handshake_fd(requester: Option<&snap::Requester>) -> Option<RawFd> {
 
 /// Tell whoever asked for the upgrade how it went, from the image that
 /// ends up serving: `Err` with why when that is not the new one; `Ok`
-/// with the warnings `server` gathered (the clients it detached,
-/// decision 25), one a line. A handshake gets the frozen `UpgradeResult`
-/// on `handshake` (written at once, the descriptor closed after); a
-/// client is told by `server` ([`Server::upgrade_answer`]).
+/// with the warnings `server` gathered (the clients it detached or that
+/// did not come back, decision 25), one a line. With a server, the answer
+/// waits for the clients told to re-attach
+/// ([`Server::upgrade_answer_later`]); without one, a handshake gets the
+/// frozen `UpgradeResult` on `handshake` at once.
 fn answer(
-    mut server: Option<&mut Server>,
+    server: Option<&mut Server>,
     requester: Option<&snap::Requester>,
     handshake: Option<OwnedFd>,
     outcome: Result<(), String>,
 ) {
-    let warnings = server
-        .as_deref_mut()
-        .map(|s| std::mem::take(&mut s.upgrade.warnings).join("\n"))
-        .unwrap_or_default();
-    let outcome = outcome.map(|()| warnings);
-    match (requester, server) {
-        (Some(snap::Requester::Handshake(_)), _) => {
-            if let Some(fd) = handshake {
-                let (ok, message) = match outcome {
-                    Ok(warnings) => (true, warnings),
-                    Err(m) => (false, m),
-                };
-                let mut stream = std::os::unix::net::UnixStream::from(fd);
-                // The requester is waiting for this one small frame, so
-                // the socket has room; a requester that went is no matter.
-                let _ = vtmux_core::protocol::write_msg(
-                    &mut stream,
-                    &vtmux_core::protocol::ServerMsg::UpgradeResult { ok, message },
-                );
+    let Some(requester) = requester else {
+        return;
+    };
+    match server {
+        Some(server) => server.upgrade_answer_later(super::upgrade::LaterAnswer {
+            requester: requester.clone(),
+            handshake,
+            outcome,
+        }),
+        None => {
+            if let (snap::Requester::Handshake(_), Some(fd)) = (requester, handshake) {
+                super::upgrade::write_result(fd, outcome.map(|()| String::new()));
             }
         }
-        (Some(snap::Requester::Client(id)), Some(server)) => {
-            server.upgrade_answer(super::ClientId(*id as usize), outcome);
-        }
-        _ => {}
     }
 }
 

@@ -814,7 +814,14 @@ fn clients_that_cannot_follow_are_detached_and_named() {
     // f's stays open: it ignored its notice.
     drop(g_peer);
     gone(&mut new, g);
-    let deadline = new.reattach_deadline().unwrap();
+    // Its process still runs (it would be given up on at once otherwise).
+    new.clients.get_mut(&g).unwrap().hello.as_mut().unwrap().pid = std::process::id();
+    let deadline = new
+        .clients
+        .values()
+        .filter_map(|c| c.reattach?.deadline)
+        .min()
+        .unwrap();
     new.reattach_timers(
         deadline
             .checked_sub(std::time::Duration::from_millis(1))
@@ -824,6 +831,250 @@ fn clients_that_cannot_follow_are_detached_and_named() {
     new.reattach_timers(deadline);
     assert!(!new.clients.contains_key(&g), "lost");
     assert_eq!(exit(&st::messages(&mut new, f, &mut f_peer)), detached);
+    let logged: Vec<String> = new
+        .messages_newest_first()
+        .take(2)
+        .map(|m| m.text.clone())
+        .collect();
+    assert!(
+        logged.contains(
+            &"warning: client /dev/f did not act on the upgrade: detached with \
+              [server upgraded: re-attach]"
+                .to_owned()
+        ),
+        "{logged:?}"
+    );
     drop(new);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The finding behind `medium_reexec_teardown`: a client that does not
+/// come back (its exec fails, the new binary can't re-attach, its token
+/// is refused) must leave its terminal as a detach does. So step 6 sends
+/// each client the teardown (`tty_stop_tty`: the alternate screen left,
+/// the title popped, mouse, bracketed paste, focus reports and keypad
+/// off) just before its notice, which the client writes out before the
+/// exec; nothing is drawn for it after.
+#[test]
+fn the_notice_comes_after_the_terminal_is_restored() {
+    let (mut server, dir) = setup("teardown");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    server.upgrade_tokens();
+    server.upgrade_notify(&dir.join("new"));
+    let got = st::messages(&mut server, f, &mut f_peer);
+    let [ServerMsg::Frame(teardown), ServerMsg::UpgradeNotice { .. }] = got.as_slice() else {
+        panic!("{got:?}");
+    };
+    let teardown = String::from_utf8_lossy(teardown);
+    for off in [
+        "\x1b[?1049l",
+        "\x1b[23;0;0t",
+        "\x1b[?1000l",
+        "\x1b[?1006l",
+        "\x1b[?2004l",
+        "\x1b[?1004l",
+        "\x1b[?1l",
+        "\x1b>",
+    ] {
+        assert!(teardown.contains(off), "{off:?} in {teardown:?}");
+    }
+    server.redraw_client(f);
+    server.render_clients();
+    assert_eq!(st::messages(&mut server, f, &mut f_peer), []);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A process id that is no process's any more.
+fn dead_pid() -> u32 {
+    let mut child = std::process::Command::new("/bin/sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    pid
+}
+
+/// The image that serves holds the requester's answer until every client
+/// told to re-attach has, or has been given up on, and names those that
+/// did not come back: here one whose process exited after its old
+/// connection closed (a binary that can't re-attach), given up on at once
+/// rather than at its deadline. The give-up is in the message log too.
+#[test]
+fn the_answer_waits_for_the_clients_re_attaching_and_names_the_lost() {
+    use std::io::Read as _;
+    let (mut server, dir) = setup("later");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let (g, mut g_peer) = attach_as(&mut server, &dir, "a", "/dev/g", true);
+    let (o, mut o_peer) = attach_as(&mut server, &dir, "a", "/dev/o", false);
+    for (id, peer) in [(f, &mut f_peer), (g, &mut g_peer), (o, &mut o_peer)] {
+        let _ = st::messages(&mut server, id, peer);
+    }
+    server.upgrade_tokens();
+    let token = server.clients[&f].reattach.unwrap().text();
+    let mut new = st::rebuild(&server, &dir, "b");
+    new.detach_unfollowing();
+    let (ours, mut theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+    theirs.set_nonblocking(true).unwrap();
+    let answered = |theirs: &mut std::os::unix::net::UnixStream| {
+        let mut buf = Vec::new();
+        let _ = theirs.read_to_end(&mut buf);
+        (!buf.is_empty()).then(|| {
+            vtmux_core::protocol::read_msg::<ServerMsg>(&mut buf.as_slice())
+                .unwrap()
+                .unwrap()
+        })
+    };
+    new.upgrade_answer_later(super::LaterAnswer {
+        requester: snap::Requester::Handshake(ours.as_raw_fd()),
+        handshake: Some(OwnedFd::from(ours)),
+        outcome: Ok(()),
+    });
+    assert_eq!(answered(&mut theirs), None, "f and g are on their way");
+    // Meanwhile another upgrade would lose the answer: refused.
+    assert_eq!(
+        new.upgrade_start(super::Requester::Handshake(f), passing(&dir)),
+        Err("the last upgrade is still waiting for its clients to re-attach".to_owned())
+    );
+
+    // g re-executed and its process exited: not coming back.
+    drop(g_peer);
+    gone(&mut new, g);
+    new.clients.get_mut(&g).unwrap().hello.as_mut().unwrap().pid = dead_pid();
+    let deadline = new.reattach_deadline().unwrap();
+    assert!(deadline < Instant::now() + super::REATTACH_WAIT / 2);
+    new.reattach_timers(Instant::now());
+    new.upgrade_answer_due();
+    assert!(!new.clients.contains_key(&g), "given up on");
+    assert_eq!(answered(&mut theirs), None, "f is on its way");
+    let lost = "warning: client /dev/g did not re-attach after the upgrade: its session is \
+                still there, attach again";
+    assert_eq!(new.messages_newest_first().next().unwrap().text, lost);
+
+    // f comes back: the answer goes, naming o and g.
+    drop(f_peer);
+    gone(&mut new, f);
+    let mut h = st::hello(
+        &[],
+        &dir,
+        Some(vtmux_core::protocol::TtyInfo {
+            name: "/dev/f".into(),
+            term: "xterm-256color".into(),
+            cols: 80,
+            rows: 24,
+            features: Vec::new(),
+        }),
+        ControlMode::None,
+    );
+    h.ext.follows_upgrade = true;
+    h.ext.reattach = Some(token);
+    let (_new_f, _new_f_peer) = st::connect(&mut new, h);
+    assert!(new.clients[&f].reattach.is_none());
+    new.upgrade_answer_due();
+    assert_eq!(
+        answered(&mut theirs),
+        Some(ServerMsg::UpgradeResult {
+            ok: true,
+            message: format!(
+                "warning: client /dev/o can't follow an upgrade: detached with \
+                 [server upgraded: re-attach]\n{lost}"
+            ),
+        })
+    );
+    assert!(new.upgrade.answer.is_none() && new.upgrade.warnings.is_empty());
+    drop(new);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A re-attach is let in as the access list says now: one from a peer
+/// made read-only since gets a read-only client, whatever the record's
+/// flags were; one from another user is refused and leaves the record
+/// waiting with its token.
+#[test]
+fn a_re_attach_is_as_the_access_list_says_now() {
+    use crate::acl::Subject;
+    let (mut server, dir) = setup("reacl");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    assert!(!server.clients[&f].flags.read_only);
+    server.upgrade_tokens();
+    server.upgrade_notify(&dir.join("new"));
+    let token = notices(&mut server, f, &mut f_peer).pop().unwrap().1;
+    drop(f_peer);
+    gone(&mut server, f);
+    let mut h = st::hello(
+        &[],
+        &dir,
+        Some(vtmux_core::protocol::TtyInfo {
+            name: "/dev/f".into(),
+            term: "xterm-256color".into(),
+            cols: 80,
+            rows: 24,
+            features: Vec::new(),
+        }),
+        ControlMode::None,
+    );
+    h.ext.follows_upgrade = true;
+    h.ext.reattach = Some(token);
+
+    // Another user's connection presenting the token.
+    let (uid, gid) = server.clients[&f].peer.unwrap();
+    server.clients.get_mut(&f).unwrap().peer = Some((uid + 1, gid));
+    let (other, mut other_peer) = st::connect(&mut server, h.clone());
+    let refused = st::messages(&mut server, other, &mut other_peer);
+    assert!(
+        matches!(refused.last(), Some(ServerMsg::Exit { code: 1, message: Some(m), .. })
+            if m == "access not allowed"),
+        "{refused:?}"
+    );
+    assert!(server.clients[&f].reattach.is_some(), "still waiting");
+    server.clients.get_mut(&f).unwrap().peer = Some((uid, gid));
+
+    // Its own user, made read-only meanwhile.
+    server.acl.set_read_only(Subject::User(uid), true);
+    let (new, _peer) = st::connect(&mut server, h);
+    assert!(
+        !server.clients.contains_key(&new),
+        "bound to the old record"
+    );
+    let c = &server.clients[&f];
+    assert!(c.reattach.is_none() && c.attached.is_some());
+    assert!(c.flags.read_only, "read-only as the access list says");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A prompt a key binding opened (`command-prompt`, which waits in the
+/// client's queue until it closes, cmd-command-prompt.c) holds the
+/// upgrade like any command in flight; the refusal says what to do.
+#[test]
+fn an_open_prompt_refuses_the_upgrade_saying_what_to_close() {
+    let (mut server, dir) = setup("prompt");
+    let (term, mut term_peer) = st::attach(&mut server, &dir, "a", &[]);
+    let _ = st::messages(&mut server, term, &mut term_peer);
+    // The prefix key, then `:`.
+    server.on_client_input(term, b"\x02:").unwrap();
+    server.cmdq_process();
+    assert!(
+        server.clients[&term].status.prompt().is_some(),
+        "prompt open"
+    );
+    let binary = passing(&dir);
+    let b = binary.to_str().unwrap();
+    let a = command(
+        &mut server,
+        &dir,
+        &["vtmux-upgrade", "-b", b],
+        Instant::now() + super::PREFLIGHT_WAIT * 2,
+    );
+    assert_eq!(
+        (a.err.as_str(), a.exit),
+        (
+            "still running after 3 s: client /dev/vtmux-test-tty has a prompt open: close it, \
+             then run vtmux-upgrade again\n",
+            Some(1)
+        )
+    );
+    assert!(execs().is_empty());
     std::fs::remove_dir_all(dir).unwrap();
 }
