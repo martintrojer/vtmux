@@ -464,7 +464,7 @@ fn check_in_child(s: &snap::Snapshot, socket: &Path) -> Result<(), String> {
     let file = crate::sys::upgrade::memfile(dir, &snap::encode(s))
         .map_err(|e| format!("snapshot: {}", vtmux_core::error::strerror(&e)))?;
     match crate::sys::upgrade::dry_run(&exe, file.as_fd(), CHECK_LIMIT) {
-        Ok(r) => r,
+        Ok(r) => r.map(drop),
         Err(e) => Err(format!(
             "{}: {}",
             exe.display(),

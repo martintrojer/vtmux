@@ -38,7 +38,8 @@ use crate::cmdq::{QueueId, StepId};
 
 /// What replaces the server image: [`crate::sys::upgrade::exec_in_place`]
 /// (tests swap it). Returns only on failure.
-pub type ExecFn = fn(&Path, OwnedFd, &[RawFd]) -> io::Error;
+/// The last argument is the `-S` for the new image, when it takes one.
+pub type ExecFn = fn(&Path, OwnedFd, &[RawFd], Option<&Path>) -> io::Error;
 
 /// How long the preflight waits for jobs and commands in flight
 /// (decisions 10 and 26: "a few seconds", 3 s).

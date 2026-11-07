@@ -540,9 +540,13 @@ fn a_server_execs_itself_and_everything_carries_on() {
     assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
 
     assert_eq!(world.pid(), pid);
+    // `ps` still tells which server it is (the oracle runner and `cargo
+    // xtask reap` go by `-S`).
+    let socket = world.run(&["display", "-p", "#{socket_path}"]);
+    let resumed = format!("-S {} --vtmux-resume ", socket.trim_end());
     assert!(
-        world.server_args().contains("--vtmux-resume"),
-        "{}",
+        world.server_args().contains(&resumed),
+        "{} lacks {resumed}",
         world.server_args()
     );
     assert_eq!(world.pane_pids(), panes);
@@ -979,7 +983,8 @@ fn a_server_left_without_a_snapshot_still_answers() {
     std::fs::write(
         &wrapper,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = --vtmux-resume ]; then printf damage >>/dev/fd/$2; fi\n\
+            "#!/bin/sh\nf=$1 n=$2; [ \"$1\" = -S ] && f=$3 n=$4\n\
+             if [ \"$f\" = --vtmux-resume ]; then printf damage >>/dev/fd/$n; fi\n\
              exec '{BIN}' \"$@\"\n"
         ),
     )
@@ -1047,7 +1052,8 @@ fn the_panes_of_a_server_left_without_a_snapshot_keep_printing() {
     std::fs::write(
         &wrapper,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = --vtmux-resume ]; then printf damage >>/dev/fd/$2; fi\n\
+            "#!/bin/sh\nf=$1 n=$2; [ \"$1\" = -S ] && f=$3 n=$4\n\
+             if [ \"$f\" = --vtmux-resume ]; then printf damage >>/dev/fd/$n; fi\n\
              exec '{BIN}' \"$@\"\n"
         ),
     )
@@ -1480,6 +1486,39 @@ fn modes_left_on(bytes: &[u8]) -> Vec<String> {
         }
     }
     on.into_iter().filter(|(_, v)| *v).map(|(k, _)| k).collect()
+}
+
+/// A binary whose dry run does not say it takes `-S <socket>` (one from
+/// before that, emulated: its check's stderr dropped, and `-S` first on
+/// its command line fails the start, as such a binary's would) gets
+/// `--vtmux-resume <fd>` alone, and the server lives on.
+#[test]
+fn a_binary_that_does_not_take_the_socket_is_not_given_it() {
+    let world = World::new();
+    world.populate(&[]);
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let older = wrapper(
+        &world,
+        "vtmux-older",
+        "--vtmux-check-snapshot) \"$BIN\" \"$@\" 2>/dev/null; exit $?;;\n\
+         -S) echo 'usage: vtmux [-2CDlNuVv]' >&2; exit 1;;",
+    );
+    assert_eq!(world.upgrade(&older), Some(upgraded()));
+    assert_eq!(world.pid(), pid);
+    assert_eq!(world.pane_pids(), panes);
+    let args = world.server_args();
+    assert!(
+        args.contains("--vtmux-resume") && !args.contains(" -S "),
+        "{args}"
+    );
+    // That image, this build, gives the next one its socket.
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()));
+    let args = world.server_args();
+    assert!(
+        args.contains(" -S ") && args.contains("--vtmux-resume"),
+        "{args}"
+    );
 }
 
 /// A binary to upgrade onto: this build, except as `case` says for the

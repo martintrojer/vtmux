@@ -30,7 +30,7 @@ thread_local! {
 
 /// An [`super::ExecFn`] that records the call and fails, as an `execve`
 /// that returns would.
-fn record_exec(binary: &Path, file: OwnedFd, keep: &[RawFd]) -> io::Error {
+fn record_exec(binary: &Path, file: OwnedFd, keep: &[RawFd], _socket: Option<&Path>) -> io::Error {
     let bytes = crate::sys::upgrade::read_all(file.as_fd()).unwrap();
     // The real exec closes it when it fails.
     drop(file);

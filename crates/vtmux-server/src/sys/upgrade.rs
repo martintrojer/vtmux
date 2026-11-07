@@ -7,7 +7,11 @@
 //! The new image is `<binary> --vtmux-resume <fd>` ([`RESUME_FLAG`]); a
 //! switch back after a failed resume adds [`SWITCHED_BACK_FLAG`], so the
 //! image it lands in does not switch again. The dry run is
-//! `<binary> --vtmux-check-snapshot <fd>` ([`CHECK_FLAG`]).
+//! `<binary> --vtmux-check-snapshot <fd>` ([`CHECK_FLAG`]). A binary whose
+//! dry run says it takes one ([`TAKES_SOCKET`]) is started as `<binary> -S
+//! <socket> --vtmux-resume <fd>`, so `ps` (the oracle runner, `cargo xtask
+//! reap`) still tells which server it is; an image of a binary from before
+//! that parses only the words above, so it gets them alone.
 
 use std::collections::BTreeSet;
 use std::ffi::{CString, OsString};
@@ -44,6 +48,19 @@ pub const PATCH_STACK_FLAG: &str = "--vtmux-patch-stack";
 
 /// How long [`patch_stack`] waits for the answer.
 pub const PATCH_STACK_LIMIT: Duration = Duration::from_secs(1);
+
+/// What a dry run that passes writes on stderr when its binary takes `-S
+/// <socket>` before [`RESUME_FLAG`]. Binaries from before it write
+/// nothing, and the image running the dry run ignores the stderr of one
+/// that passes, so either side may be the older.
+pub const TAKES_SOCKET: &str = "vtmux-resume takes -S\n";
+
+/// A dry run that passed: what the image it checked takes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Checked {
+    /// `-S <socket>` before [`RESUME_FLAG`] ([`TAKES_SOCKET`]).
+    pub takes_socket: bool,
+}
 
 /// The environment variable a switch back passes why the resume failed in,
 /// for the image it lands in to log ([`take_failure_note`]). Not an
@@ -247,7 +264,7 @@ pub fn dry_run(
     binary: &Path,
     snapshot: BorrowedFd<'_>,
     limit: Duration,
-) -> io::Result<Result<(), String>> {
+) -> io::Result<Result<Checked, String>> {
     use std::os::unix::process::CommandExt as _;
     let flags = inheritable(snapshot)?;
     let mut command = Command::new(binary);
@@ -335,7 +352,10 @@ pub fn dry_run(
         drain(e, &mut said);
     }
     if status.success() {
-        return Ok(Ok(()));
+        let takes_socket = said
+            .windows(TAKES_SOCKET.len())
+            .any(|w| w == TAKES_SOCKET.as_bytes());
+        return Ok(Ok(Checked { takes_socket }));
     }
     let message = String::from_utf8_lossy(&said);
     let message = message.trim_end();
@@ -450,13 +470,21 @@ fn exited(pid: libc::pid_t) -> io::Result<bool> {
 }
 
 /// The arguments of the new image: `argv0 --vtmux-resume <fd>`, and
-/// [`SWITCHED_BACK_FLAG`] for a switch back.
-fn resume_argv(argv0: &OsString, fd: RawFd, back: bool) -> io::Result<Vec<CString>> {
-    let mut words = vec![
-        argv0.as_bytes().to_vec(),
-        RESUME_FLAG.into(),
-        fd.to_string().into_bytes(),
-    ];
+/// [`SWITCHED_BACK_FLAG`] for a switch back; `-S <socket>` after `argv0`
+/// for an image that takes it ([`TAKES_SOCKET`]).
+fn resume_argv(
+    argv0: &OsString,
+    fd: RawFd,
+    back: bool,
+    socket: Option<&Path>,
+) -> io::Result<Vec<CString>> {
+    let mut words = vec![argv0.as_bytes().to_vec()];
+    if let Some(socket) = socket {
+        words.push(b"-S".to_vec());
+        words.push(socket.as_os_str().as_bytes().to_vec());
+    }
+    words.push(RESUME_FLAG.into());
+    words.push(fd.to_string().into_bytes());
     if back {
         words.push(SWITCHED_BACK_FLAG.into());
     }
@@ -470,15 +498,22 @@ fn resume_argv(argv0: &OsString, fd: RawFd, back: bool) -> io::Result<Vec<CStrin
 /// panes stay its children): `execve(binary, [argv0, "--vtmux-resume",
 /// <snapshot>], environ)` with `snapshot` and every descriptor of `keep`
 /// left open across it (close-on-exec cleared). `argv0` is this process's
-/// own, so `ps` still names it as before. The signals the server handles
+/// own, so `ps` still names it as before, and `socket`, given for a binary
+/// whose dry run said it takes it, goes before the flag as `-S <socket>`,
+/// so `ps` still tells which server it is. The signals the server handles
 /// are blocked across it (`signal::block_handled`): the new image unblocks
 /// them once it has handlers, and one that comes meanwhile waits instead
 /// of killing the process. Returns only on failure, with every
 /// descriptor's close-on-exec flag and the signal mask as they were;
 /// `snapshot` is closed.
 #[must_use]
-pub fn exec_in_place(binary: &Path, snapshot: OwnedFd, keep: &[RawFd]) -> io::Error {
-    let e = exec_resume(Target::Path(binary), snapshot.as_fd(), keep, None);
+pub fn exec_in_place(
+    binary: &Path,
+    snapshot: OwnedFd,
+    keep: &[RawFd],
+    socket: Option<&Path>,
+) -> io::Error {
+    let e = exec_resume(Target::Path(binary), snapshot.as_fd(), keep, None, socket);
     drop(snapshot);
     e
 }
@@ -490,7 +525,8 @@ pub fn exec_in_place(binary: &Path, snapshot: OwnedFd, keep: &[RawFd]) -> io::Er
 /// holds by now (a relinked build, a binary from before the feature).
 /// Without it, or when it can't be exec'd, `path` is, but only once its
 /// dry run on `snapshot` passes. `why` (the resume's failure) reaches
-/// that image in [`FAILED_ENV`].
+/// that image in [`FAILED_ENV`]. `socket` is the `-S` this image was
+/// started with: the image that wrote the snapshot gave it, so takes it.
 #[must_use]
 pub fn switch_back(
     exe: Option<BorrowedFd<'_>>,
@@ -498,10 +534,11 @@ pub fn switch_back(
     snapshot: BorrowedFd<'_>,
     keep: &[RawFd],
     why: &str,
+    socket: Option<&Path>,
 ) -> io::Error {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let e = match exe {
-        Some(fd) => exec_resume(Target::Fd(fd), snapshot, keep, Some(why)),
+        Some(fd) => exec_resume(Target::Fd(fd), snapshot, keep, Some(why), socket),
         None => io::Error::other("no image to switch back to"),
     };
     // No `fexecve` here, so no executable is kept open (`own_exe`).
@@ -512,7 +549,13 @@ pub fn switch_back(
     };
     let Some(path) = path else { return e };
     match dry_run(path, snapshot, SWITCH_BACK_LIMIT) {
-        Ok(Ok(())) => exec_resume(Target::Path(path), snapshot, keep, Some(why)),
+        Ok(Ok(c)) => exec_resume(
+            Target::Path(path),
+            snapshot,
+            keep,
+            Some(why),
+            socket.filter(|_| c.takes_socket),
+        ),
         Ok(Err(message)) => io::Error::other(message),
         Err(e) => e,
     }
@@ -588,13 +631,14 @@ fn exec_resume(
     snapshot: BorrowedFd<'_>,
     keep: &[RawFd],
     back: Option<&str>,
+    socket: Option<&Path>,
 ) -> io::Error {
     let argv0 = std::env::args_os().next().unwrap_or_else(|| match target {
         Target::Path(p) => p.as_os_str().to_owned(),
         #[cfg(any(target_os = "linux", target_os = "android"))]
         Target::Fd(_) => "vtmux".into(),
     });
-    let argv = match resume_argv(&argv0, snapshot.as_raw_fd(), back.is_some()) {
+    let argv = match resume_argv(&argv0, snapshot.as_raw_fd(), back.is_some(), socket) {
         Ok(argv) => argv,
         Err(e) => return e,
     };
@@ -831,15 +875,22 @@ mod tests {
     #[test]
     fn the_resume_arguments_name_the_descriptor_and_a_switch_back() {
         let argv0 = OsString::from("tmux");
-        let words = |back| {
-            resume_argv(&argv0, 7, back)
+        let words = |back, socket: Option<&str>| {
+            resume_argv(&argv0, 7, back, socket.map(Path::new))
                 .unwrap()
                 .into_iter()
                 .map(|c| c.into_string().unwrap())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(words(false), ["tmux", RESUME_FLAG, "7"]);
-        assert_eq!(words(true), ["tmux", RESUME_FLAG, "7", SWITCHED_BACK_FLAG]);
+        assert_eq!(words(false, None), ["tmux", RESUME_FLAG, "7"]);
+        assert_eq!(
+            words(true, None),
+            ["tmux", RESUME_FLAG, "7", SWITCHED_BACK_FLAG]
+        );
+        assert_eq!(
+            words(false, Some("/tmp/vto-1/s")),
+            ["tmux", "-S", "/tmp/vto-1/s", RESUME_FLAG, "7"]
+        );
     }
 
     #[test]
@@ -848,7 +899,7 @@ mod tests {
         let snapshot = memfile(&d.0, b"x").unwrap();
         let kept = memfile(&d.0, b"y").unwrap();
         let missing = d.0.join("no-such-binary");
-        let e = exec_in_place(&missing, snapshot, &[kept.as_raw_fd()]);
+        let e = exec_in_place(&missing, snapshot, &[kept.as_raw_fd()], None);
         assert_eq!(e.kind(), io::ErrorKind::NotFound);
         assert!(fcntl_getfd(&kept).unwrap().contains(FdFlags::CLOEXEC));
         // The handled signals were blocked across the attempt and are not

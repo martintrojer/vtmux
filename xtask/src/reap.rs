@@ -149,7 +149,10 @@ pub fn is_test_label(l: &str) -> bool {
 }
 
 /// Is this a `tmux`/`vtmux` command line whose socket is a test one: a global
-/// `-L` label from [`is_test_label`], or an oracle run's `-S /tmp/vto-*/s`?
+/// `-L` label from [`is_test_label`], an oracle run's `-S /tmp/vto-*/s`, or
+/// `-S` a test label's socket (`.../tmux-<uid>/<label>` or `vtmux-<uid>`):
+/// a server a live upgrade re-executed runs as `-S <its socket>
+/// --vtmux-resume <fd>`, whatever it was started with.
 fn is_test_server(args: &str) -> bool {
     let mut words = args.split_whitespace();
     let Some(argv0) = words.next() else {
@@ -172,11 +175,28 @@ fn is_test_server(args: &str) -> bool {
         };
         match value {
             Some(('L', l)) if is_test_label(l) => return true,
-            Some(('S', s)) if s.starts_with("/tmp/vto-") => return true,
+            Some(('S', s)) if s.starts_with("/tmp/vto-") || is_label_socket(s) => return true,
             _ => {}
         }
     }
     false
+}
+
+/// `path` is `<dir>/tmux-<uid>/<label>` or `<dir>/vtmux-<uid>/<label>` with a
+/// test label: where `-L <label>` puts the socket.
+fn is_label_socket(path: &str) -> bool {
+    let p = Path::new(path);
+    let dir = p
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|d| d.to_str());
+    let label = p.file_name().and_then(|l| l.to_str());
+    let socket_dir = dir.is_some_and(|d| {
+        d.strip_prefix("tmux-")
+            .or_else(|| d.strip_prefix("vtmux-"))
+            .is_some_and(|uid| !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()))
+    });
+    socket_dir && label.is_some_and(is_test_label)
 }
 
 /// A parent that adopts orphans: init, or the per-user/subreaper manager.
@@ -446,6 +466,9 @@ mod tests {
             "vtmux -L ctl7-0 -f /dev/null -C new",
             "tmux -2 -L i42 new",
             "tmux -S /tmp/vto-a1b2c3/s -f /dev/null new",
+            "tmux -S /tmp/vto-a1b2c3/s --vtmux-resume 9",
+            "/w/vtmux -S /tmp/t1/vtmux-1000/rv1 --vtmux-resume 9 --vtmux-switched-back",
+            "tmux -S /tmp/t1/tmux-1000/testA42 --vtmux-resume 9",
         ] {
             assert!(is_test_server(yes), "{yes}");
         }
@@ -456,6 +479,10 @@ mod tests {
             "tmux -f /dev/null -L other new",
             "vtmux new -s rv1 -L rv1",
             "tmux -S /run/user/1/sock new",
+            "tmux -S /tmp/t1/vtmux-1000/default --vtmux-resume 9",
+            "tmux -S /tmp/t1/vtmux-1000/work --vtmux-resume 9",
+            "tmux -S /tmp/t1/x/rv1 --vtmux-resume 9",
+            "tmux --vtmux-resume 9",
             "/usr/bin/python3 /tmp/rv_1/x.py -Lrv1",
             "tmuxer -Lrv1 x",
         ] {

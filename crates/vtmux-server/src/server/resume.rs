@@ -245,9 +245,11 @@ fn run(mut server: Server) -> i32 {
 /// snapshot in inherited descriptor `snapshot_fd` and run it; returns its
 /// exit status. `switched_back` is set in the image a failed resume
 /// switched back to ([`sys::SWITCHED_BACK_FLAG`]), which does not switch
-/// again.
+/// again. `socket` is the `-S` it was started with, if any: only `ps`
+/// reads it (the listener comes in the snapshot), and a switch back
+/// passes it on.
 #[must_use]
-pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
+pub fn resume(snapshot_fd: RawFd, switched_back: bool, socket: Option<&Path>) -> i32 {
     // Why the image that switched back to this one failed (it is taken out
     // of the environment either way).
     let note = sys::take_failure_note().filter(|_| switched_back);
@@ -321,6 +323,7 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
             file.as_fd(),
             &keep,
             &why,
+            socket,
         );
         let image = path.map_or_else(|| "the image before".into(), |p| p.display().to_string());
         why = format!("{why}; switching back to {image}: {e}");
@@ -563,10 +566,11 @@ impl Server {
                 return format!("snapshot: {}", vtmux_core::error::strerror(&e));
             }
         };
-        let refused = match sys::dry_run(binary, file.as_fd(), dry_run_limit(&snapshot)) {
-            Ok(Ok(())) => None,
-            Ok(Err(message)) => Some(message),
-            Err(e) => Some(fail(&e)),
+        let (refused, checked) = match sys::dry_run(binary, file.as_fd(), dry_run_limit(&snapshot))
+        {
+            Ok(Ok(checked)) => (None, checked),
+            Ok(Err(message)) => (Some(message), sys::Checked::default()),
+            Err(e) => (Some(fail(&e)), sys::Checked::default()),
         };
         if let Some(message) = refused {
             self.upgrade_tokens_void();
@@ -581,7 +585,8 @@ impl Server {
             .chain(binary_fd)
             .chain(handshake)
             .collect();
-        fail(&(self.upgrade.exec)(binary, file, &keep))
+        let socket = checked.takes_socket.then_some(self.socket.as_path());
+        fail(&(self.upgrade.exec)(binary, file, &keep, socket))
     }
 
     /// Every pane's and popup's history compressed now, as far as Ghostty
