@@ -55,7 +55,7 @@ pub struct Guard {
 )]
 pub struct ControlState {
     /// Unconsumed stdin bytes.
-    inbuf: Vec<u8>,
+    pub(crate) inbuf: Vec<u8>,
     /// Stdin is read (`control_ready`, after the argv command attached).
     ready: bool,
     eof: bool,
@@ -513,6 +513,17 @@ impl Server {
         if let Some(g) = guard {
             cs.guard(if ok { "end" } else { "error" }, g);
         }
+        self.control_flush(id);
+    }
+
+    /// `cmdq_error` for a command whose guard has closed (it waited):
+    /// `text` as a line in the stream and `c->retval = 1`.
+    pub(crate) fn control_error_line(&mut self, id: ClientId, text: &str) {
+        let Some(cs) = self.control_mut(id) else {
+            return;
+        };
+        cs.write_line(text.as_bytes());
+        cs.retval = 1;
         self.control_flush(id);
     }
 

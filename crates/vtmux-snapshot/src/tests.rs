@@ -50,6 +50,8 @@ pub(crate) fn sample() -> Snapshot {
             // Added within v1: out of the golden sample
             // (the_writer_executable_descriptor_round_trips).
             binary_fd: None,
+            // Added within v1 too (the_upgrade_requester_round_trips).
+            requester: None,
         },
         server: sample_server(),
         sessions: vec![sample_session()],
@@ -92,6 +94,21 @@ fn the_writer_executable_descriptor_round_trips() {
     let back = decode(&encode(&s)).unwrap();
     assert_eq!(back.meta.binary_fd, Some(17));
     assert_eq!(back.meta.binary, s.meta.binary);
+}
+
+/// `Meta::requester`, added within v1, round-trips in both forms; a
+/// stream without it (the golden one) decodes with none.
+#[test]
+fn the_upgrade_requester_round_trips() {
+    for requester in [Requester::Handshake(12), Requester::Client(4)] {
+        let mut s = sample();
+        s.meta.requester = Some(requester.clone());
+        let back = decode(&encode(&s)).unwrap();
+        assert_eq!(back.meta.requester, Some(requester));
+        assert_eq!(back.meta.binary, s.meta.binary);
+    }
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert_eq!(golden.meta.requester, None);
 }
 
 #[test]

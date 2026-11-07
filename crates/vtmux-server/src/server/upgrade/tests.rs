@@ -471,3 +471,85 @@ fn the_start_binary_is_argv0_made_absolute() {
     assert_eq!(start("tmux", Some("b")), Some(dir.join("b").join("tmux")));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// After the exec, the image that serves tells a carried requester how
+/// the upgrade went (`resume.rs`, `answer`): a command client exits, 0 or
+/// 1 with why on stderr; a control client gets why as a line and reads
+/// its next one; an attached client gets why as a status message.
+#[test]
+fn a_carried_requester_is_answered_by_the_image_that_serves() {
+    let (mut server, dir) = setup("answer");
+    let exits = |server: &mut Server, id, peer: &mut mio::net::UnixStream| {
+        st::messages(server, id, peer)
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMsg::Stderr(b) => Some(format!("err {}", String::from_utf8_lossy(&b))),
+                ServerMsg::Exit { code, .. } => Some(format!("exit {code}")),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    for (outcome, want) in [
+        (Ok(()), vec!["exit 0".to_owned()]),
+        (
+            Err("live upgrade failed: why".to_owned()),
+            vec![
+                "err live upgrade failed: why\n".to_owned(),
+                "exit 1".to_owned(),
+            ],
+        ),
+    ] {
+        // A command client still being served, as the requester is.
+        let (id, mut peer) = st::connect(
+            &mut server,
+            st::hello(&["wait-for", "never"], &dir, None, ControlMode::None),
+        );
+        server.cmdq_process();
+        assert_eq!(exits(&mut server, id, &mut peer), Vec::<String>::new());
+        server.upgrade_answer(id, outcome);
+        assert_eq!(exits(&mut server, id, &mut peer), want);
+    }
+
+    let (control, mut peer) = st::connect(
+        &mut server,
+        st::hello(&["attach", "-t", "a"], &dir, None, ControlMode::Control),
+    );
+    let _ = st::messages(&mut server, control, &mut peer);
+    // A line held behind the upgrade, as the old image left it.
+    server
+        .clients
+        .get_mut(&control)
+        .and_then(|c| c.control.as_mut())
+        .unwrap()
+        .inbuf
+        .extend_from_slice(b"display -p held\n");
+    server.upgrade_answer(control, Err("live upgrade failed: why".to_owned()));
+    server.cmdq_process();
+    let out: Vec<u8> = st::messages(&mut server, control, &mut peer)
+        .into_iter()
+        .filter_map(|m| match m {
+            ServerMsg::Stdout(b) => Some(b),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let out = String::from_utf8_lossy(&out);
+    assert!(
+        out.starts_with("live upgrade failed: why\n%begin "),
+        "{out}"
+    );
+    assert!(out.contains("\nheld\n%end "), "{out}");
+
+    let (term, _term_peer) = st::attach(&mut server, &dir, "a", &[]);
+    server.upgrade_answer(term, Err("live upgrade failed: why".to_owned()));
+    let shown = "/dev/vtmux-test-tty message: live upgrade failed: why";
+    let logged = server.messages_newest_first().next().unwrap().text.clone();
+    assert_eq!(logged, shown);
+    server.upgrade_answer(term, Ok(()));
+    assert_eq!(
+        server.messages_newest_first().next().unwrap().text,
+        shown,
+        "a success says nothing"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

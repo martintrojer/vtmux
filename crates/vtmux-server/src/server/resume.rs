@@ -13,7 +13,8 @@
 //!   open, not by path; if that fails too, the server is rebuilt without
 //!   pane terminal state, and failing that it serves with no session while
 //!   holding every descriptor open rather than exit: panes never die
-//!   because of an upgrade.
+//!   because of an upgrade. Whichever image ends up serving tells the
+//!   requester the snapshot names how it went ([`answer`]).
 //! - [`check_snapshot`], the dry run (`--vtmux-check-snapshot <fd>`): the
 //!   decode and the whole rebuild [`resume`] does, on placeholder
 //!   descriptors.
@@ -259,14 +260,10 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
     };
     // Every descriptor the snapshot names, taken once for every attempt,
     // and the executable of the image before, for the switch back.
-    let mut kept: Vec<(snap::Role, OwnedFd)> = Vec::new();
-    if let Ok(s) = &decoded {
-        for d in &s.descriptors {
-            if let Ok(fd) = sys::inherited(d.fd) {
-                kept.push((d.role.clone(), fd));
-            }
-        }
-    }
+    let kept = decoded.as_ref().map(adopt).unwrap_or_default();
+    // Whoever asked over the frozen handshake, to be told how it went.
+    let requester = meta.as_ref().and_then(|m| m.requester.clone());
+    let mut handshake = handshake_fd(requester.as_ref()).and_then(|fd| sys::inherited(fd).ok());
     // (An image switched back to does not switch again; the descriptor
     // did not survive its exec anyway.)
     let exe = meta
@@ -286,11 +283,15 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
     let me = this_image();
     let mut why = match (first, &note) {
         (Ok(mut server), _) => {
-            if let Some(note) = &note {
-                server.add_message(format!(
-                    "live upgrade failed: {note}; switched back to {me}"
-                ));
-            }
+            let outcome = match &note {
+                Some(note) => {
+                    let message = format!("live upgrade failed: {note}; switched back to {me}");
+                    server.add_message(message.clone());
+                    Err(message)
+                }
+                None => Ok(()),
+            };
+            answer(Some(&mut server), requester.as_ref(), handshake, outcome);
             drop((kept, exe, file));
             return run(server);
         }
@@ -302,7 +303,11 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
     // Decision 7: back to the image that wrote the snapshot, on the same
     // descriptors.
     if !switched_back && let Some(file) = &file {
-        let keep: Vec<RawFd> = kept.iter().map(|(_, fd)| fd.as_raw_fd()).collect();
+        let keep: Vec<RawFd> = kept
+            .iter()
+            .map(|(_, fd)| fd.as_raw_fd())
+            .chain(handshake.as_ref().map(AsRawFd::as_raw_fd))
+            .collect();
         let path = meta.as_ref().and_then(writer_binary);
         let e = sys::switch_back(
             exe.as_ref().map(AsFd::as_fd),
@@ -319,19 +324,82 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
     if let Ok(s) = &decoded
         && let Ok(mut server) = guarded(|| restore(&without_terminals(s), &kept, false))
     {
-        server.add_message(format!(
-            "live upgrade failed: {why}; panes restored without their terminal state"
-        ));
+        let message =
+            format!("live upgrade failed: {why}; panes restored without their terminal state");
+        server.add_message(message.clone());
+        answer(
+            Some(&mut server),
+            requester.as_ref(),
+            handshake.take(),
+            Err(message),
+        );
         drop((kept, file));
         return run(server);
     }
     drop(file);
+    answer(
+        None,
+        requester.as_ref(),
+        handshake.take(),
+        Err(format!("live upgrade failed: {why}; no session restored")),
+    );
     let held = kept
         .into_iter()
         .map(|(_, fd)| fd)
         .chain(sys::inherit_rest())
         .collect();
     serve_held(held, &why)
+}
+
+/// Every descriptor in `s`'s table that is open, taken by this image.
+fn adopt(s: &snap::Snapshot) -> Vec<(snap::Role, OwnedFd)> {
+    s.descriptors
+        .iter()
+        .filter_map(|d| Some((d.role.clone(), sys::inherited(d.fd).ok()?)))
+        .collect()
+}
+
+/// The descriptor of a requester over the frozen handshake, which an
+/// upgrade keeps across `execve` outside the descriptor table.
+fn handshake_fd(requester: Option<&snap::Requester>) -> Option<RawFd> {
+    match requester? {
+        snap::Requester::Handshake(fd) => Some(*fd),
+        snap::Requester::Client(_) => None,
+    }
+}
+
+/// Tell whoever asked for the upgrade how it went, from the image that
+/// ends up serving: `Err` with why when that is not the new one. A
+/// handshake gets the frozen `UpgradeResult` on `handshake` (written at
+/// once, the descriptor closed after); a client is told by `server`
+/// ([`Server::upgrade_answer`]).
+fn answer(
+    server: Option<&mut Server>,
+    requester: Option<&snap::Requester>,
+    handshake: Option<OwnedFd>,
+    outcome: Result<(), String>,
+) {
+    match (requester, server) {
+        (Some(snap::Requester::Handshake(_)), _) => {
+            if let Some(fd) = handshake {
+                let (ok, message) = match outcome {
+                    Ok(()) => (true, String::new()),
+                    Err(m) => (false, m),
+                };
+                let mut stream = std::os::unix::net::UnixStream::from(fd);
+                // The requester is waiting for this one small frame, so
+                // the socket has room; a requester that went is no matter.
+                let _ = vtmux_core::protocol::write_msg(
+                    &mut stream,
+                    &vtmux_core::protocol::ServerMsg::UpgradeResult { ok, message },
+                );
+            }
+        }
+        (Some(snap::Requester::Client(id)), Some(server)) => {
+            server.upgrade_answer(super::ClientId(*id as usize), outcome);
+        }
+        _ => {}
+    }
 }
 
 /// This image's executable, for the messages a failed resume logs.
@@ -441,8 +509,16 @@ impl Server {
     /// into an anonymous memory file, the dry run of `binary` on it, then
     /// `execve(binary)` with the descriptors it names kept open. Returns
     /// only if the server is still this image, with why. The preflight and
-    /// quiesce before it are `upgrade.rs`'s.
-    pub(crate) fn exec_upgrade(&mut self, binary: &Path) -> String {
+    /// quiesce before it are `upgrade.rs`'s. `requester` goes in the
+    /// snapshot (a handshake's descriptor is kept across the exec too), so
+    /// the image that ends up serving tells it how the upgrade went
+    /// ([`answer`]): only a failure that returns here is this image's to
+    /// report.
+    pub(crate) fn exec_upgrade(
+        &mut self,
+        binary: &Path,
+        requester: Option<snap::Requester>,
+    ) -> String {
         let fail =
             |e: &io::Error| format!("{}: {}", binary.display(), vtmux_core::error::strerror(e));
         let exe = std::env::current_exe()
@@ -452,6 +528,7 @@ impl Server {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX));
         let binary_fd = self.exe.as_ref().map(AsRawFd::as_raw_fd);
+        let handshake = handshake_fd(requester.as_ref());
         let snapshot = self.to_snapshot(snap::Meta {
             purpose: snap::Purpose::Upgrade,
             writer_version: vtmux_core::version::display(),
@@ -460,6 +537,7 @@ impl Server {
             written_us,
             requires: Vec::new(),
             binary_fd,
+            requester,
         });
         let bytes = snap::encode(&snapshot);
         let dir = self.socket.parent().unwrap_or(Path::new("/tmp"));
@@ -477,6 +555,7 @@ impl Server {
             .iter()
             .map(|d| d.fd)
             .chain(binary_fd)
+            .chain(handshake)
             .collect();
         fail(&(self.upgrade.exec)(binary, file, &keep))
     }

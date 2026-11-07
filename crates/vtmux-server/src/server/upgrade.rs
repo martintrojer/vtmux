@@ -23,13 +23,14 @@
 //! The new image's half is [`super::resume`].
 
 use std::io;
-use std::os::fd::{OwnedFd, RawFd};
+use std::os::fd::{AsRawFd as _, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use vtmux_core::error::strerror;
 use vtmux_core::protocol::ServerMsg;
+use vtmux_snapshot as snap;
 
 use super::{ClientId, Server};
 use crate::cmdq::{QueueId, StepId};
@@ -264,7 +265,16 @@ impl Server {
         if let Err(message) = self.upgrade_flush(FLUSH_WAIT) {
             return message;
         }
-        self.exec_upgrade(&p.binary)
+        let requester = match p.requester {
+            Requester::Handshake(id) => self
+                .clients
+                .get(&id)
+                .map(|c| snap::Requester::Handshake(c.stream.as_raw_fd())),
+            Requester::Command { client, .. } => client
+                .and_then(|id| u32::try_from(id.0).ok())
+                .map(snap::Requester::Client),
+        };
+        self.exec_upgrade(&p.binary, requester)
     }
 
     /// Write every client's queued output out, waiting up to `wait` for
@@ -315,6 +325,40 @@ impl Server {
                 tv_nsec: i64::from(left.min(RECHECK).subsec_nanos()),
             };
             let _ = poll(&mut fds, Some(&timeout));
+        }
+    }
+
+    /// In the image that ends up serving after the exec: tell client `id`,
+    /// which ran `vtmux-upgrade`, how it went (`resume.rs`, `answer`). Its
+    /// queue did not survive the exec, so the command ends here: a command
+    /// client exits, 0 or 1 with why on stderr; a control client gets why
+    /// as a line (as a waiting command's error after its `%end`) and reads
+    /// on; an attached client gets why as a status message.
+    pub(crate) fn upgrade_answer(&mut self, id: ClientId, outcome: Result<(), String>) {
+        let Some(c) = self.clients.get(&id) else {
+            return;
+        };
+        let (control, attached) = (c.control.is_some(), c.attached.is_some());
+        if control {
+            if let Err(message) = outcome {
+                self.control_error_line(id, &message);
+            }
+            self.control_read(id);
+        } else if attached {
+            if let Err(message) = outcome {
+                self.status_message_set(id, message);
+            }
+        } else {
+            let code = match outcome {
+                Ok(()) => 0,
+                Err(message) => {
+                    let mut line = message.into_bytes();
+                    line.push(b'\n');
+                    self.send(id, &ServerMsg::Stderr(line));
+                    1
+                }
+            };
+            self.finish_client(id, code);
         }
     }
 

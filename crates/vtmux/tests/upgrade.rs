@@ -31,6 +31,9 @@ struct World {
     server: Mutex<Option<rustix::process::Pid>>,
     /// The socket path, once an upgrade asked for it.
     socket: Mutex<Option<PathBuf>>,
+    /// The binary every client runs as: this build, or a link to it named
+    /// `tmux` (the socket directory follows the name, `tmux-UID`).
+    client: Mutex<PathBuf>,
 }
 
 impl World {
@@ -50,7 +53,12 @@ impl World {
                 .unwrap(),
             server: Mutex::new(None),
             socket: Mutex::new(None),
+            client: Mutex::new(PathBuf::from(BIN)),
         }
+    }
+
+    fn client(&self) -> PathBuf {
+        self.client.lock().unwrap().clone()
     }
 
     fn env(&self) -> Vec<(&'static str, String)> {
@@ -65,7 +73,7 @@ impl World {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        self.command_of(Path::new(BIN), args)
+        self.command_of(&self.client(), args)
     }
 
     /// [`Self::command`] run by `binary`.
@@ -94,7 +102,7 @@ impl World {
     /// kind the listings show. `server_env` goes to the server's process
     /// environment (the test hooks).
     fn populate(&self, server_env: &[(&str, &str)]) {
-        self.populate_from(Path::new(BIN), server_env);
+        self.populate_from(&self.client(), server_env);
     }
 
     /// [`Self::populate`] with the server started from `binary`.
@@ -223,8 +231,9 @@ impl World {
     }
 
     /// Ask the server over the frozen handshake to move onto `binary`: the
-    /// result it answers, `None` when the connection closes without one
-    /// (the server execed).
+    /// result it answers, from this image when it refuses, else from the
+    /// image that ends up serving; `None` when the connection closes
+    /// without one.
     fn upgrade(&self, binary: &Path) -> Option<ServerMsg> {
         let path = self.run(&["display", "-p", "#{socket_path}"]);
         *self.socket.lock().unwrap() = Some(PathBuf::from(path.trim_end()));
@@ -329,7 +338,7 @@ impl Attached {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut cmd = CommandBuilder::new(BIN);
+        let mut cmd = CommandBuilder::new(world.client());
         cmd.args([
             "-L",
             &world.label,
@@ -412,6 +421,12 @@ impl Control {
             .any(|l| l.starts_with(prefix))
     }
 
+    fn send_raw(&mut self, bytes: &str) {
+        let stdin = self.child.stdin.as_mut().unwrap();
+        stdin.write_all(bytes.as_bytes()).unwrap();
+        stdin.flush().unwrap();
+    }
+
     fn send(&mut self, line: &str) {
         let stdin = self.child.stdin.as_mut().unwrap();
         writeln!(stdin, "{line}").unwrap();
@@ -432,6 +447,22 @@ fn bin() -> PathBuf {
     PathBuf::from(BIN)
 }
 
+/// The handshake's answer to an upgrade that went through.
+fn upgraded() -> ServerMsg {
+    ServerMsg::UpgradeResult {
+        ok: true,
+        message: String::new(),
+    }
+}
+
+/// The message of a handshake's answer that the upgrade failed.
+fn failed(answer: Option<ServerMsg>) -> String {
+    match answer {
+        Some(ServerMsg::UpgradeResult { ok: false, message }) => message,
+        other => panic!("not a failure: {other:?}"),
+    }
+}
+
 /// The tentpole: the server execs itself with panes running, an attached
 /// client and a control client. Same pid, the same pane processes, every
 /// listing byte for byte; the panes, the attached client and the control
@@ -448,7 +479,7 @@ fn a_server_execs_itself_and_everything_carries_on() {
     let before = world.observe();
     assert!(!world.server_args().contains("--vtmux-resume"));
 
-    assert_eq!(world.upgrade(&bin()), None, "the server execed");
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
 
     assert_eq!(world.pid(), pid);
     assert!(
@@ -461,7 +492,11 @@ fn a_server_execs_itself_and_everything_carries_on() {
 
     // The image that resumed upgrades again, from where it stands. (Before
     // any pane output: pane terminal state is not carried yet.)
-    assert_eq!(world.upgrade(&bin()), None, "the server execed again");
+    assert_eq!(
+        world.upgrade(&bin()),
+        Some(upgraded()),
+        "the server execed again"
+    );
     assert_eq!(world.pid(), pid);
     assert_eq!(world.pane_pids(), panes);
     assert_eq!(world.observe(), before);
@@ -482,6 +517,99 @@ fn a_server_execs_itself_and_everything_carries_on() {
     control.send("display -p '#{session_name}'");
     wait("a command over control mode", || control.has("b"));
     world.echo("a:w2.1", "split");
+}
+
+/// The upgrade as a user runs it (decision 22): the server was started
+/// as `bin/tmux`, a link to this build; the link is moved to a new copy,
+/// and `tmux vtmux-upgrade` with no `-b` moves the server onto the copy.
+/// The command answers after the exec (exit 0, nothing printed); same
+/// pid, the same pane processes, every listing byte for byte, and the
+/// attached and control clients go on working.
+#[test]
+fn tmux_vtmux_upgrade_follows_a_relink_of_the_start_path() {
+    let world = World::new();
+    let dir = world.home.path().join("bin");
+    std::fs::create_dir(&dir).unwrap();
+    let link = dir.join("tmux");
+    std::os::unix::fs::symlink(BIN, &link).unwrap();
+    let copy = world.home.path().join("vtmux-new");
+    std::fs::copy(BIN, &copy).unwrap();
+    set_executable(&copy);
+    *world.client.lock().unwrap() = link.clone();
+    world.populate(&[]);
+    let attached = Attached::new(&world, "a");
+    let mut control = Control::new(&world, "b");
+    wait("both clients", || world.run(&["lsc"]).lines().count() == 2);
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let before = world.observe();
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink(&copy, &link).unwrap();
+
+    let out = world
+        .run_within(&["vtmux-upgrade"], Duration::from_secs(60))
+        .expect("vtmux-upgrade answered");
+    assert_eq!(
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).as_ref(),
+            String::from_utf8_lossy(&out.stderr).as_ref()
+        ),
+        (Some(0), "", "")
+    );
+
+    assert_eq!(world.pid(), pid);
+    let args = world.server_args();
+    assert!(args.contains("--vtmux-resume"), "{args}");
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        std::fs::read_link(format!("/proc/{pid}/exe")).unwrap(),
+        std::fs::canonicalize(&copy).unwrap()
+    );
+    assert_eq!(world.pane_pids(), panes);
+    assert_eq!(world.observe(), before);
+    let b = world.run(&["display", "-p", "-t", "b", "#{pane_id}"]);
+    let b = b.trim();
+    let at = attached.len();
+    world.echo("a:w1", "relinked");
+    wait("the attached client's redraw", || {
+        attached.since(at).contains("relinked")
+    });
+    world.echo("b:x", "ctl");
+    wait("%output from the control client", || {
+        control.has(&format!("%output {b} ctl"))
+    });
+    control.send("display -p 'after #{session_name}'");
+    wait("a command over control mode", || control.has("after b"));
+}
+
+/// `vtmux-upgrade` from a control client (mu, murmur): its guard closes
+/// as for any waiting command, and the line it sent behind it, held while
+/// the upgrade ran, runs in the new image.
+#[test]
+fn a_control_client_upgrades_and_reads_on() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut control = Control::new(&world, "b");
+    wait("the control client", || {
+        world.run(&["lsc"]).lines().count() == 1
+    });
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let before = world.observe();
+    // Both lines in one write, so the second is in the server's buffer
+    // while the first runs.
+    control.send_raw(&format!(
+        "vtmux-upgrade -b '{BIN}'\ndisplay -p 'after #{{pid}}'\n"
+    ));
+    wait("the line after the upgrade", || {
+        control.has(&format!("after {pid}"))
+    });
+    let args = world.server_args();
+    assert!(args.contains("--vtmux-resume"), "{args}");
+    assert_eq!(world.pane_pids(), panes);
+    assert_eq!(world.observe(), before);
+    assert!(!control.has("%error"));
 }
 
 /// A binary that is no vtmux fails the dry run: the server stays this
@@ -539,7 +667,14 @@ fn a_resume_that_fails_switches_back() {
     let panes = world.pane_pids();
     let before = world.observe();
 
-    assert_eq!(world.upgrade(&bin()), None);
+    // The requester hears it from the image switched back to.
+    let message = failed(world.upgrade(&bin()));
+    assert!(
+        message.starts_with(&format!(
+            "live upgrade failed: {BIN}: test hook; switched back to "
+        )),
+        "{message}"
+    );
 
     assert_eq!(world.pid(), pid);
     let args = world.server_args();
@@ -567,7 +702,11 @@ fn a_switch_back_that_fails_too_still_serves_the_panes() {
     let panes = world.pane_pids();
     let before = world.observe();
 
-    assert_eq!(world.upgrade(&bin()), None);
+    let message = failed(world.upgrade(&bin()));
+    assert!(
+        message.ends_with("; panes restored without their terminal state"),
+        "{message}"
+    );
 
     assert_eq!(world.pid(), pid);
     assert!(world.server_args().contains("--vtmux-switched-back"));
@@ -650,7 +789,7 @@ fn a_signal_storm_through_twenty_upgrades_kills_nothing() {
         })
     };
     for i in 0..20 {
-        assert_eq!(world.upgrade(&bin()), None, "upgrade {i}");
+        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "upgrade {i}");
         assert_eq!(world.pid(), pid, "upgrade {i}");
     }
     stop.store(true, Ordering::Relaxed);
@@ -684,7 +823,8 @@ fn a_switch_back_ignores_what_the_old_path_holds_now() {
     std::fs::write(&old, "#!/bin/sh\nexit 1\n").unwrap();
     set_executable(&old);
 
-    assert_eq!(world.upgrade(&bin()), None);
+    let message = failed(world.upgrade(&bin()));
+    assert!(message.starts_with("live upgrade failed: "), "{message}");
 
     assert_eq!(world.pid(), pid);
     // Linux switches back through the executable kept open; macOS has no
@@ -711,7 +851,8 @@ fn a_panic_in_the_new_image_switches_back() {
     let panes = world.pane_pids();
     let before = world.observe();
 
-    assert_eq!(world.upgrade(&bin()), None);
+    let message = failed(world.upgrade(&bin()));
+    assert!(message.contains("panicked: test hook"), "{message}");
 
     assert_eq!(world.pid(), pid);
     let args = world.server_args();
@@ -764,7 +905,8 @@ fn a_server_left_without_a_snapshot_still_answers() {
     .unwrap();
     set_executable(&wrapper);
 
-    assert_eq!(world.upgrade(&wrapper), None);
+    let message = failed(world.upgrade(&wrapper));
+    assert!(message.ends_with("; no session restored"), "{message}");
 
     let limit = Duration::from_secs(10);
     let ls = world.run_within(&["ls"], limit).expect("ls answered");
@@ -831,7 +973,8 @@ fn the_panes_of_a_server_left_without_a_snapshot_keep_printing() {
     .unwrap();
     set_executable(&wrapper);
 
-    assert_eq!(world.upgrade(&wrapper), None);
+    let message = failed(world.upgrade(&wrapper));
+    assert!(message.ends_with("; no session restored"), "{message}");
 
     let limit = Duration::from_secs(10);
     let log = world

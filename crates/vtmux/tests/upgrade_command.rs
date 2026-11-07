@@ -264,3 +264,23 @@ fn a_client_of_another_version_asks_with_the_frozen_request() {
     );
     server.join().unwrap();
 }
+
+/// The dry run passes but the `execve` after it fails (the binary removed
+/// itself meanwhile): the requester hears the failure, never a success,
+/// and the server runs on as it was.
+#[test]
+fn an_exec_that_fails_after_the_dry_run_is_reported_as_failed() {
+    let server = Server::start();
+    let gone = server.script("gone", "rm -f \"$0\"\nexit 0");
+    let (out, err, code) = server.run(&["vtmux-upgrade", "-b", gone.to_str().unwrap()]);
+    assert_eq!(
+        (out.as_str(), err.as_str(), code),
+        (
+            "",
+            format!("{}: No such file or directory\n", gone.display()).as_str(),
+            1
+        )
+    );
+    assert!(!gone.exists());
+    assert_eq!(server.run(&["has", "-t", "a"]).2, 0);
+}

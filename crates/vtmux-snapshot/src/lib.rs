@@ -237,6 +237,26 @@ record! {
         /// whatever its path holds by then (decision 7). A hint: a reader
         /// that skips it switches back by [`Meta::binary`].
         7 => opt binary_fd: Option<i32>,
+        /// Upgrade only: who asked for the upgrade and waits to hear how
+        /// it went, answered by the image that ends up serving (the new
+        /// one, the one switched back to, or the last resort). A hint: a
+        /// reader that skips it restores the same server and leaves the
+        /// requester unanswered.
+        8 => opt requester: Option<Requester>,
+    }
+}
+
+wire::oneof! {
+    /// Who asked for a live upgrade ([`Meta::requester`]).
+    pub enum Requester {
+        /// The frozen `UpgradeRequest` on this descriptor, kept across
+        /// `execve` and in no descriptor table: answered with
+        /// `UpgradeResult`, then closed.
+        1 => Handshake(i32),
+        /// `vtmux-upgrade` run for this client, carried like any other: a
+        /// command client is told to exit (with the failure on stderr), a
+        /// control client or an attached one is told of a failure.
+        2 => Client(u32),
     }
 }
 
