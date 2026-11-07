@@ -164,21 +164,34 @@ impl World {
 
     /// Poll `capture-pane -p` (max 10 s, 50 ms steps) until `want` shows,
     /// in the normalised text (`TMP` for the temp dir, either spelling of
-    /// it: macOS's `pwd` prints `/private/tmp`).
+    /// it: macOS's `pwd` prints `/private/tmp`). The last poll is made after
+    /// the deadline, so a stall that eats the whole budget in one step is
+    /// not a miss; a miss says what the pane and the server showed.
     fn wait_for_text(&self, target: &str, want: &str) {
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(10) {
-            if self
-                .normalise(&self.run(&["capture-pane", "-p", "-t", target]).stdout)
-                .contains(want)
-            {
+        let mut last;
+        loop {
+            let r = self.run(&["capture-pane", "-p", "-t", target]);
+            last = self.normalise(&r.stdout);
+            if last.contains(want) {
                 return;
+            }
+            if start.elapsed() >= Duration::from_secs(10) {
+                break;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+        let panes = self.run(&[
+            "lsp",
+            "-a",
+            "-F",
+            "#{pane_id} pid=#{pane_pid} dead=#{pane_dead} #{pane_current_command} #{pane_width}x#{pane_height}",
+        ]);
         panic!(
-            "{want:?} never appeared in {target} ({})",
-            self.bin.display()
+            "{want:?} never appeared in {target} ({}): last capture {last:?}, panes {:?} {:?}",
+            self.bin.display(),
+            panes.stdout,
+            panes.stderr,
         );
     }
 
@@ -3330,9 +3343,13 @@ fn panes_respawn() {
             w,
             &[
                 &["display", "-p", "#{alternate_on} #{pane_id}"],
-                &["splitw", "-d", "-t", "a:0", "cat"],
+                &["splitw", "-d", "-t", "a:0", "cat", "-"],
             ],
         ));
+        // Respawn the new pane once its `cat` runs: a pane still between
+        // fork and exec has a shell's or no name, and a respawn then races
+        // the pane's own start (see `wait_all_running`).
+        w.wait_all_running("cat");
         std::fs::create_dir_all(w.dir().join("sub")).expect("mkdir");
         let sub = w.dir().join("sub");
         let sub = sub.to_str().expect("utf-8");
@@ -3347,6 +3364,9 @@ fn panes_respawn() {
             "a:0.1",
             "printf '%s:' \"$FOO\"; pwd; exec cat",
         ]));
+        // A respawn that failed says so here, not as a pane that stays blank.
+        let last = runs.last().expect("the respawn");
+        assert_eq!((last.code, last.stderr.as_str()), (0, ""), "respawnp -e");
         w.wait_for_text("a:0.1", "bar:");
         runs.push(w.run(&["capturep", "-p", "-t", "a:0.1", "-E", "0"]));
         // No -e this time; -c sticks (the pane's directory).
