@@ -172,6 +172,25 @@ fn newer_versions_are_refused_older_ones_too_old_and_junk_is_not_a_snapshot() {
         })
     );
     assert_eq!(decode(b"#!/bin/sh\necho hi\n"), Err(Error::BadMagic));
+    assert!(
+        Error::Newer {
+            found: FORMAT_VERSION + 1,
+            supported: FORMAT_VERSION
+        }
+        .from_newer_binary()
+    );
+    assert!(Error::Unsupported("x".to_owned()).from_newer_binary());
+    for e in [
+        Error::BadMagic,
+        Error::TooOld {
+            found: 0,
+            oldest: MIN_VERSION,
+        },
+        Error::Truncated,
+        Error::Corrupt,
+    ] {
+        assert!(!e.from_newer_binary(), "{e}");
+    }
     assert_eq!(decode(b"VTMUX"), Err(Error::Truncated));
 }
 

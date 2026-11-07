@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use vtmux_core::protocol;
 use vtmux_server::persist;
 use vtmux_snapshot as snap;
 
@@ -996,4 +997,188 @@ fn a_checkpoint_that_fails_the_check_in_the_child_is_not_imported() {
         log.contains("not restored: manifest: test hook: the rebuild fails"),
         "{log}"
     );
+}
+
+/// Every file under `dir` and its bytes.
+fn contents(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut out: Vec<_> = files(dir)
+        .into_iter()
+        .map(|p| {
+            let bytes = std::fs::read(&p).unwrap();
+            (p, bytes)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// A checkpoint made into one a newer binary wrote.
+type Newer = fn(&[u8]) -> Vec<u8>;
+
+/// The checkpoint `bytes` as the next format version would mark it.
+fn newer_format(bytes: &[u8]) -> Vec<u8> {
+    let mut out = bytes.to_vec();
+    let v = snap::version(bytes).unwrap() + 1;
+    out[8..12].copy_from_slice(&v.to_le_bytes());
+    out
+}
+
+/// The checkpoint `bytes` requiring a feature no build knows yet.
+fn newer_feature(bytes: &[u8]) -> Vec<u8> {
+    let mut s = snap::decode(bytes).unwrap();
+    s.meta.requires.push("from-the-future".to_owned());
+    snap::encode_manifest(&s)
+}
+
+/// A checkpoint directory holding a manifest (`newer` names which) that
+/// a newer binary wrote, a newer format or a feature this one lacks, is
+/// left alone (decision 6): no restore, not even from the other manifest,
+/// and nothing written there for the server's lifetime, periodic or at
+/// shutdown, with why in `show-messages`. The reviewer's repro: the
+/// format-2 `manifest` was refused, `manifest.prev` restored, and the
+/// next checkpoint rotated the format-2 file away.
+#[test]
+fn a_checkpoint_of_a_newer_binary_is_left_alone() {
+    let cases: [(&str, Newer, &str); 3] = [
+        (persist::MANIFEST, newer_format, "newer than this binary"),
+        (
+            persist::MANIFEST_PREV,
+            newer_format,
+            "newer than this binary",
+        ),
+        (
+            persist::MANIFEST,
+            newer_feature,
+            "`from-the-future`, which this binary lacks",
+        ),
+    ];
+    for (newer, make, why) in cases {
+        let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+        w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+        w.kill_server();
+        // A second checkpoint, from the restored server: `manifest` and
+        // `manifest.prev` both there.
+        w.ok(&["start-server"]);
+        w.repid();
+        w.kill_server();
+        let dir = w.state();
+        assert!(dir.join(persist::MANIFEST_PREV).is_file());
+        let path = dir.join(newer);
+        std::fs::write(&path, make(&std::fs::read(&path).unwrap())).unwrap();
+        let before = contents(&dir);
+
+        w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+        w.repid();
+        assert_eq!(
+            w.ok(&["list-sessions", "-F", "#{session_name}"]),
+            "z\n",
+            "{newer}"
+        );
+        let log = w.ok(&["show-messages"]);
+        assert!(
+            log.contains(&format!("not restored: {newer}: "))
+                && log.contains(why)
+                && log.contains("left as it is"),
+            "{newer}: {log}"
+        );
+        // Changes, then the shutdown checkpoint: nothing is written (by
+        // it, nor by a periodic one, due every 50 ms meanwhile).
+        w.ok(&["set", "-g", "@change", "1"]);
+        w.ok(&["new-window", "-d", "-n", "later", "cat", "-"]);
+        w.kill_server();
+        assert_eq!(contents(&dir), before, "{newer}");
+    }
+}
+
+/// A `manifest` corrupt in a format this binary reads falls back to
+/// `manifest.prev`, and the restored server checkpoints as usual (unlike
+/// a newer binary's checkpoint, above). Its panes' status is unknown:
+/// tmux's default dead line has nothing before its comma, and the
+/// format the spec suggests for that reads `restored`.
+#[test]
+fn a_corrupted_manifest_falls_back_to_the_previous_one() {
+    let mut w = World::start(&["cat", "-"], &[]);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    w.ok(&["start-server"]);
+    w.repid();
+    w.ok(&["rename-session", "-t", "a", "b"]);
+    w.kill_server();
+    let dir = w.state();
+    let path = dir.join(persist::MANIFEST);
+    let mut bytes = std::fs::read(&path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&path, &bytes).unwrap();
+    w.ok(&["start-server"]);
+    w.repid();
+    assert_eq!(w.ok(&["list-sessions", "-F", "#{session_name}"]), "a\n");
+    let log = w.ok(&["show-messages"]);
+    assert!(
+        log.contains("restored 1 sessions from") && log.contains("manifest.prev"),
+        "{log}"
+    );
+    let line = w.ok(&[
+        "display",
+        "-p",
+        "-t",
+        "a",
+        "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},\
+         #{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},restored}}, \
+         #{t:pane_dead_time})",
+    ]);
+    assert!(line.starts_with("Pane is dead (restored, "), "{line}");
+    w.kill_server();
+    let (s, name) = persist::load(&dir).unwrap();
+    assert_eq!((session_names(&s), name), (vec!["a"], persist::MANIFEST));
+}
+
+/// A config with `vtmux-persist off` restores nothing, and a newer
+/// binary's checkpoint stays untouched even when `vtmux-persist` is
+/// turned on at runtime afterwards.
+#[test]
+fn a_newer_checkpoint_stays_untouched_when_persist_is_turned_on_later() {
+    let mut w = World::start_with(&["cat", "-"], &[], None, Some("set -s vtmux-persist off\n"));
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    let path = w.state().join(persist::MANIFEST);
+    std::fs::write(&path, newer_format(&std::fs::read(&path).unwrap())).unwrap();
+    let before = contents(&w.state());
+    w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+    w.repid();
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    assert_eq!(contents(&w.state()), before);
+}
+
+/// The image a live upgrade starts carries no persistence state: it too
+/// leaves a newer binary's checkpoint alone, checking before it first
+/// writes there.
+#[test]
+fn a_newer_checkpoint_stays_untouched_across_a_live_upgrade() {
+    let mut w = World::start(&["cat", "-"], &[]);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    let path = w.state().join(persist::MANIFEST);
+    std::fs::write(&path, newer_format(&std::fs::read(&path).unwrap())).unwrap();
+    let before = contents(&w.state());
+    w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+    w.repid();
+    // The frozen handshake (`tests/upgrade.rs`): the connection closes
+    // without an answer when the server execed.
+    let socket = w.ok(&["display", "-p", "#{socket_path}"]);
+    let mut stream = std::os::unix::net::UnixStream::connect(socket.trim_end()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let request = protocol::ClientMsg::UpgradeRequest {
+        binary: PathBuf::from(env!("CARGO_BIN_EXE_vtmux")),
+    };
+    protocol::write_msg(&mut stream, &request).unwrap();
+    let answer = protocol::read_msg::<protocol::ServerMsg>(&mut stream).unwrap();
+    assert!(answer.is_none(), "{answer:?}");
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&["rename-session", "-t", "z", "changed"]);
+    w.kill_server();
+    assert_eq!(contents(&w.state()), before);
 }

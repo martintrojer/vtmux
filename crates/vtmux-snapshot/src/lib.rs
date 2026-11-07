@@ -183,6 +183,17 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl Error {
+    /// Whether the stream is refused for having been written by a newer
+    /// vtmux: a newer format, or a feature this build doesn't know. Such
+    /// a stream is fine, only not for this binary, so a reader must leave
+    /// it as it is (decision 6), unlike a corrupt or truncated one.
+    #[must_use]
+    pub fn from_newer_binary(&self) -> bool {
+        matches!(self, Self::Newer { .. } | Self::Unsupported(_))
+    }
+}
+
 /// A hash as the lowercase hex a chunk file is named by.
 #[must_use]
 pub fn hex(h: &Hash) -> String {

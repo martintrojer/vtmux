@@ -74,6 +74,21 @@ pub fn interval() -> Duration {
 /// How long one loop turn writes chunks of a periodic checkpoint.
 const STEP: Duration = Duration::from_millis(5);
 
+/// What the checkpoint found at start leaves this server free to write.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Kept {
+    /// Nothing: checkpoints go to the directory.
+    #[default]
+    No,
+    /// It could not be restored: nothing is written over it while its
+    /// manifests are still there.
+    WhileThere,
+    /// A newer binary wrote it (decision 6): nothing is written to the
+    /// directory for this server's lifetime, whatever happens to the
+    /// files meanwhile.
+    Always,
+}
+
 /// The checkpoint timer and what was last written.
 #[derive(Debug)]
 pub struct Persist {
@@ -88,10 +103,9 @@ pub struct Persist {
     pub(crate) dir: Option<PathBuf>,
     /// The lock held on a checkpoint directory.
     pub(super) lock: Option<(PathBuf, Lock)>,
-    /// The checkpoint found at start could not be restored
-    /// ([`super::restore`]): nothing is written over it while its
-    /// manifests are still there.
-    pub(super) kept: bool,
+    /// What the checkpoint found at start ([`super::restore`]) leaves
+    /// this server free to write.
+    pub(super) kept: Kept,
     /// Another server holds the lock: said once in the message log.
     refused: bool,
     /// A periodic checkpoint being written, and its fingerprint.
@@ -108,7 +122,7 @@ impl Default for Persist {
             exited: false,
             dir: None,
             lock: None,
-            kept: false,
+            kept: Kept::No,
             refused: false,
             writing: None,
             step: STEP,
@@ -225,16 +239,33 @@ impl Server {
             self.add_message("vtmux-persist: no state directory (no home)".to_owned());
             return None;
         };
-        if self.persist.kept {
+        match self.persist.kept {
+            // Before this server first writes there (no lock held yet): a
+            // newer binary's checkpoint is left alone, as at the start
+            // (`super::restore::written_by_newer`).
+            Kept::No => {
+                if self.persist.lock.is_none()
+                    && let Some(why) = super::restore::written_by_newer(&dir)
+                {
+                    self.persist.kept = Kept::Always;
+                    self.add_message(super::restore::left_alone(&dir, &why));
+                    return None;
+                }
+            }
+            // A newer binary's checkpoint: the directory is left alone
+            // (`super::restore`, which said so).
+            Kept::Always => return None,
             // The checkpoint a restore refused stays as it was until the
             // user moves it away (`super::restore`, which said so).
-            if [MANIFEST, MANIFEST_PREV]
-                .iter()
-                .any(|m| dir.join(m).exists())
-            {
-                return None;
+            Kept::WhileThere => {
+                if [MANIFEST, MANIFEST_PREV]
+                    .iter()
+                    .any(|m| dir.join(m).exists())
+                {
+                    return None;
+                }
+                self.persist.kept = Kept::No;
             }
-            self.persist.kept = false;
         }
         Some((dir, mode))
     }

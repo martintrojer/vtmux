@@ -28,7 +28,21 @@
 //! A checkpoint that can't be read, checked or rebuilt leaves the fresh
 //! server, with why in `show-messages`; the files are kept, and this
 //! server writes no checkpoint over them while they are there
-//! (`Persist::kept`).
+//! (`Persist::kept`). A corrupt or truncated `manifest` of a format this
+//! binary reads falls back to `manifest.prev`, and once restored from it
+//! the server checkpoints as usual.
+//!
+//! A newer binary's checkpoint is another matter (decision 6: older
+//! refuses newer and must not destroy it): when `manifest` or
+//! `manifest.prev` is of a newer format, or requires a feature this
+//! binary lacks ([`snap::Error::from_newer_binary`]), the directory is
+//! left alone: no restore (not from the other file either, whose next
+//! rotation would delete the newer one), no lock taken, and nothing
+//! written there for this server's lifetime, with why in
+//! `show-messages`. A server that did not restore (its config set
+//! `vtmux-persist off`, turned on later by `set -s`) or was started by a
+//! live upgrade (which carries no persistence state) checks the same
+//! before it first writes there.
 //!
 //! Restored panes come back dead (`#{pane_dead}` 1, exit status unknown:
 //! `JobStatus::Unknown`), showing `remain-on-exit-format`'s dead line
@@ -47,7 +61,7 @@ use std::path::{Path, PathBuf};
 use vtmux_core::cmd::{self, ParseOpts};
 use vtmux_snapshot as snap;
 
-use super::persist::Mode;
+use super::persist::{Kept, Mode};
 use super::{GlobalEnv, Server, ServerConfig, global_environ};
 use crate::persist::{self as files, Lock, MANIFEST, MANIFEST_PREV};
 
@@ -346,21 +360,54 @@ pub(crate) fn rebuild(
 enum Found {
     /// No checkpoint, or `vtmux-persist` off: start fresh, quietly.
     None,
+    /// A newer binary's checkpoint, and why: leave the directory alone.
+    Newer(String),
     /// One that can't be restored, and why.
     Refused(String),
     /// One to import, the file it came from and the directory's lock.
     Ready(Box<snap::Snapshot>, &'static str, Lock),
 }
 
+/// Why `dir` holds a newer binary's checkpoint: the first of `manifest`
+/// and `manifest.prev` that is refused for that
+/// ([`snap::Error::from_newer_binary`]). Only read, before the lock is
+/// taken, so the directory is not touched; a file that can't be read or
+/// fails for another reason is [`find`]'s to report. A server checks
+/// again before it first writes there (`Server::checkpoint_target`): one
+/// whose config had `vtmux-persist off`, or the image a live upgrade
+/// started, which carries no persistence state.
+pub(super) fn written_by_newer(dir: &Path) -> Option<String> {
+    [MANIFEST, MANIFEST_PREV].into_iter().find_map(|name| {
+        let bytes = std::fs::read(dir.join(name)).ok()?;
+        let refused = std::panic::catch_unwind(|| snap::page_refs(&bytes).err()).ok()??;
+        refused
+            .from_newer_binary()
+            .then(|| format!("{name}: {refused}"))
+    })
+}
+
+/// What `show-messages` says of `dir`, a newer binary's checkpoint.
+pub(super) fn left_alone(dir: &Path, why: &str) -> String {
+    format!(
+        "vtmux-persist: {}: {why}; written by a newer vtmux, the directory is left as it is \
+         and this server writes no checkpoint",
+        dir.display()
+    )
+}
+
 /// The checkpoint `server` (fresh) restores from `dir`: the first of
 /// `manifest` and `manifest.prev` that decodes, is a checkpoint, and
-/// passes the check in a child process.
+/// passes the check in a child process; none when either is a newer
+/// binary's.
 fn find(server: &Server, dir: &Path) -> Found {
     if ![MANIFEST, MANIFEST_PREV]
         .iter()
         .any(|m| dir.join(m).exists())
     {
         return Found::None;
+    }
+    if let Some(why) = written_by_newer(dir) {
+        return Found::Newer(why);
     }
     let says = config_says(server);
     if says.persist == Some(Setting::Off) {
@@ -444,6 +491,11 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
     };
     let why = match find(&fresh, &dir) {
         Found::None => return Ok(fresh),
+        Found::Newer(why) => {
+            fresh.persist.kept = Kept::Always;
+            fresh.add_message(left_alone(&dir, &format!("not restored: {why}")));
+            return Ok(fresh);
+        }
         Found::Refused(why) => why,
         Found::Ready(s, name, lock) => {
             // The fresh server's shim goes before the restored one makes
@@ -469,7 +521,7 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
             }
         }
     };
-    fresh.persist.kept = true;
+    fresh.persist.kept = Kept::WhileThere;
     fresh.add_message(format!(
         "vtmux-persist: {}: not restored: {why}; the files are kept and not written over",
         dir.display()
