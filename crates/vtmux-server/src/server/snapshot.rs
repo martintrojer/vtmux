@@ -98,10 +98,11 @@ fn before(now: Instant, ms: u64) -> Instant {
     now.checked_sub(Duration::from_millis(ms)).unwrap_or(now)
 }
 
-/// How long ago an upgrade's snapshot was written (`written_us`, the wall
-/// clock), at most [`TAKEN_LIMIT`]; nothing for one with no time or a
+/// How long ago an upgrade's snapshot `s` was written (`written_us`, the
+/// wall clock), at most [`taken_limit`]; nothing for one with no time or a
 /// checkpoint, whose timers a restore does not carry on.
-fn since_taken(meta: &snap::Meta) -> Duration {
+fn since_taken(s: &snap::Snapshot) -> Duration {
+    let meta = &s.meta;
     if meta.purpose != snap::Purpose::Upgrade || meta.written_us <= 0 {
         return Duration::ZERO;
     }
@@ -111,12 +112,20 @@ fn since_taken(meta: &snap::Meta) -> Duration {
         .ok()
         .and_then(|now| now.checked_sub(Duration::from_micros(written)))
         .unwrap_or_default()
-        .min(TAKEN_LIMIT)
+        .min(taken_limit(s))
 }
 
-/// More than an upgrade takes ([`crate::sys::upgrade::DRY_RUN_LIMIT`] and
-/// the exec): a clock that stepped meanwhile moves no timer further.
-const TAKEN_LIMIT: Duration = Duration::from_secs(10);
+/// More than the time from writing `s` to rebuilding from it can take, so
+/// a clock that stepped meanwhile moves no timer further. Between them
+/// are the encode, the notices' flush ([`super::upgrade::FLUSH_WAIT`]),
+/// the exec and the new image's decode and import, which is the dry run's
+/// work: the dry run's limit for `s` (3 s and a second per 100k rows it
+/// imports as rows) twice, once for the encode, and the flush.
+/// (`review_downgrade_fix`: a flat 10 s, "more than an upgrade takes", fell
+/// short of a snapshot with much history in rows.)
+fn taken_limit(s: &snap::Snapshot) -> Duration {
+    2 * super::resume::dry_run_limit(s) + super::upgrade::FLUSH_WAIT
+}
 
 fn small(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
@@ -1396,7 +1405,7 @@ impl Server {
         // out after the snapshot (spec, *Clients*).
         let rebuilt = Instant::now();
         let now = rebuilt
-            .checked_sub(since_taken(&snapshot.meta))
+            .checked_sub(since_taken(snapshot))
             .unwrap_or(rebuilt);
         let reattach_by = rebuilt + super::upgrade::REATTACH_WAIT;
         let s = &snapshot.server;

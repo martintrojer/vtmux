@@ -1398,6 +1398,51 @@ fn timers_count_from_when_the_snapshot_was_taken() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The finding `low_upgrade_timer_shift_caps` (`review_downgrade_fix`): the
+/// shift was capped at 10 s, said to be more than an upgrade takes, but
+/// the time between the snapshot and the rebuild grows with the history
+/// the new image imports as rows (the dry run may take 3 s and a second
+/// per 100k rows, and the new image's import is the same work). A
+/// snapshot of a million rows written 12 s ago is shifted by the 12 s; a
+/// clock far off still moves nothing far.
+#[test]
+fn the_shift_cap_grows_with_the_rows_the_snapshot_imports() {
+    let ago = |secs| {
+        let t = std::time::SystemTime::now() - Duration::from_secs(secs);
+        let d = t.duration_since(std::time::UNIX_EPOCH).unwrap();
+        i64::try_from(d.as_micros()).unwrap()
+    };
+    let taken = |written_us, rows| snap::Snapshot {
+        meta: snap::Meta {
+            purpose: snap::Purpose::Upgrade,
+            written_us,
+            ..snap::Meta::default()
+        },
+        panes: vec![snap::Pane {
+            term: Some(snap::TermState {
+                primary: snap::term::Screen {
+                    history: vec![snap::HistoryPage {
+                        rows,
+                        ..snap::HistoryPage::default()
+                    }],
+                    ..snap::term::Screen::default()
+                },
+                ..snap::TermState::default()
+            }),
+            ..snap::Pane::default()
+        }],
+        ..snap::Snapshot::default()
+    };
+    let near =
+        |d: Duration, secs: u64| d.abs_diff(Duration::from_secs(secs)) < Duration::from_secs(1);
+    let shift = super::since_taken(&taken(ago(12), 1_000_000));
+    assert!(near(shift, 12), "{shift:?}");
+    let small = super::since_taken(&taken(ago(3600), 0));
+    assert!(small < Duration::from_secs(10), "{small:?}");
+    let big = super::since_taken(&taken(ago(3600), 1_000_000));
+    assert!(big < Duration::from_secs(60), "{big:?}");
+}
+
 /// One monitor hook that can't be parsed doesn't shift the last values and
 /// timers of the ones after it onto the wrong monitor.
 #[test]

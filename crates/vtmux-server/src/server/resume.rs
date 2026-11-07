@@ -771,7 +771,7 @@ const DRY_RUN_ROWS_PER_SEC: u64 = 100_000;
 /// upgrade is never refused for the size of its history (an upgrade to
 /// another patch stack carries it all as rows), while a binary that hangs
 /// is still given up on.
-fn dry_run_limit(s: &snap::Snapshot) -> std::time::Duration {
+pub(super) fn dry_run_limit(s: &snap::Snapshot) -> std::time::Duration {
     let rows = rows_to_import(s);
     sys::DRY_RUN_LIMIT
         + std::time::Duration::from_millis(rows.saturating_mul(1000) / DRY_RUN_ROWS_PER_SEC)
