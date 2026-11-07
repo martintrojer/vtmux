@@ -4665,6 +4665,42 @@ mod tests {
         }
     }
 
+    /// worker-25's reproduction of the reflow abort (patches 0018 and
+    /// 0019): 4000 lines of 20 grapheme cells, each cell its own OSC 8
+    /// link (`id=K`, K of 1000, so links repeat across pages), on 80x24,
+    /// resized to 17 columns. A safe Ghostty build aborted in the reflow;
+    /// every cell keeps its character and link, as in tmux 3.8 (grid.c
+    /// `grid_set_cell`, hyperlinks.c `hyperlinks_put`).
+    #[test]
+    fn reflow_to_17_columns_keeps_per_cell_links_and_graphemes() {
+        use std::fmt::Write as _;
+        let (lines, width, ids) = (4000, 20, 1000);
+        let mut t = PaneTerm::new(80, 24, 10_000);
+        let link = |i: usize, x: usize| (i * width + x) % ids;
+        for i in 0..lines {
+            let mut text = String::new();
+            for x in 0..width {
+                let k = link(i, x);
+                write!(text, "\x1b]8;id={k};http://f/{k}\x07e\u{301}").unwrap();
+            }
+            t.feed(format!("{text}\x1b]8;;\x07\r\n").as_bytes());
+        }
+        t.resize(17, 24);
+        assert_eq!(t.cursor(), (0, 23));
+        // Each line is a row of 17 cells and a wrapped row of 3.
+        let first = t.history_size() + 23 - 2 * lines;
+        for i in 0..lines {
+            let y = first + 2 * i;
+            let text = t.row(y).text() + &t.row(y + 1).text();
+            assert_eq!(text, "e\u{301}".repeat(width), "line {i}");
+            for x in 0..width {
+                let (cx, cy) = (x % 17, y + x / 17);
+                let want = Some(format!("http://f/{}", link(i, x)));
+                assert_eq!(t.hyperlink(cx, cy), want, "line {i} cell {x}");
+            }
+        }
+    }
+
     /// A primary-screen program with a footer under its input line (the
     /// cursor above the last content row): a narrowing splits the lines
     /// into history, the widening joins them back, and the screen and the

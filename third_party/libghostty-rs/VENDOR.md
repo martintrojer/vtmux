@@ -580,6 +580,15 @@ Recorded per commit in git history; the list is kept current:
   has; judged from the commit log only, as GitHub was unreachable), which
   sizes the hyperlink map apart from the set (`d20d208c5`) but keeps the
   retry. Upstream candidate, together with 0018; to be reported.
+  worker-25's reproduction itself (80x24, 4000 lines of 20 grapheme
+  cells each its own `id=` link, 1000 ids, resized to 17 columns) is
+  vtmux-vt `reflow_to_17_columns_keeps_per_cell_links_and_graphemes`: an
+  abort at `setGraphemes`' `putNoClobber` under ReleaseSafe without 0018
+  and 0019, every cell and link kept with them. The full `zig build
+  test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over
+  0001-0019: 7013 of 7091 pass, 76 skip, and `tabClear single` fails in
+  each test binary (the kitty temporary-file test of patch 0001's note
+  passes with the checkout outside `/tmp`).
 
 ## Bumping ghostty
 
