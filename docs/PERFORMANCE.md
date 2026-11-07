@@ -28,7 +28,7 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Copy mode entry, 1M lines, compressed | 220 ms | 57 ms | 0.26x | |
 | Search all of a 1M-line history | 1684 / 1686 ms | 7944 / 8371 ms | 4.7x / 5.0x | **Worse.** 3.4x / 3.5x at 100k lines |
 | Hidden panes, RSS per hidden pane | 48 KB | 74-80 KB | - | **Worse.** |
-| Live upgrade, 10 panes x 100k lines, request to redraw | - (kill-server) | 1670 ms compressed; refused uncompressed | - | **Misses** decision 13's 1 s; 1 x 100k and 10 x 10k: 0.2 s compressed, 1.0-1.1 s not |
+| Live upgrade, 10 panes x 100k lines, request to redraw | - (kill-server) | 1680 ms compressed; refused uncompressed | - | **Misses** decision 13's 1 s; 1 x 100k and 10 x 10k: 0.2 s compressed, 1.0 s not |
 | Hidden panes, `C-b n` to the last byte | 5.1-5.2 ms | 2.5-2.6 ms | - | |
 | Owner's config, idle server CPU over 60 s | 171 ms | 47 ms | 0.28x | the cost of answering a status poller |
 
@@ -319,26 +319,26 @@ Raw runs: [`test-health/2026-11-05-perf-refresh.md`](test-health/2026-11-05-perf
 
 ## Live upgrade
 
-`bench.py upgrade` (median of 3, release build): `vtmux-upgrade -b` onto the same binary, with N panes (one window each, 200x49, `history-limit 100000`) that printed L lines of 100 columns (every tenth coloured), one attached 200x50 client (sync on) and two control clients attached. tmux has no live upgrade: its answer is `kill-server`. *answered* is until the command returns, which it does once the new image serves; *redrawn* until the attached client has had its terminal restarted and then its status line. `fresh` upgrades as soon as the history is full, `idle` once the compressor has finished with it (RSS settled, *idle s* after the output).
+`bench.py upgrade` (median of 3, release build): `vtmux-upgrade -b` onto the same binary, with N panes (one window each, 200x49, `history-limit 100000`) that printed L lines of 100 columns (every tenth coloured), one attached 200x50 client (sync on) and two control clients attached. tmux has no live upgrade: its answer is `kill-server`. *answered* is until the command returns, which it does once the new image serves and every attached client has re-attached; *redrawn* until the attached client has had its terminal restarted and then its status line. `fresh` upgrades as soon as the history is full, `idle` once the compressor has finished with it (RSS settled, *idle s* after the output).
 
 | case | history lines | answered | redrawn | snapshot | RSS before | RSS after |
 |---|---|---|---|---|---|---|
-| 1 x 10k, fresh | 9952 | 127 ms | 129 ms | 0.9 MB | 29.4 MB | 32.7 MB |
-| 1 x 10k, idle | 9952 | 42 ms | 44 ms | 1.3 MB | 15.6 MB | 19.7 MB |
-| 1 x 100k, fresh | 99952 | 1037 ms | 1039 ms | 6.0 MB | 169.4 MB | 182.3 MB |
-| 1 x 100k, idle | 99952 | 223 ms | 225 ms | 11.5 MB | 27.2 MB | 51.0 MB |
-| 10 x 10k, fresh | 99520 | 1087 ms | 1089 ms | 6.1 MB | 170.0 MB | 183.6 MB |
-| 10 x 10k, idle | 99520 | 205 ms | 207 ms | 11.3 MB | 30.5 MB | 54.4 MB |
-| 10 x 100k, fresh | 999520 | refused | - | - | 1566.7 MB | - |
-| 10 x 100k, idle | 999520 | 1670 ms | 1673 ms | 113.1 MB | 145.6 MB | 364.3 MB |
+| 1 x 10k, fresh | 9952 | 121 ms | 123 ms | 0.9 MB | 29.4 MB | 32.6 MB |
+| 1 x 10k, idle | 9952 | 40 ms | 42 ms | 1.3 MB | 15.6 MB | 19.7 MB |
+| 1 x 100k, fresh | 99952 | 1015 ms | 1016 ms | 6.0 MB | 169.3 MB | 182.3 MB |
+| 1 x 100k, idle | 99952 | 187 ms | 189 ms | 11.5 MB | 27.2 MB | 50.8 MB |
+| 10 x 10k, fresh | 99520 | 1005 ms | 1007 ms | 6.1 MB | 170.0 MB | 183.7 MB |
+| 10 x 10k, idle | 99520 | 205 ms | 207 ms | 11.3 MB | 30.5 MB | 54.2 MB |
+| 10 x 100k, fresh | 999520 | refused | - | - | 1566.6 MB | - |
+| 10 x 100k, idle | 999520 | 1679 ms | 1680 ms | 113.1 MB | 145.7 MB | 364.3 MB |
 
-- Decision 13's target is 10 panes x 100k lines in under 1 s. Compressed, that case takes 1.7 s; with the history not yet compressed, every run was refused: the dry run (`--vtmux-check-snapshot`, which rebuilds the whole server) took over its 3 s limit, and the server carried on as it was.
+- Decision 13's target is 10 panes x 100k lines in under 1 s. Compressed, that case takes 1.7 s (1679 ms); with the history not yet compressed, every run was refused: the dry run (`--vtmux-check-snapshot`, which rebuilds the whole server) took over its 3 s limit, and the server carried on as it was.
 - Up to 100k lines in all, compressed history upgrades in about 0.2 s. Uncompressed it takes about 1 s per 100k lines: those rows are decoded and imported twice, by the dry run and by the new image.
 - Compressed pages travel in Ghostty's form (decision 23), and are the larger snapshot: 11.5 MB against 6.0 MB of vtmux rows for the same 100k lines.
-- The new image holds more than the old did: 2.5x at 10 x 100k compressed (145.6 MB to 364.3 MB, measured right after the redraw), less after uncompressed history (1.08x).
-- The client's redraw comes 2-3 ms after the command's answer in every case.
+- The new image holds more than the old did: 2.5x at 10 x 100k compressed (145.7 MB to 364.3 MB, measured right after the redraw), less after uncompressed history (1.08x).
+- The command answers once every attached client has re-attached (since the re-exec teardown fix), and the client's redraw comes 1-2 ms after that in every case.
 - The snapshot size is taken by a second upgrade right after the timed one, through a wrapper that counts the dry run's snapshot descriptor.
-- The host was loaded (load 49.8 at the start, other workers' builds), so the times are noisy.
+- The host was shared (load 14.8 at the start, other workers' builds), so the times are noisy; an earlier run at load 49.8 agreed within 20%.
 - The same with streaming panes, in a debug build: `an_upgrade_under_load_loses_and_repeats_nothing` (`crates/vtmux/tests/upgrade.rs`) prints its time to redraw, 223-577 ms for 10 streaming panes.
 
 Raw run: [`test-health/2026-11-07-live-upgrade-bench.md`](test-health/2026-11-07-live-upgrade-bench.md).
