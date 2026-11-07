@@ -214,8 +214,9 @@ const CELLS_ALIGN: usize = 128;
 /// `tv_sec = 1`, screen-write.c:1035).
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// The most pending input [`PaneTerm::pending_input`] keeps: tmux keeps all
-/// of it, but a string is cut off at `input-buffer-size` anyway.
+/// The most pending input [`PaneTerm::pending_input`] keeps (one byte more
+/// says it was cut): tmux keeps all of it, but discards a string past
+/// `input-buffer-size`, 1 MiB by default, anyway.
 const PENDING_MAX: usize = 1 << 20;
 
 /// tmux's ground timer (input.c `input_start_ground_timer`).
@@ -342,6 +343,8 @@ pub struct PaneTerm {
     /// The input since the parser last left the ground state, while it has
     /// not returned to it (tmux's `since_ground`, input.c:1022-1024).
     pending: Vec<u8>,
+    /// Where in `pending` the current sequence's ESC is.
+    pending_start: usize,
     /// tmux's own parser for DCS strings, which Ghostty never sees.
     dcs: Dcs,
     /// `input-buffer-size`, the most a DCS payload may hold.
@@ -532,6 +535,7 @@ impl PaneTerm {
             marks: Vec::new(),
             frozen_marks: Vec::new(),
             pending: Vec::new(),
+            pending_start: 0,
             dcs: Dcs::default(),
             input_buffer_size: dcs::DEFAULT_BUFFER_SIZE,
             passthrough: Vec::new(),
@@ -846,11 +850,23 @@ impl PaneTerm {
 
     /// Keep `b` in the pending input while the parser is out of the ground
     /// state after it; back in the ground state the input is dropped
-    /// (`input_ground`).
+    /// (`input_ground`). Past [`PENDING_MAX`] it keeps the current
+    /// sequence, from its ESC: [`Self::ghostty_partial`] needs its start,
+    /// and over the limit it is the only one there.
     fn note_pending(&mut self, b: u8, in_sequence: bool) {
         if !in_sequence {
             self.pending.clear();
-        } else if self.pending.len() < PENDING_MAX {
+            return;
+        }
+        if b == 0x1b && self.scan.state == ScanState::Esc {
+            self.pending_start = self.pending.len();
+        }
+        if self.pending.len() > PENDING_MAX && self.pending_start > 0 {
+            self.pending
+                .drain(..self.pending_start.min(self.pending.len()));
+            self.pending_start = 0;
+        }
+        if self.pending.len() <= PENDING_MAX {
             self.pending.push(b);
         }
     }
@@ -1621,25 +1637,42 @@ impl PaneTerm {
 
     /// The bytes of the sequence Ghostty's parser is in the middle of: the
     /// input since the last ESC of [`PaneTerm::pending_input`] (every ESC
-    /// starts a sequence afresh in both parsers), less the bytes the
-    /// scanner keeps from Ghostty inside a CSI ([`ScanEvent::Skip`]).
-    /// Nothing at the ground state, nor in a DCS or a rename, which the
-    /// scanner reads alone (Ghostty had CAN).
+    /// starts a sequence afresh in both parsers), less what it must not
+    /// see twice or at all. Nothing at the ground state, nor in a DCS or a
+    /// rename, which the scanner reads alone (Ghostty had CAN).
+    ///
+    /// - In a CSI or an escape, C0 controls ran when they arrived, and
+    ///   the state stays (tmux's `input_c0_dispatch` in
+    ///   `input_state_csi_enter_table` and the others, Ghostty's
+    ///   `execute`): run again, a newline would move the cursor twice.
+    ///   CAN and SUB never reach the tail: they end the sequence.
+    /// - In a CSI, 0x7f-0xff are the scanner's alone ([`ScanEvent::Skip`]).
+    /// - A string longer than the pending input keeps has lost its middle
+    ///   (the input stops growing at [`PENDING_MAX`], the default
+    ///   `input-buffer-size`, and tmux discards a string past that limit:
+    ///   `input_input` sets `INPUT_DISCARD`, `input_exit_osc` and the
+    ///   other exits then do nothing). Ghostty gets an OSC it rejects at
+    ///   its first byte instead, which swallows the rest of the string
+    ///   through its BEL or ST and dispatches nothing (`osc.Parser`'s
+    ///   `invalid` state).
     fn ghostty_partial(&self) -> Vec<u8> {
         let state = self.scan.state;
-        if matches!(
-            state,
-            ScanState::Ground | ScanState::Dcs | ScanState::Rename
-        ) {
-            return Vec::new();
+        match state {
+            ScanState::Ground | ScanState::Dcs | ScanState::Rename => return Vec::new(),
+            ScanState::Str if self.pending.len() > PENDING_MAX => return b"\x1b];".to_vec(),
+            _ => {}
         }
         let from = self.pending.iter().rposition(|&b| b == 0x1b).unwrap_or(0);
-        let tail = &self.pending[from..];
-        if state == ScanState::Csi {
-            tail.iter().copied().filter(|&b| b < 0x7f).collect()
-        } else {
-            tail.to_vec()
-        }
+        let keep = |b: u8| match state {
+            ScanState::Str => true,
+            ScanState::Csi => b == 0x1b || (0x20..0x7f).contains(&b),
+            _ => b == 0x1b || b >= 0x20,
+        };
+        self.pending[from..]
+            .iter()
+            .copied()
+            .filter(|&b| keep(b))
+            .collect()
     }
 
     /// How many rows at the bottom of the screen hold no text, below the
@@ -4931,5 +4964,106 @@ mod tests {
         t.feed(b"cd\x07");
         assert_eq!(t.title(), "abcd");
         assert_eq!(t.row(t.history_size()).text(), "0");
+    }
+
+    /// A C0 control inside a half-written CSI or escape runs when it
+    /// arrives and the state stays (input.c `input_c0_dispatch`); the
+    /// sequence a resize gives back to Ghostty must not run it again. The
+    /// pane ends as if the resize came after the program's next bytes.
+    #[test]
+    fn a_resize_runs_no_control_of_a_half_written_sequence_again() {
+        let shown = |t: &PaneTerm| {
+            let opts = crate::capture::CaptureOpts {
+                escapes: true,
+                start: crate::capture::LineRef::Start,
+                end: crate::capture::LineRef::End,
+                ..Default::default()
+            };
+            let text = String::from_utf8_lossy(&crate::capture::capture(t, opts)).into_owned();
+            (text, t.cursor(), t.history_size())
+        };
+        let resizes: [&[(u16, u16)]; 2] = [&[(20, 4)], &[(20, 4), (20, 6)]];
+        // The newline: the cursor's row; the tab: its column; the
+        // intermediate's newline: through ESC ( 0 (DEC graphics).
+        let starts: [(&[u8], &[u8]); 4] = [
+            (b"\x1b[3\r\n", b"1mX"),
+            (b"\x1b[3\x08", b"1mX"),
+            (b"\x1b\t", b"[31mX"),
+            (b"\x1b(\r\n", b"0q\x1b(B"),
+        ];
+        let screen = b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\x1b[2;3H";
+        for sizes in resizes {
+            for (head, tail) in starts {
+                let mut want = PaneTerm::new(20, 6, 100);
+                want.feed(screen);
+                want.feed(head);
+                want.feed(tail);
+                let mut t = PaneTerm::new(20, 6, 100);
+                t.feed(screen);
+                t.feed(head);
+                for &(cols, rows) in sizes {
+                    t.resize(cols, rows);
+                    want.resize(cols, rows);
+                }
+                assert_eq!(t.pending_input(), head, "{sizes:?} {head:?}");
+                t.feed(tail);
+                assert_eq!(shown(&t), shown(&want), "{sizes:?} {head:?}");
+            }
+        }
+        // The reviewer's probes, as tmux has them: the red X on the
+        // cursor's row, below it "5" kept; after the tab, column 9.
+        let mut t = PaneTerm::new(20, 6, 100);
+        t.feed(b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\x1b[2;1H\x1b[3\r\n");
+        t.resize(20, 4);
+        t.feed(b"1mX");
+        assert_eq!((t.cursor(), t.history_size()), ((1, 2), 2));
+        assert_eq!(t.row(t.history_size() + 3).text(), "5");
+        let mut t = PaneTerm::new(20, 6, 100);
+        t.feed(b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\x1b[2;1H\x1b\t");
+        t.resize(20, 4);
+        t.feed(b"[31mX");
+        assert_eq!(t.cursor(), (9, 1));
+    }
+
+    /// The pending input stops at [`PENDING_MAX`]. A string past it has
+    /// lost its middle, and tmux discards one past `input-buffer-size`
+    /// (`input_input`): a resize leaves Ghostty swallowing the rest, not
+    /// a string with a hole. A sequence after such a string is kept whole.
+    #[test]
+    fn a_resize_drops_a_string_past_the_pending_limit() {
+        use crate::snapshot::Color;
+        let screen = b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\x1b[2;1H";
+        let long = vec![b'a'; PENDING_MAX + 10];
+        // A long OSC 2 still open: Ghostty must not get its start again.
+        let mut t = PaneTerm::new(20, 6, 100);
+        t.feed(screen);
+        t.feed(b"\x1b]2;");
+        t.feed(&long);
+        assert_eq!(t.pending_input().len(), PENDING_MAX + 1);
+        assert_eq!(t.ghostty_partial(), b"\x1b];");
+        t.resize(20, 4);
+        t.feed(b"b\x07X");
+        assert_eq!(t.title(), "");
+        assert_eq!(
+            (t.row(t.history_size() + 1).text(), t.cursor()),
+            ("X".into(), (1, 1))
+        );
+        // A long OSC 2 ended by the ESC of a CSI still open: the CSI is
+        // what the pending input holds, and the colour applies.
+        let mut t = PaneTerm::new(20, 6, 100);
+        t.feed(screen);
+        t.feed(b"\x1b]2;");
+        t.feed(&long);
+        t.feed(b"\x1b[3");
+        assert_eq!(t.pending_input(), b"\x1b[3");
+        t.resize(20, 4);
+        t.feed(b"1mX");
+        let (cx, cy) = t.cursor();
+        let row = t.row(t.history_size() + usize::from(cy));
+        let x = &row.cells[usize::from(cx) - 1];
+        assert_eq!(
+            (x.text.as_str(), cx, x.style.fg),
+            ("X", 1, Color::Palette(1))
+        );
     }
 }

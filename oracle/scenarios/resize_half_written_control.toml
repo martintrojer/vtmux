@@ -1,0 +1,30 @@
+name = "resize_half_written_control"
+# A C0 control inside a half-written sequence runs when it arrives
+# (input.c input_state_csi_enter_table, input_state_esc_enter_table:
+# input_c0_dispatch, no state change) and never again: a resize does not
+# touch the pane's input parser (screen_resize leaves wp->ictx alone,
+# window.c window_pane_resize). Window c: a newline inside a CSI; window
+# e: a tab after an ESC. Each pane shrinks with text below the cursor, then
+# the program's next bytes finish the sequence. Each program waits until
+# the server holds the start (capture-pane -P, cmd-capture-pane.c
+# cmd_capture_pane_pending) before it signals.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "c", "-x", "20", "-y", "6", "sh", "-c", "printf '0\\n1\\n2\\n3\\n4\\n5\\n6\\n7\\033[2;1H\\033[3\\n'; until [ -n \"$(tmux capture-pane -pP)\" ]; do sleep 0.01; done; tmux wait-for -S c; tmux wait-for goc; printf '1mX\\033[0m'; tmux wait-for -S donec; exec cat -"] },
+  { run = ["neww", "-d", "-n", "e", "-t", "a:", "sh", "-c", "printf '0\\n1\\n2\\n3\\n4\\n5\\n6\\n7\\033[2;1H\\033\\t'; until [ -n \"$(tmux capture-pane -pP)\" ]; do sleep 0.01; done; tmux wait-for -S e; tmux wait-for goe; printf '[31mX\\033[0m'; tmux wait-for -S donee; exec cat -"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { wait_for = "c" },
+  { wait_for = "e" },
+  { run = ["resize-window", "-t", "a:c", "-y", "4"] },
+  { run = ["resize-window", "-t", "a:e", "-y", "4"] },
+  { run = ["capture-pane", "-pP", "-t", "a:c"] },
+  { run = ["capture-pane", "-pP", "-t", "a:e"] },
+  { run = ["wait-for", "-S", "goc"] },
+  { wait_for = "donec" },
+  { run = ["wait-for", "-S", "goe"] },
+  { wait_for = "donee" },
+  { run = ["capture-pane", "-pe", "-t", "a:c"] },
+  { run = ["display", "-p", "-t", "a:c", "#{cursor_x},#{cursor_y},#{history_size}"] },
+  { run = ["capture-pane", "-pe", "-t", "a:e"] },
+  { run = ["display", "-p", "-t", "a:e", "#{cursor_x},#{cursor_y},#{history_size}"] },
+  { run = ["kill-server"] },
+]
