@@ -1389,11 +1389,11 @@ impl Server {
         fds: &mut Adopt<'_>,
     ) -> io::Result<Self> {
         validate(snapshot)?;
-        // Timers count on from when the snapshot was taken: the dry run
-        // and the exec since are time their clocks ran on, as with no
-        // upgrade. Not so the told clients' wait to re-attach: their
-        // notice went out after the dry run, and the 10 s are theirs from
-        // the notice (spec, *Clients*).
+        // Timers count on from when the snapshot was taken: the exec and
+        // the decode since (and a switch back's attempt) are time their
+        // clocks ran on, as with no upgrade. Not so the told clients' wait
+        // to re-attach: the 10 s are theirs from the notice, which went
+        // out after the snapshot (spec, *Clients*).
         let rebuilt = Instant::now();
         let now = rebuilt
             .checked_sub(since_taken(&snapshot.meta))

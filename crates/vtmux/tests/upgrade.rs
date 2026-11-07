@@ -1659,6 +1659,60 @@ fn a_client_whose_exec_fails_gets_its_terminal_back() {
     world.echo("a:w1", "after");
 }
 
+/// The finding `low_dry_run_blocks_loop` (`review_upgrade_cmd_2`): the dry
+/// run used to hold the server's loop, so while a slow one ran (up to its
+/// limit, 3 s here) nothing typed echoed. Now the server serves on: with
+/// the new binary's dry run held at its start, what is typed into the
+/// attached client reaches its pane and echoes back on the terminal, a
+/// command client is answered, and once the dry run goes on the upgrade
+/// goes through, carrying what was typed meanwhile (the snapshot the exec
+/// gets is taken after the dry run).
+#[test]
+fn typing_echoes_while_the_dry_run_runs() {
+    let world = World::new();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.echo("a:w1", "before");
+    wait("the client's draw", || attached.screen().contains("before"));
+    let started = world.home.path().join("started");
+    let release = world.home.path().join("release");
+    // Held at most 20 s, so a failing run leaves no dry run behind.
+    let binary = wrapper(
+        &world,
+        "vtmux-slow",
+        &format!(
+            "--vtmux-check-snapshot) : >'{}'; i=0; while [ ! -e '{}' ] && [ $i -lt 400 ]; \
+             do sleep 0.05; i=$((i+1)); done;;",
+            started.display(),
+            release.display()
+        ),
+    );
+    let path = world.run(&["display", "-p", "#{socket_path}"]);
+    *world.socket.lock().unwrap() = Some(PathBuf::from(path.trim_end()));
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    thread::scope(|scope| {
+        let asked = scope.spawn(|| world.upgrade_at(&binary));
+        wait("the dry run to start", || started.exists());
+        let at = attached.len();
+        attached.keys("during\r");
+        wait("the echo on the client", || {
+            attached.since(at).contains("during")
+        });
+        assert_eq!(world.run(&["display", "-p", "served"]), "served\n");
+        assert!(!asked.is_finished(), "the dry run is still running");
+        std::fs::write(&release, "").unwrap();
+        assert_eq!(asked.join().unwrap(), Some(upgraded()));
+    });
+    assert_eq!(world.pid(), pid);
+    assert_eq!(world.pane_pids(), panes);
+    assert!(world.server_args().contains("--vtmux-resume"));
+    let shown = world.run(&["capture-pane", "-p", "-t", "a:w1"]);
+    assert_eq!(shown.matches("during").count(), 2, "{shown}");
+    world.echo("a:w1", "after");
+}
+
 /// `%output` payloads of pane `pane` in a control client's lines, octal
 /// escapes undone (control.c `control_append_data`), in order.
 fn output_of(lines: &[String], pane: &str) -> Vec<u8> {

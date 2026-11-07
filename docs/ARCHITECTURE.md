@@ -117,12 +117,14 @@ A live upgrade (D27, [live-upgrade spec](specs/2026-11-06-live-upgrade.md)) move
  vtmux-upgrade -b B           old image (pid P)                        new image (pid P)
  (or UpgradeRequest) ──► preflight: binary ok, no jobs or
                          commands in flight (≤ 3 s)
-                         quiesce: read nothing, flush clients
                          B --vtmux-patch-stack: same Ghostty pin?
                            yes: compress all history (threads)
                          snapshot ──► memfd ──► B --vtmux-check-snapshot  (dry run, ≤ 3 s
-                                                  + 1 s per 100k rows: decode +
-                                                  rebuild, exit 0)
+                         serve on meanwhile       + 1 s per 100k rows: decode +
+                         (the loop polls it)      rebuild, exit 0)
+                         passed: no jobs or commands in flight (≤ 3 s),
+                         quiesce: read nothing, flush clients,
+                         snapshot again ──► memfd
                          tty teardown + UpgradeNotice ──► attached clients
                          execve(B --vtmux-resume fd) ─────────────────► decode, adopt fds,
                            listener, client sockets, pane/popup ptys,     rebuild model and
@@ -136,7 +138,7 @@ A live upgrade (D27, [live-upgrade spec](specs/2026-11-06-live-upgrade.md)) move
                                                                           the requester
 ```
 
-`vtmux-upgrade [-b binary]` moves the server onto another binary in place ([live-upgrade spec](specs/2026-11-06-live-upgrade.md), D27). `server/upgrade.rs` refuses a missing or non-executable binary at once, and a request from inside a `run-shell`/`if-shell` job (which would wait on the upgrade that waits on it; the refusal goes into the job's output too, which run-shell shows), waits up to 3 s for `run-shell`/`if-shell` jobs and for commands in flight, and writes every client's queued output; then the exec core below snapshots, dry-runs and execs. Any refusal leaves the server running as it was and reaches the requester. Without `-b` it takes the path the server was started as, resolved through symlinks when asked, so a relink of that path is followed. From the command line, a client the server turns away for its version asks again with the frozen `UpgradeRequest`.
+`vtmux-upgrade [-b binary]` moves the server onto another binary in place ([live-upgrade spec](specs/2026-11-06-live-upgrade.md), D27). `server/upgrade.rs` refuses a missing or non-executable binary at once, and a request from inside a `run-shell`/`if-shell` job (which would wait on the upgrade that waits on it; the refusal goes into the job's output too, which run-shell shows), waits up to 3 s for `run-shell`/`if-shell` jobs and for commands in flight, then the exec core below snapshots and starts the dry run, and serves on while it runs (its loop polls the child, and its reaping of children leaves that one to the dry run). Once it passes, the server waits for work in flight again, writes every client's queued output and snapshots again, so what changed during the dry run goes too, and execs. Any refusal leaves the server running as it was and reaches the requester. Without `-b` it takes the path the server was started as, resolved through symlinks when asked, so a relink of that path is followed. From the command line, a client the server turns away for its version asks again with the frozen `UpgradeRequest`.
 
 Every frame but a few is free to change between builds, and a client of another protocol version gets `protocol version mismatch`, plus a hint to run `tmux vtmux-upgrade` when the client is the newer one. The few are frozen forever (`vtmux-core::protocol`, *Frozen frames*; live-upgrade spec): `Hello`, `Stdin`, `StdinEof`, `Stdout`, `Stderr`, `Exit`, `Exec`, `Flags`, and the upgrade handshake `UpgradeRequest` / `UpgradeResult` / `UpgradeNotice`. So are the 16 MiB frame cap, `Hello`'s version coming first (a `Hello` of another version that doesn't decode still gets the mismatch) and its trailing extension area, where later builds add fields (the first: whether the client follows an upgrade, and a re-attach's token), and the re-attach command line `<binary> --vtmux-reattach <socket>` with the token in `VTMUX_REATTACH_TOKEN`. So a control client of any version from protocol 9 on is served (sent frozen frames only, and it skips frames it doesn't know), and an `UpgradeRequest` from a peer with write access is answered ahead of any `Hello` or version check.
 

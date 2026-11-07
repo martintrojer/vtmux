@@ -2774,8 +2774,13 @@ impl Server {
             return true;
         }
         // server_client_check_redraw (server-client.c:2510); a client
-        // re-attaching across an upgrade is drawn once it is back.
-        if suspended || self.clients[&id].reattach.is_some() {
+        // re-attaching across an upgrade is drawn once it is back (one with
+        // a token not sent yet, while the dry run runs, is drawn as any).
+        if suspended
+            || self.clients[&id]
+                .reattach
+                .is_some_and(|r| r.deadline.is_some())
+        {
             self.clients
                 .get_mut(&id)
                 .expect("client")
@@ -5154,8 +5159,8 @@ impl Server {
     /// is gone and whose PTY is drained is destroyed.
     fn reap_children(&mut self) {
         loop {
-            match rustix::process::wait(rustix::process::WaitOptions::NOHANG) {
-                Ok(Some((pid, status))) => {
+            match self.reap_one() {
+                Some((pid, status)) => {
                     if status.stopped() {
                         continue;
                     }
@@ -5193,7 +5198,33 @@ impl Server {
                         }
                     }
                 }
-                Ok(None) | Err(_) => return,
+                None => return,
+            }
+        }
+    }
+
+    /// One exited child reaped, any but an upgrade's dry run while it
+    /// runs: that one is the dry run's to reap, once it has killed the
+    /// process group the child leads (`sys::upgrade::DryRun`), so it is
+    /// left a zombie here and the dry run told it has ended.
+    fn reap_one(&mut self) -> Option<(rustix::process::Pid, rustix::process::WaitStatus)> {
+        use rustix::process::{Pid, WaitOptions, wait, waitpid};
+        let Some(dry) = self.upgrade_dry_run_pid() else {
+            return wait(WaitOptions::NOHANG).ok().flatten();
+        };
+        loop {
+            let pid = sys::upgrade::next_exited()?;
+            if pid == dry {
+                self.upgrade_dry_run_ended();
+                if self.upgrade_dry_run_pid().is_some() {
+                    // Not reaped after all: leave the rest to the next turn.
+                    return None;
+                }
+                return wait(WaitOptions::NOHANG).ok().flatten();
+            }
+            let pid = Pid::from_raw(pid)?;
+            if let Ok(Some(reaped)) = waitpid(Some(pid), WaitOptions::NOHANG) {
+                return Some(reaped);
             }
         }
     }

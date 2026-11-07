@@ -510,11 +510,71 @@ impl Server {
         self.held_backlog.insert(i);
     }
 
-    /// Sequence steps 3, 4, 5 and 7 (live-upgrade spec): the snapshot
-    /// into an anonymous memory file, the dry run of `binary` on it, then
-    /// `execve(binary)` with the descriptors it names kept open. Returns
-    /// only if the server is still this image, with why. The preflight and
-    /// quiesce before it are `upgrade.rs`'s. `requester` goes in the
+    /// Sequence steps 3 and 4 (live-upgrade spec): the snapshot into an
+    /// anonymous memory file, and the dry run of `binary` on it started,
+    /// for the loop to wait on while it serves ([`Check`],
+    /// `upgrade.rs`). The tokens attached clients re-attach with are made
+    /// here, so the dry run rebuilds their records too. The preflight and
+    /// quiesce before it are `upgrade.rs`'s.
+    ///
+    /// # Errors
+    /// Why the upgrade is refused: the snapshot can't be written, or the
+    /// binary can't be started.
+    pub(crate) fn upgrade_check(
+        &mut self,
+        binary: &Path,
+        requester: Option<snap::Requester>,
+    ) -> Result<Check, String> {
+        // Decision 23: history in Ghostty's form only to a binary of this
+        // patch stack, and then all of it, compressed first.
+        let form = if same_pin(binary) {
+            Form::SamePin
+        } else {
+            Form::Rows
+        };
+        let (snapshot, file) = self.upgrade_snapshot(form, requester)?;
+        self.check_on(binary, &snapshot, &file, form, 1)
+    }
+
+    /// The dry run of `binary` on `snapshot` (in `file`, of `form`)
+    /// started, the `round`th of this upgrade.
+    fn check_on(
+        &mut self,
+        binary: &Path,
+        snapshot: &snap::Snapshot,
+        file: &OwnedFd,
+        form: Form,
+        round: u8,
+    ) -> Result<Check, String> {
+        match sys::DryRun::start(binary, file.as_fd(), dry_run_limit(snapshot)) {
+            Ok(run) => Ok(Check {
+                run,
+                form,
+                requires: snapshot.meta.requires.clone(),
+                round,
+            }),
+            Err(e) => {
+                self.upgrade_tokens_void();
+                Err(format!(
+                    "{}: {}",
+                    binary.display(),
+                    vtmux_core::error::strerror(&e)
+                ))
+            }
+        }
+    }
+
+    /// Once the dry run has passed (`passed`) and the work in flight is
+    /// done again: sequence step 3 once more, then steps 5, 6 and 7. The
+    /// server served on while the dry run ran, so the snapshot the exec
+    /// gets is taken now, with everything since in it (the one checked is
+    /// what the binary was shown it can read). One that requires a
+    /// feature the checked one did not (its first history page in
+    /// Ghostty's form, an auto-hide scrollbar shown) gets a dry run of its
+    /// own instead ([`Exec::Again`]), up to [`CHECK_ROUNDS`] in all: the
+    /// binary was never shown it reads that. Then `execve(binary)` with
+    /// the descriptors the snapshot names kept open. Returns only if the
+    /// server is still this image, with why. `requester` goes in the
     /// snapshot (a handshake's descriptor is kept across the exec too), so
     /// the image that ends up serving tells it how the upgrade went
     /// ([`answer`]): only a failure that returns here is this image's to
@@ -523,9 +583,58 @@ impl Server {
         &mut self,
         binary: &Path,
         requester: Option<snap::Requester>,
-    ) -> String {
-        let fail =
-            |e: &io::Error| format!("{}: {}", binary.display(), vtmux_core::error::strerror(e));
+        passed: &Passed,
+    ) -> Exec {
+        let handshake = handshake_fd(requester.as_ref());
+        let (snapshot, file) = match self.upgrade_snapshot(passed.form, requester) {
+            Ok(taken) => taken,
+            Err(message) => return Exec::Failed(message),
+        };
+        if let Some(need) = snapshot
+            .meta
+            .requires
+            .iter()
+            .find(|r| !passed.requires.contains(r))
+        {
+            if passed.round >= CHECK_ROUNDS {
+                self.upgrade_tokens_void();
+                return Exec::Failed(format!(
+                    "the server changed during {CHECK_ROUNDS} dry runs: its snapshot now \
+                     requires {need}, which no dry run checked: run vtmux-upgrade again"
+                ));
+            }
+            return match self.check_on(binary, &snapshot, &file, passed.form, passed.round + 1) {
+                Ok(check) => Exec::Again(check),
+                Err(message) => Exec::Failed(message),
+            };
+        }
+        // 6. Attached clients told to re-execute and re-attach.
+        self.upgrade_notify(binary);
+        let keep: Vec<RawFd> = snapshot
+            .descriptors
+            .iter()
+            .map(|d| d.fd)
+            .chain(snapshot.meta.binary_fd)
+            .chain(handshake)
+            .collect();
+        let socket = passed.checked.takes_socket.then_some(self.socket.as_path());
+        let e = (self.upgrade.exec)(binary, file, &keep, socket);
+        Exec::Failed(format!(
+            "{}: {}",
+            binary.display(),
+            vtmux_core::error::strerror(&e)
+        ))
+    }
+
+    /// Step 3: the snapshot of an upgrade onto a binary that reads `form`,
+    /// naming `requester`, in an anonymous memory file. Attached clients
+    /// that follow upgrades get their tokens first (those that have one
+    /// keep it). Refused, the tokens not yet sent are void.
+    fn upgrade_snapshot(
+        &mut self,
+        form: Form,
+        requester: Option<snap::Requester>,
+    ) -> Result<(snap::Snapshot, OwnedFd), String> {
         let exe = std::env::current_exe()
             .map(|p| sys::exe_path(&p))
             .unwrap_or_default();
@@ -533,17 +642,11 @@ impl Server {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX));
         let binary_fd = self.exe.as_ref().map(AsRawFd::as_raw_fd);
-        let handshake = handshake_fd(requester.as_ref());
         // The tokens attached clients re-attach with go in the snapshot.
         self.upgrade_tokens();
-        // Decision 23: history in Ghostty's form only to a binary of this
-        // patch stack, and then all of it, compressed first.
-        let form = if same_pin(binary) {
+        if form == Form::SamePin {
             self.compress_all_history();
-            Form::SamePin
-        } else {
-            Form::Rows
-        };
+        }
         let snapshot = self.to_snapshot_with(
             snap::Meta {
                 purpose: snap::Purpose::Upgrade,
@@ -559,34 +662,13 @@ impl Server {
         );
         let bytes = snap::encode(&snapshot);
         let dir = self.socket.parent().unwrap_or(Path::new("/tmp"));
-        let file = match sys::memfile(dir, &bytes) {
-            Ok(f) => f,
+        match sys::memfile(dir, &bytes) {
+            Ok(file) => Ok((snapshot, file)),
             Err(e) => {
                 self.upgrade_tokens_void();
-                return format!("snapshot: {}", vtmux_core::error::strerror(&e));
+                Err(format!("snapshot: {}", vtmux_core::error::strerror(&e)))
             }
-        };
-        let (refused, checked) = match sys::dry_run(binary, file.as_fd(), dry_run_limit(&snapshot))
-        {
-            Ok(Ok(checked)) => (None, checked),
-            Ok(Err(message)) => (Some(message), sys::Checked::default()),
-            Err(e) => (Some(fail(&e)), sys::Checked::default()),
-        };
-        if let Some(message) = refused {
-            self.upgrade_tokens_void();
-            return message;
         }
-        // 6. Attached clients told to re-execute and re-attach.
-        self.upgrade_notify(binary);
-        let keep: Vec<RawFd> = snapshot
-            .descriptors
-            .iter()
-            .map(|d| d.fd)
-            .chain(binary_fd)
-            .chain(handshake)
-            .collect();
-        let socket = checked.takes_socket.then_some(self.socket.as_path());
-        fail(&(self.upgrade.exec)(binary, file, &keep, socket))
     }
 
     /// Every pane's and popup's history compressed now, as far as Ghostty
@@ -605,6 +687,55 @@ impl Server {
             .filter_map(|c| Some(&mut c.popup.as_mut()?.term));
         vtmux_vt::compress_all_of(panes.chain(popups));
     }
+}
+
+/// A dry run in flight (sequence step 4) on the snapshot
+/// [`Server::upgrade_check`] took, which the loop serves around.
+#[derive(Debug)]
+pub(crate) struct Check {
+    pub(crate) run: sys::DryRun,
+    /// The form its history went in, which the exec's snapshot keeps.
+    form: Form,
+    /// The features the checked snapshot requires.
+    requires: Vec<String>,
+    /// Which dry run of the upgrade it is, from 1.
+    round: u8,
+}
+
+impl Check {
+    /// It has passed, saying `checked`.
+    pub(crate) fn passed(self, checked: sys::Checked) -> Passed {
+        Passed {
+            checked,
+            form: self.form,
+            requires: self.requires,
+            round: self.round,
+        }
+    }
+}
+
+/// A dry run that passed, for [`Server::exec_upgrade`].
+#[derive(Debug)]
+pub(crate) struct Passed {
+    checked: sys::Checked,
+    form: Form,
+    requires: Vec<String>,
+    round: u8,
+}
+
+/// How many dry runs an upgrade may take, when the snapshot after each
+/// requires a feature the one before did not ([`Server::exec_upgrade`]).
+/// There are two such features (Ghostty's history pages, the auto-hide
+/// scrollbar), so three is one more than ever needed.
+pub(crate) const CHECK_ROUNDS: u8 = 3;
+
+/// What [`Server::exec_upgrade`] came to, when the exec did not happen.
+#[derive(Debug)]
+pub(crate) enum Exec {
+    /// Refused, or the `execve` returned: why.
+    Failed(String),
+    /// The snapshot needs a dry run of its own: running.
+    Again(Check),
 }
 
 /// Whether `binary` reads history in this binary's Ghostty form: it

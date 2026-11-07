@@ -13,12 +13,19 @@
 //!    jobs (decision 10), commands in any queue but the requester's and
 //!    command clients still being served (decision 26). Refuse if any is
 //!    left.
-//! 2. **Quiesce**: the rest runs in one go inside one loop turn, so no pane
-//!    or client is read until it ends (what they send waits in the kernel);
-//!    every client's queued output is written out first.
-//! 3. The snapshot, the dry run and the `execve`
-//!    ([`Server::exec_upgrade`], `resume.rs`). Any of them failing leaves
-//!    the old server running, and the requester is told why.
+//! 2. **The dry run** ([`Server::upgrade_check`], `resume.rs`): a snapshot
+//!    for it to read, taken inside one loop turn, then the loop serves on
+//!    (panes, clients, commands) while the binary reads it; each turn
+//!    looks whether it has ended. A hanging binary holds only the
+//!    requester, until the dry run's limit.
+//! 3. Once it has passed, the wait for work in flight again (the server
+//!    ran on), then **quiesce** and the `execve`
+//!    ([`Server::exec_upgrade`]): in one go inside one loop turn, so no
+//!    pane or client is read until it ends (what they send waits in the
+//!    kernel), every client's queued output written out, the snapshot
+//!    taken again with everything since the dry run's in it, the
+//!    attached clients told, the exec. Any step failing leaves the old
+//!    server running, and the requester is told why.
 //!
 //! The new image's half is [`super::resume`].
 
@@ -33,6 +40,7 @@ use vtmux_core::error::strerror;
 use vtmux_core::protocol::{Hello, HelloExt, ServerMsg, UPGRADED_DETACH};
 use vtmux_snapshot as snap;
 
+use super::resume::{Check, Exec, Passed};
 use super::{ClientId, Server};
 use crate::cmdq::{QueueId, StepId};
 
@@ -67,6 +75,21 @@ pub const FLUSH_WAIT: Duration = Duration::from_secs(1);
 
 /// How often a waiting preflight looks again, besides on every event.
 const RECHECK: Duration = Duration::from_millis(50);
+
+/// How often the loop looks at a dry run running, besides on SIGCHLD:
+/// reading its stderr, so a child that writes much is not held long on a
+/// full pipe.
+const DRY_RUN_RECHECK: Duration = Duration::from_millis(20);
+
+/// How long the wait for work in flight lasts: [`PREFLIGHT_WAIT`], none
+/// under [`STRICT_HOOK`].
+fn preflight_wait() -> Duration {
+    if strict() {
+        Duration::ZERO
+    } else {
+        PREFLIGHT_WAIT
+    }
+}
 
 /// How long a client told to re-execute has to re-attach (live-upgrade
 /// spec, *Clients*): long enough for a busy host to start a binary.
@@ -131,13 +154,26 @@ impl Requester {
     }
 }
 
-/// An upgrade past its first checks, waiting for the work in flight.
+/// An upgrade past its first checks.
 #[derive(Debug)]
 pub(crate) struct Pending {
     requester: Requester,
     binary: PathBuf,
-    /// When the preflight gives up waiting.
+    /// When the wait for work in flight gives up.
     deadline: Instant,
+    stage: Stage,
+}
+
+/// Where a pending upgrade stands.
+#[derive(Debug)]
+enum Stage {
+    /// Waiting for the work in flight before the dry run's snapshot.
+    Preflight,
+    /// The dry run, running while the server serves.
+    Checking(Check),
+    /// The dry run passed: waiting for the work in flight again (the server
+    /// ran on meanwhile) before the snapshot the exec gets.
+    Passed(Passed),
 }
 
 /// How the upgrade went, held by the image that serves after the exec for
@@ -228,15 +264,11 @@ impl Server {
         }
         self.upgrade_inside_job(requester)?;
         check_binary(&binary)?;
-        let wait = if strict() {
-            Duration::ZERO
-        } else {
-            PREFLIGHT_WAIT
-        };
         self.upgrade.pending = Some(Pending {
             requester,
             binary,
-            deadline: Instant::now() + wait,
+            deadline: Instant::now() + preflight_wait(),
+            stage: Stage::Preflight,
         });
         Ok(())
     }
@@ -285,10 +317,36 @@ impl Server {
         Ok(())
     }
 
-    /// When the loop must look at a waiting upgrade again.
+    /// When the loop must look at a waiting upgrade again: a dry run
+    /// running is looked at every [`DRY_RUN_RECHECK`] (its end also
+    /// wakes the loop, with SIGCHLD).
     pub(crate) fn upgrade_deadline(&self) -> Option<Instant> {
         let p = self.upgrade.pending.as_ref()?;
-        Some(p.deadline.min(Instant::now() + RECHECK))
+        Some(match &p.stage {
+            Stage::Checking(c) => c.run.deadline().min(Instant::now() + DRY_RUN_RECHECK),
+            Stage::Preflight | Stage::Passed(_) => p.deadline.min(Instant::now() + RECHECK),
+        })
+    }
+
+    /// The dry run's child while it runs, for the loop's reaping to leave
+    /// to it ([`crate::sys::upgrade::next_exited`]).
+    pub(crate) fn upgrade_dry_run_pid(&self) -> Option<i32> {
+        match &self.upgrade.pending.as_ref()?.stage {
+            Stage::Checking(c) => c.run.pid(),
+            Stage::Preflight | Stage::Passed(_) => None,
+        }
+    }
+
+    /// The dry run's child has ended: reap it, its group killed. How it
+    /// went is kept for [`Self::upgrade_turn`].
+    pub(crate) fn upgrade_dry_run_ended(&mut self) {
+        if let Some(Pending {
+            stage: Stage::Checking(c),
+            ..
+        }) = self.upgrade.pending.as_mut()
+        {
+            let _ = c.run.poll();
+        }
     }
 
     /// The binary `vtmux-upgrade` without `-b` moves the server onto
@@ -308,8 +366,9 @@ impl Server {
     }
 
     /// A loop turn's look at a waiting upgrade: forget it if the requester
-    /// went, refuse it if work is still in flight at the deadline, and run
-    /// it once nothing is.
+    /// went, refuse it if work is still in flight at the deadline, start
+    /// the dry run once nothing is, see whether it has ended, and once it
+    /// has passed and nothing is in flight again, run the rest.
     pub(crate) fn upgrade_turn(&mut self, now: Instant) {
         let Some(p) = self.upgrade.pending.as_ref() else {
             return;
@@ -320,14 +379,23 @@ impl Server {
             Requester::Command { step, .. } => self.cmdq.queue_of(step).is_none(),
         };
         if gone {
+            // A dry run running is killed with it.
             self.upgrade.pending = None;
+            self.upgrade_tokens_void();
             return;
         }
         if self.shutdown {
             self.upgrade.pending = None;
+            self.upgrade_tokens_void();
             self.upgrade_refuse(requester, "the server is exiting");
             return;
         }
+        if !self.upgrade_checked(now) {
+            return;
+        }
+        let Some(p) = self.upgrade.pending.as_ref() else {
+            return;
+        };
         let busy = self.upgrade_blockers(requester);
         if !busy.is_empty() && now < p.deadline {
             return;
@@ -341,6 +409,7 @@ impl Server {
             Vec::new()
         };
         if !busy.is_empty() || !closes.is_empty() {
+            self.upgrade_tokens_void();
             let message = if strict() {
                 let mut what = busy;
                 what.extend(closes);
@@ -355,8 +424,87 @@ impl Server {
             self.upgrade_refuse(requester, &message);
             return;
         }
-        let message = self.upgrade_run(&p);
-        self.upgrade_refuse(requester, &message);
+        let snap_requester = self.snap_requester(requester);
+        let refused = match p.stage {
+            Stage::Preflight => match self.upgrade_check(&p.binary, snap_requester) {
+                Ok(check) => {
+                    self.upgrade.pending = Some(Pending {
+                        stage: Stage::Checking(check),
+                        ..p
+                    });
+                    return;
+                }
+                Err(message) => message,
+            },
+            Stage::Passed(passed) => match self.upgrade_run(&p.binary, snap_requester, &passed) {
+                Exec::Failed(message) => message,
+                Exec::Again(check) => {
+                    self.upgrade.pending = Some(Pending {
+                        stage: Stage::Checking(check),
+                        ..p
+                    });
+                    return;
+                }
+            },
+            // Not reached: `upgrade_checked` let it through.
+            stage @ Stage::Checking(_) => {
+                self.upgrade.pending = Some(Pending { stage, ..p });
+                return;
+            }
+        };
+        self.upgrade_refuse(requester, &refused);
+    }
+
+    /// Whether a pending upgrade is past its dry run, or has none running:
+    /// `false` while it runs, and once it has failed (the upgrade refused
+    /// and dropped). One that passed waits for the work in flight again,
+    /// from `now`.
+    fn upgrade_checked(&mut self, now: Instant) -> bool {
+        let Some(p) = self.upgrade.pending.as_mut() else {
+            return false;
+        };
+        let Stage::Checking(check) = &mut p.stage else {
+            return true;
+        };
+        let outcome = match check.run.poll() {
+            Ok(None) => return false,
+            Ok(Some(outcome)) => outcome,
+            Err(e) => Err(format!("{}: {}", p.binary.display(), strerror(&e))),
+        };
+        let Some(p) = self.upgrade.pending.take() else {
+            return false;
+        };
+        let Stage::Checking(check) = p.stage else {
+            return false;
+        };
+        match outcome {
+            Ok(checked) => {
+                self.upgrade.pending = Some(Pending {
+                    deadline: now + preflight_wait(),
+                    stage: Stage::Passed(check.passed(checked)),
+                    ..p
+                });
+                true
+            }
+            Err(message) => {
+                self.upgrade_tokens_void();
+                self.upgrade_refuse(p.requester, &message);
+                false
+            }
+        }
+    }
+
+    /// Who asked, as the snapshot names them.
+    fn snap_requester(&self, requester: Requester) -> Option<snap::Requester> {
+        match requester {
+            Requester::Handshake(id) => self
+                .clients
+                .get(&id)
+                .map(|c| snap::Requester::Handshake(c.stream.as_raw_fd())),
+            Requester::Command { client, .. } => client
+                .and_then(|id| u32::try_from(id.0).ok())
+                .map(snap::Requester::Client),
+        }
     }
 
     /// The work in flight a snapshot can't carry (decisions 10 and 26):
@@ -492,24 +640,22 @@ impl Server {
         out
     }
 
-    /// Step 2, then the snapshot, dry run and exec
+    /// The quiesce, then the snapshot again and the exec
     /// ([`Server::exec_upgrade`]). Returns only if the server is still
-    /// this image: why, for the requester.
-    fn upgrade_run(&mut self, p: &Pending) -> String {
-        // 2. Quiesce: nothing is read again before this returns.
+    /// this image: why, for the requester, or the dry run of a snapshot
+    /// that needs one of its own.
+    fn upgrade_run(
+        &mut self,
+        binary: &Path,
+        requester: Option<snap::Requester>,
+        passed: &Passed,
+    ) -> Exec {
+        // Quiesce: nothing is read again before this returns.
         if let Err(message) = self.upgrade_flush(FLUSH_WAIT) {
-            return message;
+            self.upgrade_tokens_void();
+            return Exec::Failed(message);
         }
-        let requester = match p.requester {
-            Requester::Handshake(id) => self
-                .clients
-                .get(&id)
-                .map(|c| snap::Requester::Handshake(c.stream.as_raw_fd())),
-            Requester::Command { client, .. } => client
-                .and_then(|id| u32::try_from(id.0).ok())
-                .map(snap::Requester::Client),
-        };
-        self.exec_upgrade(&p.binary, requester)
+        self.exec_upgrade(binary, requester, passed)
     }
 
     /// Write every client's queued output out, waiting up to `wait` for

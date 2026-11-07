@@ -68,11 +68,12 @@ pub struct Checked {
 /// command line.
 pub const FAILED_ENV: &str = "VTMUX_UPGRADE_FAILED";
 
-/// How long an upgrade's dry run may take before it counts as failed:
-/// the server it is asked of reads no pane or client meanwhile
-/// (`server/upgrade.rs`, the quiesce), so it is held short
-/// (review of `lu_upgrade_cmd`: 10 s froze the server). A dry run rebuilds the
-/// server from the snapshot and exits; it takes milliseconds.
+/// How long an upgrade's dry run may take before it counts as failed (a
+/// second more per 100k rows of history it imports, `server/resume.rs`).
+/// The server goes on serving meanwhile (`server/upgrade.rs`), but its
+/// requester waits, so a binary that hangs is given up on soon. A dry
+/// run rebuilds the server from the snapshot and exits; it takes
+/// milliseconds.
 pub const DRY_RUN_LIMIT: Duration = Duration::from_secs(3);
 
 /// [`DRY_RUN_LIMIT`] for the dry run of a switch back by path (macOS),
@@ -248,14 +249,8 @@ impl PreparedExec {
 
 /// The dry run (live-upgrade spec, sequence step 4): run
 /// `<binary> --vtmux-check-snapshot <fd>` on `snapshot` and wait for it,
-/// at most `limit`. `Ok(Err(message))` when the binary refuses the
-/// snapshot: its stderr, or how it ended.
-///
-/// The child leads a process group of its own, and once it has ended, or
-/// at the limit, the whole group is killed: nothing it started outlives
-/// it holding the snapshot or its stderr. Its stderr is read as it comes,
-/// so a child that writes much, or a descendant that keeps the pipe open,
-/// can't hold the wait past the child's end.
+/// at most `limit` ([`DryRun`], waited for here). `Ok(Err(message))` when
+/// the binary refuses the snapshot: its stderr, or how it ended.
 ///
 /// # Errors
 /// The binary can't be started (not found, not executable, not an
@@ -265,66 +260,145 @@ pub fn dry_run(
     snapshot: BorrowedFd<'_>,
     limit: Duration,
 ) -> io::Result<Result<Checked, String>> {
-    use std::os::unix::process::CommandExt as _;
-    let flags = inheritable(snapshot)?;
-    let mut command = Command::new(binary);
-    command
-        .arg(CHECK_FLAG)
-        .arg(snapshot.as_raw_fd().to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    // The child execs by `execve` itself, as the real exec does
-    // (`exec_resume`): `Command` with a `pre_exec` hook falls back to
-    // `fork` + `execvp`, and glibc's `execvp` runs a file the kernel
-    // refuses (ENOEXEC) as a shell script. What that prints and exits with
-    // is the shell's (bash: "cannot execute binary file", 126; dash:
-    // nothing, 127), so the refusal differed by host.
-    let exec = PreparedExec::new(binary, snapshot.as_raw_fd())?;
-    // `Command` passes the signal mask on, and a switch back runs this
-    // with the handled signals blocked (`exec_resume`): the child starts
-    // with none blocked, as a pane does (`pty::clear_signals`).
-    // SAFETY: the closure runs in the forked child before exec and only
-    // calls setpgid, sigemptyset, pthread_sigmask on a local set, and
-    // `PreparedExec::exec` (async-signal-safe, allocation-free).
-    unsafe {
-        command.pre_exec(move || {
-            libc::setpgid(0, 0);
-            let mut set: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&raw mut set);
-            libc::pthread_sigmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
-            Err(exec.exec())
-        });
+    let mut run = DryRun::start(binary, snapshot, limit)?;
+    loop {
+        if let Some(outcome) = run.poll()? {
+            return Ok(outcome);
+        }
+        run.nap(Duration::from_millis(10));
     }
-    let child = command.spawn();
-    fcntl_setfd(snapshot, flags)?;
-    let mut child = child?;
-    let pid = libc::pid_t::try_from(child.id()).map_err(io::Error::other)?;
-    // Also here, so the group exists before the first kill whichever side
-    // runs first (EACCES once the child has exec'd, which is fine).
-    // SAFETY: setpgid on our own child's pid.
-    unsafe { libc::setpgid(pid, pid) };
-    let mut err = child.stderr.take();
-    if let Some(e) = &err {
-        rustix::io::ioctl_fionbio(e, true)?;
+}
+
+/// A dry run started and not yet waited for: the server loop goes on
+/// serving panes and clients while it runs (`server/upgrade.rs`) and
+/// [`DryRun::poll`]s it. Dropped before it has ended, its process group
+/// is killed and the child reaped.
+///
+/// The child leads a process group of its own, and once it has ended, or
+/// at the limit, the whole group is killed: nothing it started outlives
+/// it holding the snapshot or its stderr. Its stderr is read as it comes,
+/// so a child that writes much, or a descendant that keeps the pipe open,
+/// can't hold the wait past the child's end. The child is reaped only
+/// after its group is killed (its pid, the group's id, can't have been
+/// reused before), so whoever else reaps this process's children must
+/// leave it to [`DryRun::poll`] ([`next_exited`]).
+#[derive(Debug)]
+pub struct DryRun {
+    binary: std::path::PathBuf,
+    child: std::process::Child,
+    pid: libc::pid_t,
+    err: Option<std::process::ChildStderr>,
+    said: Vec<u8>,
+    end: Instant,
+    limit: Duration,
+    /// How it went, once it has ended and been reaped.
+    outcome: Option<Result<Checked, String>>,
+}
+
+impl DryRun {
+    /// Start `<binary> --vtmux-check-snapshot <fd>` on `snapshot`, to end
+    /// within `limit`.
+    ///
+    /// # Errors
+    /// The binary can't be started, as [`dry_run`].
+    pub fn start(binary: &Path, snapshot: BorrowedFd<'_>, limit: Duration) -> io::Result<Self> {
+        use std::os::unix::process::CommandExt as _;
+        let flags = inheritable(snapshot)?;
+        let mut command = Command::new(binary);
+        command
+            .arg(CHECK_FLAG)
+            .arg(snapshot.as_raw_fd().to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        // The child execs by `execve` itself, as the real exec does
+        // (`exec_resume`): `Command` with a `pre_exec` hook falls back to
+        // `fork` + `execvp`, and glibc's `execvp` runs a file the kernel
+        // refuses (ENOEXEC) as a shell script. What that prints and exits
+        // with is the shell's (bash: "cannot execute binary file", 126;
+        // dash: nothing, 127), so the refusal differed by host.
+        let exec = PreparedExec::new(binary, snapshot.as_raw_fd())?;
+        // `Command` passes the signal mask on, and a switch back runs this
+        // with the handled signals blocked (`exec_resume`): the child
+        // starts with none blocked, as a pane does (`pty::clear_signals`).
+        // SAFETY: the closure runs in the forked child before exec and only
+        // calls setpgid, sigemptyset, pthread_sigmask on a local set, and
+        // `PreparedExec::exec` (async-signal-safe, allocation-free).
+        unsafe {
+            command.pre_exec(move || {
+                libc::setpgid(0, 0);
+                let mut set: libc::sigset_t = std::mem::zeroed();
+                libc::sigemptyset(&raw mut set);
+                libc::pthread_sigmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
+                Err(exec.exec())
+            });
+        }
+        let child = command.spawn();
+        fcntl_setfd(snapshot, flags)?;
+        let mut child = child?;
+        let pid = libc::pid_t::try_from(child.id()).map_err(io::Error::other)?;
+        // Also here, so the group exists before the first kill whichever
+        // side runs first (EACCES once the child has exec'd, which is
+        // fine).
+        // SAFETY: setpgid on our own child's pid.
+        unsafe { libc::setpgid(pid, pid) };
+        let err = child.stderr.take();
+        if let Some(e) = &err {
+            rustix::io::ioctl_fionbio(e, true)?;
+        }
+        Ok(Self {
+            binary: binary.to_path_buf(),
+            child,
+            pid,
+            err,
+            said: Vec::new(),
+            end: Instant::now() + limit,
+            limit,
+            outcome: None,
+        })
     }
-    let mut said = Vec::new();
-    let end = Instant::now() + limit;
-    let ended = loop {
-        if let Some(e) = &mut err
-            && !drain(e, &mut said)
+
+    /// The child's pid while it is not reaped, `None` after.
+    #[must_use]
+    pub fn pid(&self) -> Option<i32> {
+        self.outcome.is_none().then_some(self.pid)
+    }
+
+    /// When it is given up on.
+    #[must_use]
+    pub fn deadline(&self) -> Instant {
+        self.end
+    }
+
+    /// Without waiting: `None` while the child runs within its limit;
+    /// once it has ended, or at the limit, its group killed and the child
+    /// reaped, how it went (the same answer every call after).
+    ///
+    /// # Errors
+    /// It can't be waited for.
+    pub fn poll(&mut self) -> io::Result<Option<Result<Checked, String>>> {
+        if let Some(outcome) = &self.outcome {
+            return Ok(Some(outcome.clone()));
+        }
+        if let Some(e) = &mut self.err
+            && !drain(e, &mut self.said)
         {
-            err = None;
+            self.err = None;
         }
-        if exited(pid)? {
-            break true;
+        let ended = exited(self.pid)?;
+        if !ended && Instant::now() < self.end {
+            return Ok(None);
         }
-        let left = end.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            break false;
-        }
-        let nap = left.min(Duration::from_millis(10));
-        match &err {
+        let outcome = self.finish(ended)?;
+        self.outcome = Some(outcome.clone());
+        Ok(Some(outcome))
+    }
+
+    /// Wait at most `nap` for its stderr to have something or close (or
+    /// just `nap` once that is closed).
+    pub fn nap(&self, nap: Duration) {
+        let nap = nap.min(self.end.saturating_duration_since(Instant::now()));
+        match &self.err {
             Some(e) => {
                 let mut fds = [rustix::event::PollFd::new(e, rustix::event::PollFlags::IN)];
                 let timeout = rustix::event::Timespec {
@@ -335,35 +409,86 @@ pub fn dry_run(
             }
             None => std::thread::sleep(nap),
         }
-    };
-    // The child is not reaped yet (`exited` leaves it a zombie), so its
-    // pid, and the group's id, can't have been reused.
-    // SAFETY: kill(2) of our child's process group.
-    unsafe { libc::kill(-pid, libc::SIGKILL) };
-    let status = child.wait()?;
-    if !ended {
-        return Ok(Err(format!(
-            "{} {CHECK_FLAG} took over {} s",
-            binary.display(),
-            limit.as_secs()
-        )));
     }
-    if let Some(e) = &mut err {
-        drain(e, &mut said);
+
+    /// Kill the group, reap the child; how it went (`ended`: by itself,
+    /// not at the limit).
+    fn finish(&mut self, ended: bool) -> io::Result<Result<Checked, String>> {
+        self.kill();
+        let status = self.child.wait()?;
+        if !ended {
+            return Ok(Err(format!(
+                "{} {CHECK_FLAG} took over {} s",
+                self.binary.display(),
+                self.limit.as_secs()
+            )));
+        }
+        if let Some(e) = &mut self.err {
+            drain(e, &mut self.said);
+        }
+        if status.success() {
+            let takes_socket = self
+                .said
+                .windows(TAKES_SOCKET.len())
+                .any(|w| w == TAKES_SOCKET.as_bytes());
+            return Ok(Ok(Checked { takes_socket }));
+        }
+        let message = String::from_utf8_lossy(&self.said);
+        let message = message.trim_end();
+        Ok(Err(if message.is_empty() {
+            format!("{} {CHECK_FLAG} failed: {status}", self.binary.display())
+        } else {
+            message.to_owned()
+        }))
     }
-    if status.success() {
-        let takes_socket = said
-            .windows(TAKES_SOCKET.len())
-            .any(|w| w == TAKES_SOCKET.as_bytes());
-        return Ok(Ok(Checked { takes_socket }));
+
+    /// SIGKILL to the child's process group.
+    fn kill(&self) {
+        // Only before the child is reaped (`exited` leaves it a zombie), so
+        // its pid, and the group's id, can't have been reused.
+        // SAFETY: kill(2) of our child's process group.
+        unsafe { libc::kill(-self.pid, libc::SIGKILL) };
     }
-    let message = String::from_utf8_lossy(&said);
-    let message = message.trim_end();
-    Ok(Err(if message.is_empty() {
-        format!("{} {CHECK_FLAG} failed: {status}", binary.display())
-    } else {
-        message.to_owned()
-    }))
+}
+
+impl Drop for DryRun {
+    fn drop(&mut self) {
+        if self.outcome.is_none() {
+            self.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// A child of this process that has ended and is not reaped yet, left so
+/// (`WNOWAIT`): the server reaps by it while a [`DryRun`] is in flight,
+/// so it reaps every child but that one, which [`DryRun::poll`] reaps
+/// after killing its group. `None` when no child has ended.
+#[must_use]
+pub fn next_exited() -> Option<i32> {
+    // SAFETY: an all-zero `siginfo_t` is a valid value for waitid to
+    // fill in.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        // SAFETY: waitid on any child with a valid out pointer.
+        let r = unsafe {
+            libc::waitid(
+                libc::P_ALL,
+                0,
+                &raw mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if r == 0 {
+            // SAFETY: waitid filled `info` in; si_pid is 0 when no child
+            // has changed state.
+            let pid = unsafe { info.si_pid() };
+            return (pid != 0).then_some(pid);
+        }
+        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            return None;
+        }
+    }
 }
 
 /// The Ghostty patch-stack hash `binary` reports

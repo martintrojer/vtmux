@@ -84,13 +84,27 @@ struct Answer {
     exit: Option<i32>,
 }
 
-/// Run `words` as a command client, then the loop's upgrade turn at `at`
+/// The loop's upgrade turn at `at`, again while a dry run runs (at most
+/// 20 s).
+fn turns(server: &mut Server, at: Instant) {
+    let end = Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        server.upgrade_turn(at);
+        if server.upgrade_dry_run_pid().is_none() {
+            return;
+        }
+        assert!(Instant::now() < end, "the dry run did not end");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// Run `words` as a command client, then the loop's upgrade turns at `at`
 /// and the queues, until the client is told to exit.
 fn command(server: &mut Server, dir: &Path, words: &[&str], at: Instant) -> Answer {
     let (id, mut peer) = st::connect(server, st::hello(words, dir, None, ControlMode::None));
     let mut answer = Answer::default();
     for _ in 0..3 {
-        server.upgrade_turn(at);
+        turns(server, at);
         server.cmdq_process();
         for (c, code) in std::mem::take(&mut server.pending_exits) {
             server.finish_client(c, code);
@@ -451,7 +465,7 @@ fn a_client_in_flight_holds_the_upgrade_until_it_goes() {
     );
     drop(other);
     server.drop_client(other_id);
-    server.upgrade_turn(Instant::now());
+    turns(&mut server, Instant::now());
     assert_eq!(
         results(&mut server, id, &mut peer),
         [(false, format!("{}: test exec", binary.display()))]
@@ -482,7 +496,7 @@ fn attached_clients_are_kept_across_the_exec() {
     let (mut server, dir) = setup("attached");
     let (term, _term_peer) = st::attach(&mut server, &dir, "a", &[]);
     let (_id, _peer) = handshake(&mut server, &passing(&dir));
-    server.upgrade_turn(Instant::now());
+    turns(&mut server, Instant::now());
     let exec = execs().pop().expect("exec");
     let fd = server.clients[&term].stream.as_raw_fd();
     assert!(exec.keep.contains(&fd));
@@ -1174,5 +1188,162 @@ fn an_open_prompt_refuses_the_upgrade_saying_what_to_close() {
         )
     );
     assert!(execs().is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A binary of this patch stack whose `n`th dry run says it started in
+/// `dir/started<n>`, then passes once `dir/release<n>` exists (or after
+/// 20 s).
+fn gated(dir: &Path) -> PathBuf {
+    let (runs, at) = (dir.join("runs"), dir.display());
+    script(
+        dir,
+        "gated",
+        &format!(
+            "case \"$1\" in\n\
+             --vtmux-patch-stack) echo {}; exit 0;;\n\
+             --vtmux-check-snapshot) ;;\n\
+             *) exit 1;;\n\
+             esac\n\
+             echo x >>'{}'; n=$(wc -l <'{}'); n=$((n))\n\
+             : >\"{at}/started$n\"\n\
+             i=0\n\
+             while [ ! -e \"{at}/release$n\" ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i+1)); done\n\
+             exit 0",
+            crate::snapshot_term::PATCH_STACK,
+            runs.display(),
+            runs.display(),
+        ),
+    )
+}
+
+/// The loop's upgrade turns until the `n`th dry run of [`gated`] has
+/// started: then it runs while the loop has its turn back.
+fn started(server: &mut Server, dir: &Path, n: usize) {
+    let end = Instant::now() + std::time::Duration::from_secs(20);
+    while !dir.join(format!("started{n}")).exists() {
+        server.upgrade_turn(Instant::now());
+        assert!(Instant::now() < end, "dry run {n} did not start");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(
+        server.upgrade_dry_run_pid().is_some(),
+        "the loop got its turn back while the dry run runs"
+    );
+}
+
+/// The upgrade asked over the handshake onto [`gated`], its first dry run
+/// left running: the requester's connection.
+fn checking(server: &mut Server, dir: &Path) -> (ClientId, mio::net::UnixStream) {
+    let asked = handshake(server, &gated(dir));
+    started(server, dir, 1);
+    asked
+}
+
+/// The `n`th dry run of [`gated`] goes on.
+fn release(dir: &Path, n: usize) {
+    std::fs::write(dir.join(format!("release{n}")), "").unwrap();
+}
+
+/// The dry run runs while the server serves (`review_upgrade_cmd_2`,
+/// `low_dry_run_blocks_loop`): the loop turn that starts it returns, and
+/// commands are run meanwhile. Once it has passed, the snapshot the exec
+/// gets is taken again, so what changed meanwhile is in it, not lost.
+#[test]
+fn the_server_serves_while_the_dry_run_runs_and_the_exec_gets_what_changed() {
+    let (mut server, dir) = setup("serves");
+    let (id, mut peer) = checking(&mut server, &dir);
+    st::ok(
+        &mut server,
+        &dir,
+        &["new-window", "-d", "-t", "a", "-n", "during", "cat", "-"],
+    );
+    assert!(execs().is_empty(), "no exec before the dry run has passed");
+    release(&dir, 1);
+    turns(&mut server, Instant::now());
+    let binary = dir.join("gated");
+    assert_eq!(
+        results(&mut server, id, &mut peer),
+        [(false, format!("{}: test exec", binary.display()))]
+    );
+    let s = snap::decode(&execs().pop().expect("exec").bytes).unwrap();
+    let names: Vec<&str> = s.windows.iter().map(|w| w.name.as_str()).collect();
+    assert!(names.contains(&"during"), "{names:?}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A snapshot taken after the dry run that requires a feature the checked
+/// one did not gets a dry run of its own: the binary was never shown it
+/// reads that. Here a pane's first history pages in Ghostty's form (a
+/// pane printing through the dry run, `control_clients_stream_on_...`
+/// found it), then an auto-hide scrollbar shown: three dry runs, one
+/// exec of the last snapshot, one notice.
+#[test]
+fn a_feature_needed_since_the_dry_run_gets_a_dry_run_of_its_own() {
+    use crate::snapshot_term::ghostty_pages_requirement;
+    let (mut server, dir) = setup("needs");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    let (id, mut peer) = checking(&mut server, &dir);
+    assert!(server.clients[&f].reattach.is_some(), "the dry run's token");
+    let p = *server.model.panes.keys().next().unwrap();
+    let term = &mut server.model.panes.get_mut(&p).unwrap().term;
+    for i in 0..8000 {
+        term.feed(format!("line {i}\r\n").as_bytes());
+    }
+    release(&dir, 1);
+    started(&mut server, &dir, 2);
+    server.model.panes.get_mut(&p).unwrap().sb.visible = true;
+    release(&dir, 2);
+    started(&mut server, &dir, 3);
+    assert!(execs().is_empty() && notices(&mut server, f, &mut f_peer).is_empty());
+    release(&dir, 3);
+    turns(&mut server, Instant::now());
+    let binary = dir.join("gated");
+    assert_eq!(
+        results(&mut server, id, &mut peer),
+        [(false, format!("{}: test exec", binary.display()))]
+    );
+    let s = snap::decode_for(
+        &execs().pop().expect("exec").bytes,
+        &crate::snapshot_term::reader_features(),
+        |_| None,
+    )
+    .unwrap();
+    assert!(
+        s.meta.requires.contains(&ghostty_pages_requirement())
+            && s.meta
+                .requires
+                .contains(&snap::SCROLLBAR_FEATURE.to_string()),
+        "{:?}",
+        s.meta.requires
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("runs")).unwrap(),
+        "x\nx\nx\n"
+    );
+    assert_eq!(notices(&mut server, f, &mut f_peer).len(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A requester that goes while the dry run runs takes the upgrade with
+/// it: the dry run is killed, the tokens void.
+#[test]
+fn a_requester_gone_during_the_dry_run_kills_it() {
+    let (mut server, dir) = setup("gonedry");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    let (id, _peer) = checking(&mut server, &dir);
+    let pid = server.upgrade_dry_run_pid().unwrap();
+    server.drop_client(id);
+    server.upgrade_turn(Instant::now());
+    assert!(server.upgrade.pending.is_none() && execs().is_empty());
+    assert!(server.clients[&f].reattach.is_none(), "the token is void");
+    // Killed and reaped: no such process any more.
+    let pid = rustix::process::Pid::from_raw(pid).unwrap();
+    assert_eq!(
+        rustix::process::test_kill_process(pid),
+        Err(rustix::io::Errno::SRCH)
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
