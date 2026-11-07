@@ -1,0 +1,96 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1774,17 +1774,15 @@
+         // (grid_reflow_split) or joined to the one before it
+         // (grid_reflow_join) takes only its cellused cells.
+         //
+-        // A wrapped row is measured by it too once a reflow wrapped it
+-        // short of the width before a tab (tab_extra): it ends at its
+-        // used cells as tmux's does (cellused). A wrapped row with nothing
+-        // recorded (one from Ghostty's snapshot codec, which drops the
+-        // count) keeps every cell, as before.
+-        const used: usize = if (!src_row.wrap)
+-            src_row.tmuxCellsUsed(cells)
+-        else if (src_row.tmux_used == 0)
+-            src_page.size.cols
+-        else
+-            src_row.tmuxCellsUsed(cells);
++        // A wrapped row is measured by it too: it ends at its used cells
++        // as tmux's does (cellused), all of them for a row a print wrapped
++        // at the last column, fewer for one a reflow wrapped short of the
++        // width before a tab (tab_extra), and none for an empty row that
++        // wrapped without a cell written (a wide character that did not
++        // fit, tmux's dead-pane linefeed), which joins nothing to the line
++        // after it (grid_reflow_join). Upstream kept every cell of a
++        // wrapped row.
++        const used: usize = src_row.tmuxCellsUsed(cells);
+ 
+         // Calculate the columns in this row. First up we trim non-semantic
+         // rightmost blanks.
+@@ -1882,7 +1880,12 @@
+ 
+         // Defer processing of blank rows so that blank rows
+         // at the end of the page list are never written.
+-        if (cols_len == 0) {
++        //
++        // vtmux: a wrapped row that used no cells is not a line break:
++        // grid_reflow_join takes nothing from it and goes on to the line
++        // after it. The deferred rows are written and the next row goes
++        // on with the line this one starts or continues.
++        if (cols_len == 0 and !src_row.wrap) {
+             self.new_rows += 1;
+             return;
+         }
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -15426,6 +15426,48 @@
+     }
+ }
+ 
++test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // A wide character that does not fit an empty row wraps it with no
++    // cell written (tmux's cellused 0, the row a dead pane's linefeed
++    // marks): it joins nothing to the line after it.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 10 });
++        defer t.deinit(alloc);
++        t.setCursorPos(3, 10);
++        try t.print(0x4E00);
++        t.setCursorPos(4, 1);
++        t.eraseChars(2);
++        try t.printString("DEAD");
++        const c = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?;
++        try testing.expect(c.row.wrap);
++        try testing.expectEqual(@as(size.CellCountInt, 0), c.row.tmux_used);
++        try t.resize(alloc, .{ .cols = 8, .rows = 4 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("\n\nDEAD", str);
++    }
++
++    // Text short of the width: only its cells join, so a wider pane puts
++    // the next line straight after it.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("ab");
++        t.setCursorPos(1, 10);
++        try t.print(0x4E00);
++        t.setCursorPos(2, 1);
++        t.eraseChars(2);
++        try t.printString("cd");
++        try t.resize(alloc, .{ .cols = 20, .rows = 4 });
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("abcd", str);
++    }
++}
++
+ test "Terminal: reflow measures a line by the cells it used (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;

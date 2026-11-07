@@ -1050,6 +1050,36 @@ impl PaneTerm {
         }
         Ok(())
     }
+
+    /// tmux's `cellused` (Ghostty patch 0013) of the bottom row of the
+    /// screen in use: the cells written to it, erased or not.
+    ///
+    /// # Panics
+    /// Only if libghostty fails to allocate.
+    #[must_use]
+    pub fn bottom_row_used(&self) -> u16 {
+        let screen = if self.alternate_on() {
+            ScreenKind::Alternate
+        } else {
+            ScreenKind::Primary
+        };
+        let Some(n) = self
+            .term
+            .vtmux_page_count(screen.key())
+            .expect("page count")
+            .filter(|&n| n > 0)
+        else {
+            return 0;
+        };
+        // The bottom row is the last row of the newest page, which is in
+        // the active area and never compressed.
+        let mut buf = gv::Page::default();
+        self.term
+            .vtmux_page_export(screen.key(), n - 1, false, &mut buf)
+            .expect("page export");
+        buf.rows.last().map_or(0, |r| r.used)
+    }
+
     fn pane_state(&self) -> PaneState {
         let screen_y = |pin: &libghostty_vt::screen::TrackedGridRef| {
             pin.point(PointSpace::Screen).ok().flatten().map(|p| p.y)

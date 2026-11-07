@@ -4839,4 +4839,20 @@ mod tests {
         }
         assert_eq!(t.history_size(), 0);
     }
+
+    /// tmux's `cellused` of the bottom row, on either screen: written cells
+    /// count, erased or not; a full-line clear empties it.
+    #[test]
+    fn bottom_row_used_counts_written_cells() {
+        let mut t = PaneTerm::new(20, 4, 100);
+        assert_eq!(t.bottom_row_used(), 0);
+        t.feed(b"\x1b[4;1Habcde\x1b[4;3H\x1b[K");
+        assert_eq!(t.bottom_row_used(), 5);
+        t.feed(b"\x1b[2K");
+        assert_eq!(t.bottom_row_used(), 0);
+        t.feed(b"\x1b[?1049h\x1b[4;1Hxy");
+        assert_eq!(t.bottom_row_used(), 2);
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.bottom_row_used(), 0);
+    }
 }

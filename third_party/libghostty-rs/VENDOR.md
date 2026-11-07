@@ -592,6 +592,30 @@ Recorded per commit in git history; the list is kept current:
   each test binary (the kitty temporary-file test of patch 0001's note
   passes with the checkout outside `/tmp`).
 
+- `patches/0020-reflow-wrapped-row-by-cells-used.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`): a wrapped row reflows by its used cells
+  (patch 0013's `tmux_used`, at least its text) whatever they are, as
+  `grid_reflow_join` takes `cellused`. Patch 0015 measured a wrapped row
+  by them only when the count was not 0, and kept every cell of one with
+  none (for rows from Ghostty's snapshot codec, which vtmux does not use:
+  patch 0017 carries the count). But a row wraps with none used when
+  nothing was written to it: a wide character that does not fit an
+  empty row (Ghostty's spacer head is the cell tmux leaves unwritten), and
+  the empty last line a dead pane's linefeed marks wrapped (vtmux
+  `remain.rs` `mark_wrapped` makes the mark that way). Such a row joined
+  its full width of blanks to the line after it, so after a resize the
+  dead pane's line started 20 columns in (100 to 80 columns); and an
+  empty wrapped row was taken for a line break (`cols_len == 0` deferred
+  a new row), where tmux's join takes nothing from it and goes on, so the
+  pane kept one line more than tmux (`history_size` 8, tmux 7). Test:
+  `Terminal: reflow joins a wrapped row by the cells it used (vtmux)`
+  (two spaces before `DEAD` without the patch); vtmux oracle
+  `remain_on_exit_reflow`. The full `zig build test-lib-vt
+  -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over 0001-0020: 3262 of
+  3301 and 3753 of 3792 pass, 38 skip each, and the known `tabClear
+  single` fails in each test binary. Not an upstream candidate (tmux's
+  model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

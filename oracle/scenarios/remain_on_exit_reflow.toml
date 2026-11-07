@@ -1,0 +1,33 @@
+name = "remain_on_exit_reflow"
+# A dead pane's line after a resize (server-fn.c:403-417): the linefeed
+# before remain-on-exit-format marks the old last line wrapped
+# (screen_write_linefeed with wrapped 1) but writes none of its cells, so a
+# reflow joins only the cells that line used (grid_reflow_join takes
+# cellused): an empty last line joins nothing and the dead line stays at
+# column 0 (it was indented by the old width's blanks), and a short one
+# joins its text straight onto it, narrower or wider.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "100", "-y", "30", "cat", "-"] },
+  { run = ["set", "-g", "remain-on-exit", "on"] },
+  { run = ["set", "-g", "remain-on-exit-format", "DEAD #{pane_dead_status}"] },
+  { run = ["set-hook", "-g", "pane-died", "wait-for -S died"] },
+  { run = ["respawnp", "-k", "-t", "a:w", "sh", "-c", "exit 0"] },
+  { wait_for = "died" },
+  { run = ["capture-pane", "-pJ", "-t", "a:w", "-S", "-3"] },
+  { run = ["resize-window", "-t", "a:w", "-x", "80", "-y", "23"] },
+  { run = ["capture-pane", "-p", "-t", "a:w", "-S", "-3"] },
+  { run = ["capture-pane", "-pJ", "-t", "a:w", "-S", "-3"] },
+  { run = ["display", "-p", "-t", "a:w", "#{cursor_x},#{cursor_y} #{history_size}"] },
+  # The last line holds text short of the width.
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "20", "-y", "4", "cat", "-"] },
+  { run = ["respawnp", "-k", "-t", "b:w", "sh", "-c", "printf 'a\\nb\\nc\\nlast'; exit 2"] },
+  { wait_for = "died" },
+  { run = ["capture-pane", "-pJ", "-t", "b:w"] },
+  { run = ["resize-window", "-t", "b:w", "-x", "30"] },
+  { run = ["capture-pane", "-p", "-t", "b:w"] },
+  { run = ["display", "-p", "-t", "b:w", "#{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "b:w", "-x", "8"] },
+  { run = ["capture-pane", "-p", "-t", "b:w"] },
+  { run = ["display", "-p", "-t", "b:w", "#{cursor_x},#{cursor_y}"] },
+  { run = ["kill-server"] },
+]

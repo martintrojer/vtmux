@@ -222,11 +222,17 @@ impl Server {
 /// row wrapped only when a print wraps: the cell at the end of that line
 /// (row `sy - 1` now, 1-based) is printed again as it is, then once more,
 /// which moves down (not scrolls) to the new last line, where ECH clears
-/// the stray blank. An empty cell is printed as a blank and cleared by ICH,
-/// which leaves the row wrapped (ECH and EL would not) and keeps the
-/// cell's background. A cell this cannot write back (wide, a link, the
-/// line-drawing set, a styled blank) stays, and its row is not marked
-/// (compat/DIVERGENCES.md D-023).
+/// the stray blank. An empty cell past the cells the line used (tmux's
+/// `cellused`, which the linefeed leaves as it was) gets a wide character
+/// that does not fit, which leaves the cell unwritten (Ghostty's spacer
+/// head, the cell tmux leaves when a wide character wraps) and the used
+/// cells as they were, so a reflow joins only the line's used cells to
+/// the dead line, as `grid_reflow_join` does; ECH clears the character
+/// on the new last line. A used empty cell is printed as a blank and
+/// cleared by ICH, which leaves the row wrapped (ECH and EL would not) and
+/// keeps the cell's background. A cell this cannot write back (wide, a
+/// link, the line-drawing set, a styled blank) stays, and its row is not
+/// marked (compat/DIVERGENCES.md D-023).
 fn mark_wrapped(out: &mut Vec<u8>, term: &vtmux_vt::PaneTerm, sx: u16, sy: u16) {
     // Read before the linefeed is fed: still the bottom row.
     let row = term.row(term.history_size() + usize::from(sy) - 1);
@@ -241,6 +247,16 @@ fn mark_wrapped(out: &mut Vec<u8>, term: &vtmux_vt::PaneTerm, sx: u16, sy: u16) 
     let y = sy - 1;
     if cell.text.is_empty() {
         if cell.style != blank {
+            return;
+        }
+        // ECH over the whole new last line would unwrap the marked one
+        // (grid_clear_lines), so the wide character needs a third column.
+        if sx >= 3 && term.bottom_row_used() < sx {
+            let _ = write!(
+                out,
+                "\x1b[{y};{sx}H{}\u{4e00}\x1b[0m\x1b[{sy};1H\x1b[2X",
+                cell_sgr(&blank)
+            );
             return;
         }
         let _ = write!(
