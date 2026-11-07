@@ -254,6 +254,53 @@ fn compressed_history_as_rows_and_blobs() {
     round_trip(&mut a2, CompressedPages::Rows, PROBE, "compressed as rows");
 }
 
+/// `compress_all` compresses what a whole incremental pass would, in one
+/// call, and `compress_all_of` so for many terminals over threads (a live
+/// upgrade's history then travels as blobs, decision 23); nothing a
+/// capture shows changes.
+#[test]
+fn compress_all_does_a_pass_at_once() {
+    let mut text = Vec::new();
+    for i in 0..5000 {
+        text.extend_from_slice(
+            format!(
+                "\x1b[3{}m{i:05}\x1b[m all {}\r\n",
+                i % 8,
+                "y".repeat(i % 50)
+            )
+            .as_bytes(),
+        );
+    }
+    let reclaims = cfg!(any(target_os = "linux", target_os = "macos"));
+    let mut stepped = pane(80, 24, 4000, &text);
+    while stepped.compress_step() == Compression::Pending {}
+    let mut a = pane(80, 24, 4000, &text);
+    let before = observe(&a, true);
+    assert_eq!(a.compressed_pages(), 0);
+    let r = a.compress_all();
+    if !reclaims {
+        return;
+    }
+    assert_eq!(r, Compression::Complete);
+    // (Counted before any capture: reading history restores its pages.)
+    let pass = stepped.compressed_pages();
+    assert!(pass > 0, "nothing compressed");
+    assert_eq!(a.compressed_pages(), pass);
+    // Many terminals at once, over threads: each as a pass leaves it.
+    let mut many: Vec<PaneTerm> = (0..5).map(|_| pane(80, 24, 4000, &text)).collect();
+    let shown: Vec<String> = many.iter().map(|t| observe(t, true)).collect();
+    vtmux_vt::compress_all_of(many.iter_mut());
+    assert!(many.iter().all(|t| t.compressed_pages() == pass));
+    assert_eq!(observe(&a, true), before, "compressing changed what shows");
+    for (t, shown) in many.iter().zip(shown) {
+        assert_eq!(
+            observe(t, true),
+            shown,
+            "compress_all_of changed what shows"
+        );
+    }
+}
+
 #[test]
 fn foreign_blobs_are_refused() {
     let mut text = Vec::new();

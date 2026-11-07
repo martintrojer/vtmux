@@ -616,6 +616,13 @@ Recorded per commit in git history; the list is kept current:
    whole exported states, so a field it drops shows there only once a
    test sets it). The blob format changes with any `Page` change; that is
    what `PATCH_STACK` is for.
-6. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES`,
+6. `vtmux_vt::compress_all_of` (`crates/vtmux-vt/src/term.rs`) runs
+   `ghostty_terminal_compress(FULL)` on distinct terminals from several
+   threads at once. Check that it still is safe: no `threadlocal` under
+   `src/terminal`, no process-wide mutable state on the compression path
+   (`PageList.compressPage`, `compressPageChunked`), its memory from the
+   pools and the page allocator (`PageList.zig` `pageAllocator`), and no
+   terminal callback run from it.
+7. Re-check the constants in `crates/vtmux-vt/src/term.rs` (`PAGE_BYTES`,
    `PAGE_GRID_BYTES`, `CELLS_ALIGN`; `page_rows_matches_ghostty` fails if
    the page layout changed) and run the slow gate.

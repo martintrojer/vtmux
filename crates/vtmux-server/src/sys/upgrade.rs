@@ -34,6 +34,17 @@ pub const SWITCHED_BACK_FLAG: &str = "--vtmux-switched-back";
 /// that follows, exit 0 or non-zero with a message on stderr.
 pub const CHECK_FLAG: &str = "--vtmux-check-snapshot";
 
+/// The flag a binary answers with its Ghostty patch-stack hash (decision
+/// 23: `vtmux_vt::PATCH_STACK`) on stdout and exits 0: the old image asks
+/// the new one before it writes the snapshot ([`patch_stack`]), and sends
+/// history in Ghostty's form only to a binary that gives its own hash. A
+/// binary from before the flag prints its usage and exits 1, so it is sent
+/// rows.
+pub const PATCH_STACK_FLAG: &str = "--vtmux-patch-stack";
+
+/// How long [`patch_stack`] waits for the answer.
+pub const PATCH_STACK_LIMIT: Duration = Duration::from_secs(1);
+
 /// The environment variable a switch back passes why the resume failed in,
 /// for the image it lands in to log ([`take_failure_note`]). Not an
 /// argument: an image from before it was added must still parse its
@@ -333,6 +344,63 @@ pub fn dry_run(
     } else {
         message.to_owned()
     }))
+}
+
+/// The Ghostty patch-stack hash `binary` reports
+/// (`<binary> --vtmux-patch-stack`, [`PATCH_STACK_FLAG`]), waiting at most
+/// `limit`; `None` when it can't be started, exits non-zero, prints no
+/// hash or takes longer (it is killed then). The answer is read once the
+/// binary has exited, from what it wrote: a descendant that keeps its
+/// stdout open can't hold the wait.
+#[must_use]
+pub fn patch_stack(binary: &Path, limit: Duration) -> Option<String> {
+    let mut child = Command::new(binary)
+        .arg(PATCH_STACK_FLAG)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut out = child.stdout.take()?;
+    let end = Instant::now() + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(1)),
+            Ok(None) | Err(_) => break None,
+        }
+    };
+    if !status.is_some_and(|s| s.success()) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    rustix::io::ioctl_fionbio(&out, true).ok()?;
+    let mut said = [0; 128];
+    let mut n = 0;
+    while n < said.len() {
+        match out.read(&mut said[n..]) {
+            Ok(0) | Err(_) => break,
+            Ok(k) => n += k,
+        }
+    }
+    let hash = std::str::from_utf8(&said[..n]).ok()?.trim_end_matches('\n');
+    (!hash.is_empty() && hash.len() <= 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| hash.to_owned())
+}
+
+/// Give the heap's free memory back to the system where the allocator
+/// keeps it (glibc: `malloc_trim`), after the new image has dropped the
+/// stream and its decoded records: tens of thousands of history pages'
+/// copies, freed between allocations that stay, which glibc would
+/// otherwise hold on to (about 110 MB at 10 x 100k lines,
+/// `lu_upgrade_perf`). Elsewhere (macOS) the allocator returns it itself.
+pub fn release_free_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim only walks the allocator's own free lists.
+    unsafe {
+        libc::malloc_trim(0);
+    }
 }
 
 /// Read what non-blocking `pipe` has into `said` (up to
@@ -713,6 +781,51 @@ mod tests {
         assert_eq!(file.metadata().unwrap().nlink(), 0);
         assert_eq!(std::fs::read_dir(&d.0).unwrap().count(), 0);
         assert!(fcntl_getfd(&file).unwrap().contains(FdFlags::CLOEXEC));
+    }
+
+    /// An executable `sh` script in `d`.
+    fn script(d: &tempfile_lite::Dir, name: &str, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = d.0.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    /// Decision 23: the hash a binary prints for `--vtmux-patch-stack`,
+    /// and nothing for one that refuses the flag (a binary from before
+    /// it), prints no hash, can't run, or does not answer within the limit
+    /// (killed then, the wait bounded); a descendant holding its stdout
+    /// does not hold the answer.
+    #[test]
+    fn a_binary_tells_its_patch_stack_or_nothing() {
+        let d = dir();
+        let says = script(
+            &d,
+            "says",
+            "[ \"$1\" = --vtmux-patch-stack ] && echo 82eda04cc524487c",
+        );
+        assert_eq!(
+            patch_stack(&says, PATCH_STACK_LIMIT).as_deref(),
+            Some("82eda04cc524487c")
+        );
+        let holds = script(&d, "holds", "sleep 5 &\necho 0123abcd");
+        assert_eq!(
+            patch_stack(&holds, PATCH_STACK_LIMIT).as_deref(),
+            Some("0123abcd")
+        );
+        let old = script(&d, "old", "echo 'unknown option -- -' >&2; exit 1");
+        assert_eq!(patch_stack(&old, PATCH_STACK_LIMIT), None);
+        let words = script(&d, "words", "echo usage: vtmux");
+        assert_eq!(patch_stack(&words, PATCH_STACK_LIMIT), None);
+        let garbage = d.0.join("garbage");
+        std::fs::write(&garbage, b"\x7fnot a program").unwrap();
+        assert_eq!(patch_stack(&garbage, PATCH_STACK_LIMIT), None);
+        assert_eq!(patch_stack(&d.0.join("missing"), PATCH_STACK_LIMIT), None);
+        let hangs = script(&d, "hangs", "exec sleep 30");
+        let start = Instant::now();
+        assert_eq!(patch_stack(&hangs, Duration::from_millis(200)), None);
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

@@ -440,13 +440,20 @@ fn reattach_main(argv0: OsString, token: Option<&std::ffi::OsStr>, socket: &Path
 
 /// The images a live upgrade starts (vtmux-server `sys::upgrade`): the new
 /// server, `--vtmux-resume <fd> [--vtmux-switched-back]`, and the dry run,
-/// `--vtmux-check-snapshot <fd>`. `None` for any other command line.
+/// `--vtmux-check-snapshot <fd>`, and the old image's question before it,
+/// `--vtmux-patch-stack`. `None` for any other command line.
 fn upgrade_image(args: &[OsString]) -> Option<ExitCode> {
     use vtmux_server::server::resume;
-    use vtmux_server::sys::upgrade::{CHECK_FLAG, RESUME_FLAG, SWITCHED_BACK_FLAG};
+    use vtmux_server::sys::upgrade::{
+        CHECK_FLAG, PATCH_STACK_FLAG, RESUME_FLAG, SWITCHED_BACK_FLAG,
+    };
     let words: Vec<&str> = args.iter().map(|a| a.to_str()).collect::<Option<_>>()?;
     let fd = |w: &str| w.parse::<i32>().ok();
     match words.as_slice() {
+        [flag] if *flag == PATCH_STACK_FLAG => {
+            println!("{}", vtmux_server::snapshot_term::PATCH_STACK);
+            Some(ExitCode::SUCCESS)
+        }
         [flag, n] if *flag == RESUME_FLAG => Some(ExitCode::from(
             u8::try_from(resume::resume(fd(n)?, false)).unwrap_or(1),
         )),

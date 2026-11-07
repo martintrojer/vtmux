@@ -2130,6 +2130,20 @@ impl PaneTerm {
         }
     }
 
+    /// Compress every page of history Ghostty can, in one call (the pages
+    /// [`PaneTerm::compress_step`] would reach, a pass's worth at once).
+    /// For a live upgrade to a binary of the same [`crate::PATCH_STACK`],
+    /// whose stream carries compressed pages as they are: compressing
+    /// first costs less than exporting and importing them as rows twice
+    /// (the dry run and the new image). A partial incremental pass is
+    /// dropped; the next [`PaneTerm::compress_step`] starts a new one.
+    pub fn compress_all(&mut self) -> Compression {
+        match self.term.compress(CompressionMode::Full) {
+            Ok(CompressionResult::Pending | CompressionResult::Complete) => Compression::Complete,
+            Ok(CompressionResult::Unsupported) | Err(_) => Compression::Unsupported,
+        }
+    }
+
     /// Primary-screen pages Ghostty holds compressed now.
     #[must_use]
     pub fn compressed_pages(&self) -> u64 {
@@ -3096,6 +3110,71 @@ pub fn page_rows(cols: u16) -> usize {
         rows -= 1;
     }
     if rows == 0 { 215 } else { rows }
+}
+
+/// The most threads [`compress_all_of`] runs.
+const COMPRESS_THREADS: usize = 16;
+
+/// [`PaneTerm::compress_all`] for every terminal of `terms`, shared out
+/// over up to [`COMPRESS_THREADS`] threads (no more than the host's
+/// parallelism or the terminals), each taking the next terminal left;
+/// returns once all are done. A live upgrade compresses every pane's
+/// history before it writes the stream (decision 23): one thread took
+/// 0.85 s for 10 panes x 100k lines of 200 columns (`lu_upgrade_perf`),
+/// most of decision 13's second.
+pub fn compress_all_of<'a>(terms: impl IntoIterator<Item = &'a mut PaneTerm>) {
+    /// The one access to a terminal, for one [`Terminal::compress`] on
+    /// another thread.
+    struct Exclusive<'a>(&'a mut Terminal<'static, 'static>);
+    // SAFETY: an `Exclusive` holds the only reference to its terminal for
+    // as long as it lives, and is used for one call,
+    // `Terminal::compress(Full)`, which reads and writes only that
+    // terminal's own page list and memory pools, and gets memory from the
+    // process-wide page allocator (`PageList.zig` `pageAllocator`:
+    // `std.heap.page_allocator`, Mach VM on macOS; both thread-safe).
+    // It runs none of the terminal's callbacks, so none of the `Rc`s
+    // `PaneTerm` shares with them is touched, and Ghostty's terminal code
+    // keeps no thread-local state (no `threadlocal` under `src/terminal`
+    // at the pinned commit; VENDOR.md, *Bumping ghostty*, says to check
+    // again). Moving that access to another thread for the call is
+    // therefore sound, though libghostty-vt does not promise it in
+    // general (its crate docs, *Thread safety*).
+    unsafe impl Send for Exclusive<'_> {}
+    let jobs: Vec<Exclusive<'a>> = terms.into_iter().map(|t| Exclusive(&mut t.term)).collect();
+    let threads = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(COMPRESS_THREADS)
+        .min(jobs.len());
+    if threads <= 1 {
+        for job in jobs {
+            let _ = job.0.compress(CompressionMode::Full);
+        }
+        return;
+    }
+    let queue = std::sync::Mutex::new(jobs);
+    let next = || queue.lock().map_or(None, |mut q| q.pop());
+    std::thread::scope(|scope| {
+        // This thread is one of them.
+        for _ in 1..threads {
+            // The stack the server's main thread has, for Ghostty's frames
+            // (an LZ4 table is 16 KiB of it).
+            let worker = std::thread::Builder::new()
+                .name("vtmux-compress".into())
+                .stack_size(8 << 20)
+                .spawn_scoped(scope, || {
+                    while let Some(job) = next() {
+                        let _ = job.0.compress(CompressionMode::Full);
+                    }
+                });
+            if worker.is_err() {
+                // No thread: the ones running, or this one, do the rest.
+                break;
+            }
+        }
+        while let Some(job) = next() {
+            let _ = job.0.compress(CompressionMode::Full);
+        }
+    });
 }
 
 /// Append reply bytes, joining them to the bytes before.

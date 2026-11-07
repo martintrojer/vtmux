@@ -811,6 +811,29 @@ fn the_dry_run_flag_refuses_what_is_no_snapshot() {
     );
 }
 
+/// Decision 23: `--vtmux-patch-stack` prints the binary's Ghostty patch
+/// stack and exits 0, starting nothing (no socket appears), so an old
+/// image can ask a new one before it writes history in Ghostty's form.
+#[test]
+fn the_patch_stack_flag_prints_the_ghostty_patch_stack() {
+    let sockets = tempfile::Builder::new()
+        .prefix("vtu")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let out = Command::new(BIN)
+        .arg("--vtmux-patch-stack")
+        .env_clear()
+        .env("TMUX_TMPDIR", sockets.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("{}\n", vtmux_vt::PATCH_STACK)
+    );
+    assert_eq!(std::fs::read_dir(sockets.path()).unwrap().count(), 0);
+}
+
 /// A signal storm through 20 upgrades: SIGHUP (caught and ignored) and
 /// SIGUSR2 (caught, tmux's debug-log toggle) sent every 200 us, so some
 /// land between `execve` and the new image's handlers. Neither may kill

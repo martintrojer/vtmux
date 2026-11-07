@@ -44,6 +44,11 @@ pub enum Form {
     SamePin,
 }
 
+/// This binary's Ghostty patch-stack hash: pages in Ghostty's form go
+/// only to a binary that reports the same (decision 23,
+/// `sys::upgrade::patch_stack`).
+pub const PATCH_STACK: &str = vt::PATCH_STACK;
+
 /// The `Meta.requires` entry a stream with pages in Ghostty's form needs.
 #[must_use]
 pub fn ghostty_pages_requirement() -> String {

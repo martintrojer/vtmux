@@ -248,6 +248,104 @@ fn the_dry_run_and_the_exec_get_the_snapshot() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Decision 23, read from the stream the exec gets: a binary that reports
+/// this build's patch stack (`--vtmux-patch-stack`) gets the panes'
+/// history in Ghostty's form, also history the compressor has not reached
+/// (it waits for 5 s of quiet); one that reports another stack, or answers
+/// nothing (a binary from before the flag), gets it all as rows, and no
+/// requirement it can't meet. The history is the pane's either way.
+#[test]
+fn history_goes_in_ghosttys_form_only_to_the_same_patch_stack() {
+    use crate::snapshot_term::{PATCH_STACK, ghostty_pages_requirement, term_from_snapshot};
+    use vtmux_vt::{CaptureOpts, LineRef, capture};
+    let (mut server, dir) = setup("pin");
+    st::ok(&mut server, &dir, &["set", "-g", "history-limit", "20000"]);
+    st::ok(
+        &mut server,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "h",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    // Session `h`'s pane, the newest.
+    let pane = *server.model.panes.keys().max().unwrap();
+    let term = &mut server.model.panes.get_mut(&pane).unwrap().term;
+    for i in 0..8000 {
+        let line = format!(
+            "\x1b[3{}m{i:05}\x1b[m line {}\r\n",
+            i % 8,
+            "h".repeat(i % 70)
+        );
+        term.feed(line.as_bytes());
+    }
+    let all = CaptureOpts {
+        escapes: true,
+        start: LineRef::Start,
+        end: LineRef::End,
+        ..CaptureOpts::default()
+    };
+    let shown = capture(term, all);
+    let page_rows = u32::try_from(vtmux_vt::page_rows(80)).unwrap();
+    let other = script(
+        &dir,
+        "other",
+        "[ \"$1\" = --vtmux-patch-stack ] && echo 0123abcd; exit 0",
+    );
+    let same = script(
+        &dir,
+        "same",
+        &format!("[ \"$1\" = --vtmux-patch-stack ] && echo {PATCH_STACK}; exit 0"),
+    );
+    // Rows first, while nothing is compressed yet; then the same stack.
+    for (binary, ghostty) in [(&other, false), (&passing(&dir), false), (&same, true)] {
+        upgrade(&mut server, &dir, binary);
+        let exec = execs().pop().expect("exec");
+        let s = snap::decode_for(
+            &exec.bytes,
+            &crate::snapshot_term::reader_features(),
+            |_| None,
+        )
+        .unwrap();
+        let t = s
+            .panes
+            .iter()
+            .find(|p| p.id == pane.0)
+            .and_then(|p| p.term.as_ref())
+            .unwrap();
+        let history = &t.primary.history;
+        let blobs = history.iter().filter(|p| p.is_ghostty()).count();
+        let rows: u32 = history.iter().map(|p| p.rows).sum();
+        let needs = s.meta.requires.contains(&ghostty_pages_requirement());
+        if ghostty {
+            // All but the page the screen starts in, which Ghostty keeps
+            // resident.
+            assert!(
+                blobs > 10 && rows < page_rows,
+                "{binary:?}: {blobs} blobs, {rows} rows"
+            );
+            assert!(needs && s.meta.ghostty_patches == PATCH_STACK);
+        } else {
+            assert!(
+                blobs == 0 && rows > 7_900,
+                "{binary:?}: {blobs} blobs, {rows} rows"
+            );
+            assert!(!needs, "{:?}", s.meta.requires);
+        }
+        let back = term_from_snapshot(t, &s.meta.ghostty_patches).unwrap();
+        assert!(capture(&back, all) == shown, "{binary:?}: history differs");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Decisions 6 and 7: a dry run that fails refuses the upgrade with what
 /// the binary said, or how it ended; the old server carries on.
 #[test]

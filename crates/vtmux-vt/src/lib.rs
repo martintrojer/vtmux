@@ -38,5 +38,5 @@ pub use term::{
     ImportCheck, KeyMode, LineMark, LinkId, LinkState, ModeState, MouseModes, MouseTracking,
     Osc133, PATCH_STACK, PageBlob, PageCapacity, PageRows, PageState, PaneState, PaneTerm,
     Passthrough, RowState, SavedCursor, ScreenKind, ScreenState, StateError, StateImport,
-    StyleState, TermState, history_reads, page_rows,
+    StyleState, TermState, compress_all_of, history_reads, page_rows,
 };

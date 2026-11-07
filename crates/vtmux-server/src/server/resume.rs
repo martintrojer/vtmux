@@ -37,6 +37,7 @@ use mio::{Interest, Token};
 use vtmux_snapshot as snap;
 
 use super::{Server, ServerConfig};
+use crate::snapshot_term::Form;
 use crate::sys::upgrade as sys;
 
 /// A test hook (live-upgrade spec, *Tests*, failure paths), read from the
@@ -294,7 +295,10 @@ pub fn resume(snapshot_fd: RawFd, switched_back: bool) -> i32 {
                 None => Ok(()),
             };
             answer(Some(&mut server), requester.as_ref(), handshake, outcome);
-            drop((kept, exe, file));
+            // The stream and its decoded records (as large as the history
+            // in Ghostty's form, twice over) are not held while serving.
+            drop((kept, exe, file, decoded, bytes));
+            sys::release_free_memory();
             return run(server);
         }
         (Err(why), Some(note)) => {
@@ -529,16 +533,27 @@ impl Server {
         let handshake = handshake_fd(requester.as_ref());
         // The tokens attached clients re-attach with go in the snapshot.
         self.upgrade_tokens();
-        let snapshot = self.to_snapshot(snap::Meta {
-            purpose: snap::Purpose::Upgrade,
-            writer_version: vtmux_core::version::display(),
-            binary: exe.to_string_lossy().into_owned(),
-            ghostty_patches: String::new(),
-            written_us,
-            requires: Vec::new(),
-            binary_fd,
-            requester,
-        });
+        // Decision 23: history in Ghostty's form only to a binary of this
+        // patch stack, and then all of it, compressed first.
+        let form = if same_pin(binary) {
+            self.compress_all_history();
+            Form::SamePin
+        } else {
+            Form::Rows
+        };
+        let snapshot = self.to_snapshot_with(
+            snap::Meta {
+                purpose: snap::Purpose::Upgrade,
+                writer_version: vtmux_core::version::display(),
+                binary: exe.to_string_lossy().into_owned(),
+                ghostty_patches: String::new(),
+                written_us,
+                requires: Vec::new(),
+                binary_fd,
+                requester,
+            },
+            Some(form),
+        );
         let bytes = snap::encode(&snapshot);
         let dir = self.socket.parent().unwrap_or(Path::new("/tmp"));
         let file = match sys::memfile(dir, &bytes) {
@@ -548,7 +563,7 @@ impl Server {
                 return format!("snapshot: {}", vtmux_core::error::strerror(&e));
             }
         };
-        let refused = match sys::dry_run(binary, file.as_fd(), sys::DRY_RUN_LIMIT) {
+        let refused = match sys::dry_run(binary, file.as_fd(), dry_run_limit(&snapshot)) {
             Ok(Ok(())) => None,
             Ok(Err(message)) => Some(message),
             Err(e) => Some(fail(&e)),
@@ -568,6 +583,62 @@ impl Server {
             .collect();
         fail(&(self.upgrade.exec)(binary, file, &keep))
     }
+
+    /// Every pane's and popup's history compressed now, as far as Ghostty
+    /// compresses it ([`vtmux_vt::compress_all_of`], the terminals shared
+    /// out over threads), so that it all travels in Ghostty's form: 10
+    /// panes x 100k lines of 200 columns took 0.17 s on the 2026-11
+    /// devserver (0.85 s on one thread), where exporting them as rows took
+    /// about 1.5 s and each of the two imports (the dry run's and the new
+    /// image's) as long again (`lu_upgrade_perf`). If the upgrade fails,
+    /// the history stays compressed, as the compressor would have left it.
+    fn compress_all_history(&mut self) {
+        let panes = self.model.panes.values_mut().map(|p| &mut p.term);
+        let popups = self
+            .clients
+            .values_mut()
+            .filter_map(|c| Some(&mut c.popup.as_mut()?.term));
+        vtmux_vt::compress_all_of(panes.chain(popups));
+    }
+}
+
+/// Whether `binary` reads history in this binary's Ghostty form: it
+/// reports the same patch-stack hash (decision 23, `--vtmux-patch-stack`).
+fn same_pin(binary: &Path) -> bool {
+    sys::patch_stack(binary, sys::PATCH_STACK_LIMIT).as_deref()
+        == Some(crate::snapshot_term::PATCH_STACK)
+}
+
+/// Rows of history a dry run of `s` decodes and imports: history pages in
+/// the vtmux row format (pages in Ghostty's form are only checked, by
+/// checksum and layout).
+fn rows_to_import(s: &snap::Snapshot) -> u64 {
+    let terms = s.panes.iter().filter_map(|p| p.term.as_ref()).chain(
+        s.clients
+            .iter()
+            .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
+    );
+    terms
+        .flat_map(|t| std::iter::once(&t.primary).chain(&t.alternate))
+        .flat_map(|screen| &screen.history)
+        .map(|page| u64::from(page.rows))
+        .sum()
+}
+
+/// History rows per second of dry run allowed on top of
+/// [`sys::DRY_RUN_LIMIT`]: at least twice what a dry run took on the
+/// 2026-11 devserver, about 0.4 s per 100k rows.
+const DRY_RUN_ROWS_PER_SEC: u64 = 100_000;
+
+/// How long the dry run of `s` may take: [`sys::DRY_RUN_LIMIT`] and a
+/// second for every [`DRY_RUN_ROWS_PER_SEC`] rows of history it imports, so an
+/// upgrade is never refused for the size of its history (an upgrade to
+/// another patch stack carries it all as rows), while a binary that hangs
+/// is still given up on.
+fn dry_run_limit(s: &snap::Snapshot) -> std::time::Duration {
+    let rows = rows_to_import(s);
+    sys::DRY_RUN_LIMIT
+        + std::time::Duration::from_millis(rows.saturating_mul(1000) / DRY_RUN_ROWS_PER_SEC)
 }
 
 #[cfg(test)]
@@ -605,6 +676,45 @@ mod tests {
         assert!(decode(&bytes).is_err());
         assert_eq!(writer(&bytes), want);
         assert_eq!(writer(b"garbage"), None);
+    }
+
+    /// The dry run's limit grows with the history it imports as rows, a
+    /// second per 100k rows over the 3 s, so no upgrade is refused for its
+    /// size; pages in Ghostty's form, only checked, add nothing.
+    #[test]
+    fn the_dry_run_limit_grows_with_the_rows_it_imports() {
+        let page = |rows: u32, ghostty: bool| snap::HistoryPage {
+            rows: if ghostty { 0 } else { rows },
+            ghostty: if ghostty { vec![1; 64] } else { Vec::new() },
+            ..snap::HistoryPage::default()
+        };
+        let term = |history: Vec<snap::HistoryPage>| snap::TermState {
+            primary: snap::term::Screen {
+                history,
+                ..snap::term::Screen::default()
+            },
+            ..snap::TermState::default()
+        };
+        let mut s = snap::Snapshot::default();
+        assert_eq!(dry_run_limit(&s), sys::DRY_RUN_LIMIT);
+        s.panes = (0..10)
+            .map(|id| snap::Pane {
+                id,
+                term: Some(term(vec![page(0, true); 400])),
+                ..snap::Pane::default()
+            })
+            .collect();
+        assert_eq!(dry_run_limit(&s), sys::DRY_RUN_LIMIT);
+        // 10 panes x 100k rows, the alternate screen's too.
+        for p in &mut s.panes {
+            let t = p.term.as_mut().unwrap();
+            t.primary.history = vec![page(1000, false); 90];
+            t.alternate = Some(term(vec![page(1000, false); 10]).primary);
+        }
+        assert_eq!(
+            dry_run_limit(&s),
+            sys::DRY_RUN_LIMIT + std::time::Duration::from_secs(10)
+        );
     }
 
     #[test]

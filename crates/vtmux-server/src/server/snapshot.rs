@@ -852,7 +852,8 @@ impl Server {
     /// and, when a page went in Ghostty's form, `meta.requires` names
     /// [`ghostty_pages_requirement`], so a reader of another stack refuses
     /// the stream instead of losing that history: an upgrade to such a
-    /// binary writes [`Form::Rows`] (decision 23).
+    /// binary writes [`Form::Rows`] (decision 23; `Server::exec_upgrade`
+    /// asks the binary its stack first).
     ///
     /// Each terminal's per-turn events (replies, bells, title changes)
     /// must have been drained: the end of a loop turn.

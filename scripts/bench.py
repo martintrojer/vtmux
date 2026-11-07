@@ -29,7 +29,9 @@ the limit; 0: the trickle alone), BLEND=1 (the attached scenarios
 with `vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'` set and the reader answering OSC 10/11, D26;
 tmux ignores the option), AGENT_PANES ("5 10 20"),
 AGENT_CLIENTS ("1 2"), AGENT_SECS (10), KEY_ECHO_N (200), UPGRADE_PANES ("1 10"), UPGRADE_LINES ("10000 100000"),
-UPGRADE_IDLE_LIMIT (180 s: the longest `idle` waits for the compressor). Run cargo through `mise exec --`.
+UPGRADE_IDLE_LIMIT (180 s: the longest `idle` waits for the compressor), UPGRADE_STATES ("fresh idle"; add
+"fresh-rows idle-rows" for an upgrade onto a binary that reports another Ghostty patch stack, so the history
+goes as rows). Run cargo through `mise exec --`.
 """
 import ctypes
 import fcntl
@@ -1184,6 +1186,7 @@ def scenario_trickle(env):
 UPGRADE_PANES = [int(n) for n in os.environ.get("UPGRADE_PANES", "1 10").split()]
 UPGRADE_LINES = [int(n) for n in os.environ.get("UPGRADE_LINES", "10000 100000").split()]
 UPGRADE_IDLE_LIMIT = float(os.environ.get("UPGRADE_IDLE_LIMIT", "180"))
+UPGRADE_STATES = os.environ.get("UPGRADE_STATES", "fresh idle").split()
 RESTARTED = b"\x1b[?996n"  # Caps::restart: a re-attached client's terminal started again
 STATUS_MARK = b"bench"  # pin_terminal's status-right
 
@@ -1312,7 +1315,7 @@ def scenario_upgrade(env):
             path = os.path.join(env.work, f"lines-{lines}.txt")
             if not os.path.exists(path):
                 gen_lines(path, lines)
-            for state in ("fresh", "idle"):
+            for state in UPGRADE_STATES:
                 case = f"{n} x {lines // 1000}k {state}"
 
                 def one(which, n=n, lines=lines, state=state, path=path, case=case):
@@ -1322,10 +1325,14 @@ def scenario_upgrade(env):
                     clients, controls = [], []
                     sizefile = os.path.join(env.work, f"size-{s.label}")
                     wrapper = os.path.join(env.work, f"wrap-{s.label}")
+                    as_rows = state.endswith("-rows")
                     with open(wrapper, "w") as f:
                         f.write(f"#!/bin/sh\nif [ \"$1\" = --vtmux-check-snapshot ]; then wc -c </dev/fd/$2 >'{sizefile}'; fi\n"
-                                f"exec '{s.bin}' \"$@\"\n")
+                                + ("if [ \"$1\" = --vtmux-patch-stack ]; then echo 0; exit 0; fi\n" if as_rows else "")
+                                + f"exec '{s.bin}' \"$@\"\n")
                     os.chmod(wrapper, 0o755)
+                    # `-rows`: the upgrade goes onto the wrapper, which reports another patch stack.
+                    target = wrapper if as_rows else s.bin
                     try:
                         pin_terminal(s)
                         s.run("set", "-g", "history-limit", "100000", ";", "set", "-g", "automatic-rename", "off",
@@ -1342,14 +1349,14 @@ def scenario_upgrade(env):
                                 raise RuntimeError("upgrade: clients did not attach")
                             time.sleep(0.05)
                         history = _wait_history(s, min(lines, 100000), rows)
-                        idle_s = _wait_rss_settled(s.pid) if state == "idle" else 0.0
+                        idle_s = _wait_rss_settled(s.pid) if state.startswith("idle") else 0.0
                         quiet(clients)
                         panes = s.run("list-panes", "-a", "-F", "#{pane_pid}")
                         rss_before = rss_kb(s.pid)
                         c = clients[0]
                         c.arm()
                         t0 = time.monotonic()
-                        r = s.run("vtmux-upgrade", "-b", s.bin, check=False, full=True)
+                        r = s.run("vtmux-upgrade", "-b", target, check=False, full=True)
                         answered = time.monotonic()
                         if r.returncode:
                             refused.setdefault(case, []).append(r.stderr.strip().replace(s.bin, "<vtmux>"))
