@@ -1223,11 +1223,12 @@ pub enum ImportCheck {
     #[default]
     Lazy,
     /// As `Lazy`, and every blob is also decoded and every page's
-    /// integrity verified (`Page.verifyIntegrity`) as it is added: the
-    /// dry run before an upgrade's exec (decision 7). For a blob that
-    /// passed its checksum, so is what the writer exported, this finds LZ4
-    /// bytes that do not decode and a page the writer's Ghostty got wrong
-    /// while the old server can still carry on.
+    /// integrity verified (`Page.verifyIntegrity`) as it is added. For a
+    /// blob that passed its checksum, so is what the writer exported, this
+    /// finds LZ4 bytes that do not decode and a page the writer's Ghostty
+    /// got wrong. The upgrade's dry run does not use it (it decoded every
+    /// page of history once more, the cost `lu_upgrade_perf` removed); the
+    /// tests and the fuzzer do.
     Full,
 }
 

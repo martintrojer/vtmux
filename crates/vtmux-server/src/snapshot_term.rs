@@ -1483,9 +1483,11 @@ pub fn term_from_snapshot(
 }
 
 /// [`term_from_snapshot`], pages in Ghostty's form checked as `check`
-/// says: the upgrade's dry run (live upgrade spec, decision 7) imports
-/// with [`ImportCheck::Full`], which decodes each of them before the
-/// exec, and drops the pane.
+/// says. The server imports only with [`ImportCheck::Lazy`], the
+/// upgrade's dry run (live upgrade spec, decision 7) included: it checks
+/// each page's checksum and layout and decodes none (`lu_upgrade_perf`).
+/// [`ImportCheck::Full`], which also decodes each one, is for the tests
+/// and the fuzzer.
 ///
 /// # Errors
 /// As [`term_from_snapshot`].

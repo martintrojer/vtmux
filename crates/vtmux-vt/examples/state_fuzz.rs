@@ -2,8 +2,8 @@
 //! 23: a malformed state is an error, never a crash).
 //!
 //! Usage: `state_fuzz rows|state|links|styles|graphemes|cells|cursor|capacity|blob|blob-full
-//! FIRST COUNT` (`blob-full` imports with `ImportCheck::Full`, the dry
-//! run's check; `links`, `styles` and `graphemes` aim at the tables
+//! FIRST COUNT` (`blob-full` imports with `ImportCheck::Full`, which
+//! decodes every blob; `links`, `styles` and `graphemes` aim at the tables
 //! Ghostty bounds: URI and id lengths in pages and at the cursor, style
 //! counts and repeats, codepoints per cell, cells per page; `cells` at
 //! each cell kind's attributes, `cursor` at the cursors' semantic content

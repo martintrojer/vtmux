@@ -309,10 +309,11 @@ fn alternate_screen_sync_hold_and_raw_links() {
     round_trip(&mut a, Form::Rows, PROBE, "alternate, probe");
 }
 
-/// The dry run's import ([`ImportCheck::Full`], decision 7) reads the
-/// same terminal as the restore's, and refuses what it refuses.
+/// The full check's import ([`ImportCheck::Full`]) reads the same
+/// terminal as the restore's (and the dry run's, both `Lazy`), and both
+/// refuse a corrupt page.
 #[test]
-fn the_dry_run_imports_with_the_full_check() {
+fn the_full_check_imports_what_the_lazy_one_does() {
     let mut text = Vec::new();
     for i in 0..3000 {
         text.extend_from_slice(
