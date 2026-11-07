@@ -552,6 +552,35 @@ Recorded per commit in git history; the list is kept current:
   (`tabClear single`, and the kitty temporary-file test of patch 0001's
   note, the checkout under `/tmp`). Upstream candidate.
 
+- `patches/0019-reflow-retry-rewrites-the-whole-cell.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`): `writeCell` stores a cell's graphemes, then
+  its hyperlink, then its style. When the hyperlink (or style) is
+  OutOfSpace, `reflowRow` moves the row to a new page and writes the cell
+  again, but the moved row carried the graphemes already stored and the
+  retry stored them a second time: `setGraphemes`' `putNoClobber`
+  assertion in safe builds, a duplicate grapheme-map entry and a leaked
+  slice in fast ones (nothing a release build shows). The retry now clears
+  the half-written cell on the new page first. With 0018 the reflow
+  reaches this retry far more often: a page whose map is full now moves
+  its row instead of dropping the link. Narrowing gathers the short lines
+  of several source pages into one destination page, so live output dense
+  with OSC 8 links fills its hyperlink map or set. Found by worker-25's
+  import fuzz (2026-11-06) on live output: an 80x24 pane, 4000 lines of
+  per-cell `id=` links and graphemes, resized to 17 columns. Test:
+  `PageList resize reflow retries a cell with graphemes and a hyperlink on
+  a new page (vtmux)` (aborts in Debug and ReleaseSafe without the patch;
+  under 1 s in Debug); vtmux-vt
+  `reflow_keeps_every_link_past_a_full_hyperlink_map` (a dropped link in
+  the default build without 0018, an abort with 0018 alone under
+  `LIBGHOSTTY_VT_SYS_OPTIMIZE=ReleaseSafe`). Not fixed: the hyperlink and
+  style set adds in `writeCell` still grow once and assume room, which a
+  page whose capacity is not one of the doubling steps could defeat (no
+  vtmux path makes such a page that the fuzz found). Upstream: not fixed
+  as of ghostty `e95bed633` (2026-11-04, the newest commit a local clone
+  has; judged from the commit log only, as GitHub was unreachable), which
+  sizes the hyperlink map apart from the set (`d20d208c5`) but keeps the
+  retry. Upstream candidate, together with 0018; to be reported.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

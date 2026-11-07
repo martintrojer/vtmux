@@ -4632,6 +4632,39 @@ mod tests {
         assert_eq!(t.row(4).text(), "PANE04 abcdefghij");
     }
 
+    /// Lines of 20 linked grapheme cells (one link of 100 a line, `id=`
+    /// so they are not all distinct) reflowed from 80 columns to 20 fill
+    /// a Ghostty page's hyperlink map. Growing its `hyperlink_bytes` to the
+    /// largest value left the map as full as before, so the cell after it
+    /// lost its link (patch 0018; this is what a release build shows).
+    /// With the map grown until the row moves to a new page, the retry on
+    /// that page wrote the cell's combining mark a second time (patch
+    /// 0019; an abort in a safe build, as `LIBGHOSTTY_VT_SYS_OPTIMIZE=ReleaseSafe`
+    /// gives). Every cell keeps its character and its line's link, as in
+    /// tmux 3.8, whose grid keeps a link per cell with no page limit
+    /// (grid.c `grid_set_cell`, hyperlinks.c `hyperlinks_put`).
+    #[test]
+    fn reflow_keeps_every_link_past_a_full_hyperlink_map() {
+        let (lines, width) = (1500, 20);
+        let mut t = PaneTerm::new(80, 24, 3000);
+        for i in 0..lines {
+            let cells = "e\u{301}".repeat(width);
+            let k = i % 100;
+            t.feed(format!("\x1b]8;id={k};http://f/{k}\x07{cells}\x1b]8;;\x07\r\n").as_bytes());
+        }
+        t.resize(20, 24);
+        assert_eq!(t.cursor(), (0, 23));
+        let first = t.history_size() + 23 - lines;
+        for i in 0..lines {
+            let y = first + i;
+            assert_eq!(t.row(y).text(), "e\u{301}".repeat(width), "line {i}");
+            let link = Some(format!("http://f/{}", i % 100));
+            for x in 0..width {
+                assert_eq!(t.hyperlink(x, y), link, "line {i} cell {x}");
+            }
+        }
+    }
+
     /// A primary-screen program with a footer under its input line (the
     /// cursor above the last content row): a narrowing splits the lines
     /// into history, the widening joins them back, and the screen and the

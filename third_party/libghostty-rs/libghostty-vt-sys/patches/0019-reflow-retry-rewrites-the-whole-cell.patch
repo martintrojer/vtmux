@@ -1,0 +1,118 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 24e58d579..946a55e45 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -2043,6 +2043,15 @@ const ReflowCursor = struct {
+                     // Move our last row to a new page.
+                     try self.moveLastRowToNewPage(list, cap);
+ 
++                    // vtmux: the failed write may have stored part of
++                    // the cell's managed memory (its graphemes before its
++                    // hyperlink, both before its style), and the moved
++                    // row carried it. Drop it so the retry below writes
++                    // the cell whole: writing over it would store the
++                    // graphemes a second time (setGraphemes asserts the
++                    // cell has none) and leak the rest.
++                    self.page.clearCells(self.page_row, self.x, self.x + 1);
++
+                     // Do NOT increment x so that we retry writing
+                     // the same existing cell.
+                 },
+@@ -19925,6 +19934,97 @@ test "PageList resize reflow grapheme map capacity exceeded" {
+     try testing.expectEqual(@as(usize, 2), s.cols);
+ }
+ 
++test "PageList resize reflow retries a cell with graphemes and a hyperlink on a new page (vtmux)" {
++    // Two pages each hold a little over half the links the largest
++    // hyperlink set holds (hyperlink_bytes is a u16), two per row, each
++    // on a cell with graphemes. Narrowing puts both pages' rows in one
++    // destination page, so its set fills up: writing the next linked cell
++    // fails with OutOfSpace, and reflowRow moves the row to a new page
++    // and writes the cell again. The cell's graphemes were stored before
++    // its link failed and the moved row carried them, so the retry stored
++    // them a second time (an assertion in safe builds, a duplicate map
++    // entry in fast ones).
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 80, .rows = 10, .max_size = null });
++    defer s.deinit();
++
++    const max_link_bytes = std.math.maxInt(size.HyperlinkCountInt);
++    const per_page = per_page: {
++        var cap = std_capacity;
++        cap.hyperlink_bytes = max_link_bytes;
++        var page = try Page.init(cap);
++        defer page.deinit();
++        break :per_page page.hyperlink_set.layout.cap / 2 + 100;
++    };
++    const rows_per_page = per_page / 2;
++
++    // A full first page and a second one with rows_per_page rows.
++    {
++        const page = s.pages.first.?.page();
++        page.pauseIntegrityChecks(true);
++        for (page.size.rows..page.capacity.rows) |_| _ = try s.grow();
++        page.pauseIntegrityChecks(false);
++        try testing.expect(page.size.rows >= rows_per_page);
++        try s.growRows(rows_per_page);
++        try testing.expectEqual(@as(usize, 2), s.totalPages());
++    }
++
++    // The last rows_per_page rows of the first page and the first ones of
++    // the second get two cells each: e + U+0301 with a link of its own.
++    for (0..2) |p| {
++        var node = if (p == 0) s.pages.first.? else s.pages.last.?;
++        while (node.page().capacity.hyperlink_bytes < max_link_bytes)
++            node = try s.increaseCapacity(node, .hyperlink_bytes);
++        while (node.page().graphemeCapacity() < per_page or
++            node.page().capacity.grapheme_bytes < per_page * 64)
++            node = try s.increaseCapacity(node, .grapheme_bytes);
++        while (node.page().capacity.string_bytes < per_page * 64)
++            node = try s.increaseCapacity(node, .string_bytes);
++
++        const page = node.page();
++        page.pauseIntegrityChecks(true);
++        defer page.pauseIntegrityChecks(false);
++        const first_y = if (p == 0) page.size.rows - rows_per_page else 0;
++        for (0..rows_per_page * 2) |i| {
++            const rac = page.getRowAndCell(i % 2, first_y + i / 2);
++            rac.cell.* = .{
++                .content_tag = .codepoint,
++                .content = .{ .codepoint = .{ .data = 'e' } },
++            };
++            try page.appendGrapheme(rac.row, rac.cell, 0x0301);
++            var buf: [32]u8 = undefined;
++            const n = p * per_page + i;
++            const id = try page.insertHyperlink(.{
++                .id = .{ .implicit = @intCast(n) },
++                .uri = try std.fmt.bufPrint(&buf, "http://f/{d}", .{n}),
++            });
++            try page.setHyperlink(rac.row, rac.cell, id);
++        }
++    }
++
++    try s.resize(.{ .cols = 2, .reflow = true });
++
++    // Every cell kept its grapheme and its link.
++    var graphemes: usize = 0;
++    var links: usize = 0;
++    var node_it = s.pages.first;
++    while (node_it) |node| : (node_it = node.next) {
++        const page = node.page();
++        for (0..page.size.rows) |y| for (0..page.size.cols) |x| {
++            const rac = page.getRowAndCell(x, y);
++            if (rac.cell.hasGrapheme()) {
++                graphemes += 1;
++                try testing.expectEqualSlices(u21, &.{0x0301}, page.lookupGrapheme(rac.cell).?);
++            }
++            if (rac.cell.hyperlink) links += 1;
++        };
++    }
++    try testing.expectEqual(4 * rows_per_page, graphemes);
++    try testing.expectEqual(4 * rows_per_page, links);
++}
++
+ test "PageList resize grow cols with unwrap fixes viewport pin" {
+     // Regression test: after resize/reflow, the viewport pin can end up at a
+     // position where pin.y + rows > total_rows, causing getBottomRight to panic.
