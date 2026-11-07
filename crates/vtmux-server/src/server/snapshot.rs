@@ -1248,14 +1248,13 @@ impl Server {
         {
             meta.requires.push(bar);
         }
-        let queries = snap::TERM_QUERIES_FEATURE.to_string();
-        if !meta.requires.contains(&queries) && clients.iter().any(|c| c.queries.is_some()) {
-            meta.requires.push(queries);
-        }
-        let title = snap::TERMINAL_TITLE_FEATURE.to_string();
-        if !meta.requires.contains(&title) && clients.iter().any(|c| c.terminal_title.is_some()) {
-            meta.requires.push(title);
-        }
+        // A client's queries and terminal title are not required: nearly
+        // every attached client has them, so requiring them would refuse
+        // every downgrade, and a reader that drops them loses no session
+        // state (its client's decoder starts with no start timer, as
+        // every build before them did after an upgrade, and its terminal
+        // shows the next title set): `vtmux_snapshot`, *Changing the
+        // format*.
         snap::Snapshot {
             meta,
             server,

@@ -1063,14 +1063,6 @@ fn a_clients_start_timer_runs_on() {
     let mut q2 = q;
     q2.da2 = true;
     a.clients.get_mut(&client).unwrap().decoder.set_queries(q2);
-    let s = a.to_snapshot(snap::Meta::default());
-    assert!(
-        s.meta
-            .requires
-            .contains(&snap::TERM_QUERIES_FEATURE.to_string()),
-        "{:?}",
-        s.meta.requires
-    );
     let b = rebuild(&a, &dir, "b");
     let back = b.clients[&client].decoder.queries();
     assert!(back.da2 && !back.da, "{back:?}");
@@ -1081,7 +1073,7 @@ fn a_clients_start_timer_runs_on() {
 }
 
 /// The title an attached client's terminal shows from its output comes
-/// back with the client, under its feature name.
+/// back with the client.
 #[test]
 fn a_clients_terminal_title_is_kept() {
     let dir = temp_dir("ttitle");
@@ -1091,17 +1083,47 @@ fn a_clients_terminal_title_is_kept() {
     let plain = a.to_snapshot(snap::Meta::default());
     assert!(plain.clients.iter().all(|c| c.terminal_title.is_none()));
     a.clients.get_mut(&client).unwrap().terminal_title = Some("INNER".into());
-    let s = a.to_snapshot(snap::Meta::default());
-    assert!(
-        s.meta
-            .requires
-            .contains(&snap::TERMINAL_TITLE_FEATURE.to_string()),
-        "{:?}",
-        s.meta.requires
-    );
     let b = rebuild(&a, &dir, "b");
     assert_eq!(b.clients[&client].terminal_title.as_deref(), Some("INNER"));
     drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A downgrade to the build before works with an ordinary attached client
+/// (decision 6 refuses a newer format, not a feature a fix adds): nothing
+/// such a client produces, its terminal's answered queries and a title set
+/// on it, is in `Meta::requires`, which an older binary refuses when it
+/// names something it lacks. The build before this rule (54ad112) knew no
+/// feature names at all. Only state an ordinary session doesn't produce
+/// may be required: a shown auto-hide scrollbar, or history in Ghostty's
+/// form onto a binary of the same patch stack.
+#[test]
+fn an_ordinary_attached_client_requires_no_feature() {
+    let dir = temp_dir("ordinary");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["set", "-g", "set-titles", "on"]);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    a.on_client_input(
+        client,
+        b"\x1b[?62;22c\x1b[>84;0;0c\x1bP>|xterm(390)\x1b\\\x1b]11;rgb:1010/2020/3030\x1b\\",
+    )
+    .unwrap();
+    // As a redraw does (server_client_set_title).
+    let session = a.clients[&client].attached.unwrap();
+    assert!(a.client_title(client, session).is_some());
+    let s = a.to_snapshot(snap::Meta {
+        purpose: snap::Purpose::Upgrade,
+        ..snap::Meta::default()
+    });
+    let [c] = &s.clients[..] else {
+        panic!("{:?}", s.clients)
+    };
+    let q = c.queries.as_ref().expect("its queries are carried");
+    assert!(q.da && q.da2 && q.xtversion, "{q:?}");
+    assert!(c.terminal_title.is_some(), "set-titles set one");
+    assert_eq!(s.meta.requires, Vec::<String>::new());
+    drop(a);
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -41,6 +41,12 @@
 //! - A field under a new tag that a reader may lose without changing what
 //!   it restores (a hint it can work out again) needs nothing more: older
 //!   readers of the version skip it.
+//! - So does state an ordinary attached client produces whose loss costs
+//!   no session state, only how its terminal is shown until it changes
+//!   again ([`Client::queries`], [`Client::terminal_title`]): naming it
+//!   in [`Meta::requires`] would make nearly every server refuse a
+//!   downgrade to the build before (decision 6 is about the format
+//!   version, not about a feature a fix adds).
 //! - A field under a new tag that carries state (losing it would change a
 //!   format, a screen or a `show-*`/`list-*` output after the restore)
 //!   needs either a new [`FORMAT_VERSION`] or a feature name: the writer
@@ -93,6 +99,8 @@ pub const MIN_VERSION: u32 = 1;
 pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 
 /// The [`Meta::requires`] names every reader of this build understands.
+/// It keeps the names no writer lists any more, for the streams of the
+/// builds that did.
 pub const KNOWN_FEATURES: &[&str] = &[
     SCROLLBAR_FEATURE,
     TERM_QUERIES_FEATURE,
@@ -105,11 +113,15 @@ pub const KNOWN_FEATURES: &[&str] = &[
 pub const SCROLLBAR_FEATURE: &str = "scrollbar-auto-hide";
 
 /// The [`Meta::requires`] name of where a client terminal's queries stand
-/// ([`Client::queries`]), listed when some client's is written.
+/// ([`Client::queries`]), which builds from 69aa4cc to 91b8f49 listed
+/// when some client's was written. No longer listed: a reader may drop
+/// the field (*Changing the format*).
 pub const TERM_QUERIES_FEATURE: &str = "client-term-queries";
 
 /// The [`Meta::requires`] name of the title a client's terminal shows
-/// ([`Client::terminal_title`]), listed when some client's is written.
+/// ([`Client::terminal_title`]), which builds from 471193e to 91b8f49
+/// listed when some client's was written. No longer listed, like
+/// [`TERM_QUERIES_FEATURE`].
 pub const TERMINAL_TITLE_FEATURE: &str = "client-terminal-title";
 
 /// The [`Meta::requires`] name of history pages in Ghostty's own

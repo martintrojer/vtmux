@@ -130,12 +130,12 @@ fn an_auto_hide_scrollbar_round_trips() {
     );
 }
 
-/// Where a client terminal's queries stand, added within v1 under
-/// [`TERM_QUERIES_FEATURE`], round-trips; the golden stream has none.
+/// Where a client terminal's queries stand, added within v1, round-trips,
+/// required or not ([`TERM_QUERIES_FEATURE`], which the builds before it
+/// was ignorable listed); the golden stream has none.
 #[test]
 fn a_clients_terminal_queries_round_trip() {
     let mut s = sample();
-    s.meta.requires = vec![TERM_QUERIES_FEATURE.into()];
     s.clients[0].queries = Some(TermQueries {
         start_in_ms: Some(4000),
         da: true,
@@ -147,17 +147,21 @@ fn a_clients_terminal_queries_round_trip() {
         bg: false,
     });
     assert_eq!(decode(&encode(&s)).unwrap(), s);
+    s.meta.requires = vec![TERM_QUERIES_FEATURE.into()];
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
     let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
     assert!(golden.clients.iter().all(|c| c.queries.is_none()));
 }
 
-/// The title a client's terminal shows, added within v1 under
-/// [`TERMINAL_TITLE_FEATURE`], round-trips; the golden stream has none.
+/// The title a client's terminal shows, added within v1, round-trips,
+/// required or not ([`TERMINAL_TITLE_FEATURE`]); the golden stream has
+/// none.
 #[test]
 fn a_clients_terminal_title_round_trips() {
     let mut s = sample();
-    s.meta.requires = vec![TERMINAL_TITLE_FEATURE.into()];
     s.clients[0].terminal_title = Some("INNER".into());
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    s.meta.requires = vec![TERMINAL_TITLE_FEATURE.into()];
     assert_eq!(decode(&encode(&s)).unwrap(), s);
     let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
     assert!(golden.clients.iter().all(|c| c.terminal_title.is_none()));

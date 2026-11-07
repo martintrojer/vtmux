@@ -802,12 +802,12 @@ record! {
         42 => many open_overrides: Vec<String>,
         /// The status-line message on its screen and its timer.
         43 => opt status_message: Option<StatusMessage>,
-        /// Where its terminal's queries stand; written under
-        /// [`crate::TERM_QUERIES_FEATURE`].
+        /// Where its terminal's queries stand. A reader may drop it (not
+        /// required, [`crate::TERM_QUERIES_FEATURE`]).
         44 => opt queries: Option<TermQueries>,
         /// The title its terminal shows from its output (`set-titles` or
-        /// a pane's passthrough); written under
-        /// [`crate::TERMINAL_TITLE_FEATURE`].
+        /// a pane's passthrough). A reader may drop it (not required,
+        /// [`crate::TERMINAL_TITLE_FEATURE`]).
         45 => opt terminal_title: Option<String>,
     }
 }
