@@ -426,8 +426,10 @@ Recorded per commit in git history; the list is kept current:
     with `blob_if_compressed`, comes out as a blob: a small header, the
     native `Page` value and the LZ4 bytes, readable only by the same build
     (decision 23; vtmux checks `ffi::PATCH_STACK`, the import checks the
-    magic, `@sizeOf(Page)` and an XxHash3 checksum over the `Page` value
-    and the LZ4 bytes before it reads either, then that the `Page` value
+    magic, `@sizeOf(Page)` and a Wyhash checksum over the `Page` value
+    and the LZ4 bytes before it reads either (Wyhash, not Zig 0.17's
+    `XxHash3`, which hashed about 250 MB/s against Wyhash's 10+ GB/s and
+    so was most of a 10 x 100k-line upgrade: `lu_upgrade_perf`), then that the `Page` value
     is the one `Page.initBuf` gives for its capacity but for the fields
     use changes (size, dirty, allocator search hints, set counters, each
     bounded), and that its width is the terminal's).

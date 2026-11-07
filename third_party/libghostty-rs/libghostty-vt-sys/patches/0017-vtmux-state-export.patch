@@ -857,7 +857,7 @@ index 0000000..8af48eb
 +/// The blob of a compressed page: this header, the page's metadata (its
 +/// `Page` value, the memory pointer zeroed) and the compressed bytes. Only
 +/// a library of the same build reads it back (`Page` is native layout).
-+/// `checksum` is the XxHash3 of everything after the header: the import
++/// `checksum` is the Wyhash of everything after the header: the import
 +/// reads nothing of a blob it does not match, and the page's LZ4 bytes
 +/// are only decoded on its first read, long after the import.
 +const BlobHeader = extern struct {
@@ -873,7 +873,7 @@ index 0000000..8af48eb
 +const blob_seed: u64 = 0x7674_6d75_7862_6c62; // "vtmuxblb"
 +
 +fn blobChecksum(meta: []const u8, encoded: []const u8) u64 {
-+    var h: std.hash.XxHash3 = .init(blob_seed);
++    var h: std.hash.Wyhash = .init(blob_seed);
 +    h.update(meta);
 +    h.update(encoded);
 +    return h.final();
