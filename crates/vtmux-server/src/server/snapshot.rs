@@ -1391,10 +1391,14 @@ impl Server {
         validate(snapshot)?;
         // Timers count on from when the snapshot was taken: the dry run
         // and the exec since are time their clocks ran on, as with no
-        // upgrade.
-        let now = Instant::now()
+        // upgrade. Not so the told clients' wait to re-attach: their
+        // notice went out after the dry run, and the 10 s are theirs from
+        // the notice (spec, *Clients*).
+        let rebuilt = Instant::now();
+        let now = rebuilt
             .checked_sub(since_taken(&snapshot.meta))
-            .unwrap_or_else(Instant::now);
+            .unwrap_or(rebuilt);
+        let reattach_by = rebuilt + super::upgrade::REATTACH_WAIT;
         let s = &snapshot.server;
         let mut server = Self::new(listener, PathBuf::from(&s.socket_path), config)?;
         server.config_loaded = true;
@@ -1676,7 +1680,14 @@ impl Server {
             };
             let id = ClientId(x.id as usize);
             let popup = fds(&snap::Role::PopupPty(x.id));
-            let client = server.client_in(x, fd, popup, &snapshot.meta.ghostty_patches, now)?;
+            let client = server.client_in(
+                x,
+                fd,
+                popup,
+                &snapshot.meta.ghostty_patches,
+                now,
+                reattach_by,
+            )?;
             server.clients.insert(id, client);
         }
 
@@ -1786,6 +1797,7 @@ impl Server {
         popup_fd: Option<OwnedFd>,
         patches: &str,
         now: Instant,
+        reattach_by: Instant,
     ) -> io::Result<Client> {
         use vtmux_core::protocol::{ClientFlags, ControlMode, Hello, TtyInfo};
         let std = std::os::unix::net::UnixStream::from(fd);
@@ -1924,7 +1936,7 @@ impl Server {
         if x.token != 0 && c.attached.is_some() && c.control.is_none() {
             c.reattach = Some(super::upgrade::Reattach {
                 token: x.token,
-                deadline: Some(now + super::upgrade::REATTACH_WAIT),
+                deadline: Some(reattach_by),
                 gone: false,
             });
         }

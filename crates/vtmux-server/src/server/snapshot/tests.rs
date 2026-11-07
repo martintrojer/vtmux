@@ -1127,6 +1127,38 @@ fn an_ordinary_attached_client_requires_no_feature() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A told client's 10 s to re-attach count from the rebuild, not from when
+/// the snapshot was taken as carried timers do: the notice goes out after
+/// the dry run, and the wait is the client's from the notice (spec,
+/// *Clients*), so a slow dry run takes nothing off it.
+#[test]
+fn the_reattach_wait_counts_from_the_rebuild() {
+    let dir = temp_dir("rwait");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let taken = std::time::SystemTime::now() - Duration::from_secs(9);
+    let since_epoch = taken.duration_since(std::time::UNIX_EPOCH).unwrap();
+    let mut s = a.to_snapshot(snap::Meta {
+        purpose: snap::Purpose::Upgrade,
+        written_us: i64::try_from(since_epoch.as_micros()).unwrap(),
+        ..snap::Meta::default()
+    });
+    for c in &mut s.clients {
+        c.token = 0x0123_4567_89ab_cdef;
+    }
+    let (l, _) = listener(&dir, "b");
+    let b = Server::from_snapshot(l, ServerConfig::default(), &s, &mut |r| adopt(&a, r)).unwrap();
+    let deadline = b.clients[&client].reattach.unwrap().deadline.unwrap();
+    assert!(
+        deadline > Instant::now() + Duration::from_secs(5),
+        "{:?} left",
+        deadline.saturating_duration_since(Instant::now())
+    );
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Pane output a `pipe-pane` command has not taken yet stays queued for it
 /// (decision 10, keep `pipe-pane` running), and `-I`/`-O` come back as
 /// they were.
