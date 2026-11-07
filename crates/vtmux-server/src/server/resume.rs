@@ -53,9 +53,10 @@ fn hook() -> Option<String> {
     std::env::var(FAIL_HOOK).ok()
 }
 
-/// What this binary reads beyond [`snap::KNOWN_FEATURES`].
+/// What this binary reads beyond [`snap::KNOWN_FEATURES`]: history pages
+/// in its own Ghostty form (decision 23).
 fn features() -> snap::Features {
-    snap::Features::default()
+    crate::snapshot_term::reader_features()
 }
 
 /// A stream decoded and checked as [`Server::from_snapshot`] would check
@@ -664,6 +665,22 @@ mod tests {
             Err("no listening socket kept".to_owned())
         );
         drop(server);
+    }
+
+    /// Decision 23: a stream holding history pages in this build's Ghostty
+    /// form (what the compressor leaves idle history in) is one this
+    /// build's dry run and resume read: an upgrade onto itself of a server
+    /// with compressed history goes through.
+    #[test]
+    fn this_builds_ghostty_pages_are_read() {
+        let s = snap::Snapshot {
+            meta: snap::Meta {
+                requires: vec![crate::snapshot_term::ghostty_pages_requirement()],
+                ..snap::Meta::default()
+            },
+            ..snap::Snapshot::default()
+        };
+        assert_eq!(decode(&snap::encode(&s)).err(), None);
     }
 
     /// A panic in a rebuild is an error with its message, not an unwind
