@@ -448,6 +448,10 @@ fn normalised(mut s: snap::Snapshot) -> snap::Snapshot {
             m.timer_in_ms = m.timer_in_ms.map(|_| 0);
         }
         c.repeat_in_ms = c.repeat_in_ms.map(|_| 0);
+        if let Some(q) = &mut c.queries {
+            q.start_in_ms = q.start_in_ms.map(|_| 0);
+            q.colours_in_ms = q.colours_in_ms.map(|_| 0);
+        }
         if let Some(cs) = &mut c.control {
             cs.subs_due_ms = cs.subs_due_ms.map(|_| 0);
             for q in &mut cs.queued {
@@ -465,6 +469,7 @@ fn normalised(mut s: snap::Snapshot) -> snap::Snapshot {
         p.output_ago_ms = p.output_ago_ms.map(|_| 0);
         p.resize_in_ms = p.resize_in_ms.map(|_| 0);
         p.rename_ago_ms = p.rename_ago_ms.map(|_| 0);
+        p.scrollbar_hide_in_ms = p.scrollbar_hide_in_ms.map(|_| 0);
         for m in &mut p.modes {
             if let snap::PaneMode::Copy(c) = m {
                 c.refresh_in_ms = c.refresh_in_ms.map(|_| 0);
@@ -1043,6 +1048,38 @@ fn a_client_keeps_the_terminal_features_it_opened_with() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Where an attached client terminal's queries stand comes back as it was:
+/// the start timer still due when it was (`tty_start_timer_callback`), so a
+/// terminal that never answers DA still gets its redraw; answered queries
+/// stay answered.
+#[test]
+fn a_clients_start_timer_runs_on() {
+    let dir = temp_dir("queries");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let q = a.clients[&client].decoder.queries();
+    assert!(q.until.is_some(), "{q:?}");
+    let mut q2 = q;
+    q2.da2 = true;
+    a.clients.get_mut(&client).unwrap().decoder.set_queries(q2);
+    let s = a.to_snapshot(snap::Meta::default());
+    assert!(
+        s.meta
+            .requires
+            .contains(&snap::TERM_QUERIES_FEATURE.to_string()),
+        "{:?}",
+        s.meta.requires
+    );
+    let b = rebuild(&a, &dir, "b");
+    let back = b.clients[&client].decoder.queries();
+    assert!(back.da2 && !back.da, "{back:?}");
+    let (was, now) = (q.until.unwrap(), back.until.unwrap());
+    assert!(now + Duration::from_secs(1) > was && now <= was + Duration::from_secs(1));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Pane output a `pipe-pane` command has not taken yet stays queued for it
 /// (decision 10, keep `pipe-pane` running), and `-I`/`-O` come back as
 /// they were.
@@ -1195,6 +1232,41 @@ fn timers_and_messages_survive_a_rebuild() {
     let last = b.model.panes[&vtmux_core::ids::PaneId(0)].last_rename;
     assert!(last.is_some() && last <= Some(Instant::now()));
     assert_eq!(b.causes, a.causes);
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A pane's auto-hide scrollbar keeps what it shows and when it hides
+/// (`sb_auto_visible`, `sb_auto_hover`, `sb_auto_timer`), under its
+/// feature name; one left at the default requires nothing.
+#[test]
+fn an_auto_hide_scrollbar_stays_as_shown() {
+    let dir = temp_dir("sbar");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let plain = a.to_snapshot(snap::Meta::default());
+    assert!(plain.meta.requires.is_empty(), "{:?}", plain.meta.requires);
+    let p = vtmux_core::ids::PaneId(0);
+    let hide_at = Instant::now() + Duration::from_secs(5);
+    a.model.panes.get_mut(&p).unwrap().sb = crate::scrollbar::AutoHide {
+        visible: true,
+        hover: true,
+        hide_at: Some(hide_at),
+    };
+    let shown = a.to_snapshot(snap::Meta::default());
+    assert_eq!(
+        shown.meta.requires,
+        vec![snap::SCROLLBAR_FEATURE.to_string()]
+    );
+
+    let b = rebuild(&a, &dir, "b");
+    let sb = b.model.panes[&p].sb;
+    assert!(sb.visible && sb.hover, "{sb:?}");
+    // The time it had left (counted again from the rebuild), not none or
+    // the option's whole timeout.
+    let left = sb.hide_at.unwrap();
+    assert!(left <= Instant::now() + Duration::from_secs(5), "{left:?}");
+    assert!(left + Duration::from_secs(1) > hide_at, "{left:?}");
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }

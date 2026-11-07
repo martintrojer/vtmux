@@ -181,6 +181,23 @@ const REPLY_DELAY: Duration = Duration::from_millis(500);
 /// `TTY_QUERY_TIMEOUT` (tty.c:85): queries unanswered by then are given up.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Where the terminal's startup queries (DA, DA2, XTVERSION, `DECRQM
+/// 2026`) and colour queries (OSC 10/11) stand: which are answered (the
+/// `TTY_HAVE*` flags, `TTY_WAITFG|TTY_WAITBG` clear) and, while some are
+/// out, when the start timer gives up on them. A live upgrade carries it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools, reason = "tmux's TTY_HAVE* flags")]
+pub struct Queries {
+    pub until: Option<Instant>,
+    pub da: bool,
+    pub da2: bool,
+    pub xtversion: bool,
+    pub sync: bool,
+    pub colours_until: Option<Instant>,
+    pub fg: bool,
+    pub bg: bool,
+}
+
 #[derive(Default)]
 pub struct Decoder {
     bytes: Vec<u8>,
@@ -220,6 +237,35 @@ impl Decoder {
     pub fn colours_sent(&mut self, now: Instant) {
         self.colours_until = Some(now + QUERY_TIMEOUT);
         self.colours_answered = (false, false);
+    }
+    /// Where the queries stand.
+    #[must_use]
+    pub fn queries(&self) -> Queries {
+        Queries {
+            until: self.queries_until,
+            da: self.answered & QUERY_DA != 0,
+            da2: self.answered & QUERY_DA2 != 0,
+            xtversion: self.answered & QUERY_XDA != 0,
+            sync: self.answered & QUERY_SYNC != 0,
+            colours_until: self.colours_until,
+            fg: self.colours_answered.0,
+            bg: self.colours_answered.1,
+        }
+    }
+    /// The queries stand as `q` says (a client carried across an upgrade).
+    pub fn set_queries(&mut self, q: Queries) {
+        self.queries_until = q.until;
+        self.answered = [
+            (q.da, QUERY_DA),
+            (q.da2, QUERY_DA2),
+            (q.xtversion, QUERY_XDA),
+            (q.sync, QUERY_SYNC),
+        ]
+        .iter()
+        .filter(|(on, _)| *on)
+        .fold(0, |bits, (_, bit)| bits | bit);
+        self.colours_until = q.colours_until;
+        self.colours_answered = (q.fg, q.bg);
     }
     /// When the start timer fires, while queries are unanswered.
     #[must_use]

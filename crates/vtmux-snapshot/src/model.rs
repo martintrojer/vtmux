@@ -613,6 +613,12 @@ record! {
         32 => many resizes: Vec<((u32, u32), (u32, u32))>,
         /// How long ago `automatic-rename` last renamed its window from it.
         33 => opt rename_ago_ms: Option<u64>,
+        /// The auto-hide scrollbar shown (`sb_auto_visible`), under the
+        /// pointer (`sb_auto_hover`), and when its hide timer runs out
+        /// (`sb_auto_timer`). Written under [`crate::SCROLLBAR_FEATURE`].
+        34 => one scrollbar_visible: bool,
+        35 => one scrollbar_hover: bool,
+        36 => opt scrollbar_hide_in_ms: Option<u64>,
     }
 }
 
@@ -796,6 +802,27 @@ record! {
         42 => many open_overrides: Vec<String>,
         /// The status-line message on its screen and its timer.
         43 => opt status_message: Option<StatusMessage>,
+        /// Where its terminal's queries stand; written under
+        /// [`crate::TERM_QUERIES_FEATURE`].
+        44 => opt queries: Option<TermQueries>,
+    }
+}
+
+record! {
+    /// A client terminal's startup queries (DA, DA2, XTVERSION, `DECRQM
+    /// 2026`) and colour queries (OSC 10/11): which are answered (the
+    /// `TTY_HAVE*` flags, `TTY_WAITFG|TTY_WAITBG` clear) and, while some
+    /// are out, when the start timer gives up on them
+    /// (`tty_start_timer_callback`).
+    pub struct TermQueries {
+        1 => opt start_in_ms: Option<u64>,
+        2 => one da: bool,
+        3 => one da2: bool,
+        4 => one xtversion: bool,
+        5 => one sync: bool,
+        6 => opt colours_in_ms: Option<u64>,
+        7 => one fg: bool,
+        8 => one bg: bool,
     }
 }
 
@@ -1277,6 +1304,11 @@ pub(crate) mod tests {
             resize_in_ms: Some(250),
             resizes: vec![((80, 24), (40, 24)), ((40, 24), (39, 24))],
             rename_ago_ms: Some(120),
+            // Added within v1: out of the golden sample
+            // (an_auto_hide_scrollbar_round_trips).
+            scrollbar_visible: false,
+            scrollbar_hover: false,
+            scrollbar_hide_in_ms: None,
         }
     }
 
@@ -1430,6 +1462,9 @@ pub(crate) mod tests {
                 frozen: true,
                 timer_in_ms: Some(900),
             }),
+            // Added within v1: out of the golden sample
+            // (a_clients_terminal_queries_round_trip).
+            queries: None,
         }
     }
 

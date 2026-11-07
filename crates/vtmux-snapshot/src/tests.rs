@@ -111,6 +111,46 @@ fn the_upgrade_requester_round_trips() {
     assert_eq!(golden.meta.requester, None);
 }
 
+/// A pane's auto-hide scrollbar state, added within v1 under
+/// [`SCROLLBAR_FEATURE`], round-trips; the golden stream has none.
+#[test]
+fn an_auto_hide_scrollbar_round_trips() {
+    let mut s = sample();
+    s.meta.requires = vec![SCROLLBAR_FEATURE.into()];
+    s.panes[0].scrollbar_visible = true;
+    s.panes[0].scrollbar_hover = true;
+    s.panes[0].scrollbar_hide_in_ms = Some(600);
+    let back = decode(&encode(&s)).unwrap();
+    assert_eq!(back, s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(
+        golden.panes.iter().all(|p| !p.scrollbar_visible
+            && !p.scrollbar_hover
+            && p.scrollbar_hide_in_ms.is_none())
+    );
+}
+
+/// Where a client terminal's queries stand, added within v1 under
+/// [`TERM_QUERIES_FEATURE`], round-trips; the golden stream has none.
+#[test]
+fn a_clients_terminal_queries_round_trip() {
+    let mut s = sample();
+    s.meta.requires = vec![TERM_QUERIES_FEATURE.into()];
+    s.clients[0].queries = Some(TermQueries {
+        start_in_ms: Some(4000),
+        da: true,
+        da2: false,
+        xtversion: true,
+        sync: false,
+        colours_in_ms: None,
+        fg: true,
+        bg: false,
+    });
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.clients.iter().all(|c| c.queries.is_none()));
+}
+
 #[test]
 fn pages_are_found_everywhere_they_live() {
     let s = sample();

@@ -75,7 +75,7 @@ inserted upgrade never comes between an input and the `settle` or `control_wait`
 nor after the last step; it first settles. The runs set `VTMUX_TEST_UPGRADE_STRICT=1` for vtmux (a server
 hook, never in the global environment): where an upgrade would wait for work in flight (a pane's `tmux
 wait-for`, a job) or change what a client sees (a mode, prompt or menu it closes by design, a status message,
-a key held for `escape-time`, a locked client), the server refuses at once and the runner tries after the next
+a key held for `escape-time`, a mouse drag, a locked client), the server refuses at once and the runner tries after the next
 step. The summary counts upgrades inserted and put off. Scenarios whose observations an upgrade changes by
 design with no state to check, or that hit a known bug, are listed with why in `oracle/upgrade-every-skip.toml`
 and run without inserted upgrades; the replay prints the reason.

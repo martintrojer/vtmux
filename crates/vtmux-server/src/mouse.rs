@@ -345,6 +345,14 @@ impl ClientMouse {
         self.click_deadline
     }
 
+    /// A drag is going on: a button held since it moved
+    /// (`mouse_drag_flag`), a scrollbar's slider held
+    /// (`mouse_scrolling_flag`), or a command's drag callback installed.
+    #[must_use]
+    pub fn dragging(&self) -> bool {
+        self.drag_flag != 0 || self.scrolling || self.drag_action.is_some()
+    }
+
     /// `tty_invalidate`: the next update writes the modes again.
     pub fn invalidate(&mut self) {
         self.outer = None;

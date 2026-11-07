@@ -92,9 +92,17 @@ pub const MIN_VERSION: u32 = 1;
 /// Length of a stream's header: magic, version, body length, body hash.
 pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 
-/// The [`Meta::requires`] names every reader of this build understands;
-/// none yet.
-pub const KNOWN_FEATURES: &[&str] = &[];
+/// The [`Meta::requires`] names every reader of this build understands.
+pub const KNOWN_FEATURES: &[&str] = &[SCROLLBAR_FEATURE, TERM_QUERIES_FEATURE];
+
+/// The [`Meta::requires`] name of a pane's auto-hide scrollbar state
+/// ([`Pane::scrollbar_visible`] and the fields after it), listed when
+/// some pane's is not the default (hidden, no timer).
+pub const SCROLLBAR_FEATURE: &str = "scrollbar-auto-hide";
+
+/// The [`Meta::requires`] name of where a client terminal's queries stand
+/// ([`Client::queries`]), listed when some client's is written.
+pub const TERM_QUERIES_FEATURE: &str = "client-term-queries";
 
 /// The [`Meta::requires`] name of history pages in Ghostty's own
 /// compressed form ([`HistoryPage::ghostty`]), which only a binary with

@@ -407,7 +407,14 @@ impl Server {
             p.pipe = None;
             p.search = None;
             p.environment.clear();
+            // A restored pane is dead, its scrollbar hidden.
+            p.scrollbar_visible = false;
+            p.scrollbar_hover = false;
+            p.scrollbar_hide_in_ms = None;
         }
+        s.meta
+            .requires
+            .retain(|r| r != snap::SCROLLBAR_FEATURE && r != snap::TERM_QUERIES_FEATURE);
         if mode == Mode::Layout {
             // Copied screen text, and titles programs set.
             s.server.buffers.clear();

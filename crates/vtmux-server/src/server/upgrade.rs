@@ -435,8 +435,10 @@ impl Server {
     /// the re-attach can't show as it was (spec, *Clients*): a status
     /// message (the screen frozen under it is redrawn as it is now, and its
     /// timer runs on through the upgrade), a key the client's input holds
-    /// for `escape-time` (its decoder starts again), and a locked or
-    /// suspended client (it can't re-execute until it is back).
+    /// for `escape-time` (its decoder starts again), a mouse drag or a
+    /// click waiting for a second one (its mouse state starts again), and
+    /// a locked or suspended client (it can't re-execute until it is
+    /// back).
     fn upgrade_shows(&self) -> Vec<String> {
         use crate::mode::{Mode, PaneMode as _};
         let mut out = Vec::new();
@@ -471,6 +473,16 @@ impl Server {
             }
             if c.decoder.deadline().is_some() {
                 out.push(format!("a key held on {}", self.client_name(id)));
+            }
+            // The re-attach starts the terminal again, which ends a drag
+            // (tty_start_tty clears mouse_drag_flag and the callbacks)
+            // and, with the client's mouse state new, a click's wait for
+            // a second one.
+            if c.mouse.dragging() {
+                out.push(format!("a mouse drag on {}", self.client_name(id)));
+            }
+            if c.mouse.deadline().is_some() {
+                out.push(format!("a click held on {}", self.client_name(id)));
             }
             if c.suspended {
                 out.push(format!("{} locked or suspended", self.client_name(id)));
@@ -799,10 +811,16 @@ impl Server {
                 size = Some((now.cols, now.rows));
             }
         }
+        // A new decoder for the new connection's bytes; the queries stand
+        // as they were: those the terminal answered stay answered, and the
+        // start timer runs on (tty_start_tty would start it again, but a
+        // live upgrade asks the terminal nothing, so it changes nothing).
+        let queries = c.decoder.queries();
         c.decoder = crate::input::Decoder::default();
         if let Some(term) = c.term.as_deref() {
             c.decoder.set_terminal(term);
         }
+        c.decoder.set_queries(queries);
         c.mouse = crate::mouse::ClientMouse::default();
         c.title = None;
         c.passthrough.clear();

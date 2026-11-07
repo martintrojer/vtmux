@@ -22,17 +22,19 @@
 //!   preflight refuses while any is pending (decisions 10 and 26).
 //! - Caches and timers the loop rebuilds: compositor state, frames not yet
 //!   acknowledged, `#()` job output, pane queries waiting on a terminal.
-//! - Not yet carried: the auto-hide scrollbar's state (it shows again on
-//!   the next scroll), and bytes still queued for a client socket the
-//!   quiesce couldn't flush (the upgrade's quiesce must flush them or
-//!   carry them, phase 2).
+//! - Not yet carried: bytes still queued for a client socket the quiesce
+//!   couldn't flush (the upgrade's quiesce must flush them or carry them,
+//!   phase 2).
 //!
 //! Carried runtime state that is easy to miss: each pane's size changes
 //! the program hasn't been told yet (`wp->resize_queue`), output a
 //! `pipe-pane` command hasn't taken yet, each client's
 //! `terminal-features`/`terminal-overrides` as its terminal opened with
 //! them, the status-line message and its timer, `lock-after-time`'s and
-//! `automatic-rename`'s timers, and config errors waiting for a client.
+//! `automatic-rename`'s timers, each pane's auto-hide scrollbar (shown,
+//! hovered, its hide timer), where each client terminal's queries stand
+//! (answered, and the start timer that gives up on them), and config
+//! errors waiting for a client.
 //!
 //! [`Server::from_snapshot`] refuses (an error, never a panic) a snapshot
 //! that fails [`snap::Snapshot::check`] or the server's own checks
@@ -1180,6 +1182,9 @@ impl Server {
                     resize_in_ms: p.resize_timer.map(|t| until(now, t)),
                     resizes: p.resizes.clone(),
                     rename_ago_ms: p.last_rename.map(|t| since(now, t)),
+                    scrollbar_visible: p.sb.visible,
+                    scrollbar_hover: p.sb.hover,
+                    scrollbar_hide_in_ms: p.sb.hide_at.map(|t| until(now, t)),
                 }
             })
             .collect();
@@ -1213,6 +1218,18 @@ impl Server {
         );
         if !meta.requires.contains(&need) && terms.any(crate::snapshot_term::has_ghostty_pages) {
             meta.requires.push(need);
+        }
+        let bar = snap::SCROLLBAR_FEATURE.to_string();
+        if !meta.requires.contains(&bar)
+            && panes.iter().any(|p| {
+                p.scrollbar_visible || p.scrollbar_hover || p.scrollbar_hide_in_ms.is_some()
+            })
+        {
+            meta.requires.push(bar);
+        }
+        let queries = snap::TERM_QUERIES_FEATURE.to_string();
+        if !meta.requires.contains(&queries) && clients.iter().any(|c| c.queries.is_some()) {
+            meta.requires.push(queries);
         }
         snap::Snapshot {
             meta,
@@ -1310,6 +1327,19 @@ impl Server {
                     ignore_keys: m.ignore_keys,
                     frozen: m.frozen,
                     timer_in_ms: m.timer.map(|t| until(now, t)),
+                })
+            },
+            queries: {
+                let q = c.decoder.queries();
+                (q != crate::input::Queries::default()).then(|| snap::TermQueries {
+                    start_in_ms: q.until.map(|t| until(now, t)),
+                    da: q.da,
+                    da2: q.da2,
+                    xtversion: q.xtversion,
+                    sync: q.sync,
+                    colours_in_ms: q.colours_until.map(|t| until(now, t)),
+                    fg: q.fg,
+                    bg: q.bg,
                 })
             },
         }
@@ -1699,7 +1729,11 @@ impl Server {
             mode_prompt_owner: None,
             compress: crate::compress::PaneCompress::default(),
             pipe,
-            sb: crate::scrollbar::AutoHide::default(),
+            sb: crate::scrollbar::AutoHide {
+                visible: x.scrollbar_visible,
+                hover: x.scrollbar_hover,
+                hide_at: x.scrollbar_hide_in_ms.map(|m| after(now, m)),
+            },
             over_zoom: x.over_zoom,
             capture_keys: x.capture_keys,
             close_on_click: x.close_on_click,
@@ -1840,6 +1874,18 @@ impl Server {
                     frozen: m.frozen,
                     timer: m.timer_in_ms.map(|ms| after(now, ms)),
                 });
+        }
+        if let Some(q) = &x.queries {
+            c.decoder.set_queries(crate::input::Queries {
+                until: q.start_in_ms.map(|ms| after(now, ms)),
+                da: q.da,
+                da2: q.da2,
+                xtversion: q.xtversion,
+                sync: q.sync,
+                colours_until: q.colours_in_ms.map(|ms| after(now, ms)),
+                fg: q.fg,
+                bg: q.bg,
+            });
         }
         c.hello = Some(hello);
         // Told to re-execute before the exec: drawn nothing until it
