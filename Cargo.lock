@@ -830,6 +830,7 @@ dependencies = [
  "serde_json",
  "similar",
  "toml",
+ "vtmux-core",
  "vtmux-vt",
 ]
 

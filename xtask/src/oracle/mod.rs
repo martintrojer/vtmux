@@ -7,7 +7,9 @@
 //! - `live`    reference vs vtmux in memory; `live --self` reference vs
 //!   reference (a determinism check).
 //!
-//! All take `--only <glob>`; `*` and `?` match.
+//! All take `--only <glob>`; `*` and `?` match. `replay` and `live` take
+//! `--upgrade-every <n>`: vtmux also upgrades onto itself after every nth
+//! step, and every scenario must still match (live-upgrade spec, *Tests*).
 
 mod normalize;
 #[cfg(test)]
@@ -51,6 +53,7 @@ struct Opts {
     mode: Mode,
     only: Option<String>,
     self_check: bool,
+    upgrade_every: Option<usize>,
 }
 
 fn parse_args(args: impl Iterator<Item = String>) -> Result<Opts> {
@@ -60,18 +63,29 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Opts> {
         Some("replay") => Mode::Replay,
         Some("live") => Mode::Live,
         _ => {
-            return fail("usage: cargo xtask oracle <record|replay|live [--self]> [--only <glob>]");
+            return fail(
+                "usage: cargo xtask oracle <record|replay|live [--self]> [--only <glob>] \
+                 [--upgrade-every <n>]",
+            );
         }
     };
     let mut opts = Opts {
         mode,
         only: None,
         self_check: false,
+        upgrade_every: None,
     };
     while let Some(a) = args.next() {
         match a.as_str() {
             "--only" => opts.only = Some(args.next().ok_or("--only needs a glob")?),
             "--self" if mode == Mode::Live => opts.self_check = true,
+            "--upgrade-every" if mode != Mode::Record => {
+                let n = args.next().ok_or("--upgrade-every needs a step count")?;
+                match n.parse::<usize>() {
+                    Ok(n @ 1..) => opts.upgrade_every = Some(n),
+                    _ => return fail(format!("--upgrade-every: {n:?} is no step count")),
+                }
+            }
             _ => return fail(format!("unknown argument {a:?} for {mode:?}")),
         }
     }
@@ -143,6 +157,29 @@ fn load_scenarios(root: &Path, only: Option<&str>) -> Result<Vec<Scenario>> {
     Ok(out)
 }
 
+/// The scenarios `--upgrade-every` inserts no upgrade into, each with why:
+/// what they observe an upgrade changes by design (live-upgrade spec,
+/// *Tests*).
+const SKIP_FILE: &str = "oracle/upgrade-every-skip.toml";
+
+fn upgrade_skips(root: &Path) -> Result<BTreeMap<String, String>> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Skips {
+        skip: BTreeMap<String, String>,
+    }
+    let path = root.join(SKIP_FILE);
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let skips: Skips = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let all = load_scenarios(root, None)?;
+    for name in skips.skip.keys() {
+        if !all.iter().any(|sc| &sc.name == name) {
+            return fail(format!("{SKIP_FILE}: no scenario {name:?}"));
+        }
+    }
+    Ok(skips.skip)
+}
+
 fn build_vtmux(root: &Path) -> Result<PathBuf> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let st = Command::new(cargo)
@@ -189,38 +226,73 @@ fn run_inner() -> Result<ExitCode> {
     let opts = parse_args(std::env::args().skip(2))?;
     let root = workspace_root();
     let scenarios = load_scenarios(&root, opts.only.as_deref())?;
+    let reference = runner::Opts::default();
+    let vtmux = runner::Opts {
+        vtmux: true,
+        upgrade_every: opts.upgrade_every,
+    };
+    let skip = if opts.upgrade_every.is_some() {
+        upgrade_skips(&root)?
+    } else {
+        BTreeMap::new()
+    };
+    // A scenario `SKIP_FILE` lists runs with no upgrade inserted.
+    let vtmux_for = |sc: &Scenario| match skip.get(&sc.name) {
+        Some(why) => (
+            runner::Opts {
+                upgrade_every: None,
+                ..vtmux
+            },
+            Some(why.clone()),
+        ),
+        None => (vtmux, None),
+    };
+    let what = |base: &str| match opts.upgrade_every {
+        Some(n) => format!("{base} --upgrade-every {n}"),
+        None => base.to_string(),
+    };
     match opts.mode {
         Mode::Record => record(&root, &scenarios),
         Mode::Replay => {
-            let vtmux = build_vtmux(&root)?;
+            let bin = build_vtmux(&root)?;
             let results = parallel(&scenarios, |sc| {
                 let trace = read_trace(&root, sc)?;
-                let got = runner::run(&vtmux, sc)?;
+                let (opts, why) = vtmux_for(sc);
+                let got = runner::run(&bin, sc, opts)?;
                 let (want, got) = host_view(&trace, &current_host(), got);
-                Ok::<_, String>(compare(&want, &got, false))
+                let mut outcome = compare(&want, &got, false);
+                outcome.no_upgrades = why;
+                Ok::<_, String>(outcome)
             });
-            Ok(report(&scenarios, results, "replay"))
+            Ok(report(&scenarios, results, &what("replay")))
         }
         Mode::Live => {
-            let reference = ref_tmux::reference_tmux()?;
+            let ref_bin = ref_tmux::reference_tmux()?;
             let other = if opts.self_check {
-                reference.clone()
+                ref_bin.clone()
             } else {
                 build_vtmux(&root)?
             };
             let results = parallel(&scenarios, |sc| {
-                let want = runner::run(&reference, sc)?;
-                let got = runner::run(&other, sc)?;
-                Ok::<_, String>(compare(&want, &got, opts.self_check))
+                let want = runner::run(&ref_bin, sc, reference)?;
+                let (other_opts, why) = if opts.self_check {
+                    (reference, None)
+                } else {
+                    vtmux_for(sc)
+                };
+                let got = runner::run(&other, sc, other_opts)?;
+                let mut outcome = compare(&want, &got, opts.self_check);
+                outcome.no_upgrades = why;
+                Ok::<_, String>(outcome)
             });
             Ok(report(
                 &scenarios,
                 results,
-                if opts.self_check {
+                &what(if opts.self_check {
                     "live --self"
                 } else {
                     "live"
-                },
+                }),
             ))
         }
     }
@@ -316,7 +388,9 @@ fn record(root: &Path, scenarios: &[Scenario]) -> Result<ExitCode> {
     let reference = ref_tmux::reference_tmux()?;
     let dir = root.join("oracle/traces");
     fs::create_dir_all(&dir)?;
-    let runs = parallel(scenarios, |sc| runner::run(&reference, sc));
+    let runs = parallel(scenarios, |sc| {
+        runner::run(&reference, sc, runner::Opts::default())
+    });
     let mut bad = 0;
     for (sc, run) in scenarios.iter().zip(runs) {
         match run {
@@ -408,6 +482,8 @@ struct Outcome {
     mismatches: Vec<Mismatch>,
     /// Steps judged against a divergence annotation, with their ids.
     diverged: Vec<String>,
+    /// Run without the upgrades `--upgrade-every` inserts, and why.
+    no_upgrades: Option<String>,
 }
 
 /// Diff `got` against `want`, matching observations by step (and by order
@@ -432,6 +508,7 @@ fn compare(want: &[Item], got: &[Item], ignore_divergence: bool) -> Outcome {
     let mut out = Outcome {
         mismatches: Vec::new(),
         diverged: Vec::new(),
+        no_upgrades: None,
     };
     for key in keys {
         let (w, g) = (want.get(&key), got.get(&key));
@@ -518,11 +595,14 @@ fn report(
     for (sc, res) in scenarios.iter().zip(results) {
         match res {
             Ok(o) if o.mismatches.is_empty() => {
-                let note = if o.diverged.is_empty() {
+                let mut note = if o.diverged.is_empty() {
                     String::new()
                 } else {
                     format!(" (divergence {})", o.diverged.join(", "))
                 };
+                if let Some(why) = &o.no_upgrades {
+                    let _ = write!(note, " (no upgrades inserted, {SKIP_FILE}: {why})");
+                }
                 println!("ok    {}{note}", sc.name);
             }
             Ok(o) => {
@@ -541,7 +621,17 @@ fn report(
             }
         }
     }
-    println!("{what}: {} scenarios, {failed} failed", scenarios.len());
+    let upgrades = runner::UPGRADES.load(std::sync::atomic::Ordering::Relaxed);
+    let deferred = runner::DEFERRED.load(std::sync::atomic::Ordering::Relaxed);
+    let inserted = if what.contains("--upgrade-every") {
+        format!("; {upgrades} upgrades inserted, {deferred} put off a step")
+    } else {
+        String::new()
+    };
+    println!(
+        "{what}: {} scenarios, {failed} failed{inserted}",
+        scenarios.len()
+    );
     if failed == 0 {
         ExitCode::SUCCESS
     } else {
@@ -569,6 +659,29 @@ mod tests {
             },
             divergence: None,
         }
+    }
+
+    #[test]
+    fn upgrade_every_takes_a_step_count_and_not_for_record() {
+        let parse = |a: &[&str]| parse_args(a.iter().map(|s| (*s).to_string()));
+        let opts = parse(&["replay", "--upgrade-every", "3"]).unwrap();
+        assert_eq!(opts.upgrade_every, Some(3));
+        assert_eq!(
+            parse(&["live", "--upgrade-every", "1"])
+                .unwrap()
+                .upgrade_every,
+            Some(1)
+        );
+        assert!(parse(&["replay", "--upgrade-every", "0"]).is_err());
+        assert!(parse(&["replay", "--upgrade-every"]).is_err());
+        assert!(parse(&["record", "--upgrade-every", "3"]).is_err());
+    }
+
+    /// Every scenario the skip list names exists, and each says why.
+    #[test]
+    fn the_upgrade_skip_list_names_scenarios_and_reasons() {
+        let skips = upgrade_skips(&workspace_root()).unwrap();
+        assert!(skips.values().all(|why| !why.trim().is_empty()));
     }
 
     #[test]

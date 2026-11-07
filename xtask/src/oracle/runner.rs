@@ -44,6 +44,24 @@ const SETTLE_LIMIT: Duration = Duration::from_secs(30);
 /// How long `settle` waits for the first output a just-sent input provokes.
 const REACTION_LIMIT: Duration = Duration::from_secs(3);
 const POLL: Duration = Duration::from_millis(5);
+/// An upgrade waits up to 3 s for jobs and commands in flight, then runs a
+/// dry run of at most 3 s (live-upgrade spec, *Sequence*).
+const UPGRADE_TIMEOUT: Duration = Duration::from_secs(30);
+/// The server gives a client 10 s to re-attach after its notice.
+const REATTACH_LIMIT: Duration = Duration::from_secs(15);
+/// What a re-attached client is sent first (`Caps::restart`, as after
+/// `MSG_WAKEUP`): its terminal started again, ahead of the full redraw.
+const REATTACHED: &[u8] = b"\x1b[?996n";
+/// How the server refuses an upgrade under its strict test hook
+/// (`VTMUX_TEST_UPGRADE_STRICT`, vtmux-server `server/upgrade.rs`
+/// `STRICT_REFUSAL`): something in flight, or open that the upgrade would
+/// close by design. Not a failure: the inserted upgrade comes a step later.
+const STRICT_REFUSAL: &str = "test hook: not now: ";
+
+/// Upgrades `--upgrade-every` inserted, and the times one was put off to
+/// a later step, across every run of this process.
+pub static UPGRADES: AtomicUsize = AtomicUsize::new(0);
+pub static DEFERRED: AtomicUsize = AtomicUsize::new(0);
 const HISTORY_LIMIT: usize = 2000;
 
 /// Where run roots live. Fixed, so a long `$TMPDIR` cannot lengthen socket paths.
@@ -148,9 +166,22 @@ struct Attach {
     events: Arc<Mutex<Vec<Event>>>,
 }
 
+/// What a run does beyond the scenario's own steps.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Opts {
+    /// The binary under test is vtmux: `upgrade` steps run (the reference
+    /// tmux has no upgrade and skips them).
+    pub vtmux: bool,
+    /// Also upgrade the server onto itself after every Nth step (`replay
+    /// --upgrade-every N`), never observed: a scenario must pass as it
+    /// does without (live-upgrade spec, *Tests*).
+    pub upgrade_every: Option<usize>,
+}
+
 pub struct Runner<'a> {
     bin: &'a Path,
     sc: &'a Scenario,
+    opts: Opts,
     root: PathBuf,
     socket: PathBuf,
     norm: Normalizer,
@@ -195,14 +226,14 @@ fn socket_pids(ps: &str, socket: &str, own: u32) -> Vec<u32> {
 }
 
 /// Run `sc` against `bin` and return its normalised observations.
-pub fn run(bin: &Path, sc: &Scenario) -> Result<Vec<Item>> {
-    let mut r = Runner::new(bin, sc)?;
+pub fn run(bin: &Path, sc: &Scenario, opts: Opts) -> Result<Vec<Item>> {
+    let mut r = Runner::new(bin, sc, opts)?;
     r.run_steps()?;
     Ok(std::mem::take(&mut r.items))
 }
 
 impl<'a> Runner<'a> {
-    fn new(bin: &'a Path, sc: &'a Scenario) -> Result<Self> {
+    fn new(bin: &'a Path, sc: &'a Scenario, opts: Opts) -> Result<Self> {
         let root = make_root()?;
         let made = Self::init_root(bin, &root);
         let socket = match made.and_then(|()| socket_path(&root)) {
@@ -216,6 +247,7 @@ impl<'a> Runner<'a> {
         Ok(Self {
             bin,
             sc,
+            opts,
             root,
             socket,
             norm,
@@ -241,7 +273,7 @@ impl<'a> Runner<'a> {
     }
 
     fn env(&self) -> Vec<(&'static str, String)> {
-        vec![
+        let mut env = vec![
             (
                 "HOME",
                 self.root.join("home").to_string_lossy().into_owned(),
@@ -258,7 +290,11 @@ impl<'a> Runner<'a> {
                 ),
             ),
             ("TMUX_TMPDIR", self.root.to_string_lossy().into_owned()),
-        ]
+        ];
+        if self.opts.vtmux && self.opts.upgrade_every.is_some() {
+            env.push(("VTMUX_TEST_UPGRADE_STRICT", "1".into()));
+        }
+        env
     }
 
     fn base_args(&self) -> Vec<String> {
@@ -359,6 +395,7 @@ impl<'a> Runner<'a> {
 
     fn run_steps(&mut self) -> Result<()> {
         let sc = self.sc;
+        let mut upgrade_due = false;
         for (i, step) in sc.steps.iter().enumerate() {
             match step {
                 Step::Run(argv) => self.cli(i, argv, &format!("run {argv:?}"))?,
@@ -443,12 +480,155 @@ impl<'a> Runner<'a> {
                 }
                 Step::Title(_) => self.observe_client(i, "", "title", true)?,
                 Step::Divergence(d) => self.pending_div = Some(d.clone()),
+                Step::Upgrade(_) if self.opts.vtmux => {
+                    self.upgrade(i, false);
+                }
+                Step::Upgrade(_) => {}
             }
+            self.upgrade_after(i, &mut upgrade_due);
         }
         if self.pending_div.is_some() {
             return Err("divergence step is not followed by an observation".into());
         }
         Ok(())
+    }
+
+    /// `--upgrade-every`: once `n` steps have run since the last inserted
+    /// upgrade, the next one after step `i`, though not between an input
+    /// and the step that waits for its reaction (the redraw would pass for
+    /// the reaction), and not after the last step (nothing would observe
+    /// it). One the server puts off (its strict hook) comes after the next
+    /// step that allows one.
+    fn upgrade_after(&mut self, i: usize, due: &mut bool) {
+        if self.opts.vtmux
+            && self
+                .opts
+                .upgrade_every
+                .is_some_and(|n| (i + 1).is_multiple_of(n))
+        {
+            *due = true;
+        }
+        let next = self.sc.steps.get(i + 1);
+        if *due && next.is_some_and(|s| !matches!(s, Step::Settle(_) | Step::ControlWait(_))) {
+            *due = !self.upgrade(i, true);
+        }
+    }
+
+    /// The server moved onto `bin` again over the frozen handshake
+    /// (`UpgradeRequest`, as `vtmux-upgrade -b <bin>` from a client of
+    /// another version asks; unlike the command it leaves no line in
+    /// `show-messages`), then every attached client back from its re-exec
+    /// and the redraw it gets quiet. Observes nothing when that goes
+    /// through, and what went wrong otherwise (which no trace holds, so it
+    /// fails the step). Inserted (`auto`), it first lets what the steps
+    /// before provoked settle, and is skipped while no server listens. Put
+    /// off (false) when the server's strict hook (`--upgrade-every` runs
+    /// only) says not now.
+    fn upgrade(&mut self, step: usize, auto: bool) -> bool {
+        if auto {
+            self.settle(DEFAULT_QUIET);
+        }
+        let marks: Vec<(String, usize)> = self
+            .attaches
+            .iter_mut()
+            .filter_map(|(id, a)| {
+                matches!(a.child.try_wait(), Ok(None))
+                    .then(|| (id.clone(), a.events.lock().unwrap().len()))
+            })
+            .collect();
+        let what = if auto {
+            "the upgrade after this step"
+        } else {
+            "upgrade"
+        };
+        let failed = match self.upgrade_request() {
+            Ok(None) if auto => return true,
+            Ok(None) => Some(format!("{what}: no server")),
+            Ok(Some((true, message))) if message.is_empty() => None,
+            // Under the strict hook an `upgrade` step of the scenario's own
+            // is put off too: plain `replay` runs it where it stands.
+            Ok(Some((false, message))) if message.starts_with(STRICT_REFUSAL) => {
+                DEFERRED.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            Ok(Some((ok, message))) => Some(format!("{what}: ok={ok}: {message}")),
+            Err(e) => Some(format!("{what}: {e}")),
+        };
+        if auto {
+            UPGRADES.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Some(message) = failed {
+            let observation = Observation::Cli {
+                stdout: String::new(),
+                stderr: self.norm.text(&format!("{message}\n")),
+                exit: 1,
+            };
+            self.items.push(Item {
+                step,
+                observation,
+                divergence: None,
+            });
+            return true;
+        }
+        for (id, at) in marks {
+            if !self.reattached(&id, at) {
+                self.items.push(Item {
+                    step,
+                    observation: Observation::Timeout {
+                        what: format!("{what}: attached client {id:?} re-attaching"),
+                    },
+                    divergence: None,
+                });
+            }
+        }
+        self.settle(DEFAULT_QUIET);
+        true
+    }
+
+    /// The frozen upgrade handshake onto `bin`: the server's answer, or
+    /// `None` when nothing listens on the socket.
+    fn upgrade_request(&self) -> std::result::Result<Option<(bool, String)>, String> {
+        use vtmux_core::protocol::{self, ClientMsg, ServerMsg};
+        let Ok(mut stream) = UnixStream::connect(&self.socket) else {
+            return Ok(None);
+        };
+        stream
+            .set_read_timeout(Some(UPGRADE_TIMEOUT))
+            .map_err(|e| e.to_string())?;
+        let request = ClientMsg::UpgradeRequest {
+            binary: self.bin.to_path_buf(),
+        };
+        protocol::write_msg(&mut stream, &request).map_err(|e| e.to_string())?;
+        match protocol::read_msg::<ServerMsg>(&mut stream) {
+            Ok(Some(ServerMsg::UpgradeResult { ok, message })) => Ok(Some((ok, message))),
+            Ok(Some(other)) => Err(format!("answered {other:?}")),
+            Ok(None) => Err("the connection closed with no answer".into()),
+            Err(e) => Err(format!("no answer: {e}")),
+        }
+    }
+
+    /// Attached client `id` has been sent, since event `at`, what a
+    /// re-attached client gets first ([`REATTACHED`]).
+    fn reattached(&self, id: &str, at: usize) -> bool {
+        let start = Instant::now();
+        loop {
+            let bytes: Vec<u8> = self.attaches[id].events.lock().unwrap()[at..]
+                .iter()
+                .filter_map(|e| match e {
+                    Event::Bytes(b) => Some(b.as_slice()),
+                    Event::Resize(..) => None,
+                })
+                .flatten()
+                .copied()
+                .collect();
+            if bytes.windows(REATTACHED.len()).any(|w| w == REATTACHED) {
+                return true;
+            }
+            if start.elapsed() > REATTACH_LIMIT {
+                return false;
+            }
+            thread::sleep(POLL);
+        }
     }
 
     fn stale_socket(&self) -> Result<()> {

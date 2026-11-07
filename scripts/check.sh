@@ -24,5 +24,9 @@ if rustup target list --installed 2>/dev/null | grep -qx "$other"; then
 fi
 cargo test --workspace
 VTMUX_CHECK_HARNESS="${VTMUX_CHECK_HARNESS:-1}"
-if [ "$VTMUX_CHECK_HARNESS" = 1 ]; then cargo xtask regress && cargo xtask oracle replay; fi
+# The replay again with the server upgraded onto itself after every third
+# step (live-upgrade spec, *Tests*): every scenario must still match.
+if [ "$VTMUX_CHECK_HARNESS" = 1 ]; then
+  cargo xtask regress && cargo xtask oracle replay && cargo xtask oracle replay --upgrade-every 3
+fi
 bash scripts/socket-guard.sh verify "$sockets_before"

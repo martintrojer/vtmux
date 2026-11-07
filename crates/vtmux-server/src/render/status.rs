@@ -412,6 +412,13 @@ impl StatusLine {
             self.redraw = false;
             self.drawn += 1;
             if let Some(m) = &self.message {
+                // A message is drawn over the status as last drawn
+                // (`sl->screen`). A client restored from a snapshot with a
+                // message up (D27) has drawn none in this image: the status
+                // as it would be drawn now stands in for it.
+                if self.screen.is_empty() && lines != 0 {
+                    self.screen = status_rows(source, ctx, s, cols, lines);
+                }
                 self.active = message_rows(source, ctx, s, &self.screen, m, cols, lines);
             } else if let Some(p) = &self.prompt {
                 let (rows, cursor) = prompt_rows(source, s, &self.screen, p, cols, lines);

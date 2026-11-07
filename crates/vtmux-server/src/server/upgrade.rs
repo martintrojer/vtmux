@@ -44,6 +44,23 @@ pub type ExecFn = fn(&Path, OwnedFd, &[RawFd]) -> io::Error;
 /// (decisions 10 and 26: "a few seconds", 3 s).
 pub const PREFLIGHT_WAIT: Duration = Duration::from_secs(3);
 
+/// A test hook read from the server's environment (`1`), which
+/// `cargo xtask oracle replay --upgrade-every` sets: it inserts upgrades
+/// between a scenario's steps and needs each one to leave everything a
+/// scenario can see as it was. With it, an upgrade that would wait for
+/// work in flight, or change what a client sees ([`Server::upgrade_shows`])
+/// is refused at once with a message starting [`STRICT_REFUSAL`], so the
+/// oracle tries after the next step instead. A `VTMUX_TEST_*` variable is a hook for the server
+/// process, never part of the global environment (`global_environ`).
+const STRICT_HOOK: &str = "VTMUX_TEST_UPGRADE_STRICT";
+
+/// How a refusal under [`STRICT_HOOK`] starts.
+pub const STRICT_REFUSAL: &str = "test hook: not now: ";
+
+fn strict() -> bool {
+    std::env::var_os(STRICT_HOOK).is_some_and(|v| v == "1")
+}
+
 /// How long the quiesce waits for clients to take their queued output.
 pub const FLUSH_WAIT: Duration = Duration::from_secs(1);
 
@@ -210,10 +227,15 @@ impl Server {
         }
         self.upgrade_inside_job(requester)?;
         check_binary(&binary)?;
+        let wait = if strict() {
+            Duration::ZERO
+        } else {
+            PREFLIGHT_WAIT
+        };
         self.upgrade.pending = Some(Pending {
             requester,
             binary,
-            deadline: Instant::now() + PREFLIGHT_WAIT,
+            deadline: Instant::now() + wait,
         });
         Ok(())
     }
@@ -312,12 +334,23 @@ impl Server {
         let Some(p) = self.upgrade.pending.take() else {
             return;
         };
-        if !busy.is_empty() {
-            let message = format!(
-                "still running after {} s: {}",
-                PREFLIGHT_WAIT.as_secs(),
-                busy.join(", ")
-            );
+        let closes = if strict() {
+            self.upgrade_shows()
+        } else {
+            Vec::new()
+        };
+        if !busy.is_empty() || !closes.is_empty() {
+            let message = if strict() {
+                let mut what = busy;
+                what.extend(closes);
+                format!("{STRICT_REFUSAL}{}", what.join(", "))
+            } else {
+                format!(
+                    "still running after {} s: {}",
+                    PREFLIGHT_WAIT.as_secs(),
+                    busy.join(", ")
+                )
+            };
             self.upgrade_refuse(requester, &message);
             return;
         }
@@ -392,6 +425,58 @@ impl Server {
         } else {
             None
         }
+    }
+
+    /// What an upgrade now would change for a client to see, for
+    /// [`STRICT_HOOK`] only. What the snapshot closes by design
+    /// (`snapshot.rs`, `mode_out`; live-upgrade spec, *Open questions*):
+    /// every pane mode but copy and clock mode, pane and mode prompts,
+    /// status-line prompts, menus, and a popup running an editor. And what
+    /// the re-attach can't show as it was (spec, *Clients*): a status
+    /// message (the screen frozen under it is redrawn as it is now, and its
+    /// timer runs on through the upgrade), a key the client's input holds
+    /// for `escape-time` (its decoder starts again), and a locked or
+    /// suspended client (it can't re-execute until it is back).
+    fn upgrade_shows(&self) -> Vec<String> {
+        use crate::mode::{Mode, PaneMode as _};
+        let mut out = Vec::new();
+        for p in self.model.panes.values() {
+            for m in &p.modes {
+                if !matches!(m, Mode::Copy(_) | Mode::Clock(_)) {
+                    out.push(format!("would close {} in %{}", m.name(), p.id.0));
+                }
+            }
+            if p.prompt.is_some() || p.mode_prompt.is_some() {
+                out.push(format!("would close a prompt in %{}", p.id.0));
+            }
+        }
+        for (id, w) in &self.model.windows {
+            if w.menu.is_some() {
+                out.push(format!("would close a menu in @{}", id.0));
+            }
+        }
+        for &id in self.clients.keys() {
+            let c = &self.clients[&id];
+            if c.status.prompt().is_some() {
+                out.push(format!("would close a prompt on {}", self.client_name(id)));
+            }
+            if c.popup.as_ref().is_some_and(|p| p.export().is_none()) {
+                out.push(format!(
+                    "would close an editor popup on {}",
+                    self.client_name(id)
+                ));
+            }
+            if c.status.message().is_some() {
+                out.push(format!("a message on {}", self.client_name(id)));
+            }
+            if c.decoder.deadline().is_some() {
+                out.push(format!("a key held on {}", self.client_name(id)));
+            }
+            if c.suspended {
+                out.push(format!("{} locked or suspended", self.client_name(id)));
+            }
+        }
+        out
     }
 
     /// Step 2, then the snapshot, dry run and exec

@@ -1,0 +1,17 @@
+# Scenarios `cargo xtask oracle replay --upgrade-every <n>` runs as they are,
+# with no upgrade inserted (live-upgrade spec, *Tests*): what each observes
+# is something an upgrade changes by design (or a known bug, marked so), and
+# no state the server can check says when. Everything else an upgrade would change is put off by
+# the server's strict test hook (`VTMUX_TEST_UPGRADE_STRICT`, vtmux-server
+# `server/upgrade.rs`) to a later step. A skip is not a pass: each entry
+# says why, and the replay prints it.
+[skip]
+border_style_cache = "the re-attach redraws the borders, which expands their style again, as any attach does (window_pane_get_border_style keeps it until such a redraw)"
+format_jobs_status = "#() jobs start again in the new image (decision 10), and this one prints a different line each run"
+prompt_flags = "bug, not yet understood: an upgrade after `7 Escape` in a `command-prompt -N` makes the `C-b c` that follows start a window, where tmux sends all three keys to the pane"
+scrollbars_draw = "the auto-hide scrollbar's state is not carried (snapshot.rs, Not yet carried): it shows again on the next scroll"
+scrollbars_mouse = "the auto-hide scrollbar's state is not carried (snapshot.rs, Not yet carried): it shows again on the next scroll"
+status_msg_lazy = "the re-attach draws the status line as it is now, as any attach does, where tmux has not yet redrawn it for a change in a window not shown (the Z flag of a zoom)"
+status_msg_lines = "a message over the pane area with the status off is drawn over the status lines as last drawn before it went off (sl->screen), which a restored client has not drawn (not carried)"
+status_msg_selectw = "the re-attach draws the status line as it is now, as any attach does, where tmux has not yet redrawn it for a change in a window not shown (the Z flag of a zoom)"
+sync_copy_mode_keeps_hold = "the re-attach redraws every pane whole, which ends its synchronized output, as any attach does (screen-redraw.c ends MODE_SYNC for a pane redrawn whole)"

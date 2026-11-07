@@ -7,6 +7,7 @@ cargo xtask oracle record  [--only <glob>]   reference tmux 3.8 -> oracle/traces
 cargo xtask oracle replay  [--only <glob>]   vtmux vs the committed traces (what CI runs)
 cargo xtask oracle live    [--only <glob>]   reference vs vtmux in memory, nothing written
 cargo xtask oracle live --self               reference vs reference: determinism check
+cargo xtask oracle replay --upgrade-every <n>  replay, vtmux upgraded onto itself after every nth step
 ```
 
 `replay` exits 1 on any mismatch not covered by a `divergence` annotation and prints a unified diff per
@@ -54,6 +55,7 @@ steps = [ ... ]
 | `{ screen = {} }` | settle, then observe the attached client's screen (`{ id = "b" }`: client `b`'s) |
 | `{ title = {} }` | settle, then observe the attached client's terminal title (OSC 0/2 from `set-titles`) as a `cli` observation: the title and a newline |
 | `{ divergence = { id = "D-NNN", expect = {...} } }` | annotates the next observation: replay compares vtmux against `expect` (the documented behaviour from `compat/DIVERGENCES.md`), never skips it |
+| `{ upgrade = {} }` | vtmux only: the server moves onto the binary under test in place (the frozen `UpgradeRequest`, as `vtmux-upgrade -b` asks, which leaves no line in `show-messages`), then every attached client re-executes, re-attaches and its redraw settles; the reference tmux skips the step. Observes nothing when it goes through, so what follows must match what tmux shows with no upgrade |
 
 `expect` uses the stored observation shape, e.g. `{ kind = "cli", stdout = "...", stderr = "", exit = 0 }`.
 
@@ -64,6 +66,19 @@ for ESC in stored rows). Sync uses quiescence and `wait-for`, no fixed sleeps. A
 timer has run out and the count is final; one CLI step then provokes at most one SIGWINCH per pane
 between two observations (chain commands with `;` in one `run`, otherwise the timer coalesces them
 depending on load).
+
+## Upgrades between steps
+
+`replay --upgrade-every <n>` (in `scripts/check.sh`, so in CI, with `n` = 3) inserts an `upgrade` after every
+nth step of every scenario, and every scenario must still match its trace (live-upgrade spec, *Tests*). An
+inserted upgrade never comes between an input and the `settle` or `control_wait` that waits for its reaction,
+nor after the last step; it first settles. The runs set `VTMUX_TEST_UPGRADE_STRICT=1` for vtmux (a server
+hook, never in the global environment): where an upgrade would wait for work in flight (a pane's `tmux
+wait-for`, a job) or change what a client sees (a mode, prompt or menu it closes by design, a status message,
+a key held for `escape-time`, a locked client), the server refuses at once and the runner tries after the next
+step. The summary counts upgrades inserted and put off. Scenarios whose observations an upgrade changes by
+design with no state to check, or that hit a known bug, are listed with why in `oracle/upgrade-every-skip.toml`
+and run without inserted upgrades; the replay prints the reason.
 
 ## Normalisation
 

@@ -723,8 +723,16 @@ impl ConfigEnv for GlobalEnv<'_> {
 
 /// The global environment a server started by `config`'s client begins
 /// with: the client's, and its working directory as `PWD` (tmux.c:417-421).
+/// Not the test hooks (`VTMUX_TEST_*`), which are for the server process
+/// alone: a scenario that shows the environment can't see them.
 fn global_environ(config: &ServerConfig) -> Environ {
-    let mut env = Environ::from_pairs(config.environ.clone());
+    let mut env = Environ::from_pairs(
+        config
+            .environ
+            .iter()
+            .filter(|(k, _)| !k.starts_with("VTMUX_TEST_"))
+            .cloned(),
+    );
     if let Some(cwd) = &config.cwd {
         env.set("PWD", &cwd.to_string_lossy(), false);
     }

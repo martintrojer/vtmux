@@ -54,6 +54,11 @@ pub enum Step {
     Title(Empty),
     /// Annotates the next observation: replay compares vtmux against `expect`.
     Divergence(Divergence),
+    /// vtmux only (live-upgrade spec, *Tests*): `vtmux-upgrade -b <the
+    /// binary under test>`, then wait for every attached client to come
+    /// back and redraw. The reference tmux skips it. Observes nothing when
+    /// the upgrade goes through, so a trace never holds it.
+    Upgrade(Empty),
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
