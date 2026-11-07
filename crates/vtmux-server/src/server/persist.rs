@@ -30,12 +30,16 @@
 //!   frozen grid is a screen) and paste buffers (copied screen text):
 //!   [`Server::to_snapshot`] never exports terminal state or copy mode
 //!   for a [`snap::Purpose::CheckpointLayout`] snapshot.
-//! - `full` adds the screens and history (pane terminal state, once
-//!   `lu_pane_state` fills `Pane::term`; copy mode), titles and paste
-//!   buffers. Its history pages go to `chunks/`, a few per loop turn
+//! - `full` adds the screens and history (every pane's terminal state,
+//!   in the vtmux row format even where Ghostty holds a page compressed,
+//!   decision 23; copy mode), titles and paste buffers. Its history pages
+//!   go to `chunks/`, a few per loop turn
 //!   ([`crate::persist::Writer`]), so a first `full` checkpoint of
 //!   hundreds of new pages never holds the loop for long; the shutdown
-//!   checkpoint is written at once.
+//!   checkpoint is written at once. Not yet incremental: building the
+//!   snapshot exports every terminal on the loop, unchanged ones too
+//!   (the fingerprint compares the whole export), 1.4 s at 10 panes x
+//!   100k lines in a release build (`bench_checkpoint_ten_panes_of_100k_lines`).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

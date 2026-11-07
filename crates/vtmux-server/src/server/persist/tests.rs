@@ -191,6 +191,67 @@ fn a_layout_checkpoint_holds_no_screen_and_nothing_of_the_process() {
     }
 }
 
+/// `capture-pane -e -S - -E -` of `t`.
+fn captured(t: &vtmux_vt::PaneTerm) -> Vec<u8> {
+    vtmux_vt::capture(
+        t,
+        vtmux_vt::CaptureOpts {
+            escapes: true,
+            start: vtmux_vt::LineRef::Start,
+            end: vtmux_vt::LineRef::End,
+            ..vtmux_vt::CaptureOpts::default()
+        },
+    )
+}
+
+/// A `full` checkpoint carries every pane's terminal, its history as
+/// chunks: what comes back from disk is the same screen and history
+/// (`capture-pane -e -S -`), the same cursor. Compressed history goes in
+/// the vtmux row format, never in Ghostty's (decision 23: only an
+/// upgrade stream carries that).
+#[test]
+fn a_full_checkpoint_carries_every_pane_s_terminal() {
+    let (mut server, dir) = server("ckpt-term");
+    let pane = server.model.panes.get_mut(&PaneId(1)).unwrap();
+    for n in 0..300 {
+        pane.term.feed(
+            format!(
+                "\x1b[3{}mline {n} \x1b]8;;http://h/{n}\x07link\x1b]8;;\x07 e\u{301}\x1b[m\r\n",
+                n % 8
+            )
+            .as_bytes(),
+        );
+    }
+    pane.term.feed(b"half");
+    while pane.term.compress_step() == vtmux_vt::Compression::Pending {}
+    let state = dir.join("state");
+    let written = server.checkpoint_to(&state, Mode::Full).unwrap();
+    assert!(written.chunks_new > 0, "{written:?}");
+    let (back, from) = crate::persist::load(&state).unwrap();
+    assert_eq!(from, MANIFEST);
+    assert!(back.meta.requires.is_empty(), "{:?}", back.meta.requires);
+    for id in [0, 1] {
+        let p = back.panes.iter().find(|p| p.id == id).unwrap();
+        let t = p
+            .term
+            .as_ref()
+            .unwrap_or_else(|| panic!("%{id}: no terminal"));
+        assert!(!crate::snapshot_term::has_ghostty_pages(t), "%{id}");
+        let restored =
+            crate::snapshot_term::term_from_snapshot(t, &back.meta.ghostty_patches).unwrap();
+        let live = &server.model.panes[&PaneId(id)].term;
+        assert_eq!(captured(&restored), captured(live), "%{id}");
+        assert_eq!(restored.cursor(), live.cursor(), "%{id}");
+        assert_eq!(restored.history_size(), live.history_size(), "%{id}");
+    }
+    // A layout checkpoint of the same server holds none of it.
+    let layout = dir.join("layout");
+    assert!(server.checkpoint_to(&layout, Mode::Layout).is_some());
+    let (back, _) = crate::persist::load(&layout).unwrap();
+    assert!(back.panes.iter().all(|p| p.term.is_none()));
+    assert_eq!(back.pages().len(), 0);
+}
+
 #[test]
 fn a_checkpoint_is_written_only_when_something_changed() {
     let (mut server, dir) = server("ckpt-changed");
@@ -371,10 +432,11 @@ fn the_fingerprint_ignores_the_clock_alone() {
 /// The perf gate of the checkpoint (`cargo test --release -p vtmux-server
 /// --lib bench_checkpoint -- --ignored --nocapture`): 10 panes x 100k
 /// lines of history. `layout` on the real model (terminal state is never
-/// exported for it, so its cost must not grow with history); `full` with
-/// the history as pages of 1000 rows (what the pane terminal state export
-/// will hand the writer): the first checkpoint, an unchanged one, and one
-/// with a new page per pane.
+/// exported for it, so its cost must not grow with history); `full` on
+/// the real model (every terminal exported, the unchanged one too, as the
+/// fingerprint needs it), then with the history as synthetic pages of
+/// 1000 rows: the first checkpoint, an unchanged one, and one with a new
+/// page per pane.
 #[test]
 #[ignore = "timing, run by hand in release"]
 fn bench_checkpoint_ten_panes_of_100k_lines() {
@@ -415,7 +477,26 @@ fn bench_checkpoint_ten_panes_of_100k_lines() {
     }
     println!("fed 10 x {BENCH_LINES} lines in {:?}", start.elapsed());
     bench_layout(&mut server, &dir);
+    bench_real_full(&mut server, &dir);
     bench_full(&server, &dir);
+}
+
+fn bench_real_full(server: &mut Server, dir: &std::path::Path) {
+    let start = Instant::now();
+    let pages = server.checkpoint_snapshot(Mode::Full).pages().len();
+    println!("full export: {:?}, {pages} pages", start.elapsed());
+    let state = dir.join("real");
+    let start = Instant::now();
+    let written = server.checkpoint_to(&state, Mode::Full).unwrap();
+    println!(
+        "full first: {:?}, {} chunks, {} KB",
+        start.elapsed(),
+        written.chunks_new,
+        written.bytes / 1000
+    );
+    let start = Instant::now();
+    assert_eq!(server.checkpoint_to(&state, Mode::Full), None);
+    println!("full unchanged: {:?}", start.elapsed());
 }
 
 const BENCH_LINES: usize = 100_000;
