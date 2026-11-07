@@ -26,11 +26,15 @@
 //! whole outside Ghostty. `export_state` and `import_state` are those over
 //! a whole [`TermState`].
 //!
-//! An import trusts nothing: every count, index, width, position and
-//! bound is checked (`validate.rs`, then Ghostty again) and a malformed
-//! state is a [`StateError`], never a crash later. A blob carries a
-//! checksum; [`ImportCheck::Full`] also decodes it at once, for the dry
-//! run before an upgrade's exec (decision 7).
+//! An import trusts nothing of the rows and the state around them: every
+//! count, index, width, position and bound is checked (`validate.rs`,
+//! including every table size Ghostty's parser and pages bound, then
+//! Ghostty again) and a malformed state is a [`StateError`], never a crash
+//! later. A blob is another matter: it is Ghostty's own page memory, and it
+//! is trusted for where it comes from, an upgrade's memory file, private to
+//! the user, written by a build of the same [`PATCH_STACK`] (it never goes
+//! to disk: decision 23). Its checksum finds a damaged blob, not a forged
+//! one. See [`ImportCheck`].
 
 use std::rc::Rc;
 
@@ -145,14 +149,14 @@ pub struct StyleState {
 }
 
 /// An OSC 8 hyperlink: its URI and id.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LinkState {
     pub uri: Vec<u8>,
     pub id: LinkId,
 }
 
 /// A hyperlink's OSC 8 id.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LinkId {
     /// `id=` given by the program.
     Explicit(Vec<u8>),
@@ -1196,16 +1200,26 @@ impl PaneTerm {
 }
 
 /// How much an import checks of the compressed pages (blobs) it is given.
-/// Rows are always checked whole.
+/// Rows are always checked whole, whatever this says.
+///
+/// Neither defends against a forged blob (bytes changed and the checksum
+/// computed again): a blob is trusted because only an upgrade's memory
+/// file carries one, the same user's, from a build of the same
+/// [`PATCH_STACK`]. Ghostty's integrity check reads a page through the
+/// page's own offsets, so a forged page can crash it, also under `Full`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ImportCheck {
-    /// A blob's checksum and its page metadata are checked; its
-    /// compressed bytes are decoded on the page's first read.
+    /// A blob's checksum (over its `Page` value and LZ4 bytes) and its
+    /// `Page` value against its capacity's layout are checked; its LZ4
+    /// bytes are decoded on the page's first read.
     #[default]
     Lazy,
-    /// Every blob is decoded and every page's integrity verified as it is
-    /// added: the dry run before an upgrade's exec (decision 7), so a bad
-    /// page fails while the old server can still carry on.
+    /// As `Lazy`, and every blob is also decoded and every page's
+    /// integrity verified (`Page.verifyIntegrity`) as it is added: the
+    /// dry run before an upgrade's exec (decision 7). For a blob that
+    /// passed its checksum, so is what the writer exported, this finds LZ4
+    /// bytes that do not decode and a page the writer's Ghostty got wrong
+    /// while the old server can still carry on.
     Full,
 }
 

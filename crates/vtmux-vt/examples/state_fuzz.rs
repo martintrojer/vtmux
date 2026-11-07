@@ -1,8 +1,11 @@
 //! Mutation fuzz of `PaneTerm::import_state` (live upgrade spec, decision
 //! 23: a malformed state is an error, never a crash).
 //!
-//! Usage: `state_fuzz rows|state|blob|blob-full FIRST COUNT` (`blob-full`
-//! imports with `ImportCheck::Full`, the dry run's check). Each seed takes an
+//! Usage: `state_fuzz rows|state|links|styles|graphemes|blob|blob-full FIRST
+//! COUNT` (`blob-full` imports with `ImportCheck::Full`, the dry run's
+//! check; `links`, `styles` and `graphemes` aim at the tables Ghostty
+//! bounds: URI and id lengths in pages and at the cursor, style counts and
+//! repeats, codepoints per cell, cells per page). Each seed takes an
 //! export of a pane with styled, linked, wide and grapheme history
 //! (compressed, so `blob` has blobs; every other seed with an alternate
 //! screen up), changes one to three fields at random, imports it, and
@@ -22,8 +25,8 @@
 use std::io::Write as _;
 
 use vtmux_vt::{
-    CaptureOpts, CompressedPages, Compression, ImportCheck, LineRef, PageState, PaneTerm,
-    SavedCursor, TermState, capture,
+    CaptureOpts, Color, CompressedPages, Compression, ImportCheck, LineRef, LinkId, LinkState,
+    PageRows, PageState, PaneTerm, SavedCursor, Style, StyleState, TermState, capture,
 };
 
 /// xorshift64: the same seed gives the same mutations on every host.
@@ -292,6 +295,181 @@ fn mutate_state(st: &mut TermState, r: &mut Rng) {
     }
 }
 
+/// A length that hits the bounds Ghostty keeps: around 2048 (a link's
+/// string), 64 (codepoints after a cell's first), 53247 (styles a page
+/// holds), 65535 (a 16-bit count), or anything.
+fn edge_len(r: &mut Rng) -> usize {
+    const EDGES: [usize; 8] = [0, 1, 64, 2048, 53_247, 65_519, 65_535, 1 << 20];
+    let base = EDGES[r.below(EDGES.len())];
+    match r.below(4) {
+        0 => base,
+        1 => base + r.below(3),
+        2 => base.saturating_sub(r.below(3)),
+        _ => r.below(5000),
+    }
+}
+
+/// A random page of rows (any screen).
+fn rows_page<'a>(st: &'a mut TermState, r: &mut Rng) -> Option<&'a mut PageRows> {
+    let screen = match st.alternate.as_mut() {
+        Some(alt) if r.below(4) == 0 => alt,
+        _ => &mut st.primary,
+    };
+    let n = screen.pages.len();
+    match screen.pages.get_mut(r.below(n)) {
+        Some(PageState::Rows(p)) => Some(p),
+        _ => None,
+    }
+}
+
+fn some_link(r: &mut Rng) -> LinkState {
+    let len = edge_len(r).min(70_000);
+    LinkState {
+        uri: vec![b'a' + (r.byte() % 26); len],
+        id: if r.below(2) == 0 {
+            LinkId::Implicit(r.wild())
+        } else {
+            LinkId::Explicit(vec![b'i'; edge_len(r).min(70_000)])
+        },
+    }
+}
+
+fn mutate_links(st: &mut TermState, r: &mut Rng) {
+    let c = r.below(7);
+    print!(" linkcase{c}");
+    if c < 2 {
+        let link = (r.below(8) != 0).then(|| some_link(r));
+        let screen = match st.alternate.as_mut() {
+            Some(alt) if c == 1 => alt,
+            _ => &mut st.primary,
+        };
+        screen.cursor.link = link;
+        return;
+    }
+    let Some(p) = rows_page(st, r) else { return };
+    let k = 1 + r.below(p.links.len().saturating_sub(1).max(1));
+    match c {
+        // One link's URI or id.
+        2 if k < p.links.len() => {
+            if let Some(l) = p.links[k].as_mut() {
+                l.uri = vec![b'u'; edge_len(r).min(70_000)];
+            }
+        }
+        3 if k < p.links.len() => {
+            if let Some(l) = p.links[k].as_mut() {
+                l.id = LinkId::Explicit(vec![b'i'; edge_len(r).min(70_000)]);
+            }
+        }
+        // A link repeated, or many new ones, and cells pointed at them.
+        4 if k < p.links.len() => {
+            let again = p.links[k].clone();
+            for _ in 0..=r.below(3) {
+                p.links.push(again.clone());
+            }
+        }
+        5 => {
+            for i in 0..edge_len(r).min(5000) {
+                p.links.push(Some(LinkState {
+                    uri: format!("http://f/{i}").into_bytes(),
+                    id: LinkId::Implicit(r.wild()),
+                }));
+            }
+        }
+        _ => {}
+    }
+    let n = p.links.len();
+    if n > 1 && r.below(2) == 0 {
+        for c in &mut p.cells {
+            c.link = u16::try_from(1 + r.below(n - 1)).unwrap_or(0);
+        }
+    }
+}
+
+fn mutate_styles(st: &mut TermState, r: &mut Rng) {
+    let c = r.below(6);
+    print!(" stylecase{c}");
+    let Some(p) = rows_page(st, r) else { return };
+    match c {
+        // Distinct styles up to and past what a page holds.
+        0 => {
+            let n = edge_len(r).min(70_000);
+            p.styles.extend((0..n).map(|i| {
+                let [_, r, g, b] = u32::try_from(i).unwrap_or(0).to_be_bytes();
+                StyleState {
+                    style: Style {
+                        bg: Color::Rgb(r, g, b),
+                        ..Style::default()
+                    },
+                    ..StyleState::default()
+                }
+            }));
+        }
+        // One style repeated.
+        1 => {
+            let again = p.styles[r.below(p.styles.len())];
+            let n = edge_len(r).min(70_000);
+            p.styles.extend(std::iter::repeat_n(again, n));
+        }
+        // Every cell one style, in a page with room for more cells.
+        2 | 3 => {
+            p.capacity.rows = if c == 2 {
+                u32::try_from(edge_len(r) / usize::from(p.cols.max(1))).unwrap_or(0)
+            } else {
+                r.wild() & 0xffff
+            };
+            let s = u16::try_from(r.below(p.styles.len())).unwrap_or(0);
+            for c in &mut p.cells {
+                c.style = s;
+            }
+        }
+        // The pens.
+        4 => {
+            st.primary.cursor.pen.fg_256 ^= true;
+            st.primary.cursor.pen.style.bg = Color::Rgb(r.byte(), r.byte(), r.byte());
+            if let Some(saved) = st.primary.saved_cursor.as_mut() {
+                saved.pen.style.underline_color = Color::Palette256(r.byte());
+            }
+        }
+        _ => p.capacity.styles = r.wild(),
+    }
+}
+
+fn mutate_graphemes(st: &mut TermState, r: &mut Rng) {
+    let c = r.below(4);
+    print!(" graphemecase{c}");
+    let Some(p) = rows_page(st, r) else { return };
+    match c {
+        // One cell's codepoints after its first.
+        0 if p.graphemes.len() > 2 => {
+            let n = edge_len(r).min(70_000);
+            let old = p.graphemes[1] as usize;
+            let rest = p.graphemes.split_off((2 + old).min(p.graphemes.len()));
+            p.graphemes.truncate(1);
+            p.graphemes.push(u32::try_from(n).unwrap_or(u32::MAX));
+            p.graphemes.extend(std::iter::repeat_n(0x301, n));
+            p.graphemes.extend(rest);
+        }
+        // Many cells with many codepoints.
+        1 => {
+            let n = 1 + edge_len(r).min(100);
+            let mut table = Vec::new();
+            for (i, cell) in p.cells.iter_mut().enumerate() {
+                if cell.flags & 3 <= 1 && cell.content != 0 && r.below(3) == 0 {
+                    cell.flags = (cell.flags & !3) | 1;
+                    table.push(u32::try_from(i).unwrap_or(0));
+                    table.push(u32::try_from(n).unwrap_or(0));
+                    table.extend(std::iter::repeat_n(0x1f3fb, n));
+                } else if cell.flags & 3 == 1 {
+                    cell.flags &= !3;
+                }
+            }
+            p.graphemes = table;
+        }
+        2 => p.capacity.grapheme_bytes = r.wild(),
+        _ => p.capacity.string_bytes = r.wild(),
+    }
+}
+
 fn exercise(b: &mut PaneTerm) {
     let all = CaptureOpts {
         start: LineRef::Start,
@@ -312,6 +490,10 @@ fn exercise(b: &mut PaneTerm) {
         let _ = (b.cursor(), b.line_marks(), b.osc133_lines());
     };
     look(b);
+    // The cursor's pen and link onto the page, both screens switched.
+    b.feed(b"\x1b[?2026lstyled\x1b[38;2;1;2;3mx\x1b]8;;http://n\x07L\x1b[?1049hA\x1b[?1049lB\x1b8\x1b[?1049h\x1b[?1049l\x1b]8;;\x07\x1b[m");
+    let again = b.export_state();
+    PaneTerm::import_state(&again).expect("its own export imports");
     b.feed(b"\x1b[?2026lhello\r\n\x1b[Lx\x1b[3;1Hmore\x1b[S\x1b[T\x1b8z\x1b[2Jcleared");
     for i in 0..50 {
         b.feed(format!("after {i} \u{4e16}e\u{301}\r\n").as_bytes());
@@ -352,6 +534,9 @@ fn main() {
             match kind {
                 _ if blob => mutate_blob(&mut st, &mut r),
                 "rows" => mutate_rows(&mut st, &mut r),
+                "links" => mutate_links(&mut st, &mut r),
+                "styles" => mutate_styles(&mut st, &mut r),
+                "graphemes" => mutate_graphemes(&mut st, &mut r),
                 _ => mutate_state(&mut st, &mut r),
             }
             if st.primary.pages.is_empty() {

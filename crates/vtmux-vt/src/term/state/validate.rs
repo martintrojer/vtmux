@@ -3,16 +3,24 @@
 //! on-disk form, so nothing in a [`TermState`] is trusted: every count,
 //! index, width and position is checked here before Ghostty sees it, and
 //! Ghostty checks again what only it can (a blob's checksum and `Page`
-//! value, patch 0017 `importBlob`).
+//! value, patch 0017 `importBlob`). A blob's page is trusted for where it
+//! comes from (see [`super::ImportCheck`]), not checked here.
 //!
 //! A state some vtmux exported always passes; the rules are Ghostty's
-//! own invariants (`page.zig` `verifyIntegrity`, `PageList.Builder`) and
-//! the bounds tmux puts on what it models.
+//! own invariants (`page.zig` `verifyIntegrity`, `PageList.Builder`), the
+//! bounds Ghostty's parser and pages put on what a live terminal can hold
+//! (each `MAX_*` below, with where it comes from), and the bounds tmux puts
+//! on what it models. Past a Ghostty bound the import would not just fail:
+//! Ghostty's allocators and reference counts assume it and crash or write
+//! out of bounds.
+
+use std::collections::HashSet;
 
 use super::{
-    FrozenRowState, GhosttyCharset, GhosttyCursor, PATCH_STACK, PageRows, PageState, PaneState,
-    RowState, ScreenState, StateError, TermState,
+    FrozenRowState, GhosttyCharset, GhosttyCursor, LinkId, LinkState, PATCH_STACK, PageRows,
+    PageState, PaneState, RowState, ScreenState, StateError, StyleState, TermState,
 };
+use crate::snapshot::{Color, Underline};
 
 /// tmux's largest window (`WINDOW_MAXIMUM`, tmux.h).
 pub(super) const MAX_SIZE: u16 = 10_000;
@@ -27,6 +35,38 @@ const MAX_ID: u64 = i64::MAX as u64;
 
 /// Ghostty's charsets (`charsets.zig` `Charset`) and slots (`Slots`).
 const CHARSETS: u8 = 4;
+
+/// The longest OSC 8 Ghostty's parser takes: it holds what follows `8;`
+/// (`id=ID;URI`, or `;URI`) in its fixed buffer (`osc.zig`
+/// `Parser.MAX_BUF`, 2048 bytes) with a NUL after it
+/// (`osc/parsers/hyperlink.zig`), so no live link is longer. Past it a
+/// URI or id is a `string_alloc` span of more than 64 32-byte chunks,
+/// which the bitmap allocator's long-span search reads and writes past its
+/// bitmaps (`bitmap_allocator.zig` `findFreeChunks`), and a URI and id
+/// that are each up to 64 chunks but more together pass a reflow's check
+/// one at a time and fail it together (`PageList.zig`
+/// `hyperlinkStringsFit`, then `unreachable`).
+pub(super) const MAX_OSC8_BYTES: usize = 2047;
+
+/// The most codepoints a cell keeps after its first (`page.zig`
+/// `grapheme_max_len`; `Page.appendGrapheme` drops the rest, so more
+/// would not import as they are).
+pub(super) const MAX_GRAPHEME: usize = 64;
+
+/// The most styles a page holds besides the default: a page's style
+/// capacity is 16-bit (`size.zig` `StyleCountInt`), whose set
+/// (`ref_counted_set.zig` `Layout.init`) has a 65536-bucket table with
+/// 13/16 of that as items, id 0 reserved.
+pub(super) const MAX_STYLES: usize = 65_536 * 13 / 16 - 1;
+
+/// The most cells a page has room for (its rows, or its capacity's when
+/// larger, times its width). A style or hyperlink is counted once for each
+/// cell that uses it in a 16-bit count (`size.zig` `CellCountInt`, the
+/// sets' `RefCountInt`), and Ghostty adds a few references of its own
+/// (the table's while importing, the cursor's, a resize's); Ghostty's
+/// pages never come near (a standard page is 215 x 215 cells and
+/// `Capacity.adjust` keeps its size at another width).
+pub(super) const MAX_PAGE_CELLS: usize = u16::MAX as usize - 16;
 
 fn invalid(what: &'static str) -> StateError {
     StateError::Invalid(what)
@@ -52,6 +92,17 @@ pub(super) fn head(s: &TermState) -> Result<(), StateError> {
     if let Some(alt) = &s.alternate {
         screen(alt, s)?;
     }
+    // Leaving a screen ends its link (Terminal.zig `switchScreen`), and
+    // coming back asserts there is none.
+    let inactive = if s.alternate_active {
+        Some(&s.primary)
+    } else {
+        s.alternate.as_ref()
+    };
+    check(
+        inactive.is_none_or(|sc| sc.cursor.link.is_none()),
+        "hyperlink open on the inactive screen",
+    )?;
     let g = &s.ghostty;
     let (top, bottom, left, right) = g.scroll_region;
     // DECSTBM and DECSLRM never leave a region out of order or off the
@@ -96,11 +147,95 @@ fn cursor(c: &GhosttyCursor, s: &TermState) -> Result<(), StateError> {
     // Ghostty's cursor is always on the screen; a pending wrap keeps it
     // in the last column.
     check(c.x < s.cols && c.y < s.rows, "cursor off the screen")?;
-    // OSC 8 with an empty URI closes the link (`osc.zig` hyperlink start).
+    c.link.as_ref().map_or(Ok(()), link)
+}
+
+/// An OSC 8 link as the parser makes one (`osc/parsers/hyperlink.zig`):
+/// an empty URI closes the link and an empty `id=` is no id, so neither is
+/// ever stored (and `Page.insertHyperlink` cannot store an empty string),
+/// and the sequence fits [`MAX_OSC8_BYTES`].
+fn link(l: &LinkState) -> Result<(), StateError> {
+    let osc8 = match &l.id {
+        LinkId::Explicit(id) => {
+            check(!id.is_empty(), "hyperlink id empty")?;
+            "id=;".len() + id.len()
+        }
+        LinkId::Implicit(_) => ";".len(),
+    };
+    check(!l.uri.is_empty(), "hyperlink URI empty")?;
     check(
-        c.link.as_ref().is_none_or(|l| !l.uri.is_empty()),
-        "cursor hyperlink without a URI",
+        osc8.saturating_add(l.uri.len()) <= MAX_OSC8_BYTES,
+        "hyperlink longer than an OSC 8",
     )
+}
+
+/// A style as Ghostty compares them (`style.zig` `Style.eql`): a palette
+/// colour's form is in the 256 flags, not in the colour.
+fn style_key(s: &StyleState) -> ([[u8; 4]; 3], u16) {
+    let color = |c: Color| match c {
+        Color::Default => [0; 4],
+        Color::Palette(n) | Color::Palette256(n) => [1, n, 0, 0],
+        Color::Rgb(r, g, b) => [2, r, g, b],
+    };
+    let t = &s.style;
+    let flags = [
+        t.bold,
+        t.faint,
+        t.italic,
+        t.blink,
+        t.inverse,
+        t.invisible,
+        t.strikethrough,
+        t.overline,
+        s.fg_256,
+        s.bg_256,
+    ]
+    .iter()
+    .enumerate()
+    .fold(0u16, |acc, (i, &b)| acc | (u16::from(b) << i));
+    let underline = match t.underline {
+        Underline::None => 0,
+        Underline::Single => 1,
+        Underline::Double => 2,
+        Underline::Curly => 3,
+        Underline::Dotted => 4,
+        Underline::Dashed => 5,
+    };
+    (
+        [color(t.fg), color(t.bg), color(t.underline_color)],
+        flags | (underline << 10),
+    )
+}
+
+/// The page's style and hyperlink tables as an export writes them: each
+/// entry once (an entry added twice is counted twice, toward the 16-bit
+/// count [`MAX_PAGE_CELLS`] keeps clear of), within Ghostty's capacity.
+fn tables(p: &PageRows) -> Result<(), StateError> {
+    check(p.styles.len() <= MAX_STYLES + 1, "page style table size")?;
+    if p.styles.len() > 2 {
+        let default = style_key(&StyleState::default());
+        let mut seen = HashSet::with_capacity(p.styles.len());
+        check(
+            p.styles[1..]
+                .iter()
+                .map(style_key)
+                .all(|k| k == default || seen.insert(k)),
+            "page style twice",
+        )?;
+    }
+    check(
+        p.links.first().is_some_and(Option::is_none) && p.links[1..].iter().all(Option::is_some),
+        "page hyperlink table",
+    )?;
+    p.links[1..].iter().flatten().try_for_each(link)?;
+    if p.links.len() > 2 {
+        let mut seen = HashSet::with_capacity(p.links.len());
+        check(
+            p.links[1..].iter().flatten().all(|l| seen.insert(l)),
+            "page hyperlink twice",
+        )?;
+    }
+    Ok(())
 }
 
 fn charset(c: GhosttyCharset) -> Result<(), StateError> {
@@ -193,10 +328,7 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
         "page row count",
     )?;
     check(!p.styles.is_empty(), "page without its default style")?;
-    check(
-        p.links.first().is_some_and(Option::is_none) && p.links[1..].iter().all(Option::is_some),
-        "page hyperlink table",
-    )?;
+    tables(p)?;
     let cap = p.capacity;
     if cap.rows != 0 {
         // Ghostty's `Capacity` fields (rows, styles and hyperlink bytes
@@ -208,6 +340,13 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
             "page capacity",
         )?;
     }
+    // The page Ghostty makes has room for this many rows (the capacity's
+    // when it is used, else at least the rows given).
+    let room = p.rows.len().max(cap.rows as usize);
+    check(
+        room.saturating_mul(usize::from(cols)) <= MAX_PAGE_CELLS,
+        "page cell count",
+    )?;
     let mut graphemes = Graphemes::new(&p.graphemes);
     let mut next = 0usize;
     for row in &p.rows {
@@ -299,7 +438,7 @@ impl<'a> Graphemes<'a> {
             .get(2..2usize.saturating_add(n))
             .ok_or(invalid("grapheme table"))?;
         check(
-            n > 0
+            (1..=MAX_GRAPHEME).contains(&n)
                 && cps
                     .iter()
                     .all(|&cp| cp != 0 && char::from_u32(cp).is_some()),

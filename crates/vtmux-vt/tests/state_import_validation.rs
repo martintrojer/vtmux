@@ -6,8 +6,9 @@
 //! state as the whole one.
 
 use vtmux_vt::{
-    CaptureOpts, CompressedPages, Compression, ImportCheck, LineRef, PageRows, PageState, PaneTerm,
-    ScreenKind, StateError, StateImport, TermState, capture,
+    CaptureOpts, Color, CompressedPages, Compression, ImportCheck, LineRef, LinkId, LinkState,
+    PageRows, PageState, PaneTerm, ScreenKind, StateError, StateImport, Style, StyleState,
+    TermState, capture,
 };
 
 /// A pane with styles, links, wide characters and graphemes in history,
@@ -162,6 +163,44 @@ fn malformed_states_are_refused() {
         s.pane.marks.push((u32::MAX, vtmux_vt::Osc133::default()));
     });
     refused("wild history limit", |s| s.pane.history_limit = usize::MAX);
+}
+
+#[test]
+fn a_link_open_on_the_inactive_screen_is_refused() {
+    // Ghostty ends a screen's link when it leaves it and asserts there is
+    // none when it comes back: imported, `?1049l` reached `unreachable`
+    // in `Terminal.switchScreenMode`.
+    let link = || LinkState {
+        uri: b"http://inactive".to_vec(),
+        id: LinkId::Implicit(1),
+    };
+    let mut on_alt = source(true);
+    let mut on_primary = source(true);
+    on_primary.feed(b"\x1b[?1049l");
+    let switch = b"\x1b[?1049h\x1b[?1049l\x1b[?1049h\x1b[?1049l";
+    for (t, alternate_active) in [(&mut on_alt, true), (&mut on_primary, false)] {
+        let mut s = t.export_state();
+        assert_eq!(s.alternate_active, alternate_active);
+        let screen = |s: &mut TermState, active: bool| {
+            if active == s.alternate_active {
+                s.alternate.as_mut().unwrap().cursor.link = Some(link());
+            } else {
+                s.primary.cursor.link = Some(link());
+            }
+        };
+        // The active screen's own link is fine.
+        screen(&mut s, true);
+        let mut b = PaneTerm::import_state(&s).expect("a link on the active screen");
+        b.feed(switch);
+        screen(&mut s, false);
+        match PaneTerm::import_state(&s) {
+            Ok(mut b) => {
+                b.feed(switch);
+                panic!("a link on the inactive screen imported");
+            }
+            Err(e) => assert!(matches!(e, StateError::Invalid(_)), "{e}"),
+        }
+    }
 }
 
 #[test]
@@ -320,4 +359,281 @@ fn undersized_capacity_hints_fill_the_page_again() {
     };
     assert_eq!(capture(&b, all), capture(&a, all));
     assert_eq!(use_pane(&mut b), use_pane(&mut a));
+}
+
+/// Replace the page's first grapheme with `n` codepoints after its first.
+fn set_first_grapheme(p: &mut PageRows, n: usize) {
+    let old = p.graphemes[1] as usize;
+    let rest = p.graphemes.split_off(2 + old);
+    p.graphemes.truncate(1);
+    p.graphemes.push(u32::try_from(n).unwrap());
+    p.graphemes.extend(std::iter::repeat_n(0x301, n));
+    p.graphemes.extend(rest);
+}
+
+/// `n` styles no page of `source` has (RGB foregrounds).
+fn new_styles(n: usize) -> impl Iterator<Item = StyleState> {
+    (0..n).map(|i| {
+        let [_, r, g, b] = u32::try_from(i).unwrap().to_be_bytes();
+        StyleState {
+            style: Style {
+                fg: Color::Rgb(r, g, b),
+                bold: true,
+                ..Style::default()
+            },
+            ..StyleState::default()
+        }
+    })
+}
+
+/// A resource Ghostty bounds: `at` puts it at the bound, which imports
+/// and is a terminal that works (output, resizes, both screens); `past`
+/// one past it, which is refused before Ghostty sees it. Past each of
+/// these Ghostty did not fail an import: it crashed, wrote past a bitmap
+/// or overflowed a reference count (the import-validation re-review).
+fn bound(
+    base: &TermState,
+    name: &str,
+    at: impl FnOnce(&mut TermState),
+    past: impl FnOnce(&mut TermState),
+) -> PaneTerm {
+    let mut s = base.clone();
+    past(&mut s);
+    match PaneTerm::import_state(&s) {
+        Ok(mut t) => {
+            use_pane(&mut t);
+            panic!("{name}: past the bound imported");
+        }
+        Err(e) => assert!(matches!(e, StateError::Invalid(_)), "{name} past: {e}"),
+    }
+    let mut s = base.clone();
+    at(&mut s);
+    let mut t = PaneTerm::import_state(&s).unwrap_or_else(|e| panic!("{name}: at the bound: {e}"));
+    let back = t.export_state();
+    use_pane(&mut t);
+    t.feed(b"\x1b[?1049hx\x1b[?1049ly\x1b[?1049h\x1b[?1049l");
+    for check in [ImportCheck::Lazy, ImportCheck::Full] {
+        PaneTerm::import_state_with(&s, check)
+            .unwrap_or_else(|e| panic!("{name}: at the bound ({check:?}): {e}"));
+    }
+    PaneTerm::import_state(&back).unwrap_or_else(|e| panic!("{name}: exported again: {e}"))
+}
+
+fn links_of(t: &PaneTerm) -> Vec<LinkState> {
+    let s = t.export_state();
+    s.primary
+        .pages
+        .iter()
+        .filter_map(|p| match p {
+            PageState::Rows(r) => Some(r.links.iter().flatten().cloned().collect::<Vec<_>>()),
+            PageState::Blob(_) => None,
+        })
+        .flatten()
+        .chain(s.primary.cursor.link)
+        .collect()
+}
+
+/// An OSC 8 is at most 2047 bytes after its `8;` (`osc.zig`
+/// `Parser.MAX_BUF` with a NUL): `;URI`, or `id=ID;URI`.
+const URI: usize = 2046;
+const ID: usize = 2047 - "id=;http://id".len();
+/// A 16-bit style capacity's set holds 53247 styles but the default
+/// (`ref_counted_set.zig` `Layout.init`: 13/16 of 65536 buckets, id 0
+/// reserved).
+const STYLES: usize = 53_247;
+
+#[test]
+fn hyperlinks_at_and_past_their_bounds() {
+    let base = source(false).export_state();
+    let uri = |n: usize| {
+        move |s: &mut TermState| rich_page(s).links[1].as_mut().unwrap().uri = vec![b'h'; n]
+    };
+    let t = bound(&base, "page link URI", uri(URI), uri(URI + 1));
+    assert!(
+        links_of(&t).iter().any(|l| l.uri.len() == URI),
+        "the long URI is kept"
+    );
+    bound(&base, "empty page link URI", uri(1), uri(0));
+    // With an id, the two share the sequence.
+    let id = |n: usize| {
+        move |s: &mut TermState| {
+            let l = rich_page(s).links[1].as_mut().unwrap();
+            l.uri = b"http://id".to_vec();
+            l.id = LinkId::Explicit(vec![b'i'; n]);
+        }
+    };
+    let t = bound(&base, "page link id", id(ID), id(ID + 1));
+    assert!(
+        links_of(&t)
+            .iter()
+            .any(|l| l.id == LinkId::Explicit(vec![b'i'; ID])),
+        "the long id is kept"
+    );
+    bound(&base, "empty page link id", id(1), id(0));
+    let cursor = |n: usize, id: LinkId| {
+        move |s: &mut TermState| {
+            s.primary.cursor.link = Some(LinkState {
+                uri: vec![b'c'; n],
+                id,
+            });
+        }
+    };
+    let t = bound(
+        &base,
+        "cursor link URI",
+        cursor(URI, LinkId::Implicit(3)),
+        cursor(URI + 1, LinkId::Implicit(3)),
+    );
+    assert!(links_of(&t).iter().any(|l| l.uri.len() == URI));
+    bound(
+        &base,
+        "cursor link id",
+        cursor(9, LinkId::Explicit(vec![b'i'; ID])),
+        cursor(9, LinkId::Explicit(vec![b'i'; ID + 1])),
+    );
+    bound(
+        &base,
+        "empty cursor link id",
+        cursor(9, LinkId::Explicit(vec![b'i'])),
+        cursor(9, LinkId::Explicit(Vec::new())),
+    );
+    bound(
+        &base,
+        "link repeated",
+        |s| {
+            let p = rich_page(s);
+            let mut other = p.links[1].clone().unwrap();
+            other.uri.push(b'/');
+            p.links.push(Some(other));
+        },
+        |s| {
+            let p = rich_page(s);
+            let again = p.links[1].clone();
+            p.links.push(again);
+        },
+    );
+}
+
+#[test]
+fn page_tables_at_and_past_their_bounds() {
+    let base = source(false).export_state();
+    // page.zig `grapheme_max_len`: codepoints after a cell's first.
+    let t = bound(
+        &base,
+        "grapheme",
+        |s| set_first_grapheme(rich_page(s), 64),
+        |s| set_first_grapheme(rich_page(s), 65),
+    );
+    assert_eq!(rich_page(&mut t.export_state()).graphemes[1], 64);
+    let styles = |n: usize| {
+        move |s: &mut TermState| {
+            let p = rich_page(s);
+            let more = n + 1 - p.styles.len();
+            p.styles.extend(new_styles(more));
+        }
+    };
+    bound(&base, "styles", styles(STYLES), styles(STYLES + 1));
+    // An export writes each style and link once: a table that repeats one
+    // counts it again in its 16-bit reference count (65534 copies
+    // overflowed it in `RefCountedSet.addContext`). Here the table is as
+    // large as it may be, all copies of one style.
+    let repeated = |copy: bool| {
+        move |s: &mut TermState| {
+            let p = rich_page(s);
+            let more = STYLES + 1 - p.styles.len();
+            if copy {
+                let again = p.styles[1];
+                p.styles.extend(std::iter::repeat_n(again, more));
+            } else {
+                p.styles.extend(new_styles(more));
+            }
+        }
+    };
+    bound(&base, "style repeated", repeated(false), repeated(true));
+    // A style or link is counted once per cell in a 16-bit count: a page
+    // has room for 65519 cells (40 x 1637) and Ghostty's few references of
+    // its own. Every cell takes one style to fill it.
+    let room = |rows: u32| {
+        move |s: &mut TermState| {
+            let p = rich_page(s);
+            p.capacity.rows = rows;
+            for c in &mut p.cells {
+                c.style = 1;
+            }
+        }
+    };
+    bound(&base, "page cells", room(1637), room(1638));
+}
+
+#[test]
+fn hyperlinks_past_a_page_s_capacity_are_an_error() {
+    // Ghostty sizes a page's hyperlink set from 16-bit bytes; more links
+    // than it holds are refused, not a crash.
+    let base = source(false).export_state();
+    let mut s = base.clone();
+    let p = rich_page(&mut s);
+    for i in 0..5000 {
+        p.links.push(Some(LinkState {
+            uri: format!("http://many/{i}").into_bytes(),
+            id: LinkId::Implicit(1),
+        }));
+    }
+    let links = p.links.len();
+    for (i, c) in p.cells.iter_mut().enumerate() {
+        c.link = u16::try_from(1 + i % (links - 1)).unwrap();
+    }
+    match PaneTerm::import_state(&s) {
+        Ok(mut t) => {
+            use_pane(&mut t);
+            panic!("more links than a page holds imported");
+        }
+        Err(e) => assert!(matches!(e, StateError::Ghostty(_)), "{e}"),
+    }
+    // As many as an export can have: Ghostty's own page full of them.
+    let mut t = PaneTerm::new(40, 8, 3000);
+    for i in 0..3000 {
+        t.feed(format!("\x1b]8;;http://x/{i}\x07a\x1b]8;;\x07\r\n").as_bytes());
+    }
+    let mut b = PaneTerm::import_state(&t.export_state()).expect("a page full of links");
+    assert_eq!(use_pane(&mut b), use_pane(&mut t));
+}
+
+#[test]
+fn every_width_s_pages_import() {
+    // A page's room for cells (`MAX_PAGE_CELLS`) is above what Ghostty's
+    // pages have at any width a pane can have.
+    for cols in [1, 2, 3, 7, 40, 80, 214, 215, 216, 500, 1000, 4096, 10_000] {
+        let mut t = PaneTerm::new(cols, 5, 100_000);
+        let line = format!("\x1b[1;3{}m{}\r\n", cols % 8, "x".repeat(usize::from(cols)));
+        for _ in 0..(400_000 / usize::from(cols)).clamp(10, 3000) {
+            t.feed(line.as_bytes());
+        }
+        let s = t.export_state();
+        PaneTerm::import_state(&s).unwrap_or_else(|e| panic!("{cols} columns: {e}"));
+    }
+}
+
+#[test]
+fn the_osc8_bound_is_the_parser_s() {
+    // The longest link a program can open is the longest an import takes
+    // (`MAX_OSC8_BYTES`), with and without an id, and one byte more opens
+    // none.
+    let opened = |id: &str, uri: usize| {
+        let mut t = PaneTerm::new(40, 8, 100);
+        let mut bytes = format!("\x1b]8;{id};").into_bytes();
+        bytes.extend(std::iter::repeat_n(b'h', uri));
+        bytes.extend_from_slice(b"\x07x");
+        t.feed(&bytes);
+        let links = links_of(&t);
+        assert!(links.len() <= 2, "{links:?}");
+        let found = links.iter().any(|l| l.uri.len() == uri);
+        if found {
+            PaneTerm::import_state(&t.export_state()).expect("the parser's longest link");
+        }
+        found
+    };
+    assert!(opened("", 2046) && !opened("", 2047));
+    let id = format!("id={}", "i".repeat(100));
+    let uri = 2047 - id.len() - 1;
+    assert!(opened(&id, uri) && !opened(&id, uri + 1));
 }

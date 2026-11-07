@@ -461,7 +461,34 @@ Recorded per commit in git history; the list is kept current:
     every page passes `Page.verifyIntegrity` as it is added; without, a
     blob is decoded on its first read. vtmux-vt validates the whole state
     before any of this (`term/state/validate.rs`); these checks are the
-    second line.
+    second line. The importer leaves to that validation the bounds
+    Ghostty's parser and pages keep for live input, past which Ghostty
+    crashes or writes out of bounds instead of failing: a hyperlink's
+    URI and explicit id are not empty and fit one OSC 8 (`;URI` or
+    `id=ID;URI` in 2047 bytes, `osc.zig` `Parser.MAX_BUF` less the NUL
+    the parser adds; a longer string is a `string_alloc` span over 64
+    chunks, and `bitmap_allocator.zig` `findFreeChunks` then indexes a
+    bitmap past the end when the free span reaches it, and a URI and id
+    each within 64 chunks but more together pass the reflow's
+    `hyperlinkStringsFit` one at a time and then fail their `dupe`,
+    `unreachable` in safe builds: upstream bugs live OSC 8 never
+    reaches), at
+    most 64 codepoints after a cell's first (`page.zig`
+    `grapheme_max_len`), at most 53247 styles a page (a 16-bit style
+    capacity's `RefCountedSet`), no style or link twice in a page's table
+    and at most 65519 cells of room a page (each reference is counted in a
+    16-bit `CellCountInt`), and no open link on the inactive screen's
+    cursor (`Terminal.switchScreen` asserts it).
+    Blobs are Ghostty's own page memory and are trusted for where they
+    come from, not checked as rows are: only an upgrade's memory file,
+    the same user's, carries them (never a checkpoint on disk), and only a
+    build of the same `PATCH_STACK` reads them. The checksum finds a
+    damaged blob, not a forged one, and `check` is no defence against a
+    forged one either: `Page.verifyIntegrity` reads the page through its
+    own offsets and asserts, so a forged page with its checksum computed
+    again can crash it ("unreachable", an index past a slice). For a
+    blob whose checksum holds, `check` finds LZ4 bytes that do not decode
+    and a page the writer got wrong.
   - `ghostty_vtmux_set_active_screen`: switch screens with no mode side
     effects (vtmux pins OSC 133 marks on the primary before switching).
   Ghostty's own snapshot codec (`src/terminal/snapshot`) is not used: its
