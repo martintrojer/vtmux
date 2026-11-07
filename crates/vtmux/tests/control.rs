@@ -177,10 +177,10 @@ impl Control {
         });
     }
 
+    /// `line` and its newline in one write.
     fn send(&mut self, line: &str) {
         let stdin = self.stdin.as_mut().expect("stdin open");
-        stdin.write_all(line.as_bytes()).unwrap();
-        stdin.write_all(b"\n").unwrap();
+        stdin.write_all(format!("{line}\n").as_bytes()).unwrap();
         stdin.flush().unwrap();
     }
 
@@ -912,32 +912,45 @@ fn too_far_behind_lets_a_stalled_client_go() {
 /// `control_check_reply_buffer` (control.c:429-451): a client that does
 /// not read while its replies pass 64 MB is let go, `too far behind`. Let
 /// go, it reads no more lines: tmux's `control_discard` (control.c:1040-1048)
-/// stops the read event, so only lines already read run; vtmux stops once
-/// it has sent `Exit`. A line sent after the let-go never runs in either.
+/// stops the read event, so only lines already read run; vtmux runs the
+/// lines it read in that loop turn and sends `Exit` at its end
+/// (`control_tick`). A line sent after the let-go never runs in either.
 #[test]
 fn reply_buffer_cap_lets_a_stalled_client_go() {
     compare("reply_buffer_cap_lets_a_stalled_client_go", |w| {
-        let big = w.dir.path().join("big");
-        // 1 MiB: 16384 lines of 64 bytes.
+        // 4 MiB: 65536 lines of 64 bytes.
         let line = format!("{}\n", "x".repeat(63));
-        std::fs::write(&big, line.repeat(1 << 14)).unwrap();
-        w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]);
+        std::fs::write(w.dir.path().join("big"), line.repeat(1 << 16)).unwrap();
+        w.run(&["new", "-d", "-s", "a", "-x", "80", "-y", "24", "cat", "-"]);
         let mut c = w.control_stalled(&["attach", "-t", "a"]);
         w.wait_clients(1);
-        c.send(&format!("load-buffer -b big {}", big.display()));
-        // 80 MB of replies, none read.
-        for _ in 0..80 {
-            c.send("show-buffer -b big");
-        }
-        // Wait until the server has run every `show-buffer`, however long
-        // that takes (a debug vtmux without a UTF-8 locale needs over 2 s),
-        // not a fixed stall. Lines run in order, so the marker is set after
-        // the last reply is queued or dropped, and after the let-go at the
-        // 64th. The lines were all read before it (one write, a few KB).
+        // 80 MB of replies, none read, then a marker: the server has run
+        // every `show-buffer` once it is set, however long that takes (a
+        // debug vtmux without a UTF-8 locale needs over 2 s). The marker
+        // runs only if it was read in the same go as the show-buffer that
+        // passes the cap: the server runs what it read without reading
+        // more, and drops what comes after the let-go. So the whole
+        // script is one write of less than `PIPE_BUF` (512 on macOS),
+        // which one read takes whole: tmux's from the pipe, vtmux's
+        // client's into one `Stdin` frame. Sent a line at a time, the
+        // server could read the lines up to past the cap but not the
+        // marker, run them, and drop the marker (macOS CI). `big` is
+        // relative to the session's directory (server_client_get_cwd), to
+        // keep the script short.
+        let mut script = String::from("load-buffer -b big big\n");
+        script.push_str(&"show-buffer -b big\n".repeat(20));
+        script.push_str("set -g @rvdone 1");
+        assert!(script.len() < 512, "{} bytes and a newline", script.len());
+        c.send(&script);
         let set = |w: &World, name: &str| w.run(&["show", "-gv", name]).0.trim() == "1";
-        c.send("set -g @rvdone 1");
         let end = Instant::now() + Duration::from_secs(60);
         while !set(w, "@rvdone") {
+            let gone = !w.run(&["lsc", "-F", "x"]).0.contains('x');
+            assert!(
+                !gone || set(w, "@rvdone"),
+                "{}: let go before the marker was read",
+                w.bin.display()
+            );
             assert!(
                 Instant::now() < end,
                 "{}: replies never queued",
