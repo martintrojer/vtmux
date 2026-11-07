@@ -1784,3 +1784,165 @@ fn a_client_that_does_not_follow_is_detached_and_named_to_the_requester() {
     let left = world.run(&["lsc", "-F", "#{client_name}"]);
     assert!(!left.contains("/dev/vtu-"), "{left}");
 }
+
+/// The first index at or after `from` where `needle` starts in `hay`.
+fn find_from(hay: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
+    hay.get(from..)?
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .map(|i| from + i)
+}
+
+/// Ten panes in session `s` printing `n1`, `n2`, ... until `stop` exists,
+/// then `END`: two in window `w0` (beside its `cat -`) and two in each of
+/// `w1` to `w4`. Their ids.
+fn ten_streams(world: &World, stop: &Path) -> Vec<String> {
+    let printer = format!(
+        "i=0; while [ ! -e '{}' ]; do i=$((i+1)); echo n$i; \
+         if [ $((i % 50)) = 0 ]; then sleep 0.01; fi; done; echo END; exec cat -",
+        stop.display()
+    );
+    for w in 0..5 {
+        let window = format!("w{w}");
+        if w > 0 {
+            let args = ["neww", "-d", "-t", "s", "-n", &window, "sh", "-c", &printer];
+            world.run(&args);
+        } else {
+            world.run(&["splitw", "-d", "-t", "s:w0", "sh", "-c", &printer]);
+        }
+        let target = format!("s:{window}");
+        world.run(&["splitw", "-d", "-t", &target, "sh", "-c", &printer]);
+    }
+    let format = "#{pane_id} #{pane_start_command}";
+    let streaming: Vec<String> = world
+        .run(&["lsp", "-s", "-t", "s", "-F", format])
+        .lines()
+        .filter(|l| l.contains("stop"))
+        .map(|l| l.split(' ').next().unwrap().to_owned())
+        .collect();
+    assert_eq!(streaming.len(), 10, "{streaming:?}");
+    streaming
+}
+
+/// How long after `start` the client, sent `at` bytes then, got its full
+/// redraw: its terminal started again (`Caps::restart`), then the status
+/// line's `mark`.
+fn redrawn_after(attached: &Attached, at: usize, mark: &str, start: Instant) -> Duration {
+    loop {
+        let bytes = attached.bytes.lock().unwrap();
+        if let Some(i) = find_from(&bytes, at, b"\x1b[?996n")
+            && find_from(&bytes, i, mark.as_bytes()).is_some()
+        {
+            return start.elapsed();
+        }
+        drop(bytes);
+        assert!(start.elapsed() < Duration::from_secs(20), "no redraw");
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Control client `c` got pane `p`'s `n1` to `nN` and `END`, each once and
+/// in order.
+fn every_line_once(c: &Control, p: &str, name: &str) {
+    let text = String::from_utf8(output_of(&c.lines.lock().unwrap(), p)).unwrap();
+    let lines: Vec<&str> = text.split_terminator("\r\n").collect();
+    let (last, numbers) = lines.split_last().unwrap();
+    assert_eq!(*last, "END", "{name} client, {p}");
+    for (i, line) in numbers.iter().enumerate() {
+        assert_eq!(*line, format!("n{}", i + 1), "{name} client, {p}, line {i}");
+    }
+}
+
+/// Decision 13 under load (live-upgrade spec, *Tests*): ten panes stream
+/// numbered lines, one attached client shows two of them and two control
+/// clients read every pane's `%output`, and the server upgrades onto
+/// itself mid-stream. No process is restarted (the server, every pane and
+/// the client keep their pids), each control client gets every line of
+/// every pane exactly once and in order, and once the streams end the
+/// client's screen is what a fresh attach shows. The time from the request
+/// to the client's redraw is printed against the 1 s target (a debug
+/// build on a loaded host: recorded, never asserted; `scripts/bench.py
+/// upgrade` measures a release build).
+#[test]
+fn an_upgrade_under_load_loses_and_repeats_nothing() {
+    const MARK: &str = "Q9Q";
+    let world = World::new();
+    let out = output_retrying(|| {
+        world.command(&[
+            "new", "-d", "-s", "s", "-n", "w0", "-x", "80", "-y", "24", "cat", "-",
+        ])
+    });
+    assert!(out.status.success(), "{out:?}");
+    world.run(&["set", "-g", "status-right", MARK]);
+    world.run(&["select-pane", "-t", "s:w0", "-T", "t"]);
+    let c1 = Control::new(&world, "s");
+    let c2 = Control::new(&world, "s");
+    let attached = Attached::new(&world, "s");
+    wait("three clients", || world.run(&["lsc"]).lines().count() == 3);
+    let stop = world.home.path().join("stop");
+    let streaming = ten_streams(&world, &stop);
+    let seen = |c: &Control, p: &str| output_of(&c.lines.lock().unwrap(), p).len();
+    let all_past = |at: &[(usize, usize)], more: usize| {
+        streaming
+            .iter()
+            .zip(at)
+            .all(|(p, &(a, b))| seen(&c1, p) > a + more && seen(&c2, p) > b + more)
+    };
+    // Some 20 KB a pane, so a good deal is in flight at the upgrade.
+    wait("every pane streaming", || {
+        all_past(&vec![(0, 0); streaming.len()], 20_000)
+    });
+
+    let pid = world.pid();
+    let panes = world.pane_pids();
+    let client = attached.pid();
+    let at = attached.len();
+    let before: Vec<(usize, usize)> = streaming
+        .iter()
+        .map(|p| (seen(&c1, p), seen(&c2, p)))
+        .collect();
+    let start = Instant::now();
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()), "the server execed");
+    let answered = start.elapsed();
+    let redrawn = redrawn_after(&attached, at, MARK, start);
+    eprintln!(
+        "upgrade under load (10 streaming panes, 1 attached, 2 control clients): \
+         answered after {} ms, the client redrawn after {} ms (target < 1000 ms, decision 13)",
+        answered.as_millis(),
+        redrawn.as_millis()
+    );
+
+    assert_eq!(world.pid(), pid);
+    assert_eq!(world.pane_pids(), panes);
+    assert_eq!(attached.pid(), client, "the client re-executed in place");
+    wait("the streams to go on", || all_past(&before, 20_000));
+    std::fs::write(&stop, "").unwrap();
+    let ended = |c: &Control| {
+        streaming
+            .iter()
+            .all(|p| output_of(&c.lines.lock().unwrap(), p).ends_with(b"END\r\n"))
+    };
+    wait("the end of every stream", || ended(&c1) && ended(&c2));
+    for p in &streaming {
+        every_line_once(&c1, p, "first");
+        every_line_once(&c2, p, "second");
+    }
+    assert!(!c1.has("%exit") && !c2.has("%exit"));
+
+    let fresh = Attached::new(&world, "s");
+    wait("the fresh client's first draw", || {
+        fresh.screen().contains(MARK)
+    });
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let (a, f) = (attached.screen(), fresh.screen());
+        if a == f {
+            break;
+        }
+        assert!(
+            Instant::now() < end,
+            "re-attached:\n{a}\nfresh attach:\n{f}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
