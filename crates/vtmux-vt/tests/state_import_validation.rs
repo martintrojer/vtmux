@@ -637,3 +637,216 @@ fn the_osc8_bound_is_the_parser_s() {
     let uri = 2047 - id.len() - 1;
     assert!(opened(&id, uri) && !opened(&id, uri + 1));
 }
+
+/// Cell kinds (`CellState::flags` bits 0-1): background only, palette or
+/// RGB.
+const KIND_PALETTE: u16 = 2;
+const KIND_RGB: u16 = 3;
+
+/// `source`, then lines erased with a palette and an RGB background:
+/// background-only cells (`Style.bgCell`) on the screen.
+fn with_background_cells() -> TermState {
+    let mut t = source(false);
+    t.feed(b"\x1b[41m\x1b[K\r\n\x1b[48;2;1;2;3m\x1b[K\r\n\x1b[m");
+    t.export_state()
+}
+
+/// The screen's page and the index of its first cell of `kind`.
+fn background_cell(s: &mut TermState, kind: u16) -> (&mut PageRows, usize) {
+    s.primary
+        .pages
+        .iter_mut()
+        .rev()
+        .find_map(|p| match p {
+            PageState::Rows(r) => r
+                .cells
+                .iter()
+                .position(|c| c.flags & 3 == kind)
+                .map(|i| (r, i)),
+            PageState::Blob(_) => None,
+        })
+        .expect("a background cell")
+}
+
+fn refused_from(base: &TermState, name: &str, change: impl FnOnce(&mut TermState)) {
+    let mut s = base.clone();
+    change(&mut s);
+    match PaneTerm::import_state(&s) {
+        Ok(mut t) => {
+            use_pane(&mut t);
+            panic!("{name}: imported");
+        }
+        Err(e) => assert!(matches!(e, StateError::Invalid(_)), "{name}: {e}"),
+    }
+}
+
+#[test]
+fn background_cells_carry_no_text_attributes() {
+    // An erase leaves a background cell with no style and no link
+    // (style.zig `Style.bgCell`). With a style it imported and a capture
+    // reached `unreachable` in c/style.zig; with a link a resize unwrapped
+    // a null in page.zig `clonePartialRowFrom` (the import re-review).
+    let base = with_background_cells();
+    let mut t = PaneTerm::import_state(&base).expect("background cells as exported");
+    use_pane(&mut t);
+    for kind in [KIND_PALETTE, KIND_RGB] {
+        let styled = |s: &mut TermState| {
+            let (p, i) = background_cell(s, kind);
+            p.styles.extend(new_styles(1));
+            p.cells[i].style = u16::try_from(p.styles.len() - 1).unwrap();
+        };
+        refused_from(&base, "background cell with a style", styled);
+        let linked = |s: &mut TermState| {
+            let (p, i) = background_cell(s, kind);
+            p.links.push(Some(LinkState {
+                uri: b"http://bg".to_vec(),
+                id: LinkId::Implicit(1),
+            }));
+            p.cells[i].link = u16::try_from(p.links.len() - 1).unwrap();
+        };
+        refused_from(&base, "background cell with a link", linked);
+        // Nor anything else a printed character has.
+        for (name, flags) in [
+            ("wide", 1 << 2),
+            ("spacer head", 3 << 2),
+            ("protected", 1 << 4),
+            ("prompt", 2 << 6),
+        ] {
+            refused_from(&base, name, |s| {
+                let (p, i) = background_cell(s, kind);
+                p.cells[i].flags |= flags;
+            });
+        }
+    }
+}
+
+#[test]
+fn background_cells_round_trip_wherever_ghostty_makes_them() {
+    // Erased with a background under ACS, in an OSC 133 prompt and input,
+    // with tabs across them and a reverse index: each kind of background
+    // cell an export holds imports as it was.
+    let mut a = PaneTerm::new(40, 8, 100);
+    a.feed(b"\x1b(0\x1b[44m\x1b[Kq\tq\r\n\x1b(B");
+    a.feed(b"\x1b]133;A\x07\x1b[45;1m\x1b[K$ \x1b]133;B\x07\x1b[48;5;200m\x1b[Kls\r\n");
+    a.feed(b"\x1b[48;2;9;8;7m\x1b[2K\t\tx\x1b[1;1H\x1bM\x1b[L\x1b[3@\x1b[m\r\n");
+    let s = a.export_state();
+    let kinds: Vec<(u16, u8)> = s
+        .primary
+        .pages
+        .iter()
+        .flat_map(|p| match p {
+            PageState::Rows(r) => r.cells.clone(),
+            PageState::Blob(_) => Vec::new(),
+        })
+        .filter(|c| c.flags & 3 >= KIND_PALETTE)
+        .map(|c| (c.flags & 3, c.tab))
+        .collect();
+    for kind in [KIND_PALETTE, KIND_RGB] {
+        assert!(kinds.iter().any(|&(k, _)| k == kind), "kind {kind}");
+    }
+    assert!(kinds.iter().any(|&(_, tab)| tab != 0), "a tab over them");
+    let mut b = PaneTerm::import_state(&s).expect("Ghostty's background cells");
+    assert_eq!(
+        exported(&b, CompressedPages::Rows),
+        exported(&a, CompressedPages::Rows)
+    );
+    assert_eq!(use_pane(&mut b), use_pane(&mut a));
+}
+
+#[test]
+fn cursor_semantic_content_is_as_ghostty_sets_it() {
+    // Only OSC 133;I's input is cleared at the end of a line (Screen.zig
+    // `cursorSetSemanticContent`), and a linefeed asserts the flag is
+    // never set with output (Terminal.zig `index`): imported so, the
+    // pane's first LF reached `unreachable` (the import re-review).
+    // vtmux keeps OSC 133 from Ghostty, so its own exports have output
+    // and no flag; the rest is what Ghostty's OSC 133 sets.
+    let base = source(false).export_state();
+    let c = &base.primary.cursor;
+    assert_eq!((c.semantic_content, c.semantic_clear_eol), (0, false));
+    for (content, eol) in [(1, true), (1, false), (2, false)] {
+        let mut s = base.clone();
+        s.primary.cursor.semantic_content = content;
+        s.primary.cursor.semantic_clear_eol = eol;
+        let mut t = PaneTerm::import_state(&s)
+            .unwrap_or_else(|e| panic!("semantic content {content}, eol {eol}: {e}"));
+        use_pane(&mut t);
+    }
+    for (content, eol) in [(0, true), (2, true), (3, false)] {
+        refused_from(
+            &base,
+            &format!("semantic content {content}, eol {eol}"),
+            |s| {
+                s.primary.cursor.semantic_content = content;
+                s.primary.cursor.semantic_clear_eol = eol;
+            },
+        );
+    }
+}
+
+#[test]
+fn capacity_hints_are_bounded_by_the_page_s_content() {
+    // Ghostty allocates a hint whole, and zeroes it in its safe builds: a
+    // one-row page asking for a gigabyte of grapheme and string bytes took
+    // gigabytes (the import re-review). Past a fresh page's capacity or a
+    // few times what the page holds, a hint is refused.
+    let base = source(false).export_state();
+    for (name, set) in [
+        (
+            "grapheme bytes",
+            (|p: &mut PageRows| p.capacity.grapheme_bytes = 64 << 20) as fn(&mut PageRows),
+        ),
+        ("string bytes", |p| p.capacity.string_bytes = 64 << 20),
+        ("styles", |p| p.capacity.styles = u32::from(u16::MAX)),
+    ] {
+        refused_from(&base, name, |s| set(rich_page(s)));
+        // A page of one row, the review's case.
+        refused_from(&base, &format!("one row, {name}"), |s| {
+            let p = rich_page(s);
+            p.rows.truncate(1);
+            p.cells.truncate(usize::from(p.rows[0].cell_count));
+            p.graphemes.clear();
+            for c in &mut p.cells {
+                c.flags &= !3;
+            }
+            set(p);
+        });
+    }
+    // As exported, they import.
+    PaneTerm::import_state(&base).expect("the hints as exported");
+}
+
+#[test]
+fn a_capacity_grown_for_what_was_erased_exports_within_its_bound() {
+    // A live page's capacity only grows: graphemes over a fresh page's
+    // room double it (`PageList.increaseCapacity`), and erasing them
+    // leaves it. The export writes the hint within what the page now
+    // holds, so the state still imports.
+    let mut a = PaneTerm::new(40, 8, 100);
+    let cell = format!("e{}", "\u{301}".repeat(8));
+    for _ in 0..8 {
+        a.feed(cell.repeat(40).as_bytes());
+    }
+    let grown = a.export_state();
+    let PageState::Rows(p) = grown.primary.pages.last().unwrap() else {
+        panic!("rows")
+    };
+    assert!(p.capacity.grapheme_bytes > 8192, "{:?}", p.capacity);
+    // EL on each row: an ED from the top would scroll it into history.
+    a.feed("\x1b[2K\x1bM".repeat(8).as_bytes());
+    let s = a.export_state();
+    let PageState::Rows(p) = s.primary.pages.last().unwrap() else {
+        panic!("rows")
+    };
+    assert!(
+        p.graphemes.is_empty() && p.capacity.grapheme_bytes == 8192,
+        "{:?}",
+        p.capacity
+    );
+    let mut b = PaneTerm::import_state(&s).expect("the erased page");
+    assert_eq!(
+        exported(&b, CompressedPages::Rows),
+        exported(&a, CompressedPages::Rows)
+    );
+    assert_eq!(use_pane(&mut b), use_pane(&mut a));
+}

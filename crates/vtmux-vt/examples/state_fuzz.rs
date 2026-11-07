@@ -1,11 +1,14 @@
 //! Mutation fuzz of `PaneTerm::import_state` (live upgrade spec, decision
 //! 23: a malformed state is an error, never a crash).
 //!
-//! Usage: `state_fuzz rows|state|links|styles|graphemes|blob|blob-full FIRST
-//! COUNT` (`blob-full` imports with `ImportCheck::Full`, the dry run's
-//! check; `links`, `styles` and `graphemes` aim at the tables Ghostty
-//! bounds: URI and id lengths in pages and at the cursor, style counts and
-//! repeats, codepoints per cell, cells per page). Each seed takes an
+//! Usage: `state_fuzz rows|state|links|styles|graphemes|cells|cursor|capacity|blob|blob-full
+//! FIRST COUNT` (`blob-full` imports with `ImportCheck::Full`, the dry
+//! run's check; `links`, `styles` and `graphemes` aim at the tables
+//! Ghostty bounds: URI and id lengths in pages and at the cursor, style
+//! counts and repeats, codepoints per cell, cells per page; `cells` at
+//! each cell kind's attributes, `cursor` at the cursors' semantic content
+//! and flags, `capacity` at capacity hints), or `state_fuzz amp PAGES
+//! BYTES`: PAGES pages asking for BYTES of grapheme and string room each. Each seed takes an
 //! export of a pane with styled, linked, wide and grapheme history
 //! (compressed, so `blob` has blobs; every other seed with an alternate
 //! screen up), changes one to three fields at random, imports it, and
@@ -80,6 +83,17 @@ fn base(blob: bool, alt: bool) -> TermState {
                 i % 8,
                 i % 5,
                 "w".repeat(i % 37)
+            )
+            .as_bytes(),
+        );
+    }
+    // Background-only cells (an erase with a background colour), palette
+    // and RGB, with tabs across some.
+    for i in 0..30 {
+        a.feed(
+            format!(
+                "\x1b[4{}m\x1b[K\t{i}\r\n\x1b[48;2;{i};2;3m\x1b[K\r\n\x1b[m",
+                i % 8
             )
             .as_bytes(),
         );
@@ -470,6 +484,190 @@ fn mutate_graphemes(st: &mut TermState, r: &mut Rng) {
     }
 }
 
+/// One cell of a page with cells: its page and index.
+fn some_cell<'a>(st: &'a mut TermState, r: &mut Rng) -> Option<(&'a mut PageRows, usize)> {
+    let p = rows_page(st, r)?;
+    if p.cells.is_empty() {
+        return None;
+    }
+    let k = r.below(p.cells.len());
+    Some((p, k))
+}
+
+/// Cell kinds with the attributes of another kind: a background-only
+/// cell with a style, a link, a width, protection or semantic content,
+/// and text cells with any of their tables' entries.
+fn mutate_cells(st: &mut TermState, r: &mut Rng) {
+    let c = r.below(6);
+    print!(" cellcase{c}");
+    let Some((p, k)) = some_cell(st, r) else {
+        return;
+    };
+    let (styles, links) = (p.styles.len(), p.links.len());
+    let cell = &mut p.cells[k];
+    match c {
+        // Background only, with a style or a link from the page's tables.
+        0 | 1 => {
+            cell.flags = (cell.flags & !3) | (2 + u16::from(r.byte() & 1));
+            cell.content = r.wild() & 0xff_ffff;
+            if c == 0 || r.below(2) == 0 {
+                cell.style = u16::try_from(r.below(styles)).unwrap_or(0);
+            }
+            if c == 1 || r.below(2) == 0 {
+                cell.link = u16::try_from(r.below(links)).unwrap_or(0);
+            }
+        }
+        // Any width, protection, semantic content or palette form.
+        2 => cell.flags ^= 1 << (2 + r.below(6)),
+        // A text cell's table entries, or none.
+        3 => {
+            cell.style = u16::try_from(r.below(styles)).unwrap_or(0);
+            cell.link = u16::try_from(r.below(links)).unwrap_or(0);
+        }
+        // An empty text cell with a style and a link.
+        4 => {
+            cell.flags &= !3;
+            cell.content = 0;
+            cell.style = u16::try_from(r.below(styles)).unwrap_or(0);
+            cell.link = u16::try_from(r.below(links)).unwrap_or(0);
+        }
+        // Every cell of the page so.
+        _ => {
+            let kind = r.byte() & 3;
+            let style = u16::try_from(r.below(styles)).unwrap_or(0);
+            let link = u16::try_from(r.below(links)).unwrap_or(0);
+            for cell in &mut p.cells {
+                if kind >= 2 && cell.flags & 3 >= 2 {
+                    cell.style = style;
+                    cell.link = link;
+                } else if kind < 2 && cell.flags & 3 < 2 {
+                    cell.link = link;
+                }
+            }
+        }
+    }
+}
+
+/// The cursors' semantic content, styles, links and flags.
+fn mutate_cursor(st: &mut TermState, r: &mut Rng) {
+    let c = r.below(5);
+    print!(" cursorcase{c}");
+    let screen = match st.alternate.as_mut() {
+        Some(alt) if r.below(2) == 0 => alt,
+        _ => &mut st.primary,
+    };
+    let cur = &mut screen.cursor;
+    match c {
+        0 => {
+            cur.semantic_content = r.byte() % 5;
+            cur.semantic_clear_eol = r.below(2) == 0;
+        }
+        1 => {
+            cur.visual = r.byte();
+            cur.protected ^= true;
+            cur.pending_wrap ^= true;
+        }
+        2 => screen.semantic_click = (r.byte() % 4, r.byte() % 8),
+        3 => {
+            screen.hyperlink_counter = r.wild();
+            if let Some(LinkState {
+                id: LinkId::Implicit(n),
+                ..
+            }) = cur.link.as_mut()
+            {
+                *n = r.wild();
+            }
+        }
+        _ => {
+            if let Some(saved) = screen.saved_cursor.as_mut() {
+                saved.pending_wrap ^= true;
+                saved.origin ^= true;
+                saved.protected ^= true;
+            }
+        }
+    }
+}
+
+/// A capacity hint that amplifies: 1 GiB, edges, and pages cut to one
+/// row (the review's `amp`).
+fn mutate_capacity(st: &mut TermState, r: &mut Rng) {
+    let c = r.below(4);
+    print!(" capcase{c}");
+    let Some(p) = rows_page(st, r) else { return };
+    if c == 0 {
+        p.rows.truncate(1);
+        let n = p.rows[0].cell_start as usize + usize::from(p.rows[0].cell_count);
+        p.cells.truncate(n.min(p.cells.len()));
+        p.graphemes.clear();
+        for cell in &mut p.cells {
+            cell.flags &= !3;
+        }
+    }
+    let v = match r.below(3) {
+        0 => 1 << (10 + r.below(21)),
+        1 => r.wild(),
+        _ => r.wild() & 0x3ff_ffff,
+    };
+    match r.below(5) {
+        0 => p.capacity.rows = v & 0xffff,
+        1 => p.capacity.styles = v,
+        2 => p.capacity.hyperlink_bytes = v,
+        3 => p.capacity.grapheme_bytes = v,
+        _ => p.capacity.string_bytes = v,
+    }
+}
+
+/// The review's `amp`: a state of `pages` one-row pages, each asking for
+/// `bytes` of grapheme and string room.
+fn amp(pages: usize, bytes: u32) {
+    let mut a = PaneTerm::new(80, 24, 3000);
+    for i in 0..(pages * 600) {
+        a.feed(format!("{i}\r\n").as_bytes());
+    }
+    let mut st = a.export_state();
+    let mut cut = 0;
+    for page in &mut st.primary.pages {
+        if let PageState::Rows(p) = page {
+            if cut == pages {
+                break;
+            }
+            p.capacity.grapheme_bytes = bytes;
+            p.capacity.string_bytes = bytes;
+            cut += 1;
+        }
+    }
+    match PaneTerm::import_state(&st) {
+        Ok(mut b) => {
+            exercise(&mut b);
+            println!("amp {pages} x {bytes}: imported");
+        }
+        Err(e) => println!("amp {pages} x {bytes}: refused: {e}"),
+    }
+}
+
+/// `DUMP=1`: each page of rows, what Ghostty sizes it by.
+fn dump(st: &TermState) {
+    let screens = std::iter::once(("primary", &st.primary))
+        .chain(st.alternate.iter().map(|a| ("alternate", a)));
+    for (name, screen) in screens {
+        for (i, page) in screen.pages.iter().enumerate() {
+            if let PageState::Rows(p) = page {
+                let linked = p.cells.iter().filter(|c| c.link != 0).count();
+                let styled = p.cells.iter().filter(|c| c.style != 0).count();
+                let background = p.cells.iter().filter(|c| c.flags & 3 >= 2).count();
+                println!(
+                    "  {name} page {i}: {} rows, {} cells ({linked} linked, {styled} styled, {background} background), {} styles, {} links, {:?}",
+                    p.rows.len(),
+                    p.cells.len(),
+                    p.styles.len(),
+                    p.links.len(),
+                    p.capacity
+                );
+            }
+        }
+    }
+}
+
 fn exercise(b: &mut PaneTerm) {
     let all = CaptureOpts {
         start: LineRef::Start,
@@ -514,6 +712,12 @@ fn exercise(b: &mut PaneTerm) {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let kind = args.get(1).map_or("rows", String::as_str);
+    if kind == "amp" {
+        let pages = args.get(2).and_then(|a| a.parse().ok()).unwrap_or(4);
+        let bytes = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(1 << 30);
+        amp(pages, bytes);
+        return;
+    }
     let first: u64 = args.get(2).and_then(|a| a.parse().ok()).unwrap_or(0);
     let count: u64 = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(100);
     std::panic::set_hook(Box::new(|info| eprintln!("panic: {info}")));
@@ -537,6 +741,9 @@ fn main() {
                 "links" => mutate_links(&mut st, &mut r),
                 "styles" => mutate_styles(&mut st, &mut r),
                 "graphemes" => mutate_graphemes(&mut st, &mut r),
+                "cells" => mutate_cells(&mut st, &mut r),
+                "cursor" => mutate_cursor(&mut st, &mut r),
+                "capacity" => mutate_capacity(&mut st, &mut r),
                 _ => mutate_state(&mut st, &mut r),
             }
             if st.primary.pages.is_empty() {
@@ -544,6 +751,9 @@ fn main() {
             }
         }
         println!();
+        if std::env::var_os("DUMP").is_some() {
+            dump(&st);
+        }
         let _ = out.flush();
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             match PaneTerm::import_state_with(&st, check) {

@@ -17,8 +17,8 @@
 use std::collections::HashSet;
 
 use super::{
-    FrozenRowState, GhosttyCharset, GhosttyCursor, LinkId, LinkState, PATCH_STACK, PageRows,
-    PageState, PaneState, RowState, ScreenState, StateError, StyleState, TermState,
+    FrozenRowState, GhosttyCharset, GhosttyCursor, LinkId, LinkState, PATCH_STACK, PageCapacity,
+    PageRows, PageState, PaneState, RowState, ScreenState, StateError, StyleState, TermState,
 };
 use crate::snapshot::{Color, Underline};
 
@@ -143,10 +143,25 @@ fn screen(sc: &ScreenState, s: &TermState) -> Result<(), StateError> {
     Ok(())
 }
 
+/// Ghostty's `Cell.SemanticContent`: output, input, prompt.
+const SEMANTIC_OUTPUT: u8 = 0;
+const SEMANTIC_INPUT: u8 = 1;
+const SEMANTIC_PROMPT: u8 = 2;
+
 fn cursor(c: &GhosttyCursor, s: &TermState) -> Result<(), StateError> {
     // Ghostty's cursor is always on the screen; a pending wrap keeps it
     // in the last column.
     check(c.x < s.cols && c.y < s.rows, "cursor off the screen")?;
+    // Only OSC 133;I's input clears at the end of a line (Screen.zig
+    // `cursorSetSemanticContent`: output and prompt clear the flag), and
+    // a linefeed asserts it is never set with output (Terminal.zig
+    // `index`, `unreachable` past it). vtmux keeps OSC 133 from Ghostty
+    // (`ScanEvent::Osc133`), so its own exports have neither.
+    check(
+        c.semantic_content <= SEMANTIC_PROMPT
+            && (!c.semantic_clear_eol || c.semantic_content == SEMANTIC_INPUT),
+        "cursor semantic content",
+    )?;
     c.link.as_ref().map_or(Ok(()), link)
 }
 
@@ -311,9 +326,72 @@ pub(super) fn page(p: &PageState, cols: u16) -> Result<(), StateError> {
 const KIND_TEXT: u16 = 0;
 const KIND_GRAPHEME: u16 = 1;
 const KIND_PALETTE: u16 = 2;
+const NARROW: u16 = 0;
 const WIDE: u16 = 1;
 const SPACER_TAIL: u16 = 2;
 const SPACER_HEAD: u16 = 3;
+const PROTECTED: u16 = 1 << 4;
+
+/// Ghostty's page capacities its own pages start from (`page.zig`
+/// `std_capacity`, `string_bytes_default`): a hint up to these is what a
+/// fresh page has, whatever it holds.
+const STD_STYLES: u32 = 128;
+const STD_GRAPHEME_BYTES: u32 = 8192;
+const STD_STRING_BYTES: u32 = 2048;
+
+/// How far a capacity hint may exceed what its page holds (see
+/// [`capacity_bound`]).
+const HINT_FACTOR: u32 = 4;
+
+/// The largest capacity hint a page of rows may carry: what a fresh
+/// Ghostty page has, or [`HINT_FACTOR`] times what the page's content
+/// takes, whichever is more. Ghostty allocates (and in its safe builds
+/// zeroes) all of a hint, so without a bound a one-cell page asking for
+/// a gigabyte of grapheme and string bytes cost gigabytes (the import
+/// re-review); with it, an imported page costs at most a standard page
+/// plus a few times its own content. The row hint is bounded by
+/// [`MAX_PAGE_CELLS`] (half a megabyte of cells, a standard page's size)
+/// and the hyperlink bytes by their 16-bit field.
+///
+/// A live page's capacity only grows (`PageList.increaseCapacity`
+/// doubles it, or projects its use to every row), so it can be far over
+/// this once what needed it is erased: the export writes the hint
+/// clamped to the bound (`PageRows::from_ffi`), so every export passes,
+/// and a page imported from it grows again as Ghostty's own do.
+pub(super) fn capacity_bound(p: &PageRows) -> PageCapacity {
+    // Ghostty's allocators hand out whole chunks (`page.zig`
+    // `grapheme_chunk`, `string_chunk`; `bitmap_allocator.zig`
+    // `bytesRequired`).
+    let chunks = |bytes: usize, chunk: usize| bytes.div_ceil(chunk).saturating_mul(chunk);
+    let mut graphemes = 0usize;
+    let mut rest = p.graphemes.as_slice();
+    while let [_, n, tail @ ..] = rest {
+        let n = (*n as usize).min(tail.len());
+        graphemes = graphemes.saturating_add(chunks(n.saturating_mul(4), 16));
+        rest = &tail[n..];
+    }
+    let strings = p.links.iter().flatten().fold(0usize, |acc, l| {
+        let id = match &l.id {
+            LinkId::Explicit(id) => chunks(id.len(), 32),
+            LinkId::Implicit(_) => 0,
+        };
+        acc.saturating_add(chunks(l.uri.len(), 32))
+            .saturating_add(id)
+    });
+    let times = |need: usize, floor: u32| {
+        u32::try_from(need)
+            .unwrap_or(u32::MAX)
+            .saturating_mul(HINT_FACTOR)
+            .max(floor)
+    };
+    PageCapacity {
+        rows: u32::try_from(MAX_PAGE_CELLS / usize::from(p.cols.max(1))).unwrap_or(u32::MAX),
+        styles: times(p.styles.len().saturating_sub(1), STD_STYLES).min(u32::from(u16::MAX)),
+        hyperlink_bytes: u32::from(u16::MAX),
+        grapheme_bytes: times(graphemes, STD_GRAPHEME_BYTES),
+        string_bytes: times(strings, STD_STRING_BYTES),
+    }
+}
 
 /// A page of rows as Ghostty's own pages are (`page.zig`
 /// `verifyIntegrity`) and as the export writes them: every row's cells
@@ -346,6 +424,13 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
     check(
         room.saturating_mul(usize::from(cols)) <= MAX_PAGE_CELLS,
         "page cell count",
+    )?;
+    let most = capacity_bound(p);
+    check(
+        cap.styles <= most.styles
+            && cap.grapheme_bytes <= most.grapheme_bytes
+            && cap.string_bytes <= most.string_bytes,
+        "page capacity over its content",
     )?;
     let mut graphemes = Graphemes::new(&p.graphemes);
     let mut next = 0usize;
@@ -398,6 +483,21 @@ fn rows(p: &PageRows, cols: u16) -> Result<(), StateError> {
             )?;
             check(usize::from(c.style) < p.styles.len(), "cell style")?;
             check(usize::from(c.link) < p.links.len(), "cell hyperlink")?;
+            // A background-only cell is what an erase with a background
+            // colour leaves (Screen.zig `blankCell`, style.zig
+            // `Style.bgCell`): narrow, unprotected, output, and with no
+            // style or link. Ghostty reads neither on such a cell: a style
+            // reached `unreachable` in a capture (c/style.zig), a link a
+            // null unwrap in a resize (page.zig `clonePartialRowFrom`).
+            check(
+                kind < KIND_PALETTE
+                    || (width == NARROW
+                        && c.flags & PROTECTED == 0
+                        && c.flags >> 6 == u16::from(SEMANTIC_OUTPUT)
+                        && c.style == 0
+                        && c.link == 0),
+                "background cell with text attributes",
+            )?;
             let index = u32::try_from(start + x).map_err(|_| invalid("page cell count"))?;
             check(
                 graphemes.at(index)? == (kind == KIND_GRAPHEME),

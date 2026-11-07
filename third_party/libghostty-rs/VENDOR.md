@@ -477,8 +477,18 @@ Recorded per commit in git history; the list is kept current:
     `grapheme_max_len`), at most 53247 styles a page (a 16-bit style
     capacity's `RefCountedSet`), no style or link twice in a page's table
     and at most 65519 cells of room a page (each reference is counted in a
-    16-bit `CellCountInt`), and no open link on the inactive screen's
-    cursor (`Terminal.switchScreen` asserts it).
+    16-bit `CellCountInt`), no open link on the inactive screen's
+    cursor (`Terminal.switchScreen` asserts it), background-only cells
+    (`bg_color_palette`, `bg_color_rgb`) as `Style.bgCell` makes them:
+    narrow, unprotected, output, with no style and no link (a style
+    reached `unreachable` in a capture's `grid_ref_style`, a link a null
+    unwrap in `Page.clonePartialRowFrom` on a resize), a cursor whose
+    `semantic_content_clear_eol` is set only with input content (a
+    linefeed asserts it, `Terminal.index`), and capacity hints within a
+    fresh page's or four times what the page holds (grapheme and string
+    bytes, styles: the page is allocated, and zeroed in safe builds, at
+    the hint, so a one-cell page asking for 1 GiB of each took 3.4 GB;
+    the export writes hints clamped to the same bound).
     Blobs are Ghostty's own page memory and are trusted for where they
     come from, not checked as rows are: only an upgrade's memory file,
     the same user's, carries them (never a checkpoint on disk), and only a

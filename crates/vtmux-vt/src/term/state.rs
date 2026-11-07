@@ -595,7 +595,7 @@ fn link_to(link: &LinkState, bytes: &mut Vec<u8>) -> gv::Link {
 
 impl PageRows {
     fn from_ffi(p: &gv::Page) -> Self {
-        Self {
+        let mut page = Self {
             cols: p.cols,
             rows: p
                 .rows
@@ -644,7 +644,15 @@ impl PageRows {
                 grapheme_bytes: p.capacity.grapheme_bytes,
                 string_bytes: p.capacity.string_bytes,
             },
-        }
+        };
+        // A live page's capacity outgrows what it holds once that is
+        // erased; the hint goes out within what an import takes.
+        let most = validate::capacity_bound(&page);
+        let cap = &mut page.capacity;
+        cap.styles = cap.styles.min(most.styles);
+        cap.grapheme_bytes = cap.grapheme_bytes.min(most.grapheme_bytes);
+        cap.string_bytes = cap.string_bytes.min(most.string_bytes);
+        page
     }
 
     /// The C records for an import, into `scratch`.
