@@ -631,6 +631,32 @@ pub fn exe_path(exe: &Path) -> std::path::PathBuf {
     OsString::from_vec(bytes.to_vec()).into()
 }
 
+/// The parent of process `pid`, `None` when it can't be told (gone, or
+/// a host with neither way below).
+#[must_use]
+pub fn parent_pid(pid: i32) -> Option<i32> {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: an all-zero `proc_bsdinfo` is a valid value for
+        // proc_pidinfo to fill in.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+        // SAFETY: the buffer is `size` bytes of a `proc_bsdinfo`, what
+        // PROC_PIDTBSDINFO writes.
+        let n = unsafe {
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
+        };
+        (n == size).then(|| i32::try_from(info.pbi_ppid).ok())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // `pid (comm) state ppid ...`; comm may hold spaces and parens.
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let rest = &stat[stat.rfind(')')? + 1..];
+        rest.split_whitespace().nth(1)?.parse().ok()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -752,6 +778,14 @@ mod tests {
         let snapshot = memfile(&d.0, b"x").unwrap();
         let e = dry_run(&garbage, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap_err();
         assert_eq!(e.raw_os_error(), Some(libc::ENOEXEC), "{e}");
+    }
+
+    #[test]
+    fn the_parent_of_this_process_is_known() {
+        let me = i32::try_from(std::process::id()).unwrap();
+        let parent = i32::try_from(std::os::unix::process::parent_id()).unwrap();
+        assert_eq!(parent_pid(me), Some(parent));
+        assert_eq!(parent_pid(i32::MAX), None);
     }
 
     #[test]

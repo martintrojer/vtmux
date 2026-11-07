@@ -57,6 +57,10 @@ pub type Update = Rc<dyn Fn(&mut Server, &mut Vec<u8>)>;
 /// A callback a timer runs.
 pub type Deferred = Box<dyn FnOnce(&mut Server)>;
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent job flags (JOB_NOWAIT, JOB_SHOWSTDERR, ...)"
+)]
 struct Job {
     /// The command line (`job->cmd`).
     command: String,
@@ -80,6 +84,8 @@ struct Job {
     nowait: bool,
     /// [`JobSpec::blocks_upgrade`].
     blocks_upgrade: bool,
+    /// `JOB_SHOWSTDERR`: its stderr is in its output.
+    show_stderr: bool,
     update: Option<Update>,
     complete: Option<Complete>,
 }
@@ -159,6 +165,29 @@ impl Jobs {
         let timers = self.timers.iter().filter_map(|(.., what)| what.clone());
         jobs.chain(timers).collect()
     }
+
+    /// The process of every job [`Self::upgrade_blockers`] names, with
+    /// its command.
+    #[must_use]
+    pub fn upgrade_blocker_pids(&self) -> Vec<(JobId, i32, &str)> {
+        self.running
+            .iter()
+            .filter(|(_, j)| j.blocks_upgrade && j.fd.is_some())
+            .filter_map(|(&id, j)| Some((id, j.pid?, j.command.as_str())))
+            .collect()
+    }
+
+    /// `line` in job `id`'s output, which its command shows when it ends,
+    /// unless its stderr is shown already (where whatever ran in the job
+    /// printed it).
+    pub fn note(&mut self, id: JobId, line: &str) {
+        if let Some(j) = self.running.get_mut(&id)
+            && !j.show_stderr
+        {
+            j.output.extend_from_slice(line.as_bytes());
+            j.output.push(b'\n');
+        }
+    }
 }
 
 /// What to run (`job_run`'s arguments).
@@ -216,6 +245,7 @@ impl Server {
                 status: None,
                 nowait: spec.nowait,
                 blocks_upgrade: spec.blocks_upgrade,
+                show_stderr: spec.show_stderr,
                 update: spec.update.clone(),
                 complete: Some(complete),
             },

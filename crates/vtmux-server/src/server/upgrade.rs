@@ -140,12 +140,57 @@ impl Server {
                 self.held.len()
             ));
         }
+        self.upgrade_inside_job(requester)?;
         check_binary(&binary)?;
         self.upgrade.pending = Some(Pending {
             requester,
             binary,
             deadline: Instant::now() + PREFLIGHT_WAIT,
         });
+        Ok(())
+    }
+
+    /// A requester running inside a `run-shell` or `if-shell` job
+    /// (`run-shell 'tmux vtmux-upgrade'`) would wait for the upgrade
+    /// while the upgrade waits for the job (decision 10): refused at once.
+    /// run-shell shows only the job's output, not its stderr (without
+    /// `-E`, cmd-run-shell.c and job.c `JOB_SHOWSTDERR`), so the refusal
+    /// also goes into the job's output, where it is shown.
+    ///
+    /// # Errors
+    /// The refusal, naming the job.
+    fn upgrade_inside_job(&mut self, requester: Requester) -> Result<(), String> {
+        let Some(pid) = requester
+            .client()
+            .and_then(|id| self.clients.get(&id)?.hello.as_ref())
+            .and_then(|h| i32::try_from(h.pid).ok())
+        else {
+            return Ok(());
+        };
+        let jobs = self.jobs.upgrade_blocker_pids();
+        let server = i32::try_from(std::process::id()).unwrap_or(0);
+        let mut at = pid;
+        // The client is the job's process or a descendant of it (a shell
+        // that forks rather than execs its last command); a few levels
+        // are enough, the bound only stops a loop.
+        for _ in 0..32 {
+            if at <= 1 || at == server {
+                return Ok(());
+            }
+            if let Some((job, _, command)) = jobs.iter().find(|(_, p, _)| *p == at) {
+                let message = format!(
+                    "job '{command}' runs this vtmux-upgrade, and an upgrade waits for \
+                     run-shell and if-shell jobs to finish: run vtmux-upgrade outside them"
+                );
+                let job = *job;
+                self.jobs.note(job, &message);
+                return Err(message);
+            }
+            let Some(parent) = crate::sys::upgrade::parent_pid(at) else {
+                return Ok(());
+            };
+            at = parent;
+        }
         Ok(())
     }
 

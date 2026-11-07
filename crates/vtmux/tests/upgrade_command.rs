@@ -284,3 +284,28 @@ fn an_exec_that_fails_after_the_dry_run_is_reported_as_failed() {
     assert!(!gone.exists());
     assert_eq!(server.run(&["has", "-t", "a"]).2, 0);
 }
+
+/// `run-shell 'tmux vtmux-upgrade'`: an upgrade waits for run-shell jobs
+/// (decision 10), and this one waits for the upgrade, so it is refused at
+/// once, and the refusal is in the job's output, which run-shell shows
+/// (its stderr it does not, without -E).
+#[test]
+fn an_upgrade_from_inside_run_shell_is_refused_where_run_shell_shows_it() {
+    let server = Server::start();
+    let job = format!("tmux vtmux-upgrade -b '{VTMUX}'");
+    let (out, err, code) = server.run(&["run-shell", &job]);
+    let want = format!(
+        "job '{job}' runs this vtmux-upgrade, and an upgrade waits for run-shell and \
+         if-shell jobs to finish: run vtmux-upgrade outside them"
+    );
+    // Then run-shell's own line, and the job's exit status as the
+    // client's (cmd-run-shell.c `cmd_run_shell_callback`).
+    assert_eq!(
+        (out, err.as_str(), code),
+        (format!("{want}\n'{job}' returned 1\n"), "", 1)
+    );
+    // With -E the job's stderr is shown, and the message is there once.
+    let (out, _, _) = server.run(&["run-shell", "-E", &job]);
+    assert_eq!(out.matches(&want).count(), 1, "{out}");
+    assert_eq!(server.run(&["has", "-t", "a"]).2, 0);
+}
