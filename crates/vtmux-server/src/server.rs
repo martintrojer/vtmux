@@ -1172,22 +1172,24 @@ impl Server {
     /// told (`kill-server`'s own is answered later in the turn): a client
     /// that starts after that is refused and starts a fresh server, instead
     /// of connecting to this one and losing it ("server exited
-    /// unexpectedly"). The shim goes with the socket, or this server's
-    /// exit would remove the fresh server's `.<socket>.bin`. With a job
-    /// running the socket stays, as tmux's does until it exits: a client
-    /// meanwhile is accepted and dropped (`server_accept`).
+    /// unexpectedly"). With a job running the socket (and the shim, which
+    /// the job's `tmux` needs) stays, as tmux's does until it exits: a
+    /// client meanwhile is accepted and dropped (`server_accept`).
     pub(crate) fn begin_shutdown(&mut self) {
         // D27 decision 16: the checkpoint of a clean shutdown holds the
         // server as it was, before `send_exit` hangs up every pane.
         self.checkpoint_exit();
         self.shutdown = true;
         if !self.jobs.still_running() {
-            self.shim = None;
             self.close_listener();
         }
     }
 
+    /// Stop listening, the shim first: once the socket refuses, a client
+    /// may start a fresh server on the same path, and that server's
+    /// `.<socket>.bin` must not go when this one finishes exiting.
     fn close_listener(&mut self) {
+        self.shim = None;
         if let Some(mut l) = self.listener.take() {
             let _ = self.poll.registry().deregister(&mut l);
         }
@@ -5862,6 +5864,34 @@ mod tests {
                 "plain frames tag every row: {tags:?}"
             );
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A server that waited for a job (`kill-server` with one running)
+    /// stops listening only as it exits, and a client refused from then on
+    /// starts a fresh server on the same socket at once. That server's
+    /// `tmux` shim must outlive this one: the shim goes before the socket
+    /// stops listening, never with the rest of the teardown.
+    #[test]
+    fn a_fresh_server_keeps_its_shim_when_the_old_one_exits() {
+        use super::{Server, ServerConfig};
+        use crate::server::snapshot::tests::{listener, temp_dir};
+        let dir = temp_dir("shim-exit");
+        let (l, socket) = listener(&dir, "s");
+        let mut old = Server::new(l, socket.clone(), ServerConfig::default()).unwrap();
+        let link = dir.join(".s.bin").join("tmux");
+        assert!(link.exists(), "{}", link.display());
+        old.shutdown = true;
+        old.exit_clients();
+        assert!(old.listener.is_none());
+        // Refused now: the next client starts a server.
+        let (l, socket) = listener(&dir, "s");
+        let fresh = Server::new(l, socket, ServerConfig::default()).unwrap();
+        assert!(link.exists());
+        drop(old);
+        assert!(link.exists(), "the old server removed the fresh one's shim");
+        drop(fresh);
+        assert!(!link.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
