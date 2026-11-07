@@ -545,7 +545,7 @@ impl Server {
             Ok(f) => f,
             Err(e) => return format!("snapshot: {}", vtmux_core::error::strerror(&e)),
         };
-        match sys::dry_run(binary, file.as_fd()) {
+        match sys::dry_run(binary, file.as_fd(), sys::DRY_RUN_LIMIT) {
             Ok(Ok(())) => {}
             Ok(Err(message)) => return message,
             Err(e) => return fail(&e),

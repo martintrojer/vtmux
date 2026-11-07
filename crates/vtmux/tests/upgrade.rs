@@ -1020,6 +1020,126 @@ fn the_dry_run_inherits_only_the_snapshot() {
     assert_eq!(std::fs::read_to_string(&seen).unwrap(), "");
 }
 
+/// The same on Linux for every descriptor, with an attached client, a
+/// control client and a `pipe-pane` running: the dry run holds nothing of
+/// the server's but the snapshot (the review of `lu_upgrade_cmd`: a dry run that
+/// inherited the listener or a pty master, and a descendant of it, could
+/// keep them past its end).
+#[cfg(target_os = "linux")]
+#[test]
+fn the_dry_run_inherits_nothing_of_the_server_on_linux() {
+    let world = World::new();
+    world.populate(&[]);
+    let _attached = Attached::new(&world, "a");
+    let _control = Control::new(&world, "b");
+    wait("both clients", || world.run(&["lsc"]).lines().count() == 2);
+    world.run(&["pipe-pane", "-t", "a:w1", "cat >/dev/null"]);
+    let seen = world.home.path().join("fds");
+    let snapshot = world.home.path().join("snapshot-fd");
+    let lister = world.home.path().join("lister");
+    // `ls` lists the shell's descriptors from outside, so none of its own
+    // (a redirection, a command substitution) is among them.
+    std::fs::write(
+        &lister,
+        format!(
+            "#!/bin/sh\necho \"$2\" >'{}'\nls -l /proc/$$/fd >'{}'\necho listed >&2\nexit 1\n",
+            snapshot.display(),
+            seen.display()
+        ),
+    )
+    .unwrap();
+    set_executable(&lister);
+
+    assert_eq!(failed(world.upgrade(&lister)), "listed");
+    let snapshot = std::fs::read_to_string(&snapshot).unwrap();
+    let script = lister.display().to_string();
+    let inherited: Vec<String> = std::fs::read_to_string(&seen)
+        .unwrap()
+        .lines()
+        .filter_map(|l| {
+            let (left, target) = l.split_once(" -> ")?;
+            let fd: u32 = left.rsplit(' ').next()?.parse().ok()?;
+            // The shell's own: its script, and (dash) a copy of its
+            // stdio, which the dry run gets as /dev/null.
+            let shells = target == script || target == "/dev/null";
+            (fd > 2 && fd.to_string() != snapshot.trim() && !shells)
+                .then(|| format!("{fd} -> {target}"))
+        })
+        .collect();
+    assert_eq!(inherited, Vec::<String>::new());
+}
+
+/// A dry run that does not end within its limit (3 s, so the server it
+/// holds still is never frozen long) is refused with why, and killed with
+/// every process it started: none is left holding the snapshot.
+#[test]
+fn a_dry_run_past_its_limit_is_killed_with_its_children() {
+    let world = World::new();
+    world.populate(&[]);
+    let child = world.home.path().join("child");
+    let slow = world.home.path().join("slow");
+    std::fs::write(
+        &slow,
+        format!(
+            "#!/bin/sh\nsleep 1000 &\necho $! >'{}'\nexec sleep 1000\n",
+            child.display()
+        ),
+    )
+    .unwrap();
+    set_executable(&slow);
+
+    assert_eq!(
+        failed(world.upgrade(&slow)),
+        format!("{} --vtmux-check-snapshot took over 3 s", slow.display())
+    );
+    assert_gone(&child);
+    world.echo("a:w1", "unfrozen");
+}
+
+/// A dry run that refuses but leaves a child holding its stderr is
+/// answered as soon as it exits, not when the child does, and the child
+/// is killed.
+#[test]
+fn a_dry_run_whose_child_holds_its_stderr_answers_when_it_exits() {
+    let world = World::new();
+    world.populate(&[]);
+    let child = world.home.path().join("child");
+    let refuses = world.home.path().join("refuses");
+    std::fs::write(
+        &refuses,
+        format!(
+            "#!/bin/sh\nsleep 1000 &\necho $! >'{}'\necho 'not mine' >&2\nexit 1\n",
+            child.display()
+        ),
+    )
+    .unwrap();
+    set_executable(&refuses);
+
+    assert_eq!(failed(world.upgrade(&refuses)), "not mine");
+    assert_gone(&child);
+    world.echo("a:w1", "answered");
+}
+
+/// The process whose pid is in `file` has gone (it may linger a moment as
+/// a zombie until whoever inherited it reaps it).
+fn assert_gone(file: &Path) {
+    use rustix::process::{Pid, test_kill_process};
+    let pid: i32 = std::fs::read_to_string(file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let pid = Pid::from_raw(pid).unwrap();
+    let zombie_or_gone = || {
+        test_kill_process(pid).is_err()
+            || Command::new("ps")
+                .args(["-o", "stat=", "-p", &pid.as_raw_nonzero().to_string()])
+                .output()
+                .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim().starts_with('Z'))
+    };
+    wait("the dry run's child to be killed", zombie_or_gone);
+}
+
 fn set_executable(path: &Path) {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();

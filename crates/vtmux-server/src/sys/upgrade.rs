@@ -40,8 +40,20 @@ pub const CHECK_FLAG: &str = "--vtmux-check-snapshot";
 /// command line.
 pub const FAILED_ENV: &str = "VTMUX_UPGRADE_FAILED";
 
-/// How long the dry run may take before it counts as failed.
-const DRY_RUN_LIMIT: Duration = Duration::from_secs(30);
+/// How long an upgrade's dry run may take before it counts as failed:
+/// the server it is asked of reads no pane or client meanwhile
+/// (`server/upgrade.rs`, the quiesce), so it is held short
+/// (review of `lu_upgrade_cmd`: 10 s froze the server). A dry run rebuilds the
+/// server from the snapshot and exits; it takes milliseconds.
+pub const DRY_RUN_LIMIT: Duration = Duration::from_secs(3);
+
+/// [`DRY_RUN_LIMIT`] for the dry run of a switch back by path (macOS),
+/// whose image has no server running yet and whose alternative is the
+/// rebuild without terminal state.
+const SWITCH_BACK_LIMIT: Duration = Duration::from_secs(30);
+
+/// At most this much of a dry run's stderr is kept for the message.
+const MESSAGE_LIMIT: usize = 64 * 1024;
 
 /// `bytes` in an anonymous file, its offset at the end: a `memfd` on
 /// Linux, elsewhere a file created in `dir` (the socket directory, private
@@ -208,13 +220,23 @@ impl PreparedExec {
 
 /// The dry run (live-upgrade spec, sequence step 4): run
 /// `<binary> --vtmux-check-snapshot <fd>` on `snapshot` and wait for it,
-/// at most [`DRY_RUN_LIMIT`]. `Ok(Err(message))` when the binary refuses
-/// the snapshot: its stderr, or how it ended.
+/// at most `limit`. `Ok(Err(message))` when the binary refuses the
+/// snapshot: its stderr, or how it ended.
+///
+/// The child leads a process group of its own, and once it has ended, or
+/// at the limit, the whole group is killed: nothing it started outlives
+/// it holding the snapshot or its stderr. Its stderr is read as it comes,
+/// so a child that writes much, or a descendant that keeps the pipe open,
+/// can't hold the wait past the child's end.
 ///
 /// # Errors
 /// The binary can't be started (not found, not executable, not an
 /// executable format: the `execve` error, on every host) or waited for.
-pub fn dry_run(binary: &Path, snapshot: BorrowedFd<'_>) -> io::Result<Result<(), String>> {
+pub fn dry_run(
+    binary: &Path,
+    snapshot: BorrowedFd<'_>,
+    limit: Duration,
+) -> io::Result<Result<(), String>> {
     use std::os::unix::process::CommandExt as _;
     let flags = inheritable(snapshot)?;
     let mut command = Command::new(binary);
@@ -235,10 +257,11 @@ pub fn dry_run(binary: &Path, snapshot: BorrowedFd<'_>) -> io::Result<Result<(),
     // with the handled signals blocked (`exec_resume`): the child starts
     // with none blocked, as a pane does (`pty::clear_signals`).
     // SAFETY: the closure runs in the forked child before exec and only
-    // calls sigemptyset, pthread_sigmask on a local set, and
+    // calls setpgid, sigemptyset, pthread_sigmask on a local set, and
     // `PreparedExec::exec` (async-signal-safe, allocation-free).
     unsafe {
         command.pre_exec(move || {
+            libc::setpgid(0, 0);
             let mut set: libc::sigset_t = std::mem::zeroed();
             libc::sigemptyset(&raw mut set);
             libc::pthread_sigmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
@@ -248,35 +271,114 @@ pub fn dry_run(binary: &Path, snapshot: BorrowedFd<'_>) -> io::Result<Result<(),
     let child = command.spawn();
     fcntl_setfd(snapshot, flags)?;
     let mut child = child?;
-    let end = Instant::now() + DRY_RUN_LIMIT;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
+    let pid = libc::pid_t::try_from(child.id()).map_err(io::Error::other)?;
+    // Also here, so the group exists before the first kill whichever side
+    // runs first (EACCES once the child has exec'd, which is fine).
+    // SAFETY: setpgid on our own child's pid.
+    unsafe { libc::setpgid(pid, pid) };
+    let mut err = child.stderr.take();
+    if let Some(e) = &err {
+        rustix::io::ioctl_fionbio(e, true)?;
+    }
+    let mut said = Vec::new();
+    let end = Instant::now() + limit;
+    let ended = loop {
+        if let Some(e) = &mut err
+            && !drain(e, &mut said)
+        {
+            err = None;
         }
-        if Instant::now() >= end {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Ok(Err(format!(
-                "{} {CHECK_FLAG} took over {} s",
-                binary.display(),
-                DRY_RUN_LIMIT.as_secs()
-            )));
+        if exited(pid)? {
+            break true;
         }
-        std::thread::sleep(Duration::from_millis(2));
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            break false;
+        }
+        let nap = left.min(Duration::from_millis(10));
+        match &err {
+            Some(e) => {
+                let mut fds = [rustix::event::PollFd::new(e, rustix::event::PollFlags::IN)];
+                let timeout = rustix::event::Timespec {
+                    tv_sec: 0,
+                    tv_nsec: i64::from(nap.subsec_nanos()),
+                };
+                let _ = rustix::event::poll(&mut fds, Some(&timeout));
+            }
+            None => std::thread::sleep(nap),
+        }
     };
+    // The child is not reaped yet (`exited` leaves it a zombie), so its
+    // pid, and the group's id, can't have been reused.
+    // SAFETY: kill(2) of our child's process group.
+    unsafe { libc::kill(-pid, libc::SIGKILL) };
+    let status = child.wait()?;
+    if !ended {
+        return Ok(Err(format!(
+            "{} {CHECK_FLAG} took over {} s",
+            binary.display(),
+            limit.as_secs()
+        )));
+    }
+    if let Some(e) = &mut err {
+        drain(e, &mut said);
+    }
     if status.success() {
         return Ok(Ok(()));
     }
-    let mut message = String::new();
-    if let Some(mut err) = child.stderr.take() {
-        let _ = err.read_to_string(&mut message);
-    }
+    let message = String::from_utf8_lossy(&said);
     let message = message.trim_end();
     Ok(Err(if message.is_empty() {
         format!("{} {CHECK_FLAG} failed: {status}", binary.display())
     } else {
         message.to_owned()
     }))
+}
+
+/// Read what non-blocking `pipe` has into `said` (up to
+/// [`MESSAGE_LIMIT`]); whether it is still open.
+fn drain(pipe: &mut std::process::ChildStderr, said: &mut Vec<u8>) -> bool {
+    let mut buf = [0; 4096];
+    loop {
+        match pipe.read(&mut buf) {
+            Ok(0) => return false,
+            Ok(n) => {
+                let room = MESSAGE_LIMIT.saturating_sub(said.len());
+                said.extend_from_slice(&buf[..n.min(room)]);
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => return true,
+            Err(_) => return false,
+        }
+    }
+}
+
+/// Whether child `pid` has ended, leaving it unreaped (`WNOWAIT`), so its
+/// process group can still be killed by its id.
+fn exited(pid: libc::pid_t) -> io::Result<bool> {
+    // SAFETY: an all-zero `siginfo_t` is a valid value for waitid to
+    // fill in.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        // SAFETY: waitid on our own child with a valid out pointer.
+        let r = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                libc::id_t::try_from(pid).map_err(io::Error::other)?,
+                &raw mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if r == 0 {
+            // SAFETY: waitid filled `info` in; si_pid is 0 when the child
+            // has not changed state.
+            return Ok(unsafe { info.si_pid() } != 0);
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() != io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
 }
 
 /// The arguments of the new image: `argv0 --vtmux-resume <fd>`, and
@@ -341,7 +443,7 @@ pub fn switch_back(
         io::Error::other("no image to switch back to")
     };
     let Some(path) = path else { return e };
-    match dry_run(path, snapshot) {
+    match dry_run(path, snapshot, SWITCH_BACK_LIMIT) {
         Ok(Ok(())) => exec_resume(Target::Path(path), snapshot, keep, Some(why)),
         Ok(Err(message)) => io::Error::other(message),
         Err(e) => e,
@@ -622,7 +724,7 @@ mod tests {
         let mask = super::super::signal::block_handled();
         let end = Instant::now() + Duration::from_secs(20);
         let got = loop {
-            match dry_run(&script, snapshot.as_fd()) {
+            match dry_run(&script, snapshot.as_fd(), DRY_RUN_LIMIT) {
                 // Another test thread's fork can hold the script open for
                 // writing a moment (ETXTBSY).
                 Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) && Instant::now() < end => {
@@ -648,7 +750,7 @@ mod tests {
         std::fs::write(&garbage, [0x7f, 0x00, 0xff, 0x13, 0x37, 0x00]).unwrap();
         std::fs::set_permissions(&garbage, std::fs::Permissions::from_mode(0o755)).unwrap();
         let snapshot = memfile(&d.0, b"x").unwrap();
-        let e = dry_run(&garbage, snapshot.as_fd()).unwrap_err();
+        let e = dry_run(&garbage, snapshot.as_fd(), DRY_RUN_LIMIT).unwrap_err();
         assert_eq!(e.raw_os_error(), Some(libc::ENOEXEC), "{e}");
     }
 
