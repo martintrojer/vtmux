@@ -4,7 +4,7 @@
 Usage: mise exec -- python3 scripts/bench.py [scenario...]
        mise exec -- python3 scripts/bench.py --smoke    regression guard (scripts/bench_smoke.py)
 Scenarios: idle scale history startup throughput owner_idle owner_startup throughput_attached render many_clients
-           agent_panes key_echo (default: all), and trickle (by name only: about 22 min).
+           agent_panes key_echo upgrade (default: all), and trickle (by name only: about 22 min).
 
 Every server runs on a private socket (-L plus TMUX_TMPDIR=<tempdir>, -f /dev/null);
 its pid comes from `display -p '#{pid}'` (never pgrep) and is checked gone after
@@ -28,7 +28,8 @@ TRICKLE_LIMIT (100000), TRICKLE_PANES ("1": streaming panes per case, one window
 the limit; 0: the trickle alone), BLEND=1 (the attached scenarios
 with `vtmux-pane-inactive-blend 'fg=bg/25,bg=bg/25'` set and the reader answering OSC 10/11, D26;
 tmux ignores the option), AGENT_PANES ("5 10 20"),
-AGENT_CLIENTS ("1 2"), AGENT_SECS (10), KEY_ECHO_N (200). Run cargo through `mise exec --`.
+AGENT_CLIENTS ("1 2"), AGENT_SECS (10), KEY_ECHO_N (200), UPGRADE_PANES ("1 10"), UPGRADE_LINES ("10000 100000"),
+UPGRADE_IDLE_LIMIT (180 s: the longest `idle` waits for the compressor). Run cargo through `mise exec --`.
 """
 import ctypes
 import fcntl
@@ -189,12 +190,12 @@ class Server:
                         LANG="C.UTF-8" if LINUX else "en_US.UTF-8")
         self.pid = None
 
-    def run(self, *args, check=True):
+    def run(self, *args, check=True, full=False):
         r = subprocess.run([self.bin, "-L", self.label, "-f", "/dev/null", *args],
                            env=self.env, capture_output=True, text=True, timeout=120)
         if check and r.returncode:
             raise RuntimeError(f"{self.bin} {' '.join(args[:6])}: {r.stderr.strip()}")
-        return r.stdout
+        return r if full else r.stdout
 
     def find_pid(self):
         self.pid = int(self.run("display", "-p", "#{pid}"))
@@ -1178,6 +1179,218 @@ def scenario_trickle(env):
                      f"RSS every {every:g} s{per})", "secs": secs, "cases": cases}
 
 
+# ---- live upgrade (vtmux only) -------------------------------------------------
+
+UPGRADE_PANES = [int(n) for n in os.environ.get("UPGRADE_PANES", "1 10").split()]
+UPGRADE_LINES = [int(n) for n in os.environ.get("UPGRADE_LINES", "10000 100000").split()]
+UPGRADE_IDLE_LIMIT = float(os.environ.get("UPGRADE_IDLE_LIMIT", "180"))
+RESTARTED = b"\x1b[?996n"  # Caps::restart: a re-attached client's terminal started again
+STATUS_MARK = b"bench"  # pin_terminal's status-right
+
+
+class UpgradeClient(Client):
+    """A Client whose reader thread stamps its redraw after an upgrade: the terminal's
+    restart (RESTARTED), then the status line (STATUS_MARK)."""
+
+    def __init__(self, *a, **kw):
+        self.armed, self.restarted, self.redrawn = False, False, None
+        self._tail = b""
+        super().__init__(*a, **kw)
+
+    def arm(self):
+        self._tail, self.restarted, self.redrawn = b"", False, None
+        self.armed = True
+
+    def _drain(self):
+        while True:
+            try:
+                b = os.read(self.master, 65536)
+            except OSError:
+                break
+            if not b:
+                break
+            now = time.monotonic()
+            self.bytes += len(b)
+            if self.reply and not self.replied and QUERY in self._tail + b:
+                self.replied = True
+                os.write(self.master, b"\x1b[?2026;2$y")
+            if not self.armed:
+                self._tail = (self._tail + b)[-8:]
+                continue
+            data = self._tail + b
+            self._tail = data[-8:]
+            if not self.restarted and RESTARTED in data:
+                self.restarted = True
+                data = data[data.index(RESTARTED):]
+            if self.restarted and self.redrawn is None and STATUS_MARK in data:
+                self.redrawn = now
+                self.armed = False
+
+
+class ControlReader:
+    """A `-C attach` client whose output a thread reads and drops."""
+
+    def __init__(self, s, session):
+        self.proc = subprocess.Popen([s.bin, "-L", s.label, "-f", "/dev/null", "-C", "attach", "-t", session],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=s.env)
+        self.lines = 0
+        self.thread = threading.Thread(target=self._drain, daemon=True)
+        self.thread.start()
+
+    def _drain(self):
+        for _ in self.proc.stdout:
+            self.lines += 1
+
+    def close(self):
+        try:
+            self.proc.stdin.close()
+            self.proc.wait(timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            self.proc.kill()
+            self.proc.wait()
+        self.thread.join(5)
+
+
+def gen_lines(path, n):
+    """n lines of 100 printable columns, every tenth with SGR colours (seeded, so every run alike)."""
+    rnd = random.Random(n)
+    words = ["build", "test", "ok", "error:", "warning", "src/main.rs", "fn", "let", "=>", "0x1f", "passed"]
+    with open(path, "w") as f:
+        for i in range(n):
+            text = f"{i:07d} " + " ".join(rnd.choice(words) for _ in range(20))
+            text = text[:100].ljust(100)
+            if i % 10 == 0:
+                text = f"\x1b[3{i % 8}m{text[:50]}\x1b[m{text[50:]}"
+            f.write(text + "\n")
+
+
+def _wait_history(s, n, rows, limit=600):
+    """Every pane's history full: at least min(lines, history-limit) - rows, and unchanged for 1 s."""
+    want = n - rows - 2
+    deadline, last, since = time.monotonic() + limit, None, time.monotonic()
+    while time.monotonic() < deadline:
+        sizes = [int(x) for x in s.run("list-panes", "-a", "-F", "#{history_size}").split()]
+        if sizes != last:
+            last, since = sizes, time.monotonic()
+        elif all(h >= want for h in sizes) and time.monotonic() - since >= 1:
+            return sum(sizes)
+        time.sleep(0.2)
+    raise RuntimeError(f"upgrade: history never filled ({last}, want {want} each)")
+
+
+def _wait_rss_settled(pid, secs=3.0, limit=UPGRADE_IDLE_LIMIT):
+    """Idle past the compressor's 5 s of quiet history, then until the server's RSS has not
+    fallen by 0.5% in `secs` (its passes are done). Seconds idle, None at `limit`."""
+    deadline = time.monotonic() + limit
+    time.sleep(6)
+    low, since = rss_kb(pid), time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        now = rss_kb(pid)
+        if now < low * 0.995:
+            low, since = now, time.monotonic()
+        elif time.monotonic() - since >= secs:
+            return time.monotonic() - (deadline - limit)
+    return None
+
+
+def scenario_upgrade(env):
+    """vtmux-upgrade onto its own binary (live-upgrade spec, decision 13), vtmux only: N panes
+    (one window each, CLIENT_COLS x CLIENT_ROWS, history-limit 100000) that printed L lines of
+    100 columns (every tenth coloured), one attached client and two control clients. `fresh`:
+    as soon as the history is full; `idle`: after the compressor has finished (RSS settled).
+    answered = until `vtmux-upgrade -b <same binary>` returns (the new image serves);
+    redrawn = until the attached client got its terminal restart and then the status line.
+    The snapshot size is taken by a second upgrade right after, through a wrapper that counts
+    the dry run's snapshot descriptor."""
+    if "vtmux" not in env.bins:
+        raise Skip("no vtmux binary")
+    rows = CLIENT_ROWS - 1
+    out, refused = {}, {}
+    for n in UPGRADE_PANES:
+        for lines in UPGRADE_LINES:
+            path = os.path.join(env.work, f"lines-{lines}.txt")
+            if not os.path.exists(path):
+                gen_lines(path, lines)
+            for state in ("fresh", "idle"):
+                case = f"{n} x {lines // 1000}k {state}"
+
+                def one(which, n=n, lines=lines, state=state, path=path, case=case):
+                    s = env.server(which)
+                    s.run("new", "-d", "-s", "u", "-n", "w0", "-x", str(CLIENT_COLS), "-y", str(rows), "cat")
+                    s.find_pid()
+                    clients, controls = [], []
+                    sizefile = os.path.join(env.work, f"size-{s.label}")
+                    wrapper = os.path.join(env.work, f"wrap-{s.label}")
+                    with open(wrapper, "w") as f:
+                        f.write(f"#!/bin/sh\nif [ \"$1\" = --vtmux-check-snapshot ]; then wc -c </dev/fd/$2 >'{sizefile}'; fi\n"
+                                f"exec '{s.bin}' \"$@\"\n")
+                    os.chmod(wrapper, 0o755)
+                    try:
+                        pin_terminal(s)
+                        s.run("set", "-g", "history-limit", "100000", ";", "set", "-g", "automatic-rename", "off",
+                              ";", "set", "-g", "default-size", f"{CLIENT_COLS}x{rows}")
+                        fill = f"cat '{path}'; exec cat"
+                        s.run("respawn-pane", "-k", "-t", "u:w0", "sh", "-c", fill)
+                        for i in range(1, n):
+                            s.run("neww", "-d", "-t", "u:", "-n", f"w{i}", "sh", "-c", fill)
+                        clients = [UpgradeClient(s, "u", CLIENT_COLS, CLIENT_ROWS, True)]
+                        controls = [ControlReader(s, "u") for _ in range(2)]
+                        deadline = time.monotonic() + 15
+                        while len(s.run("list-clients", "-F", "x").split()) < 3:
+                            if time.monotonic() > deadline:
+                                raise RuntimeError("upgrade: clients did not attach")
+                            time.sleep(0.05)
+                        history = _wait_history(s, min(lines, 100000), rows)
+                        idle_s = _wait_rss_settled(s.pid) if state == "idle" else 0.0
+                        quiet(clients)
+                        panes = s.run("list-panes", "-a", "-F", "#{pane_pid}")
+                        rss_before = rss_kb(s.pid)
+                        c = clients[0]
+                        c.arm()
+                        t0 = time.monotonic()
+                        r = s.run("vtmux-upgrade", "-b", s.bin, check=False, full=True)
+                        answered = time.monotonic()
+                        if r.returncode:
+                            refused.setdefault(case, []).append(r.stderr.strip().replace(s.bin, "<vtmux>"))
+                            return {"history_lines": history, "idle_s": idle_s, "answered_ms": None, "redrawn_ms": None,
+                                    "snapshot_mb": None, "rss_before_mb": rss_before / 1024, "rss_after_mb": None}
+                        deadline = answered + 30
+                        while c.redrawn is None and time.monotonic() < deadline:
+                            time.sleep(0.001)
+                        if c.redrawn is None:
+                            raise RuntimeError("upgrade: the client never redrew")
+                        if s.find_pid() != s.pid or s.run("list-panes", "-a", "-F", "#{pane_pid}") != panes:
+                            raise RuntimeError("upgrade: the server or a pane process changed")
+                        rss_after = rss_kb(s.pid)
+                        quiet(clients)
+                        s.run("vtmux-upgrade", "-b", wrapper)
+                        with open(sizefile) as f:
+                            size = int(f.read().strip())
+                        return {"history_lines": history, "idle_s": idle_s, "answered_ms": (answered - t0) * 1000,
+                                "redrawn_ms": (c.redrawn - t0) * 1000, "snapshot_mb": size / 1e6,
+                                "rss_before_mb": rss_before / 1024, "rss_after_mb": rss_after / 1024}
+                    finally:
+                        s.kill()
+                        for c in clients:
+                            c.close()
+                        for c in controls:
+                            c.close()
+                out[case] = env_with(env, {"vtmux": env.bins["vtmux"]}).per_binary(one)
+    return {"title": f"upgrade (vtmux-upgrade onto the same binary: N panes x L lines, one window each, "
+                     f"1 attached {CLIENT_COLS}x{CLIENT_ROWS} client with sync on, 2 control clients; target < 1000 ms, decision 13)",
+            "rows": out, "refused": refused}
+
+
+def env_with(env, bins):
+    """`env` measuring only `bins` (the upgrade has no tmux side)."""
+    e = Env.__new__(Env)
+    e.__dict__.update(env.__dict__)
+    e.bins = bins
+    return e
+
+
+ALL.append("upgrade")
 OPTIONAL = ["trickle"]  # long (about 22 min): run by name only
 
 
@@ -1220,13 +1433,18 @@ def render_attached(name, res):
                         ("terminal KB/s (sum)", "term_kb_per_s", 1), ("sync frames/s (sum)", "frames_per_s", 0),
                         ("server wakeups/s", "wakeups_per_s", 0), ("RSS MB", "rss_mb", 1)],
         "key_echo": [("p50 ms", "p50_ms", 2), ("p90 ms", "p90_ms", 2), ("max ms", "max_ms", 2), ("lost", "lost", 0)],
+        "upgrade": [("history lines", "history_lines", 0), ("idle s", "idle_s", 1), ("answered ms", "answered_ms", 0),
+                    ("redrawn ms", "redrawn_ms", 0), ("snapshot MB", "snapshot_mb", 1), ("RSS MB before", "rss_before_mb", 1),
+                    ("RSS MB after", "rss_after_mb", 1)],
     }[name]
     for per in res["rows"].values():
         for m in per.values():
             if "server_cpu_s" in m:
                 m["total_cpu_s"] = m["server_cpu_s"] + m["client_cpu_s"]
     rows = [[k, b, *[fmt(m[key], nd) for _, key, nd in cols]] for k, per in res["rows"].items() for b, m in per.items()]
-    return f"### {res['title']}\n\n" + table(["case", "binary", *[c[0] for c in cols]], rows) + "\n"
+    notes = "".join(f"\n{k}: {len(v)} of {RUNS} runs refused: {'; '.join(sorted(set(v)))}\n"
+                    for k, v in res.get("refused", {}).items())
+    return f"### {res['title']}\n\n" + table(["case", "binary", *[c[0] for c in cols]], rows) + "\n" + notes
 
 
 # ---- output -----------------------------------------------------------------
@@ -1244,7 +1462,7 @@ def table(header, rows):
 def render(name, res):
     if name in OWNER_RENDER:
         return OWNER_RENDER[name](res)
-    if name in ATTACHED:
+    if name in ATTACHED or name == "upgrade":
         return render_attached(name, res)
     if name == "trickle":
         return render_trickle(res)
@@ -1320,6 +1538,7 @@ def main():
     funcs.update(OWNER_FUNCS)
     funcs.update(ATTACHED)
     funcs["trickle"] = scenario_trickle
+    funcs["upgrade"] = scenario_upgrade
     results, md = {}, []
     try:
         for name in scenarios:

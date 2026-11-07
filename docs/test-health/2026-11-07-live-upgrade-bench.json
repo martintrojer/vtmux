@@ -1,0 +1,118 @@
+{
+  "meta": {
+    "date": "2026-11-07 16:15 UTC",
+    "commit": "40e06e1+dirty",
+    "host": "Linux-6.16.1-0_fbk5_0_g0e127f210adc-x86_64-with-glibc2.34",
+    "cpu": "AMD EPYC-Genoa Processor",
+    "cpus": 96,
+    "kernel": "6.16.1-0_fbk5_0_g0e127f210adc",
+    "load_at_start": 49.82,
+    "runs": 3,
+    "versions": {
+      "tmux": "tmux 3.8",
+      "vtmux": "vtmux 3.8-beta1"
+    }
+  },
+  "scenarios": {
+    "upgrade": {
+      "title": "upgrade (vtmux-upgrade onto the same binary: N panes x L lines, one window each, 1 attached 200x50 client with sync on, 2 control clients; target < 1000 ms, decision 13)",
+      "rows": {
+        "1 x 10k fresh": {
+          "vtmux": {
+            "history_lines": 9952,
+            "idle_s": 0.0,
+            "answered_ms": 126.70213601086289,
+            "redrawn_ms": 128.66427400149405,
+            "snapshot_mb": 0.898094,
+            "rss_before_mb": 29.4375,
+            "rss_after_mb": 32.7421875
+          }
+        },
+        "1 x 10k idle": {
+          "vtmux": {
+            "history_lines": 9952,
+            "idle_s": 9.003380904032383,
+            "answered_ms": 41.8885899707675,
+            "redrawn_ms": 44.020764995366335,
+            "snapshot_mb": 1.297195,
+            "rss_before_mb": 15.58203125,
+            "rss_after_mb": 19.74609375
+          }
+        },
+        "1 x 100k fresh": {
+          "vtmux": {
+            "history_lines": 99952,
+            "idle_s": 0.0,
+            "answered_ms": 1036.6163909784518,
+            "redrawn_ms": 1038.6800820124336,
+            "snapshot_mb": 5.993907,
+            "rss_before_mb": 169.41796875,
+            "rss_after_mb": 182.28515625
+          }
+        },
+        "1 x 100k idle": {
+          "vtmux": {
+            "history_lines": 99952,
+            "idle_s": 19.015169535996392,
+            "answered_ms": 222.65896998578683,
+            "redrawn_ms": 225.32757796579972,
+            "snapshot_mb": 11.473797,
+            "rss_before_mb": 27.19921875,
+            "rss_after_mb": 50.9765625
+          }
+        },
+        "10 x 10k fresh": {
+          "vtmux": {
+            "history_lines": 99520,
+            "idle_s": 0.0,
+            "answered_ms": 1086.5601529949345,
+            "redrawn_ms": 1088.995767000597,
+            "snapshot_mb": 6.081773,
+            "rss_before_mb": 169.9921875,
+            "rss_after_mb": 183.63671875
+          }
+        },
+        "10 x 10k idle": {
+          "vtmux": {
+            "history_lines": 99520,
+            "idle_s": 12.507315755006857,
+            "answered_ms": 205.12743201106787,
+            "redrawn_ms": 207.4440679862164,
+            "snapshot_mb": 11.32288,
+            "rss_before_mb": 30.48046875,
+            "rss_after_mb": 54.390625
+          }
+        },
+        "10 x 100k fresh": {
+          "vtmux": {
+            "history_lines": 999520,
+            "idle_s": 0.0,
+            "answered_ms": null,
+            "redrawn_ms": null,
+            "snapshot_mb": null,
+            "rss_before_mb": 1566.66015625,
+            "rss_after_mb": null
+          }
+        },
+        "10 x 100k idle": {
+          "vtmux": {
+            "history_lines": 999520,
+            "idle_s": 22.26765636197524,
+            "answered_ms": 1670.3251710277982,
+            "redrawn_ms": 1672.608016000595,
+            "snapshot_mb": 113.089023,
+            "rss_before_mb": 145.6328125,
+            "rss_after_mb": 364.30859375
+          }
+        }
+      },
+      "refused": {
+        "10 x 100k fresh": [
+          "<vtmux> --vtmux-check-snapshot took over 3 s",
+          "<vtmux> --vtmux-check-snapshot took over 3 s",
+          "<vtmux> --vtmux-check-snapshot took over 3 s"
+        ]
+      }
+    }
+  }
+}
