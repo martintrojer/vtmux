@@ -126,3 +126,27 @@ PERF GATE (compress.rs gains `PaneCompress::restored`, which only a restore call
 key_echo`, AGENT_PANES "5 20", AGENT_CLIENTS "1 2", release, base main `3ae218e` against the tip, load 9.
 Server CPU: 5/1 1.5 -> 1.5 %, 5/2 2.1 -> 2.3 %, 20/1 3.5 -> 3.7 %, 20/2 4.6 -> 4.6 %. RSS is unchanged.
 key_echo p50: 0.32 -> 0.30 ms (idle), 0.44 -> 0.45 ms (flood). All within noise.
+
+## Integrated onto main a19b4b4 (lu_emulator_integration)
+
+One branch on main `a19b4b4` (highest patch there 0016): 0017 (state export), one copy of 0018 (reflow
+hyperlink map), 0019 (reflow retry) on top, the import validation, the model plug-in, and `CheckpointFull`
+writing every pane's terminal in the row form (`612e22b`). Measured on the tip `612e22b`, same devserver
+(96 cores, shared, load 6-10):
+
+| check | result |
+|---|---|
+| `state_roundtrip` / `snapshot_term` fuzz, `VTMUX_STATE_FUZZ_SEEDS=4000` (2000 per form in `snapshot_term`), Debug and release + ReleaseSafe Ghostty | pass, 65 / 80 s (Debug), 32 / 42 s (ReleaseSafe) |
+| `state_fuzz` (release, ReleaseSafe Ghostty), seeds 0-999 of each of the ten kinds | 0 Ghostty crashes, 0 Rust panics; imported rows 46, state 234, links 233, styles 272, graphemes 199, cells 342, cursor 781, capacity 154, blob 11, blob-full 11 |
+| reflow repro (80x24, 4000 lines of per-cell OSC 8 links and graphemes, to 17 columns) and the other `reflow` tests, ReleaseSafe | pass |
+| `zig build test-lib-vt -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over 0001-0019 | 7013 / 7091 pass, 76 skip, `tabClear single` the only failure in each test binary |
+
+The Debug Zig suite takes about 36 min on this host, almost all of it in 0018's `Terminal: reflow keeps the
+links of a page full of them (vtmux)`: Debug runs `Page.verifyIntegrity` on every `cursorSetHyperlink`, so its
+90000 linked prints are quadratic in the page. `-Doptimize=ReleaseSafe` does not build the suite (an upstream
+test asserts `slow_runtime_safety` at comptime, `PageList.zig`).
+
+PERF GATE (Ghostty's reflow changed): `bench.py agent_panes key_echo`, AGENT_PANES "5 20", AGENT_CLIENTS "1 2",
+release, base main `a19b4b4` against the tip, load 8-10. Server CPU: 5/1 1.4 -> 1.4 %, 5/2 2.0 -> 2.0 %,
+20/1 3.5 -> 3.5 %, 20/2 4.6 -> 4.5 %; RSS +0.1-0.2 MB. key_echo p50: 0.31 -> 0.30 ms (idle), 0.45 -> 0.45 ms
+(flood). All within noise.
