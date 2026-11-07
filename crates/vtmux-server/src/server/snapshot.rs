@@ -98,6 +98,26 @@ fn before(now: Instant, ms: u64) -> Instant {
     now.checked_sub(Duration::from_millis(ms)).unwrap_or(now)
 }
 
+/// How long ago an upgrade's snapshot was written (`written_us`, the wall
+/// clock), at most [`TAKEN_LIMIT`]; nothing for one with no time or a
+/// checkpoint, whose timers a restore does not carry on.
+fn since_taken(meta: &snap::Meta) -> Duration {
+    if meta.purpose != snap::Purpose::Upgrade || meta.written_us <= 0 {
+        return Duration::ZERO;
+    }
+    let written = u64::try_from(meta.written_us).unwrap_or(0);
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|now| now.checked_sub(Duration::from_micros(written)))
+        .unwrap_or_default()
+        .min(TAKEN_LIMIT)
+}
+
+/// More than an upgrade takes ([`crate::sys::upgrade::DRY_RUN_LIMIT`] and
+/// the exec): a clock that stepped meanwhile moves no timer further.
+const TAKEN_LIMIT: Duration = Duration::from_secs(10);
+
 fn small(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
@@ -1370,7 +1390,12 @@ impl Server {
         fds: &mut Adopt<'_>,
     ) -> io::Result<Self> {
         validate(snapshot)?;
-        let now = Instant::now();
+        // Timers count on from when the snapshot was taken: the dry run
+        // and the exec since are time their clocks ran on, as with no
+        // upgrade.
+        let now = Instant::now()
+            .checked_sub(since_taken(&snapshot.meta))
+            .unwrap_or_else(Instant::now);
         let s = &snapshot.server;
         let mut server = Self::new(listener, PathBuf::from(&s.socket_path), config)?;
         server.config_loaded = true;

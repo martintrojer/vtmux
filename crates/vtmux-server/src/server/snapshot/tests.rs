@@ -1296,6 +1296,54 @@ fn an_auto_hide_scrollbar_stays_as_shown() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// An upgrade's timers count on from when its snapshot was written, not
+/// from the rebuild: the dry run and the exec in between are time that
+/// passed for them.
+#[test]
+fn timers_count_from_when_the_snapshot_was_taken() {
+    let dir = temp_dir("taken");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let p = vtmux_core::ids::PaneId(0);
+    a.model.panes.get_mut(&p).unwrap().sb = crate::scrollbar::AutoHide {
+        visible: true,
+        hover: false,
+        hide_at: Some(Instant::now() + Duration::from_secs(5)),
+    };
+    let ago = |secs| {
+        let t = std::time::SystemTime::now() - Duration::from_secs(secs);
+        let d = t.duration_since(std::time::UNIX_EPOCH).unwrap();
+        i64::try_from(d.as_micros()).unwrap()
+    };
+    let taken = |written_us, purpose| {
+        a.to_snapshot(snap::Meta {
+            purpose,
+            written_us,
+            ..snap::Meta::default()
+        })
+    };
+    let hide_at = |s: &snap::Snapshot| {
+        let b = from_snapshot(&dir, s).unwrap();
+        b.model.panes[&p].sb.hide_at.unwrap()
+    };
+    // Written 2 s ago: 3 s left.
+    let left = hide_at(&taken(ago(2), snap::Purpose::Upgrade));
+    assert!(left <= Instant::now() + Duration::from_secs(3), "{left:?}");
+    assert!(left + Duration::from_secs(4) > Instant::now() + Duration::from_secs(5));
+    // No time, a checkpoint, or a clock far off: counted from the rebuild.
+    for s in [
+        taken(0, snap::Purpose::Upgrade),
+        taken(ago(2), snap::Purpose::CheckpointFull),
+    ] {
+        let left = hide_at(&s);
+        assert!(left > Instant::now() + Duration::from_secs(4), "{left:?}");
+    }
+    let far = hide_at(&taken(ago(3600), snap::Purpose::Upgrade));
+    assert!(far + Duration::from_secs(11) > Instant::now(), "{far:?}");
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// One monitor hook that can't be parsed doesn't shift the last values and
 /// timers of the ones after it onto the wrong monitor.
 #[test]
