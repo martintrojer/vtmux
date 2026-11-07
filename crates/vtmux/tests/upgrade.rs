@@ -499,10 +499,13 @@ fn a_binary_that_fails_the_dry_run_leaves_the_server_as_it_was() {
     let Some(ServerMsg::UpgradeResult { ok: false, message }) = world.upgrade(&garbage) else {
         panic!("no refusal");
     };
+    // Refused, naming the binary and why. The wording is the kernel's
+    // (the exec error), not a shell's, so it is the same on every host.
     assert!(
-        message.starts_with(&format!("{}: ", garbage.display())),
+        message.contains(&garbage.display().to_string()),
         "{message}"
     );
+    assert!(message.contains("format"), "{message}");
 
     // A binary that runs and refuses the snapshot: its message.
     let refuses = world.home.path().join("refuses");
