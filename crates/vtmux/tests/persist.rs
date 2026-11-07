@@ -844,7 +844,7 @@ fn respawn_pane_restarts_the_saved_command_in_its_saved_cwd() {
         ]),
         format!(
             "w0 1 cat - {here}\nw1 0 sh -c \"printf in=; pwd; exec cat -\" {cwd}\nw2 0 cat - {cwd}\n",
-            here = w.dir.path().display()
+            here = std::fs::canonicalize(w.dir.path()).unwrap().display()
         )
     );
     wait_until("the respawned pane runs cat", || {
@@ -1164,8 +1164,8 @@ fn a_newer_checkpoint_stays_untouched_across_a_live_upgrade() {
     let before = contents(&w.state());
     w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
     w.repid();
-    // The frozen handshake (`tests/upgrade.rs`): the connection closes
-    // without an answer when the server execed.
+    // The frozen handshake (`tests/upgrade.rs`): the image that ends up
+    // serving answers the requester.
     let socket = w.ok(&["display", "-p", "#{socket_path}"]);
     let mut stream = std::os::unix::net::UnixStream::connect(socket.trim_end()).unwrap();
     stream
@@ -1176,7 +1176,13 @@ fn a_newer_checkpoint_stays_untouched_across_a_live_upgrade() {
     };
     protocol::write_msg(&mut stream, &request).unwrap();
     let answer = protocol::read_msg::<protocol::ServerMsg>(&mut stream).unwrap();
-    assert!(answer.is_none(), "{answer:?}");
+    assert!(
+        matches!(
+            answer,
+            Some(protocol::ServerMsg::UpgradeResult { ok: true, .. })
+        ),
+        "{answer:?}"
+    );
     w.ok(&["set", "-s", "vtmux-persist", "layout"]);
     w.ok(&["rename-session", "-t", "z", "changed"]);
     w.kill_server();
