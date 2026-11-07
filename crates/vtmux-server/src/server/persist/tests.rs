@@ -393,9 +393,17 @@ fn a_locked_directory_is_not_written() {
         crate::persist::load(&state).unwrap().0.windows[0].name,
         "two"
     );
-    // The first gone, its lock goes with it.
+    // The first gone, its lock goes with it. A pane another test thread is
+    // spawning right now may have forked while `one` held the lock and
+    // still holds the descriptor (and so the flock, which lives with the
+    // open file) until it execs: wait for that, as a real second server
+    // would on its next checkpoint.
     drop(one);
-    assert!(two.checkpoint_to(&state, Mode::Layout).is_some());
+    let give_up = Instant::now() + std::time::Duration::from_secs(60);
+    while two.checkpoint_to(&state, Mode::Layout).is_none() {
+        assert!(Instant::now() < give_up, "the lock was never released");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     assert_eq!(
         crate::persist::load(&state).unwrap().0.windows[0].name,
         "two"
