@@ -809,7 +809,7 @@ mod tests {
             "covers-inner-4242-1",
             "testA4243",
         ] {
-            drop(UnixListener::bind(dir.join(name)).unwrap());
+            crate::reap::test_support::dead_socket(&dir.join(name));
         }
         let live = UnixListener::bind(dir.join("testA4242-live")).unwrap();
         sweep_script_sockets(std::slice::from_ref(&dir), 4242);
