@@ -165,7 +165,12 @@ fn parallel<T: Send>(scenarios: &[Scenario], f: impl Fn(&Scenario) -> T + Sync) 
     thread::scope(|s| {
         for _ in 0..workers {
             s.spawn(|| {
-                while let Some(i) = queue.lock().unwrap().pop_front() {
+                // The guard must go before the scenario runs: a `while
+                // let` keeps its scrutinee's temporaries (the guard) for
+                // the whole body, which ran every scenario one at a time.
+                loop {
+                    let next = queue.lock().unwrap().pop_front();
+                    let Some(i) = next else { break };
                     let r = f(&scenarios[i]);
                     results.lock().unwrap()[i] = Some(r);
                 }
