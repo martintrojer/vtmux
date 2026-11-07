@@ -81,7 +81,7 @@
           "%0",
           "sh",
           "-c",
-          "stty raw -echo min 0 time 10; q() { printf \"$1\"; dd bs=1 count=64 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033]10;?\\007'; q '\\033]11;?\\007'; q '\\033[?996n'; printf '%s\\r\\n' \"$(tmux display -p -t %0 '#{pane_fg} #{pane_bg} [#{client_theme}] [#{@t}]')\"; tmux wait-for -S ready; exec cat"
+          "stty raw -echo min 0 time 10; q() { printf \"$1\"; dd bs=1 count=64 2>/dev/null | cat -v; printf '\\r\\n'; }; q '\\033]10;?\\007'; q '\\033]11;?\\007'; q '\\033[?996n'; printf '%s\\r\\n' \"$(tmux display -p -t %0 '#{pane_fg} #{pane_bg} [#{client_theme}] [#{@t}]')\"; stty min 1 time 0; tmux wait-for -S ready; exec cat"
         ]
       },
       {
@@ -122,7 +122,7 @@
           "%0",
           "sh",
           "-c",
-          "stty raw -echo min 0 time 30; printf '\\033[?996n'; dd bs=1 count=9 2>/dev/null | cat -v; printf '\\r\\n\\033[?2031h'; tmux wait-for -S on; dd bs=1 count=9 2>/dev/null | cat -v; printf '\\r\\n'; tmux wait-for -S ready; exec cat"
+          "stty raw -echo min 0 time 100; printf '\\033[?996n'; dd bs=1 count=9 2>/dev/null | cat -v; printf '\\r\\n\\033[?2031h'; tmux wait-for -S on; dd bs=1 count=9 2>/dev/null | cat -v; printf '\\r\\n'; stty min 1 time 0; tmux wait-for -S ready; exec cat"
         ]
       },
       {
