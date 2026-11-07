@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "date": "2026-11-07 19:16 UTC",
+    "commit": "1b0dba1+dirty",
+    "host": "Linux-6.16.1-0_fbk5_0_g0e127f210adc-x86_64-with-glibc2.34",
+    "cpu": "AMD EPYC-Genoa Processor",
+    "cpus": 96,
+    "kernel": "6.16.1-0_fbk5_0_g0e127f210adc",
+    "load_at_start": 5.76,
+    "runs": 3,
+    "versions": {
+      "tmux": "tmux 3.8",
+      "vtmux": "vtmux 3.8-beta1"
+    }
+  },
+  "scenarios": {
+    "upgrade": {
+      "title": "upgrade (vtmux-upgrade onto the same binary: N panes x L lines, one window each, 1 attached 200x50 client with sync on, 2 control clients; target < 1000 ms, decision 13)",
+      "rows": {
+        "1 x 10k fresh": {
+          "vtmux": {
+            "history_lines": 9952,
+            "idle_s": 0.0,
+            "answered_ms": 39.39517796970904,
+            "redrawn_ms": 41.059023002162576,
+            "snapshot_mb": 1.297853,
+            "rss_before_mb": 29.4609375,
+            "rss_after_mb": 16.62890625
+          }
+        },
+        "1 x 10k idle": {
+          "vtmux": {
+            "history_lines": 9952,
+            "idle_s": 9.00342757999897,
+            "answered_ms": 31.34758200030774,
+            "redrawn_ms": 33.154392964206636,
+            "snapshot_mb": 1.297849,
+            "rss_before_mb": 15.54296875,
+            "rss_after_mb": 16.6796875
+          }
+        },
+        "1 x 10k fresh-rows": {
+          "vtmux": {
+            "history_lines": 9952,
+            "idle_s": 0.0,
+            "answered_ms": 130.3688359912485,
+            "redrawn_ms": 132.39308499032632,
+            "snapshot_mb": 0.758485,
+            "rss_before_mb": 29.5078125,
+            "rss_after_mb": 30.79296875
+          }
+        },
+        "1 x 10k idle-rows": {
+          "vtmux": {
+            "history_lines": 9952,
+            "idle_s": 9.003446697955951,
+            "answered_ms": 133.86898598400876,
+            "redrawn_ms": 135.69090102100745,
+            "snapshot_mb": 0.758489,
+            "rss_before_mb": 15.48046875,
+            "rss_after_mb": 30.77734375
+          }
+        },
+        "1 x 100k fresh": {
+          "vtmux": {
+            "history_lines": 99952,
+            "idle_s": 0.0,
+            "answered_ms": 160.77416302869096,
+            "redrawn_ms": 162.56189701380208,
+            "snapshot_mb": 11.474438,
+            "rss_before_mb": 169.390625,
+            "rss_after_mb": 28.28125
+          }
+        },
+        "1 x 100k idle": {
+          "vtmux": {
+            "history_lines": 99952,
+            "idle_s": 18.012530498963315,
+            "answered_ms": 80.62753197737038,
+            "redrawn_ms": 82.43121003033593,
+            "snapshot_mb": 11.474443,
+            "rss_before_mb": 27.3359375,
+            "rss_after_mb": 28.390625
+          }
+        },
+        "1 x 100k fresh-rows": {
+          "vtmux": {
+            "history_lines": 99952,
+            "idle_s": 0.0,
+            "answered_ms": 1019.4909299607389,
+            "redrawn_ms": 1021.4004869922064,
+            "snapshot_mb": 5.840428,
+            "rss_before_mb": 169.359375,
+            "rss_after_mb": 170.26171875
+          }
+        },
+        "1 x 100k idle-rows": {
+          "vtmux": {
+            "history_lines": 99952,
+            "idle_s": 18.01296949898824,
+            "answered_ms": 1105.937617016025,
+            "redrawn_ms": 1107.9164980328642,
+            "snapshot_mb": 5.840432,
+            "rss_before_mb": 27.32421875,
+            "rss_after_mb": 170.34375
+          }
+        },
+        "10 x 10k fresh": {
+          "vtmux": {
+            "history_lines": 99520,
+            "idle_s": 0.0,
+            "answered_ms": 116.67309101903811,
+            "redrawn_ms": 118.52545104920864,
+            "snapshot_mb": 11.323428,
+            "rss_before_mb": 170.046875,
+            "rss_after_mb": 31.24609375
+          }
+        },
+        "10 x 10k idle": {
+          "vtmux": {
+            "history_lines": 99520,
+            "idle_s": 12.506916109996382,
+            "answered_ms": 99.54745997674763,
+            "redrawn_ms": 101.45249997731298,
+            "snapshot_mb": 11.323442,
+            "rss_before_mb": 30.546875,
+            "rss_after_mb": 31.15625
+          }
+        },
+        "10 x 10k fresh-rows": {
+          "vtmux": {
+            "history_lines": 99520,
+            "idle_s": 0.0,
+            "answered_ms": 1029.6992270159535,
+            "redrawn_ms": 1031.7483650287613,
+            "snapshot_mb": 5.930183,
+            "rss_before_mb": 169.91015625,
+            "rss_after_mb": 170.7578125
+          }
+        },
+        "10 x 10k idle-rows": {
+          "vtmux": {
+            "history_lines": 99520,
+            "idle_s": 12.506909713032655,
+            "answered_ms": 1063.332805992104,
+            "redrawn_ms": 1065.2413619682193,
+            "snapshot_mb": 5.930183,
+            "rss_before_mb": 30.6015625,
+            "rss_after_mb": 170.7421875
+          }
+        },
+        "10 x 100k fresh": {
+          "vtmux": {
+            "history_lines": 999520,
+            "idle_s": 0.0,
+            "answered_ms": 749.0030379849486,
+            "redrawn_ms": 750.8895589853637,
+            "snapshot_mb": 113.089492,
+            "rss_before_mb": 1566.7109375,
+            "rss_after_mb": 146.453125
+          }
+        },
+        "10 x 100k idle": {
+          "vtmux": {
+            "history_lines": 999520,
+            "idle_s": 22.517981819983106,
+            "answered_ms": 595.8745339885354,
+            "redrawn_ms": 597.9352479916997,
+            "snapshot_mb": 113.089516,
+            "rss_before_mb": 145.62890625,
+            "rss_after_mb": 146.4453125
+          }
+        },
+        "10 x 100k fresh-rows": {
+          "vtmux": {
+            "history_lines": 999520,
+            "idle_s": 0.0,
+            "answered_ms": 9869.404789991677,
+            "redrawn_ms": 9871.48283899296,
+            "snapshot_mb": 56.749862,
+            "rss_before_mb": 1566.76953125,
+            "rss_after_mb": 1567.73828125
+          }
+        },
+        "10 x 100k idle-rows": {
+          "vtmux": {
+            "history_lines": 999520,
+            "idle_s": 22.01678746403195,
+            "answered_ms": 10422.10335098207,
+            "redrawn_ms": 10424.10166998161,
+            "snapshot_mb": 56.749878,
+            "rss_before_mb": 145.55859375,
+            "rss_after_mb": 1567.71875
+          }
+        }
+      },
+      "refused": {}
+    }
+  }
+}

@@ -28,7 +28,7 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Copy mode entry, 1M lines, compressed | 220 ms | 57 ms | 0.26x | |
 | Search all of a 1M-line history | 1684 / 1686 ms | 7944 / 8371 ms | 4.7x / 5.0x | **Worse.** 3.4x / 3.5x at 100k lines |
 | Hidden panes, RSS per hidden pane | 48 KB | 74-80 KB | - | **Worse.** |
-| Live upgrade, 10 panes x 100k lines, request to redraw | - (kill-server) | 1680 ms compressed; refused uncompressed | - | **Misses** decision 13's 1 s; 1 x 100k and 10 x 10k: 0.2 s compressed, 1.0 s not |
+| Live upgrade, 10 panes x 100k lines, request to redraw | - (kill-server) | 598 ms compressed; 751 ms not yet compressed | - | Meets decision 13's 1 s (was 1705 ms and refused). **Misses** it onto a binary of another Ghostty patch stack: 9.9-10.4 s |
 | Hidden panes, `C-b n` to the last byte | 5.1-5.2 ms | 2.5-2.6 ms | - | |
 | Owner's config, idle server CPU over 60 s | 171 ms | 47 ms | 0.28x | the cost of answering a status poller |
 
@@ -319,29 +319,36 @@ Raw runs: [`test-health/2026-11-05-perf-refresh.md`](test-health/2026-11-05-perf
 
 ## Live upgrade
 
-`bench.py upgrade` (median of 3, release build): `vtmux-upgrade -b` onto the same binary, with N panes (one window each, 200x49, `history-limit 100000`) that printed L lines of 100 columns (every tenth coloured), one attached 200x50 client (sync on) and two control clients attached. tmux has no live upgrade: its answer is `kill-server`. *answered* is until the command returns, which it does once the new image serves and every attached client has re-attached; *redrawn* until the attached client has had its terminal restarted and then its status line. `fresh` upgrades as soon as the history is full, `idle` once the compressor has finished with it (RSS settled, *idle s* after the output).
+`bench.py upgrade` (median of 3, release build): `vtmux-upgrade -b` onto the same binary, with N panes (one window each, 200x49, `history-limit 100000`) that printed L lines of 100 columns (every tenth coloured), one attached 200x50 client (sync on) and two control clients attached. tmux has no live upgrade: its answer is `kill-server`. *answered* is until the command returns, which it does once the new image serves and every attached client has re-attached; *redrawn* until the attached client has had its terminal restarted and then its status line. `fresh` upgrades as soon as the history is full, `idle` once the compressor has finished with it (RSS settled, *idle s* after the output). `-rows` upgrades onto a wrapper that reports another Ghostty patch stack (`UPGRADE_STATES`), so the history goes as rows, as onto a build with another pin.
 
-| case | history lines | answered | redrawn | snapshot | RSS before | RSS after |
-|---|---|---|---|---|---|---|
-| 1 x 10k, fresh | 9952 | 121 ms | 123 ms | 0.9 MB | 29.4 MB | 32.6 MB |
-| 1 x 10k, idle | 9952 | 40 ms | 42 ms | 1.3 MB | 15.6 MB | 19.7 MB |
-| 1 x 100k, fresh | 99952 | 1015 ms | 1016 ms | 6.0 MB | 169.3 MB | 182.3 MB |
-| 1 x 100k, idle | 99952 | 187 ms | 189 ms | 11.5 MB | 27.2 MB | 50.8 MB |
-| 10 x 10k, fresh | 99520 | 1005 ms | 1007 ms | 6.1 MB | 170.0 MB | 183.7 MB |
-| 10 x 10k, idle | 99520 | 205 ms | 207 ms | 11.3 MB | 30.5 MB | 54.2 MB |
-| 10 x 100k, fresh | 999520 | refused | - | - | 1566.6 MB | - |
-| 10 x 100k, idle | 999520 | 1679 ms | 1680 ms | 113.1 MB | 145.7 MB | 364.3 MB |
+Before is `1b0dba1`, after is `lu_upgrade_perf`:
 
-- Decision 13's target is 10 panes x 100k lines in under 1 s. Compressed, that case takes 1.7 s (1679 ms); with the history not yet compressed, every run was refused: the dry run (`--vtmux-check-snapshot`, which rebuilds the whole server) took over its 3 s limit, and the server carried on as it was.
-- Up to 100k lines in all, compressed history upgrades in about 0.2 s. Uncompressed it takes about 1 s per 100k lines: those rows are decoded and imported twice, by the dry run and by the new image.
-- Compressed pages travel in Ghostty's form (decision 23), and are the larger snapshot: 11.5 MB against 6.0 MB of vtmux rows for the same 100k lines.
-- The new image holds more than the old did: 2.5x at 10 x 100k compressed (145.7 MB to 364.3 MB, measured right after the redraw), less after uncompressed history (1.08x).
-- The command answers once every attached client has re-attached (since the re-exec teardown fix), and the client's redraw comes 1-2 ms after that in every case.
+| case | history lines | answered before | after | redrawn after | snapshot before | after | RSS before the upgrade | RSS after it, before | after |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 x 10k, fresh | 9952 | 123 ms | 39 ms | 41 ms | 0.9 MB | 1.3 MB | 29.5 MB | 32.8 MB | 16.6 MB |
+| 1 x 10k, idle | 9952 | 42 ms | 31 ms | 33 ms | 1.3 MB | 1.3 MB | 15.5 MB | 19.8 MB | 16.7 MB |
+| 1 x 100k, fresh | 99952 | 1036 ms | 161 ms | 163 ms | 6.0 MB | 11.5 MB | 169.4 MB | 182.5 MB | 28.3 MB |
+| 1 x 100k, idle | 99952 | 186 ms | 81 ms | 82 ms | 11.5 MB | 11.5 MB | 27.3 MB | 51.0 MB | 28.4 MB |
+| 10 x 10k, fresh | 99520 | 1040 ms | 117 ms | 119 ms | 6.1 MB | 11.3 MB | 170.0 MB | 183.6 MB | 31.2 MB |
+| 10 x 10k, idle | 99520 | 206 ms | 100 ms | 101 ms | 11.3 MB | 11.3 MB | 30.6 MB | 54.2 MB | 31.2 MB |
+| 10 x 100k, fresh | 999520 | refused | 749 ms | 751 ms | - | 113.1 MB | 1566.7 MB | - | 146.5 MB |
+| 10 x 100k, idle | 999520 | 1703 ms | 596 ms | 598 ms | 113.1 MB | 113.1 MB | 145.6 MB | 364.3 MB | 146.4 MB |
+| 1 x 100k, fresh-rows | 99952 | | 1019 ms | 1021 ms | | 5.8 MB | 169.4 MB | | 170.3 MB |
+| 10 x 10k, fresh-rows | 99520 | | 1030 ms | 1032 ms | | 5.9 MB | 169.9 MB | | 170.8 MB |
+| 10 x 100k, fresh-rows | 999520 | | 9869 ms | 9871 ms | | 56.7 MB | 1566.8 MB | | 1567.7 MB |
+| 10 x 100k, idle-rows | 999520 | | 10422 ms | 10424 ms | | 56.7 MB | 145.6 MB | | 1567.7 MB |
+
+- Decision 13's target is 10 panes x 100k lines in under 1 s. It is met now: 598 ms with the history compressed, 751 ms with none of it compressed yet. Before, the compressed case took 1.7 s and the uncompressed one was refused every time (the dry run passed its 3 s limit).
+- What changed (`lu_upgrade_perf`): the blob checksum of vendored patch 0017 is Wyhash instead of Zig 0.17's `XxHash3`, which hashed about 250 MB/s and was most of the 1.7 s (each 113 MB stream was hashed three times: export, dry run, new image); the old image asks the new binary its patch stack (`--vtmux-patch-stack`) and, when it is its own, compresses every pane's history first, on up to 16 threads (0.17 s at 10 x 100k, 0.85 s on one), so all history goes in Ghostty's form and nothing is decoded or imported as rows; the new image drops the stream and its decoded records before it serves and gives the freed heap back (`malloc_trim`).
+- Where the time goes at 10 x 100k idle (one run of a build stamping each step to a file, 547 ms in all): snapshot 31 ms, encoding 89 ms (mostly BLAKE3 over the 113 MB body), memory file and the dry run's start 25 ms, the dry run 194 ms (reading 31, decoding with the hash check 79, rebuilding 76), the exec 20 ms, the new image 184 ms (reading 32, decoding 82, rebuilding 64), then the re-attach. A fresh history adds the compression, 0.17 s.
+- RSS after the upgrade is what it was before (146 MB at 10 x 100k, was 364 MB), and after a fresh upgrade far less than before it (1567 MB to 147 MB): the history arrives compressed, as the compressor would have left it.
+- The snapshot of uncompressed history is now the larger one (Ghostty's compressed pages, 11.3-11.5 MB per 100k lines, against 5.8-6.1 MB of vtmux rows).
+- Onto a binary of another patch stack the history goes as rows, decoded and imported twice (dry run, new image): about 1 s per 100k lines, 9.9-10.4 s at 10 x 100k, and the new image holds it resident (1.57 GB) until its compressor has been through it (decision 23). It is no longer refused for its size: the dry run may take 3 s plus a second per 100k rows it imports (13 s here). Decision 13's second is out of reach on that path without importing in parallel; it is the upgrade after a Ghostty pin bump, not the daily one.
 - The snapshot size is taken by a second upgrade right after the timed one, through a wrapper that counts the dry run's snapshot descriptor.
-- The host was shared (load 14.8 at the start, other workers' builds), so the times are noisy; an earlier run at load 49.8 agreed within 20%.
-- The same with streaming panes, in a debug build: `an_upgrade_under_load_loses_and_repeats_nothing` (`crates/vtmux/tests/upgrade.rs`) prints its time to redraw, 223-577 ms for 10 streaming panes.
+- The host was shared (load 5-8, other workers' builds), so the times are noisy.
+- The same with streaming panes, in a debug build: `an_upgrade_under_load_loses_and_repeats_nothing` (`crates/vtmux/tests/upgrade.rs`) prints its time to redraw.
 
-Raw run: [`test-health/2026-11-07-live-upgrade-bench.md`](test-health/2026-11-07-live-upgrade-bench.md).
+Raw runs: [`test-health/2026-11-07-live-upgrade-bench.md`](test-health/2026-11-07-live-upgrade-bench.md) (before), [`test-health/2026-11-07-live-upgrade-perf.md`](test-health/2026-11-07-live-upgrade-perf.md) (after).
 
 ## With the owner's config
 
@@ -434,7 +441,7 @@ Raw runs: [`test-health/2026-11-05-perf-refresh.md`](test-health/2026-11-05-perf
 | `trickle` (by name only: about 22 min) | one pane per server writes timestamped log lines at `TRICKLE_RATES` (10 and 1000 lines/s) for `TRICKLE_SECS` (1200) after filling its history to `TRICKLE_LIMIT` (100000), plus a `fill` case (150k lines, then idle); all servers at once, RSS, `#{history_size}` and server CPU every 10 s, then `TRICKLE_IDLE_SECS` (120) idle | Scrollback memory of a pane that never goes idle (agent logs, `tail -f`, builds): does it shrink like an idle one? |
 | `key_echo` | one 200x50 client (sync on), the window split in two, a raw echo program in the active pane, `cat` or `yes` in the other; `KEY_ECHO_N` (200) keys 30 ms apart, each echoed as a Greek letter (bytes found nowhere else on the terminal), arrival stamped in the reader thread: p50, p90, max | What typing costs, alone and next to a flood. |
 | `many_clients` | 1 session, 2 panes, 8 clients of different sizes (80x24 to 240x60), `window-size smallest` for both, a 20 MB log in one pane: server CPU and RSS, terminal bytes (sum) | Per-client fan-out cost. |
-| `upgrade` | vtmux only: `UPGRADE_PANES` (1 10) panes x `UPGRADE_LINES` (10000 100000) lines of 100 columns, one window each, `history-limit 100000`, one 200x50 client (sync on) and two control clients; `vtmux-upgrade -b` onto the same binary as soon as the history is full and again on a new server once the compressor is done (at most `UPGRADE_IDLE_LIMIT`, 180 s): time to the answer and to the client's redraw, snapshot size, RSS before and after | What decision 13 of the live-upgrade spec measures: how long a dogfood upgrade takes. |
+| `upgrade` | vtmux only: `UPGRADE_PANES` (1 10) panes x `UPGRADE_LINES` (10000 100000) lines of 100 columns, one window each, `history-limit 100000`, one 200x50 client (sync on) and two control clients; `vtmux-upgrade -b` onto the same binary as soon as the history is full and again on a new server once the compressor is done (at most `UPGRADE_IDLE_LIMIT`, 180 s); `UPGRADE_STATES` adds `fresh-rows` and `idle-rows`, the same onto a wrapper reporting another Ghostty patch stack: time to the answer and to the client's redraw, snapshot size, RSS before and after | What decision 13 of the live-upgrade spec measures: how long a dogfood upgrade takes. |
 | `agent_panes` | `AGENT_PANES` (5 10 20) panes of `scripts/agent_tui.py`, 2 per window, with `AGENT_CLIENTS` (1 2) 200x50 clients answering the 2026 query, the first on window 0 and the second on a session that links window 1; 2 s to settle, then `AGENT_SECS` (10) measured: server and client CPU, terminal bytes, sync frames, wakeups, RSS | What many agent TUIs (pi, ink renderers) cost the server. |
 
 `agent_tui.py` mimics pi's alt-screen renderer at real speed, with deterministic content per pane seed:
@@ -461,7 +468,7 @@ Times for the `bench-history-memory.sh` and `bench-hidden-panes.py` rows are the
 |---|---|---|
 | `bench.py` (all default scenarios) | every `bench.py` table on this page | about 32 min (`agent_panes` is 9 of them), and about 5 more since `upgrade` |
 | `bench.py agent_panes` | *Agent panes* | about 11 min with `BASE` |
-| `bench.py upgrade` | *Live upgrade* | about 5 min |
+| `bench.py upgrade` | *Live upgrade* | about 5 min; 15 with `UPGRADE_STATES="fresh idle fresh-rows idle-rows"` |
 | `bench.py trickle` | *A pane that never stops*; with `TRICKLE_PANES`, *Many panes that never stop* | about 22 min |
 | `bench.py --smoke` | the regression guard | about 1 minute on an idle host, under 3 minutes anywhere |
 | `bench-history-memory.sh spec big` | *Big scrollback*, one pane | 22:29-22:31 in the refresh record |
