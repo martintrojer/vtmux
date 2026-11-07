@@ -8,9 +8,6 @@
 [skip]
 border_style_cache = "the re-attach redraws the borders, which expands their style again, as any attach does (window_pane_get_border_style keeps it until such a redraw)"
 format_jobs_status = "#() jobs start again in the new image (decision 10), and this one prints a different line each run"
-passthrough_background = "the re-executing client's teardown pops the title its attach pushed, as a detach does (tty_stop_tty, CSI 23 t), so a title left by a pane's passthrough (DCS tmux; OSC 2) is gone, and its re-attach sets none, as a fresh attach would not"
-passthrough_screen = "the re-executing client's teardown pops the title its attach pushed, as a detach does (tty_stop_tty, CSI 23 t), so a title left by a pane's passthrough (DCS tmux; OSC 2) is gone, and its re-attach sets none, as a fresh attach would not"
-set_titles = "the re-executing client's teardown pops the title its attach pushed, as a detach does (tty_stop_tty, CSI 23 t), so a title left by set-titles before it was turned off is gone, and its re-attach sets none, as a fresh attach would not"
 status_msg_lazy = "the re-attach draws the status line as it is now, as any attach does, where tmux has not yet redrawn it for a change in a window not shown (the Z flag of a zoom)"
 status_msg_lines = "a message over the pane area with the status off is drawn over the status lines as last drawn before it went off (sl->screen), which a restored client has not drawn (not carried)"
 status_msg_selectw = "the re-attach draws the status line as it is now, as any attach does, where tmux has not yet redrawn it for a change in a window not shown (the Z flag of a zoom)"

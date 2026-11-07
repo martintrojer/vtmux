@@ -196,6 +196,12 @@ pub(crate) struct Client {
     /// `c->title`: the last title written to the terminal, so an
     /// unchanged one is not written again.
     title: Option<String>,
+    /// The title the terminal shows from this client's output: the last
+    /// written by `set-titles` or by a pane's passthrough (an OSC 0 or 2
+    /// in a `DCS tmux;` payload). A re-attach after a live upgrade gives
+    /// it again, as the re-executing client's teardown popped it (CSI 23
+    /// t) where tmux, with no upgrade, would have left it.
+    pub(crate) terminal_title: Option<String>,
     /// The terminal's replies that changed its features, in order: a
     /// snapshot replays them onto the terminal opened again (D27).
     pub(crate) term_replies: Vec<snapshot::TermReply>,
@@ -257,6 +263,7 @@ impl Client {
             clipboard_query: None,
             reported: crate::term_queries::Reported::default(),
             title: None,
+            terminal_title: None,
             term_replies: Vec::new(),
             written: 0,
             pasting: false,
@@ -3151,6 +3158,9 @@ impl Server {
             return;
         };
         let mut raw = std::mem::take(&mut client.passthrough);
+        if let Some(title) = osc_title(&raw) {
+            client.terminal_title = Some(title);
+        }
         if !raw.is_empty() {
             // The program may have moved the terminal's cursor.
             raw.extend(client.compositor.cursor_bytes(caps));
@@ -3277,7 +3287,9 @@ impl Server {
             return None;
         }
         client.title = Some(title.clone());
-        client.term.as_ref()?.set_title(&title)
+        let bytes = client.term.as_ref()?.set_title(&title)?;
+        client.terminal_title = Some(title);
+        Some(bytes)
     }
 
     /// Session `s`'s current window composed into rows
@@ -5310,9 +5322,49 @@ fn int(n: u32) -> i32 {
     i32::try_from(n).unwrap_or(i32::MAX)
 }
 
+/// The title the last OSC 0 or 2 in passthrough bytes `raw` sets (ended
+/// by BEL or ST), if any.
+fn osc_title(raw: &[u8]) -> Option<String> {
+    let mut found = None;
+    let mut at = 0;
+    while let Some(i) = raw[at..].windows(2).position(|w| w == b"\x1b]") {
+        let start = at + i + 2;
+        at = start;
+        let body = &raw[start..];
+        let Some(text) = body
+            .strip_prefix(b"0;")
+            .or_else(|| body.strip_prefix(b"2;"))
+        else {
+            continue;
+        };
+        let end = text
+            .iter()
+            .enumerate()
+            .find(|&(j, &b)| b == 0x07 || (b == 0x1b && text.get(j + 1) == Some(&b'\\')))
+            .map(|(j, _)| j);
+        if let Some(end) = end {
+            found = Some(String::from_utf8_lossy(&text[..end]).into_owned());
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use crate::mode::prompt::tests::setup;
+
+    #[test]
+    fn passthrough_titles_are_found() {
+        use super::osc_title;
+        assert_eq!(
+            osc_title(b"X\x1b]52;c;aGk=\x07\x1b]2;INNER\x07\x1b[31m"),
+            Some("INNER".into())
+        );
+        assert_eq!(osc_title(b"\x1b]0;a\x1b\\\x1b]2;b\x1b\\"), Some("b".into()));
+        assert_eq!(osc_title(b"\x1b]2;cut"), None);
+        assert_eq!(osc_title(b"\x1b]1;icon\x07"), None);
+        assert_eq!(osc_title(b"plain"), None);
+    }
 
     /// A client of another protocol version (`Speaks::Frozen`) is sent the
     /// frozen frames and nothing else (protocol module docs).

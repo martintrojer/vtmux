@@ -805,6 +805,10 @@ record! {
         /// Where its terminal's queries stand; written under
         /// [`crate::TERM_QUERIES_FEATURE`].
         44 => opt queries: Option<TermQueries>,
+        /// The title its terminal shows from its output (`set-titles` or
+        /// a pane's passthrough); written under
+        /// [`crate::TERMINAL_TITLE_FEATURE`].
+        45 => opt terminal_title: Option<String>,
     }
 }
 
@@ -1465,6 +1469,8 @@ pub(crate) mod tests {
             // Added within v1: out of the golden sample
             // (a_clients_terminal_queries_round_trip).
             queries: None,
+            // Added within v1 too (a_clients_terminal_title_round_trips).
+            terminal_title: None,
         }
     }
 

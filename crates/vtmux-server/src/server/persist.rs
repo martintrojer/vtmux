@@ -412,9 +412,14 @@ impl Server {
             p.scrollbar_hover = false;
             p.scrollbar_hide_in_ms = None;
         }
-        s.meta
-            .requires
-            .retain(|r| r != snap::SCROLLBAR_FEATURE && r != snap::TERM_QUERIES_FEATURE);
+        s.meta.requires.retain(|r| {
+            ![
+                snap::SCROLLBAR_FEATURE,
+                snap::TERM_QUERIES_FEATURE,
+                snap::TERMINAL_TITLE_FEATURE,
+            ]
+            .contains(&r.as_str())
+        });
         if mode == Mode::Layout {
             // Copied screen text, and titles programs set.
             s.server.buffers.clear();

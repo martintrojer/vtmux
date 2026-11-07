@@ -151,6 +151,18 @@ fn a_clients_terminal_queries_round_trip() {
     assert!(golden.clients.iter().all(|c| c.queries.is_none()));
 }
 
+/// The title a client's terminal shows, added within v1 under
+/// [`TERMINAL_TITLE_FEATURE`], round-trips; the golden stream has none.
+#[test]
+fn a_clients_terminal_title_round_trips() {
+    let mut s = sample();
+    s.meta.requires = vec![TERMINAL_TITLE_FEATURE.into()];
+    s.clients[0].terminal_title = Some("INNER".into());
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.clients.iter().all(|c| c.terminal_title.is_none()));
+}
+
 #[test]
 fn pages_are_found_everywhere_they_live() {
     let s = sample();

@@ -93,7 +93,11 @@ pub const MIN_VERSION: u32 = 1;
 pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 
 /// The [`Meta::requires`] names every reader of this build understands.
-pub const KNOWN_FEATURES: &[&str] = &[SCROLLBAR_FEATURE, TERM_QUERIES_FEATURE];
+pub const KNOWN_FEATURES: &[&str] = &[
+    SCROLLBAR_FEATURE,
+    TERM_QUERIES_FEATURE,
+    TERMINAL_TITLE_FEATURE,
+];
 
 /// The [`Meta::requires`] name of a pane's auto-hide scrollbar state
 /// ([`Pane::scrollbar_visible`] and the fields after it), listed when
@@ -103,6 +107,10 @@ pub const SCROLLBAR_FEATURE: &str = "scrollbar-auto-hide";
 /// The [`Meta::requires`] name of where a client terminal's queries stand
 /// ([`Client::queries`]), listed when some client's is written.
 pub const TERM_QUERIES_FEATURE: &str = "client-term-queries";
+
+/// The [`Meta::requires`] name of the title a client's terminal shows
+/// ([`Client::terminal_title`]), listed when some client's is written.
+pub const TERMINAL_TITLE_FEATURE: &str = "client-terminal-title";
 
 /// The [`Meta::requires`] name of history pages in Ghostty's own
 /// compressed form ([`HistoryPage::ghostty`]), which only a binary with

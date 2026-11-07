@@ -839,6 +839,15 @@ impl Server {
             let clear = self.clear_on_attach();
             self.send(old, &ServerMsg::Frame(caps.restart(clear, rows)));
         }
+        // The title the teardown popped, given again: with no upgrade the
+        // terminal would still show it.
+        let title = self
+            .clients
+            .get(&old)
+            .and_then(|c| c.term.as_ref()?.set_title(c.terminal_title.as_deref()?));
+        if let Some(bytes) = title {
+            self.send(old, &ServerMsg::Frame(bytes));
+        }
         // A resize while it was re-executing.
         if let Some((cols, rows)) = size {
             self.resize_client(old, cols, rows);

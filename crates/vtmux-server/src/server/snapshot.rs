@@ -33,7 +33,8 @@
 //! them, the status-line message and its timer, `lock-after-time`'s and
 //! `automatic-rename`'s timers, each pane's auto-hide scrollbar (shown,
 //! hovered, its hide timer), where each client terminal's queries stand
-//! (answered, and the start timer that gives up on them), and config
+//! (answered, and the start timer that gives up on them), the title each
+//! client's terminal shows from its output, and config
 //! errors waiting for a client.
 //!
 //! [`Server::from_snapshot`] refuses (an error, never a panic) a snapshot
@@ -1231,6 +1232,10 @@ impl Server {
         if !meta.requires.contains(&queries) && clients.iter().any(|c| c.queries.is_some()) {
             meta.requires.push(queries);
         }
+        let title = snap::TERMINAL_TITLE_FEATURE.to_string();
+        if !meta.requires.contains(&title) && clients.iter().any(|c| c.terminal_title.is_some()) {
+            meta.requires.push(title);
+        }
         snap::Snapshot {
             meta,
             server,
@@ -1286,6 +1291,7 @@ impl Server {
             focused: c.focused,
             suspended: c.suspended,
             title: c.title.clone(),
+            terminal_title: c.terminal_title.clone(),
             control: c.control.as_ref().map(|cs| {
                 let mut out = control_out(cs, &self.control_streams, level, now);
                 out.level = level;
@@ -1818,6 +1824,7 @@ impl Server {
         c.flags = flags_in(&x.flags);
         c.suspended = x.suspended;
         c.title.clone_from(&x.title);
+        c.terminal_title.clone_from(&x.terminal_title);
         let mut palette = crate::term_queries::Reported::default().palette;
         for e in &x.palette {
             if let Some(slot) = palette.get_mut(e.index as usize) {

@@ -1080,6 +1080,31 @@ fn a_clients_start_timer_runs_on() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The title an attached client's terminal shows from its output comes
+/// back with the client, under its feature name.
+#[test]
+fn a_clients_terminal_title_is_kept() {
+    let dir = temp_dir("ttitle");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let (client, _peer) = attach(&mut a, &dir, "s", &[]);
+    let plain = a.to_snapshot(snap::Meta::default());
+    assert!(plain.clients.iter().all(|c| c.terminal_title.is_none()));
+    a.clients.get_mut(&client).unwrap().terminal_title = Some("INNER".into());
+    let s = a.to_snapshot(snap::Meta::default());
+    assert!(
+        s.meta
+            .requires
+            .contains(&snap::TERMINAL_TITLE_FEATURE.to_string()),
+        "{:?}",
+        s.meta.requires
+    );
+    let b = rebuild(&a, &dir, "b");
+    assert_eq!(b.clients[&client].terminal_title.as_deref(), Some("INNER"));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Pane output a `pipe-pane` command has not taken yet stays queued for it
 /// (decision 10, keep `pipe-pane` running), and `-I`/`-O` come back as
 /// they were.
