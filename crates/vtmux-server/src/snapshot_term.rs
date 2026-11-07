@@ -1464,15 +1464,31 @@ fn modes_in(cols: u16, rows: u16, recorded: &[snap::term::Mode]) -> Vec<ModeStat
 
 /// A pane that is the terminal `t` was exported from. `ghostty_patches`
 /// is the writer's patch stack (`Meta.ghostty_patches`): pages in
-/// Ghostty's form are read only if it is this binary's.
+/// Ghostty's form are read only if it is this binary's, checked as
+/// [`ImportCheck::Lazy`] says (the restore after an upgrade's exec).
 ///
 /// # Errors
 /// A record out of range, a page that does not decode, pages from another
 /// Ghostty build, or a state Ghostty refuses.
-#[expect(clippy::too_many_lines, reason = "one line per field carried")]
 pub fn term_from_snapshot(
     t: &snap::TermState,
     ghostty_patches: &str,
+) -> Result<PaneTerm, TermError> {
+    term_from_snapshot_with(t, ghostty_patches, ImportCheck::Lazy)
+}
+
+/// [`term_from_snapshot`], pages in Ghostty's form checked as `check`
+/// says: the upgrade's dry run (live upgrade spec, decision 7) imports
+/// with [`ImportCheck::Full`], which decodes each of them before the
+/// exec, and drops the pane.
+///
+/// # Errors
+/// As [`term_from_snapshot`].
+#[expect(clippy::too_many_lines, reason = "one line per field carried")]
+pub fn term_from_snapshot_with(
+    t: &snap::TermState,
+    ghostty_patches: &str,
+    check: ImportCheck,
 ) -> Result<PaneTerm, TermError> {
     let cols = narrow::<u16>(t.cols, "terminal width")?;
     let rows = narrow::<u16>(t.rows, "terminal height")?;
@@ -1628,7 +1644,7 @@ pub fn term_from_snapshot(
         ghostty,
         pane,
     };
-    let mut import = StateImport::new(&state, ImportCheck::Lazy)?;
+    let mut import = StateImport::new(&state, check)?;
     pages_of(&t.primary, cols, ghostty_patches, &mut |page| {
         Ok(import.page(ScreenKind::Primary, page)?)
     })?;

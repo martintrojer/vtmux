@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use harness::{Fuzz, PROBE, exported, exported_flat, fuzz_seeds, observe, oracle_programs};
 use vtmux_server::snapshot_term::{
     Form, TermError, ghostty_pages_requirement, has_ghostty_pages, reader_features,
-    term_from_snapshot, term_to_snapshot,
+    term_from_snapshot, term_from_snapshot_with, term_to_snapshot,
 };
 use vtmux_snapshot as snap;
-use vtmux_vt::{Compression, PATCH_STACK, PaneTerm, StateError};
+use vtmux_vt::{Compression, ImportCheck, PATCH_STACK, PaneTerm, StateError};
 
 /// `t` alone in a consistent snapshot, encoded as `form` travels (an
 /// upgrade stream for `SamePin`, a checkpoint manifest and its chunks for
@@ -307,6 +307,36 @@ fn alternate_screen_sync_hold_and_raw_links() {
         );
     }
     round_trip(&mut a, Form::Rows, PROBE, "alternate, probe");
+}
+
+/// The dry run's import ([`ImportCheck::Full`], decision 7) reads the
+/// same terminal as the restore's, and refuses what it refuses.
+#[test]
+fn the_dry_run_imports_with_the_full_check() {
+    let mut text = Vec::new();
+    for i in 0..3000 {
+        text.extend_from_slice(
+            format!("\x1b[3{}m{i} {}\r\n", i % 8, "d".repeat(i % 70)).as_bytes(),
+        );
+    }
+    let a = compressed(pane(80, 24, 3000, &text));
+    for form in [Form::SamePin, Form::Rows] {
+        let t = through_stream(term_to_snapshot(&a, form), form);
+        let full = term_from_snapshot_with(&t, PATCH_STACK, ImportCheck::Full).expect("full");
+        assert_alike(&a, &full, &format!("full {form:?}"), true);
+        let mut bad = t.clone();
+        let Some(page) = bad.primary.history.iter_mut().find(|p| p.is_ghostty()) else {
+            continue;
+        };
+        let at = page.ghostty.len() - 3;
+        page.ghostty[at] ^= 0x40;
+        for check in [ImportCheck::Lazy, ImportCheck::Full] {
+            assert!(
+                term_from_snapshot_with(&bad, PATCH_STACK, check).is_err(),
+                "{check:?}: a corrupt page imported"
+            );
+        }
+    }
 }
 
 /// A stream from another Ghostty patch stack can't carry its pages in
