@@ -53,6 +53,7 @@ pub(crate) fn hello(
             utf8: true,
             no_start: false,
         },
+        ext: vtmux_core::protocol::HelloExt::default(),
     }
 }
 

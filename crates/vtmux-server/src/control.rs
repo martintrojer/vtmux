@@ -527,6 +527,16 @@ impl Server {
         self.control_flush(id);
     }
 
+    /// `text` as a line in the stream, outside any guard, not as an error:
+    /// an upgrade's warnings to the control client that asked for it.
+    pub(crate) fn control_plain_line(&mut self, id: ClientId, text: &str) {
+        let Some(cs) = self.control_mut(id) else {
+            return;
+        };
+        cs.write_line(text.as_bytes());
+        self.control_flush(id);
+    }
+
     /// `c->retval = 1` from a `cmdq_error` outside the command's guard.
     pub(crate) fn control_retval(&mut self, id: ClientId, status: i32) {
         if let Some(cs) = self.control_mut(id) {

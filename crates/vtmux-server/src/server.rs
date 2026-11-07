@@ -199,6 +199,9 @@ pub(crate) struct Client {
     /// The terminal's replies that changed its features, in order: a
     /// snapshot replays them onto the terminal opened again (D27).
     pub(crate) term_replies: Vec<snapshot::TermReply>,
+    /// Between connections across a live upgrade (`upgrade.rs`,
+    /// decision 21): drawn nothing until it re-attaches.
+    pub(crate) reattach: Option<upgrade::Reattach>,
 }
 
 impl Client {
@@ -266,6 +269,7 @@ impl Client {
             compositor: crate::render::Compositor::default(),
             window_cache: crate::render::WindowCache::default(),
             passthrough: Vec::new(),
+            reattach: None,
         }
     }
 }
@@ -877,6 +881,7 @@ impl Server {
             self.subs_timers(Instant::now());
             self.lock_timer_fire(Instant::now());
             self.exit_timers(Instant::now());
+            self.reattach_timers(Instant::now());
             self.persist_timers(Instant::now());
             // Events from outside commands (a pane exiting, a client
             // leaving, a rename, alerts) reach their sinks before the
@@ -1030,6 +1035,8 @@ impl Server {
             self.persist_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.upgrade_deadline()
+                .map(|d| d.saturating_duration_since(now)),
+            self.reattach_deadline()
                 .map(|d| d.saturating_duration_since(now)),
             self.clients
                 .values()
@@ -1274,7 +1281,7 @@ impl Server {
                 }
             }
         }
-        if closed {
+        if closed && !self.reattach_closed(id) {
             self.drop_client(id);
         }
     }
@@ -1474,8 +1481,9 @@ impl Server {
             return;
         }
         // A suspended client's terminal is not tmux's to write
-        // (TTY_STARTED is off: tty_client_ready, tty.c:1634).
-        if c.suspended && matches!(msg, ServerMsg::Frame(_)) {
+        // (TTY_STARTED is off: tty_client_ready, tty.c:1634), nor is that
+        // of a client re-attaching across an upgrade.
+        if (c.suspended || c.reattach.is_some()) && matches!(msg, ServerMsg::Frame(_)) {
             return;
         }
         // Large payloads are split so no frame exceeds MAX_FRAME.
@@ -1518,6 +1526,15 @@ impl Server {
         let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead) else {
             return;
         };
+        // Re-executing across an upgrade: its old connection is closed, and
+        // the new one starts afresh.
+        if c.reattach.is_some_and(|r| r.gone) {
+            c.out = Outbox::default();
+            if c.closing {
+                self.drop_client(id);
+            }
+            return;
+        }
         match c.out.write_to(&mut c.stream) {
             Ok(true) => c.last_write = Instant::now(),
             Ok(false) => {}
@@ -1702,6 +1719,12 @@ impl Server {
                 }
             }
             crate::acl::Access::Write => {}
+        }
+        // A client re-executed by an upgrade, back with its token
+        // (live-upgrade spec, decision 21): no command, no hook.
+        if let Some(token) = hello.ext.reattach.clone() {
+            self.reattach(id, &hello, &token);
+            return;
         }
         let origin = Origin {
             attached: None,
@@ -2729,8 +2752,9 @@ impl Server {
             self.exit_attached(id, 0, Some("exited".into()), false);
             return true;
         }
-        // server_client_check_redraw (server-client.c:2510).
-        if suspended {
+        // server_client_check_redraw (server-client.c:2510); a client
+        // re-attaching across an upgrade is drawn once it is back.
+        if suspended || self.clients[&id].reattach.is_some() {
             self.clients
                 .get_mut(&id)
                 .expect("client")
@@ -5614,6 +5638,7 @@ mod tests {
                 features: Vec::new(),
             }),
             flags: ClientFlags::default(),
+            ext: vtmux_core::protocol::HelloExt::default(),
         });
         server.clients.insert(id, client);
         server.attach_client(id, s).unwrap();
@@ -5654,6 +5679,7 @@ mod tests {
                 features: Vec::new(),
             }),
             flags: ClientFlags::default(),
+            ext: vtmux_core::protocol::HelloExt::default(),
         });
         server.clients.insert(id, client);
         server.attach_client(id, s).unwrap();
@@ -5729,6 +5755,7 @@ mod tests {
                 features: Vec::new(),
             }),
             flags: ClientFlags::default(),
+            ext: vtmux_core::protocol::HelloExt::default(),
         });
         server.clients.insert(id, client);
         server.attach_client(id, s).unwrap();

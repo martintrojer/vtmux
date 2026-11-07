@@ -490,7 +490,7 @@ fn a_carried_requester_is_answered_by_the_image_that_serves() {
             .collect::<Vec<_>>()
     };
     for (outcome, want) in [
-        (Ok(()), vec!["exit 0".to_owned()]),
+        (Ok(String::new()), vec!["exit 0".to_owned()]),
         (
             Err("live upgrade failed: why".to_owned()),
             vec![
@@ -545,11 +545,285 @@ fn a_carried_requester_is_answered_by_the_image_that_serves() {
     let shown = "/dev/vtmux-test-tty message: live upgrade failed: why";
     let logged = server.messages_newest_first().next().unwrap().text.clone();
     assert_eq!(logged, shown);
-    server.upgrade_answer(term, Ok(()));
+    server.upgrade_answer(term, Ok(String::new()));
     assert_eq!(
         server.messages_newest_first().next().unwrap().text,
         shown,
         "a success says nothing"
     );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// An attached terminal client named `tty` on `session`, whose binary
+/// follows upgrades or (`follows` false) is from before they did.
+fn attach_as(
+    server: &mut Server,
+    dir: &Path,
+    session: &str,
+    tty: &str,
+    follows: bool,
+) -> (ClientId, mio::net::UnixStream) {
+    let mut h = st::hello(
+        &["attach-session", "-t", session],
+        dir,
+        Some(vtmux_core::protocol::TtyInfo {
+            name: tty.into(),
+            term: "xterm-256color".into(),
+            cols: 80,
+            rows: 24,
+            features: Vec::new(),
+        }),
+        ControlMode::None,
+    );
+    h.ext.follows_upgrade = follows;
+    let out = st::connect(server, h);
+    server.pending_exits.clear();
+    out
+}
+
+/// Client `id`'s peer has closed its end: wait for the server to see the
+/// end of the stream (a child another test thread forks may hold a copy
+/// of the peer until it execs).
+fn gone(server: &mut Server, id: ClientId) {
+    let end = Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        server.client_readable(id);
+        if server.clients[&id].reattach.is_some_and(|r| r.gone) {
+            return;
+        }
+        assert!(Instant::now() < end, "{:?}", server.clients[&id].reattach);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// The notices in `peer`'s stream: (binary, token).
+fn notices(
+    server: &mut Server,
+    id: ClientId,
+    peer: &mut mio::net::UnixStream,
+) -> Vec<(PathBuf, String)> {
+    st::messages(server, id, peer)
+        .into_iter()
+        .filter_map(|m| match m {
+            ServerMsg::UpgradeNotice { binary, token } => Some((binary, token)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Step 6 (decisions 4 and 21): once the dry run passes, each attached
+/// client that follows upgrades is sent the binary and the token its
+/// record carries in the snapshot; one from before (no
+/// `follows_upgrade`) gets nothing and carries no token. An exec that
+/// returns leaves the follower waiting to re-attach, to this image.
+#[test]
+fn followers_are_told_to_re_execute_with_the_token_the_snapshot_carries() {
+    let (mut server, dir) = setup("notice");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let (o, mut o_peer) = attach_as(&mut server, &dir, "a", "/dev/o", false);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    let _ = st::messages(&mut server, o, &mut o_peer);
+    let binary = passing(&dir);
+    upgrade(&mut server, &dir, &binary);
+    let s = snap::decode(&execs().pop().expect("exec").bytes).unwrap();
+    let token = |id: ClientId| {
+        s.clients
+            .iter()
+            .find(|c| c.id as usize == id.0)
+            .map(|c| c.token)
+            .unwrap()
+    };
+    assert_ne!(token(f), 0);
+    assert_eq!(token(o), 0);
+    let sent = notices(&mut server, f, &mut f_peer);
+    assert_eq!(sent, [(binary, format!("{:016x}", token(f)))]);
+    assert!(vtmux_core::protocol::is_upgrade_token(&sent[0].1));
+    assert_eq!(notices(&mut server, o, &mut o_peer), []);
+    let r = server.clients[&f].reattach.expect("waiting to re-attach");
+    assert!(r.deadline.is_some() && !r.gone);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A dry run that fails sends no notice, and the tokens it would have
+/// carried are void.
+#[test]
+fn a_failed_dry_run_sends_no_notice() {
+    let (mut server, dir) = setup("nonotice");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    upgrade(&mut server, &dir, &script(&dir, "no", "exit 2"));
+    assert_eq!(notices(&mut server, f, &mut f_peer), []);
+    assert!(server.clients[&f].reattach.is_none());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Decision 21: the client re-executed (its old connection closed) and
+/// re-attached with its token is bound back to its record: the same id,
+/// creation time and key table, no `client-*` hook and no `%client-*`
+/// notification to a control client; it is sent `Ready`, then its
+/// terminal started again, and nothing until then. A token no record
+/// holds is told to attach again.
+#[test]
+fn a_re_attach_rebinds_the_record_and_fires_nothing() {
+    let (mut server, dir) = setup("rebind");
+    st::ok(&mut server, &dir, &["new-session", "-d", "-s", "b"]);
+    st::ok(&mut server, &dir, &["set", "-g", "@fired", "0"]);
+    for hook in [
+        "client-attached",
+        "client-detached",
+        "client-session-changed",
+        "client-resized",
+        "client-active",
+    ] {
+        st::ok(
+            &mut server,
+            &dir,
+            &["set-hook", "-g", hook, &format!("set -ga @fired {hook}")],
+        );
+    }
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let (control, mut c_peer) = st::connect(
+        &mut server,
+        st::hello(&["attach", "-t", "b"], &dir, None, ControlMode::Control),
+    );
+    server.cmdq_process();
+    let _ = st::messages(&mut server, f, &mut f_peer);
+    let _ = st::messages(&mut server, control, &mut c_peer);
+    let fired = st::run(&mut server, &dir, &["show", "-gv", "@fired"]);
+    server.cmdq_process();
+    let created = server.clients[&f].created_secs;
+
+    server.upgrade_tokens();
+    server.upgrade_notify(&dir.join("new"));
+    let token = notices(&mut server, f, &mut f_peer).pop().unwrap().1;
+    // The client execs: its old connection closes, the record stays.
+    drop(f_peer);
+    gone(&mut server, f);
+    // Nothing is drawn for it meanwhile.
+    server.redraw_client(f);
+    server.render_clients();
+
+    let mut h = st::hello(
+        &[],
+        &dir,
+        Some(vtmux_core::protocol::TtyInfo {
+            name: "/dev/f".into(),
+            term: "xterm-256color".into(),
+            cols: 80,
+            rows: 24,
+            features: Vec::new(),
+        }),
+        ControlMode::None,
+    );
+    h.ext.follows_upgrade = true;
+    h.ext.reattach = Some(token.clone());
+    let (new, mut peer) = st::connect(&mut server, h.clone());
+    assert!(
+        !server.clients.contains_key(&new),
+        "bound to the old record"
+    );
+    let c = &server.clients[&f];
+    assert!(c.reattach.is_none() && c.attached.is_some());
+    assert_eq!(c.created_secs, created);
+    let got = st::messages(&mut server, f, &mut peer);
+    assert_eq!(got.first(), Some(&ServerMsg::Ready), "{got:?}");
+    let Some(ServerMsg::Frame(start)) = got.get(1) else {
+        panic!("{got:?}");
+    };
+    assert!(start.ends_with(b"\x1b[?996n"), "tty_start_tty first");
+    // The client acknowledges what it wrote; then the redraw.
+    server.on_message(
+        f,
+        vtmux_core::protocol::ClientMsg::FrameAck { seq: u64::MAX },
+    );
+    server.render_clients();
+    server.cmdq_process();
+    let got = st::messages(&mut server, f, &mut peer);
+    assert!(
+        // Every row is drawn, blank ones too.
+        matches!(got.as_slice(), [ServerMsg::Frame(b)]
+            if (1..24).all(|row| String::from_utf8_lossy(b).contains(&format!("\x1b[{row};1H")))),
+        "the redraw: {got:?}"
+    );
+    assert_eq!(
+        st::run(&mut server, &dir, &["show", "-gv", "@fired"]),
+        fired,
+        "no hook"
+    );
+    server.cmdq_process();
+    let lines: String = st::messages(&mut server, control, &mut c_peer)
+        .into_iter()
+        .filter_map(|m| match m {
+            ServerMsg::Stdout(b) => Some(String::from_utf8_lossy(&b).into_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(!lines.contains("%client-"), "{lines}");
+
+    // The token is used up.
+    let (again, mut again_peer) = st::connect(&mut server, h);
+    assert_eq!(
+        st::messages(&mut server, again, &mut again_peer),
+        [ServerMsg::Exit {
+            code: 1,
+            message: Some("server upgraded: re-attach".into()),
+            hup: false,
+        }]
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// In the image that serves after the exec: a client carried with a
+/// token waits to re-attach; one without (decision 25) is detached with
+/// `[server upgraded: re-attach]` and named in the warnings. A follower
+/// that never re-attaches is given up on at its deadline: detached the
+/// same way while its old connection is open (it ignored its notice),
+/// lost once that has closed.
+#[test]
+fn clients_that_cannot_follow_are_detached_and_named() {
+    let (mut server, dir) = setup("unfollowing");
+    let (f, mut f_peer) = attach_as(&mut server, &dir, "a", "/dev/f", true);
+    let (g, mut g_peer) = attach_as(&mut server, &dir, "a", "/dev/g", true);
+    let (o, mut o_peer) = attach_as(&mut server, &dir, "a", "/dev/o", false);
+    for (id, peer) in [(f, &mut f_peer), (g, &mut g_peer), (o, &mut o_peer)] {
+        let _ = st::messages(&mut server, id, peer);
+    }
+    server.upgrade_tokens();
+    let mut new = st::rebuild(&server, &dir, "b");
+    new.detach_unfollowing();
+    assert_eq!(
+        new.upgrade.warnings,
+        [
+            "warning: client /dev/o can't follow an upgrade: detached with \
+          [server upgraded: re-attach]"
+        ]
+    );
+    let exit = |m: &[ServerMsg]| {
+        m.iter()
+            .filter_map(|m| match m {
+                ServerMsg::Exit { code, message, .. } => Some((*code, message.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let detached = vec![(1, Some("server upgraded: re-attach".to_owned()))];
+    assert_eq!(exit(&st::messages(&mut new, o, &mut o_peer)), detached);
+    assert!(new.clients[&f].reattach.is_some() && new.clients[&g].reattach.is_some());
+
+    // g's old connection closes (it re-executes) and it never comes back;
+    // f's stays open: it ignored its notice.
+    drop(g_peer);
+    gone(&mut new, g);
+    let deadline = new.reattach_deadline().unwrap();
+    new.reattach_timers(
+        deadline
+            .checked_sub(std::time::Duration::from_millis(1))
+            .unwrap(),
+    );
+    assert!(new.clients.contains_key(&f) && new.clients.contains_key(&g));
+    new.reattach_timers(deadline);
+    assert!(!new.clients.contains_key(&g), "lost");
+    assert_eq!(exit(&st::messages(&mut new, f, &mut f_peer)), detached);
+    drop(new);
     std::fs::remove_dir_all(dir).unwrap();
 }

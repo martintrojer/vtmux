@@ -1,5 +1,6 @@
 //! Attached client: raw input, signals and encoded server frames, never a grid.
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
@@ -9,7 +10,9 @@ use mio::unix::SourceFd;
 use mio::{Events, Interest, Poll, Token};
 use signal_hook::consts::{SIGCONT, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGWINCH};
 use signal_hook_mio::v1_0::Signals;
-use vtmux_core::protocol::{self, ClientMsg, ProtocolError, ServerMsg};
+use vtmux_core::protocol::{
+    self, ClientMsg, ProtocolError, REATTACH_FLAG, ServerMsg, UPGRADED_DETACH,
+};
 
 use crate::tty::RawTty;
 
@@ -18,10 +21,24 @@ const SOCKET: Token = Token(1);
 const SIGNALS: Token = Token(2);
 const STDOUT: Token = Token(3);
 
+/// How an attached client comes back after a live upgrade (live-upgrade
+/// spec, *Clients*): what it re-executes as, and where it connects.
+#[derive(Clone, Debug)]
+pub struct Reattach {
+    /// Its `argv[0]`, kept across the exec: `tmux` or `vtmux` (D21).
+    pub argv0: OsString,
+    /// The socket it is connected through.
+    pub socket: PathBuf,
+    /// The terminal size its `Hello` gave when it is itself a re-attach:
+    /// sent again only if the terminal has changed size since, so the
+    /// server sees no resize that did not happen.
+    pub sent_size: Option<(u32, u32)>,
+}
+
 /// Called after Ready; the server owns startup and teardown escapes.
 #[must_use]
-pub fn attach(stream: &mut UnixStream) -> i32 {
-    match run(stream) {
+pub fn attach(stream: &mut UnixStream, how: &Reattach) -> i32 {
+    match run(stream, how.sent_size) {
         Ok(Leave::Exit { code, message, hup }) => {
             if let Some(message) = message {
                 println!("[{message}]");
@@ -36,6 +53,9 @@ pub fn attach(stream: &mut UnixStream) -> i32 {
         // The terminal is restored (run dropped its guard): the process
         // becomes the command.
         Ok(Leave::Exec { command, shell }) => exec(&shell, &command),
+        // The terminal has its modes back and has taken every frame: the
+        // process becomes the new binary, on the same terminal.
+        Ok(Leave::Upgrade { binary, token }) => reexec(&binary, &token, how),
         Err(e) => {
             eprintln!("{e}");
             1
@@ -52,6 +72,8 @@ enum Leave {
     },
     /// `MSG_EXEC`.
     Exec { command: String, shell: PathBuf },
+    /// The frozen `UpgradeNotice`: re-execute `binary` and re-attach.
+    Upgrade { binary: PathBuf, token: String },
 }
 
 impl Leave {
@@ -82,7 +104,26 @@ pub fn exec(shell: &Path, command: &str) -> i32 {
     1
 }
 
-fn run(stream: &mut UnixStream) -> io::Result<Leave> {
+/// The server is replacing itself with `binary` (live-upgrade spec,
+/// decision 4): become `binary`, re-attaching with `token` on the same
+/// terminal through the same socket (the frozen re-attach command line,
+/// protocol module docs). Only returns, with the exit status, if the exec
+/// fails: the client can't follow, so it says what the server would have.
+#[must_use]
+pub fn reexec(binary: &Path, token: &str, how: &Reattach) -> i32 {
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new(binary)
+        .arg0(&how.argv0)
+        .arg(REATTACH_FLAG)
+        .arg(token)
+        .arg(&how.socket)
+        .exec();
+    eprintln!("{}: {err}", binary.display());
+    println!("[{UPGRADED_DETACH}]");
+    1
+}
+
+fn run(stream: &mut UnixStream, sent_size: Option<(u32, u32)>) -> io::Result<Leave> {
     // Install signal handlers before entering raw mode: all returns drop the
     // tty guard, including SIGTERM/SIGHUP (client.c client_signal). SIGINT
     // goes to proc_signal_cb and client_signal ignores it while attached;
@@ -113,7 +154,7 @@ fn run(stream: &mut UnixStream) -> io::Result<Leave> {
     );
     stream.set_nonblocking(true)?;
     let mut out = Output::default();
-    let result = relay(stream, &mut poll, &mut signals, &mut out, &raw);
+    let result = relay(stream, &mut poll, &mut signals, &mut out, &raw, sent_size);
     // Teardown escapes are in the buffer: deliver them before the guard
     // restores termios.
     let flushed = out.finish();
@@ -324,11 +365,14 @@ fn relay(
     signals: &mut Signals,
     out: &mut Output,
     raw: &RawTty,
+    sent_size: Option<(u32, u32)>,
 ) -> io::Result<Leave> {
     let mut events = Events::with_capacity(16);
     let mut socket = Socket::default();
     out.high_water = high_water();
-    send_size(stream)?;
+    if sent_size.is_none() || sent_size != size().ok() {
+        send_size(stream)?;
+    }
     loop {
         match poll.poll(&mut events, None) {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -477,6 +521,11 @@ impl Socket {
                                 self.suspend_now = true;
                             }
                             ServerMsg::Lock { command } => self.lock = Some(command),
+                            // Nothing more is read: what comes after is
+                            // the new image's, for the re-attach.
+                            ServerMsg::UpgradeNotice { binary, token } => {
+                                return Ok(Some(Leave::Upgrade { binary, token }));
+                            }
                             // File requests go to command clients only: an
                             // attached client's I/O is the server's.
                             ServerMsg::Ready
@@ -485,9 +534,7 @@ impl Socket {
                             | ServerMsg::WriteData(_)
                             | ServerMsg::WriteClose
                             | ServerMsg::Flags { .. }
-                            // Re-exec on an upgrade comes with the upgrade
-                            // itself; a result goes to a requester only.
-                            | ServerMsg::UpgradeNotice { .. }
+                            // A result goes to a requester only.
                             | ServerMsg::UpgradeResult { .. } => {}
                         }
                     }
@@ -510,13 +557,13 @@ fn tty_hung_up() -> bool {
         .is_ok_and(|n| n > 0 && fds[0].revents().contains(PollFlags::HUP))
 }
 
-fn send_size(stream: &mut UnixStream) -> io::Result<()> {
+/// The terminal's size, columns then rows.
+fn size() -> io::Result<(u32, u32)> {
     let ws = rustix::termios::tcgetwinsize(io::stdin())?;
-    send(
-        stream,
-        &ClientMsg::Resize {
-            cols: u32::from(ws.ws_col),
-            rows: u32::from(ws.ws_row),
-        },
-    )
+    Ok((u32::from(ws.ws_col), u32::from(ws.ws_row)))
+}
+
+fn send_size(stream: &mut UnixStream) -> io::Result<()> {
+    let (cols, rows) = size()?;
+    send(stream, &ClientMsg::Resize { cols, rows })
 }

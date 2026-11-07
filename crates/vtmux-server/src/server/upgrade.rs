@@ -28,8 +28,9 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use mio::{Interest, Token};
 use vtmux_core::error::strerror;
-use vtmux_core::protocol::ServerMsg;
+use vtmux_core::protocol::{Hello, HelloExt, ServerMsg, UPGRADED_DETACH};
 use vtmux_snapshot as snap;
 
 use super::{ClientId, Server};
@@ -48,6 +49,46 @@ pub const FLUSH_WAIT: Duration = Duration::from_secs(1);
 
 /// How often a waiting preflight looks again, besides on every event.
 const RECHECK: Duration = Duration::from_millis(50);
+
+/// How long a client told to re-execute has to re-attach (live-upgrade
+/// spec, *Clients*): long enough for a busy host to start a binary.
+pub const REATTACH_WAIT: Duration = Duration::from_secs(10);
+
+/// An attached client between its connection and the next, across an
+/// upgrade (decisions 4 and 21): sent an `UpgradeNotice` with `token`, it
+/// re-executes and re-attaches presenting it, and is bound back to its
+/// record ([`Server::reattach`]). Meanwhile it is drawn nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Reattach {
+    pub(crate) token: u64,
+    /// When it is given up on; `None` while its notice is not sent yet.
+    pub(crate) deadline: Option<Instant>,
+    /// Its old connection has closed: it is re-executing.
+    pub(crate) gone: bool,
+}
+
+impl Reattach {
+    /// The token as the notice carries it ([`vtmux_core::protocol::is_upgrade_token`]).
+    pub(crate) fn text(self) -> String {
+        token_text(self.token)
+    }
+}
+
+fn token_text(token: u64) -> String {
+    format!("{token:016x}")
+}
+
+/// A token nobody can guess: the process's random hash keys (std seeds
+/// them from the OS), never 0 (a snapshot's "no token").
+fn fresh_token(salt: usize) -> u64 {
+    use std::hash::BuildHasher as _;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    std::collections::hash_map::RandomState::new()
+        .hash_one((salt, now))
+        .max(1)
+}
 
 /// Who asked for the upgrade, and so who hears how it went.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +127,9 @@ pub(crate) struct Pending {
 pub(crate) struct Upgrade {
     pub(crate) pending: Option<Pending>,
     pub(crate) exec: ExecFn,
+    /// What the requester is warned of once the new image serves: the
+    /// clients it detached ([`Server::detach_unfollowing`]).
+    pub(crate) warnings: Vec<String>,
 }
 
 impl Default for Upgrade {
@@ -93,6 +137,7 @@ impl Default for Upgrade {
         Self {
             pending: None,
             exec: crate::sys::upgrade::exec_in_place,
+            warnings: Vec::new(),
         }
     }
 }
@@ -378,31 +423,37 @@ impl Server {
     /// queue did not survive the exec, so the command ends here: a command
     /// client exits, 0 or 1 with why on stderr; a control client gets why
     /// as a line (as a waiting command's error after its `%end`) and reads
-    /// on; an attached client gets why as a status message.
-    pub(crate) fn upgrade_answer(&mut self, id: ClientId, outcome: Result<(), String>) {
+    /// on; an attached client gets why as a status message. A success
+    /// carries the warnings (`Ok` with their lines, empty without), told
+    /// the same way but as no error.
+    pub(crate) fn upgrade_answer(&mut self, id: ClientId, outcome: Result<String, String>) {
         let Some(c) = self.clients.get(&id) else {
             return;
         };
         let (control, attached) = (c.control.is_some(), c.attached.is_some());
         if control {
-            if let Err(message) = outcome {
-                self.control_error_line(id, &message);
+            match outcome {
+                Err(message) => self.control_error_line(id, &message),
+                Ok(warnings) if !warnings.is_empty() => self.control_plain_line(id, &warnings),
+                Ok(_) => {}
             }
             self.control_read(id);
         } else if attached {
-            if let Err(message) = outcome {
+            if let Err(message) | Ok(message) = outcome
+                && !message.is_empty()
+            {
                 self.status_message_set(id, message);
             }
         } else {
-            let code = match outcome {
-                Ok(()) => 0,
-                Err(message) => {
-                    let mut line = message.into_bytes();
-                    line.push(b'\n');
-                    self.send(id, &ServerMsg::Stderr(line));
-                    1
-                }
+            let (code, message) = match outcome {
+                Ok(warnings) => (0, warnings),
+                Err(message) => (1, message),
             };
+            if !message.is_empty() {
+                let mut line = message.into_bytes();
+                line.push(b'\n');
+                self.send(id, &ServerMsg::Stderr(line));
+            }
             self.finish_client(id, code);
         }
     }
@@ -432,6 +483,246 @@ impl Server {
             c.closing = true;
         }
         self.flush_client(id);
+    }
+}
+
+/// Attached clients across the exec (live-upgrade spec, *Clients*,
+/// decisions 4, 21 and 25). In the old image: a token for every attached
+/// terminal client whose binary follows upgrades
+/// ([`vtmux_core::protocol::HelloExt::follows_upgrade`]), written into
+/// the snapshot, and once the dry run has passed, the `UpgradeNotice`
+/// carrying it. In whichever image serves next: the clients without one
+/// are detached and named to the requester; each with one is drawn
+/// nothing until it re-attaches with its token, which binds the new
+/// connection to the record.
+impl Server {
+    /// Before the snapshot: a token for each attached terminal client that
+    /// follows upgrades. A client still re-attaching from an upgrade that
+    /// failed at the exec keeps the token it was sent.
+    pub(crate) fn upgrade_tokens(&mut self) {
+        for (&id, c) in &mut self.clients {
+            let follows = c
+                .hello
+                .as_ref()
+                .is_some_and(|h| h.tty.is_some() && h.ext.follows_upgrade);
+            if follows
+                && c.attached.is_some()
+                && c.control.is_none()
+                && !c.dead
+                && !c.closing
+                && c.reattach.is_none()
+            {
+                c.reattach = Some(Reattach {
+                    token: fresh_token(id.0),
+                    deadline: None,
+                    gone: false,
+                });
+            }
+        }
+    }
+
+    /// The dry run failed: no notice goes out, so the tokens are void.
+    pub(crate) fn upgrade_tokens_void(&mut self) {
+        for c in self.clients.values_mut() {
+            if c.reattach.is_some_and(|r| r.deadline.is_none()) {
+                c.reattach = None;
+            }
+        }
+    }
+
+    /// Sequence step 6: every client with a token is told to re-execute
+    /// `binary` (the frozen `UpgradeNotice`), and the notices are written
+    /// out before the exec, so none is cut in half. Each then has
+    /// [`REATTACH_WAIT`] to re-attach, to this image too if the exec fails.
+    pub(crate) fn upgrade_notify(&mut self, binary: &Path) {
+        let now = Instant::now();
+        let told: Vec<(ClientId, String)> = self
+            .clients
+            .iter_mut()
+            .filter_map(|(&id, c)| {
+                let r = c.reattach.as_mut().filter(|r| r.deadline.is_none())?;
+                r.deadline = Some(now + REATTACH_WAIT);
+                Some((id, r.text()))
+            })
+            .collect();
+        for (id, token) in told {
+            self.send(
+                id,
+                &ServerMsg::UpgradeNotice {
+                    binary: binary.to_path_buf(),
+                    token,
+                },
+            );
+        }
+        // A client that does not take a frame this small is stuck; it is
+        // given up on at its deadline like any other.
+        let _ = self.upgrade_flush(FLUSH_WAIT);
+    }
+
+    /// Decisions 4 and 25, in the image that serves after the exec: an
+    /// attached terminal client without a token (its binary is from
+    /// before clients follow upgrades, or the image before had no tokens)
+    /// can't follow. It is detached with `[server upgraded: re-attach]`
+    /// and named in the requester's answer.
+    pub(crate) fn detach_unfollowing(&mut self) {
+        let ids: Vec<ClientId> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| {
+                c.attached.is_some()
+                    && c.control.is_none()
+                    && c.reattach.is_none()
+                    && !c.closing
+                    && !c.dead
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in ids {
+            let name = self.client_name(id);
+            self.exit_attached(id, 1, Some(UPGRADED_DETACH.to_owned()), false);
+            self.upgrade.warnings.push(format!(
+                "warning: client {name} can't follow an upgrade: detached with \
+                 [{UPGRADED_DETACH}]"
+            ));
+        }
+    }
+
+    /// A `Hello` re-attaching with `token` on connection `new` (decision
+    /// 21): the connection takes the place of the old one in the record
+    /// the token was sent to, which keeps its id, creation time, flags,
+    /// key table and session. No hook fires and no control client hears
+    /// of it: to them the client never left. Its terminal is started again
+    /// (`tty_start_tty`, as after `MSG_WAKEUP`: its features are the
+    /// record's, so it is not asked again) and redrawn in full. A token
+    /// no record holds (given up on, or its session went) is told to
+    /// attach again.
+    pub(crate) fn reattach(&mut self, new: ClientId, hello: &Hello, token: &str) {
+        let old = self
+            .clients
+            .iter()
+            .find(|&(&id, c)| id != new && !c.dead && c.reattach.is_some_and(|r| r.text() == token))
+            .map(|(&id, _)| id);
+        let Some(old) = old else {
+            self.finish_client_with(new, 1, Some(UPGRADED_DETACH.to_owned()));
+            return;
+        };
+        // What the old connection still holds (keys typed before the
+        // notice was read) is taken first.
+        self.client_readable(old);
+        let (Some(mut fresh), true) = (self.clients.remove(&new), self.clients.contains_key(&old))
+        else {
+            return;
+        };
+        let _ = self.poll.registry().deregister(&mut fresh.stream);
+        let Some(c) = self.clients.get_mut(&old) else {
+            return;
+        };
+        let mut stale = std::mem::replace(&mut c.stream, fresh.stream);
+        let _ = self.poll.registry().deregister(&mut stale);
+        drop(stale);
+        let registered = self.poll.registry().register(
+            &mut c.stream,
+            Token(super::CLIENT_BASE + old.0),
+            Interest::READABLE,
+        );
+        c.inbuf = fresh.inbuf;
+        c.out = super::Outbox::default();
+        c.unacked = super::Unacked::default();
+        c.peer = fresh.peer;
+        c.speaks = vtmux_core::protocol::Speaks::Full;
+        c.reattach = None;
+        c.exit_deadline = None;
+        c.last_write = Instant::now();
+        let mut size = None;
+        if let Some(h) = c.hello.as_mut() {
+            h.pid = hello.pid;
+            h.ext = HelloExt {
+                follows_upgrade: hello.ext.follows_upgrade,
+                reattach: None,
+            };
+            if let (Some(was), Some(now)) = (h.tty.as_ref(), hello.tty.as_ref())
+                && (was.cols, was.rows) != (now.cols, now.rows)
+            {
+                size = Some((now.cols, now.rows));
+            }
+        }
+        c.decoder = crate::input::Decoder::default();
+        if let Some(term) = c.term.as_deref() {
+            c.decoder.set_terminal(term);
+        }
+        c.mouse = crate::mouse::ClientMouse::default();
+        c.title = None;
+        c.passthrough.clear();
+        c.pasting = false;
+        c.window_cache = crate::render::WindowCache::default();
+        c.compositor.invalidate();
+        let caps = c.caps;
+        if registered.is_err() {
+            self.drop_client(old);
+            return;
+        }
+        self.send(old, &ServerMsg::Ready);
+        if let Some(caps) = caps {
+            let rows = self.tty_size(old).map_or(24, |(_, r)| u32::from(r));
+            let clear = self.clear_on_attach();
+            self.send(old, &ServerMsg::Frame(caps.restart(clear, rows)));
+        }
+        // A resize while it was re-executing.
+        if let Some((cols, rows)) = size {
+            self.resize_client(old, cols, rows);
+        }
+        // Extended keys and focus reports asked for again, then the redraw.
+        self.update_features(old);
+        self.recalculate_sizes();
+    }
+
+    /// The old connection of a client sent its notice closed: it is
+    /// re-executing, so its record stays for the re-attach. `false` for
+    /// any other client.
+    pub(crate) fn reattach_closed(&mut self, id: ClientId) -> bool {
+        let Some(c) = self.clients.get_mut(&id) else {
+            return false;
+        };
+        let Some(r) = c.reattach.as_mut().filter(|r| r.deadline.is_some()) else {
+            return false;
+        };
+        r.gone = true;
+        let _ = self.poll.registry().deregister(&mut c.stream);
+        c.out = super::Outbox::default();
+        true
+    }
+
+    /// When the loop must look at a client re-attaching again.
+    pub(crate) fn reattach_deadline(&self) -> Option<Instant> {
+        self.clients
+            .values()
+            .filter_map(|c| c.reattach?.deadline)
+            .min()
+    }
+
+    /// Clients that did not re-attach within [`REATTACH_WAIT`]: one whose
+    /// old connection closed has gone (lost as any client); one still on
+    /// it did not act on its notice and is detached with
+    /// `[server upgraded: re-attach]`.
+    pub(crate) fn reattach_timers(&mut self, now: Instant) {
+        let due: Vec<(ClientId, bool)> = self
+            .clients
+            .iter_mut()
+            .filter_map(|(&id, c)| {
+                let r = c
+                    .reattach
+                    .filter(|r| r.deadline.is_some_and(|d| d <= now))?;
+                c.reattach = None;
+                Some((id, r.gone))
+            })
+            .collect();
+        for (id, gone) in due {
+            if gone {
+                self.drop_client(id);
+            } else {
+                self.exit_attached(id, 1, Some(UPGRADED_DETACH.to_owned()), false);
+            }
+        }
     }
 }
 

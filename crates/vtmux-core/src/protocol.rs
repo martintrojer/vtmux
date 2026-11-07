@@ -49,10 +49,17 @@
 //!   server reads it before the rest ([`hello_version`]), so a `Hello` of
 //!   another version gets the version mismatch even when the rest of it
 //!   does not decode.
-//! - `Hello`'s `ext` is its extension area, empty from protocol 9 on. A
-//!   later version appends its new `Hello` fields there in version order;
-//!   a reader takes the fields it knows and ignores the rest (protocol 9
-//!   ignores it all). Bytes after `ext` are still an error.
+//! - `Hello`'s `ext` is its extension area. A later build appends its new
+//!   `Hello` fields there in order; a reader takes the fields it knows and
+//!   ignores the rest (the first protocol 9 builds ignore it all). Bytes
+//!   after `ext` are still an error. The fields so far ([`HelloExt`]), all
+//!   of protocol 9: `upgrade` u8 (bit 0: the client follows an
+//!   [`ServerMsg::UpgradeNotice`]; the other bits 0), then `reattach`
+//!   option of string (the notice's token). A `Hello` whose fields are all
+//!   unset has an empty `ext`, as before them.
+//! - The re-attach command line, which a client of one build runs to
+//!   start the binary of another: `<binary> --vtmux-reattach <token>
+//!   <socket path>` ([`REATTACH_FLAG`]), `argv[0]` the client's own.
 //! - The `UpgradeRequest` and `UpgradeNotice` paths are absolute, since
 //!   the server's working directory is not the client's: the server refuses
 //!   a request with a relative one, and a client refuses such a notice
@@ -104,6 +111,17 @@ pub const FROZEN_SINCE: u32 = 9;
 /// smaller; this only bounds what a corrupt length can make us allocate.
 /// Frozen (module docs): binaries of other versions refuse a longer frame.
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
+
+/// The flag of the re-attach command line (module docs, *Frozen
+/// frames*): on an [`ServerMsg::UpgradeNotice`] an attached client execs
+/// `<binary> --vtmux-reattach <token> <socket path>`, which connects to
+/// `socket path` and sends a [`Hello`] with [`HelloExt::reattach`] set.
+pub const REATTACH_FLAG: &str = "--vtmux-reattach";
+
+/// What a client that can't follow an upgrade is detached with
+/// (live-upgrade spec, decisions 4 and 25); the client prints it in
+/// brackets.
+pub const UPGRADED_DETACH: &str = "server upgraded: re-attach";
 
 /// The shortest and longest [`ServerMsg::UpgradeNotice`] token (module
 /// docs, *Frozen frames*).
@@ -160,6 +178,65 @@ pub struct Hello {
     pub env: Vec<(String, String)>,
     pub tty: Option<TtyInfo>,
     pub flags: ClientFlags,
+    /// The fields in its extension area (module docs).
+    pub ext: HelloExt,
+}
+
+/// [`Hello`]'s extension fields (module docs, *Frozen frames*).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HelloExt {
+    /// The client re-executes on an [`ServerMsg::UpgradeNotice`]
+    /// (live-upgrade spec, decision 4). A client from before it doesn't
+    /// say so, and is detached by an upgrade (decision 25).
+    pub follows_upgrade: bool,
+    /// A re-attach after an [`ServerMsg::UpgradeNotice`]: its token
+    /// ([`is_upgrade_token`]), which rebinds the connection to the
+    /// client's record (decision 21). The rest of the `Hello` is the new
+    /// process's, which keeps its pid and terminal.
+    pub reattach: Option<String>,
+}
+
+impl HelloExt {
+    fn len(&self) -> usize {
+        if *self == Self::default() {
+            0
+        } else {
+            1 + option_len(self.reattach.as_ref(), |t| 4 + t.len())
+        }
+    }
+
+    fn write(&self, out: &mut Vec<u8>) {
+        if *self == Self::default() {
+            return;
+        }
+        out.push(u8::from(self.follows_upgrade));
+        put_option(out, self.reattach.as_ref(), |o, t| {
+            put_bytes(o, t.as_bytes());
+        });
+    }
+
+    /// The fields this build knows from `ext`; what follows them is a
+    /// later build's and ignored.
+    fn read(ext: &[u8]) -> Result<Self, ProtocolError> {
+        let mut r = Reader { buf: ext };
+        if r.buf.is_empty() {
+            return Ok(Self::default());
+        }
+        // Bits other than 0 are a later build's.
+        let follows_upgrade = r.u8()? & 1 != 0;
+        let reattach = if r.buf.is_empty() {
+            None
+        } else {
+            r.option(Reader::string)?
+        };
+        if reattach.as_deref().is_some_and(|t| !is_upgrade_token(t)) {
+            return Err(ProtocolError::Malformed("bad upgrade token"));
+        }
+        Ok(Self {
+            follows_upgrade,
+            reattach,
+        })
+    }
 }
 
 /// How the client was invoked, for the options M0 needs. Each field maps to
@@ -655,8 +732,8 @@ impl Hello {
         });
         out.push(u8::from(self.flags.utf8));
         out.push(u8::from(self.flags.no_start));
-        // ext: empty from protocol 9 on (module docs).
-        put_len(out, 0);
+        put_len(out, self.ext.len());
+        self.ext.write(out);
     }
 
     fn len(&self) -> usize {
@@ -675,6 +752,7 @@ impl Hello {
             + option_len(self.tty.as_ref(), TtyInfo::len)
             + 3
             + 4
+            + self.ext.len()
     }
 
     fn read(r: &mut Reader<'_>) -> Result<Self, ProtocolError> {
@@ -704,9 +782,8 @@ impl Hello {
             utf8: r.flag()?,
             no_start: r.flag()?,
         };
-        // ext: a later version's fields, none of which this one knows.
         let n = r.u32()? as usize;
-        r.take(n)?;
+        let ext = HelloExt::read(r.take(n)?)?;
         Ok(Self {
             version,
             invocation,
@@ -716,6 +793,7 @@ impl Hello {
             env,
             tty,
             flags,
+            ext,
         })
     }
 }
@@ -954,6 +1032,7 @@ mod tests {
                 utf8: true,
                 no_start: false,
             },
+            ext: HelloExt::default(),
         }
     }
 
@@ -1342,6 +1421,7 @@ mod tests {
                         utf8: true,
                         no_start: false,
                     },
+                    ext: HelloExt::default(),
                 }),
                 "34000000 00 09000000 00 04030201 02000000 02000000 6c73 01000000 ff 01000000 2f 01000000 01000000 41 01000000 62 00 01 01 00 00000000",
             ),
@@ -1365,6 +1445,7 @@ mod tests {
                         utf8: false,
                         no_start: true,
                     },
+                    ext: HelloExt::default(),
                 }),
                 "4a000000 00 09000000 01 07000000 00000000 02000000 2f68 00000000 01 0a000000 2f6465762f7074732f31 05000000 787465726d 50000000 18000000 01000000 03000000 524742 02 00 01 00000000",
             ),
@@ -1498,14 +1579,31 @@ mod tests {
         frame
     }
 
-    /// Hello's extension area (module docs): what a later version puts
-    /// there is ignored; bytes after it are still an error.
+    /// Hello's extension area (module docs): what a later build puts
+    /// there after the fields this one knows is ignored, and so are the
+    /// `upgrade` bits it does not know; bytes after it are still an error.
     #[test]
     fn a_hello_reads_past_its_extension_area() {
-        let ClientMsg::Hello(want) = frozen_client_goldens()[0].0.clone() else {
+        let ClientMsg::Hello(mut want) = frozen_client_goldens()[0].0.clone() else {
             unreachable!()
         };
-        let frame = hello_golden_with(9, 0, b"later fields", b"");
+        let frame = hello_golden_with(9, 0, b"\x00\x00later fields", b"");
+        assert_eq!(
+            decode::<ClientMsg>(&frame).unwrap(),
+            (ClientMsg::Hello(want.clone()), frame.len())
+        );
+        let frame = hello_golden_with(9, 0, b"\xfe", b"");
+        assert_eq!(
+            decode::<ClientMsg>(&frame).unwrap(),
+            (ClientMsg::Hello(want.clone()), frame.len())
+        );
+        want.ext = HelloExt {
+            follows_upgrade: true,
+            reattach: Some("a1B2c3D4e5F6g7H8".into()),
+        };
+        let mut ext = b"\x03\x01\x10\x00\x00\x00a1B2c3D4e5F6g7H8".to_vec();
+        ext.extend_from_slice(b"later");
+        let frame = hello_golden_with(9, 0, &ext, b"");
         assert_eq!(
             decode::<ClientMsg>(&frame).unwrap(),
             (ClientMsg::Hello(want), frame.len())
@@ -1514,6 +1612,55 @@ mod tests {
             decode::<ClientMsg>(&hello_golden_with(9, 0, b"", b"x")),
             Err(ProtocolError::TrailingBytes)
         ));
+    }
+
+    /// Hello's extension fields (module docs, *Frozen frames*), pinned
+    /// byte for byte like the frozen frames: a client of one build
+    /// re-attaches to the server of another with them. Unset, the area is
+    /// empty, as the frozen goldens have it.
+    #[test]
+    fn hello_ext_fields_never_change() {
+        let ClientMsg::Hello(base) = frozen_client_goldens()[0].0.clone() else {
+            unreachable!()
+        };
+        let with = |ext: HelloExt| {
+            ClientMsg::Hello(Hello {
+                ext,
+                ..base.clone()
+            })
+        };
+        for (ext, golden) in [
+            (HelloExt::default(), &b""[..]),
+            (
+                HelloExt {
+                    follows_upgrade: true,
+                    reattach: None,
+                },
+                b"\x01\x00",
+            ),
+            (
+                HelloExt {
+                    follows_upgrade: true,
+                    reattach: Some("0123456789abcdef".into()),
+                },
+                b"\x01\x01\x10\x00\x00\x000123456789abcdef",
+            ),
+        ] {
+            let m = with(ext);
+            let bytes = hello_golden_with(9, 0, golden, b"");
+            assert_eq!(hex(&encode(&m).unwrap()), hex(&bytes), "{m:?}");
+            assert_eq!(decode::<ClientMsg>(&bytes).unwrap(), (m, bytes.len()));
+        }
+        // A re-attach token breaking the rule (it came from a command
+        // line) does not decode.
+        for bad in [&b"short"[..], b"0123456789abcde-"] {
+            let mut ext = vec![1, 1];
+            put_bytes(&mut ext, bad);
+            assert!(matches!(
+                decode::<ClientMsg>(&hello_golden_with(9, 0, &ext, b"")),
+                Err(ProtocolError::Malformed(_))
+            ));
+        }
     }
 
     /// The version comes first (module docs): it is read from a Hello that

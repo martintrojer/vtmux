@@ -325,6 +325,7 @@ fn wait(what: &str, mut done: impl FnMut() -> bool) {
 struct Attached {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     bytes: Arc<Mutex<Vec<u8>>>,
+    writer: Box<dyn std::io::Write + Send>,
     _master: Box<dyn portable_pty::MasterPty + Send>,
 }
 
@@ -354,6 +355,7 @@ impl Attached {
         }
         let child = pair.slave.spawn_command(cmd).unwrap();
         drop(pair.slave);
+        let writer = pair.master.take_writer().unwrap();
         let mut reader = pair.master.try_clone_reader().unwrap();
         let bytes = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&bytes);
@@ -366,8 +368,46 @@ impl Attached {
         Self {
             child,
             bytes,
+            writer,
             _master: pair.master,
         }
+    }
+
+    /// The client's pid (an exec keeps it).
+    fn pid(&self) -> String {
+        self.child.process_id().unwrap().to_string()
+    }
+
+    /// The client's command line, from `ps` (portable to macOS).
+    fn args(&self) -> String {
+        let out = Command::new("ps")
+            .args(["-o", "args=", "-p", &self.pid()])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    /// What its terminal shows: everything it was sent, fed to a
+    /// terminal of its size, captured with styles, and the cursor.
+    fn screen(&self) -> String {
+        let mut t = vtmux_vt::PaneTerm::new(80, 24, 0);
+        t.feed(&self.bytes.lock().unwrap());
+        let opts = vtmux_vt::CaptureOpts {
+            escapes: true,
+            ..vtmux_vt::CaptureOpts::default()
+        };
+        let text = String::from_utf8_lossy(&vtmux_vt::capture(&t, opts)).into_owned();
+        format!("{text}cursor {:?}\n", t.cursor())
+    }
+
+    fn keys(&mut self, bytes: &str) {
+        self.writer.write_all(bytes.as_bytes()).unwrap();
+        self.writer.flush().unwrap();
+    }
+
+    /// The client's exit status, once it has exited.
+    fn exited(&mut self) -> Option<u32> {
+        self.child.try_wait().unwrap().map(|s| s.exit_code())
     }
 
     fn len(&self) -> usize {
@@ -1143,4 +1183,353 @@ fn assert_gone(file: &Path) {
 fn set_executable(path: &Path) {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Every attached client as `lsc` shows it, with what decision 21 keeps:
+/// pid, creation time, flags, key table, session, size and terminal.
+fn clients(world: &World) -> String {
+    world.run(&[
+        "lsc",
+        "-F",
+        "#{client_name} #{client_pid} #{client_created} #{client_flags} \
+         #{client_key_table} #{client_session} #{client_width}x#{client_height} \
+         #{client_termname} #{client_utf8} #{client_readonly}",
+    ])
+}
+
+/// The client's command line has moved on from `was`: it has re-executed
+/// with a re-attach (each upgrade sends a new token).
+fn reexecuted(attached: &Attached, was: &str) -> String {
+    let mut now = String::new();
+    wait("the client to re-execute", || {
+        now = attached.args();
+        now != was && now.contains(protocol::REATTACH_FLAG)
+    });
+    now
+}
+
+/// `fresh`'s screen, once it has drawn its status line, and `attached`'s
+/// equal to it.
+fn same_screen_as_fresh(attached: &Attached, fresh: &Attached) {
+    wait("the fresh client's first draw", || {
+        fresh.screen().contains("w2")
+    });
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        let (a, f) = (attached.screen(), fresh.screen());
+        if a == f {
+            return;
+        }
+        assert!(
+            Instant::now() < end,
+            "re-attached:\n{a}\nfresh attach:\n{f}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Decisions 4 and 21 (live-upgrade spec, *Clients*): on the upgrade an
+/// attached client re-executes the new binary (same process, its command
+/// line now the re-attach) and comes back as the client it was: `lsc`
+/// alike, no `client-*` hook and no `%client-*` notification, its screen
+/// what a fresh attach shows, and its keys reach its pane.
+#[test]
+fn an_attached_client_re_executes_and_comes_back_as_it_was() {
+    let world = World::new();
+    world.populate(&[]);
+    world.run(&["set", "-g", "@fired", "0"]);
+    for hook in [
+        "client-attached",
+        "client-detached",
+        "client-session-changed",
+        "client-resized",
+        "client-active",
+        "client-focus-in",
+        "client-focus-out",
+    ] {
+        world.run(&["set-hook", "-g", hook, &format!("set -ga @fired ' {hook}'")]);
+    }
+    let mut attached = Attached::new(&world, "a");
+    let control = Control::new(&world, "b");
+    wait("both clients", || world.run(&["lsc"]).lines().count() == 2);
+    // Something on the old screen that the new image's panes don't show
+    // until pane terminal state is carried: the redraw must cover it.
+    world.echo("a:w1", "before");
+    wait("the attached client's draw", || {
+        attached.screen().contains("before")
+    });
+    let pid = attached.pid();
+    let was = attached.args();
+    let listed = clients(&world);
+    let fired = world.run(&["show", "-gv", "@fired"]);
+    let notified = |c: &Control| {
+        c.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|l| l.starts_with("%client-"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let before = notified(&control);
+
+    let at = attached.len();
+    assert_eq!(world.upgrade(&bin()), Some(upgraded()));
+    reexecuted(&attached, &was);
+    assert_eq!(attached.pid(), pid, "the same process");
+    wait("the terminal started again", || {
+        attached.since(at).contains("\u{1b}[?996n")
+    });
+    assert_eq!(world.run(&["show", "-gv", "@fired"]), fired, "no hook");
+    assert_eq!(notified(&control), before, "no notification");
+    assert_eq!(clients(&world), listed);
+    let fresh = Attached::new(&world, "a");
+    same_screen_as_fresh(&attached, &fresh);
+    drop(fresh);
+    wait("the fresh client to go", || {
+        world.run(&["lsc"]).lines().count() == 2
+    });
+    assert_eq!(clients(&world), listed);
+
+    attached.keys("typed\r");
+    let at = attached.len();
+    wait("the keys to reach the pane", || {
+        world
+            .run(&["capture-pane", "-p", "-t", "a:w1"])
+            .contains("typed")
+    });
+    wait("the echo on the client", || {
+        attached.since(at).contains("typed")
+    });
+    assert!(attached.exited().is_none());
+}
+
+/// Twenty upgrades in a row, alternating between this build and a copy of
+/// it at another path: after each the attached client has re-executed the
+/// binary it was told to, is the same client (`lsc` alike, the same
+/// process) and shows what a fresh attach shows.
+#[test]
+fn an_attached_client_follows_twenty_upgrades_in_a_row() {
+    let world = World::new();
+    world.populate(&[]);
+    let copy = world.home.path().join("vtmux-copy");
+    std::fs::copy(BIN, &copy).unwrap();
+    set_executable(&copy);
+    let attached = Attached::new(&world, "a");
+    wait("the client", || world.run(&["lsc"]).lines().count() == 1);
+    world.echo("a:w1", "first");
+    let pid = attached.pid();
+    let listed = clients(&world);
+    let mut was = attached.args();
+    for i in 0..20 {
+        let binary = if i % 2 == 0 { copy.clone() } else { bin() };
+        let at = attached.len();
+        assert_eq!(world.upgrade(&binary), Some(upgraded()), "upgrade {i}");
+        was = reexecuted(&attached, &was);
+        assert!(
+            was.contains(&format!(" {} ", protocol::REATTACH_FLAG)),
+            "upgrade {i}: {was}"
+        );
+        assert_eq!(attached.pid(), pid, "upgrade {i}");
+        wait("the terminal started again", || {
+            attached.since(at).contains("\u{1b}[?996n")
+        });
+        let fresh = Attached::new(&world, "a");
+        same_screen_as_fresh(&attached, &fresh);
+        drop(fresh);
+        wait("the fresh client to go", || {
+            world.run(&["lsc"]).lines().count() == 1
+        });
+        assert_eq!(clients(&world), listed, "upgrade {i}");
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            std::fs::read_link(format!("/proc/{pid}/exe")).unwrap(),
+            std::fs::canonicalize(&binary).unwrap(),
+            "upgrade {i}: the client runs the binary it was told to"
+        );
+    }
+}
+
+/// `%output` payloads of pane `pane` in a control client's lines, octal
+/// escapes undone (control.c `control_append_data`), in order.
+fn output_of(lines: &[String], pane: &str) -> Vec<u8> {
+    let prefix = format!("%output {pane} ");
+    let mut out = Vec::new();
+    for line in lines {
+        let Some(data) = line.strip_prefix(&prefix) else {
+            continue;
+        };
+        let b = data.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(u8::is_ascii_digit) {
+                let n = (b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0');
+                out.push(n);
+                i += 4;
+            } else if b[i] == b'\\' && b.get(i + 1) == Some(&b'\\') {
+                out.push(b'\\');
+                i += 2;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Decisions 9 and 26: two control clients stay connected through three
+/// upgrades while a pane streams numbered lines, and each gets every line
+/// exactly once, in order, with nothing lost or doubled at the exec.
+#[test]
+fn control_clients_stream_on_through_upgrades_without_loss_or_repeat() {
+    let world = World::new();
+    world.populate(&[]);
+    let c1 = Control::new(&world, "b");
+    let c2 = Control::new(&world, "b");
+    wait("both control clients", || {
+        world.run(&["lsc"]).lines().count() == 2
+    });
+    let stop = world.home.path().join("stop");
+    let printer = format!(
+        "i=0; while [ ! -e '{}' ]; do i=$((i+1)); echo n$i; \
+         if [ $((i % 200)) = 0 ]; then sleep 0.01; fi; done; echo END; exec cat -",
+        stop.display()
+    );
+    world.run(&["neww", "-d", "-t", "b", "-n", "pr", "sh", "-c", &printer]);
+    let pane = world.run(&["display", "-p", "-t", "b:pr", "#{pane_id}"]);
+    let pane = pane.trim();
+    let seen = |c: &Control| output_of(&c.lines.lock().unwrap(), pane);
+    wait("the stream to start", || {
+        seen(&c1).len() > 1000 && seen(&c2).len() > 1000
+    });
+    for i in 0..3 {
+        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "upgrade {i}");
+        let (a, b) = (seen(&c1).len(), seen(&c2).len());
+        wait("the stream to go on", || {
+            seen(&c1).len() > a + 1000 && seen(&c2).len() > b + 1000
+        });
+    }
+    std::fs::write(&stop, "").unwrap();
+    let ended = |c: &Control| seen(c).ends_with(b"END\r\n");
+    wait("the end of the stream", || ended(&c1) && ended(&c2));
+    for (name, c) in [("first", &c1), ("second", &c2)] {
+        let text = String::from_utf8(seen(c)).unwrap();
+        let lines: Vec<&str> = text.split_terminator("\r\n").collect();
+        let (last, numbers) = lines.split_last().unwrap();
+        assert_eq!(*last, "END", "{name}");
+        assert!(numbers.len() > 500, "{name}: {} lines", numbers.len());
+        for (i, line) in numbers.iter().enumerate() {
+            assert_eq!(*line, format!("n{}", i + 1), "{name} client, line {i}");
+        }
+    }
+    assert!(!c1.has("%exit") && !c2.has("%exit"));
+}
+
+/// A raw attached client speaking this protocol, as a binary from before
+/// clients followed upgrades (`follows` false: no `follows_upgrade` in its
+/// `Hello`) or as one that says it follows and then ignores its notice;
+/// what it is sent, as it comes. It never acknowledges a frame.
+struct Raw {
+    _stream: UnixStream,
+    got: Arc<Mutex<Vec<ServerMsg>>>,
+}
+
+impl Raw {
+    fn new(world: &World, tty: &str, follows: bool) -> Self {
+        let path = world.run(&["display", "-p", "#{socket_path}"]);
+        let mut stream = UnixStream::connect(path.trim_end()).unwrap();
+        let hello = protocol::Hello {
+            version: protocol::PROTOCOL_VERSION,
+            invocation: vtmux_core::socket::Invocation::Vtmux,
+            pid: std::process::id(),
+            argv: vec![b"attach".to_vec(), b"-t".to_vec(), b"a".to_vec()],
+            cwd: world.home.path().to_path_buf(),
+            env: vec![("TERM".into(), "xterm-256color".into())],
+            tty: Some(protocol::TtyInfo {
+                name: tty.into(),
+                term: "xterm-256color".into(),
+                cols: 80,
+                rows: 24,
+                features: Vec::new(),
+            }),
+            flags: protocol::ClientFlags::default(),
+            ext: protocol::HelloExt {
+                follows_upgrade: follows,
+                reattach: None,
+            },
+        };
+        protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).unwrap();
+        let mut reader = stream.try_clone().unwrap();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&got);
+        thread::spawn(move || {
+            while let Ok(Some(m)) = protocol::read_msg::<ServerMsg>(&mut reader) {
+                sink.lock().unwrap().push(m);
+            }
+        });
+        Self {
+            _stream: stream,
+            got,
+        }
+    }
+
+    fn exit(&self) -> Option<ServerMsg> {
+        self.got
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|m| matches!(m, ServerMsg::Exit { .. }))
+            .cloned()
+    }
+
+    fn noticed(&self) -> bool {
+        self.got
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|m| matches!(m, ServerMsg::UpgradeNotice { .. }))
+    }
+}
+
+/// Decisions 4 and 25: a client from before clients followed upgrades is
+/// detached by the upgrade with `[server upgraded: re-attach]`, and the
+/// requester is warned, naming it; the upgrade goes on and a client of
+/// this build follows. A client that is told to re-execute and doesn't
+/// is detached the same way once its time to re-attach is up.
+#[test]
+fn a_client_that_does_not_follow_is_detached_and_named_to_the_requester() {
+    let world = World::new();
+    world.populate(&[]);
+    let attached = Attached::new(&world, "a");
+    let old = Raw::new(&world, "/dev/vtu-old", false);
+    let deaf = Raw::new(&world, "/dev/vtu-deaf", true);
+    wait("three clients", || world.run(&["lsc"]).lines().count() == 3);
+    let was = attached.args();
+
+    assert_eq!(
+        world.upgrade(&bin()),
+        Some(ServerMsg::UpgradeResult {
+            ok: true,
+            message: "warning: client /dev/vtu-old can't follow an upgrade: detached \
+                      with [server upgraded: re-attach]"
+                .into(),
+        })
+    );
+    let detached = Some(ServerMsg::Exit {
+        code: 1,
+        message: Some("server upgraded: re-attach".into()),
+        hup: false,
+    });
+    wait("the old client's detach", || old.exit().is_some());
+    assert_eq!(old.exit(), detached);
+    reexecuted(&attached, &was);
+    assert!(deaf.noticed() && deaf.exit().is_none());
+    wait("the deaf client's detach", || deaf.exit().is_some());
+    assert_eq!(deaf.exit(), detached);
+    wait("the clients left", || {
+        world.run(&["lsc", "-F", "#{client_name}"]).lines().count() == 1
+    });
+    let left = world.run(&["lsc", "-F", "#{client_name}"]);
+    assert!(!left.contains("/dev/vtu-"), "{left}");
 }

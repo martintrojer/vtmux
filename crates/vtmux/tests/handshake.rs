@@ -82,6 +82,7 @@ impl Server {
                 control,
                 ..ClientFlags::default()
             },
+            ext: vtmux_core::protocol::HelloExt::default(),
         })
     }
 }
@@ -196,17 +197,18 @@ fn a_hello_of_another_version_that_does_not_decode_gets_the_mismatch() {
     assert_eq!(server.run(&["has", "-t", "a"]).2, 0, "the server runs on");
 }
 
-/// A later version's Hello fields go in the extension area, which this
-/// server skips: such a control client is served, and so is a command
-/// client of this version.
+/// A later version's Hello fields go in the extension area after the
+/// ones this build knows (none set here: `upgrade` 0, no `reattach`),
+/// and this server skips them: such a control client is served, and so is
+/// a command client of this version.
 #[test]
 fn a_hello_with_a_later_extension_area_is_served() {
     let server = Server::start();
     let with_ext = |msg: &ClientMsg| {
         reframe(&protocol::encode(msg).unwrap(), |p| {
             p.truncate(p.len() - 4);
-            p.extend_from_slice(&5u32.to_le_bytes());
-            p.extend_from_slice(b"later");
+            p.extend_from_slice(&7u32.to_le_bytes());
+            p.extend_from_slice(b"\x00\x00later");
         })
     };
     let mut stream = server.connect();

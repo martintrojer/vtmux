@@ -12,10 +12,12 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use vtmux_client::attach::Reattach;
 use vtmux_core::cmd;
 use vtmux_core::error::{EdgeError, strerror};
 use vtmux_core::protocol::{
-    self, ClientFlags, ClientMsg, ControlMode, Hello, PROTOCOL_VERSION, ServerMsg, TtyInfo,
+    self, ClientFlags, ClientMsg, ControlMode, Hello, HelloExt, PROTOCOL_VERSION, REATTACH_FLAG,
+    ServerMsg, TtyInfo,
 };
 use vtmux_core::socket::{self, Invocation, RealEnv, RealFs};
 use vtmux_server::ServerConfig;
@@ -243,7 +245,14 @@ fn parse_cli(
 
 fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().collect();
-    upgrade_image(args.get(1..).unwrap_or_default()).unwrap_or_else(|| client_main(args))
+    upgrade_image(args.get(1..).unwrap_or_default())
+        .or_else(|| match args.as_slice() {
+            [argv0, flag, token, socket] if flag == REATTACH_FLAG => {
+                Some(reattach_main(argv0.clone(), token, Path::new(socket)))
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| client_main(args))
 }
 
 /// The client: find or start the server, send the command, relay.
@@ -327,17 +336,93 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
             utf8,
             no_start: cli.no_start,
         },
+        // An attached client re-executes on an upgrade (decision 4).
+        ext: HelloExt {
+            follows_upgrade: cli.control == ControlMode::None,
+            reattach: None,
+        },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);
     }
+    let how = Reattach {
+        argv0: argv0.clone(),
+        socket: path.clone(),
+        sent_size: None,
+    };
     match (cli.control, lone_upgrade(&cli.command)) {
-        (ControlMode::None, Some(up)) => {
-            upgrade_relay(&mut stream, &path, up.flag.map(|b| cwd.join(b)), &argv0)
-        }
-        (ControlMode::None, None) => relay(&mut stream, None),
+        (ControlMode::None, Some(up)) => upgrade_relay(
+            &mut stream,
+            &path,
+            up.flag.map(|b| cwd.join(b)),
+            &argv0,
+            &how,
+        ),
+        (ControlMode::None, None) => relay(&mut stream, None, &how),
         _ => control_relay(&mut stream),
+    }
+}
+
+/// The frozen re-attach command line (`<binary> --vtmux-reattach <token>
+/// <socket>`, protocol module docs) that an attached client of this or
+/// another build runs when an upgrade tells it to (live-upgrade spec,
+/// *Clients*): connect to the same socket, never starting a server, and
+/// present the token, which binds this process to the client record it
+/// had; then go on as that attached client. A token the server no longer
+/// knows is told to attach again.
+fn reattach_main(argv0: OsString, token: &std::ffi::OsStr, socket: &Path) -> ExitCode {
+    let Some(token) = token.to_str().filter(|t| protocol::is_upgrade_token(t)) else {
+        write_err(b"bad re-attach token");
+        return ExitCode::from(1);
+    };
+    let mut stream = match connect(socket) {
+        Ok(s) => s,
+        Err(e) => return edge_exit(&connect_error(socket, e)),
+    };
+    let tty = tty_info(&[]);
+    let sent_size = tty.as_ref().map(|t| (t.cols, t.rows));
+    let hello = Hello {
+        version: PROTOCOL_VERSION,
+        invocation: Invocation::from_argv0(&argv0),
+        pid: std::process::id(),
+        argv: Vec::new(),
+        cwd: find_cwd()
+            .or_else(find_home)
+            .unwrap_or_else(|| PathBuf::from("/")),
+        env: client_env(),
+        tty,
+        flags: ClientFlags {
+            control: ControlMode::None,
+            utf8: detect_utf8(false),
+            no_start: true,
+        },
+        ext: HelloExt {
+            follows_upgrade: true,
+            reattach: Some(token.to_owned()),
+        },
+    };
+    if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
+        write_err(b"server exited unexpectedly");
+        return ExitCode::from(1);
+    }
+    let how = Reattach {
+        argv0,
+        socket: socket.to_owned(),
+        sent_size,
+    };
+    match protocol::read_msg::<ServerMsg>(&mut stream) {
+        // Told to attach again: said as a detached client says it.
+        Ok(Some(ServerMsg::Exit {
+            code,
+            message: Some(m),
+            ..
+        })) => {
+            println!("[{m}]");
+            ExitCode::from(u8::try_from(code).unwrap_or(1))
+        }
+        Ok(Some(first)) => relay(&mut stream, Some(first), &how),
+        Ok(None) | Err(_) => relay(&mut stream, None, &how),
     }
 }
 
@@ -403,11 +488,12 @@ fn upgrade_relay(
     socket: &Path,
     flag: Option<PathBuf>,
     argv0: &std::ffi::OsStr,
+    how: &Reattach,
 ) -> ExitCode {
     let mismatch = match protocol::read_msg::<ServerMsg>(stream) {
         Ok(Some(ServerMsg::Stderr(b))) if b.starts_with(b"protocol version mismatch") => b,
-        Ok(Some(first)) => return relay(stream, Some(first)),
-        Ok(None) | Err(_) => return relay(stream, None),
+        Ok(Some(first)) => return relay(stream, Some(first), how),
+        Ok(None) | Err(_) => return relay(stream, None, how),
     };
     let Some(binary) =
         flag.or_else(|| std::env::current_exe().ok().or_else(|| start_binary(argv0)))
@@ -568,8 +654,9 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
 }
 
 /// Print what the server sends until `Exit`, `first` (already read) then
-/// the rest, doing the file I/O it asks for (file.c, client side).
-fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>) -> ExitCode {
+/// the rest, doing the file I/O it asks for (file.c, client side). Once
+/// attached, the client comes back after an upgrade as `how` says.
+fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>, how: &Reattach) -> ExitCode {
     let mut writing: Option<files::Write> = None;
     loop {
         let next = match first.take() {
@@ -600,7 +687,7 @@ fn relay(stream: &mut UnixStream, mut first: Option<ServerMsg>) -> ExitCode {
                 // suspend-client stops the client with SIGTSTP.
                 vtmux_server::sys::signal::default_stop_on_tstp();
                 return ExitCode::from(
-                    u8::try_from(vtmux_client::attach::attach(stream)).unwrap_or(1),
+                    u8::try_from(vtmux_client::attach::attach(stream, how)).unwrap_or(1),
                 );
             }
             Ok(Some(ServerMsg::WriteOpen { path, append })) => {

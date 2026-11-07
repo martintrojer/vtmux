@@ -1278,7 +1278,7 @@ impl Server {
                 out.term = form.map(|f| term_to_snapshot(&p.term, f));
                 Some(out)
             }),
-            token: 0,
+            token: c.reattach.map_or(0, |r| r.token),
             fg: c.reported.fg.map(rgb_out),
             bg: c.reported.bg.map(rgb_out),
             theme: c.reported.theme.map(|t| t.name().to_owned()),
@@ -1760,6 +1760,11 @@ impl Server {
                 utf8: x.utf8,
                 no_start: false,
             },
+            // Only a client that follows upgrades was given a token.
+            ext: vtmux_core::protocol::HelloExt {
+                follows_upgrade: x.token != 0,
+                reattach: None,
+            },
         };
         c.environ = hello.env.clone().into();
         c.attached = x.session.map(SessionId);
@@ -1836,6 +1841,15 @@ impl Server {
                 });
         }
         c.hello = Some(hello);
+        // Told to re-execute before the exec: drawn nothing until it
+        // re-attaches with its token (`upgrade.rs`, decision 21).
+        if x.token != 0 && c.attached.is_some() && c.control.is_none() {
+            c.reattach = Some(super::upgrade::Reattach {
+                token: x.token,
+                deadline: Some(now + super::upgrade::REATTACH_WAIT),
+                gone: false,
+            });
+        }
         if let Some(p) = &x.popup {
             let io = match popup_fd {
                 Some(fd) => {

@@ -19,10 +19,9 @@
 //!   decode and the whole rebuild [`resume`] does, on placeholder
 //!   descriptors.
 //!
-//! The preflight and quiesce (steps 1-2) are `upgrade.rs`'s. Not here
-//! yet: telling attached clients to re-execute (step 6). An attached client of the
-//! same build stays connected through the exec, since its socket is kept;
-//! the server redraws it from scratch. Pane terminal state is not carried
+//! The preflight and quiesce (steps 1-2) are `upgrade.rs`'s, and so are
+//! the attached clients' tokens and notices (step 6) and their re-attach
+//! in the image that serves next. Pane terminal state is not carried
 //! yet (`snapshot.rs`, `restore_term`): panes come back with blank
 //! terminals of their size, their PTY, process and pid kept.
 
@@ -208,6 +207,8 @@ fn restore(
     if !dry_run {
         // Panes whose process exited while the image changed.
         server.reap_children();
+        // Attached clients that can't re-attach (decision 25).
+        server.detach_unfollowing();
     }
     Ok(server)
 }
@@ -369,21 +370,27 @@ fn handshake_fd(requester: Option<&snap::Requester>) -> Option<RawFd> {
 }
 
 /// Tell whoever asked for the upgrade how it went, from the image that
-/// ends up serving: `Err` with why when that is not the new one. A
-/// handshake gets the frozen `UpgradeResult` on `handshake` (written at
-/// once, the descriptor closed after); a client is told by `server`
-/// ([`Server::upgrade_answer`]).
+/// ends up serving: `Err` with why when that is not the new one; `Ok`
+/// with the warnings `server` gathered (the clients it detached,
+/// decision 25), one a line. A handshake gets the frozen `UpgradeResult`
+/// on `handshake` (written at once, the descriptor closed after); a
+/// client is told by `server` ([`Server::upgrade_answer`]).
 fn answer(
-    server: Option<&mut Server>,
+    mut server: Option<&mut Server>,
     requester: Option<&snap::Requester>,
     handshake: Option<OwnedFd>,
     outcome: Result<(), String>,
 ) {
+    let warnings = server
+        .as_deref_mut()
+        .map(|s| std::mem::take(&mut s.upgrade.warnings).join("\n"))
+        .unwrap_or_default();
+    let outcome = outcome.map(|()| warnings);
     match (requester, server) {
         (Some(snap::Requester::Handshake(_)), _) => {
             if let Some(fd) = handshake {
                 let (ok, message) = match outcome {
-                    Ok(()) => (true, String::new()),
+                    Ok(warnings) => (true, warnings),
                     Err(m) => (false, m),
                 };
                 let mut stream = std::os::unix::net::UnixStream::from(fd);
@@ -529,6 +536,8 @@ impl Server {
             .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX));
         let binary_fd = self.exe.as_ref().map(AsRawFd::as_raw_fd);
         let handshake = handshake_fd(requester.as_ref());
+        // The tokens attached clients re-attach with go in the snapshot.
+        self.upgrade_tokens();
         let snapshot = self.to_snapshot(snap::Meta {
             purpose: snap::Purpose::Upgrade,
             writer_version: vtmux_core::version::display(),
@@ -543,13 +552,22 @@ impl Server {
         let dir = self.socket.parent().unwrap_or(Path::new("/tmp"));
         let file = match sys::memfile(dir, &bytes) {
             Ok(f) => f,
-            Err(e) => return format!("snapshot: {}", vtmux_core::error::strerror(&e)),
+            Err(e) => {
+                self.upgrade_tokens_void();
+                return format!("snapshot: {}", vtmux_core::error::strerror(&e));
+            }
         };
-        match sys::dry_run(binary, file.as_fd(), sys::DRY_RUN_LIMIT) {
-            Ok(Ok(())) => {}
-            Ok(Err(message)) => return message,
-            Err(e) => return fail(&e),
+        let refused = match sys::dry_run(binary, file.as_fd(), sys::DRY_RUN_LIMIT) {
+            Ok(Ok(())) => None,
+            Ok(Err(message)) => Some(message),
+            Err(e) => Some(fail(&e)),
+        };
+        if let Some(message) = refused {
+            self.upgrade_tokens_void();
+            return message;
         }
+        // 6. Attached clients told to re-execute and re-attach.
+        self.upgrade_notify(binary);
         let keep: Vec<RawFd> = snapshot
             .descriptors
             .iter()
