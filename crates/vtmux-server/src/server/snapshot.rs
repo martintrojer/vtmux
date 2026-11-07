@@ -415,13 +415,16 @@ fn status_out(s: crate::jobs::JobStatus) -> snap::ExitStatus {
             signal: Some(sig),
             ..snap::ExitStatus::default()
         },
+        crate::jobs::JobStatus::Unknown => snap::ExitStatus::default(),
     }
 }
 
+/// Neither a code nor a signal is a status not known (a restored pane's).
 fn status_in(s: &snap::ExitStatus) -> crate::jobs::JobStatus {
     match (s.code, s.signal) {
         (_, Some(sig)) => crate::jobs::JobStatus::Signaled(sig),
-        (code, None) => crate::jobs::JobStatus::Exited(code.unwrap_or(0)),
+        (Some(code), None) => crate::jobs::JobStatus::Exited(code),
+        (None, None) => crate::jobs::JobStatus::Unknown,
     }
 }
 

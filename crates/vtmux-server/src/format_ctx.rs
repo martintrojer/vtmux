@@ -729,11 +729,15 @@ impl<'a> Ctx<'a> {
             "pane_dead" => flag(p.status.is_some() && io.is_none() && p.pipe.is_none()),
             "pane_dead_status" => match p.status? {
                 crate::jobs::JobStatus::Exited(code) => code.to_string(),
-                crate::jobs::JobStatus::Signaled(_) => return None,
+                crate::jobs::JobStatus::Signaled(_) | crate::jobs::JobStatus::Unknown => {
+                    return None;
+                }
             },
             "pane_dead_signal" => match p.status? {
                 crate::jobs::JobStatus::Signaled(sig) => crate::server::sig_name(sig),
-                crate::jobs::JobStatus::Exited(_) => return None,
+                crate::jobs::JobStatus::Exited(_) | crate::jobs::JobStatus::Unknown => {
+                    return None;
+                }
             },
             "pane_dead_time" => p.dead_time?.to_string(),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),

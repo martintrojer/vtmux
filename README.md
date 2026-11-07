@@ -26,7 +26,7 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25'
 %endif
 ```
 
-**Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached. Opt-in `vtmux-persist` uses the same snapshot to bring sessions and scrollback back after a reboot ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress).
+**Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached. Opt-in `vtmux-persist` uses the same snapshot to bring sessions back after a crash or reboot, panes dead until `respawn-pane`; scrollback comes back once pane terminal state is carried ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress).
 
 ## Also
 

@@ -521,3 +521,33 @@ fn vtmux_persist_is_a_hidden_server_choice() {
     sim.argv(&["show", "-s"]);
     assert!(!sim.take().contains(NAME));
 }
+
+/// `vtmux-persist-drop` (D27, decision 30): a session array of globs,
+/// empty until set, assigned from one string as `update-environment` is,
+/// hidden from listings until set.
+#[test]
+fn vtmux_persist_drop_is_a_hidden_session_array() {
+    const NAME: &str = "vtmux-persist-drop";
+    let mut sim = Sim::new();
+    sim.argv(&["show", "-g"]);
+    assert!(!sim.take().contains(NAME));
+    for c in [
+        &["show", "-gv", NAME][..],
+        &["set", "-g", NAME, "@murmur_* @x"],
+        &["show", "-g", NAME],
+        &["set", "-ga", NAME, "@y"],
+        &["show", "-gv", NAME],
+        &["set", "-gu", NAME],
+        &["show", "-gv", NAME],
+    ] {
+        sim.argv(c);
+    }
+    assert_eq!(
+        sim.take(),
+        // An empty array shows nothing with -v, as tmux's
+        // `update-environment` does.
+        format!("{NAME}[0] @murmur_*\n{NAME}[1] @x\n@murmur_*\n@x\n@y\n")
+    );
+    sim.argv(&["show", "-g"]);
+    assert!(!sim.take().contains(NAME));
+}

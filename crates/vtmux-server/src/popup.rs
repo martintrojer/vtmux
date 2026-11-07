@@ -664,6 +664,7 @@ impl Server {
             // the signal number.
             p.status = match status {
                 JobStatus::Exited(n) | JobStatus::Signaled(n) => n,
+                JobStatus::Unknown => 0,
             };
         }
         self.popup_check_done(c);

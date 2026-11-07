@@ -56,6 +56,7 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 const HIDDEN_VIEW_IDLE: Duration = Duration::from_secs(1);
 
 pub mod persist;
+pub mod restore;
 pub mod resume;
 pub mod snapshot;
 
@@ -704,6 +705,16 @@ impl ConfigEnv for GlobalEnv<'_> {
     }
 }
 
+/// The global environment a server started by `config`'s client begins
+/// with: the client's, and its working directory as `PWD` (tmux.c:417-421).
+fn global_environ(config: &ServerConfig) -> Environ {
+    let mut env = Environ::from_pairs(config.environ.clone());
+    if let Some(cwd) = &config.cwd {
+        env.set("PWD", &cwd.to_string_lossy(), false);
+    }
+    env
+}
+
 impl Server {
     /// Take over a bound listening socket.
     pub fn new(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io::Result<Self> {
@@ -717,10 +728,7 @@ impl Server {
         let mut signals = Signals::new(sys::signal::HANDLED)?;
         poll.registry()
             .register(&mut signals, SIGNALS, Interest::READABLE)?;
-        let mut global_env = Environ::from_pairs(config.environ.clone());
-        if let Some(cwd) = &config.cwd {
-            global_env.set("PWD", &cwd.to_string_lossy(), false);
-        }
+        let global_env = global_environ(&config);
         let defaults = Defaults::from_env(
             default_shell(&config.environ)
                 .to_string_lossy()
@@ -4613,6 +4621,7 @@ impl Server {
         ev = match status {
             crate::jobs::JobStatus::Exited(code) => ev.int("exit_status", code),
             crate::jobs::JobStatus::Signaled(sig) => ev.text("exit_signal", sig_name(sig)),
+            crate::jobs::JobStatus::Unknown => ev,
         };
         ev = ev.int("exit_success", i64::from(status.success()));
         self.model.push_event(ev);
@@ -4693,7 +4702,7 @@ impl Server {
         let retval = match pane.status {
             Some(crate::jobs::JobStatus::Exited(code)) => code,
             Some(crate::jobs::JobStatus::Signaled(sig)) => 128 + sig,
-            None => 128 + libc::SIGHUP,
+            None | Some(crate::jobs::JobStatus::Unknown) => 128 + libc::SIGHUP,
         };
         self.cmdq_with_item(step, |server, item| {
             if item
@@ -5223,7 +5232,8 @@ fn cmd_error_bytes(e: &CmdError) -> Vec<u8> {
 /// ([`sys::daemon::bind_socket`]) and run it until it exits.
 #[must_use]
 pub fn run_server(listener: StdListener, socket: PathBuf, config: ServerConfig) -> i32 {
-    match Server::new(listener, socket, config) {
+    // D27 decision 15: a `vtmux-persist` checkpoint comes back first.
+    match restore::start(listener, socket, config) {
         Ok(mut server) => match server.run() {
             Ok(()) => 0,
             Err(_) => 1,

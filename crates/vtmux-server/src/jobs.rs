@@ -32,6 +32,10 @@ pub struct JobId(pub usize);
 pub enum JobStatus {
     Exited(i32),
     Signaled(i32),
+    /// Not known: a pane restored from a `vtmux-persist` checkpoint, whose
+    /// process ran in the server before (`#{pane_dead}` 1, no
+    /// `#{pane_dead_status}` or `#{pane_dead_signal}`). Never a job's.
+    Unknown,
 }
 
 impl JobStatus {
@@ -117,7 +121,7 @@ impl Jobs {
             .enumerate()
             .map(|(n, j)| {
                 let status = match j.status {
-                    None => 0,
+                    None | Some(JobStatus::Unknown) => 0,
                     Some(JobStatus::Exited(code)) => (code & 0xff) << 8,
                     Some(JobStatus::Signaled(sig)) => sig & 0x7f,
                 };

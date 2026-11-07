@@ -580,3 +580,420 @@ fn a_changed_server_is_checkpointed_on_its_interval() {
     w.kill_server();
     assert_eq!(std::fs::read(&manifest).unwrap(), last);
 }
+
+// ------------------------------------------------------------- restoring
+//
+// A server starting on a socket with a checkpoint restores it (decisions
+// 15, 27, 28 and 30; *Design > Persistence > Restoring*).
+
+impl World {
+    /// SIGKILL the server: no clean shutdown, no checkpoint of its own.
+    fn kill_9(&self) {
+        rustix::process::kill_process(self.pid.expect("server pid"), rustix::process::Signal::KILL)
+            .unwrap();
+        self.gone();
+    }
+
+    /// The server running now (after a restart), for `gone` and the
+    /// teardown.
+    fn repid(&mut self) {
+        self.pid = common::parse_pid(&self.ok(&["display", "-p", "#{pid}"]));
+    }
+
+    /// The checkpoint on disk holds `@saved` (set last), so it holds
+    /// everything done before it too.
+    fn wait_saved(&self) {
+        self.ok(&["set", "-g", "@saved", "yes"]);
+        wait_until("a checkpoint with @saved", || {
+            persist::load(&self.state())
+                .is_ok_and(|(s, _)| s.server.session_options.iter().any(|o| o.name == "@saved"))
+        });
+    }
+}
+
+/// An attached client under a PTY; what it was sent, as it comes.
+struct Attached {
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    _master: Box<dyn portable_pty::MasterPty + Send>,
+}
+
+impl Attached {
+    fn new(w: &World, args: &[&str]) -> Self {
+        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+        use std::io::Read as _;
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_vtmux"));
+        cmd.args(&w.socket);
+        cmd.arg("-f");
+        cmd.arg(&w.config);
+        cmd.args(args);
+        cmd.cwd(w.dir.path());
+        cmd.env_clear();
+        cmd.env("HOME", w.dir.path());
+        cmd.env("TMUX_TMPDIR", w.dir.path());
+        cmd.env("XDG_STATE_HOME", w.dir.path().join("state"));
+        cmd.env("SHELL", "/bin/sh");
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("PATH", std::env::var_os("PATH").unwrap_or_default());
+        for (k, v) in &w.env {
+            cmd.env(k, v);
+        }
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&bytes);
+        std::thread::spawn(move || {
+            let mut buf = [0; 8192];
+            while let Ok(n @ 1..) = reader.read(&mut buf) {
+                sink.lock().unwrap().extend_from_slice(&buf[..n]);
+            }
+        });
+        Self {
+            child,
+            bytes,
+            _master: pair.master,
+        }
+    }
+
+    /// The screen its output draws.
+    fn screen(&self) -> String {
+        let mut t = vtmux_vt::PaneTerm::new(80, 24, 0);
+        t.feed(&self.bytes.lock().unwrap());
+        String::from_utf8_lossy(&vtmux_vt::capture(&t, vtmux_vt::CaptureOpts::default()))
+            .into_owned()
+    }
+}
+
+impl Drop for Attached {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// What a restore must bring back as it was: sessions, windows (names,
+/// indexes, layout, active), panes (ids, start command and path, size),
+/// user options.
+fn structure(w: &World) -> Vec<String> {
+    [
+        &["list-sessions", "-F", "#{session_id} #{session_name} #{session_windows} #{session_created}"][..],
+        &[
+            "list-windows",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_active} #{window_layout}",
+        ],
+        &[
+            "list-panes",
+            "-a",
+            "-F",
+            "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active} [#{pane_start_command}] #{pane_start_path}",
+        ],
+        &["show-options", "-v", "-t", "a", "@colour"],
+        &["show-options", "-wv", "-t", "a:w1", "@side"],
+    ]
+    .iter()
+    .map(|args| w.ok(args))
+    .collect()
+}
+
+/// `layout` checkpoint, `kill -9`, and a server started again restores
+/// it: the same sessions, windows, layout, ids and user options; every
+/// pane dead (status unknown) with its start command and cwd and the dead
+/// line on its screen. `list-sessions` does not start the server; any
+/// command that starts one restores first (decision 28).
+#[test]
+fn a_checkpoint_comes_back_after_kill_9() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    let here = w.dir.path().to_str().unwrap().to_owned();
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&["split-window", "-h", "-t", "a:w0", "-c", "/", "cat", "-"]);
+    w.ok(&["resize-pane", "-t", "a:w0.0", "-x", "30"]);
+    w.ok(&[
+        "new-window",
+        "-d",
+        "-t",
+        "a:5",
+        "-n",
+        "w1",
+        "-c",
+        &here,
+        "sh",
+        "-c",
+        "exec cat -",
+    ]);
+    w.ok(&["split-window", "-v", "-t", "a:w1", "cat", "-"]);
+    w.ok(&["new", "-d", "-s", "b", "-n", "bw", "cat", "-"]);
+    w.ok(&["set", "-t", "a", "@colour", "teal"]);
+    w.ok(&["set", "-w", "-t", "a:w1", "@side", "left"]);
+    let before = structure(&w);
+    w.wait_saved();
+    w.kill_9();
+
+    let (out, err, code) = w.run(&["list-sessions"]);
+    assert_eq!((out.as_str(), code), ("", 1), "{err}");
+    assert!(err.starts_with("no server running on "), "{err}");
+
+    w.ok(&["start-server"]);
+    w.repid();
+    assert_eq!(structure(&w), before);
+    let dead = w.ok(&[
+        "list-panes",
+        "-a",
+        "-F",
+        "#{pane_id} #{pane_dead}[#{pane_dead_status}#{pane_dead_signal}] #{?pane_pid,pid,}",
+    ]);
+    assert_eq!(dead, "%0 1[] \n%1 1[] \n%2 1[] \n%3 1[] \n%4 1[] \n");
+    assert!(
+        w.ok(&["capture-pane", "-p", "-t", "a:w1.0"])
+            .contains("Pane is dead"),
+    );
+    assert!(
+        w.ok(&["show-messages"])
+            .contains("vtmux-persist: restored 2 sessions")
+    );
+    // New ids go on from the restored ones.
+    w.ok(&["new-window", "-d", "-t", "b:1", "cat", "-"]);
+    assert_eq!(
+        w.ok(&["display", "-p", "-t", "b:1", "#{window_id} #{pane_id}"]),
+        "@3 %5\n"
+    );
+}
+
+/// `attach` with no server and a checkpoint there starts one, restores
+/// it and attaches (decision 28): the client shows the restored session.
+#[test]
+fn attach_with_no_server_restores_and_attaches() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&["set", "-g", "status-right", "pinned"]);
+    w.ok(&["rename-window", "-t", "a:0", "restored"]);
+    w.wait_saved();
+    w.kill_9();
+    let client = Attached::new(&w, &["attach", "-t", "a"]);
+    wait_until("the attached client shows the restored pane", || {
+        let screen = client.screen();
+        screen.contains("Pane is dead") && screen.contains("0:restored*")
+    });
+    w.repid();
+    assert_eq!(w.ok(&["list-clients", "-F", "#{client_session}"]), "a\n");
+}
+
+/// `respawn-pane` (and `respawn-window`) start a restored pane's saved
+/// command in its saved cwd.
+#[test]
+fn respawn_pane_restarts_the_saved_command_in_its_saved_cwd() {
+    let mut w = World::start(&["cat", "-"], &[]);
+    let cwd = std::fs::canonicalize(w.dir.path())
+        .unwrap()
+        .join("work dir");
+    std::fs::create_dir(&cwd).unwrap();
+    let cwd = cwd.to_str().unwrap().to_owned();
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&[
+        "new-window",
+        "-d",
+        "-t",
+        "a:1",
+        "-n",
+        "w1",
+        "-c",
+        &cwd,
+        "sh",
+        "-c",
+        "printf in=; pwd; exec cat -",
+    ]);
+    w.ok(&[
+        "new-window",
+        "-d",
+        "-t",
+        "a:2",
+        "-n",
+        "w2",
+        "-c",
+        &cwd,
+        "cat",
+        "-",
+    ]);
+    w.kill_server();
+    w.ok(&["start-server"]);
+    w.repid();
+    assert_eq!(w.ok(&["display", "-p", "-t", "a:1", "#{pane_dead}"]), "1\n");
+    w.ok(&["respawn-pane", "-t", "a:1"]);
+    wait_until("the pane runs its command in its cwd", || {
+        w.ok(&["capture-pane", "-p", "-t", "a:1"])
+            .contains(&format!("in={cwd}\n"))
+    });
+    w.ok(&["respawn-window", "-t", "a:2"]);
+    assert_eq!(
+        w.ok(&[
+            "list-panes",
+            "-a",
+            "-F",
+            "#{window_name} #{pane_dead} #{pane_start_command} #{pane_start_path}"
+        ]),
+        format!(
+            "w0 1 cat - {here}\nw1 0 sh -c \"printf in=; pwd; exec cat -\" {cwd}\nw2 0 cat - {cwd}\n",
+            here = w.dir.path().display()
+        )
+    );
+    wait_until("the respawned pane runs cat", || {
+        w.ok(&["display", "-p", "-t", "a:2", "#{pane_current_command}"]) == "cat\n"
+    });
+}
+
+/// The config runs after the restore (decision 27): what it sets wins
+/// over the checkpoint, runtime-only settings survive, and its
+/// `new-session` of a restored name fails as tmux's duplicate does,
+/// keeping the restored session.
+#[test]
+fn config_edits_since_the_save_win() {
+    let mut w = World::start_with(&["cat", "-"], &[], None, Some("set -g @c old\n"));
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&["set", "-g", "@runtime", "kept"]);
+    w.ok(&["rename-window", "-t", "a:0", "saved"]);
+    w.kill_server();
+    std::fs::write(
+        &w.config,
+        "set -g @c new\nnew -d -s a -n fromconf cat -\nnew -d -s c -n cw cat -\nset -g @after yes\n",
+    )
+    .unwrap();
+    w.ok(&["start-server"]);
+    w.repid();
+    assert_eq!(w.ok(&["show", "-gv", "@c"]), "new\n");
+    assert_eq!(w.ok(&["show", "-gv", "@runtime"]), "kept\n");
+    assert_eq!(w.ok(&["show", "-gv", "@after"]), "yes\n");
+    assert_eq!(
+        w.ok(&["list-windows", "-a", "-F", "#{session_name} #{window_name}"]),
+        "a saved\nc cw\n"
+    );
+    // cfg.c `cfg_add_cause`: shown by the next source-file (D-009).
+    let (out, err, _) = w.run(&["source-file", "/dev/null"]);
+    assert_eq!(
+        out + &err,
+        format!("{}:2: duplicate session: a\n", w.config.display())
+    );
+}
+
+/// A config that turns `vtmux-persist` off gets no restore (spec,
+/// *Non-goals*); the files stay.
+#[test]
+fn a_config_with_persist_off_restores_nothing() {
+    let w = World::start_with(&["cat", "-"], &[], None, Some(""));
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    let manifest = std::fs::read(w.state().join(persist::MANIFEST)).unwrap();
+    std::fs::write(&w.config, "set -s vtmux-persist off\n").unwrap();
+    w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+    assert_eq!(w.ok(&["list-sessions", "-F", "#{session_name}"]), "z\n");
+    w.kill_server();
+    assert_eq!(
+        std::fs::read(w.state().join(persist::MANIFEST)).unwrap(),
+        manifest
+    );
+}
+
+/// `vtmux-persist-drop` (decision 30): the user options matching its
+/// globs are not restored. A session's own value applies to it; the
+/// others go by the global one, the config's when it sets it (here only
+/// after the save), so `@murmur_*` goes from session `a` (and its window
+/// and pane) and `@tool_*` from session `b`.
+#[test]
+fn vtmux_persist_drop_drops_those_user_options() {
+    let mut w = World::start_with(&["cat", "-"], &[], None, Some(""));
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&["new", "-d", "-s", "b", "cat", "-"]);
+    w.ok(&["set", "-t", "a", "vtmux-persist-drop", "@murmur_*"]);
+    for s in ["a", "b"] {
+        w.ok(&["set", "-t", s, "@murmur_session_state", "working"]);
+        w.ok(&["set", "-t", s, "@tool_x", "1"]);
+        w.ok(&["set", "-t", s, "@keep", "yes"]);
+        w.ok(&["set", "-w", "-t", s, "@murmur_w", "2"]);
+        w.ok(&["set", "-p", "-t", s, "@murmur_p", "3"]);
+    }
+    w.kill_server();
+    std::fs::write(&w.config, "set -g vtmux-persist-drop '@tool_*'\n").unwrap();
+    w.ok(&["start-server"]);
+    w.repid();
+    let show = |args: &[&str]| w.run(args).0;
+    for (s, murmur, tool) in [("a", "", "1\n"), ("b", "working\n", "")] {
+        assert_eq!(
+            show(&["show", "-v", "-t", s, "@murmur_session_state"]),
+            murmur,
+            "{s}"
+        );
+        assert_eq!(show(&["show", "-v", "-t", s, "@tool_x"]), tool, "{s}");
+        assert_eq!(show(&["show", "-v", "-t", s, "@keep"]), "yes\n", "{s}");
+        let murmur_wp = if murmur.is_empty() {
+            ["", ""]
+        } else {
+            ["2\n", "3\n"]
+        };
+        assert_eq!(
+            show(&["show", "-wv", "-t", s, "@murmur_w"]),
+            murmur_wp[0],
+            "{s}"
+        );
+        assert_eq!(
+            show(&["show", "-pv", "-t", s, "@murmur_p"]),
+            murmur_wp[1],
+            "{s}"
+        );
+    }
+}
+
+/// A manifest that does not decode starts a fresh server (the command's
+/// own session only), with why in `show-messages`; the files are kept and
+/// not written over, not even by the shutdown checkpoint.
+#[test]
+fn a_corrupted_manifest_starts_a_fresh_server_and_keeps_the_files() {
+    let mut w = World::start(&["cat", "-"], &[]);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    let path = w.state().join(persist::MANIFEST);
+    let mut bytes = std::fs::read(&path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&path, &bytes).unwrap();
+    w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+    w.repid();
+    assert_eq!(w.ok(&["list-sessions", "-F", "#{session_name}"]), "z\n");
+    let log = w.ok(&["show-messages"]);
+    assert!(
+        log.contains("not restored: manifest: snapshot is corrupt")
+            && log.contains("the files are kept"),
+        "{log}"
+    );
+    w.ok(&["rename-session", "-t", "z", "changed"]);
+    w.kill_server();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(!w.state().join(persist::MANIFEST_PREV).exists());
+}
+
+/// The checkpoint is checked in a child process, by the dry run a live
+/// upgrade uses, before it is imported: a rebuild that fails there (the
+/// test hook makes it) leaves a fresh server, with the child's message.
+#[test]
+fn a_checkpoint_that_fails_the_check_in_the_child_is_not_imported() {
+    let mut w = World::start(&["cat", "-"], &[]);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    w.env.push(("VTMUX_TEST_RESUME_FAIL", "check".to_owned()));
+    w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+    w.repid();
+    assert_eq!(w.ok(&["list-sessions", "-F", "#{session_name}"]), "z\n");
+    let log = w.ok(&["show-messages"]);
+    assert!(
+        log.contains("not restored: manifest: test hook: the rebuild fails"),
+        "{log}"
+    );
+}

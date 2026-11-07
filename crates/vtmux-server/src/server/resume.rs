@@ -88,6 +88,20 @@ pub fn check_snapshot(fd: RawFd) -> Result<(), String> {
 /// fresh socket of this process's own.
 fn check_bytes(bytes: &[u8]) -> Result<(), String> {
     let s = decode(bytes)?;
+    if matches!(
+        s.meta.purpose,
+        snap::Purpose::CheckpointLayout | snap::Purpose::CheckpointFull
+    ) {
+        // A `vtmux-persist` checkpoint a starting server is about to
+        // restore (`super::restore`): it names no descriptor.
+        return guarded(|| {
+            if hook().as_deref() == Some("check") {
+                return Err(io::Error::other("test hook: the rebuild fails"));
+            }
+            super::restore::check(&s)
+        })
+        .map(drop);
+    }
     let kept = s
         .descriptors
         .iter()
@@ -109,7 +123,7 @@ fn check_bytes(bytes: &[u8]) -> Result<(), String> {
 /// `rebuild()`, a panic in it turned into an error: a failed rebuild in
 /// the new image leads to the switch back, not to an exit that would close
 /// every pane's PTY.
-fn guarded(rebuild: impl FnOnce() -> io::Result<Server>) -> Result<Server, String> {
+pub(super) fn guarded(rebuild: impl FnOnce() -> io::Result<Server>) -> Result<Server, String> {
     match catch_unwind(AssertUnwindSafe(rebuild)) {
         Ok(Ok(server)) => Ok(server),
         Ok(Err(e)) => Err(e.to_string()),

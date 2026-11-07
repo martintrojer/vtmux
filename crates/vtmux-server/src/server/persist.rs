@@ -44,7 +44,7 @@ use vtmux_core::options::TreeId;
 use vtmux_snapshot as snap;
 
 use super::Server;
-use crate::persist::{Lock, Writer, Written};
+use crate::persist::{Lock, MANIFEST, MANIFEST_PREV, Writer, Written};
 
 /// What a checkpoint holds (`vtmux-persist`; module docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,7 +87,11 @@ pub struct Persist {
     /// The checkpoint directory, found once ([`Server::persist_dir`]).
     pub(crate) dir: Option<PathBuf>,
     /// The lock held on a checkpoint directory.
-    lock: Option<(PathBuf, Lock)>,
+    pub(super) lock: Option<(PathBuf, Lock)>,
+    /// The checkpoint found at start could not be restored
+    /// ([`super::restore`]): nothing is written over it while its
+    /// manifests are still there.
+    pub(super) kept: bool,
     /// Another server holds the lock: said once in the message log.
     refused: bool,
     /// A periodic checkpoint being written, and its fingerprint.
@@ -104,6 +108,7 @@ impl Default for Persist {
             exited: false,
             dir: None,
             lock: None,
+            kept: false,
             refused: false,
             writing: None,
             step: STEP,
@@ -220,6 +225,17 @@ impl Server {
             self.add_message("vtmux-persist: no state directory (no home)".to_owned());
             return None;
         };
+        if self.persist.kept {
+            // The checkpoint a restore refused stays as it was until the
+            // user moves it away (`super::restore`, which said so).
+            if [MANIFEST, MANIFEST_PREV]
+                .iter()
+                .any(|m| dir.join(m).exists())
+            {
+                return None;
+            }
+            self.persist.kept = false;
+        }
         Some((dir, mode))
     }
 

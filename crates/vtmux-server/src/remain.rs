@@ -96,7 +96,7 @@ impl Server {
     /// `remain-on-exit-format` is drawn (`format_draw`, default cell) on the
     /// new last line; the cursor stays at its start, hidden. False when
     /// the format is empty and nothing is drawn.
-    fn draw_dead_line(&mut self, p: PaneId) -> bool {
+    pub(crate) fn draw_dead_line(&mut self, p: PaneId) -> bool {
         let template = self
             .model
             .options

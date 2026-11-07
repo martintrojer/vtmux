@@ -309,23 +309,16 @@ fn collect(dir: &Path, names: &BTreeSet<String>) -> usize {
 /// Neither reads (`NotFound` when neither exists; else `InvalidData`
 /// naming each file's error).
 pub fn load(dir: &Path) -> io::Result<(snap::Snapshot, &'static str)> {
-    let chunks = dir.join(CHUNKS);
     let mut errors = Vec::new();
     let mut found = false;
     for name in [MANIFEST, MANIFEST_PREV] {
-        let bytes = match fs::read(dir.join(name)) {
-            Ok(b) => b,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+        match load_file(dir, name) {
+            Ok(s) => return Ok((s, name)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => {
                 found = true;
                 errors.push(format!("{name}: {e}"));
-                continue;
             }
-        };
-        found = true;
-        match snap::decode_with(&bytes, |h| fs::read(chunks.join(snap::hex(h))).ok()) {
-            Ok(s) => return Ok((s, name)),
-            Err(e) => errors.push(format!("{name}: {e}")),
         }
     }
     if !found {
@@ -335,6 +328,19 @@ pub fn load(dir: &Path) -> io::Result<(snap::Snapshot, &'static str)> {
         io::ErrorKind::InvalidData,
         errors.join("; "),
     ))
+}
+
+/// Read the checkpoint manifest `name` in `dir` ([`MANIFEST`] or
+/// [`MANIFEST_PREV`]) with its pages from `chunks/`.
+///
+/// # Errors
+/// `NotFound` when the file does not exist; `InvalidData` when it does not
+/// decode (a page missing from `chunks/` is one way); else the read's.
+pub fn load_file(dir: &Path, name: &str) -> io::Result<snap::Snapshot> {
+    let bytes = fs::read(dir.join(name))?;
+    let chunks = dir.join(CHUNKS);
+    snap::decode_with(&bytes, |h| fs::read(chunks.join(snap::hex(h))).ok())
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
 }
 
 /// Make `dir` (and missing parents) mode 0700, and an existing `dir` 0700

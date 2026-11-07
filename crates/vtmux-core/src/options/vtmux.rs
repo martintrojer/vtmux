@@ -15,7 +15,7 @@ use super::table::{DefaultValue, Kind, OptionDef, Scope, StringCheck};
 use super::{Entry, value};
 
 /// Every vtmux option, in name order (the order listings show them).
-pub(super) static EXTENSIONS: [OptionDef; 3] = [
+pub(super) static EXTENSIONS: [OptionDef; 4] = [
     // D26: the pane blend.
     OptionDef {
         name: "vtmux-pane-active-blend",
@@ -50,6 +50,19 @@ pub(super) static EXTENSIONS: [OptionDef; 3] = [
         separator: None,
         default: DefaultValue::Choice(0),
         text: Some("Checkpoint the server's state to disk: layout only, or with screens."),
+        unit: None,
+    },
+    // D27: user options a restore leaves out (decision 30), globs as
+    // `update-environment` lists names.
+    OptionDef {
+        name: "vtmux-persist-drop",
+        scope: Scope::Session,
+        kind: Kind::String(StringCheck::None),
+        array: true,
+        hook: false,
+        separator: None,
+        default: DefaultValue::Str(""),
+        text: Some("User options (globs) not restored from a checkpoint."),
         unit: None,
     },
 ];

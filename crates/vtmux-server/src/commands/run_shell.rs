@@ -331,7 +331,8 @@ fn job_done(
         lines.pop();
     }
     let retcode = match status {
-        JobStatus::Exited(0) => 0,
+        // `Unknown` is a restored pane's, never a job's.
+        JobStatus::Exited(0) | JobStatus::Unknown => 0,
         JobStatus::Exited(code) => {
             lines.push(format!("'{command}' returned {code}").into_bytes());
             code
