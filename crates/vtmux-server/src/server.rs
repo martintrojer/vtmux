@@ -55,8 +55,8 @@ const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 /// output ([`Server::release_hidden_screens`]).
 const HIDDEN_VIEW_IDLE: Duration = Duration::from_secs(1);
 
-pub mod resume;
 pub mod persist;
+pub mod resume;
 pub mod snapshot;
 
 /// A connected client.
