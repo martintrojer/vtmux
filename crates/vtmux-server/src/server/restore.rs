@@ -451,6 +451,10 @@ fn find(server: &Server, dir: &Path) -> Found {
     Found::Refused(errors.join("; "))
 }
 
+/// How long the dry run of a checkpoint may take: the 30 s `dry_run` had
+/// before an upgrade's own limit (3 s) became an argument.
+const CHECK_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The dry run of a live upgrade on `s` (`--vtmux-check-snapshot`, by this
 /// server's own executable), which decodes it and rebuilds the server
 /// from it in a child process ([`super::resume::check_snapshot`]).
@@ -459,7 +463,7 @@ fn check_in_child(s: &snap::Snapshot, socket: &Path) -> Result<(), String> {
     let dir = socket.parent().unwrap_or(Path::new("/tmp"));
     let file = crate::sys::upgrade::memfile(dir, &snap::encode(s))
         .map_err(|e| format!("snapshot: {}", vtmux_core::error::strerror(&e)))?;
-    match crate::sys::upgrade::dry_run(&exe, file.as_fd()) {
+    match crate::sys::upgrade::dry_run(&exe, file.as_fd(), CHECK_LIMIT) {
         Ok(r) => r,
         Err(e) => Err(format!(
             "{}: {}",
