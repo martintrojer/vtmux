@@ -1,0 +1,23 @@
+name = "resize_half_written_sequence"
+# A resize does not touch the pane's input parser (screen_resize leaves
+# wp->ictx alone, window.c window_pane_resize), so a sequence the program
+# left half-written when the pane shrinks is finished by its next bytes: a
+# CSI's colour applies and an OSC's title is the whole string. The program
+# waits until the server holds the start (capture-pane -P,
+# cmd-capture-pane.c cmd_capture_pane_pending) before it signals.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '0\\n1\\n2\\n3\\n4\\n5\\033[2;1H\\033[3'; until [ -n \"$(tmux capture-pane -pP)\" ]; do sleep 0.01; done; tmux wait-for -S half; tmux wait-for go; printf '1mX\\033[0m\\033]2;ab'; until [ -n \"$(tmux capture-pane -pP)\" ]; do sleep 0.01; done; tmux wait-for -S osc; tmux wait-for go; printf 'cd\\007'; tmux wait-for -S done; exec cat -"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { wait_for = "half" },
+  { run = ["resize-window", "-t", "a:w", "-y", "4"] },
+  { run = ["capture-pane", "-pP", "-t", "a:w"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "osc" },
+  { run = ["resize-window", "-t", "a:w", "-y", "3"] },
+  { run = ["capture-pane", "-pP", "-t", "a:w"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "done" },
+  { run = ["capture-pane", "-pe", "-t", "a:w"] },
+  { run = ["display", "-p", "-t", "a:w", "#{pane_title}"] },
+  { run = ["kill-server"] },
+]

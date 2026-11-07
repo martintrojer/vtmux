@@ -1,0 +1,246 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "resize_half_written_sequence",
+  "inputs": {
+    "name": "resize_half_written_sequence",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '0\\n1\\n2\\n3\\n4\\n5\\033[2;1H\\033[3'; until [ -n \"$(tmux capture-pane -pP)\" ]; do sleep 0.01; done; tmux wait-for -S half; tmux wait-for go; printf '1mX\\033[0m\\033]2;ab'; until [ -n \"$(tmux capture-pane -pP)\" ]; do sleep 0.01; done; tmux wait-for -S osc; tmux wait-for go; printf 'cd\\007'; tmux wait-for -S done; exec cat -"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "wait_for": "half"
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:w",
+          "-y",
+          "4"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-pP",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "osc"
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:w",
+          "-y",
+          "3"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-pP",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-pe",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{pane_title}"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b[3\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]2;ab\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n\u001b[31mX\u001b[39m\n2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcd\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

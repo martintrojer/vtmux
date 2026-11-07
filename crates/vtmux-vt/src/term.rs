@@ -1597,7 +1597,17 @@ impl PaneTerm {
 
     /// Write `seq` (cursor moves in screen coordinates) with origin mode
     /// off, so CUP is not relative to the scroll region, and back on after.
+    ///
+    /// A resize does not touch tmux's input parser (`screen_resize` leaves
+    /// `wp->ictx` alone), so a sequence the program left half-written is
+    /// taken out of Ghostty's parser first and given back after: CAN ends
+    /// it without dispatching it (an OSC is dropped, `osc.Parser.end`), and
+    /// the program's next bytes finish it.
     fn write_screen_moves(&mut self, seq: &str) {
+        let partial = self.ghostty_partial();
+        if !partial.is_empty() {
+            self.term.vt_write(b"\x18");
+        }
         let origin = self.term.mode(Mode::ORIGIN).unwrap_or(false);
         if origin {
             let _ = self.term.set_mode(Mode::ORIGIN, false);
@@ -1605,6 +1615,30 @@ impl PaneTerm {
         self.term.vt_write(seq.as_bytes());
         if origin {
             let _ = self.term.set_mode(Mode::ORIGIN, true);
+        }
+        self.term.vt_write(&partial);
+    }
+
+    /// The bytes of the sequence Ghostty's parser is in the middle of: the
+    /// input since the last ESC of [`PaneTerm::pending_input`] (every ESC
+    /// starts a sequence afresh in both parsers), less the bytes the
+    /// scanner keeps from Ghostty inside a CSI ([`ScanEvent::Skip`]).
+    /// Nothing at the ground state, nor in a DCS or a rename, which the
+    /// scanner reads alone (Ghostty had CAN).
+    fn ghostty_partial(&self) -> Vec<u8> {
+        let state = self.scan.state;
+        if matches!(
+            state,
+            ScanState::Ground | ScanState::Dcs | ScanState::Rename
+        ) {
+            return Vec::new();
+        }
+        let from = self.pending.iter().rposition(|&b| b == 0x1b).unwrap_or(0);
+        let tail = &self.pending[from..];
+        if state == ScanState::Csi {
+            tail.iter().copied().filter(|&b| b < 0x7f).collect()
+        } else {
+            tail.to_vec()
         }
     }
 
@@ -4854,5 +4888,48 @@ mod tests {
         assert_eq!(t.bottom_row_used(), 2);
         t.feed(b"\x1b[?1049l");
         assert_eq!(t.bottom_row_used(), 0);
+    }
+
+    /// A resize does not touch tmux's input parser (`screen_resize` leaves
+    /// `wp->ictx` alone), so a sequence the program left half-written is
+    /// finished by its next bytes. The resize's own cursor moves
+    /// (`write_screen_moves`) must not end it in Ghostty's parser.
+    #[test]
+    fn a_resize_keeps_a_half_written_sequence() {
+        use crate::snapshot::Color;
+        // Each resize writes moves: a shorter screen with text below the
+        // cursor (eat_below_cursor), a taller one with history and the
+        // cursor off the last row (grow_pulling_history).
+        let resizes: [&[(u16, u16)]; 2] = [&[(20, 4)], &[(20, 4), (20, 6)]];
+        let starts: [(&[u8], &[u8], Color); 4] = [
+            (b"\x1b[3", b"1mX", Color::Palette(1)),
+            (b"\x1b[38;5", b";1mX", Color::Palette256(1)),
+            (b"\x1b", b"[31mX", Color::Palette(1)),
+            (b"\x1b[3\xff", b"1mX", Color::Palette(1)),
+        ];
+        for sizes in resizes {
+            for (head, tail, fg) in starts {
+                let mut t = PaneTerm::new(20, 6, 100);
+                t.feed(b"0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\x1b[2;1H");
+                t.feed(head);
+                for &(cols, rows) in sizes {
+                    t.resize(cols, rows);
+                }
+                assert_eq!(t.pending_input(), head, "{sizes:?} {head:?}");
+                t.feed(tail);
+                let (cx, cy) = t.cursor();
+                let row = t.row(t.history_size() + usize::from(cy));
+                let x = &row.cells[usize::from(cx) - 1];
+                assert_eq!((x.text.as_str(), cx), ("X", 1), "{sizes:?} {head:?}");
+                assert_eq!(x.style.fg, fg, "{sizes:?} {head:?}");
+            }
+        }
+        // A string: the title is the whole OSC.
+        let mut t = PaneTerm::new(20, 6, 100);
+        t.feed(b"0\r\n1\r\n2\x1b[H\x1b]2;ab");
+        t.resize(20, 2);
+        t.feed(b"cd\x07");
+        assert_eq!(t.title(), "abcd");
+        assert_eq!(t.row(t.history_size()).text(), "0");
     }
 }
