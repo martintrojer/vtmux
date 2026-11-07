@@ -1,0 +1,15 @@
+# A message shown before the client's status line was ever drawn (a
+# client-attached hook runs before the attach's first redraw) is drawn
+# over sl->screen as it is, still blank (status_message_redraw copies
+# sl->screen, status.c), not over the status line it would show.
+name = "status_msg_before_status"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-g", "message-style", "bg=yellow,fg=black,width=10"] },
+  { run = ["set-hook", "-g", "client-attached", "display-message -d 0 hello"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+]

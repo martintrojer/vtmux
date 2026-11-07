@@ -85,6 +85,10 @@ pub struct StatusLine {
     /// `sl->screen`: the status lines as last drawn, one row per line. It
     /// keeps its last content while the status is off.
     screen: Vec<Vec<Cell>>,
+    /// The message came with the client from a snapshot (D27), and
+    /// `screen`, which the image before had drawn, is not carried: the
+    /// status as it would be drawn now stands in for it once.
+    restored: bool,
     /// `sl->active` while a message shows: the message over a copy of
     /// `screen`.
     active: Vec<Vec<Cell>>,
@@ -134,6 +138,7 @@ impl Default for StatusLine {
             redraw_borders: false,
             force: false,
             screen: Vec::new(),
+            restored: false,
             active: Vec::new(),
             message: None,
             prompt: None,
@@ -350,6 +355,7 @@ impl StatusLine {
             text,
             ignore_styles: parts.ignore_styles,
         });
+        self.restored = self.message.is_some();
         self.redraw = true;
     }
 
@@ -413,10 +419,11 @@ impl StatusLine {
             self.drawn += 1;
             if let Some(m) = &self.message {
                 // A message is drawn over the status as last drawn
-                // (`sl->screen`). A client restored from a snapshot with a
+                // (`sl->screen`, status_message_redraw), blank before the
+                // first draw. A client restored from a snapshot with a
                 // message up (D27) has drawn none in this image: the status
                 // as it would be drawn now stands in for it.
-                if self.screen.is_empty() && lines != 0 {
+                if std::mem::take(&mut self.restored) && self.screen.is_empty() && lines != 0 {
                     self.screen = status_rows(source, ctx, s, cols, lines);
                 }
                 self.active = message_rows(source, ctx, s, &self.screen, m, cols, lines);
