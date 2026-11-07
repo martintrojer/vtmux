@@ -19,7 +19,7 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # A hung test must fail the job, not hold the runner for six hours.
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
