@@ -156,13 +156,64 @@ fn inheritable(fd: BorrowedFd<'_>) -> io::Result<FdFlags> {
     Ok(flags)
 }
 
+/// The `execve` arguments of the dry run, built before the fork so the
+/// child allocates nothing.
+struct PreparedExec {
+    path: CString,
+    argv: Vec<*const libc::c_char>,
+    envp: Vec<*const libc::c_char>,
+    /// Owners of what `argv` and `envp` point into.
+    _strings: Vec<CString>,
+}
+
+// SAFETY: the raw pointers point into `_strings`' heap buffers, which a
+// move leaves where they are, and nothing writes through them.
+unsafe impl Send for PreparedExec {}
+// SAFETY: as above; the struct is read-only after `new`.
+unsafe impl Sync for PreparedExec {}
+
+impl PreparedExec {
+    /// `binary --vtmux-check-snapshot <fd>` in this process's environment.
+    fn new(binary: &Path, fd: RawFd) -> io::Result<Self> {
+        let path = CString::new(binary.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        let mut strings = vec![
+            path.clone(),
+            CString::new(CHECK_FLAG).map_err(io::Error::other)?,
+            CString::new(fd.to_string()).map_err(io::Error::other)?,
+        ];
+        let words = strings.len();
+        strings.extend(environ(None));
+        let mut argv: Vec<*const libc::c_char> =
+            strings[..words].iter().map(|s| s.as_ptr()).collect();
+        argv.push(std::ptr::null());
+        let mut envp: Vec<*const libc::c_char> =
+            strings[words..].iter().map(|s| s.as_ptr()).collect();
+        envp.push(std::ptr::null());
+        Ok(Self {
+            path,
+            argv,
+            envp,
+            _strings: strings,
+        })
+    }
+
+    /// `execve`; returns only the error it failed with.
+    fn exec(&self) -> io::Error {
+        // SAFETY: `path`, `argv` and `envp` are NULL-terminated and point
+        // at NUL-terminated strings that live as long as `self`.
+        unsafe { libc::execve(self.path.as_ptr(), self.argv.as_ptr(), self.envp.as_ptr()) };
+        io::Error::last_os_error()
+    }
+}
+
 /// The dry run (live-upgrade spec, sequence step 4): run
 /// `<binary> --vtmux-check-snapshot <fd>` on `snapshot` and wait for it,
 /// at most [`DRY_RUN_LIMIT`]. `Ok(Err(message))` when the binary refuses
 /// the snapshot: its stderr, or how it ended.
 ///
 /// # Errors
-/// The binary can't be started or waited for.
+/// The binary can't be started (not found, not executable, not an
+/// executable format: the `execve` error, on every host) or waited for.
 pub fn dry_run(binary: &Path, snapshot: BorrowedFd<'_>) -> io::Result<Result<(), String>> {
     use std::os::unix::process::CommandExt as _;
     let flags = inheritable(snapshot)?;
@@ -173,18 +224,25 @@ pub fn dry_run(binary: &Path, snapshot: BorrowedFd<'_>) -> io::Result<Result<(),
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+    // The child execs by `execve` itself, as the real exec does
+    // (`exec_resume`): `Command` with a `pre_exec` hook falls back to
+    // `fork` + `execvp`, and glibc's `execvp` runs a file the kernel
+    // refuses (ENOEXEC) as a shell script. What that prints and exits with
+    // is the shell's (bash: "cannot execute binary file", 126; dash:
+    // nothing, 127), so the refusal differed by host.
+    let exec = PreparedExec::new(binary, snapshot.as_raw_fd())?;
     // `Command` passes the signal mask on, and a switch back runs this
     // with the handled signals blocked (`exec_resume`): the child starts
     // with none blocked, as a pane does (`pty::clear_signals`).
     // SAFETY: the closure runs in the forked child before exec and only
-    // calls sigemptyset and pthread_sigmask on a local set, both
-    // async-signal-safe.
+    // calls sigemptyset, pthread_sigmask on a local set, and
+    // `PreparedExec::exec` (async-signal-safe, allocation-free).
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             let mut set: libc::sigset_t = std::mem::zeroed();
             libc::sigemptyset(&raw mut set);
             libc::pthread_sigmask(libc::SIG_SETMASK, &raw const set, std::ptr::null_mut());
-            Ok(())
+            Err(exec.exec())
         });
     }
     let child = command.spawn();
@@ -576,6 +634,22 @@ mod tests {
         super::super::signal::restore_mask(mask);
         let message = got.unwrap().unwrap_err();
         assert!(message.contains("signal: 1"), "{message}");
+    }
+
+    /// A file the kernel will not exec (no `#!`, not an executable
+    /// format) fails the spawn with the `execve` error: never the shell
+    /// fallback of `execvp`, whose exit code and message differ by host
+    /// (bash 126 with a message, dash 127 and none).
+    #[test]
+    fn a_dry_run_of_a_file_that_is_no_executable_is_an_exec_error() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let d = dir();
+        let garbage = d.0.join("garbage");
+        std::fs::write(&garbage, [0x7f, 0x00, 0xff, 0x13, 0x37, 0x00]).unwrap();
+        std::fs::set_permissions(&garbage, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let snapshot = memfile(&d.0, b"x").unwrap();
+        let e = dry_run(&garbage, snapshot.as_fd()).unwrap_err();
+        assert_eq!(e.raw_os_error(), Some(libc::ENOEXEC), "{e}");
     }
 
     #[test]
