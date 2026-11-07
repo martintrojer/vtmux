@@ -522,6 +522,26 @@ Recorded per commit in git history; the list is kept current:
   vtmux's `crates/vtmux-vt/tests/state_roundtrip.rs`. Not an upstream
   candidate as is (it carries vtmux's patch bits).
 
+- `patches/0018-reflow-hyperlink-map-full.patch` (`PageList.zig`
+  `ReflowCursor.writeCell`): the reflow grows a destination page's
+  hyperlink map until a cell's link fits, not once. Near
+  `hyperlink_bytes`' 16-bit maximum a doubling (capped at the maximum)
+  can leave the map's power-of-two capacity as it was, and the
+  `setHyperlink` after it failed: `unreachable` in safe builds, the
+  link dropped in others. Past the maximum the growth is `OutOfSpace`,
+  on which `reflowRow` already moves the row to a new page. Live input
+  reaches it: 3000 lines of 30 linked characters on 80 columns, then 17
+  columns (the narrower rows pack more linked cells into a page than the
+  source pages held), found by vtmux's import fuzz. Test: `Terminal:
+  reflow keeps the links of a page full of them (vtmux)` (fails before:
+  `unreachable` at the `setHyperlink`); vtmux's
+  `a_reflow_keeps_the_links_of_pages_full_of_them` (ReleaseFast: 3 of
+  90000 links dropped before). The full `zig build test-lib-vt
+  -Demit-lib-vt=true -Dapp-runtime=none` (Debug) over 0001-0018: 7009 of
+  7089 pass, 76 skip, and the two known failures in each test binary
+  (`tabClear single`, and the kitty temporary-file test of patch 0001's
+  note, the checkout under `/tmp`). Upstream candidate.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

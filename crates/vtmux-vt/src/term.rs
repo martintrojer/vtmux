@@ -4536,6 +4536,33 @@ mod tests {
     /// row in Ghostty, so the line limit must not prune to tmux's unsplit
     /// count until then, and tmux's history starts at the same row after.
     #[test]
+    fn a_reflow_keeps_the_links_of_pages_full_of_them() {
+        // Short linked lines fill pages' hyperlink maps; narrower, each
+        // takes two rows of a destination page with as many cells. Ghostty
+        // grew the map once where it needed twice and dropped the links
+        // that did not fit (`unreachable` in its safe builds); patch 0018.
+        let mut t = PaneTerm::new(80, 4, 100_000);
+        t.feed(b"\x1b]8;;http://example.com\x07");
+        for _ in 0..3000 {
+            t.feed(format!("{}\r\n", "x".repeat(30)).as_bytes());
+        }
+        t.feed(b"\x1b]8;;\x07");
+        t.resize(17, 4);
+        let state = t.export_state();
+        let (mut text, mut linked) = (0, 0);
+        for page in &state.primary.pages {
+            let crate::PageState::Rows(p) = page else {
+                panic!("an uncompressed page")
+            };
+            for c in p.cells.iter().filter(|c| c.content == u32::from('x')) {
+                text += 1;
+                linked += usize::from(c.link != 0);
+            }
+        }
+        assert_eq!((text, linked), (3000 * 30, 3000 * 30));
+    }
+
+    #[test]
     fn resize_under_the_alternate_screen_keeps_history() {
         for styled in [false, true] {
             let mut t = PaneTerm::new(80, 24, 2000);
