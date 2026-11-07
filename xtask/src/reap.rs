@@ -388,6 +388,35 @@ pub fn run() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Helpers shared by this crate's unit tests.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::path::Path;
+    use std::time::{Duration, Instant};
+
+    /// A socket file nobody listens on: bound, then the listener dropped (std
+    /// leaves the file behind, as a server that exits does).
+    ///
+    /// Returns only once a `connect()` is refused. `bind` also listens, and a
+    /// parallel test that forks (`Command::spawn`) between `bind` and `drop`
+    /// has a copy of the fd until its child execs (`CLOEXEC` acts at exec), so
+    /// right after `drop` the socket can still answer for a few ms and a sweep
+    /// would take it for live. Once refused it never revives: the fd is closed
+    /// here, so no later fork can inherit it.
+    pub(crate) fn dead_socket(path: &Path) {
+        drop(UnixListener::bind(path).unwrap());
+        let give_up = Instant::now() + Duration::from_secs(10);
+        while !matches!(
+            UnixStream::connect(path),
+            Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionRefused
+        ) {
+            assert!(Instant::now() < give_up, "{path:?} still answers");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,11 +602,7 @@ mod tests {
         }
     }
 
-    /// A socket file nobody listens on: bound, then the listener dropped (std
-    /// leaves the file behind, as a server that exits does).
-    fn dead_socket(path: &Path) {
-        drop(std::os::unix::net::UnixListener::bind(path).unwrap());
-    }
+    use super::test_support::dead_socket;
 
     fn names(paths: &[PathBuf]) -> Vec<String> {
         paths
