@@ -7,7 +7,7 @@
 //! - `live`    reference vs vtmux in memory; `live --self` reference vs
 //!   reference (a determinism check).
 //!
-//! All take `--only <glob>`; `*` and `?` match. `replay` and `live` take
+//! All take `--only <glob>[,<glob>...]`; `*` and `?` match. `replay` and `live` take
 //! `--upgrade-every <n>`: vtmux also upgrades onto itself after every nth
 //! step, and every scenario must still match (live-upgrade spec, *Tests*).
 
@@ -64,7 +64,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Opts> {
         Some("live") => Mode::Live,
         _ => {
             return fail(
-                "usage: cargo xtask oracle <record|replay|live [--self]> [--only <glob>] \
+                "usage: cargo xtask oracle <record|replay|live [--self]> [--only <glob>[,<glob>...]] \
                  [--upgrade-every <n>]",
             );
         }
@@ -92,7 +92,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Opts> {
     Ok(opts)
 }
 
-/// `*` and `?` glob match.
+/// `*` and `?` glob match, of any of the comma-separated globs in `pat`.
 fn glob(pat: &str, text: &str) -> bool {
     fn go(p: &[u8], t: &[u8]) -> bool {
         match p.split_first() {
@@ -102,7 +102,7 @@ fn glob(pat: &str, text: &str) -> bool {
             Some((c, rest)) => t.first() == Some(c) && go(rest, &t[1..]),
         }
     }
-    go(pat.as_bytes(), text.as_bytes())
+    pat.split(',').any(|p| go(p.as_bytes(), text.as_bytes()))
 }
 
 fn workspace_root() -> PathBuf {
@@ -689,6 +689,9 @@ mod tests {
         assert!(glob("control_*", "control_output"));
         assert!(glob("new_?as_kill", "new_has_kill"));
         assert!(!glob("control", "control_output"));
+        assert!(glob("a,control_*", "control_output"));
+        assert!(glob("control_*,b", "control_output") && glob("x,b", "b"));
+        assert!(!glob("a,b", "ab"));
     }
 
     #[test]

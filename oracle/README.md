@@ -10,7 +10,7 @@ cargo xtask oracle live --self               reference vs reference: determinism
 cargo xtask oracle replay --upgrade-every <n>  replay, vtmux upgraded onto itself after every nth step
 ```
 
-`replay` exits 1 on any mismatch not covered by a `divergence` annotation and prints a unified diff per
+`--only` takes globs separated by commas (`a_*,b`). `replay` exits 1 on any mismatch not covered by a `divergence` annotation and prints a unified diff per
 mismatching step. Traces are rewritten only by `record`, on a deliberate reference bump or a new/changed
 scenario; never edit one by hand. `replay` refuses a trace whose stored scenario differs from the `.toml`.
 
@@ -78,7 +78,8 @@ wait-for`, a job) or change what a client sees (a mode, prompt or menu it closes
 a key held for `escape-time`, a mouse drag, a locked client), the server refuses at once and the runner tries after the next
 step. The summary counts upgrades inserted and put off. Scenarios whose observations an upgrade changes by
 design with no state to check, or that hit a known bug, are listed with why in `oracle/upgrade-every-skip.toml`
-and run without inserted upgrades; the replay prints the reason.
+and run without inserted upgrades; the replay prints the reason. `check.sh` also replays the scenarios that once
+failed only with an upgrade after every step (`--upgrade-every 1 --only <list>`, the list in the script).
 
 ## Normalisation
 

@@ -25,8 +25,11 @@ fi
 cargo test --workspace
 VTMUX_CHECK_HARNESS="${VTMUX_CHECK_HARNESS:-1}"
 # The replay again with the server upgraded onto itself after every third
-# step (live-upgrade spec, *Tests*): every scenario must still match.
+# step (live-upgrade spec, *Tests*): every scenario must still match. Then
+# after every step, for the scenarios that once failed only so.
+upgrade_every_1='reply_client_colours,scrollbars_*,tree_preview_start_timer,prompt_flags,passthrough_*,set_titles'
 if [ "$VTMUX_CHECK_HARNESS" = 1 ]; then
-  cargo xtask regress && cargo xtask oracle replay && cargo xtask oracle replay --upgrade-every 3
+  cargo xtask regress && cargo xtask oracle replay && cargo xtask oracle replay --upgrade-every 3 &&
+    cargo xtask oracle replay --upgrade-every 1 --only "$upgrade_every_1"
 fi
 bash scripts/socket-guard.sh verify "$sockets_before"
