@@ -100,12 +100,12 @@ impl Default for Palette {
     }
 }
 
-/// Whether an OSC with this payload starts like one tmux reads here (the
-/// full payload is worth keeping).
+/// Whether an OSC with this payload starts like one tmux reads here, or
+/// the progress bar's OSC 9 (the full payload is worth keeping).
 pub(crate) fn is_palette_osc(prefix: &[u8]) -> bool {
     matches!(
         osc_number(prefix),
-        Some((4 | 10 | 11 | 12 | 52 | 104 | 110 | 111 | 112, _))
+        Some((4 | 9 | 10 | 11 | 12 | 52 | 104 | 110 | 111 | 112, _))
     )
 }
 

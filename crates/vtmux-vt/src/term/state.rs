@@ -49,6 +49,7 @@ use super::{
 };
 use crate::capture::FrozenRow;
 use crate::palette::PaletteState;
+use crate::progress::ProgressBar;
 use crate::snapshot::{Color, Snapshot, Style, Underline};
 
 mod validate;
@@ -365,6 +366,8 @@ pub struct PaneState {
     /// so a REP repeats it (input.c `INPUT_CSI_REP`).
     pub last_print: bool,
     pub palette: PaletteState,
+    /// tmux's OSC 9;4 progress bar (`s->progress_bar`).
+    pub progress_bar: ProgressBar,
     /// The server's title over the program's, and tmux's title stack.
     pub title: Option<String>,
     pub title_stack: Vec<String>,
@@ -1244,6 +1247,7 @@ impl PaneTerm {
             extended_keys: self.scan.extended_keys,
             last_print: self.scan.last_print,
             palette: self.scan.palette.state(),
+            progress_bar: self.scan.progress,
             title: titles.server.clone(),
             title_stack: titles.stack.clone(),
             continuation: self.continuation(),
@@ -1334,6 +1338,7 @@ impl PaneTerm {
         // did, and set it never (it holds no printed character).
         self.scan.last_print = p.last_print;
         self.scan.palette.restore(&p.palette);
+        self.scan.progress = p.progress_bar;
         {
             let titles = &mut self.titles;
             titles.server.clone_from(&p.title);

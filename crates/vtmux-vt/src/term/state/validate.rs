@@ -297,6 +297,8 @@ fn pane(p: &PaneState) -> Result<(), StateError> {
             && p.times.len() as u64 <= p.scrolled,
         "history ids",
     )?;
+    // tmux's `input_osc_9` takes 0 to 100.
+    check(p.progress_bar.progress <= 100, "progress bar")?;
     // tmux's `input-buffer-size` is a 32-bit option.
     check(
         u32::try_from(p.input_buffer_size).is_ok(),

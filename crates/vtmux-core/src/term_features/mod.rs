@@ -282,6 +282,9 @@ impl Cap {
 /// `Ms` as the `clipboard` feature gives it (tty-features.c), escapes decoded.
 const MS: &str = "\x1b]52;%p1%s;%p2%s\x07";
 
+/// `Spb` as the `progressbar` feature gives it (tty-features.c:374).
+const SPB: &str = "\x1b]9;4;%p1%d;%p2%d\x1b\\";
+
 /// The value the feature that adds string capability `name` gives it
 /// (`tty_feature_*_capabilities`, tty-features.c), escapes decoded; `None`
 /// for one vtmux does not write.
@@ -311,6 +314,7 @@ fn feature_value(name: &str) -> Option<&'static str> {
         "ol" => "\x1b[59m",
         "Smol" => "\x1b[53m",
         "smxx" => "\x1b[9m",
+        "Spb" => SPB,
         _ => return None,
     })
 }
@@ -767,6 +771,15 @@ impl Term {
         Some([swd, path, fsl].concat().into_bytes())
     }
 
+    /// `tty_set_progress_bar` (tty.c:3218-3223): `Spb` with the state and
+    /// the progress (`tty_putcode_ii`), or `None` when the terminal has no
+    /// `Spb`.
+    #[must_use]
+    pub fn set_progress_bar(&self, state: u8, progress: u8) -> Option<Vec<u8>> {
+        let spb = self.string("Spb")?;
+        Some(expand_ii(spb, i32::from(state), i32::from(progress)))
+    }
+
     /// `TERM_RGBCOLOURS`.
     #[must_use]
     pub fn rgb(&self) -> bool {
@@ -1079,6 +1092,40 @@ fn expand_ss(template: &str, p1: &str, p2: &str) -> Vec<u8> {
     out
 }
 
+/// `tiparm_s(template, p1, p2)` with two numbers, for the `%` operations a
+/// progress template uses: `%pN` pushes a parameter, `%d` prints the top
+/// in decimal, `%%` is a `%`. Anything else is dropped, as in
+/// [`expand_ss`].
+fn expand_ii(template: &str, p1: i32, p2: i32) -> Vec<u8> {
+    let bytes = template.as_bytes();
+    let mut out = Vec::new();
+    let mut stack: Vec<i32> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'%' {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        match bytes.get(i) {
+            Some(b'%') => out.push(b'%'),
+            Some(b'p') => {
+                match bytes.get(i + 1) {
+                    Some(b'1') => stack.push(p1),
+                    Some(b'2') => stack.push(p2),
+                    _ => stack.push(0),
+                }
+                i += 1;
+            }
+            Some(b'd') => out.extend_from_slice(stack.pop().unwrap_or(0).to_string().as_bytes()),
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
 /// `b64_ntop`: standard base64 with padding.
 #[must_use]
 pub fn base64(data: &[u8]) -> String {
@@ -1218,6 +1265,54 @@ mod selection_tests {
         let none =
             Term::open("xterm-256color", &[], None, &[], &["xterm*:Ms@".to_owned()]).unwrap();
         assert!(none.set_selection("", b"x").is_none());
+    }
+
+    /// `Spb` comes with the `progressbar` feature (tty-features.c:373-375)
+    /// or an override, and goes with `Spb@`.
+    #[test]
+    fn set_progress_bar_is_spb_with_two_numbers() {
+        let open = |features: &[&str], overrides: &[&str]| {
+            let f: Vec<String> = features.iter().map(|s| (*s).to_owned()).collect();
+            let o: Vec<String> = overrides.iter().map(|s| (*s).to_owned()).collect();
+            Term::open("xterm-256color", &[], None, &f, &o).unwrap()
+        };
+        assert!(open(&[], &[]).set_progress_bar(1, 50).is_none());
+        let feature = open(&["xterm*:progressbar"], &[]);
+        assert!(feature.feature_present("progressbar"));
+        assert_eq!(
+            feature.set_progress_bar(1, 50).unwrap(),
+            b"\x1b]9;4;1;50\x1b\\"
+        );
+        assert_eq!(
+            feature.set_progress_bar(0, 100).unwrap(),
+            b"\x1b]9;4;0;100\x1b\\"
+        );
+        let client = Term::open(
+            "xterm-256color",
+            &["progressbar".to_owned()],
+            None,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            client.set_progress_bar(3, 7).unwrap(),
+            b"\x1b]9;4;3;7\x1b\\"
+        );
+        let overridden = open(&[], &["xterm*:Spb=<%p2%d|%p1%d%%>"]);
+        assert_eq!(overridden.set_progress_bar(2, 30).unwrap(), b"<30|2%>");
+        let removed = open(&["xterm*:progressbar"], &["xterm*:Spb@"]);
+        assert!(removed.set_progress_bar(1, 50).is_none());
+    }
+
+    /// The `ghostty` terminal (its XTVERSION reply) has the feature
+    /// (tty-features.c:648-659).
+    #[test]
+    fn ghostty_gets_the_progress_bar() {
+        let mut term = Term::open("xterm-ghostty", &[], None, &[], &[]).unwrap();
+        assert!(term.set_progress_bar(1, 1).is_none());
+        term.extended_device_attributes("ghostty 1.2.3");
+        assert_eq!(term.set_progress_bar(1, 1).unwrap(), b"\x1b]9;4;1;1\x1b\\");
     }
 }
 

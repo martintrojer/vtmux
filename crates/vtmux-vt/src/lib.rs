@@ -8,6 +8,7 @@
 pub mod capture;
 mod dcs;
 pub mod palette;
+pub mod progress;
 pub mod snapshot;
 pub mod term;
 mod text;
@@ -44,6 +45,7 @@ pub fn set_tmux_clusters(vs16_wide: bool) {
     libghostty_vt::unicode::set_tmux_clusters(true, vs16_wide);
 }
 pub use palette::PaletteState;
+pub use progress::{ProgressBar, ProgressState};
 pub use term::{
     AltSaved, CellState, CompressedPages, Compression, CompressionActivity, CursorShape,
     CursorStyle, ExtendedKeys, FrozenCell, FrozenLinkId, FrozenRowState, GhosttyCharset,

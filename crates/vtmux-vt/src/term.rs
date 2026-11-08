@@ -20,6 +20,7 @@ use libghostty_vt::terminal::{
 use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
+use crate::progress::ProgressBar;
 
 mod state;
 use crate::dcs::{self, Dcs, Dispatch, Step};
@@ -653,6 +654,9 @@ impl PaneTerm {
                 // A palette OSC ended: tmux redraws the pane at once, ahead
                 // of whatever follows in this input.
                 self.redraw |= std::mem::take(&mut self.scan.palette_redraw);
+                if std::mem::take(&mut self.scan.progress_set) {
+                    self.events.borrow_mut().push(TermEvent::Progress);
+                }
                 if let Some(e) = e {
                     event = Some(e);
                     break;
@@ -2098,6 +2102,18 @@ impl PaneTerm {
             .push(TermEvent::Title(text.to_owned()));
     }
 
+    /// The progress bar OSC 9;4 set (`s->progress_bar`).
+    #[must_use]
+    pub fn progress_bar(&self) -> ProgressBar {
+        self.scan.progress
+    }
+
+    /// `screen_reinit` (screen.c:139, a respawn): the bar hidden at 0.
+    /// RIS keeps it, as tmux's does.
+    pub fn reset_progress_bar(&mut self) {
+        self.scan.progress = ProgressBar::default();
+    }
+
     /// Give back a title [`Self::title`] read (a snapshot's): it is
     /// already cleaned, so it is kept as it is.
     pub fn restore_title(&mut self, title: &str) {
@@ -2691,6 +2707,10 @@ struct AltModeScanner {
     answers: Vec<Reply>,
     /// A palette OSC just ended with a redraw ([`PaneTerm::feed`] takes it).
     palette_redraw: bool,
+    /// tmux's progress bar (`s->progress_bar`, OSC 9;4).
+    progress: ProgressBar,
+    /// An OSC 9;4 just set it ([`PaneTerm::feed`] reports it).
+    progress_set: bool,
     /// Intermediate bytes (0x20-0x2f) in the CSI being scanned.
     interm_count: u8,
     /// The CSI had a byte tmux does not take as a parameter or intermediate
@@ -3173,6 +3193,10 @@ pub enum TermEvent {
     /// `OSC 133;D`: a command finished, with its exit status
     /// (`input_osc_133_exit_status`; `pane-command-finished`).
     CommandFinished(u8),
+    /// An OSC 9;4 set the progress bar ([`PaneTerm::progress_bar`]),
+    /// changed or not: tmux redraws the window's borders and status
+    /// (`input_set_progress_bar`, input.c:3016-3026).
+    Progress,
 }
 
 /// The events not yet taken, BELs in a row counted in one. Unbounded:
@@ -3189,6 +3213,10 @@ impl Events {
         if let (TermEvent::Bells(n), Some(TermEvent::Bells(last))) = (&event, self.list.last_mut())
         {
             *last = last.saturating_add(*n);
+            return;
+        }
+        // One redraw stands for any number in a row.
+        if event == TermEvent::Progress && self.list.last() == Some(&TermEvent::Progress) {
             return;
         }
         self.list.push(event);
@@ -3401,7 +3429,12 @@ impl AltModeScanner {
                 let osc = self.palette_osc.take().unwrap_or_default();
                 // input_end_bel: only BEL; ST and the rest end as ST.
                 let end = if b == 0x07 { OscEnd::Bel } else { OscEnd::St };
-                if !self.palette_discard && self.palette.osc(&osc, end, &mut self.answers) {
+                if self.palette_discard {
+                    return;
+                }
+                if let Some((9, p)) = palette::osc_number(&osc) {
+                    self.progress_set |= self.progress.osc_9(p);
+                } else if self.palette.osc(&osc, end, &mut self.answers) {
                     self.palette_redraw = true;
                 }
             }
@@ -5341,6 +5374,58 @@ mod tests {
         let mut back = PaneTerm::new(20, 5, 100);
         back.restore_title(&shown);
         assert_eq!(back.title(), shown);
+    }
+
+    #[test]
+    fn osc_9_4_sets_the_progress_bar() {
+        let mut t = PaneTerm::new(20, 5, 100);
+        assert_eq!(t.progress_bar(), ProgressBar::default());
+        // ST and BEL both end it, a split across reads too, and nothing
+        // reaches the grid.
+        t.feed(b"a\x1b]9;4;1;5");
+        assert_eq!(t.take_events(), []);
+        t.feed(b"0\x1b\\b");
+        assert_eq!(t.take_events(), [TermEvent::Progress]);
+        let bar = t.progress_bar();
+        assert_eq!((bar.state.name(), bar.progress), ("normal", 50));
+        // One event for a run of them; tmux redraws for an unchanged one.
+        t.feed(b"\x1b]9;4;1;50\x07\x1b]9;4;2\x07");
+        assert_eq!(t.take_events(), [TermEvent::Progress]);
+        assert_eq!(t.progress_bar().state.name(), "error");
+        // A leading zero in the number is still OSC 9 (input_exit_osc).
+        t.feed(b"\x1b]09;4;4;7\x07");
+        assert_eq!(t.take_events(), [TermEvent::Progress]);
+        assert_eq!(
+            (t.progress_bar().state.name(), t.progress_bar().progress),
+            ("paused", 7)
+        );
+        // Malformed: nothing set, no redraw.
+        t.feed(b"\x1b]9;4;7;1\x07\x1b]9;1\x07\x1b]9\x07");
+        assert_eq!(t.take_events(), []);
+        assert_eq!(t.progress_bar().state.name(), "paused");
+        // RIS keeps it (screen_write_reset leaves it); a respawn resets.
+        t.feed(b"\x1bc");
+        assert_eq!(t.progress_bar().progress, 7);
+        t.reset_progress_bar();
+        assert_eq!(t.progress_bar(), ProgressBar::default());
+        t.feed(b"ab");
+        let shown = crate::capture::capture(&t, crate::CaptureOpts::default());
+        assert!(shown.starts_with(b"ab\n"), "{shown:?}");
+    }
+
+    #[test]
+    fn an_osc_9_past_the_input_buffer_is_dropped() {
+        // Leading zeros keep the number 50 and make the payload 48 bytes:
+        // past the 31 that the smallest buffer holds (`input_input`).
+        let osc = format!("\x1b]9;4;1;{}50\x07", "0".repeat(40));
+        let mut t = PaneTerm::new(20, 5, 100);
+        t.set_input_buffer_size(4);
+        t.feed(osc.as_bytes());
+        assert_eq!(t.progress_bar(), ProgressBar::default());
+        assert_eq!(t.take_events(), []);
+        t.set_input_buffer_size(1 << 20);
+        t.feed(osc.as_bytes());
+        assert_eq!(t.progress_bar().progress, 50);
     }
 
     #[test]

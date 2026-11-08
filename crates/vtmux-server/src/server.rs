@@ -210,6 +210,9 @@ pub(crate) struct Client {
     /// it again, as the re-executing client's teardown popped it (CSI 23
     /// t) where tmux, with no upgrade, would have left it.
     pub(crate) terminal_title: Option<String>,
+    /// `c->progress_bar`: the progress bar last passed to the terminal,
+    /// so an unchanged one is not passed again.
+    progress_bar: vtmux_vt::ProgressBar,
     /// The terminal's replies that changed its features, in order: a
     /// snapshot replays them onto the terminal opened again (D27).
     pub(crate) term_replies: Vec<snapshot::TermReply>,
@@ -280,6 +283,7 @@ impl Client {
             title: None,
             path: None,
             terminal_title: None,
+            progress_bar: vtmux_vt::ProgressBar::default(),
             term_replies: Vec::new(),
             written: 0,
             pasting: false,
@@ -3052,6 +3056,7 @@ impl Server {
         t == "screen" || t.starts_with("screen-")
     }
 
+    #[allow(clippy::too_many_lines)] // one render per client, step by step
     fn render_clients(&mut self) {
         let attached: Vec<_> = self
             .clients
@@ -3165,7 +3170,8 @@ impl Server {
                 .frame_tagged(screen, tags, caps);
             self.add_outer_modes(id, &mut frame);
             if redrawing {
-                frame.splice(0..0, self.client_title_and_path(id, s));
+                let ahead = self.redraw_head(id, s);
+                frame.splice(0..0, ahead);
             }
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
@@ -3551,11 +3557,13 @@ impl Server {
         Some(bytes)
     }
 
-    /// server-client.c:2588-2592: on a redraw, the title, then the path.
-    fn client_title_and_path(&mut self, id: ClientId, s: SessionId) -> Vec<u8> {
-        let mut bytes = self.client_title(id, s).unwrap_or_default();
-        bytes.extend(self.client_path(id, s).unwrap_or_default());
-        bytes
+    /// What goes ahead of a redraw's frame (`server_client_check_redraw`,
+    /// server-client.c:2588-2594): the title, the path, then the progress bar.
+    fn redraw_head(&mut self, id: ClientId, s: SessionId) -> Vec<u8> {
+        let mut head = self.client_title(id, s).unwrap_or_default();
+        head.extend(self.client_path(id, s).unwrap_or_default());
+        head.extend(self.client_progress_bar(id, s).unwrap_or_default());
+        head
     }
 
     /// `server_client_set_path` (server-client.c:2638-2655), with
@@ -3576,6 +3584,25 @@ impl Server {
         let bytes = client.term.as_ref()?.set_path(&path);
         client.path = Some(path);
         bytes
+    }
+
+    /// `server_client_set_progress_bar` (server-client.c:2657-2672), run
+    /// on a redraw: the progress bar of the active pane of session `s`'s
+    /// current window, as `tty_set_progress_bar` writes it unless it is the
+    /// one last passed. A terminal without `Spb` is passed nothing, but the
+    /// bar is still taken as passed.
+    fn client_progress_bar(&mut self, id: ClientId, s: SessionId) -> Option<Vec<u8>> {
+        let (_, _, p) = self.model.current_of(s)?;
+        let bar = self.model.panes.get(&p)?.term.progress_bar();
+        let client = self.clients.get_mut(&id)?;
+        if client.progress_bar == bar {
+            return None;
+        }
+        client.progress_bar = bar;
+        client
+            .term
+            .as_ref()?
+            .set_progress_bar(bar.state.number(), bar.progress)
     }
 
     /// Session `s`'s current window composed into rows
@@ -5067,6 +5094,7 @@ impl Server {
         // visible cursor (the shape stays).
         pane.term.reinit_cursor_modes();
         pane.term.forget_alternate_saved();
+        pane.term.reset_progress_bar();
         // screen_reinit (spawn.c:329) under the current `extended-keys`.
         pane.term.set_extended_keys(extended_keys);
         pane.term.reset_key_mode();
@@ -5353,6 +5381,15 @@ impl Server {
                     c.finish(now, status);
                 }
                 self.fire_command_event("pane-command-finished", p, window, now);
+            }
+            // input_set_progress_bar (input.c:3016-3026): the borders and
+            // status of the window, which the next redraw passes to each
+            // client's terminal (`client_progress_bar`).
+            TermEvent::Progress => {
+                self.model
+                    .redraw(crate::model::Redraw::WindowBorders(window));
+                self.model
+                    .redraw(crate::model::Redraw::WindowStatus(window));
             }
         }
     }

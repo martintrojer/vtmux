@@ -412,6 +412,17 @@ record! {
 }
 
 record! {
+    /// tmux's OSC 9;4 progress bar (`struct progress_bar`).
+    pub struct ProgressBar {
+        /// `enum progress_bar_state`: 0 hidden, 1 normal, 2 error,
+        /// 3 indeterminate, 4 paused.
+        1 => one state: u32,
+        /// 0 to 100.
+        2 => one progress: u32,
+    }
+}
+
+record! {
     /// A pane's whole terminal state.
     pub struct TermState {
         1 => one cols: u32,
@@ -480,6 +491,9 @@ record! {
         38 => opt alternate_saved: Option<AltSaved>,
         /// Always written beside [`TermState::alternate_saved`].
         39 => opt alternate_saved_layout: Option<AltSaveLayout>,
+        /// The progress bar; written under
+        /// [`crate::PROGRESS_BAR_FEATURE`] when not hidden at 0.
+        40 => one progress_bar: ProgressBar,
     }
 }
 
@@ -741,6 +755,10 @@ pub(crate) mod tests {
         t.history.max_bytes = Some(1 << 20);
         t.history.hscrolled = Some(2);
         t.cursor_style.very_visible = true;
+        t.progress_bar = ProgressBar {
+            state: 3,
+            progress: 42,
+        };
         let alt = t.alt_entry.as_mut().unwrap();
         alt.entry_row = Some(4);
         alt.has_saved = true;

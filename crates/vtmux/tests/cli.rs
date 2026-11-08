@@ -8057,8 +8057,6 @@ fn display_message_all() {
         "history_generation",
         "pane_output_generation",
         "pane_command_running",
-        "pane_pb_progress",
-        "pane_pb_state",
     ];
     let all = |w: &World, args: &[&str]| {
         let mut r = w.run(args);

@@ -59,6 +59,11 @@ pub enum Step {
     /// OSC 0/2 from `set-titles`), as a `cli` observation: stdout is the
     /// title and a newline.
     Title(Empty),
+    /// Observe the OSC 9;4 progress bar the attached client's terminal (the
+    /// one started with `id`, if given) ends up with, from `Spb`, as a
+    /// `cli` observation: stdout is `state|progress` and a newline, as
+    /// `#{pane_pb_state}|#{pane_pb_progress}` print it.
+    Progress(ScreenSpec),
     /// Annotates the next observation: replay compares vtmux against `expect`.
     Divergence(Divergence),
     /// vtmux only (live-upgrade spec, *Tests*): `vtmux-upgrade -b <the

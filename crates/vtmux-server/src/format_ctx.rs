@@ -747,6 +747,10 @@ impl<'a> Ctx<'a> {
             // format_cb_pane_pipe, format_cb_pane_pipe_pid (format.c:2587-2608).
             "pane_pipe" => flag(p.pipe.is_some()),
             "pane_pipe_pid" => p.pipe.as_ref()?.pid.to_string(),
+            // format_cb_pane_pb_progress, format_cb_pane_pb_state
+            // (format.c:2610-2640): OSC 9;4's bar.
+            "pane_pb_progress" => p.term.progress_bar().progress.to_string(),
+            "pane_pb_state" => p.term.progress_bar().state.name().to_owned(),
             "pane_unseen_changes" => flag(p.unseen_changes),
             // format_cb_pane_dead* (format.c:2255-2311): the PTY closed
             // and the status in; the status or signal as it ended; when

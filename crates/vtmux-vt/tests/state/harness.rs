@@ -100,11 +100,12 @@ pub fn observe(t: &PaneTerm, times: bool) -> String {
     );
     let _ = writeln!(
         out,
-        "marks {:?} osc133 {:?} pending {:?} sync {}",
+        "marks {:?} osc133 {:?} pending {:?} sync {} progress {:?}",
         t.line_marks(),
         t.osc133_lines(),
         t.pending_input(),
         t.sync_held().is_some(),
+        t.progress_bar(),
     );
     for y in 0..t.history_size().min(if times { 3 } else { 0 }) {
         let id = t.history_id(y);

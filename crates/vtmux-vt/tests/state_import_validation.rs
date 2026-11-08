@@ -163,6 +163,7 @@ fn malformed_states_are_refused() {
         s.pane.marks.push((u32::MAX, vtmux_vt::Osc133::default()));
     });
     refused("wild history limit", |s| s.pane.history_limit = usize::MAX);
+    refused("progress past 100", |s| s.pane.progress_bar.progress = 101);
 }
 
 #[test]

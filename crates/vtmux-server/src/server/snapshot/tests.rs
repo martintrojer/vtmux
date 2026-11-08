@@ -1894,3 +1894,36 @@ fn a_title_restored_without_its_terminal_is_not_escaped_again() {
     drop(a);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// The OSC 9;4 progress bar is terminal state a live upgrade carries
+/// (`#{pane_pb_state}`, `#{pane_pb_progress}`), required by name only
+/// while some pane's is set.
+#[test]
+fn the_progress_bar_survives_a_rebuild() {
+    let dir = temp_dir("progress");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let required = |s: &Server| {
+        s.to_snapshot(snap::Meta::default())
+            .meta
+            .requires
+            .contains(&snap::PROGRESS_BAR_FEATURE.to_owned())
+    };
+    assert!(!required(&a));
+    a.pane_input(vtmux_core::ids::PaneId(0), b"\x1b]9;4;2;64\x1b\\", false);
+    let bar = [
+        "display",
+        "-p",
+        "-t",
+        "s",
+        "#{pane_pb_state}|#{pane_pb_progress}",
+    ];
+    let before = run(&mut a, &dir, &bar);
+    assert!(before.contains("\nerror|64\n"), "{before:?}");
+    assert!(required(&a));
+    let mut b = rebuild(&a, &dir, "b");
+    assert_eq!(run(&mut b, &dir, &bar), before);
+    drop(b);
+    drop(a);
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -71,6 +71,12 @@ pub fn has_very_visible_cursor(t: &snap::TermState) -> bool {
     t.cursor_style.very_visible
 }
 
+/// The terminal's progress bar is set ([`snap::PROGRESS_BAR_FEATURE`]).
+#[must_use]
+pub fn has_progress_bar(t: &snap::TermState) -> bool {
+    t.progress_bar != snap::term::ProgressBar::default()
+}
+
 /// Whether `t` holds a page in Ghostty's form (the stream then requires
 /// [`ghostty_pages_requirement`]).
 #[must_use]
@@ -1531,6 +1537,10 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             style: style_out(&a.pen),
         }),
         alternate_saved_layout: Some(snap::term::AltSaveLayout::default()),
+        progress_bar: snap::term::ProgressBar {
+            state: p.progress_bar.state.number().into(),
+            progress: p.progress_bar.progress.into(),
+        },
         emulator: snap::term::Emulator {
             status_display: g.status_display.into(),
             previous_char: g.previous_char,
@@ -1811,6 +1821,13 @@ pub fn term_from_snapshot_with(
             fg: t.fg.map(rgb_in),
             bg: t.bg.map(rgb_in),
             cursor: t.cursor_colour.map(rgb_in),
+        },
+        progress_bar: vt::ProgressBar {
+            state: u8::try_from(t.progress_bar.state)
+                .ok()
+                .and_then(vt::ProgressState::from_number)
+                .ok_or_else(|| bad("progress bar state"))?,
+            progress: narrow(t.progress_bar.progress, "progress bar")?,
         },
         title: t.server_title.clone(),
         title_stack: t.title_stack.clone(),

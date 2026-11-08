@@ -1285,6 +1285,18 @@ impl Server {
         {
             meta.requires.push(visible);
         }
+        if panes
+            .iter()
+            .filter_map(|p| p.term.as_ref())
+            .chain(
+                clients
+                    .iter()
+                    .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
+            )
+            .any(crate::snapshot_term::has_progress_bar)
+        {
+            meta.requires.push(snap::PROGRESS_BAR_FEATURE.to_string());
+        }
         let bar = snap::SCROLLBAR_FEATURE.to_string();
         if !meta.requires.contains(&bar)
             && panes.iter().any(|p| {

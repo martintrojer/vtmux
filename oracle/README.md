@@ -56,6 +56,7 @@ steps = [ ... ]
 | `{ wait_screen = { has = ["a"], lacks = ["b"] } }` | wait until a row of the attached client's plain-text screen contains every `has` text and none of the `lacks` texts (`id` as for `screen`); observes nothing, a screen that never gets there (60 s) is a `timeout`. For a state another process brings about (a job's report, an editor's exit) |
 | `{ screen = {} }` | settle, then observe the attached client's screen (`{ id = "b" }`: client `b`'s) |
 | `{ title = {} }` | settle, then observe the attached client's terminal title (OSC 0/2 from `set-titles`) as a `cli` observation: the title and a newline |
+| `{ progress = {} }` | settle, then observe the OSC 9;4 progress bar the attached client's terminal was given (`Spb`) as a `cli` observation: `state\|progress` and a newline, as `#{pane_pb_state}\|#{pane_pb_progress}` print them (`{ id = "b" }`: client `b`'s) |
 | `{ divergence = { id = "D-NNN", expect = {...} } }` | annotates the next observation: replay compares vtmux against `expect` (the documented behaviour from `compat/DIVERGENCES.md`), never skips it |
 | `{ upgrade = {} }` | vtmux only: the server moves onto the binary under test in place (the frozen `UpgradeRequest`, as `vtmux-upgrade -b` asks, which leaves no line in `show-messages`), then every attached client re-executes, re-attaches and its redraw settles; the reference tmux skips the step. Observes nothing when it goes through, so what follows must match what tmux shows with no upgrade |
 

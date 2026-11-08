@@ -478,9 +478,13 @@ impl<'a> Runner<'a> {
                 Step::WaitScreen(w) => self.wait_screen_step(i, w)?,
                 Step::Screen(s) => {
                     let id = s.id.clone().unwrap_or_default();
-                    self.observe_client(i, &id, "screen", false)?;
+                    self.observe_client(i, &id, ClientView::Screen)?;
                 }
-                Step::Title(_) => self.observe_client(i, "", "title", true)?,
+                Step::Title(_) => self.observe_client(i, "", ClientView::Title)?,
+                Step::Progress(s) => {
+                    let id = s.id.clone().unwrap_or_default();
+                    self.observe_client(i, &id, ClientView::Progress)?;
+                }
                 Step::Divergence(d) => self.pending_div = Some(d.clone()),
                 Step::Upgrade(_) if self.opts.vtmux => {
                     self.upgrade(i, false);
@@ -969,22 +973,28 @@ impl<'a> Runner<'a> {
     }
 
     /// Settle, then observe the attached client's screen, or its terminal
-    /// title as a `cli` observation.
-    fn observe_client(&mut self, step: usize, id: &str, what: &str, title: bool) -> Result<()> {
+    /// title or progress bar as a `cli` observation.
+    fn observe_client(&mut self, step: usize, id: &str, view: ClientView) -> Result<()> {
+        let cli = |stdout: String| Observation::Cli {
+            stdout,
+            stderr: String::new(),
+            exit: 0,
+        };
         let obs = if self.settle(DEFAULT_QUIET) {
-            if title {
-                let title = self.client_title(id)?;
-                Observation::Cli {
-                    stdout: self.norm.text(&format!("{title}\n")),
-                    stderr: String::new(),
-                    exit: 0,
+            match view {
+                ClientView::Screen => self.screen(id)?,
+                ClientView::Title => {
+                    let title = self.client_title(id)?;
+                    cli(self.norm.text(&format!("{title}\n")))
                 }
-            } else {
-                self.screen(id)?
+                ClientView::Progress => {
+                    let bar = self.client_term(id)?.progress_bar();
+                    cli(format!("{}|{}\n", bar.state.name(), bar.progress))
+                }
             }
         } else {
             Observation::Timeout {
-                what: format!("settle before {what}"),
+                what: format!("settle before {}", view.name()),
             }
         };
         self.push(step, obs);
@@ -1043,6 +1053,25 @@ fn has_line(buf: &[u8], from: usize, prefix: &str) -> bool {
     buf[from..]
         .split(|b| *b == b'\n')
         .any(|l| l.starts_with(prefix.as_bytes()))
+}
+
+/// What [`Runner::observe_client`] reads from an attached client's
+/// terminal.
+#[derive(Clone, Copy)]
+enum ClientView {
+    Screen,
+    Title,
+    Progress,
+}
+
+impl ClientView {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Screen => "screen",
+            Self::Title => "title",
+            Self::Progress => "progress",
+        }
+    }
 }
 
 #[cfg(test)]
