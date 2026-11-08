@@ -2897,6 +2897,46 @@ fn tmux_sgr(raw: &[u8], out: &mut String) -> bool {
     !out.is_empty()
 }
 
+/// True for SGR parameters Ghostty already reads as tmux does, which is
+/// what most programs send: every parameter there, without a colon or a
+/// leading zero, an attribute both know, and 38, 48 and 58 followed by
+/// `5;n` or `2;r;g;b` in range. Checked without allocating.
+fn sgr_is_plain(raw: &[u8]) -> bool {
+    let mut params = raw.split(|b| *b == b';').map(|p| {
+        if p.is_empty() || (p.len() > 1 && p[0] == b'0') {
+            None
+        } else {
+            param_number(p)
+        }
+    });
+    let byte = |v: Option<Option<u64>>| matches!(v, Some(Some(0..=255)));
+    while let Some(p) = params.next() {
+        match p {
+            Some(
+                0..=5
+                | 7..=9
+                | 21..=25
+                | 27..=37
+                | 39..=47
+                | 49
+                | 53
+                | 55
+                | 59
+                | 90..=97
+                | 100..=107,
+            ) => {}
+            Some(38 | 48 | 58) => match params.next() {
+                Some(Some(5)) if byte(params.next()) => {}
+                Some(Some(2))
+                    if byte(params.next()) && byte(params.next()) && byte(params.next()) => {}
+                _ => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
+}
+
 /// `input_csi_dispatch_sgr_256_do`: out of range is the default colour
 /// (none for the underline).
 fn sgr_256(kind: i64, c: i64, push: &mut impl FnMut(std::fmt::Arguments<'_>)) {
@@ -2960,6 +3000,36 @@ fn sgr_colon(param: &[u8], push: &mut impl FnMut(std::fmt::Arguments<'_>)) {
 
 /// `input_split`: `None` when tmux gives up on the sequence (a number above
 /// `INT_MAX`, or 24 parameters: `param_list[24]`).
+/// [`parse_params`] would take `raw`; without building the list.
+fn params_split(raw: &[u8]) -> bool {
+    let mut count = 0;
+    for piece in raw.split(|b| *b == b';') {
+        if !piece.is_empty() && !piece.contains(&b':') && param_number(piece).is_none() {
+            return false;
+        }
+        count += 1;
+        if count == 24 {
+            return false;
+        }
+    }
+    true
+}
+
+/// A parameter of digits as `input_split` takes it: at most `INT_MAX`.
+fn param_number(piece: &[u8]) -> Option<u64> {
+    let mut n: u64 = 0;
+    for &d in piece {
+        if !d.is_ascii_digit() {
+            return None;
+        }
+        n = n * 10 + u64::from(d - b'0');
+        if n > i32::MAX as u64 {
+            return None;
+        }
+    }
+    Some(n)
+}
+
 fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
     if raw.is_empty() {
         return Some(Vec::new());
@@ -2971,11 +3041,7 @@ fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
         } else if piece.contains(&b':') {
             Param::Text
         } else {
-            let n: u64 = std::str::from_utf8(piece).ok()?.parse().ok()?;
-            if n > i32::MAX as u64 {
-                return None;
-            }
-            Param::Num(n)
+            Param::Num(param_number(piece)?)
         });
         if out.len() == 24 {
             return None;
@@ -3550,7 +3616,7 @@ impl AltModeScanner {
         // input_csi_dispatch: nothing for a sequence that went to
         // csi_ignore, whose parameters input_split rejects, or that
         // input_csi_table does not have (DECSTR, DECSCA, XTSAVE, DA3, ...).
-        if self.csi_ignored || !self.csi_in_tmux_table(b) || parse_params(&self.params).is_none() {
+        if self.csi_ignored || !self.csi_in_tmux_table(b) || !params_split(&self.params) {
             return Some(ScanEvent::Drop);
         }
         if self.private || self.gt || b != b'J' || self.intermediate.is_some() {
@@ -3726,6 +3792,10 @@ impl AltModeScanner {
     /// Ghostty would read it otherwise, [`Self::rewrite`] has it as tmux
     /// reads it.
     fn tmux_sgr(&mut self) -> bool {
+        // What most programs send, as it is.
+        if sgr_is_plain(&self.params) {
+            return true;
+        }
         let mut sgr = String::new();
         if !tmux_sgr(&self.params, &mut sgr) {
             return false;
@@ -3747,31 +3817,35 @@ impl AltModeScanner {
             1, 3, 6, 7, 12, 25, 47, 1000, 1002, 1003, 1004, 1005, 1006, 1047, 1049, 2004, 2026,
             2031,
         ];
-        let Some(params) = parse_params(&self.params) else {
-            return false;
+        // Missing and string parameters are -1 to input_get: no mode.
+        let private = self.private;
+        let known = |p: &&[u8]| {
+            !p.is_empty()
+                && param_number(p).is_some_and(|n| {
+                    if private {
+                        PRIVATE.contains(&n)
+                    } else {
+                        n == 4
+                    }
+                })
         };
-        let known = |p: &Param| match p {
-            Param::Num(n) if self.private => PRIVATE.contains(n),
-            Param::Num(n) => *n == 4,
-            _ => false,
-        };
-        if params.iter().all(known) {
+        let mut pieces = self.params.split(|b| *b == b';');
+        if pieces.clone().all(|p| known(&p)) {
             return true;
         }
-        let kept: Vec<String> = params
-            .iter()
-            .filter(|p| known(p))
-            .map(|p| match p {
-                Param::Num(n) => n.to_string(),
-                _ => String::new(),
-            })
-            .collect();
-        let q = if self.private { "?" } else { "" };
-        if kept.is_empty() {
-            return false;
+        let mut start = format!("\x1b[{}", if private { "?" } else { "" }).into_bytes();
+        let mut any = false;
+        for p in pieces.by_ref().filter(known) {
+            if any {
+                start.push(b';');
+            }
+            start.extend_from_slice(p);
+            any = true;
         }
-        self.rewrite = Some(format!("\x1b[{q}{}", kept.join(";")).into_bytes());
-        true
+        if any {
+            self.rewrite = Some(start);
+        }
+        any
     }
 }
 
@@ -4617,6 +4691,27 @@ mod tests {
             (m.origin, m.scroll_region, t.cursor()),
             (true, (0, 2), (1, 0))
         );
+    }
+
+    /// The forms that go to Ghostty untouched, and every other one goes
+    /// through `tmux_sgr` (`sgr_reads_as_tmux`).
+    #[test]
+    fn plain_sgr_forms() {
+        for raw in [
+            "0",
+            "1;31",
+            "38;5;208",
+            "48;2;1;2;3;1",
+            "58;5;0",
+            "97;107;53",
+        ] {
+            assert!(sgr_is_plain(raw.as_bytes()), "{raw}");
+        }
+        for raw in [
+            "01", "5;", ";1", "6", "38;5", "38;5;300", "48;1", "4:3", "26", "38;2;1;2",
+        ] {
+            assert!(!sgr_is_plain(raw.as_bytes()), "{raw}");
+        }
     }
 
     /// `CSI s` saves the cursor whatever its parameters (input.c
