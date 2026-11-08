@@ -1044,6 +1044,69 @@ fn a_corrupted_manifest_starts_a_fresh_server_and_keeps_the_files() {
     assert!(!w.state().join(persist::MANIFEST_PREV).exists());
 }
 
+/// A copy mode over more history than a snapshot page holds, which every
+/// vtmux before 8c94c6e checkpointed in one page (the test hook stands in
+/// for such a writer), is left out of the restore, as a live upgrade's last
+/// resort leaves it: the session and the pane's own screen and history
+/// come back, and the log says what was left out. (The whole checkpoint
+/// was refused: `history chunk ... missing or corrupt`.)
+#[test]
+fn a_copy_mode_page_past_the_limit_is_left_out_of_the_restore() {
+    let mut w = World::start_with(
+        &["sh", "-c", "seq 70000; exec cat -"],
+        &[("VTMUX_TEST_COPY_ONE_PAGE", "1")],
+        None,
+        Some("set -g history-limit 100000\n"),
+    );
+    let shown = |w: &World| {
+        w.ok(&[
+            "display",
+            "-p",
+            "-t",
+            "a",
+            "#{history_size} #{pane_in_mode}",
+        ])
+    };
+    wait_until("the long history", || {
+        w.ok(&[
+            "display",
+            "-p",
+            "-t",
+            "a",
+            "#{history_size} #{pane_current_command}",
+        ]) == "69977 cat\n"
+    });
+    let saved = w.ok(&["capture-pane", "-p", "-S", "-", "-t", "a"]);
+    w.ok(&["set", "-s", "vtmux-persist", "full"]);
+    w.ok(&["copy-mode", "-t", "a"]);
+    assert_eq!(shown(&w), "69977 1\n");
+    w.kill_server();
+
+    // (A server with nothing restored and no session exits at once.)
+    w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+    w.repid();
+    let log = w.ok(&["show-messages"]);
+    assert_eq!(
+        w.ok(&["list-sessions", "-F", "#{session_name}"]),
+        "a\nz\n",
+        "{log}"
+    );
+    assert_eq!(shown(&w), "69977 0\n");
+    let restored = w.ok(&["capture-pane", "-p", "-S", "-", "-t", "a"]);
+    assert!(
+        restored.starts_with(saved.trim_end()),
+        "{}",
+        &restored[restored.len().saturating_sub(200)..]
+    );
+    assert!(
+        log.contains("vtmux-persist: restored 1 sessions from ")
+            && log.contains(
+                ", without %0's copy mode: malformed snapshot: history page sizes don't add up"
+            ),
+        "{log}"
+    );
+}
+
 /// The checkpoint is checked in a child process, by the dry run a live
 /// upgrade uses, before it is imported: a rebuild that fails there (the
 /// test hook makes it) leaves a fresh server, with the child's message.

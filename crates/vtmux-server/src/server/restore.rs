@@ -386,8 +386,9 @@ enum Found {
     Newer(String),
     /// One that can't be restored, and why.
     Refused(String),
-    /// One to import, the file it came from and the directory's lock.
-    Ready(Box<snap::Snapshot>, &'static str, Lock),
+    /// One to import, the file it came from, the directory's lock, and
+    /// what was left out of it ([`files::load_file`]).
+    Ready(Box<snap::Snapshot>, &'static str, Lock, Vec<String>),
 }
 
 /// Why `dir` holds a newer binary's checkpoint: the first of `manifest`
@@ -446,8 +447,8 @@ fn find(server: &Server, dir: &Path) -> Found {
     for name in [MANIFEST, MANIFEST_PREV] {
         let loaded = std::panic::catch_unwind(|| files::load_file(dir, name))
             .unwrap_or_else(|_| Err(io::Error::other("decoding panicked")));
-        let s = match loaded {
-            Ok(s) => s,
+        let (s, left_out) = match loaded {
+            Ok(loaded) => loaded,
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
             Err(e) => {
                 errors.push(format!("{name}: {e}"));
@@ -466,7 +467,7 @@ fn find(server: &Server, dir: &Path) -> Found {
         }
         let s = prepare(s, &says, &server.socket, &server.config);
         match check_in_child(&s, &server.socket) {
-            Ok(()) => return Found::Ready(Box::new(s), name, lock),
+            Ok(()) => return Found::Ready(Box::new(s), name, lock, left_out),
             Err(e) => errors.push(format!("{name}: {e}")),
         }
     }
@@ -523,7 +524,7 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
             return Ok(fresh);
         }
         Found::Refused(why) => why,
-        Found::Ready(s, name, lock) => {
+        Found::Ready(s, name, lock, left_out) => {
             // The fresh server's shim goes before the restored one makes
             // its own in the same place.
             drop(fresh);
@@ -531,8 +532,13 @@ pub fn start(listener: StdListener, socket: PathBuf, config: ServerConfig) -> io
                 Ok(mut server) => {
                     server.persist.lock = Some((dir.clone(), lock));
                     server.persist.dir = Some(dir.clone());
+                    let without = if left_out.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", without {}", left_out.join(", "))
+                    };
                     server.add_message(format!(
-                        "vtmux-persist: restored {} sessions from {}",
+                        "vtmux-persist: restored {} sessions from {}{without}",
                         s.sessions.len(),
                         dir.join(name).display()
                     ));

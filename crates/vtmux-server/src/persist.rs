@@ -313,7 +313,7 @@ pub fn load(dir: &Path) -> io::Result<(snap::Snapshot, &'static str)> {
     let mut found = false;
     for name in [MANIFEST, MANIFEST_PREV] {
         match load_file(dir, name) {
-            Ok(s) => return Ok((s, name)),
+            Ok((s, _)) => return Ok((s, name)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => {
                 found = true;
@@ -331,16 +331,39 @@ pub fn load(dir: &Path) -> io::Result<(snap::Snapshot, &'static str)> {
 }
 
 /// Read the checkpoint manifest `name` in `dir` ([`MANIFEST`] or
-/// [`MANIFEST_PREV`]) with its pages from `chunks/`.
+/// [`MANIFEST_PREV`]) with its pages from `chunks/`. A copy mode holding
+/// a page that does not check (its chunk missing or corrupt, or past a
+/// reader's limits: a writer before 8c94c6e put copy mode over a long
+/// history in one page) is left out, the pane restored without it, as a
+/// live upgrade's last resort does: copy mode is a view of the pane, whose
+/// own screen and history are in its terminal state. Returns the snapshot
+/// and what was left out, with why.
 ///
 /// # Errors
 /// `NotFound` when the file does not exist; `InvalidData` when it does not
-/// decode (a page missing from `chunks/` is one way); else the read's.
-pub fn load_file(dir: &Path, name: &str) -> io::Result<snap::Snapshot> {
+/// decode (a pane's or popup's page missing from `chunks/` is one way);
+/// else the read's.
+pub fn load_file(dir: &Path, name: &str) -> io::Result<(snap::Snapshot, Vec<String>)> {
+    let invalid = |e: snap::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
     let bytes = fs::read(dir.join(name))?;
     let chunks = dir.join(CHUNKS);
-    snap::decode_with(&bytes, |h| fs::read(chunks.join(snap::hex(h))).ok())
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+    let mut s = snap::decode_partial(&bytes, &snap::Features::default(), |h| {
+        fs::read(chunks.join(snap::hex(h))).ok()
+    })
+    .map_err(invalid)?;
+    let mut modes = Vec::new();
+    let mut why = Vec::new();
+    for (part, e) in s.unreadable() {
+        match part {
+            snap::Part::PaneMode(..) => {
+                modes.push(part);
+                why.push(format!("{part}: {e}"));
+            }
+            snap::Part::PaneTerm(_) | snap::Part::PopupTerm(_) => return Err(invalid(e)),
+        }
+    }
+    s.without(&modes);
+    Ok((s, why))
 }
 
 /// Make `dir` (and missing parents) mode 0700, and an existing `dir` 0700
