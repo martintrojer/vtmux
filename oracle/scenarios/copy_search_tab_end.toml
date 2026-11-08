@@ -1,0 +1,28 @@
+# A TAB cell in copy mode is drawn whole in the match, current match or
+# mark style of its first column (window_copy_write_one writes the cell's
+# width in spaces with the style window_copy_update_style gave it): a
+# regular expression's match ending on a tab of six or two columns, one at
+# a line's start, one across a tab, and a plain text match.
+name = "copy_search_tab_end"
+size = [30, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "30", "-y", "5", "sh", "-c", "printf 'ab\\tq\\nxtab\\tq end\\nabcdef\\tz\\n\\tlead\\n'; tmux wait-for -S ready; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "R", ";", "set", "-g", "copy-mode-position-format", "#[align=right][#{copy_position}]"] },
+  { attach = { session = "a" } },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "[bf]."] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{search_count} #{copy_cursor_x},#{copy_cursor_y}"] },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "^."] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward", "b.q"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "search-backward-text", "f\t"] },
+  { settle = { react = true } },
+  { screen = {} },
+]

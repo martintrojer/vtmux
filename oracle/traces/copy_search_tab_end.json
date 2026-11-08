@@ -1,0 +1,313 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "copy_search_tab_end",
+  "inputs": {
+    "name": "copy_search_tab_end",
+    "size": [
+      30,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "30",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "printf 'ab\\tq\\nxtab\\tq end\\nabcdef\\tz\\n\\tlead\\n'; tmux wait-for -S ready; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R",
+          ";",
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "#[align=right][#{copy_position}]"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "search-backward",
+          "[bf]."
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{search_count} #{copy_cursor_x},#{copy_cursor_y}"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "search-backward",
+          "^."
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "search-backward",
+          "b.q"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a",
+          "-X",
+          "search-backward-text",
+          "f\t"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "a\\e[30m\\e[46mb      \\e[39m\\e[49mq                  \\e[30m\\e[43m[0]",
+          "\\e[39m\\e[49mxta\\e[30m\\e[46mb    \\e[39m\\e[49mq end",
+          "a\\e[30m\\e[46mbc\\e[39m\\e[49mde\\e[30m\\e[45mf  \\e[39m\\e[49mz",
+          "        lead",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                     \\e[30mR"
+        ],
+        "cursor": [
+          5,
+          2
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "4 5,2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[46ma\\e[39m\\e[49mb      q                  \\e[30m\\e[43m[0]",
+          "\\e[46mx\\e[39m\\e[49mtab    q end",
+          "\\e[30m\\e[46ma\\e[39m\\e[49mbcdef  z",
+          "\\e[30m\\e[46m        \\e[39m\\e[49mlead",
+          "\\e[30m\\e[46m \\e[39m\\e[49m",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                     \\e[30mR"
+        ],
+        "cursor": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "a\\e[30m\\e[46mb      q\\e[39m\\e[49m                  \\e[30m\\e[43m[0]",
+          "\\e[39m\\e[49mxta\\e[30m\\e[45mb    q\\e[39m\\e[49m end",
+          "abcdef  z",
+          "        lead",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                     \\e[30mR"
+        ],
+        "cursor": [
+          3,
+          1
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "ab      q                  \\e[30m\\e[43m[0]",
+          "\\e[39m\\e[49mxtab    q end",
+          "abcde\\e[30m\\e[45mf  \\e[39m\\e[49mz",
+          "        lead",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m                     \\e[30mR"
+        ],
+        "cursor": [
+          5,
+          2
+        ]
+      }
+    }
+  ]
+}

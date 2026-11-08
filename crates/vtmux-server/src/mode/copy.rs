@@ -1233,8 +1233,12 @@ impl CopyMode {
                 cells.truncate(py * sx + text.start);
             }
             let row = self.row(self.abs(py));
-            // Columns left of the TAB cell being drawn as spaces.
+            // Columns left of the TAB cell being drawn as spaces, and
+            // where it starts: all of it takes the style of its first
+            // column (window_copy_write_one writes the TAB cell's width in
+            // spaces with the cell window_copy_update_style gave it).
             let mut tab_left = 0;
+            let mut tab_at = 0;
             for fx in 0..nx {
                 let mut c = row.cells.get(fx).cloned().unwrap_or_else(blank);
                 // window_copy_write_one: a TAB cell is written as its width
@@ -1245,11 +1249,13 @@ impl CopyMode {
                 let mut cut = false;
                 if c.tab {
                     tab_left = usize::from(c.width);
+                    tab_at = fx;
                     if fx + tab_left > nx {
                         c = blank();
                         cut = true;
                     }
                 }
+                let styled_at = if tab_left > 0 { tab_at } else { fx };
                 if tab_left > 0 {
                     tab_left -= 1;
                     c = Cell {
@@ -1269,7 +1275,7 @@ impl CopyMode {
                     if py == self.cy {
                         paint(&mut c, Paint::CurrentLine);
                     }
-                    if let Some(p) = self.paint_of(fx, py, vi) {
+                    if let Some(p) = self.paint_of(styled_at, py, vi) {
                         paint(&mut c, p);
                     }
                 }
