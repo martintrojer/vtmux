@@ -8,9 +8,9 @@
 //! `>`), a pane's screen, or with `i` the item's information; the drawing
 //! is `render::tree`.
 //!
-//! Not here yet: session groups (`-G`) and the marked pane (`m`/`M` do
-//! nothing), and the mouse in the preview (`window_tree_mouse`); a
-//! right-click opens the mode's menu ([`super::tree_mode`]).
+//! Not here yet: session groups (`-G`) and the mouse in the preview
+//! (`window_tree_mouse`); a right-click opens the mode's menu
+//! ([`super::tree_mode`]).
 
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::keys::Key;
@@ -782,6 +782,23 @@ impl Server {
         match ch {
             Some(c @ ('<' | '>' | 'i')) => self.tree_preview_key(p, c),
             Some('H') => self.tree_home(p),
+            // window-tree.c `window_tree_key`: `m` marks the item's pane
+            // (`window_tree_pull_item`: a session's or window's active
+            // pane), `M` clears the mark (`server_set_marked`,
+            // `server_clear_marked`: no event, no redraw), and the tree is
+            // built again for the marked colour.
+            Some(c @ ('m' | 'M')) => {
+                let found = if c == 'm' {
+                    let Some(f) = self.tree_found(item) else {
+                        return false;
+                    };
+                    Some(f)
+                } else {
+                    None
+                };
+                self.model.set_marked(found);
+                self.with_tree::<WindowTree, _>(p, |server, t| rebuild(t, server));
+            }
             Some('x') => {
                 let model = &self.model;
                 let label = match item {

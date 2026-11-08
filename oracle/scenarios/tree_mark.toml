@@ -1,0 +1,37 @@
+# choose-tree's m and M (window-tree.c window_tree_key): m marks the
+# current item's pane (a session's or window's active pane,
+# window_tree_pull_item), M clears the mark; the tree is built again, so the
+# marked line turns magenta. The mark outlives the mode.
+name = "tree_mark"
+size = [60, 16]
+steps = [
+  { run = ["new", "-d", "-s", "aaa", "-n", "w0", "-x", "60", "-y", "15", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["neww", "-d", "-t", "aaa:1", "-n", "w1", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "aaa:1", "cat", "-"] },
+  { run = ["new", "-d", "-s", "bbb", "-n", "x0", "-x", "60", "-y", "15", "cat", "-"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t0"] },
+  { run = ["select-pane", "-t", "%1", "-T", "t1"] },
+  { run = ["select-pane", "-t", "%2", "-T", "t2"] },
+  { run = ["select-pane", "-t", "%3", "-T", "t3"] },
+  { run = ["run-shell", "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"] },
+  { attach = { session = "aaa" } },
+  { run = ["choose-tree", "-t", "aaa:0.0"] },
+  { settle = { react = true } },
+  { keys = "jjm" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "%1", "#{pane_marked_set} #{pane_marked} #{window_marked_flag}"] },
+  { run = ["display", "-p", "-t", "%2", "#{pane_marked}"] },
+  { keys = "jm" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "%2", "#{pane_marked}"] },
+  { keys = "M" },
+  { screen = {} },
+  { run = ["display", "-p", "#{pane_marked_set}"] },
+  { keys = "Gm" },
+  { run = ["display", "-p", "-t", "%3", "#{pane_marked}"] },
+  { keys = "q" },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "%3", "#{pane_marked}"] },
+]
