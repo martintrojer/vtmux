@@ -4,9 +4,11 @@
 #
 #   scripts/release-tarball.sh <target-name> [tag]
 #
-# <target-name> names the tarball (x86_64-linux, aarch64-linux, aarch64-macos).
+# <target-name> is the Rust target triple that names the tarball
+# (x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, aarch64-apple-darwin),
+# so `mise use github:martintrojer/vtmux` finds the asset for its platform.
 # With a tag (v3.8-beta1), the built binary's version must match it (D25: the tag
-# is `v` + what `vtmux -V` prints). Writes target/dist/vtmux-<version>-<target>.tar.gz
+# is `v` + what `vtmux -V` prints). Writes target/dist/vtmux-v<version>-<target>.tar.gz
 # and its .sha256, and prints the tarball's path.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -28,7 +30,7 @@ if [ -n "$tag" ] && [ "$tag" != "v$version" ]; then
   exit 1
 fi
 
-name=vtmux-$version-$target
+name=vtmux-v$version-$target
 stage=target/dist/$name
 rm -rf "$stage" "$stage.tar.gz" "$stage.tar.gz.sha256"
 mkdir -p "$stage/licenses"

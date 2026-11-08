@@ -6,16 +6,18 @@ A drop-in replacement for tmux 3.8, written in Rust on [libghostty-vt](https://g
 
 ## Install
 
-Grab the tarball for your platform from [Releases](https://github.com/martintrojer/vtmux/releases) (Linux x86_64 and aarch64, macOS 15+ on Apple silicon) and put it first on your PATH as `tmux`:
+With [mise](https://mise.jdx.dev) (macOS on Apple silicon, Linux x86_64 and aarch64):
 
 ```sh
-tar xzf vtmux-3.8-beta1-x86_64-linux.tar.gz
-mv vtmux-3.8-beta1-x86_64-linux/vtmux ~/.local/bin/tmux
+mise use -g github:martintrojer/vtmux
+ln -s "$(mise which vtmux)" ~/.local/bin/tmux   # optional: be tmux
 ```
 
-As `tmux` it is tmux to every script and plugin (`tmux -V` prints `tmux 3.8`, sockets in `tmux-UID`). Keep the name `vtmux` to try it next to your tmux instead: own sockets, `vtmux -V` prints `vtmux 3.8-beta1`. On macOS, a browser download needs `xattr -d com.apple.quarantine` on the binary first.
+Prebuilt tarballs are on the [releases page](https://github.com/martintrojer/vtmux/releases). From a checkout (needs [mise](https://mise.jdx.dev) for the pinned Zig): `mise install && mise exec -- cargo install --path crates/vtmux`.
 
-**Upgrade without losing a session:** put the new binary in place, then `tmux vtmux-upgrade` (or `tmux vtmux-upgrade -b <new binary>`). The running server moves onto it; panes and clients stay. See the [changelog](CHANGELOG.md).
+As `tmux` it is tmux to every script and plugin (`tmux -V` prints `tmux 3.8`). As `vtmux` it runs next to your tmux: own sockets, `vtmux -V` prints `vtmux 3.8-beta1`.
+
+**Upgrade without losing a session:** `mise upgrade vtmux`, then `tmux vtmux-upgrade -b "$(mise which vtmux)"`. The running server moves onto the new binary; panes and clients stay. See the [changelog](CHANGELOG.md).
 
 ## Compared with tmux 3.8
 

@@ -1,11 +1,12 @@
 name: release
-# A tag `v<version>` builds the release tarballs and attaches them to a draft
-# GitHub release; publishing the draft is the owner's call.
+# A tag `v<version>` builds the release tarballs and publishes them as a
+# GitHub release (assets named by Rust target triple, as ramble's, so
+# `mise use -g github:martintrojer/vtmux` installs it).
 #
 # To cut one (D25: the version is the tmux release it is tested against):
 # set `version` in Cargo.toml (3.8.0-beta.1 displays as 3.8-beta1), add its
 # `## 3.8-beta1` section to CHANGELOG.md, try `scripts/release-tarball.sh
-# x86_64-linux v3.8-beta1` locally, then push the tag `v3.8-beta1`. The build
+# x86_64-unknown-linux-gnu v3.8-beta1` locally, then push the tag `v3.8-beta1`. The build
 # fails when the tag is not `v` + what `vtmux -V` prints.
 on:
   push:
@@ -23,12 +24,12 @@ jobs:
         include:
           # 22.04: the oldest glibc GitHub builds on (2.35), so the binary runs
           # on more distributions than one built on ubuntu-latest.
-          - target: x86_64-linux
+          - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
-          - target: aarch64-linux
+          - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
           # Zig 0.17 (the ghostty pin's) targets macOS 15+, as ci.yml's macOS job.
-          - target: aarch64-macos
+          - target: aarch64-apple-darwin
             runner: macos-15
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -79,7 +80,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Draft release
+      - name: Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,8 +97,8 @@ jobs:
             echo "CHANGELOG.md has no section for $version" >&2
             exit 1
           fi
-          prerelease=()
-          case "$version" in *-*) prerelease=(--prerelease) ;; esac
-          gh release create "$TAG" --draft "${prerelease[@]}" --verify-tag \
+          # Not a draft and not a prerelease: mise's github backend installs
+          # the latest published release.
+          gh release create "$TAG" --verify-tag \
             --title "vtmux $version" --notes-file notes.md \
             ./*.tar.gz SHA256SUMS
