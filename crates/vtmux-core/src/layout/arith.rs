@@ -1046,7 +1046,12 @@ impl Layout {
         let mut sx = i64::from(start.map_or(self.sx / 2, |g| g.sx));
         let mut sy = i64::from(start.map_or(self.sy / 4, |g| g.sy));
         let max = i64::from(PANE_MAXIMUM);
-        let pos_err = |e: PercentError| format!("position {e}");
+        // args_string_percentage_and_expand (arguments.c:1067-1110) has no
+        // `empty` case: an empty value is strtonum's `invalid`.
+        let pos_err = |e: PercentError| match e {
+            PercentError::Empty => format!("position {}", PercentError::Invalid),
+            e => format!("position {e}"),
+        };
         if let Some(v) = &args.width {
             sx = percentage(v, 0, max, wsx).map_err(pos_err)?;
             if border {

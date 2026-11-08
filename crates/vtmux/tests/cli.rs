@@ -965,6 +965,25 @@ fn send_keys_checks_in_order() {
     });
 }
 
+/// A floating pane's `-x -y -X -Y` go through
+/// `args_string_percentage_and_expand` (layout.c:1727-1775), which has no
+/// `empty` case: an empty value, or one that expands to nothing, is
+/// `position invalid`, for new-pane and for `break-pane -W`.
+#[test]
+fn floating_position_errors() {
+    compare("floating_position_errors", |w| {
+        vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["splitw", "-d", "-t", "a", "cat", "-"]),
+            w.run(&["new-pane", "-d", "-x", "", "cat", "-"]),
+            w.run(&["new-pane", "-d", "-Y", "#{", "cat", "-"]),
+            w.run(&["new-pane", "-d", "-x", "1000%", "cat", "-"]),
+            w.run(&["breakp", "-W", "-d", "-s", "a:0.1", "-x", ""]),
+            w.run(&["breakp", "-W", "-d", "-s", "a:0.1", "-y", "x"]),
+        ]
+    });
+}
+
 /// `detach-client` with no attached client: `CMD_CLIENT_TFLAG` fails first,
 /// whatever `-a`, `-s`, `-P` or `-E` say (cmd-queue.c:604-609).
 #[test]
