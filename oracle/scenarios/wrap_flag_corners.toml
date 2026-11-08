@@ -1,0 +1,120 @@
+name = "wrap_flag_corners"
+# Corners of tmux's grid bookkeeping (D-006 narrowed, Ghostty patch 0029):
+# - elnone, elred: screen_write_clearline (screen-write.c) does nothing to a
+#   line never written to (`cellsize` 0) in the default background, so it
+#   unwraps nothing: the empty rows a reflow leaves before a tab wider than
+#   the pane stay wrapped. In a background colour it clears and unwraps.
+# - soc: under scroll-on-clear grid_view_clear_history (grid-view.c) scrolls
+#   the lines up to the last with cells used (`cellused`) into history,
+#   erased ones included.
+# - h0two, h0one, alttwo, altone, h0region: without history (history-limit
+#   0, the alternate screen: no GRID_HISTORY) grid_view_scroll_region_up
+#   scrolls with grid_move_lines, which for a region of two rows unwraps the
+#   line it moves to the top (a line wrapped onto the bottom row loses its
+#   flag) and for a region of one row (a one-row pane) moves nothing.
+# - rione, sdone: grid_view_scroll_region_down (RI at the top, SD) moves
+#   nothing in a one-row pane either, history or not.
+# - ilout, ilwrap, ilall, dlout, dlwrap, dlall: IL and DL with the cursor
+#   outside the scroll region work on the whole screen from the cursor's row
+#   (screen_write_insertline, screen_write_deleteline: grid_view_insert_lines,
+#   grid_view_delete_lines); an IL count reaching the bottom moves nothing.
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "20", "-y", "6", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # elnone: EL 2 on the second empty row before the tab
+  { run = ["new", "-d", "-s", "elnone", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '1\\r\\n2\\r\\n3\\r\\n4\\r\\nab\\r\\n\\t'; tmux wait-for -S elnone; tmux wait-for elnoneb; printf '\\033[3;1H\\033[2K'; tmux wait-for -S elnonec; exec cat"] },
+  { wait_for = "elnone" },
+  { run = ["resize-window", "-t", "elnone", "-x", "8"] },
+  { run = ["resize-window", "-t", "elnone", "-x", "5"] },
+  { run = ["wait-for", "-S", "elnoneb"] },
+  { wait_for = "elnonec" },
+  { run = ["display", "-p", "-t", "elnone:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "elnone:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "elnone:"] },
+  # elred: the same in red
+  { run = ["new", "-d", "-s", "elred", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '1\\r\\n2\\r\\n3\\r\\n4\\r\\nab\\r\\n\\t'; tmux wait-for -S elred; tmux wait-for elredb; printf '\\033[41m\\033[3;1H\\033[2K\\033[m'; tmux wait-for -S elredc; exec cat"] },
+  { wait_for = "elred" },
+  { run = ["resize-window", "-t", "elred", "-x", "8"] },
+  { run = ["resize-window", "-t", "elred", "-x", "5"] },
+  { run = ["wait-for", "-S", "elredb"] },
+  { wait_for = "elredc" },
+  { run = ["display", "-p", "-t", "elred:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "elred:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "elred:"] },
+  # soc: ED 2 after the second row of the wrapped line was erased
+  { run = ["new", "-d", "-s", "soc", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabbb\\033[2;1H\\033[3X\\033[2J'; tmux wait-for -S soc; exec cat"] },
+  { wait_for = "soc" },
+  { run = ["display", "-p", "-t", "soc:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "soc:"] },
+  # ilout: IL above the region
+  { run = ["new", "-d", "-s", "ilout", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'a\\r\\nb\\r\\nc\\r\\nd\\r\\ne\\033[4;5r\\033[2;3H\\033[L\\033[r'; tmux wait-for -S ilout; exec cat"] },
+  { wait_for = "ilout" },
+  { run = ["display", "-p", "-t", "ilout:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "ilout:"] },
+  # ilwrap: IL above the region, under and on a wrapped line
+  { run = ["new", "-d", "-s", "ilwrap", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'a\\r\\nbbbbbbbbbbbb\\r\\nc\\r\\nd\\033[5;6r\\033[3;1H\\033[L\\033[2;1H\\033[L\\033[r'; tmux wait-for -S ilwrap; exec cat"] },
+  { wait_for = "ilwrap" },
+  { run = ["display", "-p", "-t", "ilwrap:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "ilwrap:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "ilwrap:"] },
+  # ilall: IL above the region to the bottom
+  { run = ["new", "-d", "-s", "ilall", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'a\\r\\nb\\r\\nc\\033[4;5r\\033[2;1H\\033[9L\\033[r'; tmux wait-for -S ilall; exec cat"] },
+  { wait_for = "ilall" },
+  { run = ["display", "-p", "-t", "ilall:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "ilall:"] },
+  # dlout: DL below the region
+  { run = ["new", "-d", "-s", "dlout", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'a\\r\\nb\\r\\nc\\r\\nd\\r\\ne\\033[1;3r\\033[5;2H\\033[M\\033[r'; tmux wait-for -S dlout; exec cat"] },
+  { wait_for = "dlout" },
+  { run = ["display", "-p", "-t", "dlout:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "dlout:"] },
+  # dlwrap: DL above the region, under a wrapped line
+  { run = ["new", "-d", "-s", "dlwrap", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'aaaaaaaaaabb\\r\\nc\\r\\nd\\033[4;5r\\033[2;1H\\033[M\\033[r'; tmux wait-for -S dlwrap; exec cat"] },
+  { wait_for = "dlwrap" },
+  { run = ["display", "-p", "-t", "dlwrap:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "dlwrap:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "dlwrap:"] },
+  # dlall: DL above the region to the bottom
+  { run = ["new", "-d", "-s", "dlall", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'a\\r\\nb\\r\\nc\\r\\nd\\033[4;5r\\033[2;1H\\033[9M\\033[r'; tmux wait-for -S dlall; exec cat"] },
+  { wait_for = "dlall" },
+  { run = ["display", "-p", "-t", "dlall:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "dlall:"] },
+  # rione: RI in a one-row pane
+  { run = ["new", "-d", "-s", "rione", "-n", "w", "-x", "10", "-y", "1", "sh", "-c", "printf 'abc\\033M'; tmux wait-for -S rione; exec cat"] },
+  { wait_for = "rione" },
+  { run = ["display", "-p", "-t", "rione:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "rione:"] },
+  # sdone: SD in a one-row pane
+  { run = ["new", "-d", "-s", "sdone", "-n", "w", "-x", "10", "-y", "1", "sh", "-c", "printf 'abc\\033[T'; tmux wait-for -S sdone; exec cat"] },
+  { wait_for = "sdone" },
+  { run = ["display", "-p", "-t", "sdone:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "sdone:"] },
+  # alttwo: a wrap at the bottom of a two-row alternate screen
+  { run = ["new", "-d", "-s", "alttwo", "-n", "w", "-x", "10", "-y", "2", "sh", "-c", "printf '\\033[?1049hx\\r\\naaaaaaaaaabbb'; tmux wait-for -S alttwo; exec cat"] },
+  { wait_for = "alttwo" },
+  { run = ["display", "-p", "-t", "alttwo:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "alttwo:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "alttwo:"] },
+  # altone: a linefeed in a one-row alternate screen
+  { run = ["new", "-d", "-s", "altone", "-n", "w", "-x", "10", "-y", "1", "sh", "-c", "printf '\\033[?1049habcde\\r\\nx'; tmux wait-for -S altone; exec cat"] },
+  { wait_for = "altone" },
+  { run = ["display", "-p", "-t", "altone:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "altone:"] },
+  { run = ["set", "-g", "history-limit", "0"] },
+  # h0two: a wrap at the bottom of a two-row pane without history
+  { run = ["new", "-d", "-s", "h0two", "-n", "w", "-x", "10", "-y", "2", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbb'; tmux wait-for -S h0two; exec cat"] },
+  { wait_for = "h0two" },
+  { run = ["display", "-p", "-t", "h0two:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "h0two:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "h0two:"] },
+  # h0one: a wrap, a linefeed and SU in a one-row pane without history
+  { run = ["new", "-d", "-s", "h0one", "-n", "w", "-x", "10", "-y", "1", "sh", "-c", "printf 'abcdefghijklm\\r\\nx\\033[S'; tmux wait-for -S h0one; exec cat"] },
+  { wait_for = "h0one" },
+  { run = ["display", "-p", "-t", "h0one:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "h0one:"] },
+  # h0region: a two-row region scrolled up without history
+  { run = ["new", "-d", "-s", "h0region", "-n", "w", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\r\\naaaaaaaaaabbbbbbbbbbccc\\033[2;3r\\033[3;1H\\n\\033[r'; tmux wait-for -S h0region; exec cat"] },
+  { wait_for = "h0region" },
+  { run = ["display", "-p", "-t", "h0region:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-pJ", "-S", "-", "-t", "h0region:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "h0region:"] },
+]

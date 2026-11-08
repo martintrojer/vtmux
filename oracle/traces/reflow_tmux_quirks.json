@@ -81,17 +81,6 @@
         ]
       },
       {
-        "divergence": {
-          "id": "D-040",
-          "expect": {
-            "kind": "cli",
-            "stdout": "5 1,1\n",
-            "stderr": "",
-            "exit": 0
-          }
-        }
-      },
-      {
         "run": [
           "display",
           "-p",
@@ -99,17 +88,6 @@
           "tabwide:",
           "#{history_size} #{cursor_x},#{cursor_y}"
         ]
-      },
-      {
-        "divergence": {
-          "id": "D-040",
-          "expect": {
-            "kind": "cli",
-            "stdout": "ab\n\t\n\ncd\n\t\n\nx\n\n\n\n\n",
-            "stderr": "",
-            "exit": 0
-          }
-        }
       },
       {
         "run": [
@@ -286,7 +264,7 @@
       }
     },
     {
-      "step": 8,
+      "step": 7,
       "observation": {
         "kind": "cli",
         "stdout": "7 1,1\n",
@@ -295,10 +273,28 @@
       }
     },
     {
-      "step": 10,
+      "step": 8,
       "observation": {
         "kind": "cli",
         "stdout": "ab\n\n\n\t\n\ncd\n\t\n\nx\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -316,7 +312,7 @@
       "step": 12,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "4 2,1\n",
         "stderr": "",
         "exit": 0
       }
@@ -325,7 +321,7 @@
       "step": 13,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "abclklongwordlongword longwordlongword 字漢😀\n\n\n\n\n",
         "stderr": "",
         "exit": 0
       }
@@ -334,16 +330,7 @@
       "step": 14,
       "observation": {
         "kind": "cli",
-        "stdout": "4 2,1\n",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 15,
-      "observation": {
-        "kind": "cli",
-        "stdout": "abclklongwordlongword longwordlongword 字漢😀\n\n\n\n\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -352,22 +339,13 @@
       "step": 16,
       "observation": {
         "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 18,
-      "observation": {
-        "kind": "cli",
         "stdout": "1 20,0\n",
         "stderr": "",
         "exit": 0
       }
     },
     {
-      "step": 20,
+      "step": 18,
       "observation": {
         "kind": "cli",
         "stdout": "abclklongwordlongword longwordlongword 字漢\n😀\n\n\n\n\n",

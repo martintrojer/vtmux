@@ -1,0 +1,738 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index e5b98c589..f2dc09530 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1755,6 +1755,27 @@ const ReflowCursor = struct {
+     /// dropped and made again where it falls now.
+     src_in_tab: bool,
+ 
++    /// vtmux: the empty soft-wrapped source rows (no cells used) reflowed
++    /// since the last cell was written. tmux's grid_reflow_join skips
++    /// such lines while it looks for the next cell to join, and when that
++    /// cell does not fit even an empty line (a tab wider than the pane)
++    /// it consumes nothing, so each empty line stays a line of its own
++    /// (see reflowRow).
++    tmux_empties: usize,
++
++    /// vtmux: whether the line being joined to (tmux's target line in
++    /// grid_reflow_join) has taken cells from a row after it yet. Once it
++    /// has, the empty lines a join skips go with it (tmux removes every
++    /// line up to the last one it consumed); before, a cell too wide for
++    /// the line leaves them (see reflowRow).
++    tmux_joined: bool,
++
++    /// vtmux: whether the last thing reflowed was the padding of a wide
++    /// character made on a row of its own (tmuxWidePadding): the row the
++    /// character is on is full to tmux, which then joins nothing to it
++    /// (grid_reflow_split, grid_reflow_join stop at `width == sx`).
++    tmux_padding_made: bool,
++
+     /// This is the final row count of the reflowed pages.
+     total_rows: usize,
+ 
+@@ -1804,6 +1825,9 @@ const ReflowCursor = struct {
+             .prev_wrap = false,
+             .tab_extra = 0,
+             .src_in_tab = false,
++            .tmux_empties = 0,
++            .tmux_joined = false,
++            .tmux_padding_made = false,
+ 
+             // Initially whatever size our input node is.
+             .total_rows = node.rows(),
+@@ -1829,6 +1853,21 @@ const ReflowCursor = struct {
+         const prev_wrap = self.prev_wrap;
+         defer self.prev_wrap = src_row.wrap;
+         if (!prev_wrap) self.src_in_tab = false;
++        if (!prev_wrap) self.tmux_empties = 0;
++
++        // vtmux: a row that tmux's measure fills (tab_extra) takes no more
++        // cells (grid_reflow_split and grid_reflow_join stop at `width ==
++        // sx`, grid_reflow moves such a line whole), so the next row starts
++        // a line of tmux's own, as after a row Ghostty filled (a wrap
++        // pending). The padding of a wide character that tmux has at the
++        // start of this row (a padding cell dropped below) is counted in
++        // tab_extra but is not on the row.
++        if (prev_wrap and !self.pending_wrap and self.new_rows == 0 and self.x > 0) {
++            const padding_here = cells[0].tab == pagepkg.Cell.tab_continuation and
++                !self.src_in_tab;
++            if (@as(usize, self.x) + self.tab_extra - @intFromBool(padding_here) >=
++                self.page.size.cols) self.pending_wrap = true;
++        }
+ 
+         // vtmux: where the destination cursor is: 0 starts a line (deferred
+         // line breaks and pending wrap reset the column), anything else
+@@ -1931,6 +1970,12 @@ const ReflowCursor = struct {
+ 
+                 if (cursor_pin != null and p == cursor_pin.?) continue;
+ 
++                // vtmux: a pin on an empty soft-wrapped row (tmux's line
++                // with no cells used, tmux_empties) goes where the row
++                // goes below, without making it a cell: the row would
++                // join a blank to the line it is part of.
++                if (src_row.wrap and used == 0) continue;
++
+                 // If this pin is in the blanks on the right and past the end
+                 // of the dst col width then we move it to the end of the dst
+                 // col width instead.
+@@ -1989,6 +2034,17 @@ const ReflowCursor = struct {
+             self.new_rows -= 1;
+         }
+ 
++        // vtmux: the pins on an empty soft-wrapped row (see above).
++        if (row_has_pins and src_row.wrap and used == 0) {
++            for (list.tracked_pins.keys()) |p| {
++                if (cursor_pin != null and p == cursor_pin.?) continue;
++                if (p.node != row.node or p.y != src_y) continue;
++                p.node = self.node;
++                p.x = self.x;
++                p.y = self.y;
++            }
++        }
++
+         self.copyRowMetadata(src_row);
+ 
+         // vtmux: the destination rows this row's cells start (tmux_hscrolled).
+@@ -2009,13 +2065,123 @@ const ReflowCursor = struct {
+             }
+         };
+ 
++        // vtmux: tmux's reflow starts the next line before every cell for
++        // which `width + gc.data.width > sx`, also when nothing is on the
++        // line yet (grid_reflow_split, grid_reflow_join), so a cell wider
++        // than the pane (a tab: tmuxReflowCost) can leave empty rows
++        // before it, where Ghostty puts it at the start of a row:
++        //
++        // - A line tmux splits (a line of its own: this row when it
++        //   starts one, or the rest of a row a join stopped in) copies
++        //   from the first cell that does not fit with the width at 0
++        //   (`at`): when that cell is too wide, an empty row comes
++        //   first. A line of that one cell (`at` 0) is emptied as well,
++        //   which makes two.
++        // - A join that has consumed no line yet (tmux_joined) and stops
++        //   after skipping empty lines (empty soft-wrapped rows,
++        //   tmux_empties) removes nothing: when the cell is too wide for
++        //   an empty line, each empty line stays a row and the line the
++        //   cell is on is reflowed as one of its own (also when the
++        //   line joined to is itself empty, which stops at the cell even
++        //   with the width at 0); otherwise the line the cell is on
++        //   joins the first empty line (it fits there).
++        //
++        // `line_fresh` says whether the cells from `x` on belong to a line
++        // tmux reflows as its own (rather than joins to the one before
++        // it), `line_row` the row its first cell went on (null until it
++        // lands), `carried` that a wrap pending came with this row (after
++        // a full row) rather than from it.
++        var line_fresh = tmux_fresh and self.tmux_empties == 0;
++        var line_row: ?usize = null;
++        // A row that starts with the padding of the wide character the
++        // row before ended with, made on a row of its own because the
++        // character filled its row, is a line of its own from that
++        // padding (tmux's padding cell is this line's first cell).
++        if (!line_fresh and self.tmux_padding_made and cols_len > 0 and
++            cells[0].tab == pagepkg.Cell.tab_continuation and !self.src_in_tab)
++        {
++            line_fresh = true;
++            line_row = self.total_rows;
++            self.tmux_empties = 0;
++        }
++        self.tmux_padding_made = false;
++        if (line_fresh) self.tmux_joined = false;
++        var carried = self.pending_wrap;
++
+         var x: usize = 0;
+         while (x < cols_len) {
++            // vtmux: the cell tmux tests next, past a padding cell this
++            // reflow drops below (it is made again where it falls).
++            const tmux_x = tmux_x: {
++                var i = x;
++                var in_tab = self.src_in_tab;
++                while (i + 1 < cols_len and cells[i].tab == pagepkg.Cell.tab_continuation and !in_tab) {
++                    in_tab = false;
++                    i += 1;
++                }
++                break :tmux_x i;
++            };
++            const too_wide = (src_row.wrap or tmux_x < used) and
++                tmuxReflowCost(cells[tmux_x]) > self.page.size.cols;
++
+             if (self.pending_wrap) {
++                // vtmux: the empty rows tmux makes before the cell (see
++                // above).
++                var empty_rows: usize = 0;
++                if (!carried) {
++                    if (line_fresh) {
++                        if (too_wide and line_row == self.total_rows) empty_rows = 1;
++                    } else {
++                        const k = self.tmux_empties;
++                        if (k == 0 or self.tmux_joined or too_wide) {
++                            if (k > 0 and !self.tmux_joined) empty_rows = k;
++                            line_fresh = true;
++                            line_row = null;
++                        }
++                        self.tmux_joined = false;
++                        self.tmux_empties = 0;
++                    }
++                }
++
+                 self.page_row.wrap = true;
+                 try self.cursorScrollOrNewPage(list, cap);
+                 self.copyRowMetadata(src_row);
+                 self.page_row.wrap_continuation = true;
++                try self.tmuxEmptyRows(list, cap, src_row, empty_rows);
++            }
++            carried = false;
++
++            // vtmux: a join into an empty line stops at a cell too wide for
++            // it, and the empty lines stay (see above).
++            if (!line_fresh and !self.tmux_joined and self.tmux_empties > 0 and
++                self.x == 0 and too_wide)
++            {
++                try self.tmuxEmptyRows(list, cap, src_row, self.tmux_empties);
++                self.tmux_empties = 0;
++                line_fresh = true;
++            }
++
++            // vtmux: the first cell of a line of its own, which tmux
++            // empties and skips a line after when it is the line's only
++            // cell and too wide (see above).
++            //
++            // The line is the emptied row (tmux's split keeps the
++            // original line, `first`), so a pin marking where it starts
++            // (vtmux's history and prompt marks) stays there. The cursor
++            // goes with the cell, as grid_unwrap_position skips lines
++            // with no cells used.
++            if (line_fresh and line_row == null) {
++                if (too_wide and tmux_x + 1 == used) {
++                    if (row_has_pins) for (list.tracked_pins.keys()) |p| {
++                        if (cursor_pin != null and p == cursor_pin.?) continue;
++                        if (p.node != row.node or p.y != src_y or p.x != tmux_x) continue;
++                        p.node = self.node;
++                        p.x = self.x;
++                        p.y = self.y;
++                    };
++                    try self.tmuxEmptyRows(list, cap, src_row, 2);
++                }
++                line_row = self.total_rows;
+             }
+ 
+             // vtmux: a wide character's padding that an earlier reflow
+@@ -2082,6 +2248,9 @@ const ReflowCursor = struct {
+                     if (x < used) self.page_row.tmuxRaiseUsed(
+                         @as(usize, run_x) + @min(run, used - x),
+                     );
++                    self.tmux_empties = 0;
++                    self.tmux_padding_made = false;
++                    if (!line_fresh) self.tmux_joined = true;
+                     x += run;
+                     continue;
+                 }
+@@ -2107,6 +2276,13 @@ const ReflowCursor = struct {
+                 &cells[x],
+                 src_page,
+             );
++            if (write_result) |result| {
++                if (result != .repeat) {
++                    self.tmux_empties = 0;
++                    self.tmux_padding_made = false;
++                    if (!line_fresh) self.tmux_joined = true;
++                }
++            } else |_| {}
+ 
+             // vtmux: a tab's first cell costs its width, a wide
+             // character's one more for its padding (tab_extra).
+@@ -2137,6 +2313,14 @@ const ReflowCursor = struct {
+                         self.page.size.cols)
+                 {
+                     try self.tmuxWidePadding(list, cap, src_row, write_x);
++                    self.tmux_padding_made = true;
++                    // vtmux: a join stops at the padding, and the rest of
++                    // the row is a line of its own from it.
++                    if (!line_fresh) {
++                        line_fresh = true;
++                        line_row = self.total_rows;
++                        self.tmux_joined = false;
++                    }
+                 }
+             } else |_| {}
+ 
+@@ -2202,6 +2386,28 @@ const ReflowCursor = struct {
+         if (!src_row.wrap) {
+             self.new_rows += 1;
+         }
++
++        // vtmux: an empty soft-wrapped row, which a join skips (see
++        // tmux_empties).
++        if (src_row.wrap and cols_len == 0) self.tmux_empties += 1;
++    }
++
++    /// vtmux: `n` empty soft-wrapped rows after the row the cursor is on,
++    /// which tmux's reflow leaves before a cell wider than the pane (see
++    /// reflowRow). The cursor goes to the start of the row after them.
++    fn tmuxEmptyRows(
++        self: *ReflowCursor,
++        list: *PageList,
++        cap: Capacity,
++        src_row: *const Row,
++        n: usize,
++    ) Allocator.Error!void {
++        for (0..n) |_| {
++            self.page_row.wrap = true;
++            try self.cursorScrollOrNewPage(list, cap);
++            self.copyRowMetadata(src_row);
++            self.page_row.wrap_continuation = true;
++        }
+     }
+ 
+     /// vtmux: the columns tmux's reflow counts for a cell (tab_extra): a
+@@ -3135,6 +3341,9 @@ const ReflowCursor = struct {
+         const new_rows = self.new_rows;
+         // vtmux: and where the source line is (src_in_tab).
+         const src_in_tab = self.src_in_tab;
++        const tmux_empties = self.tmux_empties;
++        const tmux_joined = self.tmux_joined;
++        const tmux_padding_made = self.tmux_padding_made;
+ 
+         const node = try list.createPage(.{ .cap = cap });
+         errdefer comptime unreachable;
+@@ -3144,6 +3353,9 @@ const ReflowCursor = struct {
+         self.* = .init(node);
+         self.new_rows = new_rows;
+         self.src_in_tab = src_in_tab;
++        self.tmux_empties = tmux_empties;
++        self.tmux_joined = tmux_joined;
++        self.tmux_padding_made = tmux_padding_made;
+     }
+ 
+     /// Performs `cursorScroll` or `cursorNewPage` as necessary
+@@ -4038,9 +4250,12 @@ pub fn scrollClear(self: *PageList) Allocator.Error!void {
+                 const rev_i = page.rows() - i - 1;
+                 const row = rows[rev_i];
+                 const cells = row.cells.ptr(current_page.memory)[0..self.cols];
+-                for (cells) |cell| {
+-                    if (!cell.isEmpty()) break :non_empty self.rows - n;
+-                }
++                // vtmux: vtmux scrolls a clear into history with this
++                // (scroll-on-clear), which tmux does up to the last line
++                // with cells used (grid_view_clear_history: `cellused`),
++                // erased ones included; a line only erased with a
++                // background has none.
++                if (row.tmuxCellsUsed(cells) > 0) break :non_empty self.rows - n;
+ 
+                 n += 1;
+                 if (n > self.rows) break :non_empty 0;
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 06701afb9..437782bd4 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -2600,6 +2600,14 @@ pub fn index(self: *Terminal) !void {
+         screen.cursor.x >= self.scrolling_region.left and
+         screen.cursor.x <= self.scrolling_region.right)
+     {
++        // vtmux: without history (the alternate screen, a pane made with
++        // history-limit 0) tmux scrolls a region up with grid_move_lines
++        // of its height less one (grid_view_scroll_region_up), which for a
++        // region of one row (a one-row pane) moves nothing: the row stays
++        // as it is.
++        if (screen.no_scrollback and
++            self.scrolling_region.top == self.scrolling_region.bottom) return;
++
+         if (comptime build_options.kitty_graphics) {
+             // Scrolling dirties the images because it updates their placements pins.
+             screen.kitty_images.markDirty();
+@@ -2902,6 +2910,11 @@ pub fn setLeftAndRightMargin(self: *Terminal, left_req: usize, right_req: usize)
+ 
+ /// Scroll the text down by one row.
+ pub fn scrollDown(self: *Terminal, count: usize) void {
++    // vtmux: tmux scrolls a region down with grid_move_lines of its height
++    // less one (grid_view_scroll_region_down: SD, RI at the top margin),
++    // which for a region of one row (a one-row pane) moves nothing.
++    if (self.scrolling_region.top == self.scrolling_region.bottom) return;
++
+     // Preserve our x/y to restore.
+     const old_x = self.screens.active.cursor.x;
+     const old_y = self.screens.active.cursor.y;
+@@ -2942,6 +2955,11 @@ pub fn scrollDown(self: *Terminal, count: usize) void {
+ ///
+ /// Does not change the (absolute) cursor position.
+ pub fn scrollUp(self: *Terminal, count: usize) !void {
++    // vtmux: without history a region of one row does not scroll (see
++    // index).
++    if (self.screens.active.no_scrollback and
++        self.scrolling_region.top == self.scrolling_region.bottom) return;
++
+     // Preserve our x/y to restore.
+     const old_x = self.screens.active.cursor.x;
+     const old_y = self.screens.active.cursor.y;
+@@ -3013,6 +3031,7 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+         for (0..adjusted_count) |_| try self.screens.active.cursorScrollAbove();
+ 
+         self.tmuxFixContinuationsBelowRegion();
++        self.tmuxUnwrapAboveRegionWithoutHistory();
+         return;
+     }
+ 
+@@ -3022,14 +3041,21 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+     self.tmuxUnwrapAboveRegionWithoutHistory();
+ }
+ 
+-/// vtmux: without history (the alternate screen) tmux scrolls a region up
+-/// with grid_move_lines (grid_view_scroll_region_up), which unwraps the
+-/// line above the region; with history grid_scroll_history_region does
+-/// not.
++/// vtmux: without history (the alternate screen, a pane made with
++/// history-limit 0: no GRID_HISTORY) tmux scrolls a region up with
++/// grid_move_lines (grid_view_scroll_region_up), which unwraps the line
++/// above the region; with history grid_scroll_history_region does not.
++/// For a region of two rows grid_move_lines also unwraps the line it
++/// moved to the top (its source row, `py - 1`, is the region's top row
++/// when `py >= dy + ny`), so a line wrapped onto the bottom row by a
++/// print loses its flag as the row scrolls up.
+ fn tmuxUnwrapAboveRegionWithoutHistory(self: *Terminal) void {
+     if (!self.screens.active.no_scrollback) return;
+     if (self.scrolling_region.left > 0 or
+         self.scrolling_region.right < self.cols - 1) return;
++    if (self.scrolling_region.bottom - self.scrolling_region.top == 1) {
++        self.tmuxUnwrapRow(self.scrolling_region.top);
++    }
+     if (self.scrolling_region.top == 0) return;
+     self.tmuxUnwrapAbove(self.scrolling_region.top);
+ }
+@@ -3047,7 +3073,7 @@ fn tmuxUnwrapAboveRegionWithoutHistory(self: *Terminal) void {
+ /// screen does not reflow, so it skips this.
+ fn tmuxFixRegionContinuations(self: *Terminal) void {
+     const screen = self.screens.active;
+-    if (screen.no_scrollback) return;
++    if (self.screens.active_key == .alternate) return;
+     const bottom = screen.cursor.page_pin.*;
+     if (bottom.up(self.scrolling_region.bottom - self.scrolling_region.top)) |top| {
+         tmuxFixContinuationAt(top);
+@@ -3306,17 +3332,52 @@ pub fn insertLines(self: *Terminal, count: usize) void {
+ /// vtmux: CSI L as tmux does it: `insertLines`, and the cursor stays where
+ /// it was, a pending wrap included (screen_write_insertline does not move
+ /// it; Ghostty's goes to the left margin, as xterm's does).
++///
++/// With the cursor above or below the scroll region tmux inserts in the
++/// whole screen from the cursor's row down (screen_write_insertline,
++/// grid_view_insert_lines), as many lines as are left below it at most.
++/// That is grid_move_lines alone, so the inserted lines are its emptied
++/// ones, and a count that reaches the bottom moves no lines and changes
++/// nothing. Ghostty (as xterm) ignores IL outside the region.
+ pub fn insertLinesTmux(self: *Terminal, count: usize) void {
+     const x = self.screens.active.cursor.x;
+     const pending = self.screens.active.cursor.pending_wrap;
++    defer {
++        self.screens.active.cursorAbsolute(x, self.screens.active.cursor.y);
++        self.screens.active.cursor.pending_wrap = pending;
++    }
++    const y = self.screens.active.cursor.y;
++    if (self.tmuxOutsideRegion()) {
++        if (count == 0 or count >= self.rows - y) return;
++        const region = self.scrolling_region;
++        defer self.scrolling_region = region;
++        self.scrolling_region.top = 0;
++        self.scrolling_region.bottom = self.rows - 1;
++        self.insertLinesRowsTmux(count, false, false);
++        return;
++    }
+     self.insertLines(count);
+-    self.screens.active.cursorAbsolute(x, self.screens.active.cursor.y);
+-    self.screens.active.cursor.pending_wrap = pending;
++}
++
++/// vtmux: whether the cursor is above or below the scroll region, where
++/// tmux's IL and DL work on the whole screen (no left and right margins:
++/// tmux has none).
++fn tmuxOutsideRegion(self: *const Terminal) bool {
++    if (self.scrolling_region.left > 0 or
++        self.scrolling_region.right < self.cols - 1) return false;
++    const y = self.screens.active.cursor.y;
++    return y < self.scrolling_region.top or y > self.scrolling_region.bottom;
+ }
+ 
+ /// `insertLines`; `sd` for SD and RI, which tmux does as single-line
+ /// grid_view_scroll_region_down steps (screen_write_scrolldown).
+ fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
++    self.insertLinesRowsTmux(count, sd, true);
++}
++
++/// vtmux: `insertLinesRows`; `region_clear` for IL in the region, whose
++/// grid_clear unwraps a line grid_view_insert_lines does not (see below).
++fn insertLinesRowsTmux(self: *Terminal, count: usize, sd: bool, region_clear: bool) void {
+     // Rare, but happens
+     if (count == 0) return;
+ 
+@@ -3485,7 +3546,7 @@ fn insertLinesRows(self: *Terminal, count: usize, sd: bool) void {
+     // cursor, even when ny - ny2 underflows (the u_int count wraps so
+     // grid_check_y passes and no line is cleared).
+     if (!left_right) {
+-        if (!sd and rem > adjusted_count) {
++        if (!sd and region_clear and rem > adjusted_count) {
+             self.tmuxUnwrapRow(start_y + (rem - adjusted_count) - 1);
+         }
+         self.tmuxUnwrapAbove(start_y);
+@@ -3528,7 +3589,20 @@ fn tmuxFixContinuations(self: *Terminal, y: usize, n: usize) void {
+ /// above the cursor is unwrapped by grid_move_lines, and the last moved
+ /// line by the grid_clear of the freed lines. SU, which Ghostty also does
+ /// with deleteLines, unwraps neither in tmux.
++///
++/// With the cursor above or below the scroll region tmux deletes in the
++/// whole screen from the cursor's row down (screen_write_deleteline,
++/// grid_view_delete_lines), which is the region's DL with the region the
++/// whole screen. Ghostty (as xterm) ignores DL outside the region.
+ pub fn deleteLinesTmux(self: *Terminal, count: usize) void {
++    if (self.tmuxOutsideRegion()) {
++        const region = self.scrolling_region;
++        defer self.scrolling_region = region;
++        self.scrolling_region.top = 0;
++        self.scrolling_region.bottom = self.rows - 1;
++        self.deleteLinesTmux(count);
++        return;
++    }
+     const y = self.screens.active.cursor.y;
+     const left_right = self.scrolling_region.left > 0 or
+         self.scrolling_region.right < self.cols - 1;
+@@ -4071,6 +4145,20 @@ pub fn eraseLine(
+     const pending_wrap = self.screens.active.cursor.pending_wrap;
+     defer self.screens.active.cursor.pending_wrap = pending_wrap;
+ 
++    // vtmux: tmux's EL 2 (and EL 0 from column 0, EL 1 from the last
++    // column, which are EL 2) does nothing to a line never written to
++    // (`cellsize` 0) in the default background (screen_write_clearline),
++    // so it unwraps nothing either. Reflow leaves such a line wrapped
++    // (the empty rows before a tab wider than the pane).
++    const whole_line = switch (mode) {
++        .complete => true,
++        .right => self.screens.active.cursor.x == 0 and !pending_wrap,
++        .left => self.screens.active.cursor.x >= self.cols - 1,
++        else => false,
++    };
++    if (whole_line and self.screens.active.cursor.style.bg_color == .none and
++        self.tmuxLineUnwritten()) return;
++
+     // Get our start/end positions depending on mode.
+     const start, const end = switch (mode) {
+         .right => right: {
+@@ -4169,6 +4257,21 @@ pub fn eraseLine(
+     );
+ }
+ 
++/// vtmux: whether the cursor's row is a line tmux has never written to
++/// since it was cleared (`cellsize` 0): no cell used (cellused, patch
++/// 0013) and every cell blank, without a background or a tab. A line
++/// erased with a background has `cellsize` (grid_clear expands it).
++fn tmuxLineUnwritten(self: *Terminal) bool {
++    const screen = self.screens.active;
++    const row = screen.cursor.page_row;
++    if (row.tmux_used != 0) return false;
++    const page = screen.cursor.page_pin.node.page();
++    for (page.getCells(row)) |c| {
++        if (!c.isEmpty() or c.tab != 0 or c.style_id != style.default_id) return false;
++    }
++    return true;
++}
++
+ /// Erase the display (ED, `CSI Ps J`). The mode picks what is erased:
+ ///
+ ///   - `below`: from the cursor to the end of the screen.
+@@ -15430,6 +15533,200 @@ test "Terminal: reflow measures a tab as tmux does (vtmux)" {
+     }
+ }
+ 
++/// vtmux: the screen's rows from the top of the scrollback as tmux's
++/// capture-pane -p would show them with tabs as `T` (a tab's first cell)
++/// and `-` (its other cells), each row followed by `+` when it wraps.
++fn tmuxTestRows(t: *Terminal, alloc: Allocator) ![]u8 {
++    var out: std.ArrayList(u8) = .empty;
++    errdefer out.deinit(alloc);
++    const pages = &t.screens.active.pages;
++    var y: usize = 0;
++    while (pages.getCell(.{ .screen = .{ .x = 0, .y = @intCast(y) } })) |first| : (y += 1) {
++        var line: std.ArrayList(u8) = .empty;
++        defer line.deinit(alloc);
++        for (0..t.cols) |x| {
++            const c = pages.getCell(.{ .screen = .{ .x = @intCast(x), .y = @intCast(y) } }).?;
++            const ch: u8 = if (c.cell.tab == Cell.tab_continuation)
++                '-'
++            else if (c.cell.tab != 0)
++                'T'
++            else if (c.cell.hasText())
++                @intCast(c.cell.codepoint())
++            else
++                ' ';
++            try line.append(alloc, ch);
++        }
++        var len = line.items.len;
++        while (len > 0 and line.items[len - 1] == ' ') len -= 1;
++        try out.appendSlice(alloc, line.items[0..len]);
++        if (first.row.wrap) try out.append(alloc, '+');
++        try out.append(alloc, '|');
++    }
++    // The blank rows at the bottom of the screen.
++    var len = out.items.len;
++    while (len > 0 and out.items[len - 1] == '|') len -= 1;
++    out.shrinkRetainingCapacity(len);
++    return out.toOwnedSlice(alloc);
++}
++
++test "Terminal: reflow leaves empty rows before a tab wider than the pane (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // tmux 3.8, `printf 'ab\r\n\tcd\tx'` on 20 columns narrowed to 7,
++    // then 5: grid_reflow_split moves to the next line before a cell that
++    // does not fit with nothing on the line yet, so a line of one tab
++    // wider than the pane leaves two empty rows, and a join into an empty
++    // line stops at it consuming nothing.
++    var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 20 });
++    defer t.deinit(alloc);
++    try t.printString("ab");
++    t.carriageReturn();
++    try t.linefeed();
++    t.horizontalTab();
++    try t.printString("cd");
++    t.horizontalTab();
++    try t.printString("x");
++
++    try t.resize(alloc, .{ .cols = 7, .rows = 6 });
++    {
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings("ab|T+|-------+|cd+|T-+|----x", rows);
++    }
++
++    try t.resize(alloc, .{ .cols = 5, .rows = 6 });
++    {
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings("ab|+|+|T+|-----+|--cd+|T+|-----+|x", rows);
++    }
++
++    // Narrower again: the empty rows stay and the tabs leave two more each.
++    try t.resize(alloc, .{ .cols = 4, .rows = 6 });
++    {
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings("ab|+|+|+|+|T+|----+|---c+|d+|+|+|T+|----+|-x", rows);
++    }
++
++    // Wide enough for the tabs again: one line of two rows (tmux's
++    // measure splits it before the second tab).
++    try t.resize(alloc, .{ .cols = 20, .rows = 6 });
++    {
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings("ab|T-------cd+|T-----x", rows);
++    }
++}
++
++test "Terminal: tmux grid bookkeeping corners (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // EL 2 on a line never written to (screen_write_clearline returns
++    // early): the empty rows a reflow leaves before a tab wider than the
++    // pane stay wrapped. In a background colour it clears and unwraps.
++    for ([_]bool{ false, true }) |red| {
++        var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("ab");
++        t.carriageReturn();
++        try t.linefeed();
++        t.horizontalTab();
++        try t.resize(alloc, .{ .cols = 8, .rows = 6 });
++        try t.resize(alloc, .{ .cols = 5, .rows = 6 });
++        try t.setAttribute(if (red) .{ .@"8_bg" = .red } else .unset);
++        t.setCursorPos(3, 1);
++        t.eraseLine(.complete, false);
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings(if (red) "ab|||T+|-----+|--" else "ab|+|+|T+|-----+|--", rows);
++    }
++
++    // Scroll-on-clear (CSI 22 J as vtmux uses it) scrolls the rows up to
++    // the last with cells used, erased ones included
++    // (grid_view_clear_history).
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("aaaaaaaaaabbb");
++        t.setCursorPos(2, 1);
++        t.eraseChars(3);
++        t.eraseDisplay(.scroll_complete, false);
++        try testing.expectEqual(@as(usize, 2), t.screens.active.pages.total_rows - t.rows);
++    }
++
++    // Without history: a region of two rows unwraps the line it moves to
++    // its top (grid_move_lines), and a region of one row (a one-row
++    // screen) does not scroll at all.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 2, .cols = 10, .max_scrollback_bytes = 0 });
++        defer t.deinit(alloc);
++        try t.printString("x");
++        t.carriageReturn();
++        try t.linefeed();
++        try t.printString("aaaaaaaaaabbb");
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings("aaaaaaaaaa|bbb", rows);
++    }
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 1, .cols = 10, .max_scrollback_bytes = 0 });
++        defer t.deinit(alloc);
++        try t.printString("abcde");
++        t.carriageReturn();
++        try t.linefeed();
++        try t.printString("x");
++        try t.scrollUp(1);
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings("xbcde", rows);
++    }
++
++    // RI at the top of a one-row screen does not scroll either, history or
++    // not (grid_view_scroll_region_down).
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 1, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("abc");
++        t.reverseIndex();
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings("abc", rows);
++    }
++
++    // IL and DL with the cursor outside the scroll region work on the
++    // whole screen (grid_view_insert_lines, grid_view_delete_lines); an IL
++    // count reaching the bottom changes nothing.
++    for ([_]u8{ 'L', 'M', 'A' }) |op| {
++        var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("a");
++        t.carriageReturn();
++        try t.linefeed();
++        try t.printString("bbbbbbbbbbbb");
++        t.carriageReturn();
++        try t.linefeed();
++        try t.printString("c");
++        t.setTopAndBottomMargin(5, 6);
++        t.setCursorPos(2, 3);
++        switch (op) {
++            'L' => t.insertLinesTmux(1),
++            'M' => t.deleteLinesTmux(1),
++            else => t.insertLinesTmux(5),
++        }
++        try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.x);
++        const rows = try tmuxTestRows(&t, alloc);
++        defer alloc.free(rows);
++        try testing.expectEqualStrings(switch (op) {
++            'L' => "a||bbbbbbbbbb|bb|c",
++            'M' => "a|bb|c",
++            else => "a|bbbbbbbbbb+|bb|c",
++        }, rows);
++    }
++}
++
+ test "Terminal: reflow joins a wrapped row by the cells it used (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;

@@ -739,6 +739,84 @@ Recorded per commit in git history; the list is kept current:
   `vtmux` 65/65; Debug `-Dtest-filter="Terminal: "` 521/522 with the known
   `tabClear single` failure. Not an upstream candidate (tmux's model).
 
+- `patches/0029-tmux-grid-corners.patch` (`PageList.zig`
+  `ReflowCursor.reflowRow`, `tmuxEmptyRows`, new fields `tmux_empties`,
+  `tmux_joined`, `tmux_padding_made`, `scrollClear`; `Terminal.zig`
+  `eraseLine`, `tmuxLineUnwritten`, `index`, `scrollUp`, `scrollDown`,
+  `tmuxUnwrapAboveRegionWithoutHistory`, `tmuxFixRegionContinuations`,
+  `insertLinesTmux`, `insertLinesRowsTmux`, `tmuxOutsideRegion`,
+  `deleteLinesTmux`): corners of tmux's grid bookkeeping (D-040 closed,
+  D-006 narrowed).
+  - Reflow of a cell wider than the pane (a tab, D-040). tmux's
+    `grid_reflow_split` moves to the next line before every cell for
+    which `width + gc.data.width > sx`, also with nothing on the line
+    yet, so the first cell of a split (`at`) that is wider than the pane
+    gets an empty row before it, and a line of that one cell (`at` 0)
+    two: the line emptied and the one skipped. `grid_reflow_join` skips
+    empty wrapped lines (no cells used) looking for the next cell; when
+    that cell does not fit, even with the width at 0, and the join has
+    consumed no line yet, it removes nothing and each empty line stays a
+    row; once it has, the skipped lines go with it. A line tmux fills
+    exactly (`width == sx`, tab_extra counted) joins nothing, so the row
+    after it starts a line of its own (a wrap pending is set for it; a
+    wide character's padding cell that tmux has at the start of that row
+    is not counted), as does a row whose first cell is the padding a full
+    row's wide character left on a row of its own (`tmuxWidePadding`).
+    reflowRow follows which cells start a line tmux splits as its own (a
+    row starting a line, or the rest of a row a join stopped in) and adds
+    the empty rows (`tmuxEmptyRows`). Pins marking where an emptied line
+    starts (vtmux's oldest history row, OSC 133 marks) stay on it (tmux
+    keeps the original line, `first`); the cursor goes with the cell
+    (`grid_unwrap_position` skips lines with no cells used). A pin on an
+    empty wrapped row no longer makes it a blank cell (Ghostty raised the
+    row's length to write it; joined, the line gained a blank).
+  - EL 2 (and EL 0 from column 0, EL 1 from the last column) does nothing
+    to a line never written to (`cellsize` 0: no cell used, every cell
+    blank, no tab or background) in the default background
+    (`screen_write_clearline`), so it unwraps nothing; such a wrapped
+    line comes from the reflow above.
+  - `scrollClear` (`CSI 22 J`, which vtmux sends only for scroll-on-clear)
+    scrolls the rows up to the last with cells used (`tmuxCellsUsed`,
+    erased ones included), as `grid_view_clear_history` takes
+    `cellused`; Ghostty took the last row with a non-empty cell, so a
+    clear after an erased row scrolled one row less, and a row only
+    erased with a background one more.
+  - Without history (`no_scrollback`: the alternate screen, and a pane
+    made with history-limit 0, which vtmux gives no scrollback bytes) a
+    region scrolled up goes through `grid_move_lines`
+    (`grid_view_scroll_region_up` without `GRID_HISTORY`): a region of two
+    rows unwraps the line moved to its top (`py >= dy + ny`), so a line a
+    print wrapped onto the bottom row of a two-row pane loses its flag as
+    it scrolls; a region of one row (a one-row pane) moves nothing, so LF
+    and SU leave the row as it is. SD and RI at the top margin
+    (`grid_view_scroll_region_down`) move nothing in a one-row pane,
+    history or not. The continuation fix-up after a region scroll
+    (`tmuxFixRegionContinuations`, patch 0011) now skips the alternate
+    screen only, not every screen without scrollback: the primary screen
+    of a pane without history reflows.
+  - IL and DL with the cursor above or below the scroll region work on
+    the whole screen from the cursor's row (`screen_write_insertline`,
+    `screen_write_deleteline`: `grid_view_insert_lines`,
+    `grid_view_delete_lines`), where Ghostty (as xterm) did nothing. DL is
+    the region's DL with the region the whole screen; IL is
+    `grid_move_lines` alone (no `grid_clear`, so not its unwrap), and a
+    count reaching the bottom moves no line and changes nothing. The
+    cursor stays, as in the region (patch 0011).
+
+  Tests: new `Terminal: reflow leaves empty rows before a tab wider than
+  the pane (vtmux)` (fails without the PageList change: no empty rows)
+  and `Terminal: tmux grid bookkeeping corners (vtmux)`; oracle
+  `reflow_wide_tab`, `wrap_flag_corners`, `reflow_tmux_quirks` (scene
+  `tabwide` no longer annotated). A random reflow probe against tmux 3.8
+  (780 seeds of letters, tabs, wide characters, erases and CRLF on
+  20x6, 2 to 7 resizes of 2 to 20 columns, some of the height) matches
+  but for the 14 seeds of D-041. `-Doptimize=ReleaseSafe` with test filters
+  reflow, PageList, Screen, resize, scroll, insertLines, deleteLines,
+  eraseLine, eraseDisplay, index and vtmux: 1761/1761 over the two test
+  binaries; Debug `-Dtest-filter="Terminal: "` 1047/1049 with the known
+  `tabClear single` failure in each. Not an upstream candidate (tmux's
+  model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in
