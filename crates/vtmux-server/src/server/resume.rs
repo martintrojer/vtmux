@@ -774,14 +774,15 @@ fn rows_to_import(s: &snap::Snapshot) -> u64 {
 /// 2026-11 devserver, about 0.4 s per 100k rows.
 const DRY_RUN_ROWS_PER_SEC: u64 = 100_000;
 
-/// How long the dry run of `s` may take: [`sys::DRY_RUN_LIMIT`] and a
-/// second for every [`DRY_RUN_ROWS_PER_SEC`] rows of history it imports, so an
+/// How long the dry run of `s` may take: [`sys::DRY_RUN_LIMIT`] (or the
+/// test hook's, `upgrade::test_wait`) and a second for every
+/// [`DRY_RUN_ROWS_PER_SEC`] rows of history it imports, so an
 /// upgrade is never refused for the size of its history (an upgrade to
 /// another patch stack carries it all as rows), while a binary that hangs
 /// is still given up on.
 pub(super) fn dry_run_limit(s: &snap::Snapshot) -> std::time::Duration {
     let rows = rows_to_import(s);
-    sys::DRY_RUN_LIMIT
+    super::upgrade::test_wait().unwrap_or(sys::DRY_RUN_LIMIT)
         + std::time::Duration::from_millis(rows.saturating_mul(1000) / DRY_RUN_ROWS_PER_SEC)
 }
 

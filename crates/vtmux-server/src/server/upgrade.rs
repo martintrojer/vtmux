@@ -81,13 +81,30 @@ const RECHECK: Duration = Duration::from_millis(50);
 /// full pipe.
 const DRY_RUN_RECHECK: Duration = Duration::from_millis(20);
 
-/// How long the wait for work in flight lasts: [`PREFLIGHT_WAIT`], none
-/// under [`STRICT_HOOK`].
+/// A test hook read from the server's environment: whole seconds that
+/// replace the 3 s of both [`PREFLIGHT_WAIT`] and the dry run's limit
+/// (`sys::DRY_RUN_LIMIT`, before what history adds). A test that stops
+/// the server during either (`kill-server`, SIGTERM) sets it long, so the
+/// wait cannot end first on a host that stalls the test for 3 s between
+/// the request and the stop.
+const WAIT_HOOK: &str = "VTMUX_TEST_UPGRADE_WAIT";
+
+/// [`WAIT_HOOK`]'s value, if it is set to a number.
+pub(super) fn test_wait() -> Option<Duration> {
+    std::env::var(WAIT_HOOK)
+        .ok()?
+        .parse()
+        .ok()
+        .map(Duration::from_secs)
+}
+
+/// How long the wait for work in flight lasts: [`PREFLIGHT_WAIT`] (or
+/// [`WAIT_HOOK`]'s), none under [`STRICT_HOOK`].
 fn preflight_wait() -> Duration {
     if strict() {
         Duration::ZERO
     } else {
-        PREFLIGHT_WAIT
+        test_wait().unwrap_or(PREFLIGHT_WAIT)
     }
 }
 
@@ -418,7 +435,7 @@ impl Server {
             } else {
                 format!(
                     "still running after {} s: {}",
-                    PREFLIGHT_WAIT.as_secs(),
+                    preflight_wait().as_secs(),
                     busy.join(", ")
                 )
             };

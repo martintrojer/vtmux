@@ -21,11 +21,19 @@ const VTMUX: &str = env!("CARGO_BIN_EXE_vtmux");
 struct Server {
     dir: tempfile::TempDir,
     label: String,
+    /// Extra environment for every client, so for the server the first
+    /// one starts: a test hook (`VTMUX_TEST_*`).
+    env: Vec<(&'static str, &'static str)>,
 }
 
 impl Server {
-    /// A server with one detached session `a`, started as `start`.
-    fn start_as(dir: tempfile::TempDir, start: &Path) -> Self {
+    /// A server with one detached session `a`, started as `start` with
+    /// `env` on top.
+    fn start_as(
+        dir: tempfile::TempDir,
+        start: &Path,
+        env: Vec<(&'static str, &'static str)>,
+    ) -> Self {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let server = Self {
             dir,
@@ -34,6 +42,7 @@ impl Server {
                 std::process::id(),
                 SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             ),
+            env,
         };
         let (_, err, code) = server.run_as(start, &["new", "-d", "-s", "a", "cat", "-"]);
         assert_eq!(code, 0, "new-session: {err}");
@@ -41,7 +50,11 @@ impl Server {
     }
 
     fn start() -> Self {
-        Self::start_as(tempfile::tempdir().expect("tempdir"), Path::new(VTMUX))
+        Self::start_as(
+            tempfile::tempdir().expect("tempdir"),
+            Path::new(VTMUX),
+            Vec::new(),
+        )
     }
 
     fn run(&self, args: &[&str]) -> (String, String, i32) {
@@ -59,6 +72,7 @@ impl Server {
             .env("SHELL", "/bin/sh")
             .env("TERM", "xterm-256color")
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .envs(self.env.iter().copied())
             .output()
             .expect("run vtmux");
         (
@@ -161,8 +175,17 @@ fn wait(what: &str, mut done: impl FnMut() -> bool) {
 /// status), and it overrode the refusal's 1, as tmux's client exits 1
 /// when the server goes under it (client.c `client_dispatch_attached`,
 /// `CLIENT_EXIT_SERVER_EXITED`: `client_exitval = 1`).
+///
+/// The wait for the job and the dry run's limit are 20 s here
+/// (`VTMUX_TEST_UPGRADE_WAIT`), not 3: the stop comes a few process starts
+/// after the request, and on a macOS CI runner the 3 s wait once ended
+/// first and refused for the job.
 fn upgrade_cut_short(held: bool, stop: impl FnOnce(&Server)) {
-    let server = Server::start();
+    let server = Server::start_as(
+        tempfile::tempdir().expect("tempdir"),
+        Path::new(VTMUX),
+        vec![("VTMUX_TEST_UPGRADE_WAIT", "20")],
+    );
     let started = server.dir.path().join("started");
     let release = server.dir.path().join("release");
     // Held at most 20 s, so a failing run leaves no dry run behind.
@@ -265,7 +288,7 @@ fn without_b_the_relinked_start_path_is_the_binary() {
     std::fs::create_dir(&bin).unwrap();
     let link = bin.join("vtmux");
     std::os::unix::fs::symlink(VTMUX, &link).unwrap();
-    let server = Server::start_as(dir, &link);
+    let server = Server::start_as(dir, &link, Vec::new());
     let new = server.script("new", "echo \"relinked $1\" >&2; exit 1");
     std::fs::remove_file(&link).unwrap();
     std::os::unix::fs::symlink(&new, &link).unwrap();
