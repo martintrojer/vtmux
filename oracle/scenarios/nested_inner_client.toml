@@ -1,0 +1,24 @@
+# tmux inside tmux (the same binary, as plugins and users nest it): the inner client runs in a pane whose TERM is the outer default-terminal (screen: in every host's terminfo) and whose TMUX names the outer server, which -L overrides (tmux.c:557-571); the inner pane sees the inner server's default-terminal and its own TMUX_PANE. C-b C-b sends the prefix through (send-prefix) to the inner server, which creates a window and splits; the inner client's terminal name, features, UTF-8 and size come from the outer pane. Killing the inner server ends its client, which was the outer pane's program.
+name = "nested_inner_client"
+size = [60, 12]
+steps = [
+  { run = ["start", ";", "set", "-g", "default-terminal", "screen", ";", "new", "-d", "-s", "o", "-n", "ow", "-x", "60", "-y", "11", "sh", "-c", "tmux wait-for -S up; exec tmux -L inner -f /dev/null new -s i -n iw sh -c 'echo \"T=$TERM P=$TMUX_PANE\"; exec cat -'"] },
+  { wait_for = "up" },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "o", "-T", "p"] },
+  { attach = { session = "o" } },
+  { settle = { quiet_ms = 500 } },
+  { run = ["run-shell", "tmux -L inner set -g status-right IR \\; set -g default-command 'cat -' \\; set -g window-status-format '##I' \\; set -g window-status-current-format '##I*' \\; select-pane -t i -T ip"] },
+  { screen = {} },
+  { keys = "abc\r" },
+  { screen = {} },
+  { keys = "\u0002\u0002c" },
+  { screen = {} },
+  { run = ["run-shell", "tmux -L inner lsc -F '##{client_termname}|##{client_termfeatures}|##{client_utf8}|##{client_width}x##{client_height}'"] },
+  { run = ["run-shell", "tmux -L inner lsp -a -F '##{session_name}:##{window_index}.##{pane_index} ##{pane_width}x##{pane_height}'"] },
+  { keys = "\u0002\u0002\"" },
+  { screen = {} },
+  { run = ["run-shell", "tmux -L inner kill-server"] },
+  { settle = {} },
+  { screen = {} },
+]

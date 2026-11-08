@@ -1,0 +1,313 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "nested_inner_client",
+  "inputs": {
+    "name": "nested_inner_client",
+    "size": [
+      60,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "start",
+          ";",
+          "set",
+          "-g",
+          "default-terminal",
+          "screen",
+          ";",
+          "new",
+          "-d",
+          "-s",
+          "o",
+          "-n",
+          "ow",
+          "-x",
+          "60",
+          "-y",
+          "11",
+          "sh",
+          "-c",
+          "tmux wait-for -S up; exec tmux -L inner -f /dev/null new -s i -n iw sh -c 'echo \"T=$TERM P=$TMUX_PANE\"; exec cat -'"
+        ]
+      },
+      {
+        "wait_for": "up"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "o",
+          "-T",
+          "p"
+        ]
+      },
+      {
+        "attach": {
+          "session": "o"
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 500
+        }
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux -L inner set -g status-right IR \\; set -g default-command 'cat -' \\; set -g window-status-format '##I' \\; set -g window-status-current-format '##I*' \\; select-pane -t i -T ip"
+        ]
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "abc\r"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002\u0002c"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux -L inner lsc -F '##{client_termname}|##{client_termfeatures}|##{client_utf8}|##{client_width}x##{client_height}'"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux -L inner lsp -a -F '##{session_name}:##{window_index}.##{pane_index} ##{pane_width}x##{pane_height}'"
+        ]
+      },
+      {
+        "keys": "\u0002\u0002\""
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "run-shell",
+          "tmux -L inner kill-server"
+        ]
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "T=tmux-256color P=%0",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[38;5;233m\\e[48;5;113m[i] \\e[4m0*\\e[0m\\e[48;5;113m                                                    \\e[38;5;233mIR",
+          "\\e[30m\\e[42m[o] \\e[4m0:ow*\\e[0m\\e[42m                                                  \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "T=tmux-256color P=%0",
+          "abc",
+          "abc",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[38;5;233m\\e[48;5;113m[i] \\e[4m0*\\e[0m\\e[48;5;113m                                                    \\e[38;5;233mIR",
+          "\\e[30m\\e[42m[o] \\e[4m0:ow*\\e[0m\\e[42m                                                  \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[38;5;233m\\e[48;5;113m[i] 0 \\e[4m1*\\e[0m\\e[48;5;113m                                                  \\e[38;5;233mIR",
+          "\\e[30m\\e[42m[o] \\e[4m0:ow*\\e[0m\\e[42m                                                  \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "screen|256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,mouse,overline,progressbar,RGB,strikethrough,sync,title,usstyle|1|60x11\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "i:0.0 60x10\ni:1.0 60x10\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[38;5;249m───────────────────────────────\\e[38;5;113m─────────────────────────────",
+          "",
+          "",
+          "",
+          "",
+          "\\e[38;5;233m\\e[48;5;113m[i] 0 \\e[4m1*\\e[0m\\e[48;5;113m                                                  \\e[38;5;233mIR",
+          "\\e[30m\\e[42m[o] \\e[4m0:ow*\\e[0m\\e[42m                                                  \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          6
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "[exited]",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    }
+  ]
+}
