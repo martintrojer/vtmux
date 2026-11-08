@@ -200,6 +200,17 @@ fn connect_or_start(
         }
         break;
     }
+    // client.c:166-170: holding the lock, the client unlinks the socket
+    // itself; a failure there (a directory: EISDIR) is `error connecting`.
+    if matches!(lock, Some(daemon::Lock::Held(_)))
+        && let Err(io) = std::fs::remove_file(path)
+        && io.kind() != io::ErrorKind::NotFound
+    {
+        return Err(EdgeError::ConnectFailed {
+            path: path.to_owned(),
+            io,
+        });
+    }
     let listener =
         daemon::bind_socket(path, default_socket).map_err(|io| EdgeError::CreateFailed {
             path: path.to_owned(),

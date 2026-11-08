@@ -359,6 +359,24 @@ fn missing_socket_dir() {
     });
 }
 
+/// A socket path that is a directory: connect is refused, and a command
+/// that starts a server fails to unlink it first (client.c:166-170), so
+/// it is `error connecting to ... (Is a directory)` (EPERM's text on
+/// macOS), not a bind error; the directory stays.
+#[test]
+fn socket_path_is_a_directory() {
+    compare("socket_path_is_a_directory", |w| {
+        let path = w.dir().join("sockdir");
+        std::fs::create_dir(&path).expect("mkdir");
+        let p = path.to_str().expect("utf-8 path");
+        vec![
+            w.raw(&["-f", "/dev/null", "-S", p, "ls"]),
+            w.raw(&["-f", "/dev/null", "-S", p, "new", "-d", "cat", "-"]),
+            w.raw(&["-f", "/dev/null", "-S", p, "has"]),
+        ]
+    });
+}
+
 /// (3) A stale socket file (nothing listening): `no server running on`.
 #[test]
 fn stale_socket() {
