@@ -1072,6 +1072,33 @@ fn a_clients_start_timer_runs_on() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A control client stays connected across an upgrade, so one of another
+/// protocol version still reads the frozen frames only in the new image,
+/// and is still of its version in the next one's snapshot; one of this
+/// version reads every frame.
+#[test]
+fn a_control_client_keeps_its_protocol_version() {
+    use vtmux_core::protocol::{FROZEN_SINCE, Speaks};
+    assert_ne!(FROZEN_SINCE, PROTOCOL_VERSION);
+    let dir = temp_dir("ctlversion");
+    let mut a = server(&dir);
+    ok(&mut a, &dir, &["new-session", "-d", "-s", "s", "cat", "-"]);
+    let words = ["attach", "-t", "s"];
+    let mut older = hello(&words, &dir, None, ControlMode::Control);
+    older.version = FROZEN_SINCE;
+    let (old_id, _old_peer) = connect(&mut a, older);
+    let (new_id, _new_peer) = connect(&mut a, hello(&words, &dir, None, ControlMode::Control));
+    assert_eq!(a.clients[&old_id].speaks, Speaks::Frozen);
+    let b = rebuild(&a, &dir, "b");
+    let c = rebuild(&b, &dir, "c");
+    for s in [&b, &c] {
+        assert_eq!(s.clients[&old_id].speaks, Speaks::Frozen);
+        assert_eq!(s.clients[&new_id].speaks, Speaks::Full);
+    }
+    drop((a, b, c));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// The title an attached client's terminal shows from its output comes
 /// back with the client.
 #[test]

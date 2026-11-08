@@ -1844,7 +1844,7 @@ impl Server {
         let mut c = Client::new(stream, x.activity);
         let level = x.control.as_ref().map_or(0, |cs| cs.level);
         let hello = Hello {
-            version: vtmux_core::protocol::PROTOCOL_VERSION,
+            version: x.version,
             invocation: if x.tmux_invocation {
                 vtmux_core::socket::Invocation::Tmux
             } else {
@@ -1876,6 +1876,14 @@ impl Server {
                 ..Default::default()
             },
         };
+        // A control client stays connected across an upgrade (live-upgrade
+        // spec, decision 26): one of another protocol version than this
+        // image's reads the frozen frames only, as when it connects
+        // (`Hello::check_version`). A terminal client of the image before
+        // comes back as this image's binary, or is detached.
+        if level != 0 && x.version != vtmux_core::protocol::PROTOCOL_VERSION {
+            c.speaks = vtmux_core::protocol::Speaks::Frozen;
+        }
         c.environ = hello.env.clone().into();
         c.attached = x.session.map(SessionId);
         c.activity_secs = x.activity_secs;

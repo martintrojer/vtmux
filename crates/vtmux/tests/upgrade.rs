@@ -359,6 +359,11 @@ struct Attached {
 
 impl Attached {
     fn new(world: &World, session: &str) -> Self {
+        Self::of(world, &world.client(), session)
+    }
+
+    /// [`Self::new`] run by `binary`.
+    fn of(world: &World, binary: &Path, session: &str) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
@@ -367,7 +372,7 @@ impl Attached {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut cmd = CommandBuilder::new(world.client());
+        let mut cmd = CommandBuilder::new(binary);
         cmd.args([
             "-L",
             &world.label,
@@ -2222,4 +2227,88 @@ fn an_upgrade_under_load_loses_and_repeats_nothing() {
         );
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// A protocol bump end to end, against `VTMUX_PREVIOUS_BINARY`, a build of
+/// the protocol before this one's (`git worktree add` the commit before
+/// the bump and `cargo build -p vtmux` there). Clients of either version
+/// on a server of the other get the version mismatch at once, never a
+/// connection left waiting, and a newer one the upgrade hint; this
+/// build's `vtmux-upgrade` moves the older server onto it, the older
+/// attached client re-executes this build and comes back, and the older
+/// control client reads on; an older control client is served after it.
+#[test]
+#[ignore = "needs VTMUX_PREVIOUS_BINARY, a build of the previous protocol version"]
+fn a_server_of_the_previous_protocol_moves_onto_this_build() {
+    let previous = PathBuf::from(
+        std::env::var_os("VTMUX_PREVIOUS_BINARY").expect("VTMUX_PREVIOUS_BINARY is set"),
+    );
+    let (new, old) = (protocol::PROTOCOL_VERSION, protocol::PROTOCOL_VERSION - 1);
+    let hint = "run 'tmux vtmux-upgrade' to move the server onto this binary";
+    let world = World::new();
+    *world.client.lock().unwrap() = previous.clone();
+    world.populate(&[]);
+    let mut attached = Attached::new(&world, "a");
+    let mut control = Control::new(&world, "b");
+    wait("both clients", || world.run(&["lsc"]).lines().count() == 2);
+    let refused = |binary: &Path, session_client: bool, client: u32, server: u32| {
+        let line = format!("protocol version mismatch (client {client}, server {server})");
+        if session_client {
+            let mut a = Attached::of(&world, binary, "a");
+            wait("the refused client to exit", || a.exited().is_some());
+            assert_eq!(a.exited(), Some(1));
+            let text = a.since(0);
+            assert!(text.contains(&line), "{text:?}");
+            assert_eq!(text.contains(hint), client > server, "{text:?}");
+        } else {
+            let out = world.command_of(binary, &["ls"]).output().unwrap();
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{err}");
+            assert!(err.starts_with(&line), "{err}");
+            assert_eq!(err.contains(hint), client > server, "{err}");
+        }
+    };
+    refused(&bin(), true, new, old);
+    refused(&bin(), false, new, old);
+    let pid = world.pid();
+    let panes = world.pane_pids();
+
+    let at = attached.len();
+    let out = world
+        .command_of(&bin(), &["vtmux-upgrade"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        (out.status.code(), String::from_utf8_lossy(&out.stderr)),
+        (Some(0), "".into())
+    );
+    *world.client.lock().unwrap() = bin();
+    assert_eq!(world.pid(), pid);
+    assert_eq!(world.pane_pids(), panes);
+    reexecuted(&attached, at);
+    #[cfg(target_os = "linux")]
+    assert_eq!(
+        std::fs::read_link(format!("/proc/{}/exe", attached.pid())).unwrap(),
+        std::fs::canonicalize(BIN).unwrap()
+    );
+    attached.keys("typed\r");
+    wait("the keys to reach the pane", || {
+        world
+            .run(&["capture-pane", "-p", "-t", "a:w1"])
+            .contains("typed")
+    });
+    control.send("display -p 'after #{session_name}'");
+    wait("the older control client reading on", || {
+        control.has("after b")
+    });
+    assert_eq!(world.run(&["lsc"]).lines().count(), 2);
+
+    refused(&previous, true, old, new);
+    refused(&previous, false, old, new);
+    *world.client.lock().unwrap() = previous.clone();
+    let mut later = Control::new(&world, "b");
+    later.send("display -p 'later #{session_name}'");
+    wait("a later older control client", || later.has("later b"));
+    *world.client.lock().unwrap() = bin();
+    assert!(attached.exited().is_none());
 }

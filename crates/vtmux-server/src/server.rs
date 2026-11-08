@@ -1304,7 +1304,7 @@ impl Server {
                     self.on_message(id, msg);
                 }
                 Err(ProtocolError::Truncated) => break,
-                Err(_) => {
+                Err(e) => {
                     // A Hello of another version that this build can't
                     // decode still gets the mismatch: the version comes
                     // first and is frozen (protocol module docs).
@@ -1319,6 +1319,13 @@ impl Server {
                             server: protocol::PROTOCOL_VERSION,
                         };
                         self.fail_client(id, &e);
+                    } else if c.hello.is_some() && !c.closing && !c.dead && !closed {
+                        // No more bytes complete a frame that doesn't
+                        // decode: the client is dropped, as tmux drops a
+                        // peer on a bad message (server-client.c
+                        // `server_client_dispatch`, `bad:`), and told why.
+                        c.inbuf.clear();
+                        self.drop_bad_frame(id, &e);
                     } else {
                         closed = true;
                     }
@@ -1676,6 +1683,22 @@ impl Server {
                 }
             }
             ClientMsg::UpgradeRequest { binary } => self.upgrade_request(id, &binary),
+        }
+    }
+
+    /// A frame from client `id` that doesn't decode: it is sent `Exit 1`
+    /// (frozen, so a client of any build reads it) with the error as its
+    /// reason, after the teardown of an attached client's terminal.
+    fn drop_bad_frame(&mut self, id: ClientId, e: &ProtocolError) {
+        let message = Some(e.to_string());
+        let terminal = self
+            .clients
+            .get(&id)
+            .is_some_and(|c| c.attached.is_some() && c.control.is_none());
+        if terminal {
+            self.exit_attached(id, 1, message, false);
+        } else {
+            self.finish_client_with(id, 1, message);
         }
     }
 

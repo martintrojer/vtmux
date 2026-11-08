@@ -949,6 +949,7 @@ impl Server {
         let mut size = None;
         if let Some(h) = c.hello.as_mut() {
             h.pid = hello.pid;
+            h.version = hello.version;
             h.ext = HelloExt {
                 follows_upgrade: hello.ext.follows_upgrade,
                 reattach: None,

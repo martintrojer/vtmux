@@ -406,3 +406,109 @@ fn a_control_client_of_another_version_gets_exec() {
         "{frames:?}"
     );
 }
+
+/// An attach client of protocol 9 (frozen `Hello`, then its 8-byte
+/// `Resize`, which this build's is not) is turned away with the mismatch,
+/// not attached on a connection whose next frame never decodes.
+#[test]
+fn an_attach_client_of_protocol_9_gets_the_mismatch() {
+    let server = Server::start();
+    let mut stream = server.connect();
+    let ClientMsg::Hello(mut hello) = server.hello(
+        protocol::FROZEN_SINCE,
+        ControlMode::None,
+        &["attach", "-t", "a"],
+    ) else {
+        unreachable!()
+    };
+    hello.tty = Some(vtmux_core::protocol::TtyInfo {
+        name: String::new(),
+        term: "xterm-256color".into(),
+        cols: 80,
+        rows: 24,
+        features: Vec::new(),
+    });
+    protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).unwrap();
+    let line = format!(
+        "protocol version mismatch (client {}, server {PROTOCOL_VERSION})\n",
+        protocol::FROZEN_SINCE
+    );
+    assert_eq!(
+        read(&mut stream),
+        Some(ServerMsg::Stderr(line.into_bytes()))
+    );
+    assert_eq!(
+        read(&mut stream),
+        Some(ServerMsg::Exit {
+            code: 1,
+            message: None,
+            hup: false,
+        })
+    );
+    assert_eq!(server.run(&["lsc"]).0, "", "not attached");
+}
+
+/// A whole frame whose field runs past its end (protocol 9's `Resize`)
+/// is never completed by more bytes: the client is sent `Exit 1` with
+/// why, a terminal client after its teardown, and the server serves on.
+#[test]
+fn a_whole_frame_that_does_not_decode_ends_the_client_with_why() {
+    let server = Server::start();
+    let short_resize = [9, 0, 0, 0, 2, 80, 0, 0, 0, 24, 0, 0, 0];
+    for terminal in [false, true] {
+        let mut stream = server.connect();
+        let control = if terminal {
+            ControlMode::None
+        } else {
+            ControlMode::Control
+        };
+        let ClientMsg::Hello(mut hello) = server.hello(PROTOCOL_VERSION, control, &["attach"])
+        else {
+            unreachable!()
+        };
+        if terminal {
+            hello.tty = Some(vtmux_core::protocol::TtyInfo {
+                name: String::new(),
+                term: "xterm-256color".into(),
+                cols: 80,
+                rows: 24,
+                features: Vec::new(),
+            });
+        }
+        protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).unwrap();
+        if terminal {
+            while read(&mut stream) != Some(ServerMsg::Ready) {}
+        }
+        wait_for_clients(&server, 1);
+        std::io::Write::write_all(&mut stream, &short_resize).unwrap();
+        let mut frames = Vec::new();
+        while let Some(msg) = read(&mut stream) {
+            frames.push(msg);
+        }
+        assert_eq!(
+            frames.last(),
+            Some(&ServerMsg::Exit {
+                code: 1,
+                message: Some("malformed frame: field cut short".into()),
+                hup: false,
+            }),
+            "terminal {terminal}"
+        );
+        // A terminal client's terminal is given back first (`?1049l`).
+        let teardown = frames
+            .iter()
+            .any(|m| matches!(m, ServerMsg::Frame(b) if b.windows(8).any(|w| w == b"\x1b[?1049l")));
+        assert_eq!(teardown, terminal, "{frames:?}");
+        wait_for_clients(&server, 0);
+    }
+    assert_eq!(server.run(&["has", "-t", "a"]).2, 0, "the server runs on");
+}
+
+/// Waits (at most 10 s) for `lsc` to list `n` clients.
+fn wait_for_clients(server: &Server, n: usize) {
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    while server.run(&["lsc"]).0.lines().count() != n {
+        assert!(std::time::Instant::now() < end, "{n} clients");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}

@@ -5,8 +5,13 @@
 //! followed by the variant's fields: integers little-endian, byte strings and
 //! strings as `u32 LE length` + bytes, `Option` as a 0/1 byte, vectors as a
 //! `u32 LE` count + elements. A frame whose declared length exceeds
-//! [`MAX_FRAME`], a frame cut short, an unknown tag, bad UTF-8 or bytes left
-//! over after the last field are errors, never panics.
+//! [`MAX_FRAME`], a frame cut short, an unknown tag, bad UTF-8, a field
+//! running past the end of its frame or bytes left over after the last field
+//! are errors, never panics. Only a frame cut short is
+//! [`ProtocolError::Truncated`], which a reader of a stream waits on: a whole
+//! frame that doesn't decode is never completed by more bytes, so the
+//! reader drops the connection (a build of the same version with another
+//! encoding, which a missed [`PROTOCOL_VERSION`] bump would let in).
 //!
 //! A version mismatch is reported the way tmux does (client.c:659-668:
 //! `protocol version mismatch (client N, server M)`, exit 1), with vtmux's
@@ -52,12 +57,12 @@
 //! - `Hello`'s `ext` is its extension area. A later build appends its new
 //!   `Hello` fields there in order; a reader takes the fields it knows and
 //!   ignores the rest (the first protocol 9 builds ignore it all). Bytes
-//!   after `ext` are still an error. The fields so far ([`HelloExt`]), all
-//!   of protocol 9: `upgrade` u8 (bit 0: the client follows an
+//!   after `ext` are still an error. The fields so far ([`HelloExt`]):
+//!   from protocol 9, `upgrade` u8 (bit 0: the client follows an
 //!   [`ServerMsg::UpgradeNotice`]; the other bits 0), then `reattach`
-//!   option of string (the notice's token); then, from the build that
-//!   sends the terminal size queries, `pixels`: the terminal's `ws_xpixel`
-//!   and `ws_ypixel`, u32 each, written only when not both 0. A `Hello`
+//!   option of string (the notice's token); then, from protocol 10,
+//!   `pixels`: the terminal's `ws_xpixel` and `ws_ypixel`, u32 each,
+//!   written only when not both 0. A `Hello`
 //!   whose fields are all unset has an empty `ext`, as before them.
 //! - The re-attach command line, which a client of one build runs to
 //!   start the binary of another: `<binary> --vtmux-reattach <socket
@@ -104,8 +109,9 @@ use crate::error::EdgeError;
 use crate::socket::Invocation;
 
 /// Bumped on any incompatible wire change. The frozen frames (module docs)
-/// never change, whatever this says.
-pub const PROTOCOL_VERSION: u32 = 9;
+/// never change, whatever this says. `tests::this_versions_frames` pins
+/// every other frame to it. 10: `Resize` carries the pixel size.
+pub const PROTOCOL_VERSION: u32 = 10;
 
 /// The first protocol version with the frozen frames: a control client of
 /// this version or later talks to any server of this version or later.
@@ -453,7 +459,9 @@ impl ServerMsg {
 
 #[derive(Debug)]
 pub enum ProtocolError {
-    /// The buffer ends before the frame does (or inside a field).
+    /// The buffer ends before the frame does: a streaming reader waits for
+    /// more bytes. A field running past the end of a whole frame is
+    /// [`ProtocolError::Malformed`].
     Truncated,
     /// The declared payload length is above [`MAX_FRAME`].
     Oversized(usize),
@@ -543,12 +551,20 @@ pub fn decode<M: Message>(buf: &[u8]) -> Result<(M, usize), ProtocolError> {
     }
     let payload = buf.get(4..4 + len).ok_or(ProtocolError::Truncated)?;
     let mut r = Reader { buf: payload };
-    let msg = M::read_payload(&mut r)?;
+    // The whole frame is here: a field cut short is not waited on.
+    let msg = M::read_payload(&mut r).map_err(|e| match e {
+        ProtocolError::Truncated => ProtocolError::Malformed(FIELD_CUT_SHORT),
+        e => e,
+    })?;
     if !r.buf.is_empty() {
         return Err(ProtocolError::TrailingBytes);
     }
     Ok((msg, 4 + len))
 }
+
+/// [`ProtocolError::Malformed`]'s word for a field that runs past the end
+/// of its frame.
+const FIELD_CUT_SHORT: &str = "field cut short";
 
 /// Write one frame to a stream.
 ///
@@ -1310,9 +1326,11 @@ mod tests {
             decode::<ClientMsg>(&frame(&[99])),
             Err(ProtocolError::UnknownTag(99))
         ));
+        // A whole frame whose fields run past its end is malformed, not
+        // truncated: no more bytes complete it, so a reader must not wait.
         assert!(matches!(
             decode::<ClientMsg>(&frame(&[])),
-            Err(ProtocolError::Truncated)
+            Err(ProtocolError::Malformed(FIELD_CUT_SHORT))
         ));
         assert!(matches!(
             decode::<ClientMsg>(&frame(&[4, 0])),
@@ -1321,7 +1339,17 @@ mod tests {
         // Input with a declared length longer than the payload.
         assert!(matches!(
             decode::<ClientMsg>(&frame(&[1, 9, 0, 0, 0, 1])),
-            Err(ProtocolError::Truncated)
+            Err(ProtocolError::Malformed(FIELD_CUT_SHORT))
+        ));
+        // Protocol 9's Resize, columns and rows only: this build's has the
+        // pixels too.
+        assert!(matches!(
+            decode::<ClientMsg>(&frame(&[2, 80, 0, 0, 0, 24, 0, 0, 0])),
+            Err(ProtocolError::Malformed(FIELD_CUT_SHORT))
+        ));
+        assert!(matches!(
+            read_msg::<ClientMsg>(&mut &frame(&[2, 80, 0, 0, 0, 24, 0, 0, 0])[..]),
+            Err(ProtocolError::Malformed(FIELD_CUT_SHORT))
         ));
         // Stdout is bytes; Exit's message must be UTF-8.
         let mut bad_utf8 = vec![3, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0xff];
@@ -1339,7 +1367,7 @@ mod tests {
         hello.extend_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(
             decode::<ClientMsg>(&frame(&hello)),
-            Err(ProtocolError::Truncated)
+            Err(ProtocolError::Malformed(FIELD_CUT_SHORT))
         ));
     }
 
@@ -1599,6 +1627,131 @@ mod tests {
             );
         }
         for (m, golden) in &frozen_server_goldens() {
+            let bytes = unhex(golden);
+            assert_eq!(hex(&encode(m).unwrap()), hex(&bytes), "{m:?}");
+            assert_eq!(
+                decode::<ServerMsg>(&bytes).unwrap(),
+                (m.clone(), bytes.len())
+            );
+        }
+    }
+
+    /// This version's frames that are not frozen, with goldens
+    /// ([`this_versions_frames`]).
+    fn this_version_client_goldens() -> Vec<(ClientMsg, &'static str)> {
+        vec![
+            (
+                ClientMsg::Input(vec![0x1b, b'A']),
+                "07000000 01 02000000 1b41",
+            ),
+            (
+                ClientMsg::Resize {
+                    cols: 80,
+                    rows: 24,
+                    xpixel: 800,
+                    ypixel: 480,
+                },
+                "11000000 02 50000000 18000000 20030000 e0010000",
+            ),
+            (ClientMsg::Detach, "01000000 05"),
+            (
+                ClientMsg::FrameAck {
+                    seq: 0x0102_0304_0506_0708,
+                },
+                "09000000 06 0807060504030201",
+            ),
+            (
+                ClientMsg::ReadData(b"d".to_vec()),
+                "06000000 07 01000000 64",
+            ),
+            (ClientMsg::FileDone { error: 2 }, "05000000 08 02000000"),
+            (ClientMsg::Wakeup, "01000000 09"),
+            (ClientMsg::Unlock, "01000000 0a"),
+        ]
+    }
+
+    /// [`this_version_client_goldens`], the server's.
+    fn this_version_server_goldens() -> Vec<(ServerMsg, &'static str)> {
+        vec![
+            (ServerMsg::Frame(b"f".to_vec()), "06000000 02 01000000 66"),
+            (ServerMsg::Ready, "01000000 04"),
+            (ServerMsg::ReadOpen { path: None }, "02000000 05 00"),
+            (
+                ServerMsg::ReadOpen {
+                    path: Some(PathBuf::from("/f")),
+                },
+                "08000000 05 01 02000000 2f66",
+            ),
+            (
+                ServerMsg::WriteOpen {
+                    path: PathBuf::from("/f"),
+                    append: true,
+                },
+                "08000000 06 02000000 2f66 01",
+            ),
+            (
+                ServerMsg::WriteData(b"d".to_vec()),
+                "06000000 07 01000000 64",
+            ),
+            (ServerMsg::WriteClose, "01000000 08"),
+            (ServerMsg::Suspend, "01000000 0a"),
+            (
+                ServerMsg::Lock {
+                    command: "c".into(),
+                },
+                "06000000 0b 01000000 63",
+            ),
+        ]
+    }
+
+    /// The frames that are not frozen change only with [`PROTOCOL_VERSION`]:
+    /// a build of the same version is served in full, so one whose frames
+    /// differ would be read wrong (protocol 9's 8-byte `Resize` left the
+    /// connection waiting on a field). These goldens are this version's:
+    /// when one has to change, bump [`PROTOCOL_VERSION`] (never
+    /// [`FROZEN_SINCE`]) and rewrite `VERSION` and the goldens with it.
+    #[test]
+    fn this_versions_frames() {
+        const VERSION: u32 = 10;
+        assert_eq!(
+            PROTOCOL_VERSION, VERSION,
+            "the goldens below are protocol {VERSION}'s"
+        );
+        let client = this_version_client_goldens();
+        let server = this_version_server_goldens();
+        // Every frame that is not frozen has a golden here.
+        let tag = |frame: Vec<u8>| frame[4];
+        let tags = |t: Vec<u8>| -> std::collections::BTreeSet<u8> { t.into_iter().collect() };
+        let frozen_client = tags(vec![0, 3, 4, 0x80]);
+        assert_eq!(
+            tags(client.iter().map(|(_, g)| tag(unhex(g))).collect()),
+            tags(
+                all_client()
+                    .iter()
+                    .map(|m| tag(encode(m).unwrap()))
+                    .filter(|t| !frozen_client.contains(t))
+                    .collect()
+            )
+        );
+        assert_eq!(
+            tags(server.iter().map(|(_, g)| tag(unhex(g))).collect()),
+            tags(
+                all_server()
+                    .iter()
+                    .filter(|m| !m.is_frozen())
+                    .map(|m| tag(encode(m).unwrap()))
+                    .collect()
+            )
+        );
+        for (m, golden) in &client {
+            let bytes = unhex(golden);
+            assert_eq!(hex(&encode(m).unwrap()), hex(&bytes), "{m:?}");
+            assert_eq!(
+                decode::<ClientMsg>(&bytes).unwrap(),
+                (m.clone(), bytes.len())
+            );
+        }
+        for (m, golden) in &server {
             let bytes = unhex(golden);
             assert_eq!(hex(&encode(m).unwrap()), hex(&bytes), "{m:?}");
             assert_eq!(
