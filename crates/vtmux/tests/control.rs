@@ -297,6 +297,27 @@ fn unattached_exits_at_once() {
     });
 }
 
+/// A control client's stdin is read only once its own command has run
+/// (control.c `control_start` leaves the read event off; `control_ready`
+/// from server-client.c `server_client_command_done` turns it on). Its
+/// command waits for the startup config (cfg.c `start_cfg`), here held by a
+/// job, so an EOF that comes first ends the client only after the command:
+/// the session is made and the config's error reaches it as
+/// `%config-error` (regress if-shell-error.sh).
+#[test]
+fn stdin_eof_waits_for_the_startup_config() {
+    compare("stdin_eof_waits_for_the_startup_config", |w| {
+        let conf = w.dir.path().join("job.conf");
+        std::fs::write(&conf, "if 'sleep 1' 'nosuch'\n").expect("write");
+        let conf = conf.to_str().expect("utf-8");
+        // Named, so no automatic rename races the exit.
+        let c = w.control(&["-f", conf, "new", "-s", "c", "-n", "w", "cat"]);
+        let (out, err, code) = c.close();
+        let has = w.run(&["has", "-t", "c"]);
+        (normalise_guards(&w.normalise(&out)), err, code, has)
+    });
+}
+
 /// (2) An attached control client runs stdin lines in flags-1 guards.
 #[test]
 fn attached_display_in_guard() {

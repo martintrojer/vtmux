@@ -678,8 +678,13 @@ impl Server {
             }
             self.control_line(id, &vtmux_core::rawstr::from_vec(line));
         }
+        // EOF counts only once stdin is read (`control_ready`): before
+        // that tmux has not enabled the read event (control.c
+        // `control_start`), so a client whose command still waits (on the
+        // startup config's jobs, say) runs it first.
         if let Some(cs) = self.control_mut(id)
             && cs.eof
+            && cs.ready
         {
             cs.exit.get_or_insert(Exit::Return);
         }
