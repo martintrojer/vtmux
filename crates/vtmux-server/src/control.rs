@@ -19,7 +19,7 @@ use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::protocol::ServerMsg;
 
 use crate::commands::Item;
-use crate::control_queue::{self as queue, Piece};
+use crate::control_queue as queue;
 use crate::server::{ClientId, GlobalEnv, Server};
 use crate::target::Origin;
 
@@ -61,8 +61,8 @@ pub struct ControlState {
     eof: bool,
     guard_depth: u32,
     deferred: Vec<Vec<u8>>,
-    /// Protocol bytes not yet handed to the connection.
-    out: Vec<u8>,
+    /// Lines (one `control_write` each) not yet handed to the connection.
+    out: Pending,
     /// `CLIENT_EXIT` with how the exit is reported.
     exit: Option<Exit>,
     /// `Exit` has been sent.
@@ -86,6 +86,50 @@ pub struct ControlState {
     discard: bool,
     /// `c->exit_message` with [`Exit::Return`]: `too far behind`.
     exit_message: Option<String>,
+}
+
+/// Protocol bytes not yet handed to the connection, kept by line: each
+/// `control_write` is checked against the reply cap by itself
+/// (`control_check_reply_buffer`), so a stream can stop between any two.
+#[derive(Debug, Default)]
+struct Pending {
+    bytes: Vec<u8>,
+    /// Where each line ends in `bytes`.
+    ends: Vec<usize>,
+}
+
+impl Pending {
+    /// A line: `text` as it is, which ends in its newline.
+    fn add(&mut self, text: &[u8]) {
+        self.bytes.extend_from_slice(text);
+        self.ends.push(self.bytes.len());
+    }
+
+    fn is_empty(&self) -> bool {
+        self.ends.is_empty()
+    }
+
+    /// The lines, each with its newline.
+    fn lines(&self) -> impl Iterator<Item = &[u8]> {
+        let mut from = 0;
+        self.ends.iter().map(move |&end| {
+            let line = &self.bytes[from..end];
+            from = end;
+            line
+        })
+    }
+
+    /// Lines before these.
+    fn prepend(&mut self, lines: &[Vec<u8>]) {
+        let mut all = Self::default();
+        for line in lines {
+            all.add(line);
+        }
+        for line in self.lines() {
+            all.add(line);
+        }
+        *self = all;
+    }
 }
 
 /// `CONTROL_PANE_OFF` and `CONTROL_PANE_PAUSED`.
@@ -164,8 +208,10 @@ impl ControlState {
     }
 
     fn write_line(&mut self, line: &[u8]) {
-        self.out.extend_from_slice(line);
-        self.out.push(b'\n');
+        let mut text = Vec::with_capacity(line.len() + 1);
+        text.extend_from_slice(line);
+        text.push(b'\n');
+        self.out.add(&text);
     }
 
     /// `control_write_guard`: the only place guard depth changes.
@@ -280,7 +326,10 @@ impl Server {
     }
 
     /// [`Self::control_flush`] without writing what is queued: whether
-    /// the lines were queued.
+    /// the lines were queued. Each line is checked against the reply cap
+    /// by itself (`control_write_line`), with what the connection holds
+    /// and what this flush has handed it, so the stream can stop at any
+    /// line: the rest of the flush is dropped.
     fn control_flush_lines(&mut self, id: ClientId) -> bool {
         let Some(c) = self.clients.get_mut(&id) else {
             return false;
@@ -289,80 +338,94 @@ impl Server {
         let Some(cs) = c.control.as_mut() else {
             return false;
         };
+        if cs.out.is_empty() {
+            return false;
+        }
         let out = std::mem::take(&mut cs.out);
-        if out.is_empty() || cs.check_reply_buffer(unwritten, out.len()) {
-            return false;
+        let queued = !cs.queue.is_empty();
+        let mut sent = Vec::new();
+        for line in out.lines() {
+            if cs.check_reply_buffer(unwritten + sent.len(), line.len()) {
+                break;
+            }
+            if queued {
+                cs.queue.push_line(line.to_vec());
+            } else {
+                sent.extend_from_slice(line);
+            }
         }
-        if cs.queue.is_empty() {
-            self.send(id, &ServerMsg::Stdout(out));
-            return false;
+        if !sent.is_empty() {
+            self.send(id, &ServerMsg::Stdout(sent));
         }
-        cs.queue.push_line(out);
-        true
+        queued
     }
 
     /// `control_write_callback` (control.c:925-958): move what is queued
     /// for client `id` to its connection until [`queue::BUFFER_HIGH`] is
-    /// unwritten there, pane output a little at a time
-    /// ([`queue::write_limit`]) and escaped only now, so a slow reader
-    /// costs the pane bytes it has not been sent, not their copies.
+    /// unwritten there. Pane output goes a little at a time, the panes
+    /// with output queued taking turns ([`queue::Queue::next_pane`]), and
+    /// is escaped only now, so a slow reader costs the pane bytes it has
+    /// not been sent, not their copies. A line goes as soon as nothing
+    /// queued before it is left (`control_flush_all_blocks`), whatever the
+    /// room.
     pub(crate) fn control_pump(&mut self, id: ClientId) {
         let now = Instant::now();
+        if let Some(cs) = self.control_mut(id) {
+            cs.queue.begin();
+        }
         loop {
             self.control_flush_lines(id);
-            let Some(c) = self.clients.get(&id).filter(|c| !c.dead && !c.closing) else {
+            let Some(c) = self.clients.get_mut(&id).filter(|c| !c.dead && !c.closing) else {
                 return;
             };
             let unwritten = c.unwritten();
             let extended = c.flags.pause_after.is_some();
-            let Some(cs) = c.control.as_ref() else {
+            let Some(cs) = c.control.as_mut() else {
                 return;
             };
-            if unwritten >= queue::BUFFER_HIGH || cs.queue.is_empty() {
-                return;
+            if let Some(line) = cs.queue.take_line() {
+                self.send(id, &ServerMsg::Stdout(line));
+                continue;
             }
-            if let Some(p) = cs.queue.front_output() {
-                // control_write_pending, control_window_pane: the output
-                // of a pane gone, closed or no longer in the client's
-                // session goes.
-                let live = self.model.panes.get(&p).is_some_and(|x| {
-                    x.io.is_some()
-                        && c.attached
-                            .is_some_and(|s| self.model.index_of(s, x.window).is_some())
-                });
-                if !live {
-                    if let Some(cs) = self.control_mut(id) {
-                        cs.queue.discard_pane(p);
-                    }
-                    continue;
+            let Some(p) = cs.queue.next_pane(unwritten) else {
+                return;
+            };
+            // control_write_pending, control_window_pane: the output of a
+            // pane gone, closed or no longer in the client's session goes.
+            let present = self.model.panes.get(&p).is_some_and(|x| {
+                x.io.is_some()
+                    && c.attached
+                        .is_some_and(|s| self.model.index_of(s, x.window).is_some())
+            });
+            if !present {
+                cs.queue.discard_pane(p);
+                cs.queue.end_turn();
+                continue;
+            }
+            if self.control_check_age(id, p, now) {
+                if let Some(cs) = self.control_mut(id) {
+                    cs.queue.end_turn();
                 }
-                if self.control_check_age(id, p, now) {
-                    continue;
-                }
+                continue;
             }
             let Some(cs) = self.clients.get_mut(&id).and_then(|c| c.control.as_mut()) else {
                 return;
             };
-            let limit = queue::write_limit(unwritten, cs.queue.pending());
-            let Some(piece) = cs.queue.next(limit, &self.control_streams, now) else {
-                return;
+            let Some((pane, data, age)) = cs.queue.take_output(&self.control_streams, now) else {
+                cs.queue.end_turn();
+                continue;
             };
-            match piece {
-                Piece::Line(line) => self.send(id, &ServerMsg::Stdout(line)),
-                Piece::Output { pane, data, age } => {
-                    let mut line = if extended {
-                        extended_output_line(pane, age, &data)
-                    } else {
-                        output_line(pane, &data)
-                    };
-                    line.push(b'\n');
-                    self.send_as(
-                        id,
-                        &ServerMsg::Stdout(line),
-                        crate::server::OutKind::PaneOutput,
-                    );
-                }
-            }
+            let mut line = if extended {
+                extended_output_line(pane, age, &data)
+            } else {
+                output_line(pane, &data)
+            };
+            line.push(b'\n');
+            self.send_as(
+                id,
+                &ServerMsg::Stdout(line),
+                crate::server::OutKind::PaneOutput,
+            );
         }
     }
 
@@ -551,7 +614,7 @@ impl Server {
             return;
         };
         for out in item.output.drain(..) {
-            cs.out.extend_from_slice(&out.into_bytes(item.utf8).0);
+            cs.out.add(&out.into_bytes(item.utf8).0);
         }
     }
 
@@ -660,8 +723,7 @@ impl Server {
                 let guard = self.control_begin(&item);
                 let msg = crate::cmdq::error_bytes(&e);
                 if let Some(cs) = self.control_mut(id) {
-                    cs.out.extend_from_slice(b"parse error: ");
-                    cs.write_line(&msg);
+                    cs.write_line(&[b"parse error: ", msg.as_slice()].concat());
                     if let Some(g) = guard {
                         cs.guard("error", g);
                     }
@@ -697,9 +759,8 @@ impl Server {
             cs.deferred.clear();
             // control_discard: the pane output held goes; the lines
             // queued behind it go out before the exit.
-            let mut lines = cs.queue.take_lines();
-            lines.append(&mut cs.out);
-            cs.out = lines;
+            let lines = cs.queue.take_lines();
+            cs.out.prepend(&lines);
             self.discard_pane_output(id);
             if let Some(c) = self.clients.get_mut(&id) {
                 c.left_session = c.attached.or(c.left_session);
@@ -888,7 +949,7 @@ impl Server {
     pub(crate) fn control_reset_panes(&mut self, id: ClientId) {
         if let Some(cs) = self.control_mut(id) {
             cs.panes.clear();
-            cs.queue.discard_output();
+            cs.queue.reset_panes();
         }
     }
 
@@ -1122,7 +1183,7 @@ mod tests {
     }
 
     fn text(cs: &ControlState) -> String {
-        String::from_utf8(cs.out.clone()).unwrap()
+        String::from_utf8(cs.out.bytes.clone()).unwrap()
     }
 
     #[test]

@@ -116,44 +116,61 @@ impl Streams {
 }
 
 /// `struct control_block` with a size: pane bytes `[start, end)` read at
-/// `read`.
+/// `read`, `start` moving up as they are sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Block {
+    /// Where the block stands in [`Queue::all`].
+    seq: u64,
     start: u64,
     end: u64,
     read: Instant,
 }
 
-/// What goes out next, in order (`cs->all_blocks`): a line waits behind
-/// the pane output queued before it.
+/// What `cs->all_blocks` holds: a line waits behind the pane output
+/// queued before it.
 #[derive(Debug, PartialEq, Eq)]
 enum Entry {
     Line(Vec<u8>),
-    /// The oldest block of the pane's lane.
+    /// A block of the pane's lane that still has bytes to send.
     Output(PaneId),
 }
 
-/// One piece for the connection, from [`Queue::next`].
-#[derive(Debug, PartialEq, Eq)]
-pub enum Piece {
-    /// A line, with its newline.
-    Line(Vec<u8>),
-    /// Raw pane bytes and the age of the oldest block they came from.
-    Output {
-        pane: PaneId,
-        data: Vec<u8>,
-        age: Duration,
-    },
-}
-
 /// A control client's unsent output (`struct control_state`'s blocks).
+///
+/// Lines and pane output are kept in the order they were queued
+/// (`cs->all_blocks`), but pane output is sent as tmux sends it
+/// (`control_write_callback`): the panes with output held take turns, each
+/// up to its share of the room in a round ([`Self::next_pane`],
+/// [`Self::take_output`]); a line goes out as soon as nothing queued before
+/// it is left to send ([`Self::take_line`]).
 #[derive(Debug, Default)]
 pub struct Queue {
-    entries: VecDeque<Entry>,
+    /// `cs->all_blocks`: lines, and the blocks of every pane that still
+    /// have bytes to send, by the order they were queued in.
+    all: BTreeMap<u64, Entry>,
+    next_seq: u64,
     /// Each pane's blocks, oldest first (`cp->blocks`).
     lanes: BTreeMap<PaneId, VecDeque<Block>>,
+    /// `cs->pending_list`: the panes with output queued, in the order
+    /// their first block was queued. A pane stays in it after its blocks
+    /// were discarded, until its turn finds nothing to send.
+    pending: VecDeque<PaneId>,
     /// Bytes of the lines held (`cs->queued_reply_bytes`).
     line_bytes: usize,
+    /// Where the current `control_write_callback` is.
+    round: Round,
+}
+
+/// One call of `control_write_callback`: the panes still to be served in
+/// the round it is in, and the pane being served.
+#[derive(Debug, Default)]
+struct Round {
+    /// The share of one pane (`limit`), the same for the whole round.
+    limit: usize,
+    /// The panes yet to have their turn.
+    todo: VecDeque<PaneId>,
+    /// The pane being served and the bytes it has had this turn (`used`).
+    serving: Option<(PaneId, usize)>,
 }
 
 /// One thing a queue holds, as a snapshot carries it (D27): a line, or a
@@ -169,13 +186,13 @@ pub enum Held {
 }
 
 impl Queue {
-    /// Everything held, in the order it goes out, the pane bytes read
+    /// Everything held, in the order it was queued, the pane bytes read
     /// from `streams`.
     #[must_use]
     pub fn held(&self, streams: &Streams) -> Vec<Held> {
         let mut at: BTreeMap<PaneId, usize> = BTreeMap::new();
-        self.entries
-            .iter()
+        self.all
+            .values()
             .filter_map(|e| match e {
                 Entry::Line(line) => Some(Held::Line(line.clone())),
                 Entry::Output(p) => {
@@ -210,9 +227,11 @@ impl Queue {
         q
     }
 
+    /// Whether `cs->all_blocks` is empty: a line may go straight to the
+    /// connection.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.all.is_empty()
     }
 
     /// Bytes of lines held behind pane output.
@@ -221,16 +240,17 @@ impl Queue {
         self.line_bytes
     }
 
-    /// Whether any pane output is held: a line must wait behind it.
-    #[must_use]
-    pub fn has_output(&self) -> bool {
-        !self.lanes.is_empty()
+    fn push(&mut self, entry: Entry) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.all.insert(seq, entry);
+        seq
     }
 
     /// A line (ending in its newline) behind what is queued.
     pub fn push_line(&mut self, line: Vec<u8>) {
         self.line_bytes += line.len();
-        self.entries.push_back(Entry::Line(line));
+        self.push(Entry::Line(line));
     }
 
     /// Pane `p`'s bytes `[start, end)`, read at `read`: a block of its own,
@@ -239,33 +259,52 @@ impl Queue {
         if start == end {
             return;
         }
-        let lane = self.lanes.entry(p).or_default();
-        lane.push_back(Block { start, end, read });
-        self.entries.push_back(Entry::Output(p));
+        let seq = self.push(Entry::Output(p));
+        self.lanes.entry(p).or_default().push_back(Block {
+            seq,
+            start,
+            end,
+            read,
+        });
+        if !self.pending.contains(&p) {
+            self.pending.push_back(p);
+        }
     }
 
-    /// `control_discard_pane`: pane `p`'s output goes.
+    /// `control_discard_pane`: pane `p`'s blocks go. The pane stays
+    /// pending until its turn comes.
     pub fn discard_pane(&mut self, p: PaneId) {
-        if self.lanes.remove(&p).is_some() {
-            self.entries.retain(|e| *e != Entry::Output(p));
+        if let Some(lane) = self.lanes.remove(&p) {
+            for block in lane {
+                self.all.remove(&block.seq);
+            }
         }
     }
 
     /// `control_discard`: every pane's output goes; the lines stay.
     pub fn discard_output(&mut self) {
-        self.lanes.clear();
-        self.entries.retain(|e| matches!(e, Entry::Line(_)));
+        for p in self.lanes.keys().copied().collect::<Vec<_>>() {
+            self.discard_pane(p);
+        }
+    }
+
+    /// `control_reset_offsets`: every pane's output goes and none is
+    /// pending.
+    pub fn reset_panes(&mut self) {
+        self.discard_output();
+        self.pending.clear();
+        self.round = Round::default();
     }
 
     /// `control_discard`, then the lines held, in order, for the exit.
-    pub fn take_lines(&mut self) -> Vec<u8> {
+    pub fn take_lines(&mut self) -> Vec<Vec<u8>> {
         self.discard_output();
         self.line_bytes = 0;
-        self.entries
-            .drain(..)
-            .flat_map(|e| match e {
-                Entry::Line(line) => line,
-                Entry::Output(_) => Vec::new(),
+        std::mem::take(&mut self.all)
+            .into_values()
+            .filter_map(|e| match e {
+                Entry::Line(line) => Some(line),
+                Entry::Output(_) => None,
             })
             .collect()
     }
@@ -275,19 +314,25 @@ impl Queue {
         *self = Self::default();
     }
 
-    /// The pane whose output goes next, if output is next.
-    #[must_use]
-    pub fn front_output(&self) -> Option<PaneId> {
-        match self.entries.front()? {
-            Entry::Output(p) => Some(*p),
-            Entry::Line(_) => None,
+    /// The line at the head of `cs->all_blocks`, if the head is a line
+    /// (`control_flush_all_blocks`): nothing queued before it is left to
+    /// send.
+    pub fn take_line(&mut self) -> Option<Vec<u8>> {
+        let (&seq, entry) = self.all.first_key_value()?;
+        if !matches!(entry, Entry::Line(_)) {
+            return None;
         }
+        let Some(Entry::Line(line)) = self.all.remove(&seq) else {
+            unreachable!("the head is a line");
+        };
+        self.line_bytes = self.line_bytes.saturating_sub(line.len());
+        Some(line)
     }
 
-    /// How many panes have output held (`cs->pending_count`).
+    /// How many panes are pending (`cs->pending_count`).
     #[must_use]
     pub fn pending(&self) -> usize {
-        self.lanes.len()
+        self.pending.len()
     }
 
     /// The panes with output held and when the oldest of each was read.
@@ -310,44 +355,92 @@ impl Queue {
             .filter_map(|(&p, lane)| Some((p, lane.front()?.start)))
     }
 
-    /// The next piece (`control_write_pending`): a line, or up to `limit`
-    /// bytes of the pane whose output is first, across its blocks queued
-    /// one after another.
-    pub fn next(&mut self, limit: usize, streams: &Streams, now: Instant) -> Option<Piece> {
-        match self.entries.front()? {
-            Entry::Line(_) => {
-                let Some(Entry::Line(line)) = self.entries.pop_front() else {
-                    unreachable!("front is a line");
-                };
-                self.line_bytes -= line.len();
-                Some(Piece::Line(line))
+    /// A new `control_write_callback`: the panes go round from the first
+    /// pending one again.
+    pub fn begin(&mut self) {
+        self.round = Round::default();
+    }
+
+    /// The pane whose turn it is, for a connection with `unwritten` bytes
+    /// unwritten; none when the room is used (`unwritten` at
+    /// [`BUFFER_HIGH`], checked as a turn would start) or nothing is
+    /// pending. A round gives every pending pane the same share of the
+    /// room left when it starts ([`write_limit`]); a new one starts when
+    /// the last has been through every pane.
+    pub fn next_pane(&mut self, unwritten: usize) -> Option<PaneId> {
+        if let Some((p, _)) = self.round.serving {
+            return Some(p);
+        }
+        if unwritten >= BUFFER_HIGH {
+            return None;
+        }
+        if self.round.todo.is_empty() {
+            if self.pending.is_empty() {
+                return None;
             }
-            &Entry::Output(pane) => {
-                let mut data = Vec::new();
-                let mut age = None;
-                while data.len() < limit && self.entries.front() == Some(&Entry::Output(pane)) {
-                    let lane = self.lanes.get_mut(&pane).expect("an entry has its lane");
-                    let block = lane.front_mut().expect("an entry has its block");
-                    age.get_or_insert_with(|| now.saturating_duration_since(block.read));
-                    let left = usize::try_from(block.end - block.start).unwrap_or(usize::MAX);
-                    let n = left.min(limit - data.len());
-                    data.extend(streams.read(pane, block.start, n));
-                    block.start += n as u64;
-                    if block.start == block.end {
-                        lane.pop_front();
-                        if lane.is_empty() {
-                            self.lanes.remove(&pane);
-                        }
-                        self.entries.pop_front();
-                    }
+            self.round.limit = write_limit(unwritten, self.pending.len());
+            self.round.todo.clone_from(&self.pending);
+        }
+        let p = self.round.todo.pop_front()?;
+        self.round.serving = Some((p, 0));
+        Some(p)
+    }
+
+    /// The end of the turn of the pane being served
+    /// (`control_write_pending` returning): it stays pending while it has
+    /// blocks.
+    pub fn end_turn(&mut self) {
+        let Some((p, _)) = self.round.serving.take() else {
+            return;
+        };
+        if !self.lanes.contains_key(&p) {
+            self.pending.retain(|x| *x != p);
+        }
+    }
+
+    /// Up to the rest of the share of the pane being served
+    /// (`control_write_pending`) from its blocks, one after another, and
+    /// the age of the oldest block they came from. It stops where a line is
+    /// next to go, so the line goes between this and the rest. `None`
+    /// ends the turn: the share is used, or the pane has nothing more.
+    pub fn take_output(
+        &mut self,
+        streams: &Streams,
+        now: Instant,
+    ) -> Option<(PaneId, Vec<u8>, Duration)> {
+        let (pane, mut used) = self.round.serving?;
+        let limit = self.round.limit;
+        let mut data = Vec::new();
+        let mut age = None;
+        while used != limit {
+            let Some(lane) = self.lanes.get_mut(&pane) else {
+                break;
+            };
+            let block = lane.front_mut().expect("a lane has a block");
+            age.get_or_insert_with(|| now.saturating_duration_since(block.read));
+            let left = usize::try_from(block.end - block.start).unwrap_or(usize::MAX);
+            let n = left.min(limit - used);
+            data.extend(streams.read(pane, block.start, n));
+            block.start += n as u64;
+            used += n;
+            if block.start == block.end {
+                let seq = block.seq;
+                lane.pop_front();
+                if lane.is_empty() {
+                    self.lanes.remove(&pane);
                 }
-                Some(Piece::Output {
-                    pane,
-                    data,
-                    age: age.unwrap_or_default(),
-                })
+                self.all.remove(&seq);
+                // A line now at the head goes out first.
+                if matches!(self.all.first_key_value(), Some((_, Entry::Line(_)))) {
+                    break;
+                }
             }
         }
+        self.round.serving = Some((pane, used));
+        if data.is_empty() {
+            return None;
+        }
+        Some((pane, data, age.unwrap_or_default()))
     }
 }
 
@@ -368,64 +461,131 @@ mod tests {
     const P: PaneId = PaneId(1);
     const Q: PaneId = PaneId(2);
 
-    fn drain(q: &mut Queue, s: &Streams, limit: usize) -> Vec<Piece> {
+    /// What one `control_write_callback` writes with `unwritten` bytes
+    /// already held and `room` more taken before it is full: lines
+    /// whole, pane output as the (pane, bytes) pieces.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Sent {
+        Line(Vec<u8>),
+        /// The pane and its bytes as runs (`p*3 q*1`).
+        Output(PaneId, String),
+    }
+
+    /// `data` as runs of equal bytes: `[b'a'; 3]` is `a*3`.
+    fn runs(data: &[u8]) -> String {
+        let mut out: Vec<String> = Vec::new();
+        let mut i = 0;
+        while i < data.len() {
+            let n = data[i..].iter().take_while(|&&b| b == data[i]).count();
+            out.push(format!("{}*{n}", char::from(data[i])));
+            i += n;
+        }
+        out.join(" ")
+    }
+
+    fn drain(q: &mut Queue, s: &Streams, unwritten: usize) -> Vec<Sent> {
         let now = Instant::now();
-        std::iter::from_fn(|| q.next(limit, s, now)).collect()
+        let mut out = Vec::new();
+        q.begin();
+        loop {
+            if let Some(line) = q.take_line() {
+                out.push(Sent::Line(line));
+                continue;
+            }
+            if q.next_pane(unwritten).is_none() {
+                return out;
+            }
+            match q.take_output(s, now) {
+                Some((p, data, _)) => out.push(Sent::Output(p, runs(&data))),
+                None => q.end_turn(),
+            }
+        }
     }
 
-    fn out(pane: PaneId, data: &[u8]) -> (PaneId, Vec<u8>) {
-        (pane, data.to_vec())
+    fn out(pane: PaneId, data: &[u8]) -> Sent {
+        Sent::Output(pane, runs(data))
     }
 
-    fn outputs(pieces: &[Piece]) -> Vec<(PaneId, Vec<u8>)> {
-        pieces
-            .iter()
-            .filter_map(|p| match p {
-                Piece::Output { pane, data, .. } => Some((*pane, data.clone())),
-                Piece::Line(_) => None,
-            })
-            .collect()
+    fn push(q: &mut Queue, streams: &mut Streams, pane: PaneId, data: &[u8]) {
+        let (start, end) = streams.append(pane, data);
+        q.push_output(pane, start, end, Instant::now());
     }
 
     #[test]
     fn a_line_waits_behind_the_output_queued_before_it() {
         let mut s = Streams::default();
         let mut q = Queue::default();
-        let now = Instant::now();
-        let (a, b) = s.append(P, b"hello");
-        q.push_output(P, a, b, now);
+        push(&mut q, &mut s, P, b"hello");
         q.push_line(b"%sessions-changed\n".to_vec());
-        let (a, b) = s.append(P, b"world");
-        q.push_output(P, a, b, now);
-        assert!(q.has_output());
-        let pieces = drain(&mut q, &s, 100);
-        assert_eq!(pieces.len(), 3);
-        assert_eq!(pieces[1], Piece::Line(b"%sessions-changed\n".to_vec()));
-        assert_eq!(outputs(&pieces), [out(P, b"hello"), out(P, b"world")]);
-        assert!(q.is_empty() && q.line_bytes() == 0);
-    }
-
-    #[test]
-    fn output_is_cut_at_the_limit_across_a_pane_s_blocks() {
-        let mut s = Streams::default();
-        let mut q = Queue::default();
-        let now = Instant::now();
-        for chunk in [&b"abcdef"[..], b"ghij"] {
-            let (a, b) = s.append(P, chunk);
-            q.push_output(P, a, b, now);
-        }
-        let (a, b) = s.append(Q, b"xy");
-        q.push_output(Q, a, b, now);
-        let pieces = drain(&mut q, &s, 4);
+        push(&mut q, &mut s, P, b"world");
+        assert!(q.take_line().is_none());
         assert_eq!(
-            outputs(&pieces),
+            drain(&mut q, &s, 0),
             [
-                out(P, b"abcd"),
-                out(P, b"efgh"),
-                out(P, b"ij"),
-                out(Q, b"xy")
+                out(P, b"hello"),
+                Sent::Line(b"%sessions-changed\n".to_vec()),
+                out(P, b"world")
             ]
         );
+        assert!(q.is_empty() && q.line_bytes() == 0 && q.pending() == 0);
+    }
+
+    /// `control_write_pending`: a pane's share is cut across its blocks,
+    /// and a line goes out when the blocks before it are done, in the
+    /// middle of the pane's turn (control.c:889-905).
+    #[test]
+    fn a_share_runs_across_blocks_and_stops_for_a_line() {
+        let mut s = Streams::default();
+        let mut q = Queue::default();
+        push(&mut q, &mut s, P, &[b'a'; 1000]);
+        q.push_line(b"l\n".to_vec());
+        push(&mut q, &mut s, P, &[b'b'; 2000]);
+        // BUFFER_HIGH / 1 pane / 3 = 2730 bytes a turn.
+        assert_eq!(
+            drain(&mut q, &s, 0),
+            [
+                out(P, &[b'a'; 1000]),
+                Sent::Line(b"l\n".to_vec()),
+                out(P, &[b'b'; 1730]),
+                // The next round.
+                out(P, &[b'b'; 270]),
+            ]
+        );
+    }
+
+    /// `control_write_callback`: the panes with output take turns, each up
+    /// to the same share, whatever the order the output was read in; the
+    /// lines wait for what was queued before them.
+    #[test]
+    fn panes_take_turns() {
+        let mut s = Streams::default();
+        let mut q = Queue::default();
+        // 2 panes: BUFFER_HIGH / 2 / 3 = 1365 bytes each a round.
+        push(&mut q, &mut s, P, &[b'p'; 3000]);
+        push(&mut q, &mut s, Q, &[b'q'; 1000]);
+        push(&mut q, &mut s, P, &[b'P'; 10]);
+        q.push_line(b"l\n".to_vec());
+        assert_eq!(
+            drain(&mut q, &s, 0),
+            [
+                out(P, &[b'p'; 1365]),
+                out(Q, &[b'q'; 1000]),
+                // Q is through: P has the room of one pane.
+                Sent::Output(P, "p*1635 P*10".to_owned()),
+                Sent::Line(b"l\n".to_vec()),
+            ]
+        );
+    }
+
+    /// A call stops starting turns once the room is used, and the next
+    /// begins at the first pane again.
+    #[test]
+    fn no_turn_starts_without_room() {
+        let mut s = Streams::default();
+        let mut q = Queue::default();
+        push(&mut q, &mut s, P, b"p");
+        assert_eq!(drain(&mut q, &s, BUFFER_HIGH).len(), 0);
+        assert_eq!(drain(&mut q, &s, 0), [out(P, b"p")]);
     }
 
     #[test]
@@ -436,9 +596,12 @@ mod tests {
         let (a, b) = s.append(P, b"0123456789");
         fast.push_output(P, a, b, now);
         slow.push_output(P, a, b, now);
-        drain(&mut fast, &s, 100);
-        let first = slow.next(3, &s, now).unwrap();
-        assert_eq!(outputs(&[first]), [out(P, b"012")]);
+        drain(&mut fast, &s, 0);
+        // Part of the block: 3 bytes, by a share cut short.
+        slow.begin();
+        slow.next_pane(0).unwrap();
+        slow.round.limit = 3;
+        assert_eq!(slow.take_output(&s, now).unwrap().1, b"012");
         let mut owed = BTreeMap::new();
         for (p, o) in fast.owed().chain(slow.owed()) {
             let e = owed.entry(p).or_insert(o);
@@ -446,39 +609,69 @@ mod tests {
         }
         s.trim(&owed);
         assert_eq!(s.len(), 7);
-        assert_eq!(outputs(&drain(&mut slow, &s, 100)), [out(P, b"3456789")]);
+        assert_eq!(drain(&mut slow, &s, 0), [out(P, b"3456789")]);
         s.trim(&BTreeMap::new());
         assert!(s.is_empty());
     }
 
+    /// `control_discard_pane` frees the blocks and leaves the pane in the
+    /// pending list; its next turn finds nothing and takes it out.
     #[test]
     fn discarding_a_pane_keeps_the_lines_and_other_panes() {
         let mut s = Streams::default();
         let mut q = Queue::default();
-        let now = Instant::now();
-        let (a, b) = s.append(P, b"p");
-        q.push_output(P, a, b, now);
+        push(&mut q, &mut s, P, b"p");
         q.push_line(b"l\n".to_vec());
-        let (a, b) = s.append(Q, b"q");
-        q.push_output(Q, a, b, now);
+        push(&mut q, &mut s, Q, b"q");
         q.discard_pane(P);
         assert_eq!(q.oldest().map(|(p, _)| p).collect::<Vec<_>>(), [Q]);
+        assert_eq!(q.pending(), 2);
+        assert_eq!(
+            drain(&mut q, &s, 0),
+            [Sent::Line(b"l\n".to_vec()), out(Q, b"q")]
+        );
+        assert_eq!(q.pending(), 0);
+        push(&mut q, &mut s, Q, b"q");
         q.discard_output();
-        assert!(!q.has_output());
-        assert_eq!(drain(&mut q, &s, 100), [Piece::Line(b"l\n".to_vec())]);
+        assert!(q.is_empty() && q.oldest().next().is_none());
     }
 
     #[test]
     fn take_lines_drops_the_output_and_keeps_the_lines_in_order() {
         let mut s = Streams::default();
         let mut q = Queue::default();
-        let now = Instant::now();
         q.push_line(b"a\n".to_vec());
-        let (a, b) = s.append(P, b"out");
-        q.push_output(P, a, b, now);
+        push(&mut q, &mut s, P, b"out");
         q.push_line(b"b\n".to_vec());
-        assert_eq!(q.take_lines(), b"a\nb\n");
-        assert!(q.is_empty() && q.line_bytes() == 0 && q.pending() == 0);
+        assert_eq!(q.take_lines(), [b"a\n".to_vec(), b"b\n".to_vec()]);
+        assert!(q.is_empty() && q.line_bytes() == 0 && q.oldest().next().is_none());
+    }
+
+    #[test]
+    fn held_is_in_the_order_queued_and_comes_back() {
+        let mut s = Streams::default();
+        let mut q = Queue::default();
+        push(&mut q, &mut s, P, b"one");
+        q.push_line(b"l\n".to_vec());
+        push(&mut q, &mut s, Q, b"two");
+        push(&mut q, &mut s, P, b"three");
+        let held = q.held(&s);
+        assert_eq!(held.len(), 4);
+        assert!(matches!(&held[1], Held::Line(l) if l == b"l\n"));
+        assert!(
+            matches!(&held[3], Held::Output { pane, data, .. } if *pane == P && data == b"three")
+        );
+        let mut s2 = Streams::default();
+        let mut back = Queue::from_held(held, &mut s2);
+        assert_eq!(
+            drain(&mut back, &s2, 0),
+            [
+                out(P, b"one"),
+                Sent::Line(b"l\n".to_vec()),
+                out(P, b"three"),
+                out(Q, b"two"),
+            ]
+        );
     }
 
     #[test]

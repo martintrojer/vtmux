@@ -915,6 +915,11 @@ fn too_far_behind_lets_a_stalled_client_go() {
 /// stops the read event, so only lines already read run; vtmux runs the
 /// lines it read in that loop turn and sends `Exit` at its end
 /// (`control_tick`). A line sent after the let-go never runs in either.
+///
+/// Each line is checked on its own (`control_write_line`), so the stream
+/// stops after the `%begin` of the `show-buffer` whose reply (one line:
+/// `cmdq_print_data` writes the buffer whole) would pass the cap, not
+/// after the `%end` of the one before it.
 #[test]
 fn reply_buffer_cap_lets_a_stalled_client_go() {
     compare("reply_buffer_cap_lets_a_stalled_client_go", |w| {
@@ -977,6 +982,10 @@ fn reply_buffer_cap_lets_a_stalled_client_go() {
         (
             out.ends_with("\n%exit too far behind\n"),
             out.len() < 70 << 20,
+            // The line before `%exit`: the guard of the reply left out.
+            out.rsplit('\n')
+                .nth(2)
+                .is_some_and(|l| l.starts_with("%begin ")),
             code,
             set(w, "@rvafter"),
         )
