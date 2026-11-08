@@ -1040,9 +1040,12 @@ impl Server {
                 let at = ev.at(&self.model, p);
                 self.tree_mouse_key(p, c, ev.key, at);
             }
-            // window_panes_key: a mouse key keeps the mode. Choosing the
-            // pane box clicked (window_panes_find_pane) is not here yet.
-            (Some(crate::mode::Mode::Panes(_)), Some(c)) => self.panes_key(p, c, ev.key),
+            // window_panes_key: a click on a pane's box chooses it; any
+            // other mouse key keeps the mode.
+            (Some(crate::mode::Mode::Panes(_)), Some(c)) => {
+                let at = ev.at(&self.model, p);
+                self.panes_key(p, c, ev.key, at);
+            }
             _ => {}
         }
     }

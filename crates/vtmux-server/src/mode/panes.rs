@@ -16,8 +16,9 @@
 //! active pane, the pane screens and the format text). Panes made, killed,
 //! swapped or selected afterwards are not in it, as in tmux. The styles and
 //! colours are read at each frame, where tmux's are in the drawing already.
-//! The mouse (`KEYC_MOUSEDOWN1_PANE`) is not here yet, so neither are the
-//! click areas.
+//! A `MouseDown1Pane` chooses the pane whose box it is on
+//! ([`crate::render::panes::panes_pane_at`], the areas tmux records while
+//! drawing).
 //!
 //! `HIDE_PANE_STATUS` gives the zoomed pane the row its status line would
 //! have taken under `pane-border-status` (window.c:2936-2940 into
@@ -32,7 +33,7 @@ use std::time::{Duration, Instant};
 use vtmux_core::cmd::{ArgValue, Args, CmdError, CommandList};
 use vtmux_core::error::EdgeError;
 use vtmux_core::ids::{PaneId, SessionId, WindowId};
-use vtmux_core::keys::Key;
+use vtmux_core::keys::{Key, MouseKind, MouseLocation};
 use vtmux_core::layout::{Layout, Path};
 use vtmux_core::options::TreeId;
 use vtmux_vt::Snapshot;
@@ -388,9 +389,11 @@ impl Server {
     }
 
     /// `window_panes_key` (window-panes.c:1080-1099), for a key from client
-    /// `c`: `q` and Escape leave; the number or letter of a pane runs the
-    /// command on it and leaves; any other key leaves unless `-N`.
-    pub(crate) fn panes_key(&mut self, p: PaneId, c: ClientId, key: Key) {
+    /// `c`: `q` and Escape leave; the number or letter of a pane, or a
+    /// `MouseDown1Pane` on its box (`at`, the event's position in the
+    /// mode's pane), runs the command on it and leaves; any other key
+    /// leaves unless it is the mouse or `-N`.
+    pub(crate) fn panes_key(&mut self, p: PaneId, c: ClientId, key: Key, at: Option<(u32, u32)>) {
         let key = key.without_flags();
         if key == Key::ascii(0x1b) || key == Key::ascii(b'q') {
             self.reset_mode(p);
@@ -398,8 +401,23 @@ impl Server {
         }
         let Some(m) = self.panes_of(p) else { return };
         let ignore = m.ignore_keys;
-        let target = if ignore || key.is_mouse() {
+        let target = if ignore {
             None
+        } else if key.is_mouse() {
+            // window_panes_get_target: only MouseDown1Pane, inside the pane.
+            let ds = self
+                .model
+                .panes
+                .get(&p)
+                .map(|x| (u32::from(x.term.cols()), u32::from(x.term.rows())));
+            match (ds, at) {
+                (Some(ds), Some(at))
+                    if key == Key::mouse(MouseKind::Down, 1, MouseLocation::Pane) =>
+                {
+                    crate::render::panes::panes_pane_at(m, ds, at)
+                }
+                _ => None,
+            }
         } else {
             self.panes_key_pane(m, key)
         };

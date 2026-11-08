@@ -632,7 +632,7 @@ impl Server {
             if let Some(c) = c
                 && !key.is_mouse()
             {
-                self.panes_key(p, c, key);
+                self.panes_key(p, c, key, None);
                 return true;
             }
             return false;

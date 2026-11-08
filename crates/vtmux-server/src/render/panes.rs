@@ -407,6 +407,52 @@ fn geometry(
     })
 }
 
+/// `window_panes_find_pane` (window-panes.c:1016-1030) over the areas
+/// `window_panes_add_area` recorded while drawing panes mode `m` on a
+/// screen of `ds` (the tiled panes, then the floating ones over them, each
+/// clipped as drawn): the pane whose area holds `(x, y)`, the last drawn
+/// first.
+#[must_use]
+pub fn panes_pane_at(m: &PanesMode, ds: (u32, u32), at: (u32, u32)) -> Option<PaneId> {
+    let drawn = m.drawn.as_ref()?;
+    let layout = &drawn.layout;
+    let os = (layout.sx, layout.sy);
+    let borders = Borders {
+        map: Vec::new(),
+        dsx: ds.0,
+        dsy: ds.1,
+        osx: os.0,
+        osy: os.1,
+    };
+    let area = |q: PaneId, floating: bool| {
+        let path = drawn.cells.get(&q)?;
+        let border = layout.cell_needs_border(path).then_some(layout.opts.status);
+        let cell = layout.root.get(path).g();
+        let placed = geometry(cell, os, ds, border)?;
+        if floating {
+            floating_frame(cell, &borders).clip(&placed, ds)
+        } else {
+            Some(placed)
+        }
+    };
+    let areas: Vec<(PaneId, Area)> = drawn
+        .tiled
+        .iter()
+        .filter_map(|&(q, _)| Some((q, area(q, false)?)))
+        .chain(
+            drawn
+                .floating
+                .iter()
+                .filter_map(|&(q, _)| Some((q, area(q, true)?))),
+        )
+        .collect();
+    areas
+        .iter()
+        .rev()
+        .find(|(_, a)| (a.x..a.x + a.sx).contains(&at.0) && (a.y..a.y + a.sy).contains(&at.1))
+        .map(|(q, _)| *q)
+}
+
 /// The screen being drawn.
 struct Canvas {
     snap: Snapshot,
