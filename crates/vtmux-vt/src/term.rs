@@ -619,6 +619,7 @@ impl PaneTerm {
             self.scan.end_dcs();
         }
         self.rename_timeout();
+        self.scan.line_marks = !self.marks.is_empty();
         let mut i = 0;
         while i < bytes.len() {
             if self.scan.in_dcs() {
@@ -757,7 +758,20 @@ impl PaneTerm {
                         }
                     }
                     ScanEvent::EraseBelow | ScanEvent::EraseScreen
-                        if self.clear_into_history(e) => {}
+                        if self.clear_into_history(e) =>
+                    {
+                        // grid_view_clear_history: the used rows went into
+                        // history with their marks, the rest are cleared.
+                        self.drop_marks(0..self.rows());
+                    }
+                    ScanEvent::EraseBelow
+                    | ScanEvent::EraseAbove
+                    | ScanEvent::EraseScreen
+                    | ScanEvent::EraseChars => {
+                        let rows = self.erased_rows(e);
+                        self.feed_piece(&bytes[i..=i]);
+                        self.drop_marks(rows);
+                    }
                     ScanEvent::Drop => {
                         self.term.vt_write(b"\x18");
                         // An ESC that ended an OSC starts a new sequence.
@@ -1042,6 +1056,8 @@ impl PaneTerm {
         // program's ED; its state was reset above.
         self.feed_piece(bytes);
         self.feed_piece(clear);
+        // screen_write_clearscreen: what stays on the screen is emptied.
+        self.drop_marks(0..self.rows());
         self.feed_piece(b"\x1b[H");
         keep_clustering(&mut self.term);
         if self.scan.take_resync() {
@@ -1123,6 +1139,7 @@ impl PaneTerm {
         if !self.clear_into_history(ScanEvent::EraseScreen) {
             self.term.vt_write(b"\x1b[2J");
         }
+        self.drop_marks(0..self.rows());
     }
 
     /// Start from the ground state, as a fresh pane process does: nothing
@@ -1380,6 +1397,7 @@ impl PaneTerm {
         });
         if let Ok(pin) = self.term.track_grid_ref(point) {
             self.marks.push((pin, data));
+            self.scan.line_marks = true;
         }
         // Drop the marks of rows gone from history now and then.
         if self.marks.len().is_power_of_two() && self.marks.len() >= 64 {
@@ -1390,6 +1408,65 @@ impl PaneTerm {
                     .is_some_and(|p| usize::try_from(p.y).is_ok_and(|y| y >= floor))
             });
         }
+    }
+
+    /// The visible rows an ED or ECH clears whole, so loses its OSC 133
+    /// data with the rest of the line: `grid_clear` over the full width
+    /// is `grid_clear_lines`, which empties the line, flags and all
+    /// (grid.c:725-736, 593-598). EL never does: `screen_write_clearline`
+    /// puts the line's OSC 133 flags and data back (screen-write.c:1618-
+    /// 1650), and EL 0 at the first column and EL 1 at the last are it.
+    /// ED 0 at the top left and ED 2 under `scroll-on-clear` go through
+    /// [`Self::clear_into_history`] instead.
+    fn erased_rows(&self, e: ScanEvent) -> std::ops::Range<u16> {
+        if self.marks.is_empty() || self.alternate_on() {
+            return 0..0;
+        }
+        let (cx, cy) = tmux_cursor(&self.term);
+        let (sx, sy) = (self.cols(), self.rows());
+        match e {
+            // screen_write_clearendofscreen: the cursor's line from cx,
+            // whole when cx is 0, then every line below.
+            ScanEvent::EraseBelow if cx == 0 => cy..sy,
+            ScanEvent::EraseBelow => cy.saturating_add(1).min(sy)..sy,
+            // screen_write_clearstartofscreen: every line above, then the
+            // cursor's to cx, whole from the last column on.
+            ScanEvent::EraseAbove if cx >= sx.saturating_sub(1) => 0..cy.saturating_add(1).min(sy),
+            ScanEvent::EraseAbove => 0..cy,
+            // screen_write_clearscreen without history to scroll into.
+            ScanEvent::EraseScreen => 0..sy,
+            // screen_write_clearcharacter: nx cells from cx, at most to the
+            // end of the line.
+            ScanEvent::EraseChars if cx == 0 && self.scan.ech >= u64::from(sx) => {
+                cy..cy.saturating_add(1).min(sy)
+            }
+            _ => 0..0,
+        }
+    }
+
+    /// Drop the OSC 133 data of the visible rows `rows` (tmux empties those
+    /// lines, [`Self::erased_rows`]). The visible rows' marks are among the
+    /// newest, so the walk stops after a run of marks above the screen.
+    fn drop_marks(&mut self, rows: std::ops::Range<u16>) {
+        if rows.is_empty() || self.alternate_on() {
+            return;
+        }
+        let rows = u32::from(rows.start)..u32::from(rows.end);
+        let mut above = 0;
+        let mut i = self.marks.len();
+        while i > 0 && above < 64 {
+            i -= 1;
+            match self.marks[i].0.point(PointSpace::Active).ok().flatten() {
+                Some(p) => {
+                    above = 0;
+                    if rows.contains(&p.y) {
+                        self.marks.remove(i);
+                    }
+                }
+                None => above += 1,
+            }
+        }
+        self.scan.line_marks = !self.marks.is_empty();
     }
 
     /// Rows Ghostty retains above tmux's history.
@@ -2528,6 +2605,11 @@ struct AltModeScanner {
     /// the cursor (input.c: `screen_write_alternateon` and `_off` with
     /// `cursor` 1); `?47` and `?1047` do not.
     alt_cursor: bool,
+    /// The pane has OSC 133 marks, so the erases that clear whole lines
+    /// (ED 1, ECH) end a scan for [`PaneTerm::erase_marks`].
+    line_marks: bool,
+    /// The count of the ECH ([`ScanEvent::EraseChars`]) that just ended.
+    ech: u64,
 }
 
 /// Which mouse events the pane program asked for: tmux's mutually exclusive
@@ -2853,6 +2935,11 @@ enum ScanEvent {
     EraseBelow,
     /// `CSI 2 J`.
     EraseScreen,
+    /// `CSI 1 J`, while the pane has OSC 133 marks.
+    EraseAbove,
+    /// `CSI Ps X` (ECH), while the pane has OSC 133 marks;
+    /// `AltModeScanner::ech` has its count.
+    EraseChars,
     /// `ESC c` (RIS).
     Reset,
     /// `CSI ? 2026 h` or `l`: [`AltModeScanner::sync`] says which.
@@ -3288,6 +3375,7 @@ impl AltModeScanner {
         match parse_params(&self.params).map(|p| p.first().copied()) {
             Some(None | Some(Param::Missing | Param::Num(0))) => Some(ScanEvent::EraseBelow),
             Some(Some(Param::Num(2))) => Some(ScanEvent::EraseScreen),
+            Some(Some(Param::Num(1))) if self.line_marks => Some(ScanEvent::EraseAbove),
             Some(Some(Param::Num(1 | 3))) => None,
             _ => Some(ScanEvent::Drop),
         }
@@ -3305,6 +3393,21 @@ impl AltModeScanner {
             }
             self.cursor.set(c);
         }
+    }
+
+    /// ECH, while the pane has OSC 133 marks: its count is
+    /// `input_get(ictx, 0, 1, 1)` (input.c, `INPUT_CSI_ECH`); a string
+    /// parameter is -1, which clears nothing.
+    fn ech_event(&mut self, b: u8) -> Option<ScanEvent> {
+        if !self.line_marks || self.private || self.intermediate.is_some() || b != b'X' {
+            return None;
+        }
+        self.ech = match parse_params(&self.params).map(|p| p.first().copied()) {
+            Some(None | Some(Param::Missing)) => 1,
+            Some(Some(Param::Num(n))) => n.max(1),
+            _ => return None,
+        };
+        Some(ScanEvent::EraseChars)
     }
 
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
@@ -3386,6 +3489,9 @@ impl AltModeScanner {
         }
         if !self.private && b == b'J' && matches!(self.params.as_slice(), b"3" | b"3;0") {
             return Some(ScanEvent::ClearHistory);
+        }
+        if let Some(e) = self.ech_event(b) {
+            return Some(e);
         }
         if self.private
             && !self.other
@@ -4536,6 +4642,72 @@ mod tests {
         assert_eq!(t.line_marks()[0], (0, LineMark::Prompt));
     }
 
+    /// An ED or ECH that clears a whole line empties it, OSC 133 flags
+    /// and all (`grid_clear_lines`); EL keeps them
+    /// (`screen_write_clearline`). Reference `capture-pane -pF`, 20x6.
+    #[test]
+    fn whole_line_erases_drop_the_osc133_marks() {
+        const A: &str = "\x1b]133;A\x07";
+        const C: &str = "\x1b]133;C\x07";
+        let prompt = |y| (y, LineMark::Prompt);
+        let output = |y| (y, LineMark::Output);
+        let cases: [(String, Vec<(usize, LineMark)>); 14] = [
+            (format!("{A}p\r\x1b[K"), vec![prompt(0)]),
+            (format!("{A}p\x1b[2K"), vec![prompt(0)]),
+            (format!("{A}p\x1b[1K"), vec![prompt(0)]),
+            (format!("{A}\x1b[J"), vec![]),
+            (format!("x\r\n{A}p\x1b[1J"), vec![prompt(1)]),
+            (format!("{A}p\r\x1b[20X"), vec![]),
+            (format!("{A}p\r\x1b[19X"), vec![prompt(0)]),
+            (format!("{A}p\x1b[20X"), vec![prompt(0)]),
+            (format!("x\r\n{A}p\r\n{C}o\x1b[2;1H\x1b[J"), vec![]),
+            (format!("x\r\n{A}p\r\n{C}o\x1b[2;3H\x1b[J"), vec![prompt(1)]),
+            (
+                format!("x\r\n{A}p\r\n{C}o\x1b[2;20H\x1b[1J"),
+                vec![output(2)],
+            ),
+            (
+                format!("x\r\n{A}p\r\n{C}o\x1b[2;19H\x1b[1J"),
+                vec![prompt(1), output(2)],
+            ),
+            (
+                format!("{A}12345678901234567890{C}\x1b[J"),
+                vec![prompt(0), output(0)],
+            ),
+            (format!("a\r\nb\r\n{A}p\x1bc"), vec![prompt(2)]),
+        ];
+        for (bytes, marks) in cases {
+            let mut t = PaneTerm::new(20, 6, 100);
+            t.feed(bytes.as_bytes());
+            assert_eq!(t.line_marks(), marks, "{bytes:?}");
+        }
+    }
+
+    /// zsh draws each prompt after `CR ED 0` (`zle_refresh`), so an `A` its
+    /// precmd prints, and the `C` of a command with no output, are gone
+    /// once the prompt shows. The first `ED 0` is at the top left, so its
+    /// line scrolls into history with its mark (`scroll-on-clear`).
+    /// Reference: these bytes (zsh 5.9's, with `print -n` of `D` and `A`
+    /// in precmd and `C` in preexec), 40x7, `capture-pane -pF -S -`.
+    #[test]
+    fn zsh_redraws_erase_the_marks_before_the_prompt() {
+        let mut t = PaneTerm::new(40, 7, 100);
+        let prompt = "% \r \r\x1b]133;D;0\x07\x1b]133;A\x07\r\x1b[J% ";
+        t.feed(format!("\x1b]133;A\x07{prompt}").as_bytes());
+        for out in ["a\r\n", "", "b\r\n"] {
+            t.feed(format!("cmd\r\n\x1b]133;C\x07{out}{prompt}").as_bytes());
+        }
+        assert_eq!(t.history_size(), 1);
+        assert_eq!(
+            t.line_marks(),
+            [
+                (0, LineMark::Prompt),
+                (2, LineMark::Output),
+                (5, LineMark::Output)
+            ]
+        );
+    }
+
     #[test]
     fn alt_mode_scanner_matches_only_alternate_screen_modes() {
         let find = |bytes: &[u8]| {
@@ -4549,6 +4721,8 @@ mod tests {
                     | ScanEvent::Reset
                     | ScanEvent::EraseBelow
                     | ScanEvent::EraseScreen
+                    | ScanEvent::EraseAbove
+                    | ScanEvent::EraseChars
                     | ScanEvent::Drop
                     | ScanEvent::Utf8
                     | ScanEvent::Utf8Stop
