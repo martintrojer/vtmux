@@ -267,7 +267,7 @@ fn line_links(out: &mut Vec<u8>, cells: &[RowCell], seen: &mut Vec<LinkKey>) {
         if !out.is_empty() {
             out.push(b' ');
         }
-        out.extend_from_slice(key.0.as_bytes());
+        out.extend_from_slice(vis_link(&key.0).as_bytes());
         seen.push(key);
     }
 }
@@ -1336,7 +1336,12 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
                         HyperlinkId::Explicit(id) => id,
                         _ => b"",
                     };
-                    has_link = add_hyperlink(&mut line, id, uri.as_bytes(), opts.octal);
+                    has_link = add_hyperlink(
+                        &mut line,
+                        vis_link(&String::from_utf8_lossy(id)).as_bytes(),
+                        vis_link(uri).as_bytes(),
+                        opts.octal,
+                    );
                 } else if has_link {
                     add_hyperlink(&mut line, b"", b"", opts.octal);
                     has_link = false;
@@ -1371,6 +1376,37 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
 
 /// `grid_string_cells_add_hyperlink` (grid.c:1035-1060): OSC 8 with `id=`
 /// when there is one; ST is `ESC \` (`\033\\` under `-C`).
+/// A link's URI or id as tmux keeps it: `utf8_stravis` with
+/// `VIS_OCTAL|VIS_CSTYLE` (hyperlinks.c `hyperlinks_put`), which doubles a
+/// backslash and writes DEL and the C0 controls other than tab and newline
+/// in octal (`\a`, `\b`, `\f`, `\r`, `\v` and `\0` C-style); UTF-8 is
+/// kept. What capture-pane and the `*_hyperlink` formats show.
+#[must_use]
+pub fn vis_link(s: &str) -> std::borrow::Cow<'_, str> {
+    use std::fmt::Write as _;
+    let plain = |c: char| c != '\\' && c != '\x7f' && (c >= ' ' || c == '\t' || c == '\n');
+    if s.chars().all(plain) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\x07' => out.push_str("\\a"),
+            '\x08' => out.push_str("\\b"),
+            '\x0c' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            '\x0b' => out.push_str("\\v"),
+            '\0' => out.push_str("\\0"),
+            c if !plain(c) => {
+                let _ = write!(out, "\\{:03o}", u32::from(c));
+            }
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 fn add_hyperlink(out: &mut Vec<u8>, id: &[u8], uri: &[u8], octal: bool) -> bool {
     if uri.len() + id.len() + 17 >= 8192 {
         return false;
@@ -1624,6 +1660,25 @@ mod tests {
             joined.starts_with("\x1b[1mabcdefghij\u{6f22}\n"),
             "{joined:?}"
         );
+    }
+
+    /// tmux keeps a link's URI and id through `utf8_stravis` with
+    /// `VIS_OCTAL|VIS_CSTYLE` (hyperlinks.c `hyperlinks_put`), so
+    /// capture-pane shows a backslash doubled and DEL in octal.
+    #[test]
+    fn link_uri_and_id_are_kept_vis_encoded() {
+        let mut t = PaneTerm::new(20, 2, 0);
+        t.feed(b"\x1b]8;id=i\\d;a\\b\x7fc\x1b\\x\x1b]8;;\x1b\\");
+        let opts = CaptureOpts {
+            escapes: true,
+            ..Default::default()
+        };
+        let text = String::from_utf8_lossy(&capture(&t, opts)).into_owned();
+        assert!(
+            text.starts_with("\x1b]8;id=i\\\\d;a\\\\b\\177c\x1b\\x\x1b]8;;\x1b\\\n"),
+            "{text:?}"
+        );
+        assert_eq!(vis_link("a\\b\x7f\u{e9}").as_ref(), "a\\\\b\\177\u{e9}");
     }
 
     /// A row costs one point lookup, not one per cell: a lookup walks

@@ -289,7 +289,8 @@ fn grid_formats(
         out.push(("mouse_word", word));
     }
     if let Some(uri) = uri {
-        out.push(("mouse_hyperlink", uri));
+        // As tmux keeps it (hyperlinks_put).
+        out.push(("mouse_hyperlink", vtmux_vt::vis_link(&uri).into_owned()));
     }
     if !text.is_empty() {
         out.push(("mouse_line", text));

@@ -972,7 +972,10 @@ impl<'a> Ctx<'a> {
             "search_match" => m.search_match(),
             "refresh_active" => u8::from(m.refresh_active()).to_string(),
             // window_copy_cursor_hyperlink_cb: the view's cell.
-            "copy_cursor_hyperlink" => m.hyperlink_at(cx, cy).unwrap_or_default(),
+            "copy_cursor_hyperlink" => m
+                .hyperlink_at(cx, cy)
+                .map(|uri| vtmux_vt::vis_link(&uri).into_owned())
+                .unwrap_or_default(),
             _ => return None,
         })
     }

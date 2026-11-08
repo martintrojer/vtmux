@@ -1,0 +1,106 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "link_uri_vis",
+  "inputs": {
+    "name": "link_uri_vis",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "3",
+          "sh",
+          "-c",
+          "printf '\\033]8;id=i\\\\d;a\\\\b\\177c\\303\\251\\033\\\\x\\033]8;;\\033\\\\\\015'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:",
+          "#{copy_cursor_x},#{copy_cursor_y} #{copy_cursor_hyperlink}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;id=i\\\\d;a\\\\b\\177cé\u001b\\x\u001b]8;;\u001b\\\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,0 a\\\\b\\177cé\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
