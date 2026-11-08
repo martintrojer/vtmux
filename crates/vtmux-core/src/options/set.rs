@@ -86,6 +86,9 @@ pub fn apply_set(
         Err(_) if quiet => return Ok(SetOutcome::Unchanged),
         Err(e) => return Err(e),
     };
+    if host.set_from_default(tree, &opt_name) {
+        store.remove_or_default(tree, &opt_name, None);
+    }
     let here = store.tree(tree).get_only(&opt_name).is_some();
     let parent_is_array = store.get(tree, &opt_name).is_some_and(Entry::is_array);
 

@@ -23,7 +23,9 @@
 //!    its start command and cwd. The config has not run: it runs when the
 //!    first client says hello, on top (decision 27), so config edits since
 //!    the save win, and a `new-session` of a restored name fails as tmux's
-//!    `duplicate session` does.
+//!    `duplicate session` does. Its first set of each option or hook
+//!    starts from the default (`Server::config_sets`), as on a fresh
+//!    server, so its `-a` appends once rather than once per restart.
 //!
 //! A checkpoint that can't be read, checked or rebuilt leaves the fresh
 //! server, with why in `show-messages`; the files are kept, and this
@@ -349,6 +351,10 @@ pub(crate) fn rebuild(
     )));
     server.config_loaded = false;
     server.cfg_finished = false;
+    // The config runs on top as on a fresh server: its first set of each
+    // option starts from the default, so its `-a` appends once, not once
+    // more per restart, and `-o` is not refused by its own earlier value.
+    server.config_sets = Some(std::collections::HashSet::new());
     // A `layout` checkpoint keeps no title (programs set them): each pane
     // has the one a new pane gets, the host name (window.c
     // `window_pane_create`).

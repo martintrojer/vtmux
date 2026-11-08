@@ -539,6 +539,11 @@ pub struct Server {
     config_loaded: bool,
     /// `cfg_finished`: the startup config has run.
     pub(crate) cfg_finished: bool,
+    /// On a server a `vtmux-persist` restore built, until its startup
+    /// config has run: the options the config has set so far. Its first
+    /// set of each starts from the default, as on a fresh server
+    /// (`super::restore`, [`vtmux_core::options::OptionHost::set_from_default`]).
+    pub(crate) config_sets: Option<std::collections::HashSet<(TreeId, String)>>,
     /// `cfg_client` (the client that started the server, whose directory
     /// jobs use while the config loads) and `cfg_item` (its waiting step).
     pub(crate) cfg_client: Option<ClientId>,
@@ -824,6 +829,7 @@ impl Server {
             config,
             config_loaded: false,
             cfg_finished: false,
+            config_sets: None,
             cfg_client: None,
             cfg_wait: None,
             cmdq: crate::cmdq::Cmdq::default(),
@@ -4284,6 +4290,7 @@ impl Server {
             return;
         }
         self.cfg_finished = true;
+        self.config_sets = None;
         self.prompt_load_history();
         self.cfg_show_causes(None);
         if let Some(step) = self.cfg_wait.take() {

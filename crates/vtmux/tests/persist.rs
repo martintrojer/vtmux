@@ -949,6 +949,50 @@ fn config_edits_since_the_save_win() {
     );
 }
 
+/// A config runs on a restored server as on a fresh one: the first time
+/// it sets an option or hook, that starts from its default, so what it
+/// appends (`-a`) goes in once, not once more on every restart, and `-o`
+/// does not find its own earlier value. Options the config does not set
+/// keep their saved, runtime values. (Each restart added another
+/// `terminal-features` item, another hook command and another `X`.)
+#[test]
+fn a_restored_config_appends_once_not_once_per_restart() {
+    let conf = "set -s vtmux-persist layout\n\
+                set -as terminal-features ',rv-term:RGB'\n\
+                set-hook -ga after-new-window 'set -g @n 1'\n\
+                set -ga status-right X\n\
+                set -go @once yes\n";
+    let mut w = World::start_with(&["cat", "-"], &[], None, Some(conf));
+    w.ok(&["set", "-g", "status-left", "runtime"]);
+    let observe = |w: &World| {
+        [
+            &["show", "-s", "terminal-features"][..],
+            &["show-hooks", "-g", "after-new-window"],
+            &["show", "-gv", "status-right"],
+            &["show", "-gv", "@once"],
+            &["show", "-gv", "status-left"],
+            // The config's errors (none): `cfg_show_causes` keeps them for
+            // the next source-file while no client is attached.
+            &["source-file", "/dev/null"],
+        ]
+        .iter()
+        .map(|args| {
+            let (out, err, _) = w.run(args);
+            out + &err
+        })
+        .collect::<Vec<_>>()
+    };
+    let fresh = observe(&w);
+    assert!(fresh[0].contains("rv-term:RGB"), "{fresh:?}");
+    for _ in 0..2 {
+        w.kill_server();
+        w.ok(&["start-server"]);
+        w.repid();
+        assert!(w.ok(&["show-messages"]).contains("restored 1 sessions"));
+        assert_eq!(observe(&w), fresh);
+    }
+}
+
 /// A config that turns `vtmux-persist` off gets no restore (spec,
 /// *Non-goals*); the files stay.
 #[test]
