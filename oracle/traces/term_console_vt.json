@@ -1,0 +1,299 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "term_console_vt",
+  "inputs": {
+    "name": "term_console_vt",
+    "size": [
+      40,
+      10
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "9",
+          "sh",
+          "-c",
+          "printf '\\033[38;5;200mA\\033[0m \\033[91;101mB\\033[0m \\033[1;34mC\\033[0m\\n'; tmux wait-for -S ready; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "p"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "F1",
+          "set",
+          "-g",
+          "@key",
+          "F1"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "F5",
+          "set",
+          "-g",
+          "@key",
+          "F5"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a",
+          "term": "linux"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:bce}"
+        ]
+      },
+      {
+        "keys": "\u001b[[A"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@key"
+        ]
+      },
+      {
+        "keys": "\u001b[[E"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@key"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "v",
+          "term": "vt100"
+        }
+      },
+      {
+        "screen": {
+          "id": "v"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:setaf}"
+        ]
+      },
+      {
+        "keys_to": {
+          "id": "v",
+          "keys": "\u0002d"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0002d"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "lsc"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[31mA\\e[39m \\e[1m\\e[31m\\e[41mB\\e[0m \\e[1m\\e[34mC\\e[0m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "linux|bpaste,focus,title|8|0|1|1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "F1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "F5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "A \\e[1;7mB\\e[0m \\e[1mC\\e[0m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[7m[a] \\e[4m0:w*\\e[0;7m"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "linux|bpaste,focus,title|8|0|1|1\nvt100|bpaste,focus,title|2|0|0|0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

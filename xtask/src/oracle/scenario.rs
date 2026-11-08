@@ -104,6 +104,10 @@ pub struct AttachSpec {
     /// one that `keys`, `resize` and `screen` use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The client's `TERM`, when not `xterm-256color`; the terminal must
+    /// be in every host's terminfo (ncurses' base set: `linux`, `vt100`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

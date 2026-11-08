@@ -1944,6 +1944,25 @@ impl Server {
         }
     }
 
+    /// `server_client_open`'s `tty_open` for a terminal client, without
+    /// keeping the terminal: the error attaching it would give. tmux opens
+    /// the terminal before `new-session` makes the session
+    /// (cmd-new-session.c:207-213), so a client that cannot attach leaves
+    /// no session behind.
+    pub(crate) fn check_terminal(&self, id: ClientId) -> Result<(), EdgeError> {
+        let features = self.array_option(TreeId::Server, "terminal-features");
+        let overrides = self.array_option(TreeId::Server, "terminal-overrides");
+        match self
+            .clients
+            .get(&id)
+            .and_then(|c| c.hello.as_ref())
+            .and_then(|h| crate::render::Caps::open_term(h, &features, &overrides))
+        {
+            Some(Err(e)) => Err(open_error(&e)),
+            _ => Ok(()),
+        }
+    }
+
     /// `cmd_attach_session`: Ready precedes encoded terminal output.
     pub fn attach_client(&mut self, id: ClientId, s: SessionId) -> Result<(), EdgeError> {
         self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
@@ -1959,11 +1978,8 @@ impl Server {
             .hello
             .as_ref()
             .and_then(|h| crate::render::Caps::open_term(h, &features, &overrides))
-            .ok_or_else(|| {
-                EdgeError::OpenTerminalFailed(
-                    "unsupported terminal (xterm*, xterm-ghostty, screen, screen-256color, tmux-256color)".into(),
-                )
-            })?;
+            .ok_or_else(|| EdgeError::OpenTerminalFailed("not a terminal".into()))?
+            .map_err(|e| open_error(&e))?;
         client.decoder.set_terminal(&term);
         client.caps = Some(caps);
         client.term_options = (features, overrides);
@@ -2009,7 +2025,13 @@ impl Server {
             .and_then(|c| c.hello.as_ref()?.tty.as_ref())
             .map_or(24, |t| t.rows);
         let clear = self.clear_on_attach();
-        self.send(id, &ServerMsg::Frame(caps.startup(clear, rows)));
+        let bytes = self.clients[&id]
+            .term
+            .as_deref()
+            .map(|term| crate::render::startup(term, clear, rows));
+        if let Some(bytes) = bytes {
+            self.send(id, &ServerMsg::Frame(bytes));
+        }
         if let Some(tty) = self
             .clients
             .get(&id)
@@ -2295,10 +2317,8 @@ impl Server {
         }
         self.send_teardown(id);
         // tty_raw: smcup, clear, E3.
-        if let Some(c) = self.clients.get(&id)
-            && let (Some(caps), Some(term)) = (c.caps, c.term.as_ref())
-        {
-            let bytes = caps.lock_screen(term.clears_scrollback());
+        if let Some(term) = self.clients.get(&id).and_then(|c| c.term.as_ref()) {
+            let bytes = crate::render::lock_screen(term);
             self.send(id, &ServerMsg::Frame(bytes));
         }
         if let Some(c) = self.clients.get_mut(&id) {
@@ -2377,13 +2397,16 @@ impl Server {
         c.compositor.invalidate();
         // tty_start_tty -> tty_invalidate: the modes are written again.
         c.mouse.invalidate();
-        let caps = c.caps;
+        let term = c.term.clone();
         // tty_start_tty: the startup modes without the terminal queries,
         // which tty_send_requests sends only once.
-        if let Some(caps) = caps {
+        if let Some(term) = term {
             let rows = self.tty_size(id).map_or(24, |(_, r)| u32::from(r));
             let clear = self.clear_on_attach();
-            self.send(id, &ServerMsg::Frame(caps.restart(clear, rows)));
+            self.send(
+                id,
+                &ServerMsg::Frame(crate::render::restart(&term, clear, rows)),
+            );
         }
         self.redraw_client(id);
         self.recalculate_sizes();
@@ -2412,14 +2435,9 @@ impl Server {
     /// stopped already (suspended).
     fn send_teardown(&mut self, id: ClientId) {
         if let Some(c) = self.clients.get(&id).filter(|c| !c.suspended)
-            && let Some(caps) = c.caps
+            && let Some(term) = c.term.as_deref()
         {
-            let dseks = c
-                .term
-                .as_deref()
-                .and_then(vtmux_core::term_features::Term::disable_extended_keys)
-                .unwrap_or_default();
-            let bytes = caps.teardown(dseks, self.clear_on_attach());
+            let bytes = crate::render::teardown(term, self.clear_on_attach());
             self.send(id, &ServerMsg::Frame(bytes));
         }
     }
@@ -3940,14 +3958,17 @@ impl Server {
     }
 
     /// What `show-messages -T` says about a client's terminal: its `TERM`
-    /// name, `tty_term`'s `flags` (`TERM_256COLOURS` 0x1, `TERM_RGBCOLOURS`
-    /// 0x10, `TERM_VT100LIKE` 0x20) and its feature list. `None` before the
-    /// terminal is open.
+    /// name, `tty_term`'s `flags` (`TERM_256COLOURS` 0x1, `TERM_NOAM` 0x2,
+    /// `TERM_RGBCOLOURS` 0x10, `TERM_VT100LIKE` 0x20) and its feature list.
+    /// `None` before the terminal is open.
     pub(crate) fn client_term(&self, id: ClientId) -> Option<(String, u32, String)> {
         let c = self.clients.get(&id)?;
         let term = c.term.as_ref()?;
         let name = c.hello.as_ref()?.tty.as_ref()?.term.clone();
-        let flags = 0x20 | u32::from(term.colours256()) | if term.rgb() { 0x10 } else { 0 };
+        let flags = u32::from(term.colours256())
+            | if term.flag("am") { 0 } else { 0x2 }
+            | if term.rgb() { 0x10 } else { 0 }
+            | if term.vt100_like() { 0x20 } else { 0 };
         Some((name, flags, term.features().list()))
     }
 
@@ -5452,6 +5473,20 @@ fn osc_title(raw: &[u8]) -> Option<String> {
         }
     }
     found
+}
+
+/// The command error for a terminal that cannot be opened: tmux's client
+/// refuses a terminal its terminfo lacks before it connects
+/// (`tty_term_read_list`, client.c:325-331), with no prefix; the server
+/// refuses one without `clear` or `cup` (`tty_term_create`) as `open
+/// terminal failed` (cmd-attach-session.c:141, cmd-new-session.c:208).
+fn open_error(e: &vtmux_core::term_features::OpenError) -> EdgeError {
+    match e {
+        vtmux_core::term_features::OpenError::Missing(_) => EdgeError::Message(e.to_string()),
+        vtmux_core::term_features::OpenError::Lacks(_) => {
+            EdgeError::OpenTerminalFailed(e.to_string())
+        }
+    }
 }
 
 #[cfg(test)]

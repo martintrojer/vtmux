@@ -59,7 +59,7 @@ fn every_case_matches_the_reference() {
             &items(&DEFAULT_FEATURES, features),
             &items(&DEFAULT_OVERRIDES, overrides),
         )
-        .unwrap_or_else(|| panic!("unknown terminal in {line:?}"));
+        .unwrap_or_else(|e| panic!("{e} in {line:?}"));
         assert_eq!(describe(&term), expected, "row {line:?}");
         rows += 1;
     }

@@ -975,16 +975,19 @@ impl Server {
         c.pasting = false;
         c.window_cache = crate::render::WindowCache::default();
         c.compositor.invalidate();
-        let caps = c.caps;
+        let term = c.term.clone();
         if registered.is_err() {
             self.drop_client(old);
             return;
         }
         self.send(old, &ServerMsg::Ready);
-        if let Some(caps) = caps {
+        if let Some(term) = term {
             let rows = self.tty_size(old).map_or(24, |(_, r)| u32::from(r));
             let clear = self.clear_on_attach();
-            self.send(old, &ServerMsg::Frame(caps.restart(clear, rows)));
+            self.send(
+                old,
+                &ServerMsg::Frame(crate::render::restart(&term, clear, rows)),
+            );
         }
         // The title the teardown popped, given again: with no upgrade the
         // terminal would still show it.

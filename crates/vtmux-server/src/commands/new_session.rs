@@ -185,6 +185,15 @@ pub fn exec(
     if !detached && !control && tty.is_none() {
         return Err(EdgeError::OpenTerminalFailed("not a terminal".into()).into());
     }
+    // cmd-new-session.c:207-213: the terminal is opened before the session
+    // is made.
+    if !detached
+        && !control
+        && !already_attached
+        && let Some(client) = item.client
+    {
+        server.check_terminal(client)?;
+    }
     let client_size = tty.as_ref().map(|t| (t.cols, t.rows));
     let x = size(args.value('x'), "width", client_size.map(|c| c.0), 80)?;
     let y = size(args.value('y'), "height", client_size.map(|c| c.1), 24)?;

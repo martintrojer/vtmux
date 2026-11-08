@@ -2,9 +2,11 @@
 //! `terminal-overrides`, the client's `-T` / `-2` flags and `COLORTERM` apply
 //! to a client's terminal, as tty-features.c and tty-term.c decide them.
 //!
-//! vtmux has no terminfo model (D8), so [`Term`] tracks the capabilities
-//! that reach what vtmux draws: [`Cap`]. Other override names are accepted
-//! and ignored (D-007).
+//! vtmux reads no terminfo (D8): the terminals it knows are a table
+//! generated from terminfo (`terminfo.rs`, `tests/terminfo_table.py`).
+//! [`Term`] tracks every `tty_term_codes` name by presence, the
+//! capabilities that reach what vtmux draws as [`Cap`], and the values of
+//! the strings vtmux writes or decodes (D-007).
 
 use crate::fnmatch;
 
@@ -213,8 +215,9 @@ pub enum Cap {
     Eneks,
     Dseks,
     /// `kmous`: the terminal sends mouse reports, so `tty_update_mode`
-    /// may turn mouse modes on (tty.c:904). Every terminal vtmux knows has
-    /// it (xterm's `\E[<`, screen's and tmux's `\E[M`).
+    /// may turn mouse modes on (tty.c:904) and `tty_start_tty` turns them
+    /// off first (xterm's `\E[<`, screen's and tmux's `\E[M`; `linux` and
+    /// the VT terminals have none).
     Kmous,
 }
 
@@ -284,115 +287,84 @@ impl Cap {
     }
 }
 
-/// `Ms` as terminfo (and the `clipboard` feature) gives it, escapes decoded.
+/// `Ms` as the `clipboard` feature gives it (tty-features.c), escapes decoded.
 const MS: &str = "\x1b]52;%p1%s;%p2%s\x07";
 
-/// The terminals vtmux knows without terminfo (D8).
-#[derive(Clone, Copy, Debug)]
-struct Base {
-    /// `colors#`.
-    colours: u32,
-    caps: u16,
-    xterm: bool,
-    /// terminfo's `tsl` (`fsl` is BEL where there is one).
-    tsl: Option<&'static str>,
-    /// The terminfo names of `tty_term_codes` the entry has beyond `caps`.
-    other: &'static [&'static str],
+/// Why a terminal cannot be opened (`tty_term_read_list`, `tty_term_create`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OpenError {
+    /// The terminal is not one vtmux knows: what tmux's client says when the
+    /// terminfo database has no such entry (`setupterm` fails).
+    Missing(String),
+    /// `tty_term_create` requires `clear` and `cup`; the text says which is
+    /// missing.
+    Lacks(&'static str),
 }
 
-impl Base {
-    fn of(name: &str) -> Option<Self> {
-        let caps = |list: &[Cap]| list.iter().fold(Cap::Kmous.bit(), |bits, c| bits | c.bit());
-        let xterm_caps = [Cap::Ss, Cap::Se, Cap::Ms];
-        if name == "xterm-ghostty" {
-            // Ghostty 1.4's terminfo.
-            return Some(Self {
-                colours: 256,
-                caps: caps(&[
-                    Cap::Tc,
-                    Cap::SetRgbF,
-                    Cap::SetRgbB,
-                    Cap::Sync,
-                    Cap::Smulx,
-                    Cap::Setulc,
-                    Cap::Ss,
-                    Cap::Se,
-                    Cap::Ms,
-                    Cap::Tsl,
-                    Cap::Fsl,
-                ]),
-                xterm: true,
-                tsl: Some("\x1b]2;"),
-                other: terminfo::XTERM_GHOSTTY,
-            });
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing(name) => write!(f, "missing or unsuitable terminal: {name}"),
+            Self::Lacks(cap) => write!(f, "terminal does not support {cap}"),
         }
-        if name.starts_with("xterm") {
-            let direct = name.starts_with("xterm-direct");
-            let colours = if direct {
-                1 << 24
-            } else if name.contains("256") {
-                256
-            } else if name.contains("88color") {
-                88
-            } else if name.contains("16color") {
-                16
-            } else if name.contains("mono") {
-                2
-            } else {
-                8
-            };
-            // xterm-color and xterm-mono are older, smaller entries; the
-            // others (16color, 88color, 256color, direct) are `xterm`'s.
-            // They have no `Ss`, `Se` or `Ms` either (the default
-            // `terminal-features` add them).
-            let (other, own) = match name {
-                "xterm-color" => (terminfo::XTERM_COLOR, &[][..]),
-                "xterm-mono" => (terminfo::XTERM_MONO, &[][..]),
-                _ => (terminfo::XTERM, &xterm_caps[..]),
-            };
-            return Some(Self {
-                colours,
-                caps: caps(own) | if direct { Cap::Rgb.bit() } else { 0 },
-                xterm: true,
-                tsl: None,
-                other,
-            });
-        }
-        let (colours, caps, tsl, other) = match name {
-            "tmux-256color" => (
-                256,
-                caps(&[Cap::Smulx, Cap::Ss, Cap::Se, Cap::Ms, Cap::Tsl, Cap::Fsl]),
-                Some("\x1b]0;"),
-                terminfo::TMUX_256COLOR,
-            ),
-            "screen" => (8, caps(&[]), None, terminfo::SCREEN),
-            "screen-256color" => (256, caps(&[]), None, terminfo::SCREEN),
-            _ => return None,
-        };
-        Some(Self {
-            colours,
-            caps,
-            xterm: false,
-            tsl,
-            other,
-        })
     }
 }
 
+/// The terminfo entry of a terminal vtmux knows (D8, D-007): the generated
+/// table's, else, for a name of the `xterm` family the table lacks, `xterm`'s
+/// with the colours the name suggests (`xterm-direct*` with `RGB`). An
+/// empty name has no entry at all, as tmux's client reads none.
+fn entry(name: &str) -> Option<(&'static terminfo::Entry, Option<u32>, bool)> {
+    const EMPTY: terminfo::Entry = terminfo::Entry {
+        names: &[],
+        off: &[],
+        colours: None,
+        strings: &[],
+    };
+    let find = |n: &str| {
+        terminfo::TERMINALS
+            .iter()
+            .find(|(t, _)| *t == n)
+            .map(|(_, e)| e)
+    };
+    if name.is_empty() {
+        return Some((&EMPTY, None, false));
+    }
+    if let Some(e) = find(name) {
+        return Some((e, e.colours, false));
+    }
+    if !name.starts_with("xterm") {
+        return None;
+    }
+    let direct = name.starts_with("xterm-direct");
+    let colours = if direct {
+        1 << 24
+    } else if name.contains("256") {
+        256
+    } else if name.contains("88color") {
+        88
+    } else if name.contains("16color") {
+        16
+    } else if name.contains("mono") {
+        2
+    } else {
+        8
+    };
+    Some((find("xterm")?, Some(colours), direct))
+}
+
 /// A client's terminal as `tty_term_create` leaves it.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "tty_term's independent flags"
+)]
 #[derive(Clone, Debug)]
 pub struct Term {
     name: String,
-    base: Base,
     features: Features,
     /// Features whose capabilities have been applied (`applied_features`).
     applied: u32,
     caps: u16,
-    ms: Option<String>,
-    tsl: Option<String>,
-    fsl: Option<String>,
-    eneks: Option<String>,
-    dseks: Option<String>,
     /// `c->term_type`: what the terminal named itself in its XDA reply.
     version: Option<String>,
     /// `TERM_256COLOURS`.
@@ -403,6 +375,14 @@ pub struct Term {
     /// The terminfo names it has that [`Cap`] does not model, after
     /// features and overrides (`term->codes` for them).
     other: std::collections::BTreeSet<&'static str>,
+    /// The flags it has that are false.
+    off: std::collections::BTreeSet<&'static str>,
+    /// `colors`.
+    colours: Option<u32>,
+    /// The values of the string capabilities vtmux writes or decodes.
+    values: std::collections::BTreeMap<&'static str, String>,
+    /// `TERM_VT100LIKE`.
+    vt100_like: bool,
     /// `CLIENT_UTF8`, which `tty_feature_present` reads for `utf8`.
     utf8: bool,
 }
@@ -412,31 +392,51 @@ impl Term {
     /// what the client sent (`-T`, `-2`); `features` and `overrides` are the
     /// items of the `terminal-features` and `terminal-overrides` options;
     /// `colorterm` is `$COLORTERM` from the client's environment.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// [`OpenError`] for a terminal vtmux has no entry for, or one left
+    /// without `clear` or `cup`.
     pub fn open(
         name: &str,
         client: &[String],
         colorterm: Option<&str>,
         features: &[String],
         overrides: &[String],
-    ) -> Option<Self> {
-        let base = Base::of(name)?;
+    ) -> Result<Self, OpenError> {
+        let (entry, colours, direct) =
+            entry(name).ok_or_else(|| OpenError::Missing(name.to_owned()))?;
+        let mut caps = Cap::ALL
+            .into_iter()
+            .filter(|c| entry.names.contains(&c.name()))
+            .fold(0, |bits, c| bits | c.bit());
+        if direct {
+            caps |= Cap::Rgb.bit();
+        }
+        let modelled = |n: &&str| Cap::ALL.iter().any(|c| c.name() == *n);
         let mut term = Self {
             name: name.to_owned(),
-            base,
             features: Features::from_client(client),
             applied: 0,
-            caps: base.caps,
-            ms: (base.caps & Cap::Ms.bit() != 0).then(|| MS.to_owned()),
-            tsl: base.tsl.map(str::to_owned),
-            fsl: base.tsl.map(|_| "\x07".to_owned()),
-            eneks: None,
-            dseks: None,
+            caps,
             version: None,
             colours256: false,
             rgb: false,
             overrides: overrides.to_vec(),
-            other: base.other.iter().copied().collect(),
+            other: entry
+                .names
+                .iter()
+                .copied()
+                .filter(|n| !modelled(n))
+                .collect(),
+            off: entry.off.iter().copied().collect(),
+            colours,
+            values: entry
+                .strings
+                .iter()
+                .map(|&(n, v)| (n, v.to_owned()))
+                .collect(),
+            vt100_like: false,
             utf8: false,
         };
         for item in features {
@@ -454,9 +454,18 @@ impl Term {
             }
         }
         term.apply_overrides();
-        // Every terminal vtmux knows is VT100-like.
-        term.features.parse("bpaste,focus,title", &[','], true);
-        if (term.has(Cap::Tc) || term.has(Cap::Rgb))
+        for cap in ["clear", "cup"] {
+            if !term.has_name(cap) {
+                return Err(OpenError::Lacks(cap));
+            }
+        }
+        // tty-term.c:673-677: XT, or a `clear` that starts with CSI.
+        term.vt100_like =
+            term.flag("XT") || term.string("clear").is_some_and(|s| s.starts_with("\x1b["));
+        if term.vt100_like {
+            term.features.parse("bpaste,focus,title", &[','], true);
+        }
+        if (term.flag(Cap::Tc.name()) || term.has(Cap::Rgb))
             && (!term.has(Cap::SetRgbF) || !term.has(Cap::SetRgbB))
         {
             term.features.parse("RGB", &[','], true);
@@ -464,7 +473,7 @@ impl Term {
         if term.apply_features() {
             term.apply_overrides();
         }
-        Some(term)
+        Ok(term)
     }
 
     /// The terminal answered the synchronised-update query: `tty_keys_sync`.
@@ -575,14 +584,14 @@ impl Term {
     /// (`tty_update_features`, tty.c:561-562); `None` without it.
     #[must_use]
     pub fn enable_extended_keys(&self) -> Option<&str> {
-        self.eneks.as_deref().filter(|_| self.has(Cap::Eneks))
+        self.cap_string(Cap::Eneks)
     }
 
     /// `Dseks`: what turns extended keys off again (`tty_stop_tty`,
     /// tty.c:508); `None` without it.
     #[must_use]
     pub fn disable_extended_keys(&self) -> Option<&str> {
-        self.dseks.as_deref().filter(|_| self.has(Cap::Dseks))
+        self.cap_string(Cap::Dseks)
     }
 
     #[must_use]
@@ -637,12 +646,56 @@ impl Term {
         self.caps & cap.bit() != 0
     }
 
+    /// `tty_term_flag`: the terminal has the flag and it is true.
+    #[must_use]
+    pub fn flag(&self, name: &str) -> bool {
+        self.has_name(name) && !self.off.contains(name)
+    }
+
+    /// `tty_term_string` for the capabilities vtmux writes or decodes
+    /// (`tests/terminfo_table.py`'s `STRINGS`, or set by an override):
+    /// `None` when the terminal lacks it.
+    #[must_use]
+    pub fn string(&self, name: &str) -> Option<&str> {
+        self.values
+            .get(name)
+            .map(String::as_str)
+            .filter(|_| self.has_name(name))
+    }
+
+    fn cap_string(&self, cap: Cap) -> Option<&str> {
+        self.string(cap.name())
+    }
+
+    /// `TERM_VT100LIKE` (tty-term.c:673-677): the terminal has `XT` or its
+    /// `clear` starts with CSI.
+    #[must_use]
+    pub fn vt100_like(&self) -> bool {
+        self.vt100_like
+    }
+
+    /// The terminfo keys `tty_keys_build` adds to the key tree
+    /// (`tty_default_code_keys`, tty-keys.c:283-360) that vtmux reads from
+    /// the entry: `kf1` to `kf12`, `kich1`, `kdch1`, `khome`, `kend`, `knp`,
+    /// `kpp` and `kcbt`, with their sequences. The arrows and the modified
+    /// keys are xterm's rows in every entry vtmux knows.
+    #[must_use]
+    pub fn code_keys(&self) -> Vec<(&'static str, &str)> {
+        const KEYS: [&str; 19] = [
+            "kf1", "kf2", "kf3", "kf4", "kf5", "kf6", "kf7", "kf8", "kf9", "kf10", "kf11", "kf12",
+            "kich1", "kdch1", "khome", "kend", "knp", "kpp", "kcbt",
+        ];
+        KEYS.into_iter()
+            .filter_map(|k| Some((k, self.string(k).filter(|s| !s.is_empty())?)))
+            .collect()
+    }
+
     /// `tty_set_selection` (tty.c:2149-2166): `Ms` with the clipboard
     /// name and the base64 of `data` (`tty_putcode_ss`), or `None` when the
     /// terminal has no `Ms`.
     #[must_use]
     pub fn set_selection(&self, clip: &str, data: &[u8]) -> Option<Vec<u8>> {
-        let ms = self.ms.as_deref().filter(|_| self.has(Cap::Ms))?;
+        let ms = self.cap_string(Cap::Ms)?;
         Some(expand_ss(ms, clip, &base64(data)))
     }
 
@@ -650,7 +703,7 @@ impl Term {
     /// clipboard name and `?`, or `None` when the terminal has no `Ms`.
     #[must_use]
     pub fn clipboard_query(&self) -> Option<Vec<u8>> {
-        let ms = self.ms.as_deref().filter(|_| self.has(Cap::Ms))?;
+        let ms = self.cap_string(Cap::Ms)?;
         Some(expand_ss(ms, "", "?"))
     }
 
@@ -658,30 +711,9 @@ impl Term {
     /// `None` when the terminal lacks either.
     #[must_use]
     pub fn set_title(&self, title: &str) -> Option<Vec<u8>> {
-        let tsl = self.tsl.as_deref().filter(|_| self.has(Cap::Tsl))?;
-        let fsl = self.fsl.as_deref().filter(|_| self.has(Cap::Fsl))?;
+        let tsl = self.cap_string(Cap::Tsl)?;
+        let fsl = self.cap_string(Cap::Fsl)?;
         Some([tsl, title, fsl].concat().into_bytes())
-    }
-
-    /// The terminal is xterm-derived: it has `XT` and `bce` in terminfo.
-    /// terminfo's `E3` (clear the scrollback): every terminal vtmux knows
-    /// has it but screen's entries.
-    #[must_use]
-    pub fn clears_scrollback(&self) -> bool {
-        !self.name.starts_with("screen")
-    }
-
-    #[must_use]
-    pub fn is_xterm(&self) -> bool {
-        self.base.xterm
-    }
-
-    /// terminfo's `khome`/`kend` are `\E[1~`/`\E[4~` (screen, tmux)
-    /// rather than xterm's `\EOH`/`\EOF`; tty-keys.c adds them to the key
-    /// tree (`tty_default_code_keys`).
-    #[must_use]
-    pub fn tilde_home_end(&self) -> bool {
-        !self.base.xterm
     }
 
     /// `TERM_RGBCOLOURS`.
@@ -703,7 +735,7 @@ impl Term {
         if self.colours256 {
             256
         } else {
-            self.base.colours
+            self.colours.unwrap_or(0)
         }
     }
 
@@ -714,9 +746,9 @@ impl Term {
             1 << 24
         } else if self.colours256 {
             256
-        } else if self.base.colours < 8 {
+        } else if self.colours.unwrap_or(0) < 8 {
             2
-        } else if self.base.colours < 16 {
+        } else if self.colours.unwrap_or(0) < 16 {
             8
         } else {
             16
@@ -772,34 +804,22 @@ impl Term {
         self.rgb = self.has(Cap::SetRgbF) && self.has(Cap::SetRgbB);
         // tty_term_validate: an `Ms` that does not take two string
         // parameters is dropped.
-        if self.ms.as_deref().is_some_and(|ms| !ms_is_valid(ms)) {
+        if self.cap_string(Cap::Ms).is_some_and(|ms| !ms_is_valid(ms)) {
             self.clear(Cap::Ms);
         }
     }
 
     fn set(&mut self, cap: Cap, template: Option<&str>) {
         self.caps |= cap.bit();
-        let value = || Some(template.unwrap_or_default().to_owned());
-        match cap {
-            Cap::Ms => self.ms = value(),
-            Cap::Tsl => self.tsl = value(),
-            Cap::Fsl => self.fsl = value(),
-            Cap::Eneks => self.eneks = value(),
-            Cap::Dseks => self.dseks = value(),
-            _ => {}
+        self.off.remove(cap.name());
+        if !cap.is_flag() {
+            self.values
+                .insert(cap.name(), template.unwrap_or_default().to_owned());
         }
     }
 
     fn clear(&mut self, cap: Cap) {
         self.caps &= !cap.bit();
-        match cap {
-            Cap::Ms => self.ms = None,
-            Cap::Tsl => self.tsl = None,
-            Cap::Fsl => self.fsl = None,
-            Cap::Eneks => self.eneks = None,
-            Cap::Dseks => self.dseks = None,
-            _ => {}
-        }
     }
 
     /// `tty_term_apply` with `flags == 0`: `name=value` sets, `name@`
@@ -818,13 +838,8 @@ impl Term {
                 (token.as_str(), Some(String::new()), false)
             };
             let Some(cap) = Cap::ALL.into_iter().find(|c| c.name() == name) else {
-                if let Some(&known) = terminfo::ALL.iter().find(|&&n| n == name) {
-                    if remove {
-                        self.other.remove(known);
-                    } else if !is_number(known) || value.as_deref().is_some_and(is_int) {
-                        // A number that does not parse changes nothing.
-                        self.other.insert(known);
-                    }
+                if let Some(&(known, kind)) = terminfo::ALL.iter().find(|(n, _)| *n == name) {
+                    self.apply_other(known, kind, value, remove);
                 }
                 continue;
             };
@@ -836,6 +851,48 @@ impl Term {
             }
         }
     }
+
+    /// One override of a capability [`Cap`] does not model.
+    fn apply_other(
+        &mut self,
+        name: &'static str,
+        kind: terminfo::Kind,
+        value: Option<String>,
+        remove: bool,
+    ) {
+        if remove {
+            self.other.remove(name);
+            self.off.remove(name);
+            if name == "colors" {
+                self.colours = None;
+            }
+            return;
+        }
+        let value = value.unwrap_or_default();
+        match kind {
+            terminfo::Kind::String => {
+                self.values.insert(name, value);
+            }
+            terminfo::Kind::Number => {
+                // strtonum(value, 0, INT_MAX): one that does not parse
+                // changes nothing.
+                let Some(n) = value
+                    .parse::<i32>()
+                    .ok()
+                    .and_then(|n| u32::try_from(n).ok())
+                else {
+                    return;
+                };
+                if name == "colors" {
+                    self.colours = Some(n);
+                }
+            }
+            terminfo::Kind::Flag => {
+                self.off.remove(name);
+            }
+        }
+        self.other.insert(name);
+    }
 }
 
 /// `kf0` to `kf63`, which the `ignorefkeys` feature removes.
@@ -843,16 +900,6 @@ fn is_function_key(name: &str) -> bool {
     name.strip_prefix("kf")
         .and_then(|n| n.parse::<u8>().ok())
         .is_some_and(|n| n <= 63)
-}
-
-/// The two `TTYCODE_NUMBER` capabilities of `tty_term_codes`.
-fn is_number(name: &str) -> bool {
-    matches!(name, "colors" | "U8")
-}
-
-/// `strtonum(value, 0, INT_MAX)` succeeds.
-fn is_int(value: &str) -> bool {
-    value.parse::<i32>().is_ok_and(|n| n >= 0)
 }
 
 /// `tty_term_override_next`: the next `:`-separated token of `s` from `*at`,
@@ -1109,5 +1156,111 @@ mod selection_tests {
         let none =
             Term::open("xterm-256color", &[], None, &[], &["xterm*:Ms@".to_owned()]).unwrap();
         assert!(none.set_selection("", b"x").is_none());
+    }
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+
+    fn open(name: &str, overrides: &[&str]) -> Result<Term, OpenError> {
+        let overrides: Vec<String> = overrides.iter().map(|s| (*s).to_owned()).collect();
+        Term::open(name, &[], None, &[], &overrides)
+    }
+
+    /// tty-term.c `tty_term_create` refuses a terminal without `clear` or
+    /// `cup`, after the overrides; tmux's client refuses one its terminfo
+    /// lacks (`tty_term_read_list`). Reference: `TERM=dumb tmux new` prints
+    /// `open terminal failed: terminal does not support clear`, `TERM=bogus`
+    /// `missing or unsuitable terminal: bogus`.
+    #[test]
+    fn refusals_are_tmux_s() {
+        let text = |r: Result<Term, OpenError>| r.err().map(|e| e.to_string());
+        assert_eq!(
+            text(open("dumb", &[])).as_deref(),
+            Some("terminal does not support clear")
+        );
+        assert_eq!(
+            text(open("", &[])).as_deref(),
+            Some("terminal does not support clear")
+        );
+        assert_eq!(
+            text(open("bogus", &[])).as_deref(),
+            Some("missing or unsuitable terminal: bogus")
+        );
+        assert_eq!(
+            text(open("xterm-256color", &["xterm*:cup@"])).as_deref(),
+            Some("terminal does not support cup")
+        );
+        // An override can give a terminal what it lacks.
+        assert!(open("dumb", &["dumb:clear=\\E[H\\E[2J:cup=\\E[%i%p1%d;%p2%dH"]).is_ok());
+        for name in [
+            "foot",
+            "linux",
+            "alacritty",
+            "xterm-kitty",
+            "screen.xterm-256color",
+            "tmux",
+            "rxvt",
+            "vt100",
+        ] {
+            assert!(open(name, &[]).is_ok(), "{name}");
+        }
+    }
+
+    /// What the strings and flags vtmux writes with come from: the entry,
+    /// then `terminal-overrides` (`tty_term_apply`).
+    #[test]
+    fn strings_and_flags_follow_the_entry_and_overrides() {
+        let linux = open("linux", &[]).unwrap();
+        assert_eq!(linux.string("smcup"), None);
+        assert_eq!(linux.string("clear"), Some("\x1b[H\x1b[J"));
+        assert!(linux.flag("bce") && linux.flag("am") && !linux.flag("XT"));
+        assert!(linux.vt100_like());
+        assert_eq!(linux.palette_size(), 8);
+        let vt100 = open("vt100", &[]).unwrap();
+        assert!(!vt100.flag("bce") && vt100.has_name("bce"));
+        assert!(!vt100.has_name("setaf") && vt100.colours() == 2);
+        // tty_term_strip drops the padding.
+        assert_eq!(vt100.string("clear"), Some("\x1b[H\x1b[J"));
+        let xterm = open("xterm-256color", &["xterm*:smcup@:bce@:colors=8:E3=x"]).unwrap();
+        assert_eq!(xterm.string("smcup"), None);
+        assert_eq!(xterm.string("rmcup"), Some("\x1b[?1049l\x1b[23;0;0t"));
+        assert!(!xterm.flag("bce") && !xterm.has_name("bce"));
+        assert_eq!((xterm.palette_size(), xterm.string("E3")), (8, Some("x")));
+        let bce = open("vt100", &["vt100:bce:colors=x"]).unwrap();
+        assert!(bce.flag("bce"));
+        assert_eq!(bce.palette_size(), 0);
+        // Not CSI and no XT: not VT100-like, so no bpaste, focus or title.
+        let odd = open("xterm-256color", &["xterm*:XT@:clear=\\Ec"]).unwrap();
+        assert!(!odd.vt100_like() && !odd.features().has(Feature::BracketedPaste));
+    }
+
+    /// `tty_default_code_keys`: the console's F1-F5, rxvt's Home and End,
+    /// and `ignorefkeys` (rxvt's default feature) taking the F keys away.
+    #[test]
+    fn code_keys_are_the_entry_s() {
+        let keys = |t: &Term, cap: &str| {
+            t.code_keys()
+                .into_iter()
+                .find(|(c, _)| *c == cap)
+                .map(|(_, s)| s.to_owned())
+        };
+        let linux = open("linux", &[]).unwrap();
+        assert_eq!(keys(&linux, "kf1").as_deref(), Some("\x1b[[A"));
+        assert_eq!(keys(&linux, "khome").as_deref(), Some("\x1b[1~"));
+        let rxvt = Term::open(
+            "rxvt-unicode-256color",
+            &[],
+            None,
+            &["rxvt*:ignorefkeys".to_owned()],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(keys(&rxvt, "khome").as_deref(), Some("\x1b[7~"));
+        assert_eq!(keys(&rxvt, "kf1"), None);
+        let xterm = open("xterm-256color", &["xterm*:kf1=\\EOX"]).unwrap();
+        assert_eq!(keys(&xterm, "kf1").as_deref(), Some("\x1bOX"));
+        assert_eq!(keys(&xterm, "khome").as_deref(), Some("\x1bOH"));
     }
 }

@@ -185,3 +185,40 @@ xterm-256color	-	-	xterm*:extkeys	xterm*:Eneks@	bpaste,ccolour,clipboard,cstyle,
 xterm-256color	-	-	xterm*:extkeys	xterm*:Dseks@	bpaste,ccolour,clipboard,cstyle,extkeys,focus,title|16|Ss Se Ms tsl fsl Eneks
 xterm-256color	-	-	xterm*:extkeys@	-	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se Ms tsl fsl
 xterm-256color	-	-	xterm*:RGB:usstyle:hyperlinks~xterm*:extkeys	-	bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,RGB,title,usstyle|16777216|setrgbf setrgbb Smulx Setulc Ss Se Ms tsl fsl Eneks Dseks
+alacritty	-	-	-	-	bpaste,focus,title|16|Smulx Ss Se Ms tsl fsl
+alacritty-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+ghostty	-	-	-	-	bpaste,focus,title|16777216|Tc setrgbf setrgbb Sync Smulx Setulc Ss Se Ms tsl fsl
+gnome-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+iterm2	-	-	-	-	bpaste,focus,title|16|tsl fsl
+kitty	-	-	-	-	bpaste,focus,title|16|Ss Se Ms tsl fsl
+kitty-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+konsole-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+linux	-	-	-	-	bpaste,focus,title|8|tsl fsl
+linux-16color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+mintty	-	-	-	-	bpaste,focus,title|16|Smulx Ss Se Ms tsl fsl
+ms-terminal	-	-	-	-	bpaste,focus,title|16|tsl fsl
+putty-256color	-	-	-	-	bpaste,focus,title|16|tsl fsl
+rxvt	-	-	-	-	bpaste,focus,ignorefkeys,title|8|tsl fsl
+rxvt-unicode	-	-	-	-	bpaste,focus,ignorefkeys,title|16|tsl fsl
+rxvt-unicode-256color	-	-	-	-	bpaste,focus,ignorefkeys,title|16|tsl fsl
+screen.linux	-	-	-	-	bpaste,focus,title|8|tsl fsl
+screen.xterm-256color	-	-	-	-	bpaste,focus,title|16|Ss Se Ms tsl fsl
+st-256color	-	-	-	-	bpaste,focus,title|16|Ss Se Ms tsl fsl
+st-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Ss Se Ms tsl fsl
+tmux	-	-	-	-	bpaste,focus,title|8|Smulx Ss Se Ms tsl fsl
+tmux-direct	-	-	-	-	bpaste,focus,RGB,title|16777216|RGB setrgbf setrgbb Smulx Ss Se Ms tsl fsl
+vt100	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vt220	-	-	-	-	bpaste,focus,title|2|tsl fsl
+vte-256color	-	-	-	-	bpaste,focus,title|16|Smulx tsl fsl
+xterm-kitty	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|16777216|Tc setrgbf setrgbb Sync Smulx Setulc Ss Se Ms tsl fsl
+xterm-new	-	-	-	-	bpaste,ccolour,clipboard,cstyle,focus,title|8|Ss Se Ms tsl fsl
+linux	-	-	-	linux:colors=256	bpaste,focus,title|16|tsl fsl
+linux	-	-	-	linux:colors=x	bpaste,focus,title|8|tsl fsl
+vt100	-	-	-	vt100:colors=8	bpaste,focus,title|8|tsl fsl
+xterm-256color	-	-	-	xterm*:colors@	bpaste,ccolour,clipboard,cstyle,focus,title|2|Ss Se Ms tsl fsl
+xterm-256color	-	-	-	xterm*:XT@:clear=\Ec	ccolour,clipboard,cstyle,focus,title|16|Ss Se Ms tsl fsl
+xterm-256color	-	-	-	xterm*:clear=\E[2J	bpaste,ccolour,clipboard,cstyle,focus,title|16|Ss Se Ms tsl fsl
+linux	-	-	-	linux:XT:clear=\Ec	bpaste,focus,title|8|tsl fsl
+linux	truecolor	-	-	-	bpaste,focus,RGB,title|16777216|setrgbf setrgbb tsl fsl
+vt100	-	-	-	vt100:Tc	bpaste,focus,RGB,title|16777216|Tc setrgbf setrgbb tsl fsl
+xterm-kitty	-	-	-	xterm-kitty:Ms@:Sync@	bpaste,ccolour,clipboard,cstyle,focus,title|16777216|Tc setrgbf setrgbb Smulx Setulc Ss Se tsl fsl

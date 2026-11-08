@@ -425,7 +425,11 @@ impl<'a> Runner<'a> {
                 }
                 Step::ControlClose(c) => self.control_close(i, &c.id)?,
                 Step::Attach(a) => {
-                    self.attach_start(&a.session, a.id.clone().unwrap_or_default())?;
+                    self.attach_start(
+                        &a.session,
+                        a.id.clone().unwrap_or_default(),
+                        a.term.as_deref(),
+                    )?;
                 }
                 Step::Keys(k) => self.keys("", k)?,
                 Step::KeysTo(k) => self.keys(&k.id, &k.keys)?,
@@ -777,7 +781,7 @@ impl<'a> Runner<'a> {
         Ok(())
     }
 
-    fn attach_start(&mut self, session: &str, id: String) -> Result<()> {
+    fn attach_start(&mut self, session: &str, id: String, term: Option<&str>) -> Result<()> {
         let pty = native_pty_system();
         let pair = pty
             .openpty(PtySize {
@@ -791,6 +795,9 @@ impl<'a> Runner<'a> {
         cmd.env_clear();
         for (k, v) in self.env() {
             cmd.env(k, v);
+        }
+        if let Some(term) = term {
+            cmd.env("TERM", term);
         }
         cmd.args(self.base_args());
         cmd.args(["attach", "-t", session]);

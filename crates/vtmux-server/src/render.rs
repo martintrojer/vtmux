@@ -18,7 +18,7 @@ pub mod tree;
 pub mod window;
 use vtmux_core::colour::{self, Colour, tty::Depth};
 use vtmux_core::protocol::Hello;
-use vtmux_core::term_features::{Cap, Term};
+use vtmux_core::term_features::{Cap, OpenError, Term};
 use vtmux_vt::{Color, Snapshot, Style, Underline};
 
 /// What the compositor needs of a client's terminal, from its
@@ -35,8 +35,12 @@ pub struct Caps {
     pub palette_colours: u32,
     pub theme_palette: bool,
     pub sync: bool,
+    /// terminfo's `bce` (`tty_term_flag(TTYC_BCE)`, tty.c:1097).
     pub bce: bool,
-    pub xterm: bool,
+    /// The terminal has `setaf` and `setab`, which palette colours are
+    /// written with (`tty_colours_fg`, `tty_colours_bg`).
+    pub setaf: bool,
+    pub setab: bool,
     /// `#{client_colours}`.
     pub colours: u32,
     /// An overlay (a popup) is up: `tty_draw_line_clear` writes spaces,
@@ -69,23 +73,30 @@ impl Caps {
         }
     }
 
-    /// `tty_term_create` for a client's hello: `None` for a terminal vtmux
-    /// has no table for.
+    /// `tty_term_create` for a client's hello: `None` for a client
+    /// without a terminal.
+    ///
+    /// # Errors
+    ///
+    /// Why the terminal cannot be opened ([`OpenError`]).
     #[must_use]
     pub fn open_term(
         hello: &Hello,
         features: &[String],
         overrides: &[String],
-    ) -> Option<(Term, Self)> {
+    ) -> Option<Result<(Term, Self), OpenError>> {
         let tty = hello.tty.as_ref()?;
         let colorterm = hello
             .env
             .iter()
             .find(|(k, _)| k == "COLORTERM")
             .map(|(_, v)| v.as_str());
-        let term = Term::open(&tty.term, &tty.features, colorterm, features, overrides)?;
-        let caps = Self::from_term(&term);
-        Some((term, caps))
+        Some(
+            Term::open(&tty.term, &tty.features, colorterm, features, overrides).map(|term| {
+                let caps = Self::from_term(&term);
+                (term, caps)
+            }),
+        )
     }
     #[must_use]
     pub fn from_term(term: &Term) -> Self {
@@ -94,72 +105,109 @@ impl Caps {
             palette_colours: term.palette_size(),
             theme_palette: term.colours256(),
             sync: term.has(Cap::Sync),
-            bce: term.is_xterm(),
-            xterm: term.is_xterm(),
+            bce: term.flag("bce"),
+            setaf: term.has_name("setaf"),
+            setab: term.has_name("setab"),
             colours: term.colours(),
             overlay: false,
-            no_am: !term.has_name("am"),
+            no_am: !term.flag("am"),
             light_theme: false,
             isolates: term.feature_present("utf8") && term.has_name("Bidi"),
         }
     }
-    /// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424) for a
-    /// VT100-like terminal, which every terminal vtmux knows is: DA, DA2,
-    /// XTVERSION, the synchronised-update DECRQM and the default colours
-    /// (OSC 10 and 11); then, vtmux-only, palette entries 0-15 (OSC 4) for
-    /// the pane blend (D26, [`crate::term_queries::colour_queries`]).
-    /// `clear` is `clear-on-attach`; `rows` the terminal's height.
-    #[must_use]
-    pub fn startup(self, clear: bool, rows: u32) -> Vec<u8> {
-        let mut out = self.restart(clear, rows);
-        out.extend_from_slice(b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p");
-        out.extend_from_slice(&crate::term_queries::colour_queries());
-        out
-    }
-    /// `tty_start_tty` alone: a suspended client coming back.
-    /// `clear-on-attach` on enters the alternate screen and clears it;
-    /// off, the terminal's contents are scrolled up into its history
-    /// instead: `csr`, `cup`, then `indn` of one more than the height
-    /// (every terminal vtmux knows has `indn`), tty.c:357-369. tmux gives
-    /// `cup` 0 and the last row in that order, which terminfo takes as row
-    /// then column: row 1, column `rows`.
-    #[must_use]
-    pub fn restart(self, clear: bool, rows: u32) -> Vec<u8> {
-        let start = if clear {
-            let title = if self.xterm { "\x1b[22;0;0t" } else { "" };
-            format!("\x1b[?1049h{title}\x1b[H\x1b[2J")
+}
+
+/// `tty_start_tty`, then `tty_send_requests` (tty.c:406-424): DA, DA2,
+/// XTVERSION, the synchronised-update DECRQM and the default colours (OSC 10
+/// and 11); then, vtmux-only, palette entries 0-15 (OSC 4) for the pane
+/// blend (D26, [`crate::term_queries::colour_queries`]). tmux sends the
+/// queries only to a VT100-like terminal; every terminal vtmux knows is one
+/// (an override can make one that is not, which vtmux still queries).
+/// `clear` is `clear-on-attach`; `rows` the terminal's height.
+#[must_use]
+pub fn startup(term: &Term, clear: bool, rows: u32) -> Vec<u8> {
+    let mut out = restart(term, clear, rows);
+    out.extend_from_slice(b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p");
+    out.extend_from_slice(&crate::term_queries::colour_queries());
+    out
+}
+
+/// `tty_start_tty` (tty.c:357-395) alone: a suspended client coming back.
+/// `clear-on-attach` on writes `smcup` and `clear`; off, the terminal's
+/// contents are scrolled up into its history instead: `csr`, `cup`, then
+/// `indn` of one more than the height (`ind` that many times without it,
+/// `clear` without either). tmux gives `cup` 0 and the last row in that
+/// order, which terminfo takes as row then column: row 1, column `rows`.
+/// Then `smkx`, `cnorm`, the mouse modes off (with `kmous`), `Enbp`, and
+/// the theme subscription for a VT100-like terminal. `csr`, `cup` and
+/// `indn` are the xterm forms every terminal vtmux knows has.
+#[must_use]
+pub fn restart(term: &Term, clear: bool, rows: u32) -> Vec<u8> {
+    let s = |name| term.string(name).unwrap_or_default();
+    let mut out = if clear {
+        [s("smcup"), s("clear")].concat()
+    } else {
+        let rows = rows.max(1);
+        let scroll = if term.has_name("indn") {
+            format!("\x1b[{}S", rows + 1)
+        } else if term.has_name("ind") {
+            s("ind").repeat(rows as usize + 1)
         } else {
-            let rows = rows.max(1);
-            format!("\x1b[1;{rows}r\x1b[1;{rows}H\x1b[{}S", rows + 1)
+            s("clear").to_owned()
         };
-        format!("{start}\x1b[?1h\x1b=\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004h\x1b[?2031h\x1b[?996n").into_bytes()
+        format!("\x1b[1;{rows}r\x1b[1;{rows}H{scroll}")
+    };
+    out.push_str(s("smkx"));
+    out.push_str(s("cnorm"));
+    if term.has(Cap::Kmous) {
+        out.push_str("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l");
     }
-    /// `server_lock_client`'s `tty_raw` calls (server-fn.c:211-213):
-    /// `smcup`, `clear` and, where the terminal has it, `E3`.
-    #[must_use]
-    pub fn lock_screen(self, e3: bool) -> Vec<u8> {
-        let (smcup, clear) = if self.xterm {
-            ("\x1b[?1049h\x1b[22;0;0t", "\x1b[H\x1b[2J")
-        } else {
-            ("\x1b[?1049h", "\x1b[H\x1b[J")
-        };
-        let e3 = if e3 { "\x1b[3J" } else { "" };
-        format!("{smcup}{clear}{e3}").into_bytes()
+    if term.has_name("Enbp") {
+        out.push_str("\x1b[?2004h");
     }
-    /// `tty_stop_tty` (tty.c:470-520); `dseks` is the terminal's `Dseks`
-    /// (empty without it). `clear` is `clear-on-attach`: on, the screen is
-    /// cleared and the alternate screen left; off, there is no alternate
-    /// screen to leave and the clear comes last.
-    #[must_use]
-    pub fn teardown(self, dseks: &str, clear: bool) -> Vec<u8> {
-        let (early, late) = if clear {
-            let title = if self.xterm { "\x1b[23;0;0t" } else { "" };
-            ("\x1b[H\x1b[2J", format!("\x1b[?1049l{title}"))
-        } else {
-            ("", "\x1b[H\x1b[2J".to_owned())
-        };
-        format!("\x1b[r\x1b[0m\x1b[?1l\x1b>{early}\x1b[?12l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l\x1b[?2004l\x1b[?1004l{dseks}{late}\x1b[?2031l").into_bytes()
+    if term.vt100_like() {
+        out.push_str("\x1b[?2031h\x1b[?996n");
     }
+    out.into_bytes()
+}
+
+/// `server_lock_client`'s `tty_raw` calls (server-fn.c:211-214): `smcup`,
+/// `clear` and `E3`.
+#[must_use]
+pub fn lock_screen(term: &Term) -> Vec<u8> {
+    let s = |name| term.string(name).unwrap_or_default();
+    [s("smcup"), s("clear"), s("E3")].concat().into_bytes()
+}
+
+/// `tty_stop_tty` (tty.c:470-520). `clear` is `clear-on-attach`: on, the
+/// screen is cleared and `rmcup` leaves the alternate screen; off, there is
+/// none to leave and the clear comes last. `csr` and `sgr0` are xterm's
+/// forms; the focus reports and extended keys go off as `Dsfcs` and
+/// `Dseks` say.
+#[must_use]
+pub fn teardown(term: &Term, clear: bool) -> Vec<u8> {
+    let s = |name| term.string(name).unwrap_or_default();
+    let mut out = String::from("\x1b[r\x1b[0m");
+    out.push_str(s("rmkx"));
+    if clear {
+        out.push_str(s("clear"));
+    }
+    out.push_str(s("cnorm"));
+    if term.has(Cap::Kmous) {
+        out.push_str("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1005l");
+    }
+    if term.has_name("Dsbp") {
+        out.push_str("\x1b[?2004l");
+    }
+    if term.has_name("Dsfcs") {
+        out.push_str("\x1b[?1004l");
+    }
+    out.push_str(term.disable_extended_keys().unwrap_or_default());
+    out.push_str(s(if clear { "rmcup" } else { "clear" }));
+    if term.vt100_like() {
+        out.push_str("\x1b[?2031l");
+    }
+    out.into_bytes()
 }
 
 /// The shortest gap between two frames to one client while a pane is
@@ -605,6 +653,20 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
         return;
     }
     out.push_str("\x1b[0m");
+    // tty_attributes (tty.c:2689-2702): without `setab`, a background other
+    // than black is shown as reverse video, and reverse with a foreground
+    // other than white is taken off.
+    let mut inverse = wanted.inverse;
+    if !caps.setab {
+        let coloured = |c: Colour, plain: u8| {
+            !matches!(c, Colour::Default | Colour::Terminal) && c != Colour::Ansi(plain)
+        };
+        if inverse {
+            inverse = !coloured(core_colour(wanted.fg), 7);
+        } else {
+            inverse = coloured(core_colour(wanted.bg), 0);
+        }
+    }
     // tty_check_fg/bg: colours the terminal cannot show are downgraded; an
     // aixterm foreground on a terminal without them is bold instead.
     let depth = Depth {
@@ -613,13 +675,22 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
     };
     let (fg, bright) = colour::tty::check_fg(core_colour(wanted.fg), core_colour(wanted.bg), depth);
     let bg = colour::tty::check_bg(core_colour(wanted.bg), depth);
+    // tty_colours_fg/bg: a colour below 16 goes through `setaf`/`setab`,
+    // which writes nothing on a terminal without it; under
+    // `TERM_256COLOURS` aixterm and palette colours are written directly.
+    let written = |c: Colour, has: bool| match c {
+        Colour::Ansi(_) if !has => Colour::Default,
+        Colour::Bright(_) | Colour::Palette(_) if !has && !caps.theme_palette => Colour::Default,
+        c => c,
+    };
+    let (fg, bg) = (written(fg, caps.setaf), written(bg, caps.setab));
     for (on, code) in [
         (wanted.bold || bright, 1),
         (wanted.faint, 2),
         (wanted.italic, 3),
         (wanted.underline != Underline::None, 4),
         (wanted.blink, 5),
-        (wanted.inverse, 7),
+        (inverse, 7),
         (wanted.invisible, 8),
         (wanted.strikethrough, 9),
     ] {
@@ -676,7 +747,8 @@ mod tests {
             theme_palette: false,
             sync: true,
             bce: true,
-            xterm: true,
+            setaf: true,
+            setab: true,
             colours: 256,
             overlay: false,
             no_am: false,
@@ -706,7 +778,8 @@ mod tests {
             theme_palette: false,
             sync: true,
             bce: true,
-            xterm: true,
+            setaf: true,
+            setab: true,
             colours: 256,
             overlay: false,
             no_am: false,
@@ -732,6 +805,8 @@ mod tests {
     fn a_changed_cell_in_an_erased_run_is_erased() {
         let caps = Caps {
             bce: false,
+            setaf: true,
+            setab: true,
             ..test_caps()
         };
         let mut c = Compositor::default();
@@ -789,7 +864,8 @@ mod tests {
             theme_palette: false,
             sync: false,
             bce: true,
-            xterm: true,
+            setaf: true,
+            setab: true,
             colours: 256,
             overlay: false,
             no_am: false,
@@ -827,7 +903,8 @@ mod tests {
             theme_palette: false,
             sync: false,
             bce: true,
-            xterm: true,
+            setaf: true,
+            setab: true,
             colours: 256,
             overlay: false,
             no_am: false,

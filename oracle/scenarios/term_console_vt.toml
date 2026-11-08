@@ -1,0 +1,27 @@
+name = "term_console_vt"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "printf '\\033[38;5;200mA\\033[0m \\033[91;101mB\\033[0m \\033[1;34mC\\033[0m\\n'; tmux wait-for -S ready; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["select-pane", "-t", "a", "-T", "p"] },
+  { run = ["bind", "-n", "F1", "set", "-g", "@key", "F1"] },
+  { run = ["bind", "-n", "F5", "set", "-g", "@key", "F5"] },
+  { attach = { session = "a", term = "linux" } },
+  { screen = {} },
+  { run = ["lsc", "-F", "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:bce}"] },
+  { keys = "\u001b[[A" },
+  { settle = {} },
+  { run = ["show", "-gv", "@key"] },
+  { keys = "\u001b[[E" },
+  { settle = {} },
+  { run = ["show", "-gv", "@key"] },
+  { attach = { session = "a", id = "v", term = "vt100" } },
+  { screen = { id = "v" } },
+  { run = ["lsc", "-F", "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:setaf}"] },
+  { keys_to = { id = "v", keys = "\u0002d" } },
+  { settle = {} },
+  { keys = "\u0002d" },
+  { settle = {} },
+  { run = ["lsc"] },
+]

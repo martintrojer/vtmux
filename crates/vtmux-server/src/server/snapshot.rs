@@ -1936,7 +1936,7 @@ impl Server {
         if c.attached.is_some() && c.control.is_none() {
             let features = x.open_features.clone();
             let overrides = x.open_overrides.clone();
-            if let Some((mut term, caps)) =
+            if let Some(Ok((mut term, caps))) =
                 crate::render::Caps::open_term(&hello, &features, &overrides)
             {
                 term.set_utf8(hello.flags.utf8);

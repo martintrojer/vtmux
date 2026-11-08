@@ -44,7 +44,7 @@ configure failed. tmux needs libevent, ncurses, pkg-config and yacc (bison); ins
 /// its `xterm-256color` has no `smxx` and a `smcup` without the title
 /// push, so a reference linked to it answers terminfo-dependent tests
 /// differently from Linux, where vtmux's built-in terminal tables come from
-/// (`tests/terminfo_names.sh`). The reference links an ncurses 6 instead.
+/// (`tests/terminfo_table.py`). The reference links an ncurses 6 instead.
 const MACOS_NCURSES_HINT: &str = "\
 the macOS reference tmux needs ncurses 6 (macOS's 5.4 reads a 2015 terminfo database):
   brew install ncurses (keg-only; its pkg-config files are found through `brew --prefix ncurses`),

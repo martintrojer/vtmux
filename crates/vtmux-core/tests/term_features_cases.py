@@ -17,7 +17,11 @@ Per row, isolated (env -u TMUX -u TMUX_PANE, -L, -f /dev/null, SHELL=/bin/sh):
   `#{?#{Ic:NAME},NAME ,}` for each of Tc RGB setrgbf setrgbb Sync Smulx Setulc
   Ss Se Ms tsl fsl Eneks Dseks (the capabilities the client's terminal ended up with).
 The server is never left empty: the `keep` session lives until kill-server.
-xterm-ghostty needs Ghostty's terminfo ($GHOSTTY_TERMINFO)."""
+xterm-ghostty needs Ghostty's terminfo ($GHOSTTY_TERMINFO), and the rows for
+terminals outside ncurses' base set (kitty, alacritty, ...) need ncurses-term and
+kitty's terminfo there too. Some `xterm*:Ms=...` rows do not attach under a
+reference linked to CentOS 9's ncurses 6.2 (`xterm*:Ms=%p3%s`): there, regenerate
+other rows by passing a file of just those rows and merging the result."""
 import atexit, fcntl, os, pty, shutil, struct, subprocess, sys, tempfile, termios, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))

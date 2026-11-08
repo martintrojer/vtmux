@@ -210,8 +210,9 @@ pub struct Decoder {
     answered: u8,
     /// Inside a bracketed paste (`TTY_BRACKETPASTE`).
     pasting: bool,
-    /// The terminal's `khome`/`kend` are `ESC [1~`/`ESC [4~`.
-    tilde_home_end: bool,
+    /// The key tree for the client's terminal (`tty_keys_build`); `None`
+    /// until it is known, which decodes as `xterm`.
+    keys: Option<std::rc::Rc<KeyTable>>,
     /// `tty->mouse_last_x`, `_y`, `_b`: the previous mouse report.
     mouse_last: (u32, u32, u32),
     /// `TTY_WAITFG|TTY_WAITBG`: the colour queries are out until this
@@ -284,7 +285,7 @@ impl Decoder {
     }
     /// The client's terminal is known (`tty_keys_build` with its terminfo).
     pub fn set_terminal(&mut self, term: &vtmux_core::term_features::Term) {
-        self.tilde_home_end = term.tilde_home_end();
+        self.keys = Some(std::rc::Rc::new(build_table(&term.code_keys())));
     }
     pub fn feed(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);
@@ -335,9 +336,11 @@ impl Decoder {
                     Some((Event::Mouse(input, self.bytes[..n].to_vec()), n))
                 }
                 // `ESC` and `ESC [` are partial keys as well.
-                MouseParse::Partial | MouseParse::No => {
-                    decode(&self.bytes, expired, self.tilde_home_end)
-                }
+                MouseParse::Partial | MouseParse::No => decode(
+                    &self.bytes,
+                    expired,
+                    self.keys.as_deref().map_or(xterm_keys(), Vec::as_slice),
+                ),
             };
             let Some((event, mut used)) = decoded else {
                 self.pending.get_or_insert(now);
@@ -484,7 +487,7 @@ pub fn base64_decode(text: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[allow(clippy::too_many_lines)] // terminal sequence dispatch table
-fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, usize)> {
+fn decode(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Option<(Event, usize)> {
     if bytes[0] != 0x1b {
         return character(bytes, expired).map(|(k, n)| (Event::Key(k), n));
     }
@@ -546,7 +549,6 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
             return Some((event, seq.len()));
         }
     }
-    let table = key_table(tilde_home_end);
     if let Some((seq, k)) = table.iter().find(|(seq, _)| bytes.starts_with(seq)) {
         return Some((Event::Key(*k), seq.len()));
     }
@@ -603,7 +605,7 @@ fn decode(bytes: &[u8], expired: bool, tilde_home_end: bool) -> Option<(Event, u
     // tty_keys_next (tty-keys.c:900-924): Escape followed by a key is that
     // key with Meta. If the key already carries an xterm Meta modifier (or
     // is a paste marker), the Escape is a key of its own.
-    let (event, n) = decode(&bytes[1..], expired, tilde_home_end)?;
+    let (event, n) = decode(&bytes[1..], expired, table)?;
     let event = match event {
         Event::Key(k) if k.meta && !k.esc_prefix => {
             return Some((Event::Key(key(Base::Char('\x1b'))), 1));
@@ -652,18 +654,43 @@ fn row(base: Base, ctrl: bool, meta: bool, shift: bool) -> Key {
 }
 
 /// The key tree `tty_keys_build` makes: `tty_default_xterm_keys` with each
-/// modifier digit 2-9, `tty_default_raw_keys`, then the terminfo keys
-/// (`tty_default_code_keys`) of the terminals vtmux knows, which only
-/// differ in `khome`/`kend` (and agree with the rows above elsewhere).
+/// modifier digit 2-9, `tty_default_raw_keys`, then the terminal's terminfo
+/// keys (`tty_default_code_keys`, [`Term::code_keys`]).
+///
+/// [`Term::code_keys`]: vtmux_core::term_features::Term::code_keys
 type KeyTable = Vec<(Vec<u8>, Key)>;
 
-fn key_table(tilde_home_end: bool) -> &'static [(Vec<u8>, Key)] {
-    static TABLES: std::sync::OnceLock<[KeyTable; 2]> = std::sync::OnceLock::new();
-    &TABLES.get_or_init(|| [build_table(false), build_table(true)])[usize::from(tilde_home_end)]
+/// The key tree of `xterm`'s terminfo keys, for a client whose terminal
+/// is not known.
+fn xterm_keys() -> &'static [(Vec<u8>, Key)] {
+    static TABLE: std::sync::OnceLock<KeyTable> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        build_table(&[
+            ("kf1", "\x1bOP"),
+            ("kf2", "\x1bOQ"),
+            ("kf3", "\x1bOR"),
+            ("kf4", "\x1bOS"),
+            ("kf5", "\x1b[15~"),
+            ("kf6", "\x1b[17~"),
+            ("kf7", "\x1b[18~"),
+            ("kf8", "\x1b[19~"),
+            ("kf9", "\x1b[20~"),
+            ("kf10", "\x1b[21~"),
+            ("kf11", "\x1b[23~"),
+            ("kf12", "\x1b[24~"),
+            ("kich1", "\x1b[2~"),
+            ("kdch1", "\x1b[3~"),
+            ("khome", "\x1bOH"),
+            ("kend", "\x1bOF"),
+            ("knp", "\x1b[6~"),
+            ("kpp", "\x1b[5~"),
+            ("kcbt", "\x1b[Z"),
+        ])
+    })
 }
 
 #[expect(clippy::too_many_lines, reason = "tty-keys.c's key tables")]
-fn build_table(tilde_home_end: bool) -> KeyTable {
+fn build_table(code_keys: &[(&str, &str)]) -> KeyTable {
     use Named::{
         BackTab, Delete, Down, End, F, Home, Insert, Keypad, Left, PageDown, PageUp, Right, Up,
     };
@@ -777,23 +804,21 @@ fn build_table(tilde_home_end: bool) -> KeyTable {
     add("\x1b[1;5Z", row(Base::Char('\t'), true, false, true));
     // tty_default_code_keys from terminfo: kf1-kf12, kich1, kdch1, khome,
     // kend, knp, kpp, kcbt (the arrows and modified keys repeat rows above).
-    for (i, seq) in [
-        "\x1bOP", "\x1bOQ", "\x1bOR", "\x1bOS", "\x1b[15~", "\x1b[17~", "\x1b[18~", "\x1b[19~",
-        "\x1b[20~", "\x1b[21~", "\x1b[23~", "\x1b[24~",
-    ]
-    .iter()
-    .enumerate()
-    {
-        add(seq, key(named(F(u8::try_from(i + 1).expect("F key")))));
-    }
-    add("\x1b[2~", key(named(Insert)));
-    add("\x1b[3~", key(named(Delete)));
-    add("\x1b[6~", key(named(PageDown)));
-    add("\x1b[5~", key(named(PageUp)));
-    add("\x1b[Z", key(named(BackTab)));
-    if tilde_home_end {
-        add("\x1b[1~", key(named(Home)));
-        add("\x1b[4~", key(named(End)));
+    for &(cap, seq) in code_keys {
+        let n = match cap {
+            "kich1" => Insert,
+            "kdch1" => Delete,
+            "khome" => Home,
+            "kend" => End,
+            "knp" => PageDown,
+            "kpp" => PageUp,
+            "kcbt" => BackTab,
+            _ => match cap.strip_prefix("kf").and_then(|n| n.parse().ok()) {
+                Some(n) => F(n),
+                None => continue,
+            },
+        };
+        add(seq, key(named(n)));
     }
     t
 }
@@ -1194,11 +1219,13 @@ mod tests {
     #[test]
     fn tty_keys_rows_name_like_tmux() {
         let now = Instant::now();
-        let name = |b: &[u8], tilde: bool| {
-            let mut d = Decoder {
-                tilde_home_end: tilde,
-                ..Decoder::default()
-            };
+        let name = |b: &[u8], term: Option<&str>| {
+            let mut d = Decoder::default();
+            if let Some(term) = term {
+                let term =
+                    vtmux_core::term_features::Term::open(term, &[], None, &[], &[]).unwrap();
+                d.set_terminal(&term);
+            }
             d.feed(b);
             d.drain(now + Duration::from_millis(20))
                 .into_iter()
@@ -1230,11 +1257,18 @@ mod tests {
             (b"\x1b\x1b[H", "M-Home"),
             (b"\x1b\x1b[A", "M-Up"),
         ] {
-            assert_eq!(name(seq, false), want, "{seq:?}");
+            assert_eq!(name(seq, None), want, "{seq:?}");
+            assert_eq!(name(seq, Some("xterm-256color")), want, "{seq:?}");
         }
         // xterm's terminfo has no ESC [1~ / ESC [4~: Meta-[ then the text.
-        assert_eq!(name(b"\x1b[1~", false), "M-[ 1 ~");
-        assert_eq!(name(b"\x1b[1~", true), "Home");
-        assert_eq!(name(b"\x1b[4~", true), "End");
+        assert_eq!(name(b"\x1b[1~", None), "M-[ 1 ~");
+        assert_eq!(name(b"\x1b[1~", Some("screen")), "Home");
+        assert_eq!(name(b"\x1b[4~", Some("tmux-256color")), "End");
+        // The console's F1-F5 and rxvt's Home/End come from their entries.
+        assert_eq!(name(b"\x1b[[A", Some("linux")), "F1");
+        assert_eq!(name(b"\x1b[[E", Some("linux")), "F5");
+        assert_eq!(name(b"\x1b[[A", None), "M-[ [ A");
+        assert_eq!(name(b"\x1b[7~", Some("rxvt-unicode-256color")), "Home");
+        assert_eq!(name(b"\x1b[8~", Some("rxvt-unicode-256color")), "End");
     }
 }

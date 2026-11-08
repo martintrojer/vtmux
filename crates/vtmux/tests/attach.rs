@@ -1788,6 +1788,166 @@ fn terminal_features_apply_at_attach() {
     }
 }
 
+/// D-007: the terminals a tmux user's `TERM` names attach, with what their
+/// terminfo entries say (tty-term.c `tty_term_create`): the console has 8
+/// colours, no `smcup` (so `tty_start_tty` writes none) and no `kmous`; a VT
+/// terminal has no colours at all. The startup and teardown bytes are
+/// terminfo's: `rmkx`/`smcup` follow the entry. Terminals from ncurses'
+/// base set, which every host has.
+#[test]
+fn terminals_tmux_knows_attach() {
+    let fields = "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:bce}|#{If:mouse}";
+    for term in ["linux", "vt100", "vt220", "rxvt-unicode-256color", "tmux"] {
+        let mut seen = Vec::new();
+        for bin in bins() {
+            let w = World::new(bin.clone());
+            let pane = r"printf 'hello\n'; exec cat";
+            assert!(
+                w.cli(&[
+                    "new", "-d", "-s", "a", "-x", "40", "-y", "10", "sh", "-c", pane
+                ])
+                .status
+                .success()
+            );
+            assert!(w.cli(&["set", "-g", "status-right", ""]).status.success());
+            let mut a = w.attach_env(&["attach", "-t", "a"], 40, 10, &[("TERM", term)]);
+            a.wait(|a| screen_text(a).contains("hello"));
+            let list = w.cli(&["lsc", "-F", fields]);
+            let list = String::from_utf8_lossy(&list.stdout).trim().to_owned();
+            let started = a.text().contains("\x1b[?1049h");
+            a.keys(b"\x02d");
+            a.exited(0);
+            let left = a.text().contains("\x1b[?1049l");
+            seen.push((list, started, left));
+        }
+        assert_eq!(seen[0], seen[1], "{term}: vtmux vs reference");
+    }
+}
+
+/// D-007: what tmux refuses. A terminal without `clear` (`dumb`, or an empty
+/// `TERM`) fails in `tty_term_create`; one terminfo does not have fails in
+/// tmux's client (`missing or unsuitable terminal`, client.c:325-331). The
+/// terminal is opened before `new-session` makes the session
+/// (cmd-new-session.c:207-213), so none is left behind.
+#[test]
+fn terminals_tmux_refuses_leave_no_session() {
+    for term in ["dumb", "", "vtmux-no-such-terminal"] {
+        let mut seen = Vec::new();
+        for bin in bins() {
+            let w = World::new(bin.clone());
+            assert!(
+                w.cli(&["new", "-d", "-s", "keep", "cat", "-"])
+                    .status
+                    .success()
+            );
+            let mut a = w.attach_env(&["new", "-s", "x", "cat", "-"], 40, 10, &[("TERM", term)]);
+            a.exited(1);
+            let ls = w.cli(&["ls", "-F", "#{session_name}"]);
+            seen.push((a.text(), String::from_utf8_lossy(&ls.stdout).into_owned()));
+        }
+        assert_eq!(seen[0], seen[1], "{term:?}: vtmux vs reference");
+        assert_eq!(seen[0].1, "keep\n", "{term:?}");
+    }
+    // An override that removes `cup` refuses too.
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        assert!(
+            w.cli(&["new", "-d", "-s", "keep", "cat", "-"])
+                .status
+                .success()
+        );
+        assert!(
+            w.cli(&["set", "-s", "terminal-overrides[10]", "xterm*:cup@"])
+                .status
+                .success()
+        );
+        let mut a = w.attach(&["attach", "-t", "keep"]);
+        a.exited(1);
+        assert_eq!(
+            a.text(),
+            "open terminal failed: terminal does not support cup\r\n",
+            "{}",
+            bin.display()
+        );
+    }
+}
+
+/// D-007: the key tree has the terminal's terminfo keys
+/// (`tty_default_code_keys`): the console's F1 is `ESC [[A`, rxvt's Home and
+/// End are `ESC [7~` and `ESC [8~`.
+#[test]
+fn terminfo_keys_follow_the_terminal() {
+    for (term, keys, want) in [
+        ("linux", &b"\x1b[[A"[..], "F1"),
+        ("linux", b"\x1b[[E", "F5"),
+        ("rxvt-unicode-256color", b"\x1b[7~", "Home"),
+        ("rxvt-unicode-256color", b"\x1b[8~", "End"),
+    ] {
+        for bin in bins() {
+            let w = World::new(bin.clone());
+            assert!(
+                w.cli(&["new", "-d", "-s", "a", "cat", "-"])
+                    .status
+                    .success()
+            );
+            for k in ["F1", "F5", "Home", "End"] {
+                assert!(
+                    w.cli(&["bind", "-n", k, "set", "-g", "@key", k])
+                        .status
+                        .success()
+                );
+            }
+            let mut a = w.attach_env(&["attach", "-t", "a"], 40, 10, &[("TERM", term)]);
+            a.wait(|_| !w.cli(&["lsc", "-F", "x"]).stdout.is_empty());
+            a.keys(keys);
+            a.wait_labelled(
+                &format!("{term} {want} {}", bin.display()),
+                Duration::from_secs(5),
+                |_| String::from_utf8_lossy(&w.cli(&["show", "-gv", "@key"]).stdout).trim() == want,
+            );
+            a.keys(b"\x02d");
+            a.exited(0);
+        }
+    }
+}
+
+/// D-007: `terminal-overrides` reaches the strings vtmux writes. The common
+/// `smcup@:rmcup@` keeps the terminal on its normal screen, so what was on
+/// it stays in its scrollback (`tty_start_tty`, `tty_stop_tty`).
+#[test]
+fn overrides_remove_the_alternate_screen() {
+    for bin in bins() {
+        let w = World::new(bin.clone());
+        assert!(
+            w.cli(&["new", "-d", "-s", "a", "cat", "-"])
+                .status
+                .success()
+        );
+        assert!(
+            w.cli(&[
+                "set",
+                "-s",
+                "terminal-overrides[10]",
+                "xterm*:smcup@:rmcup@"
+            ])
+            .status
+            .success()
+        );
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|_| !w.cli(&["lsc", "-F", "x"]).stdout.is_empty());
+        a.keys(b"\x02d");
+        a.exited(0);
+        let text = a.text();
+        assert!(!text.contains("\x1b[?1049"), "{}: {text:?}", bin.display());
+        // `clear` still starts and ends it (clear-on-attach is on).
+        assert!(
+            text.contains("\x1b[H\x1b[2J"),
+            "{}: {text:?}",
+            bin.display()
+        );
+    }
+}
+
 /// `tty_check_fg`/`tty_check_bg`: a client with fewer than 256 colours gets
 /// `colour_256to16`, aixterm colours only from 16, bold for bright foregrounds
 /// at 8 (reviewer-26 raw.py). The observer's screen is the same under both.
@@ -1805,6 +1965,8 @@ fn colours_below_256_are_downgraded_like_tmux() {
         "xterm-16color",
         "xterm-88color",
         "xterm-256color",
+        "linux",
+        "vt100",
     ] {
         let mut screens = Vec::new();
         for bin in bins() {
