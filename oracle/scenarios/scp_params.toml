@@ -1,0 +1,10 @@
+name = "scp_params"
+# CSI s saves the cursor whatever its parameters (input.c INPUT_CSI_SCP, which
+# does not read them), and CSI u restores it; Ghostty took an SCP with
+# parameters for DECSLRM and saved nothing. Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "5", "sh", "-c", "printf 'o\\033[0s\\033[u7\\015\\012ab\\033[1;2scd\\033[ux\\015\\012ab\\033[1:2scd\\033[ux'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y}"] },
+]

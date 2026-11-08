@@ -3602,25 +3602,8 @@ impl AltModeScanner {
                 }
                 None
             }
-            // Private SM/RM: the blink mode (12) and the mouse modes touch
-            // our state, in parameter order.
             (true, None, b'h' | b'l') => {
-                if let Some(params) = parse_params(&self.params) {
-                    let mut c = self.cursor.get();
-                    let mut m = self.mouse.get();
-                    for p in params {
-                        match p {
-                            Param::Num(12) => c.set_blinking(b == b'h'),
-                            Param::Num(2026) => self.sync = Some(b == b'h'),
-                            Param::Num(3) => self.deccolm = true,
-                            Param::Num(2031) => self.answers.push(Reply::ThemeUpdates(b == b'h')),
-                            Param::Num(n) => m.apply(n, b == b'h'),
-                            _ => {}
-                        }
-                    }
-                    self.cursor.set(c);
-                    self.mouse.set(m);
-                }
+                self.private_modes(b == b'h');
                 None
             }
             (false, None, b'h' | b'l') if !self.csi_ignored => {
@@ -3638,9 +3621,17 @@ impl AltModeScanner {
                 }
                 None
             }
-            _ if self.other => None,
-            (false, None, b's') => Some(CharsetOp::Save),
+            // SCP and RCP whatever their parameters (INPUT_CSI_SCP,
+            // INPUT_CSI_RCP); Ghostty would take an SCP with parameters
+            // for DECSLRM.
+            (false, None, b's') => {
+                if !self.params.is_empty() {
+                    self.rewrite = Some(b"\x1b[".to_vec());
+                }
+                Some(CharsetOp::Save)
+            }
             (false, None, b'u') => Some(CharsetOp::Restore),
+            _ if self.other => None,
             _ => None,
         };
         if let Some(op) = op {
@@ -3683,6 +3674,28 @@ impl AltModeScanner {
             return Some(ScanEvent::Rewrite);
         }
         self.resync.then_some(ScanEvent::Resync)
+    }
+
+    /// A private SM (`set`) or RM: the blink mode (12) and the mouse modes
+    /// touch our state, in parameter order.
+    fn private_modes(&mut self, set: bool) {
+        let Some(params) = parse_params(&self.params) else {
+            return;
+        };
+        let mut c = self.cursor.get();
+        let mut m = self.mouse.get();
+        for p in params {
+            match p {
+                Param::Num(12) => c.set_blinking(set),
+                Param::Num(2026) => self.sync = Some(set),
+                Param::Num(3) => self.deccolm = true,
+                Param::Num(2031) => self.answers.push(Reply::ThemeUpdates(set)),
+                Param::Num(n) => m.apply(n, set),
+                _ => {}
+            }
+        }
+        self.cursor.set(c);
+        self.mouse.set(m);
     }
 
     /// False if the SGR just ended changes nothing for tmux; else, if
@@ -4560,6 +4573,20 @@ mod tests {
         let (m, _, region) = modes(b"\x1b[?25l\x1b[4h\x1b[2;3r\x1b[!p");
         assert_eq!((m.cursor_visible, m.insert, region), (false, true, (1, 2)));
         assert_eq!(modes(b"\x1b[=c\x1b[>1u\x1b[?u").1, Vec::<u8>::new());
+    }
+
+    /// `CSI s` saves the cursor whatever its parameters (input.c
+    /// `INPUT_CSI_SCP`); Ghostty took one with parameters for DECSLRM.
+    #[test]
+    fn scp_ignores_its_parameters() {
+        let after = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 3, 100);
+            t.feed(bytes);
+            (captured(&t), t.cursor())
+        };
+        assert_eq!(after(b"o\x1b[0s\x1b[u7"), ("o7".to_owned(), (2, 0)));
+        assert_eq!(after(b"ab\x1b[1;2scd\x1b[ux"), ("abxd".to_owned(), (3, 0)));
+        assert_eq!(after(b"ab\x1b[1:2scd\x1b[ux"), ("abxd".to_owned(), (3, 0)));
     }
 
     /// SGR as tmux reads it (input.c `input_csi_dispatch_sgr`,
