@@ -1,0 +1,14 @@
+# send-keys: key_string_search_table compares the whole rest of a name, so
+# a second `^` or a modifier after `^` (`^^KP0`, `S-C-^M-KP*`) is no key
+# and goes as text; `^M-KP5` is C-M-KP5 (no bytes), `M-KP5` Escape and 5.
+name = "send_keys_keypad_text"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "stty raw -echo; tmux wait-for -S raw; LC_ALL=C exec cat -v"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { wait_for = "raw" },
+  { attach = { session = "a" } },
+  { run = ["send-keys", "-t", "a", "<", "^^KP0", "S-C-^M-KP*", "M-C-^kp0", "^M-KP5", "M-KP5", ">"] },
+  { settle = { react = true } },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]

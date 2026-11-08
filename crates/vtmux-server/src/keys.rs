@@ -229,9 +229,12 @@ fn table(s: &str) -> Option<Base> {
     if let Some((_, n)) = NAMED.iter().find(|(k, _)| k.eq_ignore_ascii_case(s)) {
         return Some(Base::Named(*n));
     }
-    // The keypad names (key-string.c:108-124).
+    // The keypad names (key-string.c:108-124), as they are: a modifier
+    // left in `s` (`^KP0` after `^`, `^M-KP*` after `C-`) is no key.
     if s.len() >= 3
-        && let Some(n) = CoreKey::from_name(s).and_then(CoreKey::keypad_index)
+        && let Some(n) = CoreKey::from_name(s)
+            .filter(|k| k.modifiers() == 0)
+            .and_then(CoreKey::keypad_index)
     {
         return Some(Base::Named(Named::Keypad(n)));
     }
@@ -741,6 +744,20 @@ mod tests {
             assert_eq!(b(name), name.as_bytes(), "{name}");
         }
         assert_eq!(b("0x61"), b"a");
+    }
+
+    /// `key_string_search_table` compares the whole rest of the name: a
+    /// second `^`, or a modifier after one, is no keypad key, so the name
+    /// goes as text.
+    #[test]
+    fn keypad_names_with_a_modifier_left_are_text() {
+        for name in ["^^KP0", "S-C-^M-KP*", "M-C-^kp0"] {
+            assert_eq!(b(name), name.as_bytes(), "{name}");
+        }
+        assert_eq!(b("M-KP5"), b"\x1b5");
+        // `^` then `M-` are both modifiers: C-M-KP5, which sends nothing.
+        assert_eq!(b("^KP5"), b"");
+        assert_eq!(b("^M-KP5"), b"");
     }
 
     #[test]
