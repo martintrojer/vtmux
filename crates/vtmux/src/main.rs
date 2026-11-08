@@ -164,8 +164,9 @@ fn connect_error(path: &Path, e: io::Error) -> EdgeError {
 /// `client_connect` (client.c:104-182): connect; if nothing is there and
 /// the command starts a server, take the `<socket>.lock` flock (waiting for
 /// a concurrent starter to finish), connect again, and only then bind the
-/// socket (reporting `error creating`), fork the daemon and connect to it.
-/// The lock is held until the connection is made.
+/// socket (reporting `error creating`) and fork the daemon, which has this
+/// client as its first client on a socketpair (`proc_fork_and_daemon`).
+/// The lock is held until then.
 fn connect_or_start(
     path: &Path,
     start: bool,
@@ -204,17 +205,25 @@ fn connect_or_start(
             io,
         })?;
     let config = config();
+    // proc_fork_and_daemon (proc.c:374-395): the server gets this client
+    // as one end of a socketpair, its first client from the start.
+    let (ours, theirs) = UnixStream::pair().map_err(|io| EdgeError::CreateFailed {
+        path: path.to_owned(),
+        io,
+    })?;
     match daemon::fork_daemon() {
         Ok(Forked::Daemon) => {
             // server_start closes the lock descriptor (server.c:223-227).
             drop(lock);
-            let listener = daemon::close_inherited(listener);
-            let code = vtmux_server::run_server(listener, path.to_owned(), config);
+            drop(ours);
+            let (listener, starter) = daemon::close_inherited(listener, theirs);
+            let code = vtmux_server::run_server(listener, path.to_owned(), config, starter);
             std::process::exit(code);
         }
         Ok(Forked::Parent) => {
             drop(listener);
-            connect(path).map_err(|e| connect_error(path, e))
+            drop(theirs);
+            Ok(ours)
         }
         Err(io) => Err(EdgeError::CreateFailed {
             path: path.to_owned(),

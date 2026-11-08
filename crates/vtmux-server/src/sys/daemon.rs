@@ -6,11 +6,14 @@
 //! `error creating <path> (<strerror>)` and the client exits 1. Only then
 //! does the client fork; the child becomes a daemon (`daemon(1, 0)`: cwd
 //! kept, stdio on /dev/null, new session) and runs the server on the
-//! inherited socket, while the client connects to it as any client would.
+//! inherited socket. The client is its first client, on a socketpair made
+//! before the fork, as tmux's is (`proc_fork_and_daemon`), not a later
+//! connection: another client connecting first can't leave the fresh server
+//! empty, so exiting, before the starter's command runs.
 
 use std::io;
 use std::os::fd::OwnedFd;
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 
 use rustix::fs::{FlockOperation, Mode, OFlags, flock};
@@ -95,34 +98,45 @@ pub fn fork_daemon() -> io::Result<Forked> {
 }
 
 /// In the daemon, before the server starts: close every descriptor but
-/// stdio and the listener, which ends up as fd 3, close-on-exec. A starting client can
+/// stdio, the listener, which ends up as fd 3, and the starting client's
+/// end of the socketpair (`proc_fork_and_daemon`), fd 4, both close-on-exec. A starting client can
 /// hold descriptors it never meant to pass on: where `pipe2` is missing
 /// (macOS) a pipe gets `FD_CLOEXEC` only after it is made, so a client
 /// spawned by another thread in that window inherits it, and a server
 /// keeping it open forever leaves the pipe's reader waiting for EOF (cli.rs
 /// `concurrent_starts_share_one_server` hung on macOS). tmux keeps them.
 #[must_use]
-pub fn close_inherited(listener: UnixListener) -> UnixListener {
+pub fn close_inherited(listener: UnixListener, starter: UnixStream) -> (UnixListener, UnixStream) {
     use std::os::fd::{FromRawFd, IntoRawFd};
     const LISTENER_FD: libc::c_int = 3;
-    let fd = listener.into_raw_fd();
-    // SAFETY: the daemon is single-threaded and owns `fd`; dup2 to 3 and
-    // close_from(4) leave stdio and the listener, and nothing else in the
+    const STARTER_FD: libc::c_int = 4;
+    let lfd = listener.into_raw_fd();
+    let sfd = starter.into_raw_fd();
+    // SAFETY: the daemon is single-threaded and owns `lfd` and `sfd`; each
+    // is first moved above the two targets (so a dup2 to one target never
+    // closes the other descriptor), then dup2'd into place; close_from(5)
+    // leaves stdio, the listener and the starter, and nothing else in the
     // process holds a descriptor it still uses.
     unsafe {
-        if fd != LISTENER_FD {
-            if libc::dup2(fd, LISTENER_FD) == -1 {
-                return UnixListener::from_raw_fd(fd);
-            }
-            libc::close(fd);
+        let high = libc::c_int::max(lfd, sfd).max(STARTER_FD) + 1;
+        let lhigh = libc::fcntl(lfd, libc::F_DUPFD, high);
+        let shigh = libc::fcntl(sfd, libc::F_DUPFD, high);
+        if lhigh == -1 || shigh == -1 {
+            return (UnixListener::from_raw_fd(lfd), UnixStream::from_raw_fd(sfd));
         }
-        super::pty::close_from(LISTENER_FD + 1, super::pty::fd_limit());
+        libc::close(lfd);
+        libc::close(sfd);
+        libc::dup2(lhigh, LISTENER_FD);
+        libc::dup2(shigh, STARTER_FD);
+        super::pty::close_from(STARTER_FD + 1, super::pty::fd_limit());
         let listener = UnixListener::from_raw_fd(LISTENER_FD);
+        let starter = UnixStream::from_raw_fd(STARTER_FD);
         // dup2 clears close-on-exec: set it again, so nothing the server
-        // starts inherits the socket; only a live upgrade clears it, for
+        // starts inherits the sockets; only a live upgrade clears it, for
         // the descriptors it keeps (sys::upgrade).
         let _ = rustix::io::fcntl_setfd(&listener, rustix::io::FdFlags::CLOEXEC);
-        listener
+        let _ = rustix::io::fcntl_setfd(&starter, rustix::io::FdFlags::CLOEXEC);
+        (listener, starter)
     }
 }
 

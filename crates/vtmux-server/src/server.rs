@@ -1245,33 +1245,49 @@ impl Server {
     // ------------------------------------------------------------ clients
 
     fn accept(&mut self) {
-        let Some(listener) = self.listener.as_ref() else {
-            return;
-        };
         loop {
+            let Some(listener) = self.listener.as_ref() else {
+                return;
+            };
             match listener.accept() {
                 // server_accept (server.c): once exiting, a new client is
                 // closed on (`server_exit`).
                 Ok(_) if self.shutdown => {}
-                Ok((mut stream, _)) => {
-                    let id = ClientId(self.next_client);
-                    self.next_client += 1;
-                    let activity = self.model.touch();
-                    if self
-                        .poll
-                        .registry()
-                        .register(&mut stream, Token(CLIENT_BASE + id.0), Interest::READABLE)
-                        .is_err()
-                    {
-                        continue;
-                    }
-                    self.clients.insert(id, Client::new(stream, activity));
-                }
+                Ok((stream, _)) => self.add_client(stream),
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(_) => return,
             }
         }
+    }
+
+    /// `server_client_create`: a new client on `stream`, read from now on.
+    fn add_client(&mut self, mut stream: mio::net::UnixStream) {
+        let id = ClientId(self.next_client);
+        self.next_client += 1;
+        let activity = self.model.touch();
+        if self
+            .poll
+            .registry()
+            .register(&mut stream, Token(CLIENT_BASE + id.0), Interest::READABLE)
+            .is_ok()
+        {
+            self.clients.insert(id, Client::new(stream, activity));
+        }
+    }
+
+    /// The client that started the server, connected before the fork
+    /// (proc.c `proc_fork_and_daemon` makes a socketpair, server.c
+    /// `server_start` adds its end as the first client): no other client
+    /// comes before it, so one that connects and leaves first cannot make
+    /// the fresh server exit for having no sessions and no clients.
+    ///
+    /// # Errors
+    /// The stream can't be made non-blocking.
+    pub fn adopt_starter(&mut self, stream: std::os::unix::net::UnixStream) -> io::Result<()> {
+        stream.set_nonblocking(true)?;
+        self.add_client(mio::net::UnixStream::from_std(stream));
+        Ok(())
     }
 
     fn client_readable(&mut self, id: ClientId) {
@@ -5451,10 +5467,17 @@ fn cmd_error_bytes(e: &CmdError) -> Vec<u8> {
 /// Start the server on a socket the caller already bound
 /// ([`sys::daemon::bind_socket`]) and run it until it exits.
 #[must_use]
-pub fn run_server(listener: StdListener, socket: PathBuf, config: ServerConfig) -> i32 {
+/// Run a server on `listener`; `starter` is the connection of the client
+/// that started it, which is its first client ([`Server::adopt_starter`]).
+pub fn run_server(
+    listener: StdListener,
+    socket: PathBuf,
+    config: ServerConfig,
+    starter: std::os::unix::net::UnixStream,
+) -> i32 {
     // D27 decision 15: a `vtmux-persist` checkpoint comes back first.
     match restore::start(listener, socket, config) {
-        Ok(mut server) => match server.run() {
+        Ok(mut server) => match server.adopt_starter(starter).and_then(|()| server.run()) {
             Ok(()) => 0,
             Err(_) => 1,
         },
@@ -6064,6 +6087,40 @@ mod tests {
     /// starts a fresh server on the same socket at once. That server's
     /// `tmux` shim must outlive this one: the shim goes before the socket
     /// stops listening, never with the rest of the teardown.
+    /// The starting client is the server's first client (proc.c
+    /// `proc_fork_and_daemon`, server.c `server_start`): a client that
+    /// connects before the starter has said anything, and leaves, does not
+    /// leave the fresh server with no sessions and no clients, so it does
+    /// not exit (`exit-empty`) under the starter. Without the starter it
+    /// would: that was the race when the starter connected after the fork.
+    #[test]
+    fn a_client_that_comes_and_goes_first_leaves_the_starter_a_server() {
+        use super::{ClientId, Server, ServerConfig};
+        use crate::server::snapshot::tests::{listener, temp_dir};
+        use std::os::unix::net::UnixStream;
+        let dir = temp_dir("starter");
+        let early_poller = |server: &mut Server, socket: &std::path::Path| {
+            let early = UnixStream::connect(socket).unwrap();
+            let id = ClientId(server.next_client);
+            server.accept();
+            assert!(server.clients.contains_key(&id));
+            drop(early);
+            server.client_readable(id);
+        };
+        for starter in [true, false] {
+            let (l, socket) = listener(&dir, "s");
+            l.set_nonblocking(true).unwrap();
+            let mut server = Server::new(l, socket.clone(), ServerConfig::default()).unwrap();
+            let (ours, _theirs) = UnixStream::pair().unwrap();
+            if starter {
+                server.adopt_starter(ours).unwrap();
+            }
+            early_poller(&mut server, &socket);
+            assert_eq!(server.should_exit(), !starter, "starter {starter}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn a_fresh_server_keeps_its_shim_when_the_old_one_exits() {
         use super::{Server, ServerConfig};
