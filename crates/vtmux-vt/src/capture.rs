@@ -305,27 +305,48 @@ fn cell_extended(c: &RowCell) -> bool {
 /// erased is counted at the size its remaining cells need.
 #[must_use]
 pub fn history_bytes(term: &PaneTerm) -> usize {
-    const GRID_LINE: usize = 40;
-    const CELL_ENTRY: usize = 5;
-    const EXTD_ENTRY: usize = 23;
+    let c = history_counts(term);
+    c.lines * GRID_LINE + c.cells * CELL_ENTRY + c.extended * EXTD_ENTRY
+}
+
+/// `sizeof(struct grid_line)`, `sizeof(struct grid_cell_entry)` and
+/// `sizeof(struct grid_extd_entry)` on tmux's 64-bit builds.
+pub const GRID_LINE: usize = 40;
+pub const CELL_ENTRY: usize = 5;
+pub const EXTD_ENTRY: usize = 23;
+
+/// The counts [`history_bytes`] sums: lines, cell entries and extended
+/// entries (`#{history_all_bytes}`, format.c `format_cb_history_all_bytes`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HistoryCounts {
+    pub lines: usize,
+    pub cells: usize,
+    pub extended: usize,
+}
+
+/// See [`HistoryCounts`] and [`history_bytes`]'s model.
+#[must_use]
+pub fn history_counts(term: &PaneTerm) -> HistoryCounts {
     let sx = usize::from(term.cols());
     let hsize = term.history_size();
     let rows = hsize + usize::from(term.rows());
-    let mut size = rows * GRID_LINE;
+    let mut counts = HistoryCounts {
+        lines: rows,
+        ..HistoryCounts::default()
+    };
     for y in 0..rows {
         let (cells, _) = read_row(term, y, hsize, sx);
         let used = cells
             .iter()
             .rposition(|c| !c.empty || c.padding())
             .map_or(0, |i| i + 1);
-        size += tmux_cellsize(&cells, used).max(used) * CELL_ENTRY;
-        size += cells
+        counts.cells += tmux_cellsize(&cells, used).max(used);
+        counts.extended += cells
             .iter()
             .filter(|c| !c.spacer() && cell_extended(c))
-            .count()
-            * EXTD_ENTRY;
+            .count();
     }
-    size
+    counts
 }
 
 /// `capture-pane -F` (cmd-capture-pane.c:390-410): the line's flags and a

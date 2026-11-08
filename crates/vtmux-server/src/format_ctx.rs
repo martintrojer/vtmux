@@ -905,6 +905,21 @@ impl<'a> Ctx<'a> {
             .to_owned(),
             "history_size" => p.term.history_size().to_string(),
             "history_bytes" => vtmux_vt::history_bytes(&p.term).to_string(),
+            // format_cb_history_all_bytes (format.c:1023-1047), on
+            // history_bytes' model (compat/DIVERGENCES.md D-001).
+            "history_all_bytes" => {
+                use vtmux_vt::capture::{CELL_ENTRY, EXTD_ENTRY, GRID_LINE};
+                let counts = vtmux_vt::history_counts(&p.term);
+                format!(
+                    "{},{},{},{},{},{}",
+                    counts.lines,
+                    counts.lines * GRID_LINE,
+                    counts.cells,
+                    counts.cells * CELL_ENTRY,
+                    counts.extended,
+                    counts.extended * EXTD_ENTRY
+                )
+            }
             "history_limit" => p.history_limit.to_string(),
             "pane_in_mode" => p.modes.len().to_string(),
             "pane_mode" => crate::mode::PaneMode::name(p.modes.first()?).to_owned(),

@@ -1,0 +1,13 @@
+name = "format_history_all_bytes"
+# #{history_all_bytes}: lines, line bytes, cell entries, cell bytes, extended entries and their bytes
+# (format.c format_cb_history_all_bytes), on #{history_bytes}' model (compat/DIVERGENCES.md D-001).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "6", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:w", "-T", "t"] },
+  { run = ["display", "-p", "-t", "a:w", "#{history_all_bytes} #{history_bytes}"] },
+  { run = ["respawn-pane", "-k", "-t", "a:w", "sh", "-c", "printf 'plain\\n\\033[31mred\\033[m \\033[38;2;1;2;3mrgb\\033[m\\n\\303\\251\\344\\270\\226\\n1\\n2\\n3\\n4\\n5\\n6\\n'; tmux wait-for -S one; exec cat -"] },
+  { wait_for = "one" },
+  { run = ["display", "-p", "-t", "a:w", "#{history_all_bytes} #{history_bytes} #{history_size}"] },
+  { run = ["clear-history", "-t", "a:w"] },
+  { run = ["display", "-p", "-t", "a:w", "#{history_all_bytes} #{history_bytes} #{history_size}"] },
+]
