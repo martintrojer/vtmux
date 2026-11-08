@@ -54,8 +54,51 @@ impl WallClock for SystemWallClock {
     }
 
     fn local_time(&self, epoch: i64) -> Option<Tm> {
-        Tm::in_zone(&TimeZone::system(), epoch)
+        let Ok(tz) = TimeZone::try_system() else {
+            // No zone jiff can read: UTC (glibc: offset 0), under the name glibc's
+            // POSIX parser keeps from `TZ` when it has one.
+            let mut tm = Tm::in_zone(&TimeZone::UTC, epoch)?;
+            if let Some(name) = std::env::var("TZ")
+                .ok()
+                .as_deref()
+                .and_then(unparsed_tz_name)
+            {
+                tm.zone = name;
+            }
+            return Some(tm);
+        };
+        Tm::in_zone(&tz, epoch)
     }
+}
+
+/// The zone abbreviation glibc's `tzset` leaves for a `TZ` that is neither a
+/// zoneinfo file nor a POSIX rule: `__tzset_parse_tz` (`time/tzset.c`) reads the
+/// standard name (three or more letters, or `<...>` with three or more of
+/// letters, digits, `+`, `-`), fails on the missing offset and leaves offset 0
+/// and no DST (`TZ=Invalid/Zone` gives `%Z` = `Invalid`, `TZ=AB/x` an empty one).
+/// `None` when an offset follows the name: glibc then keeps part of a rule
+/// (`EST5/x` is `+0000` with an empty name, `EST5EDT/x` is `EDT`), which this
+/// does not model (`compat/DIVERGENCES.md`, D-004).
+fn unparsed_tz_name(tz: &str) -> Option<String> {
+    let tz = tz.strip_prefix(':').unwrap_or(tz);
+    let (name, rest) = if let Some(quoted) = tz.strip_prefix('<') {
+        let len = quoted
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '+' || c == '-'))
+            .unwrap_or(quoted.len());
+        match quoted[len..].strip_prefix('>') {
+            Some(rest) => (&quoted[..len], rest),
+            None => ("", tz),
+        }
+    } else {
+        let len = tz
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(tz.len());
+        (&tz[..len], &tz[len..])
+    };
+    if rest.starts_with(|c: char| c.is_ascii_digit() || c == '+' || c == '-') {
+        return None;
+    }
+    Some(if name.len() >= 3 { name } else { "" }.to_owned())
 }
 
 /// A clock stuck at one instant in one named zone.
@@ -534,6 +577,30 @@ mod tests {
             Tm::utc(99_999_999_999).ctime().as_deref(),
             Some("Wed Nov 16 09:46:39 5138")
         );
+    }
+
+    /// Reference (glibc 2.34, `%Z` under each `TZ`).
+    #[test]
+    fn unparseable_tz_keeps_the_leading_letters() {
+        for (tz, name) in [
+            ("Invalid/Zone", Some("Invalid")),
+            (":Invalid/Zone", Some("Invalid")),
+            ("Invalid", Some("Invalid")),
+            ("ESTx", Some("ESTx")),
+            ("Europe/Lon", Some("Europe")),
+            ("Foo/Bar+3", Some("Foo")),
+            ("AB/x", Some("")),
+            ("/nonexistent/Europe", Some("")),
+            ("<+03>/x", Some("+03")),
+            ("<ab>x", Some("")),
+            ("<+03", Some("")),
+            // An offset after the name: part of a rule survives in glibc.
+            ("EST5/x", None),
+            ("EST100", None),
+            ("ABC-3abc,x", None),
+        ] {
+            assert_eq!(unparsed_tz_name(tz).as_deref(), name, "TZ={tz}");
+        }
     }
 
     #[test]

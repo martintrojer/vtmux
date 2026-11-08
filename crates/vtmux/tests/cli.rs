@@ -6776,6 +6776,55 @@ fn format_time_out_of_range() {
     });
 }
 
+/// A `TZ` that is neither a zoneinfo file nor a POSIX rule: glibc's `tzset`
+/// keeps the leading letters as the zone name with offset 0 (`%Z` of
+/// `TZ=Invalid/Zone` is `Invalid`, of `TZ=AB/x` empty, `<+03>/x` gives
+/// `+03`; compat/DIVERGENCES.md D-004). Each value gets its own server, as
+/// the zone is read from the server's environment. Linux only: Darwin's
+/// `tzset` parses these differently.
+#[cfg(target_os = "linux")]
+#[test]
+fn format_time_unparseable_tz_name() {
+    compare("format_time_unparseable_tz_name", |w| {
+        let mut runs = Vec::new();
+        for tz in [
+            "Invalid/Zone",
+            ":Invalid/Zone",
+            "Invalid",
+            "ESTx",
+            "Europe/Lon",
+            "AB/x",
+            "/nonexistent/Europe",
+            "<+03>/x",
+            "<ab>x",
+            "Europe/London",
+            "EST5",
+        ] {
+            runs.push(w.raw_env(
+                &[
+                    "-L",
+                    &w.label,
+                    "-f",
+                    "/dev/null",
+                    "new",
+                    "-d",
+                    "-s",
+                    "s",
+                    "cat",
+                    "-",
+                ],
+                &[("TZ", tz)],
+            ));
+            runs.push(w.run(&["set", "-g", "@ts", "1793292783"]));
+            // `%Z|%z|%H` of `t/f`, the `%` doubled for the pass before it
+            // (the real clock would otherwise expand them).
+            runs.push(w.run(&["display", "-p", "[#{t/f/%%Z|%%z|%%H:@ts}]"]));
+            runs.push(w.run(&["kill-server"]));
+        }
+        runs
+    });
+}
+
 /// `codepoint-widths` (utf8.c `utf8_add_to_width_cache`,
 /// `utf8_update_width_cache`): items replace each other's widths, ranges
 /// include both ends, items that do not parse are skipped, and unsetting

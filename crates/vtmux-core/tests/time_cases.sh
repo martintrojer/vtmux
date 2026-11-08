@@ -88,7 +88,7 @@ row() {
 
 # Instants (UTC): Thu 2026-10-29 16:53:03 (London: GMT), Fri 2026-06-20 (BST), the last
 # second of 2025, Mon 2024-01-01, Fri 2021-01-01 (ISO week 53 of 2020), 2024-02-29,
-# just after midnight, noon, year 5138 (years past 9999 are out of range, D-004).
+# just after midnight, noon, year 5138 (ctime has no room for a fifth digit).
 TSS=(1793292783 1782000000 1767225599 1704067200 1609459200 1709164800 1793232001 1793275200 99999999999 86400 1)
 
 # `t/f/<fmt>` over one instant. A conversion that prints a control character goes through
