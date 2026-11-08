@@ -41,6 +41,9 @@
 //! - A field under a new tag that a reader may lose without changing what
 //!   it restores (a hint it can work out again) needs nothing more: older
 //!   readers of the version skip it.
+//! - So does a promise the builds before it never kept, whose loss only
+//!   puts a reader back to what those builds did ([`Server::persist_hold`]:
+//!   a reader without it may write over a checkpoint it would keep).
 //! - So does state an ordinary attached client produces whose loss costs
 //!   no session state, only how its terminal is shown until it changes
 //!   again ([`Client::queries`], [`Client::terminal_title`]): naming it
