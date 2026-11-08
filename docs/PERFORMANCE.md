@@ -26,7 +26,10 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Startup, `new -d` | 12.2 ms | 8.9 ms | 0.73x | |
 | Creating 400 panes, CPU | 200 ms | 380 ms | 1.9x | **Worse.** |
 | Copy mode entry, 1M lines, compressed | 220 ms | 57 ms | 0.26x | |
-| Search all of a 1M-line history | 1684 / 1686 ms | 7944 / 8371 ms | 4.7x / 5.0x | **Worse.** 3.4x / 3.5x at 100k lines |
+| Search all of a 1M-line history | 1673 ms | 3078 ms | 1.8x | **Worse**, was 10.5 s. At 100k lines 0.62x (109 against 175 ms); *Copy mode and search* |
+| 32 clients on one window of agent panes | 0.56 s per 10 s | 2.75 s | 4.9x | **Worse.** Each client composes its own frame; *Micro-benchmarks* |
+| 100 agent panes, one client | 3.37 s per 10 s | 2.71 s | 0.80x | RSS 100 MB against 17.8 MB, **Worse** |
+| 10 agent panes for 30 minutes | 6.5 MB | 21.9-22.1 MB | - | no growth in either; **Worse** RSS |
 | Hidden panes, RSS per hidden pane | 48 KB | 74-80 KB | - | **Worse.** |
 | Live upgrade, 10 panes x 100k lines, request to redraw | - (kill-server) | 598 ms compressed; 751 ms not yet compressed | - | Meets decision 13's 1 s (was 1705 ms and refused). **Misses** it onto a binary of another Ghostty patch stack: 9.9-10.4 s |
 | Hidden panes, `C-b n` to the last byte | 5.1-5.2 ms | 2.5-2.6 ms | - | |
@@ -140,7 +143,7 @@ Raw runs:
 
 ## Copy mode and search
 
-`bench-history-memory.sh copymode spec big`, median of 3 servers per state. Entering copy mode on compressed history is faster than tmux. A search that reads every row is 3.4x to 5.0x slower.
+`bench-history-memory.sh copymode spec big`, median of 3 servers per state. Entering copy mode on compressed history is faster than tmux. The table is from before `audit_perf_hotpaths`, which made the search faster than tmux's at 100k lines and 1.8x tmux's at 1M (*Plain search since `audit_perf_hotpaths`*, below).
 
 Copy mode copies Ghostty's pages (patch 0005 copies compressed pages without decoding them) and reads rows on demand. That makes entry cheap; a search has to decode the pages.
 
@@ -165,6 +168,20 @@ Copy mode copies Ghostty's pages (patch 0005 copies compressed pages without dec
 - tmux stays near the mode's peak after leaving it: 1.2 GB after a search of 1M lines, against vtmux's 102 MB.
 
 Raw runs: [`test-health/2026-11-05-perf-refresh.md`](test-health/2026-11-05-perf-refresh.md), *Using the history*.
+
+### Plain search since `audit_perf_hotpaths`
+
+A probe script, not the `copymode` mode above: one 120x40 pane, N log lines of about 100 characters, `copy-mode` right after the output (uncompressed), then `send-keys -X search-backward` for a string not in the history. One server each, load 6-8.
+
+| history | search | tmux 3.8 | vtmux before | vtmux after | after / tmux |
+|---|---|---|---|---|---|
+| 100k lines | plain `zzznotfound` | 175 ms | 655 ms | 109 ms | 0.62x |
+| 100k lines | regular expression `zz+notfound` | 136 ms | - | 93 ms | 0.68x |
+| 1M lines | plain `zzznotfound` | 1673 ms | 10533 ms | 3078 ms | 1.8x |
+
+- Before, a plain pattern was compared cell by cell at every column of every line (`window_copy_search_lr`), reading each line's cells several times. Now a plain ASCII pattern is looked for in the text of a narrow ASCII line that does not wrap, as a regular expression already was. Other lines still go through the cells.
+- Before, the 1M-line search took longer than tmux's 10 s search timeout (`WINDOW_COPY_SEARCH_TIMEOUT`), so it gave up where tmux finished in 1.7 s. A match near the top of such a history was not found.
+- The 1M row still loses (1.8x) because each line is found with a walk of Ghostty's page list from the top (`ghostty_terminal_grid_ref`, `PageList.pin`). That is O(pages) per line, so a full search is quadratic: 10x the lines take about 30x the time. Fixing it needs a way to step from one row to the next in the C API, which is a Ghostty patch.
 
 ## CPU and throughput
 
@@ -351,6 +368,45 @@ Before is `1b0dba1`, after is `lu_upgrade_perf`:
 
 Raw runs: [`test-health/2026-11-07-live-upgrade-bench.md`](test-health/2026-11-07-live-upgrade-bench.md) (before), [`test-health/2026-11-07-live-upgrade-perf.md`](test-health/2026-11-07-live-upgrade-perf.md) (after).
 
+## Micro-benchmarks
+
+`scripts/bench-micro.py` covers what `bench.py` doesn't. It uses `bench.py`'s servers, attached clients and `/proc` probes. Each row is the median of 3 runs, taken on 2026-11-08 under `flock /tmp/vtmux-stress.lock` at `503f2a4`. The host was badly loaded (load 118 at the start, 10 at the end), so read the CPU rows as rough. Server CPU is seconds per 10 s of steady state.
+
+| scenario | tmux 3.8 | vtmux | vtmux / tmux | note |
+|---|---|---|---|---|
+| `flood`: 8 tiled panes each `cat` 20 MB at once, one 200x50 client, sync on | 5.47 s wall, 5.31 s CPU, 35.8 MB to the terminal | 1.38 s, 1.25 s, 1.14 MB | 0.24x CPU | 5152 against 118 frames. Peak RSS 14.3 against 28.2 MB, **Worse** |
+| `many_panes`: 50 `agent_tui.py` panes, 2 per window, one client | 2.14 s | 1.38 s | 0.64x | RSS 11.5 against 56.7 MB, **Worse** |
+| `many_panes`: 100 panes | 3.37 s | 2.71 s | 0.80x | RSS 17.8 against 100 MB, **Worse** |
+| `clients`: 16 clients (120x40, `window-size smallest`) on one window of 4 agent panes | 0.37 s | 1.49 s | 4.1x | **Worse.** RSS 7.1 against 32.6 MB |
+| `clients`: 32 clients | 0.56 s | 2.75 s | 4.9x | **Worse.** RSS 9.2 against 52.5 MB |
+| `status`: `status-interval 1`, window and session loops, conditionals, strftime and `#{E:}` in the status, 20 windows, 4 clients | 0.055 s | 0.032 s | 0.59x | |
+| `jobs`: 8 different `#()` jobs in `status-right`, `status-interval 1`, 2 clients | 0.104 s | 0.122 s | 1.17x | **Worse**, about a job's worth of CPU |
+
+**Memory over 30 minutes** (`memgrowth`). 10 agent panes and one 200x50 client in each server, both servers at once, RSS every minute for 1800 s (`load 8-14`):
+
+| | tmux 3.8 | vtmux |
+|---|---|---|
+| RSS at 60 s | 6.5 MB | 21.9 MB |
+| RSS at 1800 s | 6.5 MB | 22.1 MB |
+| server CPU over the 30 minutes | 57.6 s | 52.4 s |
+
+Neither server grows. vtmux added 0.2 MB in 30 minutes, at 1560 s.
+
+**Many clients.** This is where vtmux loses most. tmux writes each pane update to every client's terminal as it comes. vtmux composes a whole frame per client: its window, status line, the diff against that client's last frame, and the encoding. 16 clients showing the same window pay that 16 times.
+
+- Before `audit_perf_hotpaths`, each client's frame also built a format context that lists every attached client, whether or not its status line was redrawn. That made a tick of n clients O(n^2). The context is now made only for a status redraw.
+- That cut server instructions by 23% at 32 clients (`perf stat -e instructions:u`, 8 s, two runs each: 22.3 and 21.9 G before, 17.0 and 16.9 G after) and changed nothing measurable at 2 or 4 clients.
+- Sharing one composed frame between clients that show the same window at the same size is the remaining fix. It is not done: each client keeps its own row caches and border styles (*Agent panes*), so it is a redesign, not a hot-path fix.
+
+**Profiles.** These come from `perf record -g` of a `release` build with frame pointers and line tables, with Ghostty built `ReleaseFast` (`LIBGHOSTTY_VT_SYS_OPTIMIZE`; a debug-info build otherwise gets Ghostty's `Debug` mode and profiles its integrity checks):
+
+- **16 clients.** Rendering is 81% of the server: building each pane's drawing inputs (`Source::window`, 18%: option lookups, styles, the pane's screen), composing rows (18%), the frame diff (15%), the client list described above (6%) and copying cells (10%).
+- **100 agent panes, one client.** Reading Ghostty's dirty rows at the end of each synchronized update is 33%, mostly for the 98 panes no client shows. Then parsing pane output, 20%. A hidden pane's view is read at each `?2026h` so that switching to it mid-update shows the held screen (*Hidden panes*). The same rows would be read at the next one anyway.
+- **Creating 400 panes.** The server's own code is 30%. The rest is the kernel: `fork` copying page tables (`copy_page_range`) and the copy-on-write faults after it. A bigger server costs more per `fork`, and tmux forks too (`fdforkpty`). Spawning with `vfork` or `posix_spawn` would avoid it, but the child's setup (controlling terminal, signals, directory fallbacks) has to move with it.
+- **A search over 100k lines, before the fix.** 78% was comparing cells (`matches_at`), and 31% of all samples went to reading rows as cells.
+
+Raw runs: [`test-health/2026-11-08-perf-hotpaths.md`](test-health/2026-11-08-perf-hotpaths.md).
+
 ## With the owner's config
 
 `owner_idle` (median of 3) and `owner_startup` (20 runs). The owner's real `~/.tmux.conf` (dotfiles `870c12a`, sha256 `72a481ffac7e`), the TPM plugins and mu-crew-dotfiles `d633e15` are copied into a hermetic `HOME`. The plugin revisions are in the raw run.
@@ -468,6 +524,7 @@ Times for the `bench-history-memory.sh` and `bench-hidden-panes.py` rows are the
 | command | what it measures | typical time |
 |---|---|---|
 | `bench.py` (all default scenarios) | every `bench.py` table on this page | about 32 min (`agent_panes` is 9 of them), and about 5 more since `upgrade` |
+| `bench-micro.py flood many_panes clients status jobs` | *Micro-benchmarks* | about 12 min with `RUNS=3`; `memgrowth` 30 min more |
 | `bench.py agent_panes` | *Agent panes* | about 11 min with `BASE` |
 | `bench.py upgrade` | *Live upgrade* | about 5 min; 15 with `UPGRADE_STATES="fresh idle fresh-rows idle-rows"` |
 | `bench.py trickle` | *A pane that never stops*; with `TRICKLE_PANES`, *Many panes that never stop* | about 22 min |
