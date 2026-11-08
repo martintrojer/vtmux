@@ -1,0 +1,33 @@
+name = "window_view_cursor_edges"
+size = [40, 12]
+steps = [
+  # A 100x30 window (window-size manual) on a 40x12 client with the status
+  # line at the top: the window shows on rows 1-11. server_client_reset_state
+  # (server-client.c:2240-2276) places the active pane's cursor when it is
+  # inside the view, its right and bottom edges included, the status lines
+  # added; one outside is hidden at the terminal's 0,0.
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "100", "-y", "30", "cat", "-"] },
+  { run = ["set", "-g", "window-size", "manual"] },
+  { run = ["set", "-g", "status-position", "top"] },
+  { run = ["set", "-g", "status-right", "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}],-}"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  # Panned below the cursor: hidden at 0,0, not under the status line.
+  { run = ["refresh-client", "-D", "5"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # Row 16 is the view's bottom edge (5 + 11): shown one row below the
+  # window's last, past the terminal's, which keeps it on its last row.
+  { feed = { pane = "%0", bytes = "\r\r\r\r\r\r\r\r" } },
+  { settle = {} },
+  { screen = {} },
+  # With the status line at the bottom that row is the status line's.
+  { run = ["set", "-g", "status-position", "bottom"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # Row 18: outside.
+  { feed = { pane = "%0", bytes = "\r" } },
+  { settle = {} },
+  { screen = {} },
+]

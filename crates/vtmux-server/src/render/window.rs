@@ -804,20 +804,20 @@ fn two_pane(model: &Model, w: WindowId) -> Option<Dir> {
     dir
 }
 
-/// Copy the active pane's cursor onto the screen.
-pub fn cursor(screen: &mut Snapshot, draw: &Draw, model: &Model, rows: u16) {
-    (screen.cursor, screen.cursor_visible) = cursor_of(draw, model, (screen.cols, rows), (0, 0));
-}
-
-/// Where [`cursor`] puts the cursor on a `cols` x `rows` area showing the
-/// window from cell `origin` ([`crate::view::View`]), and whether it
-/// shows.
+/// Where the active pane's cursor goes on a terminal `cols` wide showing
+/// the window through `view` from screen row `top` (below status lines at
+/// the top), in screen coordinates, and whether it shows
+/// (`server_client_reset_state`, server-client.c:2240-2276). A cursor in the
+/// view, its right and bottom edges included, is at its place there, no
+/// further right than the terminal's last column (`tty_cursor`); one
+/// outside it is hidden at the terminal's 0,0, the status lines not added.
 #[must_use]
 pub fn cursor_of(
     draw: &Draw,
     model: &Model,
-    (cols, rows): (u16, u16),
-    origin: (u32, u32),
+    cols: u16,
+    view: crate::view::View,
+    top: u16,
 ) -> (Option<(u16, u16)>, bool) {
     let Some(p) = draw.active else {
         return (None, false);
@@ -828,23 +828,19 @@ pub fn cursor_of(
     let Some((cx, cy)) = d.content.cursor else {
         return (None, false);
     };
-    let x = i64::from(pane.rect.xoff) + i64::from(cx) - i64::from(origin.0);
-    let y = i64::from(pane.rect.yoff) + i64::from(cy) - i64::from(origin.1);
-    // server_client_reset_state (server-client.c:2243-2276): a cursor off
-    // the view (a floating pane moved past the window's left or top edge,
-    // or the window panned past it) is hidden at 0,0.
+    let x = i64::from(pane.rect.xoff) + i64::from(cx) - i64::from(view.ox);
+    let y = i64::from(pane.rect.yoff) + i64::from(cy) - i64::from(view.oy);
+    let shown = |at: i64, size: u32| (0..=i64::from(size)).contains(&at);
+    if !shown(x, view.sx) || !shown(y, view.sy) {
+        return (Some((0, 0)), false);
+    }
     let (Ok(x), Ok(y)) = (u16::try_from(x), u16::try_from(y)) else {
         return (Some((0, 0)), false);
     };
-    // Panes mode leaves the cursor one past its last write; at the
-    // window's edge the terminal keeps it in the last column.
-    let x = if x == cols { x.saturating_sub(1) } else { x };
-    if x < cols && y < rows {
-        (Some((x, y)), d.content.cursor_visible)
-    } else {
-        // Past the view's right or bottom edge: hidden at 0,0 too.
-        (Some((0, 0)), false)
-    }
+    (
+        Some((x.min(cols.saturating_sub(1)), y.saturating_add(top))),
+        d.content.cursor_visible,
+    )
 }
 
 /// `screen_select_cell` (screen.c:641-661): the selection style over a

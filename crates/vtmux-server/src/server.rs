@@ -3337,6 +3337,7 @@ impl Server {
     /// plain (nothing drawn over the window), in which case its window rows
     /// still hold an earlier frame's and only the changed ones are copied.
     #[expect(clippy::too_many_arguments, reason = "the redraw's inputs")]
+    #[expect(clippy::too_many_lines, reason = "one pass over the window's layers")]
     fn draw_window(
         &self,
         id: ClientId,
@@ -3382,8 +3383,7 @@ impl Server {
                 rows,
             )
         });
-        let cursor =
-            crate::render::window::cursor_of(&draw, &self.model, (screen.cols, rows), origin);
+        let cursor = crate::render::window::cursor_of(&draw, &self.model, screen.cols, view, y);
         if repeat
             && composed == Some(false)
             && cache
@@ -3402,8 +3402,7 @@ impl Server {
                 p.cursor = cursor;
                 c.plain.set(Some(p));
             }
-            screen.cursor = cursor.0.map(|(x, cy)| (x, cy + y));
-            screen.cursor_visible = cursor.1;
+            (screen.cursor, screen.cursor_visible) = cursor;
             return true;
         }
         for tag in tags.iter_mut().skip(usize::from(y)).take(usize::from(rows)) {
@@ -3419,7 +3418,13 @@ impl Server {
             Some(c) => c.compose.borrow().copy_to(&mut window),
             None => crate::render::compose::compose(&scene, &draw, &theme, &mut window),
         }
-        (window.cursor, window.cursor_visible) = cursor;
+        // The window's own rows: a pane prompt or the window menu may
+        // place the cursor there instead.
+        let local = (
+            cursor.0.and_then(|(x, cy)| Some((x, cy.checked_sub(y)?))),
+            cursor.1,
+        );
+        (window.cursor, window.cursor_visible) = local;
         if let Some(c) = cache
             && let Some(mut plain) = c.plain.get()
         {
@@ -3441,8 +3446,15 @@ impl Server {
         // A swap, not a copy: the window buffer is blanked before its next
         // use anyway.
         screen.cells[at..at + window.cells.len()].swap_with_slice(&mut window.cells);
-        screen.cursor = window.cursor.map(|(x, cy)| (x, cy + y));
-        screen.cursor_visible = window.cursor_visible;
+        (screen.cursor, screen.cursor_visible) = if (window.cursor, window.cursor_visible) == local
+        {
+            cursor
+        } else {
+            (
+                window.cursor.map(|(x, cy)| (x, cy + y)),
+                window.cursor_visible,
+            )
+        };
         if let Some(c) = cache {
             *c.buffer.borrow_mut() = Some(window);
         }
