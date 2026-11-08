@@ -571,28 +571,10 @@ fn decode(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Option<(Even
     if reply.is_some() && !expired {
         return None;
     }
-    // The key tree (tty-keys.c tty_keys_find): a whole sequence is that
-    // key; the start of one waits for more until escape-time.
-    for (seq, event) in [
-        (&b"\x1b[I"[..], Event::Focus(true)),
-        (b"\x1b[O", Event::Focus(false)),
-        (b"\x1b[200~", Event::Paste(true)),
-        (b"\x1b[201~", Event::Paste(false)),
-    ] {
-        if bytes.starts_with(seq) {
-            return Some((event, seq.len()));
-        }
-    }
-    if let Some((seq, k)) = table.iter().find(|(seq, _)| bytes.starts_with(seq)) {
-        return Some((Event::Key(*k), seq.len()));
-    }
-    if !expired
-        && (table.iter().any(|(seq, _)| seq.starts_with(bytes))
-            || [&b"\x1b[200~"[..], b"\x1b[201~"]
-                .iter()
-                .any(|s| s.starts_with(bytes)))
-    {
-        return None;
+    match next1(bytes, expired, table) {
+        Next1::Found(event, n) => return Some((event, n)),
+        Next1::Partial => return None,
+        Next1::Missing => {}
     }
     if bytes[1] == b'[' {
         let final_index = bytes
@@ -635,27 +617,110 @@ fn decode(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Option<(Even
             if let Some(k) = extended_key(body, final_byte) {
                 return Some((Event::Key(k), end + 1));
             }
-        } else if !expired {
+        } else if !expired && csi_may_continue(&bytes[2..]) {
             return None;
         }
     }
-    // tty_keys_next (tty-keys.c:900-924): Escape followed by a key is that
-    // key with Meta. If the key already carries an xterm Meta modifier (or
-    // is a paste marker), the Escape is a key of its own.
-    let (event, n) = decode(&bytes[1..], expired, table)?;
-    let event = match event {
-        Event::Key(k) if k.meta && !k.esc_prefix => {
+    // tty_keys_next (tty-keys.c:900-924): Escape followed by a key of the
+    // key tree (or a UTF-8 character) is that key with Meta. If the key
+    // already carries an xterm Meta modifier (or is a paste marker), the
+    // Escape is a key of its own. Only the tree: `ESC ESC x` is M-Escape
+    // and `x`, `ESC ESC [97;5u` M-Escape and text.
+    let rest = &bytes[1..];
+    match next1(rest, expired, table) {
+        Next1::Partial => return None,
+        Next1::Found(Event::Key(k), _) if k.meta && !k.esc_prefix => {
             return Some((Event::Key(key(Base::Char('\x1b'))), 1));
         }
-        Event::Paste(_) => return Some((Event::Key(key(Base::Char('\x1b'))), 1)),
-        Event::Key(mut k) => {
+        Next1::Found(Event::Paste(_), _) => {
+            return Some((Event::Key(key(Base::Char('\x1b'))), 1));
+        }
+        Next1::Found(Event::Key(mut k), n) => {
             k.esc_prefix = true;
             k.meta = true;
-            Event::Key(k)
+            return Some((Event::Key(k), n + 1));
         }
-        other => other,
+        Next1::Found(other, n) => return Some((other, n + 1)),
+        Next1::Missing => {}
+    }
+    // tty-keys.c:926-933: no key with or without the Escape, partial or
+    // not, so Escape and the byte after it are that byte with Meta.
+    let (mut k, _) = character(&rest[..1], true)?;
+    k.meta = true;
+    k.esc_prefix = true;
+    Some((Event::Key(k), 2))
+}
+
+/// What `tty_keys_next1` (tty-keys.c:603-665) finds at the start of the
+/// buffer.
+enum Next1 {
+    Found(Event, usize),
+    /// A key that a longer one continues, or the start of a UTF-8
+    /// character: wait for more until the key timer expires.
+    Partial,
+    Missing,
+}
+
+/// `tty_keys_next1`: the key tree, then a UTF-8 character. A sequence that
+/// only starts a key is no key and no partial key (`tty_keys_find1` stops
+/// on a node without a key), so `ESC O` alone is M-O, not a wait; what
+/// waits for more is a CSI the other parsers still read
+/// ([`csi_may_continue`]) or a key a longer key continues (`tk->next`).
+fn next1(bytes: &[u8], expired: bool, table: &[(Vec<u8>, Key)]) -> Next1 {
+    for (seq, event) in [
+        (&b"\x1b[I"[..], Event::Focus(true)),
+        (b"\x1b[O", Event::Focus(false)),
+        (b"\x1b[200~", Event::Paste(true)),
+        (b"\x1b[201~", Event::Paste(false)),
+    ] {
+        if bytes.starts_with(seq) {
+            return Next1::Found(event, seq.len());
+        }
+    }
+    if let Some((seq, k)) = table.iter().find(|(seq, _)| bytes.starts_with(seq)) {
+        let continued = || {
+            table
+                .iter()
+                .any(|(longer, _)| longer.len() > seq.len() && longer.starts_with(seq))
+        };
+        if !expired && seq.len() == bytes.len() && continued() {
+            return Next1::Partial;
+        }
+        return Next1::Found(Event::Key(*k), seq.len());
+    }
+    let size = match bytes[0] {
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => return Next1::Missing,
     };
-    Some((event, n + 1))
+    if bytes.len() < size {
+        return if expired {
+            Next1::Missing
+        } else {
+            Next1::Partial
+        };
+    }
+    match std::str::from_utf8(&bytes[..size])
+        .ok()
+        .and_then(|s| s.chars().next())
+    {
+        Some(c) => Next1::Found(Event::Key(key(Base::Char(c))), size),
+        None => Next1::Missing,
+    }
+}
+
+/// Whether a CSI with no final byte yet (`bytes` after `ESC [`) can still
+/// be something tmux reads: an extended key or a window size report
+/// (digits and `;`, `tty_keys_extended_key`, `tty_keys_winsz`), or a reply
+/// (`?` or `>`, `tty_keys_device_attributes`, `tty_keys_sync`; vtmux waits
+/// for these whether or not the query was answered). Anything else is not
+/// partial, so `ESC [ 1 1 $` is M-[ and text at once.
+fn csi_may_continue(bytes: &[u8]) -> bool {
+    match bytes.first() {
+        Some(b'?' | b'>') => true,
+        _ => bytes.iter().all(|b| b.is_ascii_digit() || *b == b';'),
+    }
 }
 /// `tty_keys_winsz` (tty-keys.c:676-737): `4 ; height ; width` is the
 /// text area in pixels. `8 ; rows ; columns` is taken too, but where tmux
@@ -983,6 +1048,67 @@ mod tests {
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]
         );
+    }
+
+    /// `tty_keys_next` (tty-keys.c:900-933): after an Escape only the key
+    /// tree (or a UTF-8 character) is looked for, and a sequence that only
+    /// starts a key is not partial: `ESC ESC x` is M-Escape then `x`, and
+    /// `ESC ESC`, `ESC O`, `ESC [ 1 1 $` are keys at once, with no wait.
+    #[test]
+    fn escape_prefix_takes_the_key_tree_only() {
+        let meta = |c: char| Key {
+            meta: true,
+            esc_prefix: true,
+            ..key(Base::Char(c))
+        };
+        let now = Instant::now();
+        for (input, want) in [
+            (&b"\x1b\x1bx"[..], vec![meta('\x1b'), key(Base::Char('x'))]),
+            (b"\x1b\x1b", vec![meta('\x1b')]),
+            (b"\x1bO", vec![meta('O')]),
+            (
+                b"\x1b[11$",
+                vec![
+                    meta('['),
+                    key(Base::Char('1')),
+                    key(Base::Char('1')),
+                    key(Base::Char('$')),
+                ],
+            ),
+            (
+                b"\x1b\x1b[9;5u",
+                vec![
+                    meta('\x1b'),
+                    key(Base::Char('[')),
+                    key(Base::Char('9')),
+                    key(Base::Char(';')),
+                    key(Base::Char('5')),
+                    key(Base::Char('u')),
+                ],
+            ),
+            (b"\x1b\xc3\xa9", vec![meta('é')]),
+            (
+                b"\x1b\x1b[A",
+                vec![Key {
+                    meta: true,
+                    esc_prefix: true,
+                    ..key(Base::Named(Named::Up))
+                }],
+            ),
+        ] {
+            let mut d = Decoder::default();
+            d.feed(input);
+            let got = d.drain(now);
+            let want: Vec<Event> = want.into_iter().map(Event::Key).collect();
+            assert_eq!(got, want, "{input:?}");
+        }
+        // What can still be a key or a reply waits: an extended key, a
+        // reply, a UTF-8 character after the Escape.
+        for input in [&b"\x1b[1;5"[..], b"\x1b[", b"\x1b[?62", b"\x1b\xc3"] {
+            let mut d = Decoder::default();
+            d.feed(input);
+            assert_eq!(d.drain(now), Vec::new(), "{input:?}");
+        }
     }
 
     /// tty-keys.c:930-937: bytes that are not UTF-8 are keys one byte at

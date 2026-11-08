@@ -1,0 +1,21 @@
+# Typed Escape prefixes (tty-keys.c tty_keys_next:900-933): after an
+# Escape only the key tree is looked for, so `ESC ESC x` is M-Escape then
+# `x` (the pane gets both Escapes), `ESC ESC [97;5u` M-Escape then text,
+# and `ESC [ 1 1 $` M-[ then text; `ESC ESC [A` is M-Up from the tree.
+name = "keys_escape_prefix"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "stty raw -echo; tmux wait-for -S raw; LC_ALL=C exec cat -v"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { wait_for = "raw" },
+  { attach = { session = "a" } },
+  { keys = "<\u001b\u001bx>" },
+  { settle = {} },
+  { keys = "<\u001b\u001b[97;5u>" },
+  { settle = {} },
+  { keys = "<\u001b[11$>" },
+  { settle = {} },
+  { keys = "<\u001b\u001b[A>" },
+  { settle = {} },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]
