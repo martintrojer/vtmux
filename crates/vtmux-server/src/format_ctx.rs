@@ -717,8 +717,6 @@ impl<'a> Ctx<'a> {
                 yoff + sy == wsy
             }),
             "pane_title" => p.term.title(),
-            // format_cb_pane_path: what OSC 7 set, empty before.
-            "pane_path" => p.term.pwd(),
             // format_cb_pane_fg / _bg: tty_default_colours.
             "pane_fg" => crate::term_queries::default_colours(self.model, p.id, self)
                 .0
