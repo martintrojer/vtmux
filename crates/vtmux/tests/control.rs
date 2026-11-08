@@ -10,6 +10,7 @@ mod common;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -413,6 +414,248 @@ fn control_control_needs_a_tty() {
             out.status.code(),
         )
     });
+}
+
+/// What a terminal's settings come to for the tests: input, output,
+/// control and local flags, `VMIN`, `VTIME`, and the speed. The local
+/// flags are those `cfmakeraw` clears (echo, canonical mode, signals,
+/// extensions): tmux 3.8 leaves the rest as the stack held them
+/// (client.c:349 on a `struct termios` it never filled in).
+type Modes = (u32, u32, u32, u32, u8, u8, u32);
+
+fn modes_of(tty: &std::fs::File) -> Modes {
+    use rustix::termios::{LocalModes, SpecialCodeIndex, tcgetattr};
+    let t = tcgetattr(tty).expect("tcgetattr");
+    let raw = LocalModes::ECHO
+        | LocalModes::ECHONL
+        | LocalModes::ICANON
+        | LocalModes::ISIG
+        | LocalModes::IEXTEN;
+    (
+        t.input_modes.bits(),
+        t.output_modes.bits(),
+        t.control_modes.bits(),
+        (t.local_modes & raw).bits(),
+        t.special_codes[SpecialCodeIndex::VMIN],
+        t.special_codes[SpecialCodeIndex::VTIME],
+        t.input_speed(),
+    )
+}
+
+/// A `-CC` client on a pseudo-terminal of its own (the master is the test's).
+struct Cc {
+    child: Child,
+    master: std::fs::File,
+    out: Arc<Mutex<Vec<u8>>>,
+    /// The terminal's settings before the client ran.
+    before: Modes,
+}
+
+impl Cc {
+    fn start(w: &World, args: &[&str]) -> Self {
+        use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("openpt");
+        grantpt(&master).expect("grantpt");
+        unlockpt(&master).expect("unlockpt");
+        let name = ptsname(&master, Vec::new()).expect("ptsname");
+        let slave = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(std::ffi::OsStr::from_bytes(name.to_bytes()))
+            .expect("open slave");
+        let before = modes_of(&slave);
+        let mut command = w.command(&[&["-CC"], args].concat());
+        command
+            .stdin(slave.try_clone().unwrap())
+            .stdout(slave.try_clone().unwrap())
+            .stderr(slave);
+        let child = command.spawn().expect("spawn -CC client");
+        // The slave is the child's alone now: the master reads EOF (EIO)
+        // once it and the server it started let go.
+        drop(command);
+        let master = std::fs::File::from(master);
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&out);
+        let mut reader = master.try_clone().unwrap();
+        thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                sink.lock().unwrap().extend_from_slice(&buf[..n]);
+            }
+        });
+        Self {
+            child,
+            master,
+            out,
+            before,
+        }
+    }
+
+    fn modes(&self) -> Modes {
+        modes_of(&self.master)
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.out.lock().unwrap()).into_owned()
+    }
+
+    /// Type `keys` at the terminal.
+    fn type_(&mut self, keys: &str) {
+        self.master.write_all(keys.as_bytes()).unwrap();
+    }
+
+    /// Poll the screen stream (max 5 s) until `pred` holds.
+    fn wait(&self, what: &str, pred: impl Fn(&str) -> bool) {
+        let end = Instant::now() + WAIT;
+        while !pred(&self.text()) {
+            assert!(
+                Instant::now() < end,
+                "timeout waiting for {what}: {:?}",
+                self.text()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Wait for the client to exit; its exit status.
+    fn exit(&mut self) -> Option<i32> {
+        let end = Instant::now() + WAIT;
+        loop {
+            if let Some(s) = self.child.try_wait().unwrap() {
+                return s.code();
+            }
+            assert!(
+                Instant::now() < end,
+                "-CC client did not exit: {:?}",
+                self.text()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Drop for Cc {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// What a `-CC` run shows: the stream (guards normalised, `\r\n` counted
+/// apart), the exit status, the terminal's settings before, while the
+/// script ran (as it returns them) and after.
+type CcRun = (Vec<String>, usize, Option<i32>, Modes, Option<Modes>, Modes);
+
+/// Run `-CC args` on a terminal, drive it with `script` (which returns the
+/// settings it saw while the client ran), wait for the client's last byte,
+/// the `ST`, and its exit.
+fn cc_run(w: &World, args: &[&str], script: impl FnOnce(&mut Cc) -> Option<Modes>) -> CcRun {
+    let mut c = Cc::start(w, args);
+    let before = c.before;
+    let during = script(&mut c);
+    c.wait("the ST", |t| t.ends_with("\x1b\\"));
+    let code = c.exit();
+    let after = c.modes();
+    let text = w.normalise(&c.text());
+    // The DCS shares the first line with `%begin`: set it apart so the
+    // guard is normalised too.
+    let text = text.replacen("\x1bP1000p", "<DCS>\n", 1);
+    (
+        normalise_guards(&text.replace("\r\n", "\n")),
+        text.matches("\r\n").count(),
+        code,
+        before,
+        during,
+        after,
+    )
+}
+
+/// `-CC` (client.c `client_main`, control.c `control_start`): the stream opens
+/// with `ESC P 1000 p` and ends, after `%exit`, with `ESC \`; stdin's
+/// terminal is raw while it runs (no echo, `ICRNL`, `ONLCR`) and as it was
+/// before once the client has exited. Nothing is typed to the reference:
+/// tmux 3.8 sets the line discipline from an uninitialised `struct
+/// termios` (client.c:349), and on a pseudo-terminal about half the runs
+/// leave the input unread. `detach-client` ends the client instead.
+#[test]
+fn control_control_wraps_the_stream_in_a_dcs_and_runs_raw() {
+    compare("control_control_dcs", |w| {
+        cc_run(w, &["new", "-s", "c", "-n", "w", "cat", "-"], |c| {
+            c.wait("%session-changed", |t| t.contains("%session-changed"));
+            let during = c.modes();
+            let out = w.run(&["detach-client", "-s", "c"]);
+            assert_eq!(out.2, 0, "{out:?}");
+            Some(during)
+        })
+    });
+}
+
+/// An unattached `-CC` client exits at once (server-client.c:2827-2833),
+/// still inside the DCS and ST.
+#[test]
+fn control_control_unattached_is_wrapped_too() {
+    compare("control_control_unattached", |w| {
+        cc_run(w, &["new", "-d", "-s", "c", "cat", "-"], |_| None)
+    });
+}
+
+/// What is typed at a `-CC` client's terminal: not echoed, `CR` read as a
+/// line end (`ICRNL`), and an empty line detaches (control.c:712-715).
+/// vtmux only, for the reason above.
+#[test]
+fn control_control_reads_what_is_typed_raw() {
+    let w = World::new(&PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let (lines, crlf, code, before, _, after) =
+        cc_run(&w, &["new", "-s", "c", "-n", "w", "cat", "-"], |c| {
+            c.wait("%session-changed", |t| t.contains("%session-changed"));
+            c.type_("display -p hi\r");
+            c.wait("its reply", |t| t.matches("%end").count() == 2);
+            c.type_("\r");
+            None
+        });
+    assert_eq!(
+        lines,
+        [
+            "<DCS>",
+            "%begin <T> #1 0",
+            "%end <T> #1 0",
+            "%sessions-changed",
+            "%session-changed $0 c",
+            "%begin <T> #2 1",
+            "hi",
+            "%end <T> #2 1",
+            "%exit",
+            "\x1b\\",
+        ]
+    );
+    assert_eq!(crlf, 8, "every line ends in CR LF (ONLCR)");
+    assert_eq!(code, Some(0));
+    assert_eq!(after, before, "the terminal is put back");
+}
+
+/// With `wait-exit` the client waits for an empty line after `%exit`
+/// (`control_wait_exit`, control.c:745-785); the `ST` comes after it.
+/// vtmux only: it takes typing.
+#[test]
+fn control_control_wait_exit_ends_with_the_st() {
+    let w = World::new(&PathBuf::from(env!("CARGO_BIN_EXE_vtmux")));
+    let (lines, _, code, before, _, after) =
+        cc_run(&w, &["new", "-s", "c", "-n", "w", "cat", "-"], |c| {
+            c.wait("%session-changed", |t| t.contains("%session-changed"));
+            c.type_("refresh-client -f wait-exit\r");
+            c.wait("its reply", |t| t.matches("%end").count() == 2);
+            c.type_("\r");
+            c.wait("%exit", |t| t.contains("%exit"));
+            assert!(!c.text().ends_with('\\'), "ST before the empty line");
+            c.type_("\r");
+            None
+        });
+    assert_eq!(&lines[lines.len() - 2..], ["%exit", "\x1b\\"]);
+    assert_eq!(code, Some(0));
+    assert_eq!(after, before);
 }
 
 #[test]

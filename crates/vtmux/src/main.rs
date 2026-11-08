@@ -12,6 +12,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use rustix::termios::Termios;
 use vtmux_client::attach::Reattach;
 use vtmux_core::cmd;
 use vtmux_core::error::{EdgeError, strerror};
@@ -346,9 +347,10 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         Ok(s) => s,
         Err(e) => return edge_exit(&e),
     };
-    if let Err(code) = check_control_tty(cli.control) {
-        return code;
-    }
+    let saved_tio = match control_control_raw(cli.control) {
+        Ok(saved) => saved,
+        Err(code) => return code,
+    };
     let hello = Hello {
         version: PROTOCOL_VERSION,
         invocation,
@@ -370,6 +372,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
         },
     };
     if protocol::write_msg(&mut stream, &ClientMsg::Hello(hello)).is_err() {
+        restore_tty(saved_tio.as_ref());
         write_err(b"server exited unexpectedly");
         return ExitCode::from(1);
     }
@@ -387,7 +390,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
             &how,
         ),
         (ControlMode::None, None) => relay(&mut stream, None, &how),
-        _ => control_relay(&mut stream),
+        _ => control_relay(&mut stream, saved_tio.as_ref()),
     }
 }
 
@@ -577,18 +580,49 @@ fn upgrade_relay(
     ExitCode::from(u8::from(!ok))
 }
 
-/// client.c:343-348: `-CC` puts stdin's terminal in raw mode, after the
-/// server is up. vtmux otherwise runs `-CC` as `-C` (iTerm2 `-CC` is out of
-/// M0 scope: no DCS wrapping, output on stdout).
-fn check_control_tty(mode: ControlMode) -> Result<(), ExitCode> {
+/// client.c:343-361: `-CC` puts stdin's terminal in raw mode, after the
+/// server is up: `ICRNL|IXANY` in, `OPOST|ONLCR` out, no local flags (no
+/// echo, no line editing, no signals), `CREAD|CS8|HUPCL`, `VMIN` 1,
+/// `VTIME` 0, the speed kept. (macOS's `NOKERNINFO` is not in rustix's
+/// `LocalModes`; it only stops Ctrl-T from printing load.) Returns the
+/// settings to put back (`saved_tio`); `None` for `-C`, which leaves the
+/// terminal alone. The server writes the DCS that starts the session
+/// (`control_start`, control.c:1025), the client the `ST` that ends it
+/// ([`control_relay`]).
+fn control_control_raw(mode: ControlMode) -> Result<Option<Termios>, ExitCode> {
+    use rustix::termios::{
+        ControlModes, InputModes, LocalModes, OptionalActions, OutputModes, SpecialCodeIndex,
+        tcgetattr, tcsetattr,
+    };
     if mode != ControlMode::ControlControl {
-        return Ok(());
+        return Ok(None);
     }
-    rustix::termios::tcgetattr(io::stdin()).map_err(|e| {
+    let saved = tcgetattr(io::stdin()).map_err(|e| {
         write_err(format!("tcgetattr failed: {}", strerror(&io::Error::from(e))).as_bytes());
         ExitCode::from(1)
     })?;
-    Ok(())
+    let mut tio = saved.clone();
+    tio.make_raw();
+    tio.input_modes = InputModes::ICRNL | InputModes::IXANY;
+    tio.output_modes = OutputModes::OPOST | OutputModes::ONLCR;
+    tio.local_modes = LocalModes::empty();
+    tio.control_modes = ControlModes::CREAD | ControlModes::CS8 | ControlModes::HUPCL;
+    tio.special_codes[SpecialCodeIndex::VMIN] = 1;
+    tio.special_codes[SpecialCodeIndex::VTIME] = 0;
+    let _ = tio.set_output_speed(saved.output_speed());
+    let _ = tcsetattr(io::stdin(), OptionalActions::Now, &tio);
+    Ok(Some(saved))
+}
+
+/// `tcsetattr(STDOUT_FILENO, TCSAFLUSH, &saved_tio)` (client.c:405, 428).
+fn restore_tty(saved: Option<&Termios>) {
+    if let Some(saved) = saved {
+        let _ = rustix::termios::tcsetattr(
+            io::stdout(),
+            rustix::termios::OptionalActions::Flush,
+            saved,
+        );
+    }
 }
 
 /// Copy stdin to the server as `Stdin` messages, then `StdinEof`. Once
@@ -645,8 +679,12 @@ fn wait_exit(rest: &std::sync::mpsc::Receiver<Option<Vec<u8>>>) {
 
 /// A control client (`-C`): stdin goes to the server, the server's
 /// protocol stream to stdout; on exit print `%exit [reason]`
-/// (client.c:417-424), then wait for the input if `wait-exit` is set.
-fn control_relay(stream: &mut UnixStream) -> ExitCode {
+/// (client.c:417-424), then wait for the input if `wait-exit` is set. A
+/// `-CC` client (`saved` is its terminal's settings) ends with the `ST`
+/// that closes the server's DCS, then puts the settings back
+/// (client.c:425-429); `detach-client -E` puts them back before the exec
+/// (client.c:403-405).
+fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
     let after = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx, rest) = std::sync::mpsc::channel();
     if let Ok(writer) = stream.try_clone() {
@@ -667,6 +705,7 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
             Ok(Some(ServerMsg::Exit { code, message, .. })) => break (code, message),
             // client.c:403-407: detach-client -E replaces the client.
             Ok(Some(ServerMsg::Exec { command, shell })) => {
+                restore_tty(saved);
                 return ExitCode::from(
                     u8::try_from(vtmux_client::attach::exec(&shell, &command)).unwrap_or(1),
                 );
@@ -704,6 +743,12 @@ fn control_relay(stream: &mut UnixStream) -> ExitCode {
     if wait {
         wait_exit(&rest);
     }
+    if saved.is_some() {
+        let mut out = io::stdout().lock();
+        let _ = out.write_all(b"\x1b\\");
+        let _ = out.flush();
+    }
+    restore_tty(saved);
     ExitCode::from(u8::try_from(code).unwrap_or(1))
 }
 

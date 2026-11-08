@@ -1840,7 +1840,8 @@ impl Server {
         item.utf8 = hello.flags.utf8;
         item.origin = origin;
         let argv = hello.argv.clone();
-        let control = hello.flags.control != vtmux_core::protocol::ControlMode::None;
+        let hello_flags = hello.flags;
+        let control = hello_flags.control != vtmux_core::protocol::ControlMode::None;
         let terminal = hello.tty.is_some();
         if let Some(c) = self.clients.get_mut(&id) {
             c.environ = hello.env.clone().into();
@@ -1852,6 +1853,13 @@ impl Server {
                     crate::term_queries::cell_pixels(tty.cols, tty.rows, hello.ext.pixels);
             }
             c.hello = Some(hello);
+        }
+        // `control_start` (server-client.c:3029, control.c:1025-1027): a
+        // `-CC` client's stream opens with the DCS that tells the terminal
+        // it is in control mode, before anything the hooks or the config
+        // write. The client prints the matching `ST` when it exits.
+        if hello_flags.control == vtmux_core::protocol::ControlMode::ControlControl {
+            self.send(id, &ServerMsg::Stdout(b"\x1bP1000p".to_vec()));
         }
         // server-client.c:3042-3043.
         if control || terminal {
