@@ -267,8 +267,7 @@ status = "pass"
 status = "pass"
 
 [tests."input-raw-scroll.sh"]
-status = "xfail"
-reason = "expected divergence D-032: scene index, IND at the bottom of a region starting at row 1 moves the region's top row into history in tmux (grid_scroll_history_region), Ghostty only scrolls a region at row 0 into scrollback; every other scene passes"
+status = "pass"
 
 [tests."input-raw-sgr.sh"]
 status = "pass"

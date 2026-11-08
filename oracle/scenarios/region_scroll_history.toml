@@ -1,0 +1,65 @@
+name = "region_scroll_history"
+size = [20, 8]
+# A line scrolled off the top of a scroll region goes into history whatever row
+# the region starts on (grid-view.c grid_view_scroll_region_up,
+# grid.c grid_scroll_history_region): the rows above the region stay, the
+# region's top row is the newest history line with its wrap flag, the region's
+# bottom row is cleared with the current background. LF/IND at the region's
+# bottom (screen_write_linefeed) and SU (screen_write_scrollup, at most the
+# region's height) both do it; the alternate screen has no history
+# (grid_move_lines) and history-limit 0 keeps none. D-032, Ghostty patch 0026.
+steps = [
+  { run = ["new", "-d", "-s", "base", "-x", "20", "-y", "8", "-n", "w", "cat", "-"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "copy-mode-position-format", "#[align=right][#{scroll_position}/#{history_size}]"] },
+  # index: tmux 3.8 history_size 1, capture -S - starts with X (D-032 evidence)
+  { run = ["new", "-d", "-s", "index", "-x", "6", "-y", "4", "sh", "-c", "printf 'A\\nB\\nC\\033[2;3r\\033[2;1HX\\033D\\033DY'; tmux wait-for -S index; exec cat"] },
+  { wait_for = "index" },
+  { run = ["display", "-p", "-t", "index:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "index:"] },
+  # index then taller: the region's line is scrolled history (hscrolled), pulled back
+  { run = ["resize-window", "-t", "index", "-y", "6"] },
+  { run = ["display", "-p", "-t", "index:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "index:"] },
+  # su: SU 5 in a two-row region scrolls two lines into history, the cursor stays
+  { run = ["new", "-d", "-s", "su", "-x", "6", "-y", "4", "sh", "-c", "printf 'A\\nB\\nC\\nD\\033[2;3r\\033[4;2H\\033[5S'; tmux wait-for -S su; exec cat"] },
+  { wait_for = "su" },
+  { run = ["display", "-p", "-t", "su:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "su:"] },
+  # wrap: the region's wrapped top row keeps its flag in history, so -J joins it to row 0; then a wider reflow
+  { run = ["new", "-d", "-s", "wrap", "-x", "10", "-y", "6", "sh", "-c", "printf 'x\\naaaaaaaaaab\\nccc\\033[2;4r\\033[4;1H\\n\\033[r\\033[6;1H'; tmux wait-for -S wrap; exec cat"] },
+  { wait_for = "wrap" },
+  { run = ["display", "-p", "-t", "wrap:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-J", "-S", "-", "-t", "wrap:"] },
+  { run = ["resize-window", "-t", "wrap", "-x", "14"] },
+  { run = ["display", "-p", "-t", "wrap:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "wrap:"] },
+  # bg: the cleared bottom row takes the current background
+  { run = ["new", "-d", "-s", "bg", "-x", "6", "-y", "4", "sh", "-c", "printf 'A\\nB\\nC\\033[2;3r\\033[3;1H\\033[41m\\n\\033[0mZ'; tmux wait-for -S bg; exec cat"] },
+  { wait_for = "bg" },
+  { run = ["display", "-p", "-t", "bg:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "bg:"] },
+  # alt: no history on the alternate screen
+  { run = ["new", "-d", "-s", "alt", "-x", "6", "-y", "4", "sh", "-c", "printf '\\033[?1049hA\\nB\\nC\\033[2;3r\\033[2;1HX\\033D\\033DY'; tmux wait-for -S alt; exec cat"] },
+  { wait_for = "alt" },
+  { run = ["display", "-p", "-t", "alt:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "alt:"] },
+  # stream: 3000 lines through a region between a header and a footer, across history pages
+  { run = ["new", "-d", "-s", "stream", "-x", "20", "-y", "6", "-n", "w", "sh", "-c", "printf 'HEAD\\n\\n\\n\\n\\nFOOT\\033[2;5r\\033[5;1H'; i=0; while [ $i -lt 3000 ]; do printf '\\n%d' $i; i=$((i+1)); done; tmux wait-for -S stream; exec cat"] },
+  { wait_for = "stream" },
+  { run = ["display", "-p", "-t", "stream:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-3", "-t", "stream:"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-E", "-1995", "-t", "stream:"] },
+  { attach = { session = "stream" } },
+  { run = ["copy-mode", "-t", "stream:"] },
+  { run = ["send-keys", "-t", "stream:", "-X", "history-top"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "stream:", "-X", "cancel"] },
+  { screen = {} },
+  # nohist: history-limit 0 keeps nothing, the rows above the region stay
+  { run = ["set", "-g", "history-limit", "0"] },
+  { run = ["new", "-d", "-s", "nohist", "-x", "20", "-y", "6", "sh", "-c", "printf 'HEAD\\n\\n\\n\\n\\nFOOT\\033[2;5r\\033[5;1H'; i=0; while [ $i -lt 3000 ]; do printf '\\n%d' $i; i=$((i+1)); done; tmux wait-for -S nohist; exec cat"] },
+  { wait_for = "nohist" },
+  { run = ["display", "-p", "-t", "nohist:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "nohist:"] },
+]

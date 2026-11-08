@@ -1,0 +1,343 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 06701afb9..e93a35d93 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -11,6 +11,7 @@ const tripwire = @import("../tripwire.zig");
+ const testing = std.testing;
+ const Allocator = std.mem.Allocator;
+ const simd = @import("../simd/main.zig");
++const fastmem = @import("../fastmem.zig");
+ const unicode = @import("../unicode/main.zig");
+ const uucode = @import("uucode");
+ 
+@@ -2638,6 +2639,14 @@ pub fn index(self: *Terminal) !void {
+             return;
+         }
+ 
++        // vtmux: tmux moves the line scrolled off the top of any region
++        // into history (grid_view_scroll_region_up), not only of one at
++        // the top.
++        if (self.tmuxRegionScrollsIntoHistory()) {
++            try self.tmuxScrollRegionUpIntoHistory();
++            return;
++        }
++
+         // Slow path for left and right scrolling region margins.
+         // scrollUp handles the kitty image adjustment itself.
+         if (self.scrolling_region.left != 0 or
+@@ -3016,12 +3025,155 @@ pub fn scrollUp(self: *Terminal, count: usize) !void {
+         return;
+     }
+ 
++    // vtmux: a region below the top scrolls into history as well
++    // (screen_write_scrollup: grid_view_scroll_region_up once a line, at
++    // most the region's height).
++    if (self.tmuxRegionScrollsIntoHistory()) {
++        const region_height = self.scrolling_region.bottom - self.scrolling_region.top + 1;
++        self.screens.active.cursorAbsolute(0, self.scrolling_region.bottom);
++        for (0..@min(count, region_height)) |_| try self.tmuxScrollRegionUpIntoHistory();
++        return;
++    }
++
+     // Move to the top of the scroll region
+     self.screens.active.cursorAbsolute(self.scrolling_region.left, self.scrolling_region.top);
+     self.deleteLines(count);
+     self.tmuxUnwrapAboveRegionWithoutHistory();
+ }
+ 
++/// vtmux: whether a region scrolled up puts its top row into history as
++/// tmux's does and Ghostty's does not: a full-width region (tmux has no
++/// left and right margins) below the top on a screen that keeps history.
++/// tmux's grid_view_scroll_region_up (grid-view.c) takes
++/// grid_scroll_history_region for any region of a grid with history; the
++/// alternate screen (tmux's alternate grid has none) moves lines in place.
++/// With Kitty image placements Ghostty's in-place path, which moves them,
++/// is kept (vtmux stores no images).
++fn tmuxRegionScrollsIntoHistory(self: *const Terminal) bool {
++    const screen = self.screens.active;
++    if (screen.no_scrollback) return false;
++    if (self.scrolling_region.top == 0) return false;
++    if (self.scrolling_region.left != 0 or
++        self.scrolling_region.right != self.cols - 1) return false;
++    if (comptime build_options.kitty_graphics) {
++        if (screen.kitty_images.placements.count() != 0) return false;
++    }
++    return true;
++}
++
++/// vtmux: a full-width region below the top scrolled up by one into
++/// history, as tmux's grid_scroll_history_region (grid.c) does it: the
++/// region's top row becomes the newest history row, the rows above the
++/// region stay where they are, the rest of the region moves up a row and
++/// its bottom row is cleared with the cursor's background
++/// (grid_empty_line). The cursor is on the region's bottom row and stays
++/// there.
++///
++/// It scrolls the rows from the top to the region's bottom as a region
++/// at the top does (cursorScrollAbove: row 0 into history), then rotates
++/// the newest history row and the rows above the region down by one, so
++/// the region's old top row is in history and those rows are back where
++/// they were. The blank cursor row holds the row on the move meanwhile.
++/// Ghostty's history limits are lifted until the rows are back: a page
++/// pruned by the scroll would take the old row 0 with it.
++fn tmuxScrollRegionUpIntoHistory(self: *Terminal) !void {
++    const screen: *Screen = self.screens.active;
++    const top: usize = self.scrolling_region.top;
++    const bottom: usize = self.scrolling_region.bottom;
++    assert(top > 0 and top <= bottom);
++    assert(screen.cursor.y == bottom);
++
++    const limits = screen.pages.limits;
++    screen.pages.limits.set(.bytes, null);
++    screen.pages.limits.set(.lines, null);
++    defer {
++        screen.pages.limits = limits;
++        screen.pages.limits.enforce(&screen.pages, .lines);
++        screen.pages.limits.enforce(&screen.pages, .bytes);
++    }
++
++    try screen.cursorScrollAbove();
++
++    // Rows by index (tmuxRotationPin): 0 is the newest history row, i > 0
++    // active row i - 1, so `top` is the region's old top row (now on
++    // active row top - 1).
++    const first = tmuxRotationPin(screen, 0);
++    const last = tmuxRotationPin(screen, top);
++    self.invalidateFullWidthRowRange(first.node, screen.cursor.page_pin.node);
++    if (first.node == last.node) {
++        // One page: rotate the rows in place, [ 0 1 2 3 ] to [ 3 0 1 2 ].
++        const page = first.node.page();
++        const rows = page.rows.ptr(page.memory.ptr)[first.y .. last.y + 1];
++        fastmem.rotateOnceR(Row, rows);
++        for (rows) |*row| row.dirty = true;
++    } else {
++        // Walking up keeps every pin valid: a copy replaces only the page
++        // of its destination, and later moves are all in earlier pages.
++        var dst = last;
++        tmuxMoveRow(screen, dst, screen.cursor.page_pin.*);
++        var i: usize = top;
++        while (i > 0) : (i -= 1) {
++            const src = dst.up(1).?;
++            tmuxMoveRow(screen, src, dst);
++            dst = src;
++        }
++        tmuxMoveRow(screen, screen.cursor.page_pin.*, dst);
++
++        // The cursor row is the region's blank bottom row again.
++        const p = screen.cursor.page_pin.*;
++        const page = p.node.page();
++        const row = p.rowAndCell().row;
++        screen.clearCells(page, row, page.getCells(row));
++        row.reset();
++        const rac = p.rowAndCell();
++        screen.cursor.page_row = rac.row;
++        screen.cursor.page_cell = rac.cell;
++    }
++
++    // Rows with a new row above them: the history row, active row 0 (under
++    // the region's old top row, as tmux's history line is), the region's
++    // new top row and the row below the region (patch 0011).
++    tmuxFixContinuationAt(tmuxRotationPin(screen, 0));
++    tmuxFixContinuationAt(tmuxRotationPin(screen, 1));
++    if (top < bottom) tmuxFixContinuationAt(tmuxRotationPin(screen, top + 1));
++    self.tmuxFixContinuationsBelowRegion();
++}
++
++/// vtmux: row `i` of tmuxScrollRegionUpIntoHistory's rotation (0 the
++/// newest history row, i > 0 active row i - 1).
++fn tmuxRotationPin(screen: *Screen, i: usize) PageList.Pin {
++    if (i == 0) return screen.pages.pin(.{ .active = .{} }).?.up(1).?;
++    return screen.pages.pin(.{ .active = .{ .y = @intCast(i - 1) } }).?;
++}
++
++/// vtmux: move row `src` into row `dst` with its metadata: a swap in one
++/// page, a copy across pages (`src` keeps a copy, which a later move or
++/// the final clear replaces). A copy can replace `dst`'s page (to grow
++/// it), which leaves pins into that page stale.
++fn tmuxMoveRow(screen: *Screen, src: PageList.Pin, dst: PageList.Pin) void {
++    const src_row = src.rowAndCell().row;
++    if (src.node == dst.node) {
++        const dst_row = dst.rowAndCell().row;
++        const tmp = dst_row.*;
++        dst_row.* = src_row.*;
++        src_row.* = tmp;
++        src_row.dirty = true;
++        dst_row.dirty = true;
++        src.node.page().assertIntegrity();
++    } else {
++        const node = screen.clonePartialRowGrowCapacity(
++            dst.node,
++            dst.y,
++            src.node.page(),
++            src_row,
++            0,
++            screen.pages.cols,
++        );
++        const page = node.page();
++        page.rows.ptr(page.memory.ptr)[dst.y].dirty = true;
++    }
++}
++
+ /// vtmux: without history (the alternate screen) tmux scrolls a region up
+ /// with grid_move_lines (grid_view_scroll_region_up), which unwraps the
+ /// line above the region; with history grid_scroll_history_region does
+@@ -15241,8 +15393,9 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+     }
+ 
+     // SU in a region and LF at the bottom of a region that does not start
+-    // at the top move rows up in place: the moved rows' continuation flags
+-    // and the row below the region follow.
++    // at the top move the region's top row into history (patch 0026) and
++    // the rest up: the moved rows' continuation flags and the row below
++    // the region follow.
+     for ([_]bool{ false, true }) |lf| {
+         var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
+         defer t.deinit(alloc);
+@@ -15274,6 +15427,128 @@ test "Terminal: tmux wrap continuations follow moved rows (vtmux)" {
+     }
+ }
+ 
++test "Terminal: a region below the top scrolls into history as tmux's does (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++
++    // tmux 3.8, 6x4: printf 'A\nB\nC\033[2;3r\033[2;1HX\033D\033DY' has
++    // history_size 1 and capture-pane -S - starts with X
++    // (grid_scroll_history_region).
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 6 });
++        defer t.deinit(alloc);
++        try t.printString("A\nB\nC");
++        t.setTopAndBottomMargin(2, 3);
++        t.setCursorPos(2, 1);
++        try t.print('X');
++        try t.index();
++        try t.index();
++        try t.print('Y');
++        const str = try t.screens.active.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings("X\nA\nC\n Y", str);
++        try testing.expectEqual(@as(usize, 2), t.screens.active.cursor.y);
++    }
++
++    // SU counts lines up to the region's height; each goes into history.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 6 });
++        defer t.deinit(alloc);
++        try t.printString("A\nB\nC\nD");
++        t.setTopAndBottomMargin(2, 3);
++        t.setCursorPos(4, 2);
++        try t.scrollUp(5);
++        const str = try t.screens.active.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings("B\nC\nA\n\n\nD", str);
++        try testing.expectEqual(@as(usize, 3), t.screens.active.cursor.y);
++        try testing.expectEqual(@as(usize, 1), t.screens.active.cursor.x);
++    }
++
++    // The region's top row keeps its wrap flag in history, so the row
++    // under it (active row 0) is its continuation, as tmux's history
++    // line stays wrapped; the region's new top row is not one.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("x\naaaaaaaaaab");
++        t.setTopAndBottomMargin(2, 3);
++        t.setCursorPos(3, 1);
++        try t.index();
++        const pages = &t.screens.active.pages;
++        const h = pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?.row;
++        const r0 = pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?.row;
++        const r1 = pages.getCell(.{ .active = .{ .x = 0, .y = 1 } }).?.row;
++        const r2 = pages.getCell(.{ .active = .{ .x = 0, .y = 2 } }).?.row;
++        try testing.expect(h.wrap);
++        try testing.expect(r0.wrap_continuation);
++        try testing.expect(!r1.wrap_continuation);
++        try testing.expect(!r2.wrap_continuation);
++        const str = try t.screens.active.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings("aaaaaaaaaa\nx\nb", str);
++    }
++
++    // The bottom row is cleared with the cursor's background.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 6 });
++        defer t.deinit(alloc);
++        try t.printString("A\nB\nC");
++        t.setTopAndBottomMargin(2, 3);
++        t.setCursorPos(3, 1);
++        try t.setAttribute(.{ .direct_color_bg = .{ .r = 0xFF, .g = 0, .b = 0 } });
++        try t.index();
++        const list_cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 5, .y = 2 } }).?;
++        try testing.expect(list_cell.cell.content_tag == .bg_color_rgb);
++        try testing.expectEqual(@as(u8, 0xFF), list_cell.cell.content.color_rgb.r);
++        const str = try t.screens.active.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings("B\nA\nC", str);
++    }
++
++    // Rows on either side of a page boundary, styled (managed memory moves
++    // with a copy across pages): every step a scroll moves the boundary up
++    // a row, so it passes between each pair of the rows that rotate.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 8 });
++        defer t.deinit(alloc);
++        const pages = &t.screens.active.pages;
++        var n: usize = 0;
++        while (pages.pages.first == pages.pages.last) : (n += 1) {
++            try t.printString("fill\n");
++        }
++        try t.setAttribute(.bold);
++        t.setCursorPos(1, 1);
++        t.eraseDisplay(.below, false);
++        try t.printString("T0\nT1\nR0\nR1\nR2");
++        t.setTopAndBottomMargin(3, 5);
++        var next: usize = 3;
++        while (next < 3 + 8) : (next += 1) {
++            t.setCursorPos(5, 1);
++            try t.index();
++            var buf: [8]u8 = undefined;
++            try t.printString(try std.fmt.bufPrint(&buf, "R{d}", .{next}));
++            const str = try t.screens.active.dumpStringAlloc(alloc, .{ .screen = .{} });
++            defer alloc.free(str);
++            var want_buf: [64]u8 = undefined;
++            const want = try std.fmt.bufPrint(
++                &want_buf,
++                "\nR{d}\nT0\nT1\nR{d}\nR{d}\nR{d}",
++                .{ next - 3, next - 2, next - 1, next },
++            );
++            try testing.expect(std.mem.endsWith(u8, str, want));
++            for (0..5) |y| {
++                const c = pages.getCell(.{ .active = .{ .x = 0, .y = @intCast(y) } }).?;
++                try testing.expect(c.style().flags.bold);
++            }
++            const h = pages.pin(.{ .active = .{} }).?.up(1).?;
++            const hc = h.rowAndCell().cell;
++            try testing.expect(h.style(hc).flags.bold);
++        }
++        try testing.expect(pages.getTopLeft(.active).node != pages.pages.first);
++    }
++}
++
+ test "Terminal: reflow keeps the line break after a blank continuation (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+@@ -19196,12 +19471,17 @@ test "Terminal: eraseDisplay complete ignores stale prompt on recycled row" {
+     try t.linefeed();
+     t.setTopAndBottomMargin(0, 0);
+ 
++    // vtmux: the region's top row (the prompt row) went into history, as
++    // tmux's grid_scroll_history_region puts it (patch 0026).
++    const total_rows = t.screens.active.pages.total_rows;
++    try testing.expectEqual(t.screens.active.pages.rows + 1, total_rows);
++
+     // ED2: since no prompt is on screen, this must NOT take the
+     // scroll-and-clear path that pushes content into scrollback. A
+     // stale prompt flag on the recycled blank bottom row would.
+     t.eraseDisplay(.complete, false);
+ 
+-    try testing.expectEqual(t.screens.active.pages.rows, t.screens.active.pages.total_rows);
++    try testing.expectEqual(total_rows, t.screens.active.pages.total_rows);
+ }
+ 
+ test "Terminal: eraseDisplay complete at prompt not on last row scrolls" {

@@ -255,13 +255,10 @@ product reasons" category.
 - Evidence: 20x3 pane, reference tmux 3.8: `printf 'x\360\237\207\254y'` gives `#{cursor_x}` 3, vtmux 4; `printf 'x\357\270\217y'` 3 with U+FE0F kept on `x`, vtmux 2.
 - Category: Deferred (tmux's table over Ghostty's, through the width override patch 0007 for the lone indicator; the VS16 rule needs a Ghostty change).
 
-### D-032: lines scrolled out of a scroll region that does not start at the top stay out of history
+### D-032: closed (a scroll region below the top feeds history as tmux's does)
 
-- Test / assertion: regress `input-raw-scroll.sh` (scene `index`), xfail; goldens `cap_region_scroll_history`, `fmt_region_scroll_history_size` (ignored, `crates/vtmux-vt/DIVERGENCES-PENDING.md` P1).
-- tmux behaviour: `grid_view_scroll_region_up` (grid-view.c:107-117) moves the line scrolled off the top of any region into history (`grid_scroll_history_region`), whatever row the region starts on.
-- vtmux behaviour: Ghostty creates scrollback only for a region whose top margin is row 0 (Terminal.zig `index`), so the line is lost.
-- Evidence: 6x4 pane, `printf 'A\nB\nC\033[2;3r\033[2;1HX\033D\033DY'`: tmux `#{history_size}` 1 and capture `-S -` starts `X`; vtmux 0.
-- Category: Deferred (a Ghostty change: a region scroll that copies its top row into scrollback before rotating, about a day with its page bookkeeping).
+- Was: Ghostty created scrollback only for a region whose top margin is row 0 (Terminal.zig `index`, `scrollUp`), so a line scrolled out of a region starting lower was lost. 6x4 pane, `printf 'A\nB\nC\033[2;3r\033[2;1HX\033D\033DY'`: tmux `#{history_size}` 1 and capture `-S -` starts `X`; vtmux 0.
+- Now: vendored patch `0026-region-scroll-into-history.patch` moves the region's top row into history for LF/IND at the region's bottom and for SU (at most the region's height), on the primary screen, as `grid_view_scroll_region_up` (grid-view.c:107-117) does with `grid_scroll_history_region` (grid.c:529-560): the rows above the region stay, the history row keeps its wrap flag, the region's bottom row is cleared with the current background. The alternate screen still moves lines in place (no `GRID_HISTORY`). Regress `input-raw-scroll.sh` (scene `index`) passes; goldens `cap_region_scroll_history`, `fmt_region_scroll_history_size`; oracle `region_scroll_history`. A pane created with `history-limit 0` scrolls its region as one with history, as before (D-006).
 
 ### D-033: attach also asks the terminal for palette entries 0-15 (OSC 4)
 

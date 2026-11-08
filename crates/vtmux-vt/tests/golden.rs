@@ -241,9 +241,7 @@ golden! {
     cap_alt_history,
     fmt_alt_history_size,
     cap_cluster_truncated,
-    #[ignore = "D-032: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
     cap_region_scroll_history,
-    #[ignore = "D-032: tmux moves lines scrolled out of any scroll region into history (grid-view.c:107-117); Ghostty only for a region starting at row 0"]
     fmt_region_scroll_history_size,
     cap_reflow_narrow,
     fmt_reflow_narrow_history_size,

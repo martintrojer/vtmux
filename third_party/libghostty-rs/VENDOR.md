@@ -739,6 +739,51 @@ Recorded per commit in git history; the list is kept current:
   `vtmux` 65/65; Debug `-Dtest-filter="Terminal: "` 521/522 with the known
   `tabClear single` failure. Not an upstream candidate (tmux's model).
 
+- `patches/0026-region-scroll-into-history.patch` (`Terminal.zig` `index`,
+  `scrollUp`, new `tmuxRegionScrollsIntoHistory`,
+  `tmuxScrollRegionUpIntoHistory`, `tmuxRotationPin`, `tmuxMoveRow`): a
+  full-width scroll region that does not start at the top feeds history on
+  the primary screen, as tmux's `grid_view_scroll_region_up` (grid-view.c)
+  does for any region of a grid with history with
+  `grid_scroll_history_region` (grid.c): the region's top row becomes the
+  newest history row with its wrap flag, the rows above the region stay, the
+  rest of the region moves up and its bottom row is cleared with the cursor's
+  background. LF/IND at the region's bottom and SU (once a line, at most the
+  region's height, `screen_write_scrollup`) take it. Upstream made history
+  only from a region at the top and moved a lower one in place, so the line
+  was lost (vtmux D-032). It is the top-region scroll (`cursorScrollAbove`:
+  row 0 into history, the rows down to the region's bottom up a row), then a
+  rotation of the newest history row and the rows above the region down by
+  one: `rotateOnceR` when they are in one page, else row by row upwards with
+  the blank cursor row holding the moving row (a swap of `Row`s in one page,
+  `clonePartialRowGrowCapacity` across pages, which replaces only the
+  destination's page, so the pins above it stay valid). Ghostty's
+  history limits are lifted for the step and enforced after it: a page the
+  scroll pruned (a byte budget, or `history-limit 0`'s zero bytes) would
+  otherwise take the old row 0 with it. Continuation flags (patch 0011)
+  follow on the history row, active row 0 (under the region's old top row,
+  as tmux's history line stays wrapped above it), the region's new top row
+  and the row below the region. The alternate screen, left/right margins
+  and a screen with Kitty image placements keep upstream's in-place path
+  (vtmux stores no images). The upstream test "eraseDisplay complete
+  ignores stale prompt on recycled row" now expects the region's prompt row
+  in history and checks the clear adds none. New test `Terminal: a region
+  below the top scrolls into history as tmux's does (vtmux)` (the D-032
+  evidence, SU over the region's height, the wrap flag, the background, and
+  a styled rotation across a page boundary at every offset); vtmux goldens
+  `cap_region_scroll_history`, `fmt_region_scroll_history_size`, regress
+  `input-raw-scroll.sh`, oracle `region_scroll_history`. With it,
+  `-Doptimize=ReleaseSafe` with the filters `PageList`, `Screen`, `vtmux`,
+  `reflow`, `scroll`, `index`, `stream`, `eraseDisplay`, `prompt`,
+  `insertLines`, `deleteLines`: 1132/1132 and 1160/1160; Debug
+  `-Dtest-filter="Terminal: "` 522/523 and 523/524, the known `tabClear
+  single` failure; Debug `-Dtest-filter=kitty`: the known kitty
+  temporary-file failure only (the tree under `/tmp`). Cost (release,
+  in process, 200k lines through an 80x24 `PaneTerm`, history 2000):
+  region from the top 0.025 s either way; a region from row 1 0.026 s
+  before (no history) and 0.036 s after; from row 20 0.026 s and 0.042 s.
+  Not an upstream candidate (tmux's model).
+
 - `patches/0029-tmux-grid-corners.patch` (`PageList.zig`
   `ReflowCursor.reflowRow`, `tmuxEmptyRows`, new fields `tmux_empties`,
   `tmux_joined`, `tmux_padding_made`, `scrollClear`; `Terminal.zig`

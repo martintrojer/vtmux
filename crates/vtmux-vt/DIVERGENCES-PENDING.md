@@ -7,10 +7,14 @@ ignored golden in `tests/golden.rs`; un-ignore it when the entry is closed.
 Evidence is the reference tmux 3.8 run recorded in the golden's `command=` line
 and the probes from `review_vt_wrap`.
 
-## P1. Scroll regions that do not start at row 0 do not feed history: moved to D-032
+## P1. Scroll regions that do not start at row 0 do not feed history: closed (D-032)
 
-- Golden: `cap_region_scroll_history`, `fmt_region_scroll_history_size`
-  (ignored); regress `input-raw-scroll.sh`. See `compat/DIVERGENCES.md` D-032.
+- Closed (`div_region_scroll_history`): patch
+  `0026-region-scroll-into-history.patch` moves the line scrolled off the top
+  of any region into history (`grid_scroll_history_region`). Goldens
+  `cap_region_scroll_history`, `fmt_region_scroll_history_size`; regress
+  `input-raw-scroll.sh`; oracle `region_scroll_history`. See
+  `compat/DIVERGENCES.md` D-032.
 
 ## P2. Reflow of a cursor at the end of a row: closed (`lows_batch_k`)
 
