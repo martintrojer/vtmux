@@ -1,0 +1,12 @@
+name = "esc_high_bytes"
+# Bytes 0x7f-0xff after an ESC, or an ESC and its intermediates, are no action
+# and no state change (input.c input_state_esc_enter_table,
+# input_state_esc_intermediate_table): the next 0x30-0x7e byte ends the escape,
+# so a UTF-8 character there prints nothing. Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "5", "sh", "-c", "printf 'a\\033\\342\\206\\222\\342\\224\\202eb\\015\\012\\033\\177\\200Dc\\015\\012\\033(\\303\\2510q\\033(Bd'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_x},#{cursor_y}"] },
+]

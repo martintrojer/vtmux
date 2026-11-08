@@ -3114,6 +3114,13 @@ impl AltModeScanner {
             // Ground, and other C0 controls inside a sequence (executed).
             (ScanState::Ground, _)
             | (ScanState::Csi | ScanState::Esc | ScanState::EscIntermediate(_), 0x00..=0x1f) => {}
+            // 0x7f-0xff after an ESC (and its intermediates) are no action
+            // and no state change (input.c `input_state_esc_enter_table`,
+            // `input_state_esc_intermediate_table`); Ghostty would print
+            // U+FFFD and leave the escape.
+            (ScanState::Esc | ScanState::EscIntermediate(_), 0x7f..) => {
+                return Some(ScanEvent::Skip);
+            }
             (ScanState::Esc, b'[') => {
                 self.state = ScanState::Csi;
                 self.private = false;
@@ -4250,6 +4257,30 @@ mod tests {
         };
         let text = String::from_utf8_lossy(&crate::capture::capture(t, opts)).into_owned();
         text.trim_end_matches('\n').to_owned()
+    }
+
+    /// Bytes 0x7f-0xff after an ESC, or an ESC and intermediates, are no
+    /// action and no state change (input.c `input_state_esc_enter_table`,
+    /// `input_state_esc_intermediate_table`): the next 0x30-0x7e ends the
+    /// escape. Ghostty would print U+FFFD and go back to the ground state.
+    #[test]
+    fn high_bytes_in_an_escape_are_ignored() {
+        let after = |bytes: &[u8]| {
+            let mut t = PaneTerm::new(20, 3, 100);
+            t.feed(bytes);
+            (captured(&t), t.cursor())
+        };
+        // →│ then `e` (ESC e, unknown) and `x` printed.
+        assert_eq!(
+            after("\x1b\u{2192}\u{2502}ex".as_bytes()),
+            ("x".to_owned(), (1, 0))
+        );
+        assert_eq!(after(b"\x1b\x7f\x80Dy"), ("\ny".to_owned(), (1, 1)));
+        // ESC ( é 0: G0 is the line drawing set.
+        let mut t = PaneTerm::new(20, 3, 100);
+        t.feed("a\x1b(\u{e9}0q".as_bytes());
+        assert_eq!((captured(&t), t.cursor()), ("aq".to_owned(), (2, 0)));
+        assert!(crate::snapshot(&t).cell(1, 0).unwrap().acs);
     }
 
     /// Reference: 20x5 after `l0\nl1\nl2`, cursor at 4,2 (row 2 col 4):
