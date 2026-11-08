@@ -1131,6 +1131,9 @@ fn flood_with_a_stalled_client(w: &World, args: &[&str]) -> (Child, Control) {
 /// `%pause %0`, its output dropped until `refresh-client -A %0:continue`
 /// (`%continue %0`), and output is `%extended-output %0 <age> : ` meanwhile
 /// (`control_append_data`).
+///
+/// The pane is turned off (`%0:off`) before stdin closes: tmux 3.8 dies on
+/// an EOF that comes while output for the pane is queued (D-046).
 #[test]
 fn pause_after_pauses_a_pane_the_client_is_behind_on() {
     compare("pause_after_pauses_a_pane_the_client_is_behind_on", |w| {
@@ -1145,6 +1148,10 @@ fn pause_after_pauses_a_pane_the_client_is_behind_on() {
             t.split_once("%continue %0\n")
                 .is_some_and(|(_, after)| after.contains("\n%extended-output %0 "))
         });
+        let ends = |t: &str| t.lines().filter(|l| l.starts_with("%end ")).count();
+        let before = ends(&c.text());
+        c.send("refresh-client -A '%0:off'");
+        c.wait("%end of the off", |t| ends(t) > before);
         let _ = fast.kill();
         let _ = fast.wait();
         let (out, _, code) = c.close();
@@ -1156,8 +1163,13 @@ fn pause_after_pauses_a_pane_the_client_is_behind_on() {
                 .and_then(|r| r.split_once(" : "))
                 .is_some_and(|(age, _)| age.parse::<u64>().is_ok())
         };
+        // The client can fall behind again after the `%continue` on a
+        // slow machine; only the first pause is the case's.
         (
-            lines.iter().filter(|l| l.starts_with("%pause")).count(),
+            lines[..cont]
+                .iter()
+                .filter(|l| l.starts_with("%pause"))
+                .count(),
             lines.iter().filter(|l| l.starts_with("%continue")).count(),
             lines.iter().any(|l| l.starts_with("%output")),
             lines[..pause].iter().any(extended),
@@ -1166,6 +1178,30 @@ fn pause_after_pauses_a_pane_the_client_is_behind_on() {
             code,
         )
     });
+}
+
+/// D-046: stdin closes while output from a flooding pane is queued for the
+/// client. It exits 0 with `%exit` and the server and session stay. tmux
+/// 3.8 can die here (`fatalx("not enough data")`, control.c
+/// `control_append_data`), so only vtmux runs it.
+#[test]
+fn stdin_eof_while_output_is_queued_keeps_the_server() {
+    let w = World::new(&bins()[0]);
+    let (mut fast, mut c) = flood_with_a_stalled_client(&w, &[]);
+    c.start_reading();
+    // Reading, the pane's output queued for it as it comes.
+    c.wait("a megabyte", |t| t.len() > 1 << 20);
+    // The only client left, so the pane is read only as it reads.
+    let _ = fast.kill();
+    let _ = fast.wait();
+    let (out, _, code) = c.close();
+    assert!(
+        out.ends_with("\n%exit\n"),
+        "{:?}",
+        &out[out.len().saturating_sub(300)..]
+    );
+    assert_eq!(code, 0);
+    assert_eq!(w.run(&["has", "-t", "a"]).2, 0);
 }
 
 /// Without `pause-after`, a client whose oldest unsent output is
