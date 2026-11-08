@@ -1,0 +1,25 @@
+name = "lock_client_flags"
+# A locked client is CLIENT_SUSPENDED (server-fn.c server_lock_client) until
+# its lock-command exits (server-client.c server_client_dispatch MSG_UNLOCK),
+# and server_client_get_flags lists it as "suspended" between read-only and
+# UTF-8. list-clients skips it meanwhile; a command client's format still
+# finds it as the best client (cmd-find.c cmd_find_best_client).
+size = [40, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "lock-command", "printf LOCKED; read x"] },
+  { attach = { session = "a" } },
+  { run = ["display", "-p", "-t", "a", "#{client_flags}"] },
+  { run = ["lock-client"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{client_flags}"] },
+  { run = ["switch-client", "-r"] },
+  { run = ["display", "-p", "-t", "a", "#{client_flags}"] },
+  { keys = "\r" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a", "#{client_flags}"] },
+]

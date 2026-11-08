@@ -4062,6 +4062,7 @@ impl Server {
             control: c.control.is_some(),
             focused: c.focused,
             utf8: hello.is_some_and(|h| h.flags.utf8),
+            suspended: c.suspended,
             pid: hello.map_or(0, |h| h.pid),
             key_table: c.keys.table.clone(),
             default_key_table: self.default_key_table(id),

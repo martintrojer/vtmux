@@ -59,6 +59,10 @@ impl ServerInfo {
 
 /// An attached client as formats see it (`#{L:...}`, `ft->c`).
 #[derive(Clone, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent client flags (control, focused, UTF-8, suspended)"
+)]
 pub struct ClientView {
     /// Connection order (tmux's `clients` list is in creation order).
     pub order: u32,
@@ -84,6 +88,8 @@ pub struct ClientView {
     /// `CLIENT_FOCUSED`: the terminal reported focus (tty-keys.c).
     pub focused: bool,
     pub utf8: bool,
+    /// `CLIENT_SUSPENDED`: locked, or stopped by `suspend-client`.
+    pub suspended: bool,
     pub pid: u32,
     /// The key table the client is in, and its default table.
     pub key_table: String,
@@ -125,6 +131,9 @@ impl ClientView {
         flags.extend(self.flags.listed_before_read_only());
         if self.flags.read_only {
             flags.push("read-only".to_owned());
+        }
+        if self.suspended {
+            flags.push("suspended".to_owned());
         }
         if self.utf8 {
             flags.push("UTF-8".to_owned());
