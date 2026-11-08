@@ -2145,7 +2145,7 @@ impl PaneTerm {
     #[must_use]
     pub fn screen_modes(&self) -> ScreenModes {
         let on = |m: Mode| self.term.mode(m).unwrap_or(false);
-        let c = self.cursor.get();
+        let style = self.cursor_style();
         ScreenModes {
             app_cursor: on(Mode::DECCKM),
             app_keypad: on(Mode::KEYPAD_KEYS),
@@ -2157,15 +2157,28 @@ impl PaneTerm {
             bracketed_paste: on(Mode::BRACKETED_PASTE),
             sync: self.sync_held().is_some(),
             theme_updates: on(Mode::COLOR_SCHEME_REPORT),
-            cursor_shape: match c.shape {
+            cursor_shape: style.shape,
+            cursor_blinking: style.blinking,
+            cursor_blinking_set: style.blinking_set,
+            cursor_very_visible: style.very_visible,
+        }
+    }
+
+    /// The cursor fields of [`Self::screen_modes`], without reading the
+    /// terminal's modes: what a frame's cursor style is written from.
+    #[must_use]
+    pub fn cursor_style(&self) -> CursorStyle {
+        let c = self.cursor.get();
+        CursorStyle {
+            shape: match c.shape {
                 1 => CursorShape::Block,
                 2 => CursorShape::Underline,
                 3 => CursorShape::Bar,
                 _ => CursorShape::Default,
             },
-            cursor_blinking: c.blinking,
-            cursor_blinking_set: c.blinking_set,
-            cursor_very_visible: c.very_visible,
+            blinking: c.blinking,
+            blinking_set: c.blinking_set,
+            very_visible: c.very_visible,
         }
     }
 
@@ -2792,6 +2805,18 @@ pub enum CursorShape {
     Block,
     Underline,
     Bar,
+}
+
+/// See [`PaneTerm::cursor_style`].
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CursorStyle {
+    pub shape: CursorShape,
+    /// `MODE_CURSOR_BLINKING`, `MODE_CURSOR_BLINKING_SET`,
+    /// `MODE_CURSOR_VERY_VISIBLE`.
+    pub blinking: bool,
+    pub blinking_set: bool,
+    pub very_visible: bool,
 }
 
 /// See [`PaneTerm::screen_modes`].

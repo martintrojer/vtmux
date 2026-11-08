@@ -199,12 +199,12 @@ impl crate::server::Server {
         let s = c.attached?;
         let (_, w, active) = self.model.current_of(s)?;
         let from_term = |t: &vtmux_vt::PaneTerm, defaults: TreeId| {
-            let m = t.screen_modes();
+            let m = t.cursor_style();
             let mut screen = CursorScreen {
-                shape: m.cursor_shape,
-                blinking: m.cursor_blinking,
-                blinking_set: m.cursor_blinking_set,
-                very_visible: m.cursor_very_visible,
+                shape: m.shape,
+                blinking: m.blinking,
+                blinking_set: m.blinking_set,
+                very_visible: m.very_visible,
                 colour: t.cursor_colour(),
                 default_colour: self.colour_option(defaults, "cursor-colour"),
                 ..CursorScreen::default()

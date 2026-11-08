@@ -46,10 +46,10 @@ pub fn set_tmux_clusters(vs16_wide: bool) {
 pub use palette::PaletteState;
 pub use term::{
     AltSaved, CellState, CompressedPages, Compression, CompressionActivity, CursorShape,
-    ExtendedKeys, FrozenCell, FrozenLinkId, FrozenRowState, GhosttyCharset, GhosttyCursor,
-    GhosttyState, HeldScreen, ImportCheck, KeyMode, LineMark, LinkId, LinkState, ModeState,
-    MouseModes, MouseTracking, Osc133, PATCH_STACK, PageBlob, PageCapacity, PageRows, PageState,
-    PaneState, PaneTerm, Passthrough, RowState, SavedCursor, ScreenKind, ScreenModes, ScreenState,
-    StateError, StateImport, StyleState, TermEvent, TermState, compress_all_of, history_reads,
-    page_rows,
+    CursorStyle, ExtendedKeys, FrozenCell, FrozenLinkId, FrozenRowState, GhosttyCharset,
+    GhosttyCursor, GhosttyState, HeldScreen, ImportCheck, KeyMode, LineMark, LinkId, LinkState,
+    ModeState, MouseModes, MouseTracking, Osc133, PATCH_STACK, PageBlob, PageCapacity, PageRows,
+    PageState, PaneState, PaneTerm, Passthrough, RowState, SavedCursor, ScreenKind, ScreenModes,
+    ScreenState, StateError, StateImport, StyleState, TermEvent, TermState, compress_all_of,
+    history_reads, page_rows,
 };

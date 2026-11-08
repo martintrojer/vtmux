@@ -341,6 +341,9 @@ impl Server {
     /// forced to RGB (`colour_force_rgb`): `None` for none or the default.
     pub(crate) fn colour_option(&self, tree: TreeId, name: &str) -> Option<Rgb> {
         let text = option_text(&self.model, tree, name);
+        if text.is_empty() {
+            return None;
+        }
         let mut sy = Style::new(&CellStyle::default());
         // style_apply on a colour option: `style_parse_colour`.
         sy.parse(&CellStyle::default(), &format!("fg={text}"))
