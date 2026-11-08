@@ -1,0 +1,18 @@
+# control_window_linked_cb (control-notify.c:153-176) runs as the event fires (events.c events_fire): a window made in a grouped session fires window-linked before session_group_synchronize_from links it into the other members (spawn.c:235-238), so a control client of another member reads %unlinked-window-add, then %window-add for each window the sync links again (session.c:700-710). window-renamed reads the links the same way.
+name = "group_control_window_add"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "g", "-t", "a"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "neww -d -t g -n gw cat -" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "linkw -d -s g:1 -t g:5" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "kill-window -t g:1" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "neww -d -t a -n aw cat -" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_id} #{window_name}"] },
+  { run = ["kill-server"] },
+]

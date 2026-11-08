@@ -1042,13 +1042,11 @@ impl Server {
                         ),
                     ),
                 };
-                // The links when it fired, plus the window's sessions now
-                // for one that already went (window-unlinked fires before
-                // the winlink is removed).
-                let mut linked = ev.linked.clone();
-                if kind != "window-unlinked" {
-                    linked.extend(self.model.sessions_with(w).map(|s| s.id));
-                }
+                // The links when it fired (tmux's events are synchronous):
+                // a window new in a grouped session is unlinked for a
+                // client of another member, as session_group_synchronize_from
+                // links it there only after (spawn.c:235-238).
+                let linked = ev.linked.clone();
                 self.control_notify(&|s| Some(window_line(word, w, &rest, linked.contains(&s?))));
             }
             // control-notify.c:205-230.
