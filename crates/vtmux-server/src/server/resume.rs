@@ -755,8 +755,19 @@ fn same_pin(binary: &Path) -> bool {
 
 /// Rows of history a dry run of `s` decodes and imports: history pages in
 /// the vtmux row format (pages in Ghostty's form are only checked, by
-/// checksum and layout).
+/// checksum and layout), copy mode's frozen grids among them.
 fn rows_to_import(s: &snap::Snapshot) -> u64 {
+    let copies: u64 = s
+        .panes
+        .iter()
+        .flat_map(|p| &p.modes)
+        .filter_map(|m| match m {
+            snap::PaneMode::Copy(c) | snap::PaneMode::View(c) => Some(&c.history),
+            snap::PaneMode::Clock(_) | snap::PaneMode::Closed(()) => None,
+        })
+        .flatten()
+        .map(|page| u64::from(page.rows))
+        .sum();
     let terms = s.panes.iter().filter_map(|p| p.term.as_ref()).chain(
         s.clients
             .iter()
@@ -766,7 +777,8 @@ fn rows_to_import(s: &snap::Snapshot) -> u64 {
         .flat_map(|t| std::iter::once(&t.primary).chain(&t.alternate))
         .flat_map(|screen| &screen.history)
         .map(|page| u64::from(page.rows))
-        .sum()
+        .sum::<u64>()
+        + copies
 }
 
 /// History rows per second of dry run allowed on top of
@@ -859,6 +871,18 @@ mod tests {
         assert_eq!(
             dry_run_limit(&s),
             sys::DRY_RUN_LIMIT + std::time::Duration::from_secs(10)
+        );
+        // Copy mode's frozen grid always goes as rows, however its pane's
+        // history goes: 200k rows over two panes.
+        for p in &mut s.panes[..2] {
+            p.modes = vec![snap::PaneMode::Copy(snap::CopyMode {
+                history: vec![page(1000, false); 100],
+                ..snap::CopyMode::default()
+            })];
+        }
+        assert_eq!(
+            dry_run_limit(&s),
+            sys::DRY_RUN_LIMIT + std::time::Duration::from_secs(12)
         );
     }
 
