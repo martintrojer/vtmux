@@ -6597,6 +6597,134 @@ fn wait_file(path: &Path, done: impl Fn(&str) -> bool) -> String {
     }
 }
 
+/// Poll until no process `pid` is left (max 5 s): it has exited and its
+/// parent has reaped it.
+fn wait_reaped(pid: &str) {
+    let start = Instant::now();
+    while Command::new("kill")
+        .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+        && start.elapsed() < Duration::from_secs(5)
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A control client (`-C attach`) held open: its commands go over one
+/// connection, so a round trip through it starts no client.
+struct Control {
+    child: std::process::Child,
+    stdin: Option<std::process::ChildStdin>,
+    lines: std::sync::mpsc::Receiver<String>,
+    syncs: u32,
+}
+
+impl Control {
+    fn attach(w: &World, session: &str) -> Self {
+        let mut child = Command::new(&w.bin)
+            .args([
+                "-L",
+                &w.label,
+                "-f",
+                "/dev/null",
+                "-C",
+                "attach",
+                "-t",
+                session,
+            ])
+            .current_dir(w.dir())
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", w.dir())
+            .env("SHELL", "/bin/sh")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn control client");
+        let stdin = child.stdin.take();
+        let stdout = child.stdout.take().expect("control stdout");
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).split(b'\n') {
+                let Ok(line) = line else { break };
+                if tx
+                    .send(String::from_utf8_lossy(&line).into_owned())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            stdin,
+            lines,
+            syncs: 0,
+        }
+    }
+
+    /// Send `command` and return what it printed, up to its `%end` or
+    /// `%error`, as a `Run` (code 1 for `%error`).
+    fn run(&mut self, command: &str) -> Run {
+        use std::io::Write;
+        let stdin = self.stdin.as_mut().expect("control stdin");
+        writeln!(stdin, "{command}").expect("write control command");
+        stdin.flush().expect("flush control command");
+        self.syncs += 1;
+        let mark = format!("control-sync-{}", self.syncs);
+        writeln!(stdin, "display -p {mark}").expect("write control mark");
+        stdin.flush().expect("flush control mark");
+        // The command's block, then the mark's: skip notifications and
+        // earlier blocks until the command's `%begin`.
+        let mut stdout = String::new();
+        let mut code = None;
+        let mut inside = false;
+        loop {
+            let line = self
+                .lines
+                .recv_timeout(Duration::from_secs(30))
+                .expect("control client answers");
+            if line == mark {
+                break;
+            }
+            if code.is_some() {
+                continue;
+            }
+            if line.starts_with("%begin ") {
+                inside = true;
+            } else if inside && line.starts_with("%end ") {
+                code = Some(0);
+            } else if inside && line.starts_with("%error ") {
+                code = Some(1);
+            } else if inside {
+                stdout.push_str(&line);
+                stdout.push('\n');
+            }
+        }
+        Run {
+            stdout,
+            stderr: String::new(),
+            code: code.unwrap_or(-1),
+        }
+    }
+
+    /// A round trip: when it returns, the server has read the EOF of every
+    /// client that exited before it was called.
+    fn sync(&mut self) {
+        self.run("display -p sync");
+    }
+
+    /// EOF on stdin: the client detaches and exits.
+    fn close(mut self) {
+        drop(self.stdin.take());
+        let _ = self.child.wait();
+    }
+}
+
 /// `pipe-pane` (cmd-pipe-pane.c): `-O` (the default) sends the pane's
 /// output to the command from now on; `-I` sends the command's output into
 /// the pane; `-o` only opens when no pipe was open (a toggle); an empty
@@ -6672,7 +6800,8 @@ fn pipe_pane_cli() {
         // An -O command that exited: the next output closes the pipe.
         runs.push(w.run(&["pipep", "-t", "a", "exit 0"]));
         runs.push(piped(w));
-        std::thread::sleep(Duration::from_millis(200));
+        let pid = w.run(&["display", "-p", "-t", "a", "#{pane_pipe_pid}"]);
+        wait_reaped(pid.stdout.trim());
         runs.push(w.run(&["send-keys", "-t", "a", "-l", "y"]));
         runs.push(wait_piped(w, "0"));
         // Errors.
@@ -6701,6 +6830,14 @@ fn pipe_pane_cli() {
 /// the pane is killed the command gets EOF too. Opening and closing pipes
 /// leaks no descriptor in the server: a job started after many pipes gets
 /// the same descriptor as one started before them (`show-messages -J`).
+///
+/// A job takes the lowest free descriptors, so each is started when no
+/// client is coming or going: a command client's process exits before the
+/// server reads its EOF (client.c `MSG_EXITED`, server-client.c
+/// `server_client_lost`), and when the server accepts the next client in
+/// the same turn of its loop, that client gets the next descriptor up and
+/// the job the lingering one. A round trip through `Control`, connected all
+/// along, makes the server read every EOF before the job's command.
 #[test]
 fn pipe_pane_closes_with_the_pane() {
     compare("pipe_pane_closes_with_the_pane", |w| {
@@ -6715,7 +6852,11 @@ fn pipe_pane_closes_with_the_pane() {
                 .unwrap_or(-1)
         };
         let mut runs = vec![w.run(&["new", "-d", "-s", "keep", "cat"])];
-        runs.push(w.run(&["run-shell", "-b", "exec sleep 30"]));
+        let mut control = Control::attach(w, "keep");
+        // Held until the server exits, which kills it.
+        let hold = "exec sleep 3600";
+        control.sync();
+        runs.push(control.run(&format!("run-shell -b '{hold}'")));
         let before = job_fd(w);
         // The pane exits with output the command has not read yet (more
         // than any socket buffer holds): the pane waits for it, then the
@@ -6772,15 +6913,28 @@ fn pipe_pane_closes_with_the_pane() {
             w.run(&["pipep", "-t", "keep", "-I", "true"]);
             w.run(&["pipep", "-t", "keep"]);
         }
+        // The next output closes a pipe whose command has gone; until it
+        // has, the write would only fill the pipe.
         runs.push(w.run(&["pipep", "-t", "keep", "exit 0"]));
-        std::thread::sleep(Duration::from_millis(200));
+        let pid = w.run(&["display", "-p", "-t", "keep", "#{pane_pipe_pid}"]);
+        wait_reaped(pid.stdout.trim());
         runs.push(w.run(&["send-keys", "-t", "keep", "-l", "z"]));
-        std::thread::sleep(Duration::from_millis(200));
+        let start = Instant::now();
+        while w
+            .run(&["display", "-p", "-t", "keep", "#{pane_pipe}"])
+            .stdout
+            != "0\n"
+            && start.elapsed() < Duration::from_secs(5)
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         runs.push(w.run(&["display", "-p", "-t", "keep", "#{pane_pipe}"]));
         // The first job still holds its descriptor, so 1: the next free
         // one. Each leaked pipe would add one.
-        runs.push(w.run(&["run-shell", "-b", "exec sleep 30"]));
+        control.sync();
+        runs.push(control.run(&format!("run-shell -b '{hold}'")));
         runs.push(Run::seen(format!("{}\n", job_fd(w) - before)));
+        control.close();
         runs
     });
 }
