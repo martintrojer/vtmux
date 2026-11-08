@@ -1,0 +1,28 @@
+# window_lost_pane (window.c:1197-1219): when the active pane leaves its
+# window (kill-pane, or its program exits), the pane that becomes active is
+# marked PANE_CHANGED, so automatic-rename names the window after it at
+# the next check (names.c check_window_name). The format reads the pane
+# title, pinned, so the name does not depend on what the process is.
+# A rename by the name timer queues its window-renamed hook after the
+# loop ran its queues (server_client_loop), so the hook waits for the next
+# event: session t's pane ticks to provide one.
+name = "auto_rename_lost_pane"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["setw", "-g", "automatic-rename-format", "AR:#{pane_title}"] },
+  { run = ["select-pane", "-t", "%0", "-T", "p0"] },
+  { run = ["splitw", "-d", "-t", "%0", "-T", "p1", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "%1", "-T", "p2", "cat", "-"] },
+  { run = ["new", "-d", "-s", "t", "-n", "tick", "sh", "-c", "while :; do printf .; sleep 0.1; done"] },
+  { run = ["set-hook", "-g", "window-renamed", "if -F '#{==:#{hook_window},@0}' 'wait-for -S renamed'"] },
+  { run = ["setw", "-t", "a:0", "automatic-rename", "on"] },
+  { wait_for = "renamed" },
+  { run = ["lsw", "-t", "a", "-F", "#{window_name} #{pane_id}"] },
+  { run = ["kill-pane", "-t", "%0"] },
+  { wait_for = "renamed" },
+  { run = ["lsw", "-t", "a", "-F", "#{window_name} #{pane_id}"] },
+  { run = ["send-keys", "-t", "%1", "C-d"] },
+  { wait_for = "renamed" },
+  { run = ["lsw", "-t", "a", "-F", "#{window_name} #{pane_id}"] },
+  { run = ["kill-server"] },
+]

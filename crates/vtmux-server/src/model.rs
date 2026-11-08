@@ -1605,8 +1605,9 @@ impl Model {
 
     /// The pane-list half of `window_lost_pane` (window.c:1185-1222) for a
     /// pane moved out of window `w`: it leaves the list and the last-used
-    /// stack, and a new active pane fires window-pane-changed and has its
-    /// focus looked at.
+    /// stack, and a new active pane is marked changed (`PANE_CHANGED`, so
+    /// automatic-rename looks at it), fires window-pane-changed and has
+    /// its focus looked at.
     pub fn lose_pane(&mut self, w: WindowId, p: PaneId) {
         let Some(window) = self.windows.get_mut(&w) else {
             return;
@@ -1615,6 +1616,9 @@ impl Model {
         window.panes.remove(p);
         let next = window.panes.active;
         if was_active && let Some(n) = next {
+            if let Some(pane) = self.panes.get_mut(&n) {
+                pane.changed = true;
+            }
             self.fire_pane_changed(w, n, Some(p));
             self.push_focus_check(n);
         }

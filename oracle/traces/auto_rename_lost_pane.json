@@ -1,0 +1,312 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "auto_rename_lost_pane",
+  "inputs": {
+    "name": "auto_rename_lost_pane",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-g",
+          "automatic-rename-format",
+          "AR:#{pane_title}"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "p0"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "%0",
+          "-T",
+          "p1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "%1",
+          "-T",
+          "p2",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "t",
+          "-n",
+          "tick",
+          "sh",
+          "-c",
+          "while :; do printf .; sleep 0.1; done"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-renamed",
+          "if -F '#{==:#{hook_window},@0}' 'wait-for -S renamed'"
+        ]
+      },
+      {
+        "run": [
+          "setw",
+          "-t",
+          "a:0",
+          "automatic-rename",
+          "on"
+        ]
+      },
+      {
+        "wait_for": "renamed"
+      },
+      {
+        "run": [
+          "lsw",
+          "-t",
+          "a",
+          "-F",
+          "#{window_name} #{pane_id}"
+        ]
+      },
+      {
+        "run": [
+          "kill-pane",
+          "-t",
+          "%0"
+        ]
+      },
+      {
+        "wait_for": "renamed"
+      },
+      {
+        "run": [
+          "lsw",
+          "-t",
+          "a",
+          "-F",
+          "#{window_name} #{pane_id}"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%1",
+          "C-d"
+        ]
+      },
+      {
+        "wait_for": "renamed"
+      },
+      {
+        "run": [
+          "lsw",
+          "-t",
+          "a",
+          "-F",
+          "#{window_name} #{pane_id}"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "AR:p0 %0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "AR:p1 %1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "AR:p2 %2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
