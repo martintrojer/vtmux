@@ -947,21 +947,7 @@ impl Server {
         c.reattach = None;
         c.exit_deadline = None;
         c.last_write = Instant::now();
-        let mut size = None;
-        if let Some(h) = c.hello.as_mut() {
-            h.pid = hello.pid;
-            h.version = hello.version;
-            h.ext = HelloExt {
-                follows_upgrade: hello.ext.follows_upgrade,
-                reattach: None,
-                pixels: hello.ext.pixels,
-            };
-            if let (Some(was), Some(now)) = (h.tty.as_ref(), hello.tty.as_ref())
-                && (was.cols, was.rows) != (now.cols, now.rows)
-            {
-                size = Some((now.cols, now.rows, hello.ext.pixels));
-            }
-        }
+        let size = c.rebind_hello(hello);
         // A new decoder for the new connection's bytes; the queries stand
         // as they were: those the terminal answered stay answered, and the
         // start timer runs on (tty_start_tty would start it again, but a
@@ -1001,10 +987,12 @@ impl Server {
         if let Some(bytes) = title {
             self.send(old, &ServerMsg::Frame(bytes));
         }
-        // A resize while it was re-executing.
-        if let Some((cols, rows, pixels)) = size {
+        // A resize while it was re-executing; or no cell size yet.
+        if let Some((cols, rows, pixels, changed)) = size {
             self.tty_resize(old, cols, rows, pixels);
-            self.resize_client(old, cols, rows);
+            if changed {
+                self.resize_client(old, cols, rows);
+            }
         }
         // Extended keys and focus reports asked for again, then the redraw.
         self.update_features(old);
@@ -1209,6 +1197,29 @@ pub fn start_binary(argv0: &std::ffi::OsStr, path: Option<&str>, cwd: &Path) -> 
         .split(':')
         .map(|entry| clean_path(&cwd.join(entry).join(argv0)))
         .find(|candidate| check_binary(candidate).is_ok())
+}
+
+impl super::Client {
+    /// The new connection's hello in the record: pid, version and the
+    /// extension area. `(cols, rows, pixels, changed)` for the
+    /// [`Server::tty_resize`] it needs: the terminal's size changed while
+    /// the client re-executed, or its cell size is still 0 (an older writer,
+    /// or a terminal that gave none), which asks as a fresh attach's
+    /// would: the pixels the hello carries, else the size queries.
+    fn rebind_hello(&mut self, hello: &Hello) -> Option<(u32, u32, (u32, u32), bool)> {
+        let no_pixels = self.cell_pixels.0 == 0 || self.cell_pixels.1 == 0;
+        let h = self.hello.as_mut()?;
+        h.pid = hello.pid;
+        h.version = hello.version;
+        h.ext = HelloExt {
+            follows_upgrade: hello.ext.follows_upgrade,
+            reattach: None,
+            pixels: hello.ext.pixels,
+        };
+        let (was, now) = (h.tty.as_ref()?, hello.tty.as_ref()?);
+        let changed = (was.cols, was.rows) != (now.cols, now.rows);
+        (changed || no_pixels).then_some((now.cols, now.rows, hello.ext.pixels, changed))
+    }
 }
 
 #[cfg(test)]

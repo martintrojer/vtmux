@@ -914,6 +914,64 @@ fn a_re_attach_rebinds_the_record_and_fires_nothing() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A client carried with no cell size in pixels (a protocol-9 writer wrote
+/// 0, or its terminal gave none) is asked for it when it re-attaches, as
+/// `tty_resize` does (tty.c:124-160) when a terminal opens with none: the
+/// size queries unless the new hello carries the pixels, which then are the
+/// cell size; one that has its cell size asks nothing. No `Resize` follows
+/// (its size is the one it sent), so nothing else would ask.
+#[test]
+fn a_re_attach_without_a_cell_size_asks_the_terminal() {
+    const QUERY: &[u8] = b"\x1b[18t\x1b[14t";
+    let (mut server, dir) = setup("reattach-pixels");
+    // (cell size carried, pixels in the new hello) -> (cell size, queried)
+    let cases = [
+        ((0, 0), (0, 0), (0, 0), true),
+        ((0, 0), (800, 480), (10, 20), false),
+        ((8, 16), (0, 0), (8, 16), false),
+    ];
+    for (n, (carried, pixels, want, queried)) in cases.into_iter().enumerate() {
+        let tty = format!("/dev/p{n}");
+        let (f, mut f_peer) = attach_as(&mut server, &dir, "a", &tty, true);
+        let _ = st::messages(&mut server, f, &mut f_peer);
+        server.clients.get_mut(&f).unwrap().cell_pixels = carried;
+        server.upgrade_tokens();
+        server.upgrade_notify(&dir.join("new"));
+        let token = notices(&mut server, f, &mut f_peer).pop().unwrap().1;
+        drop(f_peer);
+        gone(&mut server, f);
+        let mut h = st::hello(
+            &[],
+            &dir,
+            Some(vtmux_core::protocol::TtyInfo {
+                name: tty,
+                term: "xterm-256color".into(),
+                cols: 80,
+                rows: 24,
+                features: Vec::new(),
+            }),
+            ControlMode::None,
+        );
+        h.ext.follows_upgrade = true;
+        h.ext.reattach = Some(token);
+        h.ext.pixels = pixels;
+        let (_, mut peer) = st::connect(&mut server, h);
+        let got = st::messages(&mut server, f, &mut peer);
+        let asked = got
+            .iter()
+            .filter(|m| matches!(m, ServerMsg::Frame(b) if b == QUERY))
+            .count();
+        let c = &server.clients[&f];
+        assert_eq!(
+            (c.cell_pixels, asked, c.decoder.winsize_query()),
+            (want, usize::from(queried), queried),
+            "carried {carried:?}, pixels {pixels:?}: {got:?}"
+        );
+        server.detach_client(f, false);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// In the image that serves after the exec: a client carried with a
 /// token waits to re-attach; one without (decision 25) is detached with
 /// `[server upgraded: re-attach]` and named in the warnings. A follower
