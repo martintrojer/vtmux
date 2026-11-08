@@ -5,10 +5,9 @@
 //! buffer, `D` the tagged ones. The mode ends when no buffer is left.
 //!
 //! `e` edits the current buffer in `editor` (`window_buffer_start_edit`),
-//! in a popup over the client as customize-mode's `e` does
-//! ([`crate::popup::Editor`], compat/DIVERGENCES.md D-028); while it runs
-//! the mode shows `WAITING FOR EDITOR` and takes only `q`, Escape and
-//! C-c, which end it. A right-click opens the mode's menu
+//! in a modal floating pane as customize-mode's `e` does
+//! ([`crate::editor`]); while it runs the mode shows `WAITING FOR EDITOR`
+//! and takes only `q`, Escape and C-c, which end it. A right-click opens the mode's menu
 //! ([`super::tree_mode`]).
 
 use vtmux_core::ids::PaneId;
@@ -390,7 +389,7 @@ impl Server {
                 order: pb.order,
             },
         );
-        if self.spawn_editor(c, p, &data, crate::popup::Edit::Buffer(edit)) {
+        if self.spawn_editor(c, p, &data, crate::editor::Edit::Buffer(edit)) {
             let pid = self.editor_pid(p);
             self.with_tree::<BufferMode, _>(p, |_, t| t.editing = pid);
         }

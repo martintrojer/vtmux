@@ -4533,6 +4533,7 @@ impl Server {
             io,
             empty: ps.empty,
             wait_step: None,
+            editor: None,
             pid,
             tty,
             argv,
@@ -4774,8 +4775,12 @@ impl Server {
     }
 
     pub(crate) fn close_pane_io(&mut self, mut pane: Pane) {
-        // window_pane_destroy: window_pane_wait_finish first.
+        // window_pane_destroy: window_pane_wait_finish and
+        // spawn_editor_finish first.
         self.pane_wait_finish(&mut pane);
+        if let Some(editor) = pane.editor.take() {
+            self.editor_finish(editor, pane.status);
+        }
         // window_pane_destroy: window_pane_clear_prompt frees the prompt's
         // owner, with no pane-prompt-closed (PANE_DESTROYED).
         if let Some(owner) = pane.prompt_owner.take() {
@@ -5194,10 +5199,17 @@ impl Server {
                             p.id
                         });
                     if let Some(p) = found {
-                        // server_child_exited: window_pane_wait_finish.
+                        // server_child_exited: window_pane_wait_finish,
+                        // spawn_editor_finish.
                         if let Some(mut pane) = self.model.panes.remove(&p) {
                             self.pane_wait_finish(&mut pane);
                             self.model.panes.insert(p, pane);
+                        }
+                        if let Some(pane) = self.model.panes.get_mut(&p) {
+                            let status = pane.status;
+                            if let Some(editor) = pane.editor.take() {
+                                self.editor_finish(editor, status);
+                            }
                         }
                         // Drain what is left, then the read side reports
                         // the close (EIO) and destroys the pane; a pipe

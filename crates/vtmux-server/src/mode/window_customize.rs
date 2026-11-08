@@ -10,9 +10,8 @@
 //! options.
 //!
 //! `e` edits the current value in `editor` (`window_customize_start_edit`):
-//! tmux runs the editor in a modal floating pane, vtmux in a popup over
-//! the client ([`crate::popup::Editor`], compat/DIVERGENCES.md D-028);
-//! while it runs the mode shows `WAITING FOR EDITOR` and takes only `q`,
+//! the editor runs in a modal floating pane ([`crate::editor`]); while it
+//! runs the mode shows `WAITING FOR EDITOR` and takes only `q`,
 //! Escape and C-c, which end it. A right-click opens the mode's menu
 //! ([`super::tree_mode`]).
 
@@ -1639,7 +1638,7 @@ impl Server {
             value
         };
         let edit = Edit { item: item.clone() };
-        if self.spawn_editor(c, p, value.as_bytes(), crate::popup::Edit::Customize(edit)) {
+        if self.spawn_editor(c, p, value.as_bytes(), crate::editor::Edit::Customize(edit)) {
             let pid = self.editor_pid(p);
             self.with_tree::<CustomizeMode, _>(p, |_, t| t.editing = pid);
         }

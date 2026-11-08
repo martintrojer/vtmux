@@ -17,7 +17,9 @@
 //!   `choose-client`, `customize-mode`, `switch-mode`), `display-panes`,
 //!   prompts (status line, pane and mode prompts), menus and popups are
 //!   closed by the upgrade and re-opened by the user (spec, *Open
-//!   questions*).
+//!   questions*). The editor a tree mode's `e` opened stays a modal pane,
+//!   but its edit goes with the mode (as `spawn_cancel_editor`) and its
+//!   temporary file stays behind.
 //! - Work in flight: command queues, jobs and file operations. The upgrade
 //!   preflight refuses while any is pending (decisions 10 and 26).
 //! - Caches and timers the loop rebuilds: compositor state, frames not yet
@@ -1753,6 +1755,7 @@ impl Server {
             cwd: PathBuf::from(&x.cwd),
             empty: x.empty,
             wait_step: None,
+            editor: None,
             exited: x.exited,
             status: x.status.as_ref().map(status_in),
             dead_time: x.dead_time,

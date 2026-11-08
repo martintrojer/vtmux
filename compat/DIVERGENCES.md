@@ -235,13 +235,10 @@ product reasons" category.
 - Evidence: reference tmux 3.8, 10x3 pane, `printf '\343\201\202B\rX'`: `capture-pane -pR` line 0 `flags=EXTENDED[2] 3/5`, cell 0,1 `flags=NONE[0]`; vtmux `flags=NONE[0] 3/5` and `flags=CLEARED[40]`. 20x3, `printf 'zz\033[mout'`: tmux `capture-pane -pN` gives `zzout`, vtmux `zzout` and five spaces.
 - Category: Ghostty grid (the state does not exist in Ghostty's grid).
 
-### D-028: the editor `e` opens runs in a popup, not a modal floating pane
+### D-028: closed (the editor runs in a modal floating pane)
 
-- Test / assertion: regress `customize-mode.sh` `test_editor`, `test_editor_invalidation` (they check the values, not where the editor is drawn); oracle `customize_edit`, `choose_buffer_edit` (customize-mode's and choose-buffer's `e`); regress `modal-pane.sh` stays xfail where it looks for the buffer editor's modal pane.
-- tmux behaviour: `spawn_editor` (spawn.c:703-800) runs `editor file` in a floating pane nine tenths of the window, centred, with `SPAWN_MODAL|SPAWN_FLOATOVERZOOM`: the window's other panes take no input until it exits, and the pane is listed (`list-panes`, `#{window_panes}`) while it runs.
-- vtmux behaviour: the same command, size and placement (of the client's terminal, not the window) in a popup over the client whose key pressed `e`, closed when the editor exits; the file is read back at that point as in `spawn_editor_finish`. The popup is not a pane, so `list-panes` does not show it, and the other clients see only `WAITING FOR EDITOR`.
-- Evidence: vtmux has floating panes but no modal ones (`new-pane -O` is not implemented); a popup is modal for its client already.
-- Category: Deferred (modal floating panes).
+- Was: customize-mode's and choose-buffer's `e` ran `editor file` in a popup over the client whose key pressed it, not in a modal floating pane as `spawn_editor` does (spawn.c:703-788), so `list-panes` did not show it and other clients saw only `WAITING FOR EDITOR`.
+- Now: `crates/vtmux-server/src/editor.rs` runs it as tmux does: a floating pane nine tenths of the window, centred, after the whole layout, modal and above a zoomed pane, `remain-on-exit` off; the file is read back when the pane's program exits 0 (`spawn_editor_finish`), and a pane killed first changes nothing. Regress `modal-pane.sh` passes; oracle `editor_modal_pane`.
 
 ### D-029: a client whose socket takes nothing for 10 s after its exit is dropped then
 

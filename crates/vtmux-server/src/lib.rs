@@ -12,6 +12,7 @@ pub mod compress;
 pub mod control;
 pub mod control_queue;
 pub mod control_subs;
+pub mod editor;
 pub mod environ;
 pub mod events;
 pub mod format_ctx;

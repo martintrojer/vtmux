@@ -69,37 +69,6 @@ pub struct Open {
     pub step: Option<StepId>,
     /// The waiting command's client (`cmdq_get_client(item)`).
     pub caller: Option<ClientId>,
-    /// An editor run for a mode (see [`Editor`]).
-    pub editor: Option<Editor>,
-}
-
-/// `spawn_editor` (spawn.c:616-800): a value edited in `editor` on a
-/// temporary file, read back when the editor exits 0. tmux runs it in a
-/// modal floating pane; vtmux has none and runs it in a popup over the
-/// client instead (compat/DIVERGENCES.md D-028).
-#[derive(Debug)]
-pub struct Editor {
-    pub path: PathBuf,
-    /// Whose edit it is: the pane whose mode started it.
-    pub pane: vtmux_core::ids::PaneId,
-    /// Which edit, for the mode.
-    pub edit: Edit,
-}
-
-/// What an [`Editor`] edits, by the mode that started it.
-#[derive(Debug)]
-pub enum Edit {
-    /// `window_customize_editdata`.
-    Customize(crate::mode::window_customize::Edit),
-    /// `window_buffer_editdata`.
-    Buffer(crate::mode::window_buffer::Edit),
-}
-
-impl Drop for Editor {
-    /// `spawn_editor_free`: the file goes with it.
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
 }
 
 /// One client's popup (`struct popup_data`).
@@ -132,7 +101,6 @@ pub struct Popup {
     status: i32,
     step: Option<StepId>,
     caller: Option<ClientId>,
-    editor: Option<Editor>,
 }
 
 impl std::fmt::Debug for Popup {
@@ -149,13 +117,9 @@ impl std::fmt::Debug for Popup {
 
 impl Popup {
     /// The popup as a snapshot carries it (D27), but its terminal
-    /// (`term` `None`), which `Server::to_snapshot` adds. An editor popup
-    /// (`customize-mode`, `choose-buffer` editing) is not carried.
+    /// (`term` `None`), which `Server::to_snapshot` adds.
     #[must_use]
     pub fn export(&self) -> Option<vtmux_snapshot::Popup> {
-        if self.editor.is_some() {
-            return None;
-        }
         let (ppx, ppy, psx, psy) = self.preferred;
         Some(vtmux_snapshot::Popup {
             pid: self.pid.unwrap_or(0),
@@ -223,7 +187,6 @@ impl Popup {
             status: r.status_code,
             step: None,
             caller: r.caller.map(|c| ClientId(c as usize)),
-            editor: None,
         }
     }
 
@@ -241,37 +204,6 @@ impl Popup {
         let off = u16::from(self.lines != BoxLines::None);
         (self.px + off + cx, self.py + off + cy)
     }
-}
-
-/// `mkstemp("/tmp/tmux.XXXXXXXX")` with `value` written to it: a new
-/// file, mode 0600, under a name nothing else has.
-fn temp_file(value: &[u8]) -> Option<PathBuf> {
-    use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    for n in 0..100u128 {
-        let tag = (seed ^ (u128::from(std::process::id()) << 64)).wrapping_add(n * 7919);
-        let path = PathBuf::from(format!("/tmp/tmux.{:08x}", tag % 0xffff_ffff));
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path);
-        match file {
-            Ok(mut f) => {
-                if f.write_all(value).is_err() {
-                    let _ = std::fs::remove_file(&path);
-                    return None;
-                }
-                return Some(path);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return None,
-        }
-    }
-    None
 }
 
 fn inner(lines: BoxLines, sx: u16, sy: u16) -> (u16, u16) {
@@ -389,7 +321,6 @@ impl Server {
             status: 128 + 1,
             step: open.step,
             caller: open.caller,
-            editor: open.editor,
         };
         // server_client_set_overlay (server-client.c:86-87) clears only an
         // earlier overlay; an open prompt stays and keeps the cursor.
@@ -503,83 +434,6 @@ impl Server {
         // server_client_clear_overlay: focus back, then a full redraw.
         self.update_focus(self.client_window(c));
         self.redraw_client(c);
-        // spawn_editor_finish: the value, if the editor exited 0 (a popup
-        // closed before its editor exited has the status of a hangup).
-        if let Some(editor) = popup.editor.take() {
-            let value = (popup.status == 0)
-                .then(|| std::fs::read(&editor.path).ok())
-                .flatten();
-            match &editor.edit {
-                Edit::Customize(edit) => self.customize_edit_done(editor.pane, edit, value),
-                Edit::Buffer(edit) => self.buffer_edit_done(editor.pane, edit, value),
-            }
-        }
-    }
-
-    /// `spawn_editor` for the mode on pane `p` of client `c`'s window: the
-    /// value written to a temporary file, then `editor file` in a popup
-    /// nine tenths of the client's terminal, centred, closed when the
-    /// editor exits. `false` if it could not start.
-    pub(crate) fn spawn_editor(
-        &mut self,
-        c: ClientId,
-        p: vtmux_core::ids::PaneId,
-        value: &[u8],
-        edit: Edit,
-    ) -> bool {
-        if self.popup_present(c) {
-            return false;
-        }
-        let Some(s) = self.client_session(c) else {
-            return false;
-        };
-        let Some((cols, rows)) = self.tty_size(c) else {
-            return false;
-        };
-        let Some(path) = temp_file(value) else {
-            return false;
-        };
-        let editor = self
-            .model
-            .options
-            .get(TreeId::Server, "editor")
-            .map(|e| e.value.to_text(e.def, None, false))
-            .unwrap_or_default();
-        let (sx, sy) = ((cols * 9 / 10).max(3), (rows * 9 / 10).max(3));
-        let open = Open {
-            session: s,
-            px: cols / 2 - sx / 2,
-            py: rows / 2 - sy / 2,
-            sx,
-            sy,
-            lines: None,
-            rules: CloseRules {
-                on_exit: true,
-                ..CloseRules::default()
-            },
-            title: String::new(),
-            style: None,
-            border_style: None,
-            command: Command::Shell(format!("{editor} {}", path.display())),
-            cwd: PathBuf::from("/tmp"),
-            env: Vec::new(),
-            step: None,
-            caller: None,
-            editor: Some(Editor {
-                path,
-                pane: p,
-                edit,
-            }),
-        };
-        self.popup_display(c, open)
-    }
-
-    /// The pid of the editor running for pane `p`'s mode, if one is.
-    pub(crate) fn editor_pid(&self, p: vtmux_core::ids::PaneId) -> Option<i32> {
-        self.clients.values().find_map(|c| {
-            let popup = c.popup.as_ref()?;
-            (popup.editor.as_ref()?.pane == p).then_some(popup.pid)?
-        })
     }
 
     /// The popup PTY of client `c` is readable: feed the terminal

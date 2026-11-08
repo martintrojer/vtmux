@@ -109,7 +109,6 @@ pub fn exec(
         env: args.values('e').map(str::to_owned).collect(),
         step: item.step,
         caller: item.client,
-        editor: None,
     };
     if server.popup_display(tc, open) {
         item.blocked = true;

@@ -227,6 +227,8 @@ pub struct Pane {
     /// `wp->wait_item`: the `split-window -W` step waiting for the process
     /// to exit.
     pub wait_step: Option<crate::cmdq::StepId>,
+    /// `wp->editor`: the pane runs a mode's editor ([`crate::editor`]).
+    pub editor: Option<crate::editor::Editor>,
     /// The process has been reaped.
     pub exited: bool,
     /// Its wait status once reaped (`wp->status`, `PANE_STATUSREADY`).
