@@ -1,0 +1,330 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "history_bytes",
+  "inputs": {
+    "name": "history_bytes",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w.0",
+          "#{history_bytes}"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:w",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "a:w",
+          "-F",
+          "#{pane_id} #{pane_height} #{history_bytes}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'a\\r\\nbcdefghijkl\\r\\n0123456789012345678901\\r\\n01234567890123456789012345678901234567\\r\\nfive\\r\\nsix\\r\\nseven\\r\\neight\\r\\n$ '; tmux wait-for -S hb-plain; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "hb-plain"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "b:w.0",
+          "#{history_size} #{history_bytes}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "c",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf 'plain\\r\\n\\344\\270\\255\\346\\226\\207 wide\\r\\n\\303\\251t\\303\\251\\r\\n\\033[38;2;1;2;3mrgb\\033[0m\\r\\ntab\\there\\r\\n\\033[1;31mbold\\033[0m \\033[9mstrike\\033[0m\\r\\n$ '; tmux wait-for -S hb-ext; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "hb-ext"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "c:w.0",
+          "#{history_size} #{history_bytes}"
+        ]
+      },
+      {
+        "run": [
+          "clear-history",
+          "-t",
+          "c:w.0"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "c:w.0",
+          "#{history_size} #{history_bytes}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "d",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '\\033[1;30Hfar\\033[2;5Hmid\\r\\n\\033[3;1H\\033[41mbg\\033[K\\033[0m\\r\\nabc\\033[2J\\033[Hxy\\r\\n$ '; tmux wait-for -S hb-cup; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "hb-cup"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "d:w.0",
+          "#{history_size} #{history_bytes}"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "b:w"
+        ]
+      },
+      {
+        "run": [
+          "lsp",
+          "-t",
+          "c:w"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "960\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "%0 12 480\n%1 11 440\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "3 1160\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1 1052\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 962\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "4 1000\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0: [40x6] [history 3/2000, 1160 bytes] %2 (active)\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0: [40x6] [history 0/2000, 962 bytes] %3 (active)\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

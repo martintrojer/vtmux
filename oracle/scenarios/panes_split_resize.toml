@@ -30,7 +30,6 @@ steps = [
   { run = ["killp", "-t", "%99"] },
   { run = ["killp", "-f", "x"] },
   { run = ["killp", "-a", "-f", "#{==:#{pane_id},%2}"] },
-  { divergence = { id = "D-001", expect = { kind = "cli", stdout = "0: [80x3] [history 0/2000,  bytes] %3\n1: [80x6] [history 0/2000,  bytes] %0 (active)\n2: [80x5] [history 0/2000,  bytes] %4\n3: [80x7] [history 0/2000,  bytes] %1\n", stderr = "", exit = 0 } } },
   { run = ["lsp"] },
   { run = ["killp", "-a"] },
   { run = ["lastp"] },

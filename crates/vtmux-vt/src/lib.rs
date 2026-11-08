@@ -14,7 +14,7 @@ mod text;
 
 pub use capture::{
     CaptureOpts, LineRef, Lines, Row, ScreenCopy, capture, capture_alternate, capture_grid,
-    capture_lines,
+    capture_lines, history_bytes,
 };
 pub use palette::{OscEnd, Reply, Rgb, colour_reply};
 pub use snapshot::{Cell, Color, ScreenView, Snapshot, Style, Underline, snapshot};

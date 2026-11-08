@@ -251,17 +251,6 @@
         ]
       },
       {
-        "divergence": {
-          "id": "D-001",
-          "expect": {
-            "kind": "cli",
-            "stdout": "0: [80x3] [history 0/2000,  bytes] %3\n1: [80x6] [history 0/2000,  bytes] %0 (active)\n2: [80x5] [history 0/2000,  bytes] %4\n3: [80x7] [history 0/2000,  bytes] %1\n",
-            "stderr": "",
-            "exit": 0
-          }
-        }
-      },
-      {
         "run": [
           "lsp"
         ]
@@ -551,7 +540,7 @@
       }
     },
     {
-      "step": 31,
+      "step": 30,
       "observation": {
         "kind": "cli",
         "stdout": "0: [80x3] [history 0/2000, 120 bytes] %3\n1: [80x6] [history 0/2000, 240 bytes] %0 (active)\n2: [80x5] [history 0/2000, 200 bytes] %4\n3: [80x7] [history 0/2000, 280 bytes] %1\n",
@@ -560,7 +549,7 @@
       }
     },
     {
-      "step": 32,
+      "step": 31,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -569,7 +558,7 @@
       }
     },
     {
-      "step": 33,
+      "step": 32,
       "observation": {
         "kind": "cli",
         "stdout": "",

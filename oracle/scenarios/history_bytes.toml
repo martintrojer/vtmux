@@ -1,0 +1,30 @@
+# #{history_bytes} (format.c format_cb_history_bytes, D-001): tmux's grid memory.
+name = "history_bytes"
+steps = [
+  # Nothing written: 40 bytes a row, no cells.
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["display", "-p", "-t", "a:w.0", "#{history_bytes}"] },
+  { run = ["splitw", "-d", "-t", "a:w", "cat", "-"] },
+  { run = ["lsp", "-t", "a:w", "-F", "#{pane_id} #{pane_height} #{history_bytes}"] },
+  # Plain text scrolled into history on a narrow pane: short and long lines
+  # grow a line's allocation by quarters, halves, then whole.
+  { run = ["new", "-d", "-s", "b", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'a\\r\\nbcdefghijkl\\r\\n0123456789012345678901\\r\\n01234567890123456789012345678901234567\\r\\nfive\\r\\nsix\\r\\nseven\\r\\neight\\r\\n$ '; tmux wait-for -S hb-plain; exec cat -"] },
+  { wait_for = "hb-plain" },
+  { run = ["display", "-p", "-t", "b:w.0", "#{history_size} #{history_bytes}"] },
+  # Text that needs extended cells: a wide character, a non-ASCII one, an
+  # RGB colour, a tab, and a colour the first eight attributes carry.
+  { run = ["new", "-d", "-s", "c", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf 'plain\\r\\n\\344\\270\\255\\346\\226\\207 wide\\r\\n\\303\\251t\\303\\251\\r\\n\\033[38;2;1;2;3mrgb\\033[0m\\r\\ntab\\there\\r\\n\\033[1;31mbold\\033[0m \\033[9mstrike\\033[0m\\r\\n$ '; tmux wait-for -S hb-ext; exec cat -"] },
+  { wait_for = "hb-ext" },
+  { run = ["display", "-p", "-t", "c:w.0", "#{history_size} #{history_bytes}"] },
+  { run = ["clear-history", "-t", "c:w.0"] },
+  { run = ["display", "-p", "-t", "c:w.0", "#{history_size} #{history_bytes}"] },
+  # Cursor addressing and erasing: a line written far across grows to the
+  # width; a coloured erase writes the cells it covers; a screen cleared
+  # drops its lines' cells, which the next lines allocate again.
+  { run = ["new", "-d", "-s", "d", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "printf '\\033[1;30Hfar\\033[2;5Hmid\\r\\n\\033[3;1H\\033[41mbg\\033[K\\033[0m\\r\\nabc\\033[2J\\033[Hxy\\r\\n$ '; tmux wait-for -S hb-cup; exec cat -"] },
+  { wait_for = "hb-cup" },
+  { run = ["display", "-p", "-t", "d:w.0", "#{history_size} #{history_bytes}"] },
+  # The default list-panes template carries it.
+  { run = ["lsp", "-t", "b:w"] },
+  { run = ["lsp", "-t", "c:w"] },
+]

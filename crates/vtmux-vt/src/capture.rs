@@ -270,19 +270,56 @@ fn line_links(out: &mut Vec<u8>, cells: &[RowCell], seen: &mut Vec<LinkKey>) {
 /// wider than one column or of more than one byte, an RGB colour, an
 /// attribute past the first eight, an underline colour, a link or a tab.
 fn row_extended(cells: &[RowCell]) -> bool {
-    cells.iter().any(|c| {
-        let st = &c.style;
-        c.link
-            || c.tab != 0
-            || c.wide == Width::Double
-            || c.data().len() > 1
-            || matches!(st.fg, Color::Rgb(..))
-            || matches!(st.bg, Color::Rgb(..))
-            || st.underline_color != Color::Default
-            || st.strikethrough
-            || st.overline
-            || !matches!(st.underline, Underline::None | Underline::Single)
-    })
+    cells.iter().any(cell_extended)
+}
+
+/// [`row_extended`] for one cell: one `grid_extd_entry` in tmux's line.
+fn cell_extended(c: &RowCell) -> bool {
+    let st = &c.style;
+    c.link
+        || c.tab != 0
+        || c.wide == Width::Double
+        || c.data().len() > 1
+        || matches!(st.fg, Color::Rgb(..))
+        || matches!(st.bg, Color::Rgb(..))
+        || st.underline_color != Color::Default
+        || st.strikethrough
+        || st.overline
+        || !matches!(st.underline, Underline::None | Underline::Single)
+}
+
+/// `#{history_bytes}` (format.c `format_cb_history_bytes`): tmux's grid
+/// memory for the history and the screen. Ghostty's grid has no such
+/// allocation, so it is modelled on the rows read back in tmux's shapes:
+/// `sizeof(struct grid_line)` (40) per line, `cellsize` entries of 5 bytes
+/// ([`tmux_cellsize`]) and one 23-byte extended entry per cell that needs
+/// one (grid.c `grid_need_extended_cell`; a tab's first cell, not the
+/// padding after it). Like [`tmux_cellsize`] it cannot
+/// know a line's earlier allocation, so a line that was written wide and
+/// erased is counted at the size its remaining cells need.
+#[must_use]
+pub fn history_bytes(term: &PaneTerm) -> usize {
+    const GRID_LINE: usize = 40;
+    const CELL_ENTRY: usize = 5;
+    const EXTD_ENTRY: usize = 23;
+    let sx = usize::from(term.cols());
+    let hsize = term.history_size();
+    let rows = hsize + usize::from(term.rows());
+    let mut size = rows * GRID_LINE;
+    for y in 0..rows {
+        let (cells, _) = read_row(term, y, hsize, sx);
+        let used = cells
+            .iter()
+            .rposition(|c| !c.empty || c.padding())
+            .map_or(0, |i| i + 1);
+        size += tmux_cellsize(&cells, used).max(used) * CELL_ENTRY;
+        size += cells
+            .iter()
+            .filter(|c| !c.spacer() && cell_extended(c))
+            .count()
+            * EXTD_ENTRY;
+    }
+    size
 }
 
 /// `capture-pane -F` (cmd-capture-pane.c:390-410): the line's flags and a

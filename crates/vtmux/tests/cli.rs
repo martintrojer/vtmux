@@ -1730,7 +1730,8 @@ fn signals_follow_tmux() {
 /// layout.c:1681; `no last pane`, cmd-select-pane.c:176; `can't find pane`;
 /// `-f only valid with -a`; `invalid sort order`) and the list-panes orders
 /// (sort.c:207-250). list-panes is compared with -F only: the default
-/// template has `#{history_bytes}`, tmux's grid memory (D-001).
+/// template has `#{history_bytes}`, tmux's grid memory, which oracle
+/// `history_bytes` compares (D-001).
 #[test]
 fn panes_split_select_kill() {
     compare("panes_split_select_kill", |w| {

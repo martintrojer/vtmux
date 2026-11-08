@@ -26,17 +26,13 @@ product reasons" category.
 
 ## Entries
 
-### D-001: `#{history_bytes}` is empty
+### D-001: `#{history_bytes}` is a model of tmux's grid memory
 
-- Test / assertion: oracle `panes_split_resize`, the default-template `list-panes` step
-  (`[history 0/2000, 120 bytes]` in tmux); every other list-panes comparison uses `-F` without it.
-- tmux behaviour: `format_cb_history_bytes` (format.c:996-1020) sums tmux's own grid memory: each line's
-  `cellsize * sizeof(struct grid_cell_entry)` plus extended cells plus `sizeof(struct grid_line)` per line.
-- vtmux behaviour: the grid is Ghostty's (D4), which has no such per-line allocation; the variable is
-  unset, so it expands to the empty string (`[history 0/2000,  bytes]`).
-- Evidence: `panes_split_resize` trace; reference `new -d -x 80 -y 24 cat; splitw; lsp` prints
-  `480 bytes` for an empty 80x12 pane (40 bytes per row of 80 cells, size of tmux structs).
-- Category: Deferred (a byte count modelled on tmux's structs could be emitted; nothing known depends on it).
+- Test / assertion: oracle `history_bytes` (empty, scrolled, extended-cell and cursor-addressed panes) and the default-template `list-panes` step of `panes_split_resize` (`[history 0/2000, 120 bytes]`) match the reference; cli.rs compares `list-panes` with `-F` elsewhere.
+- tmux behaviour: `format_cb_history_bytes` (format.c:996-1020) sums tmux's own grid memory: each line's `cellsize * sizeof(struct grid_cell_entry)` (5 bytes) plus `extdsize * sizeof(struct grid_extd_entry)` (23) plus `sizeof(struct grid_line)` (40) per line. A line's `cellsize` is what `grid_expand_line` (grid.c:564-589) allocated over its life: a quarter, a half or the whole width, for the furthest cell a write reached.
+- vtmux behaviour: the grid is Ghostty's (D4), which has no per-line allocation, so `vtmux_vt::history_bytes` rebuilds the sum from the rows read back: 40 bytes a line, `cellsize` by the capture's allocation model (`tmux_cellsize`: one `grid_expand_line` per run of same-style text), and one extended entry for each cell `grid_need_extended_cell` (grid.c:117-138) would keep one for (a wide or non-ASCII character, an RGB or theme colour, an attribute past the first eight, an underline colour, a link, a tab's first cell). It is exact for lines that were written once: plain, wide, accented, RGB, tab and cursor-addressed text, empty rows, scrolled history, `clear-history`. It differs for a line edited after it was written (erase to end of line, delete or insert characters, a shortened line): tmux keeps the allocation the longer text made, Ghostty keeps no such mark, so vtmux counts what is left.
+- Evidence: oracle `history_bytes` (traces from the reference); probes of `\033[K`, `\033[P` and `\033[@` after text on 40x6 give 340/440/440 bytes on the reference and 290/290/290 on vtmux.
+- Category: Deferred (the edited-line allocation; nothing known depends on it).
 
 ### D-002: ERE resource limits (`m/r`, `s///`)
 
