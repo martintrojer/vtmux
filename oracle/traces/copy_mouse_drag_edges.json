@@ -1,0 +1,628 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "copy_mouse_drag_edges",
+  "inputs": {
+    "name": "copy_mouse_drag_edges",
+    "size": [
+      20,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "20",
+          "-y",
+          "11",
+          "sh",
+          "-c",
+          "stty raw -echo; i=1; while [ $i -le 40 ]; do printf 'row %s foo-bar baz.qux\\r\\n' $i; i=$((i+1)); done; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "copy-mode-position-format",
+          "[#{copy_position}]"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mode-keys",
+          "vi"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "delete-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "delete-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "delete-buffer"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mode-keys",
+          "emacs"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "delete-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "delete-buffer"
+        ]
+      },
+      {
+        "keys": "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a",
+          "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"
+        ]
+      },
+      {
+        "run": [
+          "show-buffer"
+        ]
+      },
+      {
+        "run": [
+          "delete-buffer"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "row 36 foo-bar baz.q",
+          "ux",
+          "row 37 foo-bar baz.q",
+          "ux",
+          "row 38 foo-bar baz.q",
+          "ux",
+          "row 39 foo-bar baz.q",
+          "ux",
+          "row 40 foo-bar baz.q",
+          "ux",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "row 36 foo-bar baz.q",
+          "ux",
+          "row 37 foo-bar baz.q",
+          "ux",
+          "row 38 foo-bar baz.q",
+          "ux",
+          "row 39 foo-bar baz.q",
+          "ux",
+          "row 40 foo-bar baz.q",
+          "ux",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,,,,,,,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x\nrow 40 foo-bar baz.qux",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "row 36 foo-bar baz.q",
+          "ux",
+          "row 37 foo-bar baz.q",
+          "ux",
+          "row 38 foo-bar baz.q",
+          "ux",
+          "row 39 foo-bar baz.q",
+          "ux",
+          "row 40 foo-bar baz.q",
+          "ux",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,,,,,,,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "x",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0]\\e[39m\\e[49m 36 foo-bar baz.q",
+          "ux",
+          "row 37 foo-bar baz.q",
+          "ux",
+          "row 38 foo-bar baz.q",
+          "ux",
+          "\\e[30m\\e[43mrow 39 foo-bar baz.q",
+          "ux \\e[39m\\e[49m",
+          "row 40 foo-bar baz.q",
+          "ux",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          1,
+          7
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,0,1,7,0,76,2,77\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no buffers\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "no buffer\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "row 36 foo-bar baz.q",
+          "ux",
+          "row 37 foo-bar baz.q",
+          "ux",
+          "row 38 foo-bar baz.q",
+          "ux",
+          "row 39 foo-bar baz.q",
+          "ux",
+          "row 40 foo-bar baz.q",
+          "ux",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,,,,,,,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\nrow 40 foo-bar baz.qux\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "row 36 foo-bar baz.q",
+          "ux",
+          "row 37 foo-bar baz.q",
+          "ux",
+          "row 38 foo-bar baz.q",
+          "ux",
+          "row 39 foo-bar baz.q",
+          "ux",
+          "row 40 foo-bar baz.q",
+          "ux",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          10
+        ]
+      }
+    },
+    {
+      "step": 31,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,,,,,,,\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 32,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 35,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m[0]\\e[39m\\e[49m 36 foo-bar baz.q",
+          "ux",
+          "row 37 foo-bar baz.q",
+          "ux",
+          "row 38 foo-bar baz.q",
+          "ux",
+          "\\e[30m\\e[43mrow 39 foo-bar baz.q",
+          "ux\\e[39m\\e[49m",
+          "row 40 foo-bar baz.q",
+          "ux",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          2,
+          7
+        ]
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1,0,2,7,0,76,2,77\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\nrow 36 foo-bar baz.qux\nrow 37 foo-bar baz.qux\nrow 38 foo-bar baz.qux\nrow 39 foo-bar baz.qux",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

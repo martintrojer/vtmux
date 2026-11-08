@@ -2262,14 +2262,17 @@ impl CopyMode {
         }
     }
 
-    /// The top or bottom row of a drag scrolls a line and arms the timer.
+    /// The top or bottom row of a drag scrolls a line and arms the timer:
+    /// `window_copy_cursor_up`/`_down` with `scroll_only` (in vi mode the
+    /// cursor steps back a row first, so at the end of the history it
+    /// leaves the edge row).
     fn drag_scroll(&mut self, env: &Env, y: usize, now: Instant) {
         if y == 0 {
             self.drag_due = Some(now + DRAG_REPEAT);
-            self.cursor_up(env, false);
+            self.cursor_up(env, true);
         } else if y == self.sy - 1 {
             self.drag_due = Some(now + DRAG_REPEAT);
-            self.cursor_down(env, false);
+            self.cursor_down(env, true);
         }
     }
 

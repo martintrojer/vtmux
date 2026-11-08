@@ -1,0 +1,50 @@
+# A mouse drag in copy mode that reaches the top or bottom row scrolls
+# with window_copy_cursor_up/_down's scroll_only (window-copy.c
+# window_copy_drag_update): in vi mode the cursor first steps back a row,
+# so a drag onto the empty last row with no more history below leaves the
+# cursor, and the selection's end, on the row above, and the copy has no
+# trailing empty line. emacs mode keeps the row. Each drag is released in
+# the same write, before the 50 ms edge timer could scroll again.
+name = "copy_mouse_drag_edges"
+size = [20, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "11", "sh", "-c", "stty raw -echo; i=1; while [ $i -le 40 ]; do printf 'row %s foo-bar baz.qux\\r\\n' $i; i=$((i+1)); done; tmux wait-for -S ready; exec cat"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "copy-mode-position-format", "[#{copy_position}]"] },
+  { wait_for = "ready" },
+  { attach = { session = "a" } },
+  { screen = {  } },
+  { run = ["set", "-g", "mode-keys", "vi"] },
+  { keys = "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
+  { run = ["show-buffer"] },
+  { run = ["delete-buffer"] },
+  { keys = "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
+  { run = ["show-buffer"] },
+  { run = ["delete-buffer"] },
+  { keys = "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
+  { run = ["show-buffer"] },
+  { run = ["delete-buffer"] },
+  { run = ["set", "-g", "mode-keys", "emacs"] },
+  { keys = "\u001b[<0;6;8M\u001b[<32;3;11M\u001b[<0;3;11m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
+  { run = ["show-buffer"] },
+  { run = ["delete-buffer"] },
+  { keys = "\u001b[<0;6;10M\u001b[<32;1;11M\u001b[<0;1;11m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
+  { run = ["show-buffer"] },
+  { run = ["delete-buffer"] },
+  { keys = "\u001b[<64;6;8M\u001b[<0;6;8M\u001b[<32;3;1M\u001b[<0;3;1m" },
+  { screen = {  } },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode},#{scroll_position},#{copy_cursor_x},#{copy_cursor_y},#{selection_start_x},#{selection_start_y},#{selection_end_x},#{selection_end_y}"] },
+  { run = ["show-buffer"] },
+  { run = ["delete-buffer"] },
+]
