@@ -3038,6 +3038,18 @@ impl Server {
         pending
     }
 
+    /// `tty_set_italics` (tty.c:728-740): with `default-terminal` screen
+    /// or `screen-*`, italics are written as standout.
+    fn italics_as_standout(&self) -> bool {
+        let t = self
+            .model
+            .options
+            .get(TreeId::Server, "default-terminal")
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default();
+        t == "screen" || t.starts_with("screen-")
+    }
+
     fn render_clients(&mut self) {
         let attached: Vec<_> = self
             .clients
@@ -3061,6 +3073,7 @@ impl Server {
                 continue;
             };
             caps.overlay = client.popup.is_some();
+            caps.attrs.italics_as_standout = self.italics_as_standout();
             let cols = u16::try_from(tty.cols).unwrap_or(u16::MAX).max(1);
             let rows = u16::try_from(tty.rows).unwrap_or(u16::MAX).max(1);
             let queued = client.unacked.bytes;

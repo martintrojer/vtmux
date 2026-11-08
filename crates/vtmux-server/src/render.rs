@@ -75,6 +75,24 @@ pub struct Caps {
 )]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attrs {
+    /// `bold` (also for an aixterm colour the terminal lacks), `dim`,
+    /// `smul`, `blink`, `invis`, `smxx`.
+    pub bold: bool,
+    pub dim: bool,
+    pub underline: bool,
+    pub blink: bool,
+    pub invisible: bool,
+    pub strikethrough: bool,
+    /// `sitm`.
+    pub italics: bool,
+    /// The SGR parameter of `smso` (7, or screen's 3), if it has one.
+    pub standout: Option<u8>,
+    /// `rev`, else `smso` (`tty_attributes`).
+    pub reverse: Option<u8>,
+    /// `default-terminal` is `screen` or `screen-*`: `tty_set_italics`
+    /// writes italics as `smso` even with `sitm`. Not a terminal
+    /// capability; set for each frame.
+    pub italics_as_standout: bool,
     /// `Smulx`: the double, curly, dotted and dashed underlines.
     pub underline_styles: bool,
     /// `Setulc`: an RGB underline colour; `Setulc1`: a palette one.
@@ -86,6 +104,16 @@ pub struct Attrs {
 impl Attrs {
     /// What xterm-256color has.
     pub const XTERM: Self = Self {
+        bold: true,
+        dim: true,
+        underline: true,
+        blink: true,
+        invisible: true,
+        strikethrough: true,
+        italics: true,
+        standout: Some(7),
+        reverse: Some(7),
+        italics_as_standout: false,
         underline_styles: false,
         underline_rgb: false,
         underline_palette: false,
@@ -94,7 +122,28 @@ impl Attrs {
 
     #[must_use]
     pub fn from_term(term: &Term) -> Self {
+        // A plain SGR (`\E[7m`), padding already stripped; else xterm's.
+        let standout = term.code("smso", &[]).map(|s| {
+            s.strip_prefix("\x1b[")
+                .and_then(|s| s.strip_suffix('m'))
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(7)
+        });
         Self {
+            bold: term.has_name("bold"),
+            dim: term.has_name("dim"),
+            underline: term.has_name("smul"),
+            blink: term.has_name("blink"),
+            invisible: term.has_name("invis"),
+            strikethrough: term.has_name("smxx"),
+            italics: term.has_name("sitm"),
+            standout,
+            reverse: if term.has_name("rev") {
+                Some(7)
+            } else {
+                standout
+            },
+            italics_as_standout: false,
             underline_styles: term.has_name("Smulx"),
             underline_rgb: term.has_name("Setulc"),
             underline_palette: term.has_name("Setulc1"),
@@ -934,18 +983,29 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
         c => c,
     };
     let (fg, bg) = (written(fg, caps.setaf), written(bg, caps.setab));
+    // tty_attributes (tty.c:2727-2758): each with the terminal's
+    // capability, nothing without it; italics by tty_set_italics.
+    let a = caps.attrs;
+    let italics = if a.italics && !a.italics_as_standout {
+        Some(3)
+    } else {
+        a.standout
+    };
     for (on, code) in [
-        (wanted.bold || bright, 1),
-        (wanted.faint, 2),
-        (wanted.italic, 3),
-        (wanted.underline == Underline::Single, 4),
-        (wanted.blink, 5),
-        (inverse, 7),
-        (wanted.invisible, 8),
-        (wanted.strikethrough, 9),
-        (wanted.overline && caps.attrs.overline, 53),
+        ((wanted.bold || bright) && a.bold, Some(1)),
+        (wanted.faint && a.dim, Some(2)),
+        (wanted.italic, italics),
+        (
+            wanted.underline == Underline::Single && a.underline,
+            Some(4),
+        ),
+        (wanted.blink && a.blink, Some(5)),
+        (inverse, a.reverse),
+        (wanted.invisible && a.invisible, Some(8)),
+        (wanted.strikethrough && a.strikethrough, Some(9)),
+        (wanted.overline && a.overline, Some(53)),
     ] {
-        if on {
+        if let (true, Some(code)) = (on, code) {
             let _ = write!(out, "\x1b[{code}m");
         }
     }
@@ -1129,6 +1189,7 @@ mod tests {
             underline_rgb: true,
             underline_palette: false,
             overline: true,
+            ..Attrs::XTERM
         });
         assert!(
             styled.contains(
@@ -1141,8 +1202,60 @@ mod tests {
             underline_rgb: true,
             underline_palette: true,
             overline: false,
+            ..Attrs::XTERM
         });
         assert!(palette.contains("\x1b[4:2m\x1b[58:5:196md"), "{palette:?}");
+    }
+
+    /// `tty_attributes` writes an attribute with the terminal's
+    /// capability or not at all, and italics as `tty_set_italics` does:
+    /// `sitm`, else `smso` (reverse on the console, italics on screen),
+    /// and `smso` whatever the terminal when `default-terminal` is screen.
+    #[test]
+    fn attributes_follow_the_terminal() {
+        let frame_of = |name: &str, screen_default: bool| {
+            let term = Term::open(name, &[], None, &[], &[]).unwrap();
+            let mut attrs = Attrs::from_term(&term);
+            attrs.italics_as_standout = screen_default;
+            let mut pane = vtmux_vt::PaneTerm::new(9, 1, 0);
+            pane.feed(b"\x1b[1mb\x1b[0;2md\x1b[0;3mi\x1b[0;5mk\x1b[0;7mr\x1b[0;8mh\x1b[0;9ms");
+            let caps = Caps {
+                attrs,
+                ..test_caps()
+            };
+            String::from_utf8(Compositor::default().frame(vtmux_vt::snapshot(&pane), caps)).unwrap()
+        };
+        let run = |a: [&str; 7]| {
+            let mut s = String::new();
+            for (code, c) in a.iter().zip("bdikrhs".chars()) {
+                s.push_str("\x1b[0m");
+                s.push_str(code);
+                s.push(c);
+            }
+            s
+        };
+        let xterm = frame_of("xterm-256color", false);
+        let all = [
+            "\x1b[1m", "\x1b[2m", "\x1b[3m", "\x1b[5m", "\x1b[7m", "\x1b[8m", "\x1b[9m",
+        ];
+        assert!(xterm.contains(&run(all)), "{xterm:?}");
+        let mut standout = all;
+        standout[2] = "\x1b[7m";
+        let screened = frame_of("xterm-256color", true);
+        assert!(screened.contains(&run(standout)), "{screened:?}");
+        let linux = frame_of("linux", false);
+        let want = [
+            "\x1b[1m", "\x1b[2m", "\x1b[7m", "\x1b[5m", "\x1b[7m", "", "",
+        ];
+        assert!(linux.contains(&run(want)), "{linux:?}");
+        let screen = frame_of("screen", false);
+        let want = [
+            "\x1b[1m", "\x1b[2m", "\x1b[3m", "\x1b[5m", "\x1b[7m", "", "",
+        ];
+        assert!(screen.contains(&run(want)), "{screen:?}");
+        let vt100 = frame_of("vt100", false);
+        let want = ["\x1b[1m", "", "\x1b[7m", "\x1b[5m", "\x1b[7m", "", ""];
+        assert!(vt100.contains(&run(want)), "{vt100:?}");
     }
 
     /// A changed run is written as its text: the cursor is moved once, not

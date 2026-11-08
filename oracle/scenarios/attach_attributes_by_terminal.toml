@@ -1,0 +1,19 @@
+name = "attach_attributes_by_terminal"
+size = [40, 4]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "3", "sh", "-c", "printf 'B\\033[1mb\\033[0m \\033[2md\\033[0m \\033[3mi\\033[0m \\033[4mu\\033[0m \\033[5mk\\033[0m \\033[7mr\\033[0m \\033[8mh\\033[0m \\033[9ms\\033[0m \\033[7;3mri\\033[0m\\n'; tmux wait-for -S ready; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["select-pane", "-t", "a", "-T", "p"] },
+  { attach = { session = "a", term = "linux" } },
+  { screen = {} },
+  { attach = { session = "a", id = "v", term = "vt100" } },
+  { screen = { id = "v" } },
+  { attach = { session = "a", id = "s", term = "screen" } },
+  { screen = { id = "s" } },
+  { attach = { session = "a", id = "t", term = "tmux" } },
+  { screen = { id = "t" } },
+  { run = ["set", "-g", "default-terminal", "screen-256color"] },
+  { attach = { session = "a", id = "x" } },
+  { screen = { id = "x" } },
+]
