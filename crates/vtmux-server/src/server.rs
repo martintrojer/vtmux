@@ -3215,7 +3215,8 @@ impl Server {
             self.send_passthrough(id, caps);
             return;
         }
-        self.draw_status(id, s, caps, &mut screen, lines, top, jobs);
+        let status_tags = plain.then_some(tags.as_mut_slice());
+        self.draw_status(id, s, caps, (&mut screen, status_tags), lines, top, jobs);
         // screen-redraw.c:1813: the overlay over everything else.
         self.draw_popup(id, caps, &mut screen, held_popup.as_deref());
         self.force_sync_flush(id, s, flushed, scene_y, area);
@@ -3337,7 +3338,9 @@ impl Server {
             && self
                 .plain_frame(id, s, caps, (cols, rows), (y, area))
                 .is_some();
-        let keep = if plain { y..y + area } else { 0..0 };
+        // A plain frame's window rows are the composed rows and its status
+        // rows the status line's, each tagged: the buffer keeps them.
+        let keep = if plain { 0..rows } else { 0..0 };
         let client = self.clients.get_mut(&id).expect("client");
         let (screen, tags) = client.compositor.buffer(cols, rows, keep);
         (screen, tags, plain)
@@ -4132,7 +4135,7 @@ impl Server {
         id: ClientId,
         s: SessionId,
         caps: crate::render::Caps,
-        screen: &mut vtmux_vt::Snapshot,
+        (screen, tags): (&mut vtmux_vt::Snapshot, Option<&mut [u64]>),
         lines: u16,
         top: bool,
         jobs: crate::format_jobs::JobHandle,
@@ -4155,7 +4158,7 @@ impl Server {
                 ctx.kind = crate::format_ctx::Kind::Unknown;
                 ctx
             };
-            status.draw(&source, ctx, s, caps, screen, lines, top);
+            status.draw(&source, ctx, s, caps, screen, tags, lines, top);
         }
         if let Some(c) = self.clients.get_mut(&id) {
             c.status = status;
@@ -6642,6 +6645,74 @@ mod tests {
             .unwrap();
         let p = server.model.current_of(s).unwrap().2;
         (server, p, s, dir)
+    }
+
+    /// A plain frame's status row is tagged like a composed row, by its
+    /// cells: two clients whose status lines are alike tag them alike, a
+    /// status redrawn to the same cells keeps its tag, and a status that
+    /// changes takes a new one. (A frame that redraws the status is not
+    /// plain: its rows are compared cell by cell.)
+    #[test]
+    fn status_rows_are_tagged_by_their_cells() {
+        use vtmux_core::options::{TreeId, Value};
+        let (mut server, p, s, dir) = share_server("tags");
+        let right = |server: &mut super::Server, text: &str| {
+            server.model.options.set_table_value(
+                TreeId::GlobalSession,
+                "status-right",
+                Value::String(text.into()),
+            );
+        };
+        right(&mut server, "R");
+        let mut clients: Vec<_> = (0..2)
+            .map(|_| attach_test_client(&mut server, s, &dir))
+            .collect();
+        let ids: Vec<_> = clients.iter().map(|(id, _)| *id).collect();
+        let mut turn = |server: &mut super::Server, output: &[u8]| {
+            server.model.panes.get_mut(&p).unwrap().term.feed(output);
+            server.render_clients();
+            clients
+                .iter_mut()
+                .map(|(id, peer)| frames(server, *id, peer))
+                .collect::<Vec<_>>()
+        };
+        for _ in 0..3 {
+            turn(&mut server, b"");
+        }
+        let status_tag = |server: &super::Server, id| {
+            let (last, tags) = server.clients[&id].compositor.last().unwrap();
+            assert_eq!(last.rows, 10);
+            tags[9]
+        };
+        // A plain frame: pane output alone.
+        assert_ne!(turn(&mut server, b"a")[0], b"", "a frame");
+        let tag = status_tag(&server, ids[0]);
+        assert!(tag != 0, "tagged");
+        assert_eq!(status_tag(&server, ids[1]), tag, "alike for both clients");
+        server.status_redraw_client(ids[0]);
+        assert_eq!(
+            turn(&mut server, b"")[0],
+            b"",
+            "the same status sends nothing"
+        );
+        assert_ne!(turn(&mut server, b"b")[0], b"", "a frame");
+        assert_eq!(
+            status_tag(&server, ids[0]),
+            tag,
+            "the same cells, the same tag"
+        );
+        right(&mut server, "S");
+        server.status_redraw_client(ids[0]);
+        let sent = turn(&mut server, b"");
+        assert!(
+            String::from_utf8_lossy(&sent[0]).contains('S'),
+            "{:?}",
+            sent[0]
+        );
+        assert_ne!(turn(&mut server, b"c")[0], b"", "a frame");
+        let new = status_tag(&server, ids[0]);
+        assert!(new != 0 && new != tag, "a new status, a new tag");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// Clients that show one window alike take one client's drawing and

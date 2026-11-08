@@ -343,6 +343,13 @@ pub fn compose_cached(
 /// tagged with one ([`ComposeCache::copy_rows`]) holds exactly that row.
 static ROW_VERSION: AtomicU64 = AtomicU64::new(1);
 
+/// A tag no row has had yet, for a row drawn some other way that is tagged
+/// too (a status line, [`super::status`]).
+#[must_use]
+pub fn new_row_tag() -> u64 {
+    ROW_VERSION.fetch_add(1, Ordering::Relaxed)
+}
+
 /// The tag of a screen row [`ComposeCache::copy_rows`] left blank; no
 /// [`CachedRow::version`] reaches it. Tag 0 is a row anything else drew.
 pub const BLANK_ROW: u64 = u64::MAX;

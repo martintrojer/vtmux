@@ -128,6 +128,38 @@ struct ShownRows {
     /// theme and how runs are cleared.
     key: (u64, bool, super::compose::Theme, super::compose::Clear),
     rows: Vec<Vec<vtmux_vt::Cell>>,
+    /// Each row's tag ([`row_tag`]).
+    tags: Vec<u64>,
+}
+
+thread_local! {
+    /// Status rows drawn lately and their tags, newest last.
+    static ROW_TAGS: std::cell::RefCell<std::collections::VecDeque<(u64, Vec<vtmux_vt::Cell>)>> =
+        std::cell::RefCell::default();
+}
+
+/// How many [`ROW_TAGS`] are kept.
+const ROW_TAGS_KEPT: usize = 64;
+
+/// A screen row tag for a status row of these cells, as composed rows have
+/// ([`super::compose::ComposeCache::copy_rows`]): the same for the same
+/// cells, whichever client drew them, so clients whose status lines are
+/// alike compare and take each other's frames by tag
+/// ([`super::share`]), and a frame skips its status row while it stays.
+/// Looked up once per status redraw.
+fn row_tag(cells: &[vtmux_vt::Cell]) -> u64 {
+    ROW_TAGS.with(|kept| {
+        let mut kept = kept.borrow_mut();
+        if let Some((tag, _)) = kept.iter().find(|(_, c)| c == cells) {
+            return *tag;
+        }
+        let tag = super::compose::new_row_tag();
+        if kept.len() == ROW_TAGS_KEPT {
+            kept.pop_front();
+        }
+        kept.push_back((tag, cells.to_vec()));
+        tag
+    })
 }
 
 impl Default for StatusLine {
@@ -402,7 +434,10 @@ impl StatusLine {
     /// the clients; `lines` is `status_line_size(c)`; `top`
     /// is `status-position top`. A message takes at least one row, over the
     /// pane area when the status is off (screen-redraw.c:1795-1800); the
-    /// cursor is hidden while it shows (`TTY_NOCURSOR`).
+    /// cursor is hidden while it shows (`TTY_NOCURSOR`). `tags` are the
+    /// screen's row tags when it holds an earlier frame's status rows (a
+    /// plain frame, [`super::Compositor::buffer`]): a row it holds already
+    /// is not copied again, and each row drawn takes its tag.
     #[expect(clippy::too_many_arguments, reason = "status_redraw's inputs")]
     pub fn draw<'c>(
         &mut self,
@@ -411,6 +446,7 @@ impl StatusLine {
         s: SessionId,
         caps: Caps,
         screen: &mut Snapshot,
+        mut tags: Option<&mut [u64]>,
         lines: u16,
         top: bool,
     ) {
@@ -469,9 +505,8 @@ impl StatusLine {
         let key = (self.drawn, over, theme, caps.clear());
         let shown = match self.shown.take() {
             Some(shown) if shown.key == key && shown.rows.iter().all(|r| r.len() == cols) => shown,
-            _ => ShownRows {
-                key,
-                rows: rows
+            _ => {
+                let rows: Vec<Vec<vtmux_vt::Cell>> = rows
                     .iter()
                     .map(|drawn| {
                         let mut cells = vec![vtmux_vt::Cell::default(); cols];
@@ -482,11 +517,26 @@ impl StatusLine {
                         draw_line_by(&mut cells, &bgs, Colour::Default, caps.clear(), false);
                         cells
                     })
-                    .collect(),
-            },
+                    .collect();
+                let tags = rows.iter().map(|r| row_tag(r)).collect();
+                ShownRows { key, rows, tags }
+            }
         };
-        for (row, cells) in (y..screen.rows).zip(&shown.rows) {
-            screen.cells[usize::from(row) * cols..][..cols].clone_from_slice(cells);
+        debug_assert!(tags.is_none() || lines == shown.rows.len());
+        for ((row, cells), &tag) in (y..screen.rows).zip(&shown.rows).zip(&shown.tags) {
+            // A row the screen already holds (its tag says so) stays.
+            match tags
+                .as_deref_mut()
+                .and_then(|t| t.get_mut(usize::from(row)))
+            {
+                Some(t) if *t == tag => {}
+                t => {
+                    screen.cells[usize::from(row) * cols..][..cols].clone_from_slice(cells);
+                    if let Some(t) = t {
+                        *t = tag;
+                    }
+                }
+            }
         }
         self.shown = Some(shown);
     }
