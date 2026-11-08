@@ -56,10 +56,11 @@ pub fn exec(
         // Relative paths are against the client's directory, then globbed
         // (cmd-source-file.c:218-256); a miss is reported and the other
         // paths still load.
+        // The directory is quoted, so only `path` is a pattern.
         let pattern = if path.starts_with('/') {
-            PathBuf::from(&path)
+            path.clone()
         } else {
-            item.cwd.join(&path)
+            format!("{}/{path}", quote_for_glob(&item.cwd.to_string_lossy()))
         };
         let matches = glob(&pattern);
         if matches.is_empty() && !quiet {
@@ -233,23 +234,66 @@ pub struct LoadOpts {
     pub parse_client: Option<(crate::server::ClientId, crate::target::Origin)>,
 }
 
-/// `glob(3)` for the patterns tmux passes (no `{}` or `~`): `*`, `?`,
-/// `[...]` per component, results sorted. A pattern without
-/// metacharacters matches itself if it exists.
-fn glob(pattern: &Path) -> Vec<PathBuf> {
-    let text = pattern.to_string_lossy();
-    if !text.contains(['*', '?', '[']) {
-        return if pattern.exists() {
-            vec![pattern.to_owned()]
+/// `cmd_source_file_quote_for_glob` (cmd-source-file.c): a backslash
+/// before every ASCII character but a letter, a digit or `/`.
+fn quote_for_glob(path: &str) -> String {
+    let mut quoted = String::with_capacity(path.len() * 2);
+    for c in path.chars() {
+        if c.is_ascii() && !c.is_ascii_alphanumeric() && c != '/' {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+    }
+    quoted
+}
+
+/// Whether a glob(3) pattern has an unescaped `*`, `?` or `[`.
+fn has_magic(pattern: &str) -> bool {
+    let mut chars = pattern.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '*' | '?' | '[' => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// A glob(3) pattern without magic as the name it stands for: each
+/// backslash escapes the character after it.
+fn unescape(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len());
+    let mut chars = pattern.chars();
+    while let Some(c) = chars.next() {
+        out.push(if c == '\\' {
+            chars.next().unwrap_or(c)
+        } else {
+            c
+        });
+    }
+    out
+}
+
+/// `glob(3)` for the patterns tmux passes (no flags, so no `{}` or `~`):
+/// `*`, `?`, `[...]` and backslash escapes per component, results sorted.
+/// A pattern without magic matches the name it stands for if that exists.
+fn glob(pattern: &str) -> Vec<PathBuf> {
+    if !has_magic(pattern) {
+        let path = PathBuf::from(unescape(pattern));
+        return if path.exists() {
+            vec![path]
         } else {
             Vec::new()
         };
     }
     let mut current = vec![PathBuf::from("/")];
-    for comp in text.split('/').filter(|c| !c.is_empty()) {
+    for comp in pattern.split('/').filter(|c| !c.is_empty()) {
         let mut next = Vec::new();
         for dir in &current {
-            if comp.contains(['*', '?', '[']) {
+            if has_magic(comp) {
                 let Ok(entries) = std::fs::read_dir(dir) else {
                     continue;
                 };
@@ -261,7 +305,7 @@ fn glob(pattern: &Path) -> Vec<PathBuf> {
                 names.sort();
                 next.extend(names.into_iter().map(|n| dir.join(n)));
             } else {
-                let p = dir.join(comp);
+                let p = dir.join(unescape(comp));
                 if p.exists() {
                     next.push(p);
                 }

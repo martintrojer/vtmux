@@ -75,10 +75,22 @@ impl World {
 
     /// `raw` with extra environment variables for the client.
     fn raw_env(&self, args: &[&str], env: &[(&str, &str)]) -> Run {
+        self.raw_at(self.dir(), args, env)
+    }
+
+    /// `run` from the directory `cwd` instead of the world's.
+    fn run_in(&self, cwd: &Path, args: &[&str]) -> Run {
+        let mut full = vec!["-L", &self.label, "-f", "/dev/null"];
+        full.extend_from_slice(args);
+        self.raw_at(cwd, &full, &[])
+    }
+
+    /// `raw_env` with the client in `cwd`.
+    fn raw_at(&self, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
         let out = Command::new(&self.bin)
             .args(args)
             .envs(env.iter().copied())
-            .current_dir(self.dir())
+            .current_dir(cwd)
             .env_remove("TMUX")
             .env_remove("TMUX_PANE")
             .env_remove("EDITOR")
@@ -1332,6 +1344,37 @@ fn startup_config_conditions() {
             w.run(&["show", "-g", "@b"]),
             w.run(&["show", "-g", "@a"]),
         ]
+    });
+}
+
+/// `source-file` globs a relative path under the client's directory
+/// quoted for glob(3) (cmd-source-file.c `cmd_source_file_quote_for_glob`):
+/// a directory named with `[`, `*` and a space is taken literally, while
+/// the path given is still a pattern (`s*.conf`, and `s\*.conf` for the
+/// file named `s*.conf` only); `-v` and errors name the unquoted path.
+#[test]
+fn source_file_glob_quotes_the_client_directory() {
+    compare("source_file_glob_quotes_the_client_directory", |w| {
+        let sub = w.dir().join("[x]*d b");
+        std::fs::create_dir(&sub).expect("mkdir");
+        for (name, text) in [
+            ("a.conf", "display -p cwdglob\n"),
+            ("s*.conf", "display -p star\n"),
+            ("sx.conf", "display -p sx\n"),
+        ] {
+            std::fs::write(sub.join(name), text).expect("write");
+        }
+        let mut runs = vec![w.run(&["new", "-d", "-s", "a", "cat", "-"])];
+        for args in [
+            &["source", "a.conf"][..],
+            &["source", "-v", "a.conf"],
+            &["source", "s\\*.conf"],
+            &["source", "s*.conf"],
+            &["source", "nosuch*.conf"],
+        ] {
+            runs.push(w.run_in(&sub, args));
+        }
+        runs
     });
 }
 
