@@ -22,7 +22,7 @@
           "set-buffer",
           "-b",
           "c",
-          "set -g nosuchopt 1\nset -g \"\\033[31mred\" 1\nset -g @ok 1\nset -g status-interval x\n"
+          "set -g nosuchopt 1\nset -g \"\\033(0red\" 1\nset -g @ok 1\nset -g status-interval x\n"
         ]
       },
       {
@@ -219,7 +219,7 @@
         "kind": "screen",
         "rows": [
           "\\e[30m\\e[43m[16/16]\\e[39m\\e[49mf:1: invalid option: nosuchopt",
-          "bad.conf:2: ambiguous option: [31mred",
+          "bad.conf:2: invalid option: (0red",
           "bad.conf:4: value is invalid: x",
           "",
           "",

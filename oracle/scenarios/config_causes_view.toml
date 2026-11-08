@@ -4,11 +4,14 @@ size = [50, 9]
 # D-009): the server starts detached with a config of runtime errors, so the causes
 # wait (cfg_show_causes returns while no client is attached to the session);
 # attach-session then puts them in view mode of the active pane, each written
-# unparsed (window_copy_add(wp, 0, ...)): the ESC of `set -g "\033[31mred"` shows
-# as text. `q` leaves view mode, and a second attach finds a plain pane.
+# unparsed (window_copy_add(wp, 0, ...)): the ESC of `set -g "\033(0red"` shows
+# as text (parsed, `red` would be line drawing). No `[` in the name: options_match
+# leaves `ambiguous` unset for a name options_parse rejects and cmd_set_option_exec
+# reads it, so the reference's word depends on its build.
+# `q` leaves view mode, and a second attach finds a plain pane.
 steps = [
   { run = ["new", "-d", "-s", "boot"] },
-  { run = ["set-buffer", "-b", "c", "set -g nosuchopt 1\nset -g \"\\033[31mred\" 1\nset -g @ok 1\nset -g status-interval x\n"] },
+  { run = ["set-buffer", "-b", "c", "set -g nosuchopt 1\nset -g \"\\033(0red\" 1\nset -g @ok 1\nset -g status-interval x\n"] },
   { run = ["save-buffer", "-b", "c", "bad.conf"] },
   { run = ["kill-server"] },
   { run = ["-f", "bad.conf", "new", "-d", "-s", "a", "-n", "w", "cat", "-"] },

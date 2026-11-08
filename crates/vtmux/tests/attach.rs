@@ -4221,8 +4221,13 @@ fn set_titles_needs_the_title_feature() {
 /// The startup config's causes, once a session is attached (cfg.c
 /// `cfg_show_causes`, from `cfg_done`, new-session and attach-session): view
 /// mode of the session's active pane, each written unparsed
-/// (`window_copy_add(wp, 0, ...)`), so an escape in a command name shows as
-/// text. Detached start first: they wait for the attach (D-009).
+/// (`window_copy_add(wp, 0, ...)`), so an escape in an option name shows as
+/// text: `ESC(0` would draw `red` as line-drawing characters. The name has
+/// no `[`: for a name `options_parse` rejects, `cmd_set_option_exec` reads
+/// `ambiguous` uninitialised (options.c `options_match`, valgrind: "depends
+/// on uninitialised value"), so the reference says `invalid` or
+/// `ambiguous` depending on the build (CI's Ubuntu build said `invalid`).
+/// Then a detached start: the causes wait for the attach (D-009).
 #[test]
 fn config_causes_show_in_view_mode_once_attached() {
     let mut screens = Vec::new();
@@ -4236,7 +4241,7 @@ fn config_causes_show_in_view_mode_once_attached() {
         let conf = cfg_dir.join("c.conf");
         std::fs::write(
             &conf,
-            "set -g status-right ''\nset -g status-left 'S '\nset -g nosuchopt 1\nset -g status-interval \"\\033[31mred\"\nset -g status-interval x\n",
+            "set -g status-right ''\nset -g status-left 'S '\nset -g nosuchopt 1\nset -g \"\\033(0red\" 1\nset -g status-interval x\n",
         )
         .unwrap();
         let conf = conf.to_str().unwrap().to_owned();
@@ -4245,7 +4250,7 @@ fn config_causes_show_in_view_mode_once_attached() {
         let mut seen = Vec::new();
         // new-session attached: the causes are in view mode when it ends.
         let mut a = w.attach(&["-f", &conf, "new", "-s", "a", "-n", "w", "cat", "-"]);
-        a.wait(|a| screen_text(a).contains("[31mred"));
+        a.wait(|a| screen_text(a).contains("(0red"));
         seen.push(shown(&a));
         // The mode is the pane's own: `q` leaves it, and nothing comes back.
         a.keys(b"q");
@@ -4262,7 +4267,7 @@ fn config_causes_show_in_view_mode_once_attached() {
             String::from_utf8_lossy(&out.stderr)
         );
         let mut b = w.attach(&["attach", "-t", "b"]);
-        b.wait(|a| screen_text(a).contains("[31mred"));
+        b.wait(|a| screen_text(a).contains("(0red"));
         seen.push(shown(&b));
         b.keys(b"\x02d");
         b.exited(0);
