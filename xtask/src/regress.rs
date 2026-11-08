@@ -16,6 +16,14 @@
 //! the binary under test whose label carries that script's pid. Scripts that
 //! set their own `TMUX_TMPDIR`, or run a nested client under `env -i`
 //! (`new-session-environment.sh`), are covered by the label match, not the dir.
+//!
+//! Scripts hold PTYs (up to 48 each), and a host has a fixed pool: 511 on
+//! macOS (`kern.tty.ptmx_max`), where an empty pool fails `openpty` with
+//! ENXIO and the script with `fork failed`. The runner starts fewer scripts
+//! at once when the pool is small, starts none beside another while fewer
+//! than a script's worth are free, prints the pool's use at the start, peak
+//! and end, and appends who holds terminals to the log of a script that
+//! failed for a PTY.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
@@ -438,6 +446,10 @@ fn run_one(tmux: &Path, dir: &Path, logs: &Path, name: &str) -> Ran {
         })
         .unwrap_or_else(|e| Outcome::Fail(format!("harness error: {e}")));
     if let Some(pid) = script_pid {
+        // Before the reap: the servers it kills hold the script's PTYs.
+        if !matches!(outcome, Outcome::Pass) {
+            log_pty_holders(logs, name);
+        }
         reap_servers(tmux, pid);
     }
     if let Ok(t) = &tmpdir {
@@ -497,23 +509,203 @@ fn run_script(
     }
 }
 
+// --------------------------------------------------------------------- PTYs
+
+/// Free PTYs a script may need: the most one holds at once is 48
+/// (`screen-redraw-floating.sh`, two servers and the 4-pane scenes it keeps;
+/// tmux 3.8 holds as many).
+const PTY_RESERVE: usize = 64;
+
+/// PTYs to budget per concurrent script, a mean and not a bound: the suite
+/// held at most 216 at once on 96 jobs, but 77 on 3 when its two biggest
+/// scripts overlap, which `may_start` is for.
+const PTYS_PER_JOB: usize = 16;
+
+/// Concurrent scripts: one per CPU, fewer when the PTYs left would not
+/// hold `PTYS_PER_JOB` each.
+fn job_count(cpus: usize, census: Option<(usize, usize)>) -> usize {
+    let by_ptys = census.map_or(usize::MAX, |(used, max)| {
+        max.saturating_sub(used) / PTYS_PER_JOB
+    });
+    cpus.min(by_ptys).max(1)
+}
+
+/// PTYs in use on the host and the most it allows, when it says. macOS has a
+/// `/dev/ttysNNN` node per PTY, made when its master opens and removed when
+/// both sides have closed, up to `kern.tty.ptmx_max` (511 by default); Linux
+/// one under `/dev/pts/` (beside `ptmx`) up to `kernel.pty.max`.
+fn pty_census() -> Option<(usize, usize)> {
+    let count = |dir: &str, is_pty: &dyn Fn(&str) -> bool| {
+        fs::read_dir(dir).ok().map(|entries| {
+            entries
+                .filter_map(std::result::Result::ok)
+                .filter(|e| is_pty(&e.file_name().to_string_lossy()))
+                .count()
+        })
+    };
+    if cfg!(target_os = "macos") {
+        let used = count("/dev", &|n| {
+            n.strip_prefix("ttys")
+                .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+        })?;
+        let out = Command::new("/usr/sbin/sysctl")
+            .args(["-n", "kern.tty.ptmx_max"])
+            .output()
+            .ok()?;
+        Some((
+            used,
+            String::from_utf8_lossy(&out.stdout).trim().parse().ok()?,
+        ))
+    } else {
+        // This devpts instance's own `max=` mount option (the last mount
+        // on /dev/pts is the one in use), under the
+        // host-wide `kernel.pty.max` counted by `kernel.pty.nr`.
+        let read = |p: &str| -> Option<usize> { fs::read_to_string(p).ok()?.trim().parse().ok() };
+        let used = count("/dev/pts", &|n| n.bytes().all(|b| b.is_ascii_digit()))?;
+        let (host_max, host_used) = (
+            read("/proc/sys/kernel/pty/max")?,
+            read("/proc/sys/kernel/pty/nr")?,
+        );
+        let own_max = fs::read_to_string("/proc/self/mounts")
+            .ok()
+            .and_then(|m| {
+                m.lines()
+                    .rev()
+                    .map(|l| l.split_whitespace().collect::<Vec<_>>())
+                    .find(|f| f.get(1) == Some(&"/dev/pts") && f.get(2) == Some(&"devpts"))?
+                    .get(3)?
+                    .split(',')
+                    .find_map(|o| o.strip_prefix("max=")?.parse::<usize>().ok())
+            })
+            .unwrap_or(host_max);
+        let max = own_max.min(host_max);
+        let free = max
+            .saturating_sub(used)
+            .min(host_max.saturating_sub(host_used));
+        Some((max - free, max))
+    }
+}
+
+/// May another script start, with `running` scripts going and `census`
+/// PTYs in use of the most allowed? Only while `PTY_RESERVE` are left: a
+/// suite run concurrently on a host with few PTYs (macOS, 511) otherwise
+/// fails scripts with `fork failed` (ENXIO there, ENOSPC on Linux). A lone
+/// script always starts, and an unknown count never holds one back.
+fn may_start(running: usize, census: Option<(usize, usize)>) -> bool {
+    running == 0 || census.is_none_or(|(used, max)| max.saturating_sub(used) >= PTY_RESERVE)
+}
+
+/// The PTYs in use over a run, sampled while it goes.
+#[derive(Default)]
+struct PtyUse {
+    start: usize,
+    peak: usize,
+    max: usize,
+    held_back: usize,
+}
+
+/// After a script fails for a PTY (`fork failed`, the pool nearly empty),
+/// its log gets who holds the host's terminals, its own leftovers still
+/// running, so the next such failure in CI names the holders.
+fn log_pty_holders(logs: &Path, name: &str) {
+    let path = logs.join(format!("{}.log", name.trim_end_matches(".sh")));
+    let text = fs::read_to_string(&path).unwrap_or_default();
+    let census = pty_census();
+    let low = census.is_some_and(|(used, max)| max.saturating_sub(used) < PTY_RESERVE);
+    if !text.contains("fork failed") && !low {
+        return;
+    }
+    let mut note = format!("\n--- regress: PTYs in use (in use, most): {census:?}\n");
+    let ps = Command::new("ps")
+        .args(["-axww", "-o", "pid=,ppid=,tty=,etime=,args="])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    note.push_str("--- processes on a terminal (pid ppid tty etime args):\n");
+    for line in ps.lines() {
+        let tty = line.split_whitespace().nth(2).unwrap_or("?");
+        if !tty.starts_with('?') {
+            note.push_str(line);
+            note.push('\n');
+        }
+    }
+    if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&path) {
+        let _ = std::io::Write::write_all(&mut f, note.as_bytes());
+    }
+}
+
 fn run_all(tmux: &Path, dir: &Path, logs: &Path, names: Vec<String>) -> Vec<Ran> {
-    let jobs = thread::available_parallelism().map_or(1, usize::from);
+    let census = pty_census();
+    let jobs = job_count(
+        thread::available_parallelism().map_or(1, usize::from),
+        census,
+    );
     let queue = Mutex::new(names.into_iter().collect::<VecDeque<_>>());
     let done = Mutex::new(Vec::new());
+    let running = AtomicUsize::new(0);
+    let finished = std::sync::atomic::AtomicBool::new(false);
+    let ptys = Mutex::new(PtyUse::default());
+    if let Some((used, max)) = census {
+        *ptys.lock().expect("ptys") = PtyUse {
+            start: used,
+            peak: used,
+            max,
+            held_back: 0,
+        };
+    }
     thread::scope(|s| {
-        for _ in 0..jobs {
-            s.spawn(|| {
-                loop {
-                    let next = queue.lock().expect("queue").pop_front();
-                    let Some(name) = next else { break };
-                    let r = run_one(tmux, dir, logs, &name);
-                    eprintln!("{:<5} {} ({:.1}s)", r.outcome.label(), r.name, r.secs);
-                    done.lock().expect("done").push(r);
+        s.spawn(|| {
+            while !finished.load(Ordering::Relaxed) {
+                if let Some((used, _)) = pty_census() {
+                    let mut p = ptys.lock().expect("ptys");
+                    p.peak = p.peak.max(used);
                 }
-            });
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let workers: Vec<_> = (0..jobs)
+            .map(|_| {
+                s.spawn(|| {
+                    loop {
+                        let next = queue.lock().expect("queue").pop_front();
+                        let Some(name) = next else { break };
+                        let mut waited = false;
+                        while !may_start(running.load(Ordering::SeqCst), pty_census()) {
+                            waited = true;
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                        if waited {
+                            ptys.lock().expect("ptys").held_back += 1;
+                        }
+                        running.fetch_add(1, Ordering::SeqCst);
+                        let r = run_one(tmux, dir, logs, &name);
+                        running.fetch_sub(1, Ordering::SeqCst);
+                        eprintln!("{:<5} {} ({:.1}s)", r.outcome.label(), r.name, r.secs);
+                        done.lock().expect("done").push(r);
+                    }
+                })
+            })
+            .collect();
+        for w in workers {
+            let _ = w.join();
         }
+        finished.store(true, Ordering::Relaxed);
     });
+    let p = ptys.into_inner().expect("ptys");
+    if p.max > 0 {
+        eprintln!(
+            "regress: {jobs} jobs; PTYs in use: {} at the start, {} at the peak, {} at the end, of {}{}",
+            p.start,
+            p.peak,
+            pty_census().map_or(0, |(used, _)| used),
+            p.max,
+            if p.held_back > 0 {
+                format!("; {} scripts waited for free PTYs", p.held_back)
+            } else {
+                String::new()
+            }
+        );
+    }
     let mut done = done.into_inner().expect("done");
     done.sort_by(|a, b| a.name.cmp(&b.name));
     done
@@ -821,6 +1013,22 @@ mod tests {
         assert_eq!(left, ["testA4242-live", "testA4243"]);
         drop(live);
         let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A host with few PTYs left (macOS: 511 in all) gets fewer concurrent
+    /// scripts, and none starts beside another while fewer than a script's
+    /// worth are free.
+    #[test]
+    fn scripts_wait_for_free_ptys() {
+        assert_eq!(job_count(96, Some((5, 4096))), 96);
+        assert_eq!(job_count(96, Some((0, 511))), 31);
+        assert_eq!(job_count(3, Some((0, 511))), 3);
+        assert_eq!(job_count(8, Some((500, 511))), 1);
+        assert_eq!(job_count(8, None), 8);
+        assert!(may_start(0, Some((511, 511))));
+        assert!(may_start(2, Some((447, 511))));
+        assert!(!may_start(2, Some((448, 511))));
+        assert!(may_start(2, None));
     }
 
     #[test]
