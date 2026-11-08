@@ -1,0 +1,109 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "capture_wide_wrap_blank",
+  "inputs": {
+    "name": "capture_wide_wrap_blank",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "11",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "printf '\\033[1mabcdefghij\\346\\274\\242\\033[m\\015\\012\\033[41mABCDEFGHIJ\\346\\274\\242\\033[m'; tmux wait-for -S ready; exec cat"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-N",
+          "-t",
+          "a:"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-e",
+          "-J",
+          "-t",
+          "a:"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b[1mabcdefghij\u001b[0m\n\u001b[1m漢\u001b[0m\n\u001b[41mABCDEFGHIJ\u001b[49m\n\u001b[41m漢\u001b[49m\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "abcdefghij \n漢   \nABCDEFGHIJ \n漢   \n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b[1mabcdefghij漢\n\u001b[0m\u001b[41mABCDEFGHIJ漢\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

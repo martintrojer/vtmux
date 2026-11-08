@@ -1293,7 +1293,22 @@ fn emit_row(out: &mut Vec<u8>, cells: &[RowCell], opts: CaptureOpts, last: &mut 
     // appended to.
     let (mut code_at, mut code_len) = (0, 0);
     // Spacer cells are tmux's PADDING cells: skipped (grid.c:1214-1215).
-    for c in cells[..end.min(cells.len())].iter().filter(|c| !c.spacer()) {
+    // But the column a wide character that did not fit left at the line's
+    // end is no padding in tmux: screen_write_cell wraps without writing
+    // it, so it is the default blank grid_expand_line left.
+    let blank = RowCell {
+        empty: true,
+        ..RowCell::default()
+    };
+    for c in cells[..end.min(cells.len())]
+        .iter()
+        .filter(|c| !c.spacer() || c.wide == Width::SpacerHead)
+    {
+        let c = if c.wide == Width::SpacerHead {
+            &blank
+        } else {
+            c
+        };
         if opts.escapes {
             let at = line.len();
             code_at = at;
@@ -1574,6 +1589,41 @@ mod tests {
     thread_local! {
         /// Ghostty point lookups by [`read_screen_row`] on this thread.
         pub(super) static LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    /// The column a wide character that did not fit left at the end of a
+    /// line is a default blank inside tmux's `cellsize` (its line grew to
+    /// the whole width): `-N` keeps it, `-e` resets the pen on it, whatever
+    /// the pen was. Expected: tmux 3.8.
+    #[test]
+    fn a_wrapped_wide_character_leaves_a_default_blank() {
+        let cap = |pen: &str, opts: CaptureOpts| {
+            let mut t = PaneTerm::new(11, 3, 0);
+            t.feed(format!("\x1b[{pen}mabcdefghij\u{6f22}\x1b[m").as_bytes());
+            String::from_utf8_lossy(&capture(&t, opts)).into_owned()
+        };
+        let e = CaptureOpts {
+            escapes: true,
+            ..Default::default()
+        };
+        let n = CaptureOpts {
+            keep_spaces: true,
+            ..Default::default()
+        };
+        assert!(cap("1", e).starts_with("\x1b[1mabcdefghij\x1b[0m\n\x1b[1m\u{6f22}\x1b[0m\n"));
+        assert!(cap("41", e).starts_with("\x1b[41mabcdefghij\x1b[49m\n\x1b[41m\u{6f22}\x1b[49m\n"));
+        let plain = cap("1", n);
+        assert!(plain.starts_with("abcdefghij \n\u{6f22}   \n"), "{plain:?}");
+        let j = CaptureOpts {
+            escapes: true,
+            join: true,
+            ..Default::default()
+        };
+        let joined = cap("1", j);
+        assert!(
+            joined.starts_with("\x1b[1mabcdefghij\u{6f22}\n"),
+            "{joined:?}"
+        );
     }
 
     /// A row costs one point lookup, not one per cell: a lookup walks

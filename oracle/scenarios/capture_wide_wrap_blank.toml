@@ -1,0 +1,13 @@
+name = "capture_wide_wrap_blank"
+# A wide character that does not fit wraps without writing the last column
+# (screen-write.c screen_write_cell), which stays the default blank its line
+# grew with (grid.c grid_expand_line): capture-pane -N keeps it, -e resets the
+# pen on it, whatever the pen, and -J joins past it. Found by
+# scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "11", "-y", "5", "sh", "-c", "printf '\\033[1mabcdefghij\\346\\274\\242\\033[m\\015\\012\\033[41mABCDEFGHIJ\\346\\274\\242\\033[m'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-N", "-t", "a:"] },
+  { run = ["capture-pane", "-p", "-e", "-J", "-t", "a:"] },
+]
