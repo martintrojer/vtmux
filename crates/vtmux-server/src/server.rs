@@ -1204,6 +1204,27 @@ impl Server {
             && self.clients.values().all(|c| c.closing && c.out.is_empty())
     }
 
+    /// Whether telling the command clients `exits` theirs leaves the server
+    /// only its clients' unwritten output to wait for before it exits
+    /// ([`Self::should_exit`] with `exit-empty`): nothing queued or running
+    /// that could make a session, and every other client on its way out.
+    /// Then the socket closes before they are told, as `kill-server`'s does
+    /// ([`Self::begin_shutdown`], D-037): a command that follows at once is
+    /// refused and starts a fresh server, instead of connecting to this one
+    /// and losing it ("server exited unexpectedly"; tmux accepts and drops
+    /// it until it exits, server.c `server_accept`).
+    fn exits_once_told(&self, exits: &[(ClientId, i32)]) -> bool {
+        !self.shutdown
+            && !self.jobs.still_running()
+            && self.exit_empty()
+            && self.nothing_attached()
+            && self.cmdq.busy_queues().is_empty()
+            && self
+                .clients
+                .iter()
+                .all(|(id, c)| c.closing || exits.iter().any(|&(e, _)| e == *id))
+    }
+
     /// `server_send_exit` (server.c:314-333), at once when `kill-server`
     /// runs: every session goes (its panes are hung up) and every client
     /// that is not on its way out gets `MSG_SHUTDOWN`, a waiting one
@@ -2982,7 +3003,11 @@ impl Server {
     fn render_and_exit(&mut self) {
         self.render_clients();
         self.release_hidden_screens(Instant::now());
-        for (id, code) in std::mem::take(&mut self.pending_exits) {
+        let exits = std::mem::take(&mut self.pending_exits);
+        if !exits.is_empty() && self.exits_once_told(&exits) {
+            self.close_listener();
+        }
+        for (id, code) in exits {
             let code = self.tell_starter(id, code);
             self.finish_client(id, code);
         }

@@ -934,8 +934,13 @@ fn command_errors() {
 #[test]
 fn client_window_target_without_a_client() {
     compare("client_window_target_without_a_client", |w| {
+        let first = w.run(&["start-server", ";", "display", "-p", "-t", "@", "x"]);
+        // With no session the server exits (exit-empty); tmux's accepts
+        // and drops a client until it is gone (server.c `server_accept`),
+        // so `new` waits for that.
+        w.wait_gone();
         vec![
-            w.run(&["start-server", ";", "display", "-p", "-t", "@", "x"]),
+            first,
             w.run(&["new", "-d", "-s", "a", "cat", "-"]),
             w.run(&["display", "-p", "-t", "@", "x"]),
             w.run(&["display", "-p", "-t", "{active}", "#{session_name}"]),
@@ -1358,6 +1363,38 @@ fn kill_server_closes_the_socket_before_it_answers() {
             std::io::ErrorKind::ConnectionRefused,
             "round {i}"
         );
+    }
+}
+
+/// The same for a server that exits because its last session is gone
+/// (`exit-empty`, server.c `server_loop`): the command that left it empty
+/// is answered once the socket refuses, so the next command starts a fresh
+/// server. vtmux only, as above: tmux accepts and drops a client until it
+/// exits, which `client_window_target_without_a_client` hit after its
+/// session-less `start-server`.
+#[test]
+fn exit_empty_closes_the_socket_before_it_answers() {
+    let w = World::new(&vtmux_bin());
+    let sock = w.run(&["new", "-d", "-s", "a", "cat", "-"]);
+    assert_eq!(sock.code, 0, "{sock:?}");
+    let sock = w.run(&["display", "-p", "#{socket_path}"]).stdout;
+    let sock = sock.trim().replace("TMP", &w.dir().to_string_lossy());
+    let refused = |what: &str| {
+        let err = std::os::unix::net::UnixStream::connect(&sock).expect_err(what);
+        assert_eq!(err.kind(), std::io::ErrorKind::ConnectionRefused, "{what}");
+    };
+    for i in 0..20 {
+        if i > 0 {
+            let new = w.run(&["new", "-d", "-s", "a", "cat", "-"]);
+            assert_eq!(new.code, 0, "round {i}: {new:?}");
+        }
+        let kill = w.run(&["kill-session", "-t", "a"]);
+        assert_eq!(kill.code, 0, "round {i}: {kill:?}");
+        // No wait: the socket refuses at once.
+        refused(&format!("round {i}: listening after the last session"));
+        let up = w.run(&["start-server"]);
+        assert_eq!(up.code, 0, "round {i}: {up:?}");
+        refused(&format!("round {i}: listening after start-server"));
     }
 }
 
