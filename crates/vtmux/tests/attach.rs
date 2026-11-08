@@ -7099,3 +7099,177 @@ fn zero_size_terminal_is_80x24() {
         });
     }
 }
+
+/// The server's open descriptors: `/proc/<pid>/fd` where there is one,
+/// `lsof` elsewhere (macOS), its numbered descriptors only.
+fn open_fds(pid: &str) -> Vec<String> {
+    if let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) {
+        let mut fds: Vec<String> = entries
+            .filter_map(|e| {
+                let e = e.ok()?;
+                let to = std::fs::read_link(e.path()).ok()?;
+                Some(format!(
+                    "{} {}",
+                    e.file_name().to_string_lossy(),
+                    to.display()
+                ))
+            })
+            .collect();
+        fds.sort();
+        return fds;
+    }
+    let lsof = if std::path::Path::new("/usr/sbin/lsof").exists() {
+        "/usr/sbin/lsof"
+    } else {
+        "lsof"
+    };
+    let out = Command::new(lsof)
+        .args(["-n", "-P", "-p", pid, "-F", "fn"])
+        .output()
+        .expect("lsof");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut fds = Vec::new();
+    let mut fd = None;
+    for line in text.lines() {
+        if let Some(f) = line.strip_prefix('f') {
+            fd = f.parse::<u32>().ok();
+        } else if let (Some(n), Some(f)) = (line.strip_prefix('n'), fd.take()) {
+            fds.push(format!("{f} {n}"));
+        }
+    }
+    fds
+}
+
+/// `args` succeed; their output, trimmed.
+fn cli_ok(w: &World, args: &[&str]) -> String {
+    let out = w.cli(args);
+    assert!(
+        out.status.success(),
+        "{}: {args:?}: {}",
+        w.bin.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+/// Every way a pane, popup or job comes and goes, once, in session `a`
+/// (window `w`, pane `a:w.0` running `cat -`, client `a` attached).
+fn lifecycle_round(w: &World, a: &Attached) {
+    let ok = |args: &[&str]| cli_ok(w, args);
+    let until = |what: &str, f: &dyn Fn() -> bool| {
+        let what = format!("{} {what}", w.bin.display());
+        a.wait_labelled(&what, Duration::from_secs(10), |_| f());
+    };
+    let panes = || {
+        ok(&["lsp", "-s", "-t", "a", "-F", "#{pane_id}"])
+            .lines()
+            .count()
+    };
+    let split = |cmd: &[&str]| {
+        let mut args = vec!["splitw", "-d", "-P", "-F", "#{pane_id}", "-t", "a:w"];
+        args.extend(cmd);
+        ok(&args)
+    };
+    ok(&["respawn-pane", "-k", "-t", "a:w.0", "cat", "-"]);
+    ok(&["killp", "-t", &split(&["cat", "-"])]);
+    split(&["sh", "-c", "exit 0"]);
+    until("exited pane gone", &|| panes() == 1);
+    ok(&["set", "-g", "remain-on-exit", "on"]);
+    let p = split(&["sh", "-c", "exit 0"]);
+    let dead = || ok(&["display", "-p", "-t", &p, "#{pane_dead}"]) == "1";
+    until("pane dead", &dead);
+    ok(&["respawn-pane", "-t", &p, "sh", "-c", "exit 0"]);
+    until("respawned pane dead", &dead);
+    ok(&["killp", "-t", &p]);
+    ok(&["set", "-g", "remain-on-exit", "off"]);
+    ok(&["neww", "-d", "-n", "x", "-t", "a:", "cat", "-"]);
+    ok(&["killw", "-t", "a:x"]);
+    ok(&["new", "-d", "-s", "b", "cat", "-"]);
+    ok(&["kill-session", "-t", "b"]);
+    let p = ok(&[
+        "new-pane",
+        "-d",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-t",
+        "a:w",
+        "cat",
+        "-",
+    ]);
+    ok(&["killp", "-t", &p]);
+    ok(&["display-popup", "-t", "a", "-E", "true"]);
+    // A CLI display-popup waits until the popup closes.
+    let mut popup = Command::new(&w.bin)
+        .args(w.args())
+        .args(["display-popup", "-t", "a", "-T", "pp", "exec cat"])
+        .env_clear()
+        .envs(w.env())
+        .spawn()
+        .unwrap();
+    a.wait(|a| pane_text(a).contains("pp"));
+    ok(&["display-popup", "-C", "-t", "a"]);
+    popup.wait().unwrap();
+    ok(&["run-shell", "true"]);
+    ok(&["run-shell", "-b", "true"]);
+    ok(&["if-shell", "true", "set -g @x 1"]);
+    ok(&["display", "-p", "#(echo hi)"]);
+    ok(&["copy-mode", "-t", "a:w.0"]);
+    ok(&["send", "-t", "a:w.0", "-X", "cancel"]);
+    ok(&["pipe-pane", "-t", "a:w.0", "cat >/dev/null"]);
+    ok(&["pipe-pane", "-t", "a:w.0"]);
+}
+
+/// A pane's master closes when the pane goes, by whatever way it goes, and
+/// a popup's and a job's descriptors when they end (window.c
+/// `window_pane_destroy`, popup.c `popup_free_cb`, job.c `job_free`), so
+/// the server holds as many descriptors (so PTYs) after any number of
+/// lifecycles as after the first: a leak of one per respawn exhausts
+/// macOS's 511 PTYs (`kern.tty.ptmx_max`) over a test run.
+#[test]
+fn pane_lifecycles_leave_no_descriptor_behind() {
+    for bin in bins() {
+        let vtmux = bin.as_os_str() == env!("CARGO_BIN_EXE_vtmux");
+        let w = World::new(bin.clone());
+        let a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
+        a.wait(|_| w.cli(&["lsc"]).stdout.len() > 1);
+        cli_ok(&w, &["set", "-g", "status-right", "x"]);
+        let pid = cli_ok(&w, &["display", "-p", "#{pid}"]);
+        // The first round may open what lasts (a job's first use).
+        lifecycle_round(&w, &a);
+        let settled = |want: Option<usize>| {
+            // Jobs, popups and exited panes finish on their own time.
+            let end = Instant::now() + Duration::from_secs(10);
+            let mut last = open_fds(&pid);
+            loop {
+                thread::sleep(Duration::from_millis(200));
+                let now = open_fds(&pid);
+                let done = want.map_or(now == last, |n| now.len() == n);
+                if done || Instant::now() > end {
+                    return now;
+                }
+                last = now;
+            }
+        };
+        let before = settled(None);
+        for _ in 0..5 {
+            lifecycle_round(&w, &a);
+        }
+        let same = |what: &str| {
+            let after = settled(Some(before.len()));
+            assert_eq!(
+                after.len(),
+                before.len(),
+                "{} {what}: descriptors before {before:#?} after {after:#?}",
+                bin.display()
+            );
+        };
+        same("after 5 rounds");
+        // A live upgrade keeps the descriptors it chose to, no more.
+        if vtmux {
+            cli_ok(&w, &["vtmux-upgrade"]);
+            a.wait(|_| w.cli(&["lsc"]).stdout.len() > 1);
+            same("after an upgrade");
+        }
+    }
+}
