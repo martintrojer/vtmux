@@ -125,8 +125,9 @@ pub struct MouseEvent {
     pub ox: u32,
     pub oy: u32,
     pub target: MouseTarget,
-    /// The status line's `range=` under the event, when it is on the
-    /// status line (`status_get_range`, for `mouse_status_range`).
+    /// The status line's `range=` under the report's position, when that
+    /// is on the status line (`status_get_range`, for
+    /// `mouse_status_range`).
     pub status_range: Option<RangeKind>,
     /// `m->ignore`: the click timer's double click, which no program gets.
     pub ignore: bool,
@@ -604,6 +605,12 @@ impl Server {
             status_range: None,
             ignore: double,
         };
+        // format_cb_mouse_status_range reads the range under the report
+        // itself (m->x, m->y), which a drag's key does not use: a drag
+        // from a pane onto a window's name still has its range.
+        ev.status_range = status_at
+            .filter(|&at| report.y >= at && report.y < at + status_lines)
+            .and_then(|at| self.status_range_at(id, report.x, report.y - at));
         let mut loc = None;
         let (mut px, mut py) = (0, 0);
         let mut sl_mpos = 0;
@@ -615,8 +622,7 @@ impl Server {
             if kind == MouseKind::Drag && st.drag_flag == 0 {
                 st.drag_status = true;
             }
-            ev.status_range = self.status_range_at(id, x, y - at);
-            loc = Some(match ev.status_range.clone() {
+            loc = Some(match self.status_range_at(id, x, y - at) {
                 None => MouseLocation::StatusDefault,
                 Some(RangeKind::Left) => MouseLocation::StatusLeft,
                 Some(RangeKind::Right) => MouseLocation::StatusRight,

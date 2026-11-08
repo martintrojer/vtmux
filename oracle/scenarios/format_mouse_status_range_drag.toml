@@ -1,0 +1,33 @@
+# mouse_status_range is the range under the report itself
+# (format.c format_cb_mouse_status_range reads m->x, m->y), not where the
+# key was classified: a drag whose first motion is already on a window's
+# name in the status line is MouseDrag1Pane (server-client.c
+# server_client_check_mouse places a drag's start at the press) yet has
+# the window range, and its end is MouseDragEnd1Status with the same
+# range. A drag that moves in the pane first has no range, and its motion
+# onto the status line is MouseDrag1Status (unbound here). A second status
+# line shows what the bindings record, so each step settles on it.
+name = "format_mouse_status_range_drag"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "8", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", "RR"] },
+  { run = ["set", "-g", "status", "2"] },
+  { run = ["set", "-g", "status-format[1]", "#{=-38:@m}"] },
+  { run = ["bind", "-n", "MouseDown1Pane", "set", "-gaF", "@m", "P:#{mouse_status_line},#{mouse_status_range};"] },
+  { run = ["bind", "-n", "MouseDrag1Pane", "set", "-gaF", "@m", "D:#{mouse_status_line},#{mouse_status_range};"] },
+  { run = ["bind", "-n", "MouseDragEnd1Status", "set", "-gaF", "@m", "E:#{mouse_status_line},#{mouse_status_range};"] },
+  { run = ["bind", "-n", "MouseDragEnd1Pane", "set", "-gaF", "@m", "e:#{mouse_status_line},#{mouse_status_range};"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { keys = "\u001b[<0;5;3M\u001b[<32;7;9M\u001b[<0;7;9m" },
+  { settle = { react = true } },
+  { run = ["show", "-gv", "@m"] },
+  { run = ["set", "-g", "@m", ""] },
+  { settle = { react = true } },
+  { keys = "\u001b[<0;5;3M\u001b[<32;6;3M\u001b[<32;7;9M\u001b[<0;7;9m" },
+  { settle = { react = true } },
+  { run = ["show", "-gv", "@m"] },
+  { screen = {} },
+]
