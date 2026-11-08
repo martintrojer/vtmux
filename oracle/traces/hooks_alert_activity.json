@@ -1,0 +1,252 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "hooks_alert_activity",
+  "inputs": {
+    "name": "hooks_alert_activity",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "tmux wait-for g0; printf y; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "w1",
+          "sh",
+          "-c",
+          "tmux wait-for g1; printf x; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "monitor-activity",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "alert-activity",
+          "set -gaF @log '#{hook}:#{hook_window}:#{hook_window_index}:#{hook_session} '"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-ga",
+          "alert-activity",
+          "wait-for -S alert"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "g1"
+        ]
+      },
+      {
+        "wait_for": "alert"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} #{window_flags} #{window_activity_flag}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "activity-action",
+          "any"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "g0"
+        ]
+      },
+      {
+        "wait_for": "alert"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-g",
+          "-F",
+          "#{option_name}=#{hook_fire_count}",
+          "alert-activity"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "alert-activity:@1:1:$0 \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 * 0\n1 ## 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "alert-activity:@1:1:$0 alert-activity:@0:0:$0 \n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "alert-activity=2\nalert-activity=2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

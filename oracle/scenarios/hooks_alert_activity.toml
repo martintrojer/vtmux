@@ -1,0 +1,24 @@
+# alert-activity (alerts.c alerts_check_activity -> events_fire_winlink,
+# events.c:187-199) with monitor-activity on: output in a window that is
+# not current fires it once, the winlink keeping its activity flag until
+# the window is selected; with activity-action any the current window's
+# output fires it too (alerts_action_applies). The windows are made before
+# monitor-activity is on, so window_create's activity queues no check
+# (alerts_enabled).
+name = "hooks_alert_activity"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "40", "-y", "6", "sh", "-c", "tmux wait-for g0; printf y; exec cat"] },
+  { run = ["neww", "-d", "-n", "w1", "sh", "-c", "tmux wait-for g1; printf x; exec cat"] },
+  { run = ["set", "-g", "monitor-activity", "on"] },
+  { run = ["set-hook", "-g", "alert-activity", "set -gaF @log '#{hook}:#{hook_window}:#{hook_window_index}:#{hook_session} '"] },
+  { run = ["set-hook", "-ga", "alert-activity", "wait-for -S alert"] },
+  { run = ["wait-for", "-S", "g1"] },
+  { wait_for = "alert" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsw", "-F", "#{window_index} #{window_flags} #{window_activity_flag}"] },
+  { run = ["set", "-g", "activity-action", "any"] },
+  { run = ["wait-for", "-S", "g0"] },
+  { wait_for = "alert" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["show-hooks", "-g", "-F", "#{option_name}=#{hook_fire_count}", "alert-activity"] },
+]
