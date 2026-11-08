@@ -1260,6 +1260,58 @@ fn source_file_non_utf8_in_false_branch() {
     });
 }
 
+/// Set the server's soft `RLIMIT_NPROC` (its hard limit stays the test's):
+/// at 1, every fork it makes fails with `EAGAIN`, since its own user runs
+/// at least the server. `None` lifts it again.
+#[cfg(target_os = "linux")]
+fn limit_server_forks(w: &World, n: Option<u64>) {
+    use rustix::process::{Resource, Rlimit, getrlimit, prlimit};
+    let pid = common::parse_pid(&w.run(&["display", "-p", "#{pid}"]).stdout).expect("server pid");
+    let max = getrlimit(Resource::Nproc).maximum;
+    prlimit(
+        Some(pid),
+        Resource::Nproc,
+        Rlimit {
+            current: n.or(max),
+            maximum: max,
+        },
+    )
+    .expect("prlimit the server");
+}
+
+/// `RLIMIT_NPROC` binds no root process: the fork would succeed.
+#[cfg(target_os = "linux")]
+fn forks_can_be_limited(name: &str) -> bool {
+    let root = rustix::process::geteuid().is_root();
+    if root {
+        eprintln!("{name}: SKIP: root ignores RLIMIT_NPROC");
+    }
+    !root
+}
+
+/// A failed fork is `fork failed: <strerror>` under each command's own
+/// prefix (spawn.c:480; cmd-new-window.c:162, cmd-split-window.c:209,
+/// cmd-new-session.c:307), with no ` (os error N)`. Linux only: prlimit on another process.
+#[cfg(target_os = "linux")]
+#[test]
+fn spawn_failures_say_fork_failed() {
+    if !forks_can_be_limited("spawn_failures_say_fork_failed") {
+        return;
+    }
+    compare("spawn_failures_say_fork_failed", |w| {
+        let mut runs = vec![w.run(&["new", "-d", "-s", "a", "cat", "-"])];
+        limit_server_forks(w, Some(1));
+        runs.extend([
+            w.run(&["neww", "-d", "cat", "-"]),
+            w.run(&["splitw", "-d", "cat", "-"]),
+            w.run(&["new-pane", "-d", "cat", "-"]),
+            w.run(&["new", "-d", "-s", "b", "cat", "-"]),
+        ]);
+        limit_server_forks(w, None);
+        runs
+    });
+}
+
 /// A multi-word command is run as `execvp` does (spawn.c:552), so an
 /// executable without a shebang runs through `/bin/sh` (ENOEXEC fallback),
 /// given by path and found through the pane's `PATH`.

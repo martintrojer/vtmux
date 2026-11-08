@@ -81,7 +81,12 @@ pub(super) fn respawn(
             // cmd-respawn-pane.c:78-79.
             empty: args.flag('E'),
         })
-        .map_err(|e| EdgeError::Message(format!("respawn {what} failed: fork failed: {e}")))?;
+        .map_err(|e| {
+            EdgeError::Message(format!(
+                "respawn {what} failed: {}",
+                crate::server::spawn_failed(&e)
+            ))
+        })?;
     // spawn_pane (spawn.c:592): pane-created with created_respawn, for
     // respawn-window too (its spawn_window ends in spawn_pane).
     server.fire_pane_created(s, index, wp, args.flag('E'), true);

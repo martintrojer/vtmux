@@ -439,6 +439,13 @@ pub struct PaneSpawn<'a> {
 /// feed also returns the carriage (`MODE_CRLF`, Ghostty's LNM).
 pub(crate) const EMPTY_PANE_MODES: &[u8] = b"\x1b[?25l\x1b[20h";
 
+/// The cause a [`Server::spawn_pane`] failure gives: `fork failed:` and
+/// C's `strerror` text (spawn.c:480), without Rust's ` (os error N)`.
+#[must_use]
+pub fn spawn_failed(e: &io::Error) -> String {
+    format!("fork failed: {}", vtmux_core::error::strerror(e))
+}
+
 /// The client's `PATH`, if it sent one.
 #[must_use]
 pub fn client_path(env: &[(String, String)]) -> Option<&str> {
@@ -4520,7 +4527,7 @@ impl Server {
                 shell: None,
                 empty: nw.empty,
             })
-            .map_err(|e| format!("fork failed: {e}"))?;
+            .map_err(|e| spawn_failed(&e))?;
         self.insert_window(window_id, pane, nw.name.clone(), cols, rows, nw.client);
         let session = self.model.sessions.get_mut(&s).expect("target session");
         session.windows.insert(index, window_id);

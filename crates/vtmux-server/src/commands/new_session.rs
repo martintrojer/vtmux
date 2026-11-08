@@ -229,7 +229,7 @@ pub fn exec(
     };
     let s = server
         .create_session(spec)
-        .map_err(|e| EdgeError::CreateWindowFailed(e.to_string()))?;
+        .map_err(|e| EdgeError::CreateWindowFailed(crate::server::spawn_failed(&e)))?;
     if args.flag('P') {
         let template = args.value('F').unwrap_or(TEMPLATE);
         let text = expand(server, Found::from_session(&server.model, s), template);

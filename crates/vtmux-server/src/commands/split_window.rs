@@ -297,7 +297,11 @@ pub fn exec(
             window.layout.close_pane(new);
             window.panes.remove(new);
             server.model.fix_panes(w);
-            return Err(EdgeError::Message(format!("create pane failed: {e}")).into());
+            return Err(EdgeError::Message(format!(
+                "create pane failed: {}",
+                crate::server::spawn_failed(&e)
+            ))
+            .into());
         }
     };
     // window_add_pane creates the pane at the window's size and
