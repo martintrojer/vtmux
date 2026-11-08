@@ -297,7 +297,7 @@ mod tests {
     }
 
     fn lines(v: &ViewMode) -> Vec<String> {
-        let s = v.copy.screen(false, &|_, _| {});
+        let s = v.copy.screen(false, 0, &|_, _| {});
         (0..s.rows)
             .map(|y| {
                 (0..s.cols)

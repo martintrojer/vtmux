@@ -103,6 +103,13 @@ pub enum Paint {
     CurrentMatch { inverse: bool },
     /// `copy-mode-selection-style`.
     Selection,
+    /// `copy-mode-line-number-style`, or
+    /// `copy-mode-current-line-number-style` on the cursor's row: a cell
+    /// of the line numbers' gutter.
+    LineNumber { current: bool },
+    /// `copy-mode-current-line-style` over a cell of the cursor's row: its
+    /// colours where set, its attributes added.
+    CurrentLine,
 }
 
 /// What the last jump looked for (`jumptype`).
@@ -192,13 +199,16 @@ struct ScreenSel {
     /// `mode-keys` when copy mode was entered (`data->modekeys`).
     vi: bool,
     hidden: bool,
+    /// Columns left of this are never selected (`clipx`): the gutter of
+    /// the line numbers when the selection was set.
+    clipx: usize,
 }
 
 impl ScreenSel {
     /// `screen_check_selection` (screen.c:534-637).
     #[allow(clippy::similar_names)]
     fn contains(&self, px: usize, py: usize) -> bool {
-        if self.hidden {
+        if self.hidden || px < self.clipx {
             return false;
         }
         let (sx, sy, ex, ey) = (self.sx, self.sy, self.ex, self.ey);
@@ -1103,17 +1113,56 @@ impl CopyMode {
     /// search, row-major; empty without any. tmux's terminal shows those
     /// cells written, never erased with the blanks around them (reference
     /// tmux 3.8: the blank end of the mark's line is written as spaces in
-    /// `copy-mode-mark-style`).
+    /// `copy-mode-mark-style`). `numbers` is `copy-mode-line-numbers`:
+    /// with line numbers on, tmux writes every line into the mode's screen
+    /// and redraws the pane from it (`window_copy_redraw_lines`,
+    /// `PANE_REDRAW`), where only selected cells are always written
+    /// (`tty_draw_line_get_empty`), so the mark's blanks are erased.
     #[must_use]
-    pub fn selection_mask(&self, vi: bool) -> Vec<bool> {
+    pub fn selection_mask(&self, vi: bool, numbers: i64) -> Vec<bool> {
         let selection = self.sel.is_some_and(|s| !s.hidden);
-        if !selection && !self.show_mark && self.search.marks.is_none() {
+        let numbered = self.number_width(numbers) != 0;
+        if !selection && (numbered || (!self.show_mark && self.search.marks.is_none())) {
             return Vec::new();
         }
+        if numbered {
+            return (0..self.sy)
+                .flat_map(|y| (0..self.sx).map(move |x| self.selected(x, y)))
+                .collect();
+        }
+        let text = self.text_columns(numbers);
         (0..self.sy)
             .flat_map(|y| (0..self.sx).map(move |x| (x, y)))
-            .map(|(x, y)| self.selected(x, y) || self.paint_of(x, y, vi).is_some())
+            .map(|(x, y)| {
+                self.selected(x, y)
+                    || (text.contains(&x) && self.paint_of(x - text.start, y, vi).is_some())
+            })
             .collect()
+    }
+
+    /// The screen columns the text is drawn in (`window_copy_write_line`'s
+    /// `px` and `content_sx`): after the line numbers' gutter, at least one.
+    /// `numbers` is `copy-mode-line-numbers`.
+    #[must_use]
+    pub fn text_columns(&self, numbers: i64) -> std::ops::Range<usize> {
+        let width = self.number_width(numbers);
+        let first = width.min(self.sx - 1);
+        let n = if width >= self.sx { 1 } else { self.sx - width };
+        first..first + n
+    }
+
+    /// The number in the gutter of screen row `py` (window-copy.c:
+    /// 5450-5466): `default` counts from the view's offset, `absolute`
+    /// is the line in the history, `relative` the distance from the
+    /// cursor's row, `hybrid` relative but absolute on the cursor's row.
+    fn line_number(&self, numbers: i64, py: usize) -> usize {
+        let absolute = self.hsize() - self.oy + py + 1;
+        match self.line_number_mode(numbers) {
+            1 => py.abs_diff(self.oy),
+            2 => absolute,
+            4 if py == self.cy => absolute,
+            _ => py.abs_diff(self.cy),
+        }
     }
 
     /// How cell `(x, py)` of the view is painted before the selection
@@ -1132,29 +1181,52 @@ impl CopyMode {
     }
 
     /// The mode's screen (`window_copy_write_line` for every row, without
-    /// the indicator): the backing rows in view, `paint` applied to the
-    /// marked, matched and selected cells (`window_copy_update_style`,
-    /// `screen_select_cell`), and the cursor. `vi` is `mode-keys` now.
+    /// the indicator): the line numbers' gutter in their styles when on,
+    /// the backing rows in view after it, the cursor's row painted
+    /// [`Paint::CurrentLine`] and `paint` applied to the marked, matched
+    /// and selected cells (`window_copy_update_style`,
+    /// `screen_select_cell`), and the cursor. `vi` is `mode-keys` now,
+    /// `numbers` `copy-mode-line-numbers`.
     #[must_use]
-    pub fn screen(&self, vi: bool, paint: &dyn Fn(&mut Cell, Paint)) -> Snapshot {
+    pub fn screen(&self, vi: bool, numbers: i64, paint: &dyn Fn(&mut Cell, Paint)) -> Snapshot {
         let (sx, sy) = (self.sx, self.sy);
+        let width = self.number_width(numbers);
+        let text = self.text_columns(numbers);
+        let nx = text.len();
+        let blank = || Cell {
+            width: 1,
+            ..Cell::default()
+        };
         let mut cells = Vec::with_capacity(sx * sy);
         for py in 0..sy {
+            // screen_write_nputs: "%*u " in the gutter, cut at the edge.
+            if width != 0 {
+                let current = py == self.cy;
+                let label = format!("{:>w$} ", self.line_number(numbers, py), w = width - 1);
+                for ch in label.chars().take(width.min(sx)) {
+                    let mut c = Cell {
+                        text: ch.to_string().as_str().into(),
+                        width: 1,
+                        ..Cell::default()
+                    };
+                    paint(&mut c, Paint::LineNumber { current });
+                    cells.push(c);
+                }
+                // A gutter as wide as the pane: the text's one column
+                // goes over its last cell.
+                cells.truncate(py * sx + text.start);
+            }
             let row = self.row(self.abs(py));
             // Columns left of the TAB cell being drawn as spaces.
             let mut tab_left = 0;
-            for x in 0..sx {
-                let blank = || Cell {
-                    width: 1,
-                    ..Cell::default()
-                };
-                let mut c = row.cells.get(x).cloned().unwrap_or_else(blank);
+            for fx in 0..nx {
+                let mut c = row.cells.get(fx).cloned().unwrap_or_else(blank);
                 // window_copy_write_one: a TAB cell is written as its width
                 // in spaces and its padding is skipped; one cut by the edge
                 // is a single space.
                 if c.tab {
                     tab_left = usize::from(c.width);
-                    if x + tab_left > sx {
+                    if fx + tab_left > nx {
                         c = blank();
                     }
                 }
@@ -1169,13 +1241,16 @@ impl CopyMode {
                 }
                 // window_copy_write_one: a wide character cut by the edge is
                 // a space.
-                if c.width == 2 && x + 1 >= sx {
+                if c.width == 2 && fx + 1 >= nx {
                     c = blank();
                 }
-                if let Some(p) = self.paint_of(x, py, vi) {
+                if py == self.cy {
+                    paint(&mut c, Paint::CurrentLine);
+                }
+                if let Some(p) = self.paint_of(fx, py, vi) {
                     paint(&mut c, p);
                 }
-                if self.selected(x, py) {
+                if self.selected(text.start + fx, py) {
                     paint(&mut c, Paint::Selection);
                 }
                 cells.push(c);
@@ -1187,19 +1262,27 @@ impl CopyMode {
             rows: clamp(sy),
             cells,
             wrapped: vec![false; sy],
-            cursor: Some((clamp(self.cx.min(sx - 1)), clamp(self.cy.min(sy - 1)))),
+            cursor: Some((
+                clamp(self.offset_by(width, self.cx).min(sx - 1)),
+                clamp(self.cy.min(sy - 1)),
+            )),
             cursor_visible: true,
         }
     }
 
-    /// A cursor past the last column shows as `$` there, drawn last
-    /// (window-copy.c:5483-5487), in the selection's style if selected.
-    /// Written over the second half of a wide character, it clears the
-    /// character (`screen_write_overwrite`, screen-write.c:3007-3025), so
-    /// the screen says what the terminal shows and the character is drawn
-    /// again once the `$` goes.
-    pub fn mark_overflow(&self, screen: &mut Snapshot, paint: &dyn Fn(&mut Cell, Paint)) {
-        if self.cx < self.sx || self.cy >= self.sy {
+    /// A cursor past the last column of the text shows as `$` in the
+    /// pane's last column, drawn last (window-copy.c:5483-5487), in the
+    /// selection's style if selected. Written over the second half of a
+    /// wide character, it clears the character (`screen_write_overwrite`,
+    /// screen-write.c:3007-3025), so the screen says what the terminal
+    /// shows and the character is drawn again once the `$` goes.
+    pub fn mark_overflow(
+        &self,
+        screen: &mut Snapshot,
+        numbers: i64,
+        paint: &dyn Fn(&mut Cell, Paint),
+    ) {
+        if self.cx < self.text_columns(numbers).len() || self.cy >= self.sy {
             return;
         }
         let row = self.cy * self.sx;
@@ -1407,7 +1490,6 @@ impl CopyMode {
                 }
             }
             "recentre-top-bottom" => self.recentre_top_bottom(env),
-            // Line numbers are not drawn yet; the setting is kept.
             "line-numbers-on" => self.set_line_numbers(env, true, true),
             "line-numbers-off" => self.set_line_numbers(env, false, false),
             "line-numbers-toggle" => {
@@ -1692,6 +1774,14 @@ impl CopyMode {
             }
             return false;
         }
+        // window-copy.c:5939-5946: the selection is clear of the line
+        // numbers' gutter and its columns are where the text is drawn.
+        let clipx = self.line_number_width(env).min(self.sx - 1);
+        let (sx, ex) = if self.line_numbers_active(env.line_numbers) {
+            (self.cursor_offset(env, sx), self.cursor_offset(env, ex))
+        } else {
+            (sx, ex)
+        };
         self.sel = Some(ScreenSel {
             sx,
             sy,
@@ -1700,6 +1790,7 @@ impl CopyMode {
             rectangle: self.rectflag,
             vi: self.modekeys_vi,
             hidden: false,
+            clipx,
         });
         true
     }
@@ -1974,7 +2065,12 @@ impl CopyMode {
 
     /// `window_copy_line_number_width`: the columns line numbers take.
     fn line_number_width(&self, env: &Env) -> usize {
-        if !self.line_numbers_active(env.line_numbers) {
+        self.number_width(env.line_numbers)
+    }
+
+    /// [`Self::line_number_width`] under `copy-mode-line-numbers` `option`.
+    fn number_width(&self, option: i64) -> usize {
+        if !self.line_numbers_active(option) {
             return 0;
         }
         let mut lines = self.hsize() + self.sy + 1;
@@ -2003,7 +2099,11 @@ impl CopyMode {
 
     /// `window_copy_cursor_offset`: text column `cx` on screen.
     fn cursor_offset(&self, env: &Env, cx: usize) -> usize {
-        let width = self.line_number_width(env);
+        self.offset_by(self.line_number_width(env), cx)
+    }
+
+    /// [`Self::cursor_offset`] past a gutter `width` columns wide.
+    fn offset_by(&self, width: usize, cx: usize) -> usize {
         if width == 0 {
             return cx;
         }
@@ -3249,6 +3349,7 @@ impl CopyMode {
                 rectangle: s.rectangle,
                 vi: s.vi,
                 hidden: s.hidden,
+                clipx: n64(s.clipx),
             }),
             search_down: self.search.down,
             search_origin: self
@@ -3321,6 +3422,7 @@ impl CopyMode {
                 rectangle: s.rectangle,
                 vi: s.vi,
                 hidden: s.hidden,
+                clipx: us(s.clipx),
             }),
             selpos: pos_in(&r.selpos),
             endpos: pos_in(&r.endpos),
@@ -3462,7 +3564,7 @@ mod tests {
         cmd(&mut m, "history-top");
         t.feed(b"more\r\nand more\r\n");
         assert_eq!(m.cursor_line(), "line1");
-        let s = m.screen(false, &|_, _| {});
+        let s = m.screen(false, 0, &|_, _| {});
         assert_eq!(s.cell(0, 5).unwrap().text, "l");
         assert_eq!(s.cell(4, 5).unwrap().text, "6");
         cmd(&mut m, "history-bottom");
@@ -3702,6 +3804,55 @@ mod selection_tests {
     }
 
     /// A rectangle takes the same columns of every line.
+    /// `window_copy_write_line`: the gutter of relative numbers, the text
+    /// after it, the selection in screen columns clear of the gutter and
+    /// the cursor past it.
+    #[test]
+    fn line_numbers_draw_a_gutter() {
+        let e = Env {
+            line_numbers: 3,
+            ..env(true)
+        };
+        let mut m = mode("abcdef\r\nghijkl\r\n", true);
+        run(
+            &mut m,
+            &e,
+            &["history-top", "begin-selection", "cursor-down"],
+        );
+        let painted = |c: &mut Cell, p: Paint| {
+            if let Paint::LineNumber { current: true } | Paint::Selection = p {
+                c.style.bold = true;
+            }
+        };
+        let s = m.screen(true, 3, &painted);
+        let row = |y: usize| -> String {
+            s.cells[y * 20..y * 20 + 10]
+                .iter()
+                .map(|c| {
+                    if c.text.is_empty() {
+                        " ".into()
+                    } else {
+                        c.text.to_string()
+                    }
+                })
+                .collect()
+        };
+        assert_eq!(row(0), "  1 abcdef");
+        assert_eq!(row(1), "  0 ghijkl");
+        assert_eq!(row(2), "  1       ");
+        let bold: Vec<bool> = s.cells[20..30].iter().map(|c| c.style.bold).collect();
+        // The current number, then the selection up to the cursor's column.
+        assert_eq!(
+            bold,
+            [
+                true, true, true, true, true, false, false, false, false, false
+            ]
+        );
+        assert!(!s.cells[0].style.bold && s.cells[4].style.bold);
+        assert_eq!(s.cursor, Some((4, 1)));
+        assert!(!m.selection_mask(true, 3)[3]);
+    }
+
     #[test]
     fn rectangle_copies_columns() {
         let e = env(true);

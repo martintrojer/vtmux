@@ -631,6 +631,36 @@ fn the_start_binary_round_trips_and_defaults_to_empty() {
     assert_eq!(golden.server.start_binary, "");
 }
 
+/// A selection's `clipx` (the line numbers' gutter) came within v1: it
+/// round trips, and a stream without it decodes with no gutter.
+#[test]
+fn the_selection_clip_round_trips_and_defaults_to_none() {
+    fn clipx(s: &Snapshot) -> Vec<u64> {
+        s.panes
+            .iter()
+            .flat_map(|p| &p.modes)
+            .filter_map(|m| match m {
+                PaneMode::Copy(c) => c.sel.as_ref().map(|sel| sel.clipx),
+                _ => None,
+            })
+            .collect()
+    }
+    let mut s = sample();
+    assert_eq!(clipx(&s), [0]);
+    for p in &mut s.panes {
+        for m in &mut p.modes {
+            if let PaneMode::Copy(c) = m
+                && let Some(sel) = c.sel.as_mut()
+            {
+                sel.clipx = 4;
+            }
+        }
+    }
+    assert_eq!(clipx(&decode(&encode(&s)).unwrap()), [4]);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert_eq!(clipx(&golden), [0]);
+}
+
 #[test]
 fn page_names_hash_the_rows_not_the_compressed_bytes() {
     let rows = vec![sample_row(); 10];

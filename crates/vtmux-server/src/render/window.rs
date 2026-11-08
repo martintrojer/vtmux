@@ -558,11 +558,13 @@ impl Source<'_> {
         let (mut screen, selected) = match (top, top.and_then(crate::mode::Mode::as_copy)) {
             // Copy and view mode draw alike (window_copy_write_line).
             (_, Some(m)) => {
-                let vi = self
-                    .model
-                    .number_option(TreeId::Window(pane.window), "mode-keys")
-                    == 1;
-                (self.copy_screen(pane, m, ctx, caps), m.selection_mask(vi))
+                let wtree = TreeId::Window(pane.window);
+                let vi = self.model.number_option(wtree, "mode-keys") == 1;
+                let numbers = self.model.number_option(wtree, "copy-mode-line-numbers");
+                (
+                    self.copy_screen(pane, m, ctx, caps),
+                    m.selection_mask(vi, numbers),
+                )
             }
             (Some(m), _) if m.tree_kind().is_some() => {
                 (self.tree_screen(pane, m, caps), Vec::new())
@@ -644,8 +646,10 @@ impl Source<'_> {
     /// view, then `copy-mode-position-format` drawn over the top row in
     /// `copy-mode-position-style` unless hidden, then the `$` of a cursor
     /// past the last column. The mark's line and search matches take their
-    /// styles, selected cells `copy-mode-selection-style`.
-    /// Line numbers are not drawn yet.
+    /// styles, selected cells `copy-mode-selection-style`, the line
+    /// numbers in `copy-mode-line-number-style` and
+    /// `copy-mode-current-line-number-style`, and the cursor's line in
+    /// `copy-mode-current-line-style`.
     fn copy_screen(
         &self,
         pane: &crate::model::Pane,
@@ -665,9 +669,22 @@ impl Source<'_> {
             "copy-mode-current-match-style",
         ]
         .map(|name| theme.style(&self.style(wtree, name, ctx)));
+        let numbers = [
+            "copy-mode-line-number-style",
+            "copy-mode-current-line-number-style",
+        ]
+        .map(|name| theme.style(&self.style(wtree, name, ctx)));
+        let line = self.style(wtree, "copy-mode-current-line-style", ctx);
+        let line_style = theme.style(&line);
         let paint = |c: &mut vtmux_vt::Cell, p: Paint| {
             let (style, inverse) = match p {
                 Paint::Selection => return select_cell(&theme, &sel, c),
+                // style_apply on the default cell (window-copy.c:5444-5448).
+                Paint::LineNumber { current } => {
+                    c.style = numbers[usize::from(current)];
+                    return;
+                }
+                Paint::CurrentLine => return current_line_cell(&line, line_style, c),
                 Paint::Mark { inverse } => (styles[0], inverse),
                 Paint::Match { inverse } => (styles[1], inverse),
                 Paint::CurrentMatch { inverse } => (styles[2], inverse),
@@ -680,33 +697,38 @@ impl Source<'_> {
             }
         };
         let vi = self.model.number_option(wtree, "mode-keys") == 1;
-        let mut screen = m.screen(vi, &paint);
+        let line_numbers = self.model.number_option(wtree, "copy-mode-line-numbers");
+        let mut screen = m.screen(vi, line_numbers, &paint);
+        // The indicator goes after the line numbers, in the text's columns
+        // (window-copy.c:5476-5480).
+        let text = m.text_columns(line_numbers);
         // `s->rupper < s->rlower`: a screen of one row has no indicator.
         if m.shows_position() && screen.rows > 1 {
             let format = self.string(wtree, "copy-mode-position-format");
             let expanded = vtmux_core::format::expand_time(&format, ctx);
             if !expanded.is_empty() {
                 let base = self.style(wtree, "copy-mode-position-style", ctx);
-                let cols = usize::from(screen.cols);
                 let under = vec![
                     styled::Cell {
                         text: KEEP.into(),
                         width: 1,
                         style: base.clone(),
                     };
-                    cols
+                    text.len()
                 ];
                 let drawn = styled::draw_onto(&base, under, &expanded, false, false);
                 let first = drawn.cells.iter().position(|c| c.text != KEEP);
-                let last = first.and_then(|f| m.position_clip(f)).unwrap_or(usize::MAX);
+                let last = first
+                    .and_then(|f| m.position_clip(text.start + f))
+                    .map_or(usize::MAX, |l| l - text.start);
                 for (x, c) in drawn.cells.iter().enumerate().take(last.saturating_add(1)) {
                     if c.text != KEEP {
-                        screen.cells[x] = theme.cell(c);
+                        screen.cells[text.start + x] = theme.cell(c);
                     }
                 }
             }
         }
-        m.mark_overflow(&mut screen, &paint);
+        m.mark_overflow(&mut screen, line_numbers, &paint);
         screen
     }
 
@@ -846,6 +868,30 @@ pub fn cursor_of(
 /// `screen_select_cell` (screen.c:641-661): the selection style over a
 /// cell, its default colours the cell's own; `noattr` drops the cell's
 /// attributes, else they are added to the style's.
+/// window-copy.c `window_copy_update_style` (5141-5147): on the cursor's
+/// line, `copy-mode-current-line-style`'s colours replace the cell's where
+/// the style sets them and its attributes are added.
+fn current_line_cell(style: &CellStyle, themed: vtmux_vt::Style, c: &mut vtmux_vt::Cell) {
+    if style.fg != Colour::Default {
+        c.style.fg = themed.fg;
+    }
+    if style.bg != Colour::Default {
+        c.style.bg = themed.bg;
+    }
+    let s = &mut c.style;
+    s.bold |= themed.bold;
+    s.faint |= themed.faint;
+    s.italic |= themed.italic;
+    s.blink |= themed.blink;
+    s.inverse |= themed.inverse;
+    s.invisible |= themed.invisible;
+    s.strikethrough |= themed.strikethrough;
+    s.overline |= themed.overline;
+    if themed.underline != vtmux_vt::Underline::None {
+        s.underline = themed.underline;
+    }
+}
+
 fn select_cell(theme: &super::compose::Theme, sel: &CellStyle, c: &mut vtmux_vt::Cell) {
     use vtmux_core::style::Attrs;
     let default = |x: Colour| matches!(x, Colour::Default | Colour::Terminal);

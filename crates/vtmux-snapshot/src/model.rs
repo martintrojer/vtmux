@@ -548,6 +548,9 @@ record! {
         5 => one rectangle: bool,
         6 => one vi: bool,
         7 => one hidden: bool,
+        /// Columns left of this are never selected (`clipx`): the line
+        /// numbers' gutter when the selection was set.
+        8 => one clipx: u64,
     }
 }
 
@@ -1271,6 +1274,8 @@ pub(crate) mod tests {
                 rectangle: true,
                 vi: true,
                 hidden: true,
+                // Came within v1: the golden sample leaves it out.
+                clipx: 0,
             }),
             search_down: true,
             search_origin: Some((1, (2, 3))),

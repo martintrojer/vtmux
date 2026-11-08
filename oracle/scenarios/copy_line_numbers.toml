@@ -1,0 +1,88 @@
+# Line numbers in copy mode (window_copy_write_line): a gutter of
+# window_copy_line_number_width columns in copy-mode-line-number-style,
+# the cursor's line in copy-mode-current-line-number-style, the numbers as
+# copy-mode-line-numbers says (line-numbers-on with the option off: the
+# default numbers), the text and the indicator after the gutter, a cursor
+# past the narrower text as `$`, the selection offset and clipped to the
+# text (window_copy_set_selection), and copy-mode-current-line-style on the
+# cursor's line (window_copy_update_style).
+name = "copy_line_numbers"
+size = [40, 10]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "9", "sh", "-c", "i=1; while [ $i -le 14 ]; do echo line$i; i=$((i+1)); done; echo 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEF'; echo 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx世界'; echo 'end'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-g", "copy-mode-position-format", "#[align=right][#{copy_position}/#{copy_position_limit}]"] },
+  { attach = { session = "a" } },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-on"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{copy_line_numbers}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "3", "cursor-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "4", "scroll-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["set", "-g", "copy-mode-line-numbers", "absolute"] },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-down"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{copy_line_numbers}] [#{copy_position}/#{copy_position_limit}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["set", "-g", "copy-mode-line-numbers", "relative"] },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["set", "-g", "copy-mode-line-numbers", "hybrid"] },
+  { run = ["send-keys", "-t", "a", "-X", "history-bottom"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "3", "cursor-up"] },
+  { run = ["send-keys", "-t", "a", "-X", "end-of-line"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{copy_cursor_x},#{copy_cursor_y}] [#{copy_cursor_line}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "begin-selection"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "8", "cursor-left"] },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-up"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{selection_start_x},#{selection_start_y}] [#{selection_end_x},#{selection_end_y}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "rectangle-on"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "2", "cursor-up"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "clear-selection"] },
+  { run = ["set", "-g", "copy-mode-current-line-style", "bg=blue,underscore"] },
+  { run = ["send-keys", "-t", "a", "-X", "cursor-down"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # A drag in the text: the mouse's column less the gutter
+  # (window_copy_cursor_unoffset); the release counts with numbers on
+  # (window_copy_drag_release).
+  { run = ["set", "-g", "mouse", "on"] },
+  { keys = "\u001b[<0;9;2M\u001b[<32;10;2M\u001b[<32;13;4M\u001b[<0;14;4m" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_in_mode}] [#{selection_start_x},#{selection_start_y}] [#{selection_end_x},#{selection_end_y}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { run = ["show-buffer"] },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["send-keys", "-t", "a", "-X", "history-bottom"] },
+  { run = ["send-keys", "-t", "a", "-X", "-N", "6", "cursor-up"] },
+  { run = ["send-keys", "-t", "a", "-X", "line-numbers-toggle"] },
+  { settle = { react = true } },
+  { run = ["display", "-p", "-t", "a", "[#{copy_line_numbers}] [#{copy_position}/#{copy_position_limit}]"] },
+  { screen = {} },
+  { run = ["send-keys", "-t", "a", "-X", "cancel"] },
+  { settle = { react = true } },
+  { screen = {} },
+  # copy-mode -M from the shell (MouseDrag1Pane): a mouse entry has no line
+  # numbers whatever the option says (cmd-copy-mode.c:91-93).
+  { keys = "\u001b[<0;3;3M\u001b[<32;4;3M\u001b[<32;7;3M" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "a", "[#{pane_in_mode}] [#{copy_line_numbers}] [#{selection_present}] [#{copy_cursor_x},#{copy_cursor_y}]"] },
+  { screen = {} },
+  { keys = "\u001b[<0;7;3m" },
+  { settle = {} },
+  { run = ["display", "-p", "-t", "a", "#{pane_in_mode}"] },
+  { run = ["show-buffer"] },
+]
