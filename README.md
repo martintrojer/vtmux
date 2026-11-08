@@ -4,6 +4,19 @@
 
 A drop-in replacement for tmux 3.8, written in Rust on [libghostty-vt](https://github.com/ghostty-org/ghostty). Same CLI, config, formats, hooks and control mode, so your `.tmux.conf`, plugins and scripts work unchanged.
 
+## Install
+
+Grab the tarball for your platform from [Releases](https://github.com/martintrojer/vtmux/releases) (Linux x86_64 and aarch64, macOS 15+ on Apple silicon) and put it first on your PATH as `tmux`:
+
+```sh
+tar xzf vtmux-3.8-beta1-x86_64-linux.tar.gz
+mv vtmux-3.8-beta1-x86_64-linux/vtmux ~/.local/bin/tmux
+```
+
+As `tmux` it is tmux to every script and plugin (`tmux -V` prints `tmux 3.8`, sockets in `tmux-UID`). Keep the name `vtmux` to try it next to your tmux instead: own sockets, `vtmux -V` prints `vtmux 3.8-beta1`. On macOS, a browser download needs `xattr -d com.apple.quarantine` on the binary first.
+
+**Upgrade without losing a session:** put the new binary in place, then `tmux vtmux-upgrade` (or `tmux vtmux-upgrade -b <new binary>`). The running server moves onto it; panes and clients stay. See the [changelog](CHANGELOG.md).
+
 ## Compared with tmux 3.8
 
 Measured, not assumed: release builds against tmux 3.8 on the same host ([numbers and method](docs/PERFORMANCE.md)).
@@ -26,7 +39,7 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25'
 %endif
 ```
 
-**Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached. Opt-in `vtmux-persist` uses the same snapshot to bring sessions back after a crash or reboot, panes dead until `respawn-pane`; scrollback comes back once pane terminal state is carried ([spec](docs/specs/2026-11-06-live-upgrade.md); in progress).
+**Live upgrades.** `tmux vtmux-upgrade` swaps in a new binary under a running server. Your shells, editors and builds keep running; clients stay attached. Opt-in `vtmux-persist` uses the same snapshot to bring sessions back after a crash or reboot, with `full` their screens and scrollback too, panes dead until `respawn-pane` ([spec](docs/specs/2026-11-06-live-upgrade.md)).
 
 ## Also
 
@@ -36,6 +49,6 @@ set -g vtmux-pane-inactive-blend 'fg=bg/25'
 
 Compliance is checked against tmux's own regress suite and a behaviour oracle recorded from real tmux 3.8. Inside, it's idiomatic Rust: `unsafe` only at the FFI and OS boundary.
 
-**Status:** unreleased. M1 (daily use) is done: every tmux 3.8 command is implemented and the author uses vtmux as their tmux every day. M2 (live upgrade and persistence, then hardening from daily use) is in progress. See the [spec](docs/specs/2026-10-29-vtmux.md) and [how it works](docs/ARCHITECTURE.md).
+**Status:** beta, [3.8-beta1](CHANGELOG.md). M1 (daily use) is done: every tmux 3.8 command is implemented and the author uses vtmux as their tmux every day. M2 (live upgrade and persistence, then hardening from daily use) is in progress. See the [spec](docs/specs/2026-10-29-vtmux.md) and [how it works](docs/ARCHITECTURE.md).
 
 Linux first, macOS second: CI runs the full gate, including the tmux comparison suites, on both. ISC license.
