@@ -1,0 +1,19 @@
+# A window target with a leading = sets CMD_FIND_EXACT_WINDOW only (cmd-find.c:1130-1137), so when no window of the current session has that name, cmd_find_get_window tries it as a session (cmd-find.c:347-354) by name, prefix and pattern: neww -t =al and selectw -t =al reach session alpha, kill-window -t =al its current window. A grouped session renamed away from its group's name is still found by the prefix.
+name = "target_exact_window_as_session"
+steps = [
+  { run = ["new", "-d", "-s", "alpha", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "beta", "-n", "bw", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "=al", "-n", "x", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "=alpha", "-n", "y", "cat", "-"] },
+  { run = ["selectw", "-t", "=al"] },
+  { run = ["selectw", "-t", "=bw"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_name} #{window_active}"] },
+  { run = ["kill-window", "-t", "=al"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_name} #{window_active}"] },
+  { run = ["new", "-d", "-s", "g", "-n", "gw", "cat", "-"] },
+  { run = ["new", "-d", "-t", "g"] },
+  { run = ["rename", "-t", "g", "h"] },
+  { run = ["neww", "-d", "-t", "=g", "-n", "z", "cat", "-"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_name}"] },
+  { run = ["kill-server"] },
+]

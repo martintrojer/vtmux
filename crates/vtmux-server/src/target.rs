@@ -396,10 +396,20 @@ fn find_window(
     {
         return Some(f);
     }
-    if !only && let Some(s) = find_session(model, part) {
+    if !only && let Some(s) = find_session(model, &as_session(part)) {
         return Some(Found::from_session(model, s));
     }
     None
+}
+
+/// A window part tried as a session (cmd-find.c:347-348, 487-493): a
+/// leading `=` set `CMD_FIND_EXACT_WINDOW`, not `CMD_FIND_EXACT_SESSION`,
+/// so the session is found by prefix and pattern too.
+fn as_session(part: &Part) -> Part {
+    Part {
+        exact: false,
+        ..part.clone()
+    }
 }
 
 /// `cmd_find_get_pane_with_window` (cmd-find.c:579-660).
@@ -661,7 +671,7 @@ fn find_index_parts(
         return Ok(f);
     }
     if !parts.window_only
-        && let Some(s) = find_session(model, wp)
+        && let Some(s) = find_session(model, &as_session(wp))
     {
         return Ok(Found::from_session(model, s));
     }
