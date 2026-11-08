@@ -1,0 +1,625 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "view_shell_errors",
+  "inputs": {
+    "name": "view_shell_errors",
+    "size": [
+      50,
+      12
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "50",
+          "-y",
+          "11",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "v",
+          "-t",
+          "a:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:0.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:1.0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "printf 'display -p one\\nnosuchcmd x\\ndisplay -p two\\n' > \"$HOME/f.conf\""
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "printf 'display -p \"bad\\n' > \"$HOME/g.conf\""
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "S",
+          "source-file",
+          "-F",
+          "#{HOME}/f.conf"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "T",
+          "source-file",
+          "-F",
+          "#{HOME}/g.conf"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "U",
+          "source-file",
+          "-vF",
+          "#{HOME}/f.conf"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "W",
+          "run",
+          "-t",
+          "a:1",
+          "echo to-other-window"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "X",
+          "if",
+          "-F",
+          "1",
+          "nosuchcmd"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "Y",
+          "run",
+          "-C",
+          "display -p cmdout"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "Z",
+          "choose-tree"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u0002S"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "keys": "\u0002T"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002U"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "keys": "\u0002W"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:1",
+          "#{pane_mode}"
+        ]
+      },
+      {
+        "keys": "\u0002X"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "\u0002Y"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "keys": "\u0002Z"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "run",
+          "-t",
+          "a:0",
+          "echo over-tree"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "<TMP>/home/f.conf:2: unknown comman\\e[30m\\e[43m[0/0]",
+          "\\e[39m\\e[49msuchcmd",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "bad                                          \\e[30m\\e[43m[0/0]",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "bad                                          \\e[30m\\e[43m[0/0]",
+          "",
+          "\\e[39m\\e[49m<TMP>/home/f.conf:1: display-message -p",
+          "one",
+          "<TMP>/home/f.conf:2: unknown command: no",
+          "suchcmd",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "view-mode\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[43mUnknown command: nosuchcmd\\e[39m"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "cmdout                                       \\e[30m\\e[43m[0/0]",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 33,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39ma\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[30m\\e[43m(1) ├─→ - 0: w*: \"t\"\\e[39m",
+          "\\e[37m\\e[49m(2) │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t\"\\e[39m",
+          "\\e[37m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mv\\e[37m: \"t\"\\e[39m",
+          "\\e[37m(4)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 36,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "over-tree                                    \\e[30m\\e[43m[0/0]",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 38,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39ma\\e[37m: 2 windows (attached)\\e[39m",
+          "\\e[30m\\e[43m(1) ├─→ - 0: w*: \"t\"\\e[39m",
+          "\\e[37m\\e[49m(2) │   └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t\"\\e[39m",
+          "\\e[37m(3) └─→ \\e[31m-\\e[37m \\e[39m1\\e[37m: \\e[39mv\\e[37m: \"t\"\\e[39m",
+          "\\e[37m(4)     └─→ \\e[39m0\\e[37m: \\e[39mcat\\e[37m*: \"t\"\\e[39m",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m 1:v\\e[39m                                     \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

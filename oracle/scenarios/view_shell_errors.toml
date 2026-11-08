@@ -1,0 +1,54 @@
+# Config and shell commands from key bindings print through cmdq_print to
+# view mode on an attached client (server_client_print): a sourced file that
+# fails to parse prints its cause (cfg_print_causes from
+# cmd_source_file_complete_cb), one with an open quote at its end still
+# runs, -v prints each line before it runs; run -t on a pane in another
+# window puts that pane in view mode, not the client's; an error in the
+# commands if-shell -F picks is a status message; run -C output; run -t
+# over a pane in choose-tree goes to view mode over the tree, which shows
+# again once view mode is quit.
+name = "view_shell_errors"
+size = [50, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "11", "cat", "-"] },
+  { run = ["neww", "-d", "-n", "v", "-t", "a:1", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "a:0.0", "-T", "t"] },
+  { run = ["select-pane", "-t", "a:1.0", "-T", "t"] },
+  { run = ["run", "printf 'display -p one\\nnosuchcmd x\\ndisplay -p two\\n' > \"$HOME/f.conf\""] },
+  { run = ["run", "printf 'display -p \"bad\\n' > \"$HOME/g.conf\""] },
+  { run = ["bind", "S", "source-file", "-F", "#{HOME}/f.conf"] },
+  { run = ["bind", "T", "source-file", "-F", "#{HOME}/g.conf"] },
+  { run = ["bind", "U", "source-file", "-vF", "#{HOME}/f.conf"] },
+  { run = ["bind", "W", "run", "-t", "a:1", "echo to-other-window"] },
+  { run = ["bind", "X", "if", "-F", "1", "nosuchcmd"] },
+  { run = ["bind", "Y", "run", "-C", "display -p cmdout"] },
+  { run = ["bind", "Z", "choose-tree"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002S" },
+  { screen = {} },
+  { keys = "q" },
+  { keys = "\u0002T" },
+  { screen = {} },
+  { keys = "\u0002U" },
+  { screen = {} },
+  { keys = "q" },
+  { keys = "\u0002W" },
+  { screen = {} },
+  { run = ["display", "-p", "-t", "a:1", "#{pane_mode}"] },
+  { keys = "\u0002X" },
+  { screen = {} },
+  { keys = "\u0002Y" },
+  { screen = {} },
+  { keys = "q" },
+  { keys = "\u0002Z" },
+  { screen = {} },
+  { run = ["run", "-t", "a:0", "echo over-tree"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+  { keys = "q" },
+  { screen = {} },
+]

@@ -1,0 +1,42 @@
+# The lock command as the client runs it (server-fn.c server_lock_client;
+# client.c MSG_LOCK runs it with system(3), in the client's environment, so
+# no $TMUX, and answers MSG_UNLOCK whatever it returns): one that fails at
+# once unlocks at once and the client is redrawn; a lock over copy mode
+# comes back to copy mode; while the client is locked (CLIENT_SUSPENDED)
+# lock-session and lock-server skip it and #{client_flags} says
+# suspended; a status message up when the client locks is there again
+# after it.
+name = "lock_command_exits"
+size = [40, 8]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "7", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { keys = "abc\r" },
+  { screen = {} },
+  { run = ["set", "-g", "lock-command", "printf 'L1'; exit 3"] },
+  { run = ["bind", "L", "lock-client"] },
+  { keys = "\u0002L" },
+  { settle = { react = true, quiet_ms = 500 } },
+  { screen = {} },
+  { run = ["lsc", "-F", "#{client_session} #{client_flags}"] },
+  { run = ["copy-mode", "-t", "a"] },
+  { run = ["set", "-g", "lock-command", "printf 'L2 %s' \"$TMUX\" | cut -c1-6; read x"] },
+  { run = ["lock-session", "-t", "a"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["lock-session", "-t", "a"] },
+  { run = ["lock-server"] },
+  { run = ["display", "-p", "-t", "a", "#{client_flags}"] },
+  { keys = "\r" },
+  { settle = { react = true } },
+  { screen = {} },
+  { run = ["display-message", "-t", "a", "hello"] },
+  { run = ["lock-client"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\r" },
+  { settle = { react = true } },
+  { screen = {} },
+]

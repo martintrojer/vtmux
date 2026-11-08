@@ -1,0 +1,61 @@
+# Background shell commands from key bindings, with no item to report to
+# (cmd-if-shell.c cmd_if_shell_callback, cmd-run-shell.c
+# cmd_run_shell_timer): a parse error in the commands they pick is a status
+# message with its first letter upper-cased; run -b output goes to view
+# mode on the client's active pane, its exit status after it. A missing
+# source-file is a status message. Keys typed while a binding's wait-for
+# holds the client's queue wait behind it (server_client_key_callback is
+# queued), for a channel or an event (-E); run -E shows stderr too.
+name = "shell_bindings_background"
+size = [50, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "50", "-y", "11", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "R"] },
+  { run = ["set", "-g", "display-time", "0"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["bind", "A", "if", "-b", "false", "display -p x", "bogus"] },
+  { run = ["bind", "B", "run", "-b", "-C", "nosuchcmd"] },
+  { run = ["bind", "C", "run", "-b", "echo bgline; exit 2"] },
+  { run = ["bind", "E", "source-file", "/nonexistent/x.conf"] },
+  { run = ["bind", "W", "wait-for", "ch"] },
+  { run = ["bind", "V", "if", "true", "display -p yes", "display -p no"] },
+  { run = ["bind", "K", "run", "-E", "echo out; echo err >&2"] },
+  { run = ["bind", "M", "wait-for", "-E", "window-renamed"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { keys = "\u0002A" },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u0002B" },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u0002C" },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "q" },
+  { keys = "\u0002E" },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u0002W" },
+  { settle = {} },
+  { keys = "xyz\r" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["wait-for", "-S", "ch"] },
+  { settle = { react = true } },
+  { screen = {} },
+  { keys = "\u0002V" },
+  { screen = {} },
+  { keys = "q" },
+  { keys = "\u0002K" },
+  { screen = {} },
+  { keys = "q" },
+  { keys = "\u0002M" },
+  { settle = {} },
+  { keys = "abc\r" },
+  { settle = {} },
+  { screen = {} },
+  { run = ["rename-window", "-t", "a:0", "nn"] },
+  { settle = { react = true } },
+  { screen = {} },
+]
