@@ -1,0 +1,7 @@
+kind=format
+cols=30
+rows=6
+bytes=abc\ndef\033[?40h\033[?3hX\033[?3l
+format=#{cursor_y}
+command=new-session -d -x 30 -y 6 'sh -c 'printf '"'"'abc\ndef\033[?40h\033[?3hX\033[?3l'"'"'; $REF wait-for -S ready; exec cat'' ; wait-for ready ; display-message -p -t 0 '#{cursor_y}'
+expected=0\n

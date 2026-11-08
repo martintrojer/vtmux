@@ -1,0 +1,45 @@
+diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
+index d65491550..8735570b1 100644
+--- a/src/terminal/stream_terminal.zig
++++ b/src/terminal/stream_terminal.zig
+@@ -2036,10 +2036,12 @@ pub const Handler = struct {
+ 
+             .enable_mode_3 => {},
+ 
+-            .@"132_column" => try self.terminal.deccolm(
+-                self.terminal.screens.active.alloc,
+-                if (enabled) .@"132_cols" else .@"80_cols",
+-            ),
++            // vtmux: tmux has no 132-column mode, with or without DEC
++            // mode 40 (input.c input_csi_dispatch_sm_private and _rm_private
++            // home the cursor and clear the screen, which vtmux's
++            // PaneTerm::deccolm does). Upstream resized the grid to 132 or
++            // 80 columns under mode 40, behind the pane's back.
++            .@"132_column" => {},
+ 
+             // Handled above
+             .synchronized_output => unreachable,
+@@ -2807,6 +2809,23 @@ test "basic print" {
+     try testing.expectEqualStrings("Hello", str);
+ }
+ 
++test "DECCOLM never resizes, with DEC mode 40 or without (vtmux)" {
++    var t: Terminal = try .init(testing.io, testing.allocator, .{ .cols = 30, .rows = 6 });
++    defer t.deinit(testing.allocator);
++
++    var s: Stream = .init(.{ .allocator = testing.allocator, .handler = .init(&t) });
++    defer s.deinit();
++
++    s.nextSlice("abc\r\ndef\x1b[?40h\x1b[?3h");
++    try testing.expectEqual(@as(usize, 30), t.cols);
++    s.nextSlice("\x1b[?40;3l");
++    try testing.expectEqual(@as(usize, 30), t.cols);
++
++    const str = try t.plainString(testing.allocator);
++    defer testing.allocator.free(str);
++    try testing.expectEqualStrings("abc\ndef", str);
++}
++
+ test "semantic failure is sticky while processing continues" {
+     var failing = testing.FailingAllocator.init(testing.allocator, .{});
+     const alloc = failing.allocator();

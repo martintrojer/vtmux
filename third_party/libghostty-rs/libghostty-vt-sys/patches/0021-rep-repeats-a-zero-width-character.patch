@@ -1,0 +1,71 @@
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 206828b27..1fe6f925d 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -1308,6 +1308,13 @@ pub fn print(self: *Terminal, c: u21) !void {
+         return;
+     }
+ 
++    // vtmux: REP repeats the last character printed, a zero-width one
++    // too (one that joins the previous cell or is dropped): tmux keeps
++    // every character it prints as `ictx->last` (input.c input_print,
++    // input_top_bit_set) and INPUT_CSI_REP writes that one again.
++    // Upstream kept only characters that take a cell.
++    self.previous_char = c;
++
+     // After doing any printing, wrapping, scrolling, etc. we want to ensure
+     // that our screen remains in a consistent state.
+     defer self.screens.active.assertIntegrity();
+@@ -1585,9 +1592,6 @@ pub fn print(self: *Terminal, c: u21) !void {
+         return;
+     }
+ 
+-    // We have a printable character, save it
+-    self.previous_char = c;
+-
+     if (self.screens.active.cursor.pending_wrap) {
+         if (self.modes.get(.wraparound)) {
+             try self.printWrap();
+@@ -16276,6 +16280,26 @@ test "Terminal: printRepeat stops at the end of the line (vtmux)" {
+     }
+ }
+ 
++test "Terminal: printRepeat repeats a zero-width character (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    var t = try init(io_impl, alloc, .{ .rows = 5, .cols = 10 });
++    defer t.deinit(alloc);
++
++    // tmux: `e`, U+0301, REP 2, `|` is one cell with three accents.
++    try t.print('e');
++    try t.print(0x301);
++    try t.printRepeat(2);
++    try t.print('|');
++    try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.x);
++
++    {
++        const str = try t.plainString(testing.allocator);
++        defer testing.allocator.free(str);
++        try testing.expectEqualStrings("e\u{301}\u{301}\u{301}|", str);
++    }
++}
++
+ test "Terminal: printRepeat no previous character" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+diff --git a/src/terminal/snapshot/testdata/kitty-virtual-v1.hex b/src/terminal/snapshot/testdata/kitty-virtual-v1.hex
+index 0cd2ad312..36b8ae7bd 100644
+--- a/src/terminal/snapshot/testdata/kitty-virtual-v1.hex
++++ b/src/terminal/snapshot/testdata/kitty-virtual-v1.hex
+@@ -10,9 +10,9 @@
+ 47 48 4f 53 54 53 4e 50 01 00 # 0x00000000
+ 
+ # offset 0x0000000a: terminal record, payload 912 bytes
+-01 00 90 03 00 00 df fb 9f df 04 00 02 00 28 00 # 0x0000000a
++01 00 90 03 00 00 ec 3e 24 51 04 00 02 00 28 00 # 0x0000000a
+ 00 00 28 00 00 00 00 00 01 00 00 00 03 00 00 00 # 0x0000001a
+-00 01 00 ee ee 10 00 01 01 01 00 00 00 00 00 08 # 0x0000002a
++00 01 00 0d 03 00 00 01 01 01 00 00 00 00 00 08 # 0x0000002a
+ 00 04 22 00 64 00 00 00 00 04 22 00 64 00 00 00 # 0x0000003a
+ 00 04 22 00 64 00 00 00 00 00 00 00 00 00 00 00 # 0x0000004a
+ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 # 0x0000005a

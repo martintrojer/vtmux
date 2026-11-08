@@ -616,6 +616,30 @@ Recorded per commit in git history; the list is kept current:
   single` fails in each test binary. Not an upstream candidate (tmux's
   model).
 
+- `patches/0021-rep-repeats-a-zero-width-character.patch` (`Terminal.zig`
+  `print`): REP repeats the last character printed, a zero-width one too.
+  tmux keeps every character it prints as `ictx->last` (input.c
+  `input_print`, `input_top_bit_set`), and `INPUT_CSI_REP` writes it again:
+  `e`, U+0301, `CSI 2 b`, `|` is one cell with three accents and `|` in
+  column 1. Upstream set `previous_char` only for a character that takes a
+  cell, so it repeated `e`. `print` now sets it before anything else. The
+  Ghostty snapshot fixture `kitty-virtual-v1.hex` records the previous
+  character, now the last combining mark (`snapshot/testdata`, regenerated
+  from its test's candidate; vtmux does not use that codec). Test:
+  `Terminal: printRepeat repeats a zero-width character (vtmux)` (fails
+  without the change). Not an upstream candidate as is (xterm repeats the
+  last graphic character).
+
+- `patches/0022-deccolm-never-resizes.patch` (`stream_terminal.zig`): DECCOLM
+  (`?3h`/`?3l`) never resizes the grid. With DEC mode 40 set first, upstream
+  resized it to 132 or 80 columns behind the pane's back and cleared it
+  without history; tmux has no 132-column mode and ignores mode 40
+  (input.c `input_csi_dispatch_sm_private`, `_rm_private` home the cursor
+  and clear the screen, which vtmux's `PaneTerm::deccolm` does, into history
+  under `scroll-on-clear`). Test: `DECCOLM never resizes, with DEC mode 40
+  or without (vtmux)` (fails without the change). Not an upstream
+  candidate.
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

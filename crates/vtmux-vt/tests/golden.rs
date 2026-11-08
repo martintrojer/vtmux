@@ -256,6 +256,12 @@ golden! {
     #[ignore = "D-pending: P2 tmux reflow of a pending-wrap wide line leaves the cursor at 4,3 with history_size 6; Ghostty at 2,4 with history_size 4"]
     fmt_reflow_pending_wrap_wide_history_size,
     fmt_zwj_cursor_x,
+    cap_rep_after_combining,
+    fmt_rep_after_combining_cursor_x,
+    cap_deccolm_mode_40,
+    fmt_deccolm_mode_40_history_size,
+    fmt_deccolm_mode_40_cursor_x,
+    fmt_deccolm_mode_40_cursor_y,
     cap_ed3_alt,
     fmt_ed3_alt,
     cap_ed3_alt_exit,
