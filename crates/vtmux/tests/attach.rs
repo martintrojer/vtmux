@@ -4190,6 +4190,81 @@ fn set_titles_emits_the_expanded_string_once_per_change() {
     assert_eq!(all[0].last().unwrap(), &want);
 }
 
+/// The working directories the client wrote to its terminal so far
+/// (`Swd` `path` `fsl` with the `osc7` feature's `\e]7;` and BEL).
+fn paths(a: &Attached) -> Vec<String> {
+    a.text()
+        .split("\x1b]7;")
+        .skip(1)
+        .filter_map(|rest| rest.split_once('\x07').map(|(p, _)| p.to_owned()))
+        .collect()
+}
+
+/// server-client.c `server_client_set_path` (2638-2655): with `set-titles`
+/// on, a redraw also writes the working directory of the session's active
+/// pane (its program's OSC 7, empty without one) between `Swd` and `fsl`,
+/// which the `osc7` feature gives (tty-features.c:63-66), unless it is the
+/// path last written. Each step ends on a new title, written in the same
+/// redraw, so a path that is not written is seen not to be. Compared raw
+/// against tmux 3.8.
+#[test]
+fn set_titles_writes_the_active_pane_path() {
+    let steps: &[(&[&str], &str)] = &[
+        (
+            &[
+                "send-keys",
+                "-t",
+                "%0",
+                "-l",
+                "\x1b]7;file://h/tmp/x\x1b\\\r",
+            ],
+            "",
+        ),
+        (&["rename-window", "w1"], "Tw1"),
+        (&["new-window", "-n", "n2", "cat", "-"], "Tn2"),
+        (&["select-window", "-t", ":0"], "Tw1"),
+        // The same path again: only the title.
+        (&["rename-window", "w2"], "Tw2"),
+    ];
+    let mut all = Vec::new();
+    for bin in bins() {
+        let w = World::new(bin);
+        for args in [
+            &[
+                "new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "10", "cat", "-",
+            ][..],
+            &["set", "-s", "terminal-features[9]", "xterm*:osc7"],
+            &["set", "-g", "set-titles", "on"],
+            &["set", "-g", "set-titles-string", "T#W"],
+        ] {
+            assert!(w.cli(args).status.success(), "{args:?}");
+        }
+        let mut a = w.attach(&["attach", "-t", "a"]);
+        a.wait(|a| titles(a).last().is_some_and(|t| t == "Tw"));
+        let mut seen = vec![paths(&a)];
+        for (step, title) in steps {
+            assert!(w.cli(step).status.success(), "{step:?}");
+            if title.is_empty() {
+                a.wait(|a| paths(a).len() == 2);
+            } else {
+                a.wait(|a| titles(a).last().is_some_and(|t| t == title));
+            }
+            seen.push(paths(&a));
+        }
+        a.keys(b"\x02d");
+        a.exited(0);
+        all.push(seen);
+    }
+    assert_eq!(all[0], all[1], "vtmux (left) vs tmux 3.8 (right)");
+    let x = "file://h/tmp/x";
+    assert_eq!(
+        all[1].last().unwrap(),
+        &["", x, "", x].map(str::to_owned),
+        "{:?}",
+        all[1]
+    );
+}
+
 /// `tty_set_title` needs `tsl` and `fsl`: `terminal-features` without
 /// `title` writes no title at all, and `title` on `TERM=xterm-256color`
 /// is what the default `xterm*` entry gives.

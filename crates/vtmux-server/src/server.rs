@@ -199,6 +199,9 @@ pub(crate) struct Client {
     /// `c->title`: the last title written to the terminal, so an
     /// unchanged one is not written again.
     title: Option<String>,
+    /// `c->path`: the last working directory written to the terminal
+    /// (`set-titles`, OSC 7), likewise.
+    path: Option<String>,
     /// The title the terminal shows from this client's output: the last
     /// written by `set-titles` or by a pane's passthrough (an OSC 0 or 2
     /// in a `DCS tmux;` payload). A re-attach after a live upgrade gives
@@ -273,6 +276,7 @@ impl Client {
             reported: crate::term_queries::Reported::default(),
             cell_pixels: (0, 0),
             title: None,
+            path: None,
             terminal_title: None,
             term_replies: Vec::new(),
             written: 0,
@@ -3140,8 +3144,8 @@ impl Server {
                 .compositor
                 .frame_tagged(screen, tags, caps);
             self.add_outer_mouse_modes(id, &mut frame);
-            if redrawing && let Some(title) = self.client_title(id, s) {
-                frame.splice(0..0, title);
+            if redrawing {
+                frame.splice(0..0, self.client_title_and_path(id, s));
             }
             if !frame.is_empty() {
                 self.send(id, &ServerMsg::Frame(frame));
@@ -3523,6 +3527,33 @@ impl Server {
         let bytes = client.term.as_ref()?.set_title(&title)?;
         client.terminal_title = Some(title);
         Some(bytes)
+    }
+
+    /// server-client.c:2588-2592: on a redraw, the title, then the path.
+    fn client_title_and_path(&mut self, id: ClientId, s: SessionId) -> Vec<u8> {
+        let mut bytes = self.client_title(id, s).unwrap_or_default();
+        bytes.extend(self.client_path(id, s).unwrap_or_default());
+        bytes
+    }
+
+    /// `server_client_set_path` (server-client.c:2638-2655), with
+    /// `set-titles` on: the working directory of the session's active pane
+    /// (OSC 7 from its program, empty without one), as `tty_set_path`
+    /// writes it (`Swd`, from the `osc7` feature) unless it is the path
+    /// last written.
+    fn client_path(&mut self, id: ClientId, s: SessionId) -> Option<Vec<u8>> {
+        if self.model.number_option(TreeId::Session(s), "set-titles") == 0 {
+            return None;
+        }
+        let (_, _, p) = self.model.current_of(s)?;
+        let path = self.model.panes.get(&p)?.term.pwd();
+        let client = self.clients.get_mut(&id)?;
+        if client.path.as_deref() == Some(path.as_str()) {
+            return None;
+        }
+        let bytes = client.term.as_ref()?.set_path(&path);
+        client.path = Some(path);
+        bytes
     }
 
     /// Session `s`'s current window composed into rows

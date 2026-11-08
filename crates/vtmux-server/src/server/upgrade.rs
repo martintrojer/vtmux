@@ -1001,6 +1001,7 @@ impl Server {
         c.decoder.set_queries(queries);
         c.mouse = crate::mouse::ClientMouse::default();
         c.title = None;
+        c.path = None;
         c.passthrough.clear();
         c.pasting = false;
         c.window_cache = crate::render::WindowCache::default();

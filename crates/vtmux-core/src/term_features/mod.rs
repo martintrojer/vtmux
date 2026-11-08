@@ -716,6 +716,15 @@ impl Term {
         Some([tsl, title, fsl].concat().into_bytes())
     }
 
+    /// `tty_set_path` (tty.c:755-764): `Swd`, the path and `fsl`, or
+    /// `None` when the terminal lacks either.
+    #[must_use]
+    pub fn set_path(&self, path: &str) -> Option<Vec<u8>> {
+        let swd = self.string("Swd")?;
+        let fsl = self.cap_string(Cap::Fsl)?;
+        Some([swd, path, fsl].concat().into_bytes())
+    }
+
     /// `TERM_RGBCOLOURS`.
     #[must_use]
     pub fn rgb(&self) -> bool {
@@ -780,6 +789,10 @@ impl Term {
                 self.other.retain(|c| !is_function_key(c));
             }
             self.other.extend(feature.other_caps());
+            // tty-features.c:63-66: `Swd=\E]7;`, replacing the terminal's.
+            if feature == Feature::Osc7 {
+                self.values.insert("Swd", "\x1b]7;".to_owned());
+            }
             if matches!(feature, Feature::Colours256 | Feature::Rgb) {
                 self.colours256 = true;
             }
