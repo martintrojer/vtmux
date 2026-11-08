@@ -130,6 +130,29 @@ fn an_auto_hide_scrollbar_round_trips() {
     );
 }
 
+/// A pane's output generation and OSC 133 command state, added within v1
+/// as ignorable fields (an older reader starts them afresh), round-trip;
+/// the golden stream has none.
+#[test]
+fn a_panes_shell_commands_round_trip() {
+    let mut s = sample();
+    s.panes[0].output_generation = 42;
+    s.panes[0].last_prompt_time = Some(1_790_000_100);
+    s.panes[0].command_start_time = Some(1_790_000_101);
+    s.panes[0].command_end_time = Some(1_790_000_104);
+    s.panes[0].command_status = Some(255);
+    s.panes[1].command_start_time = Some(1_790_000_200);
+    s.panes[1].command_running = true;
+    assert_eq!(decode(&encode(&s)).unwrap(), s);
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert!(golden.panes.iter().all(|p| p.output_generation == 0
+        && p.last_prompt_time.is_none()
+        && p.command_start_time.is_none()
+        && p.command_end_time.is_none()
+        && !p.command_running
+        && p.command_status.is_none()));
+}
+
 /// Where a client terminal's queries stand, added within v1, round-trips,
 /// required or not ([`TERM_QUERIES_FEATURE`], which the builds before it
 /// was ignorable listed); the golden stream has none.

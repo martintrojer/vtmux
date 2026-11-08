@@ -622,6 +622,17 @@ record! {
         34 => one scrollbar_visible: bool,
         35 => one scrollbar_hover: bool,
         36 => opt scrollbar_hide_in_ms: Option<u64>,
+        /// `#{pane_output_generation}`: how many times output was parsed
+        /// into it. Ignorable, as are the OSC 133 fields after it.
+        37 => one output_generation: u64,
+        /// What OSC 133 said of the shell (input.c `input_osc_133`), epoch
+        /// seconds: the last prompt, the last command's start and end,
+        /// whether it runs, and its exit status.
+        38 => opt last_prompt_time: Option<i64>,
+        39 => opt command_start_time: Option<i64>,
+        40 => opt command_end_time: Option<i64>,
+        41 => one command_running: bool,
+        42 => opt command_status: Option<u8>,
     }
 }
 
@@ -1355,6 +1366,13 @@ pub(crate) mod tests {
             scrollbar_visible: false,
             scrollbar_hover: false,
             scrollbar_hide_in_ms: None,
+            // Added within v1 too (a_panes_shell_commands_round_trip).
+            output_generation: 0,
+            last_prompt_time: None,
+            command_start_time: None,
+            command_end_time: None,
+            command_running: false,
+            command_status: None,
         }
     }
 

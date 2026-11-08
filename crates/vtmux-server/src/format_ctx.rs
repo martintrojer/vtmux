@@ -784,6 +784,19 @@ impl<'a> Ctx<'a> {
                 }
             },
             "pane_dead_time" => p.dead_time?.to_string(),
+            // format_cb_pane_output_generation (format.c:2329-2340).
+            "pane_output_generation" => p.output_generation.to_string(),
+            // format_cb_pane_last_prompt_time and the pane_command_*
+            // callbacks (format.c:2342-2426): nothing until OSC 133 says.
+            "pane_last_prompt_time" => p.shell_commands.last_prompt?.to_string(),
+            "pane_command_start_time" => p.shell_commands.started?.to_string(),
+            "pane_command_end_time" => p.shell_commands.ended?.to_string(),
+            "pane_command_running" => flag(p.shell_commands.running),
+            "pane_command_duration" => p
+                .shell_commands
+                .duration(crate::model::now_epoch())?
+                .to_string(),
+            "pane_command_status" => p.shell_commands.status?.to_string(),
             "pane_start_command" => crate::names::stringify_argv(&p.argv),
             // format_cb_start_command_list: each word single-quoted for sh.
             "pane_start_command_list" => p
@@ -1248,6 +1261,9 @@ impl FormatContext for Ctx<'_> {
             "session_last_attached" => self.session().and_then(|s| s.last_attached),
             "window_activity" => self.window().map(|w| w.activity_secs),
             "pane_dead_time" => self.pane().and_then(|p| p.dead_time),
+            "pane_last_prompt_time" => self.pane().and_then(|p| p.shell_commands.last_prompt),
+            "pane_command_start_time" => self.pane().and_then(|p| p.shell_commands.started),
+            "pane_command_end_time" => self.pane().and_then(|p| p.shell_commands.ended),
             "client_activity" => self.client.as_ref().map(|c| c.activity_secs),
             "client_created" => self.client.as_ref().map(|c| c.created_secs),
             "buffer_created" => {

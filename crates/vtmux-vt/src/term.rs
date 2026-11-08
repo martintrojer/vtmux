@@ -271,11 +271,10 @@ pub struct PaneTerm {
     /// What the program's input asks back, in input order: Ghostty's
     /// replies as tmux words them, and what only the server can answer.
     replies: Rc<RefCell<Vec<Reply>>>,
-    /// BELs seen since the last [`PaneTerm::take_bells`] (input.c
-    /// `input_c0_dispatch`, `case '\007'`).
-    bells: Rc<std::cell::Cell<u32>>,
-    /// The server's title over Ghostty's, and the program's title changes
-    /// since the last [`PaneTerm::take_title_events`].
+    /// What the program's output did that the server reports, since the
+    /// last [`PaneTerm::take_events`], in input order.
+    events: Rc<RefCell<Events>>,
+    /// The server's title over Ghostty's, and tmux's title stack.
     titles: Rc<RefCell<Titles>>,
     history_lines: usize,
     /// tmux's `GRID_HISTORY`: the pane was made with a non-zero limit
@@ -451,8 +450,9 @@ impl PaneTerm {
         let mouse = Rc::new(StdCell::new(MouseModes::default()));
         let mouse_seen = Rc::clone(&mouse);
         let mouse_scan = Rc::clone(&mouse);
-        let bells = Rc::new(std::cell::Cell::new(0u32));
-        let belled = Rc::clone(&bells);
+        let events = Rc::new(RefCell::new(Events::default()));
+        let belled = Rc::clone(&events);
+        let retitled_events = Rc::clone(&events);
         let titles = Rc::new(RefCell::new(Titles::default()));
         let retitled = Rc::clone(&titles);
         let registered = term
@@ -485,8 +485,10 @@ impl PaneTerm {
                     })
                 })
             })
-            .and_then(|t| t.on_title_changed(move |term| Titles::program(&retitled, term)))
-            .and_then(|t| t.on_bell(move |_| belled.set(belled.get().saturating_add(1))))
+            .and_then(|t| {
+                t.on_title_changed(move |term| Titles::program(&retitled, &retitled_events, term))
+            })
+            .and_then(|t| t.on_bell(move |_| belled.borrow_mut().push(TermEvent::Bells(1))))
             // XTVERSION: `DCS > | tmux 3.8 ST` (input.c:1885-1890).
             .and_then(|t| t.on_xtversion(|_| Some("tmux 3.8")))
             // XTWINOPS 14/16/18 t (input.c:2160-2183) with tmux's default
@@ -517,7 +519,7 @@ impl PaneTerm {
         let mut pane = Self {
             term,
             replies,
-            bells,
+            events,
             titles,
             history_lines,
             history: history_lines > 0,
@@ -810,6 +812,17 @@ impl PaneTerm {
             && let Some(payload) = self.scan.osc133.take()
         {
             self.mark_cursor_line(&payload);
+            // input_osc_133 (input.c:3289-3328): the pane's events, on
+            // either screen.
+            let event = match payload.first() {
+                Some(b'A' | b'N') => Some(TermEvent::Prompt),
+                Some(b'C') => Some(TermEvent::CommandStarted),
+                Some(b'D') => Some(TermEvent::CommandFinished(osc133_exit_status(&payload))),
+                _ => None,
+            };
+            if let Some(event) = event {
+                self.events.borrow_mut().push(event);
+            }
         }
         if e == ScanEvent::TitleStack {
             for push in std::mem::take(&mut self.scan.title_ops) {
@@ -1878,11 +1891,11 @@ impl PaneTerm {
             .unwrap_or_default()
     }
 
-    /// The title changes the program made since the last call (OSC 0/2,
-    /// and every `CSI 23 t`), each with the title it reported, oldest
-    /// first (`input_fire_pane_title_changed`, input.c:795-809).
-    pub fn take_title_events(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.titles.borrow_mut().events)
+    /// What the program's output did since the last call that the server
+    /// reports (title changes, BELs, OSC 133 prompts and commands), oldest
+    /// first, as tmux fires them while it parses (`input_parse_buffer`).
+    pub fn take_events(&mut self) -> Vec<TermEvent> {
+        std::mem::take(&mut self.events.borrow_mut().list)
     }
 
     /// `CSI 22 t` (`push`) or `CSI 23 t` (input.c:2187-2212). A push keeps
@@ -1903,7 +1916,7 @@ impl PaneTerm {
         }
         drop(titles);
         let title = self.title();
-        self.titles.borrow_mut().event(&title);
+        self.events.borrow_mut().push(TermEvent::Title(title));
     }
 
     /// Set the title from the server side (`select-pane -T`,
@@ -2259,11 +2272,6 @@ impl PaneTerm {
     /// (see the `redraw` field).
     pub fn take_redraw(&mut self) -> bool {
         std::mem::take(&mut self.redraw)
-    }
-
-    /// How many BELs the program wrote since the last call.
-    pub fn take_bells(&mut self) -> u32 {
-        self.bells.replace(0)
     }
 
     /// The pane's `cursor-style` option (0..=6): what DECRQSS and DECRQM 12
@@ -2724,9 +2732,47 @@ fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
     Some(out)
 }
 
-/// Title events kept for [`PaneTerm::take_title_events`]; older ones are
-/// dropped from a terminal nobody drains.
-const MAX_TITLE_EVENTS: usize = 64;
+/// Events kept for [`PaneTerm::take_events`]; older ones are dropped from
+/// a terminal nobody drains (a popup's).
+const MAX_EVENTS: usize = 1024;
+
+/// Something a pane's program did that the server reports
+/// ([`PaneTerm::take_events`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TermEvent {
+    /// An OSC 0/2 title or a `CSI 23 t` pop, with the title it reported
+    /// (`input_fire_pane_title_changed`, input.c:795-809).
+    Title(String),
+    /// This many BELs in a row (input.c `input_c0_dispatch`, `case '\007'`).
+    Bells(u32),
+    /// `OSC 133;A` or `N`: a shell prompt starts (`pane-shell-prompt`).
+    Prompt,
+    /// `OSC 133;C`: a command starts (`pane-command-started`).
+    CommandStarted,
+    /// `OSC 133;D`: a command finished, with its exit status
+    /// (`input_osc_133_exit_status`; `pane-command-finished`).
+    CommandFinished(u8),
+}
+
+/// The events not yet taken, BELs in a row counted in one.
+#[derive(Debug, Default)]
+struct Events {
+    list: Vec<TermEvent>,
+}
+
+impl Events {
+    fn push(&mut self, event: TermEvent) {
+        if let (TermEvent::Bells(n), Some(TermEvent::Bells(last))) = (&event, self.list.last_mut())
+        {
+            *last = last.saturating_add(*n);
+            return;
+        }
+        if self.list.len() >= MAX_EVENTS {
+            self.list.remove(0);
+        }
+        self.list.push(event);
+    }
+}
 
 /// A pane's title as tmux keeps it, beside Ghostty's.
 #[derive(Debug, Default)]
@@ -2735,9 +2781,6 @@ struct Titles {
     /// keeping the old one); the next OSC 0/2 from the program replaces it,
     /// as both write the one `s->title`.
     server: Option<String>,
-    /// Each title change from the program, with the title it reported
-    /// (`input_fire_pane_title_changed`), oldest first.
-    events: Vec<String>,
     /// tmux's title stack (`s->titles`, `CSI 22 t` / `CSI 23 t`), newest
     /// first; Ghostty ignores both.
     stack: Vec<String>,
@@ -2746,19 +2789,10 @@ struct Titles {
 impl Titles {
     /// An OSC 0/2 from the program: it replaces the server's title, and
     /// the event carries the OSC's text (input.c:2725-2731).
-    fn program(titles: &RefCell<Self>, term: &Terminal<'_, '_>) {
-        let mut titles = titles.borrow_mut();
-        titles.server = None;
-        titles.event(term.title().unwrap_or_default());
-    }
-
-    /// Queue a title event; a terminal nobody drains (a popup) keeps the
-    /// newest [`MAX_TITLE_EVENTS`].
-    fn event(&mut self, title: &str) {
-        if self.events.len() >= MAX_TITLE_EVENTS {
-            self.events.remove(0);
-        }
-        self.events.push(title.to_owned());
+    fn program(titles: &RefCell<Self>, events: &RefCell<Events>, term: &Terminal<'_, '_>) {
+        titles.borrow_mut().server = None;
+        let title = term.title().unwrap_or_default().to_owned();
+        events.borrow_mut().push(TermEvent::Title(title));
     }
 }
 
@@ -4155,6 +4189,31 @@ mod tests {
         assert!(alt.alternate_on());
     }
 
+    /// What the program did comes back in input order: titles, BELs (in a
+    /// row counted as one entry), and OSC 133's prompt and command events,
+    /// on the alternate screen too, with `D`'s exit status as
+    /// `input_osc_133_exit_status` reads it (input.c:3196-3328).
+    #[test]
+    fn events_come_in_input_order() {
+        let mut t = PaneTerm::new(20, 3, 100);
+        t.feed(b"\x07\x1b]2;one\x07\x07\x07\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C\x07");
+        t.feed(b"\x1b]133;P;k=s\x07\x1b[?1049h\x1b]133;D;300\x07\x1b]133;N\x1b\\\x1b]133;D\x07");
+        assert_eq!(
+            t.take_events(),
+            [
+                TermEvent::Bells(1),
+                TermEvent::Title("one".into()),
+                TermEvent::Bells(2),
+                TermEvent::Prompt,
+                TermEvent::CommandStarted,
+                TermEvent::CommandFinished(255),
+                TermEvent::Prompt,
+                TermEvent::CommandFinished(0),
+            ]
+        );
+        assert_eq!(t.take_events(), Vec::<TermEvent>::new());
+    }
+
     /// Reference: OSC 133;A only marks the line (no fresh line), a BEL
     /// ending an OSC 133 is no bell, and an OSC 8 tmux rejects links
     /// nothing (input.c `input_osc_133`, `input_osc_8`).
@@ -4163,7 +4222,11 @@ mod tests {
         let mut t = PaneTerm::new(20, 3, 100);
         t.feed(b"xx\x1b]133;A\x07p>\x1b]133;B\x1b\\cmd");
         assert_eq!(captured(&t), "xxp>cmd");
-        assert_eq!(t.take_bells(), 0);
+        assert!(
+            !t.take_events()
+                .iter()
+                .any(|e| matches!(e, TermEvent::Bells(_)))
+        );
         assert_eq!(t.line_marks(), [(0, LineMark::Prompt)]);
         assert!(hyperlink_ok(b";http://x"));
         assert!(hyperlink_ok(b"id=a;http://x"));

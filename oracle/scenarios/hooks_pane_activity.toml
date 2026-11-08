@@ -1,0 +1,38 @@
+name = "hooks_pane_activity"
+# pane-activity fires when a pane's program writes (input_parse_buffer,
+# input.c:1054-1056) with events_fire_pane's payload: pane and window, no
+# session (events.c:172-183); pane_output_generation counts the reads
+# parsed (input.c:1052, format.c:2329-2340), none before any output. As a
+# pane hook it is looked up in the session's options, then the pane's, then
+# the window's (hooks.c:121-140), so one set on a pane runs only for it.
+# It fires once a loop turn (server_client_loop clears PANE_ACTIVITY,
+# server-client.c:1940), so how often depends on how the output is read:
+# counts are only compared with 0.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "tmux wait-for go; printf 'hi\\n'; exec cat"] },
+  { run = ["display", "-p", "-t", "a:w.0", "[#{pane_output_generation}]"] },
+  { run = ["set-hook", "-g", "pane-activity", "set -gF @act '#{hook_event}:#{hook}:#{hook_pane}:#{hook_window}:#{hook_window_name}:[#{hook_session}]:[#{hook_window_index}]'"] },
+  { run = ["set-hook", "-ga", "pane-activity", "wait-for -S act"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "act" },
+  { run = ["show", "-gv", "@act"] },
+  { run = ["display", "-p", "-t", "a:w.0", "#{e|>:#{pane_output_generation},0}"] },
+  { run = ["set-hook", "-gu", "pane-activity"] },
+  { run = ["set", "-g", "@p", ""] },
+  { run = ["splitw", "-d", "-t", "a:w", "sh", "-c", "tmux wait-for go2; printf 'x'; exec cat"] },
+  { run = ["set-hook", "-p", "-t", "%1", "pane-activity", "set -gaF @p '|#{hook_pane}'"] },
+  { run = ["set-hook", "-pa", "-t", "%1", "pane-activity", "wait-for -S act2"] },
+  { run = ["send-keys", "-t", "%0", "-l", "y"] },
+  { run = ["wait-for", "-S", "go2"] },
+  { wait_for = "act2" },
+  { run = ["show", "-gv", "@p"] },
+  { run = ["show-hooks", "-p", "-t", "%1"] },
+  # A hook with no commands still counts its firings (hooks_insert calls
+  # options_hook_fired once the option is found, hooks.c:121-143); set-hook
+  # -u starts the count again.
+  { run = ["set-hook", "-gu", "pane-activity"] },
+  { run = ["show-hooks", "-gw", "-F", "#{option_name}=#{hook_fire_count}", "pane-activity"] },
+  { run = ["splitw", "-d", "-t", "a:w", "sh", "-c", "printf 'z'; tmux wait-for -S z; exec cat"] },
+  { wait_for = "z" },
+  { run = ["show-hooks", "-gw", "-F", "#{option_name}=#{e|>:#{hook_fire_count},0}", "pane-activity"] },
+]

@@ -1,0 +1,44 @@
+name = "hooks_osc133"
+# OSC 133 from a pane's shell (input.c input_osc_133, 3289-3328): A and N
+# fire pane-shell-prompt and set pane_last_prompt_time; C starts a command
+# (pane_command_running, pane-command-started); D ends it with its exit
+# status (input_osc_133_exit_status: absent 0, out of range 255) and fires
+# pane-command-finished. The command events carry session, window_index,
+# window, pane, and command_status / _start_time / _end_time / _duration
+# when set (input_fire_command_event, input.c:3224-3262). Events fire in
+# the order the bytes come, among titles and BELs (input_parse_buffer); the
+# hooks run on the global queue after the read, so a hook's own #{pane_*}
+# shows the pane as the whole read left it. Before any OSC 133 the formats
+# are empty, pane_command_running 0 (format.c:2342-2426). pane-activity
+# fires first, ahead of what the output itself fires (input.c:1054-1056);
+# once a loop turn, so only its first firing is logged here.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "6", "sh", "-c", "tmux wait-for go; printf '\\033]2;t1\\007\\033]133;A\\007$ \\033]133;B\\007ls\\r\\n\\033]133;C\\007out\\007\\r\\n\\033]133;D;3\\007'; exec cat"] },
+  { run = ["display", "-p", "-t", "a:w.0", "[#{pane_command_running}] [#{pane_command_status}] [#{pane_command_duration}] [#{pane_last_prompt_time}] [#{pane_command_start_time}] [#{pane_command_end_time}] [#{pane_output_generation}]"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set", "-g", "@act", ""] },
+  { run = ["set-hook", "-g", "pane-activity", "if -F '#{@act}' '' { set -g @act 1; set -gaF @log '|activity:#{hook_pane}:#{hook_window}' }"] },
+  { run = ["set-hook", "-g", "pane-title-changed", "set -gaF @log '|title:#{hook_pane}:#{hook_new_title}'"] },
+  { run = ["set-hook", "-g", "pane-bell", "set -gaF @log '|bell:#{hook_pane}'"] },
+  { run = ["set-hook", "-g", "pane-shell-prompt", "set -gaF @log '|prompt:#{hook_event}:#{hook}:#{hook_pane}:#{hook_window}:#{hook_window_name}:[#{hook_session}]:[#{hook_command_status}]'"] },
+  { run = ["set-hook", "-g", "pane-command-started", "set -gaF @log '|started:#{hook_event}:#{hook_session}:#{hook_session_name}:#{hook_window_index}:#{hook_window}:#{hook_window_name}:#{hook_pane}:[#{hook_command_status}]:#{?hook_command_start_time,s,-}:#{?hook_command_end_time,e,-}:#{e|<:#{hook_command_duration},5}'"] },
+  { run = ["set-hook", "-g", "pane-command-finished", "set -gaF @log '|finished:#{hook_event}:#{hook_session}:#{hook_window_index}:#{hook_pane}:[#{hook_command_status}]:#{?hook_command_start_time,s,-}:#{?hook_command_end_time,e,-}:#{e|<:#{hook_command_duration},5}:#{e|>=:#{hook_command_end_time},#{hook_command_start_time}}:#{pane_command_running}'"] },
+  { run = ["set-hook", "-ga", "pane-command-finished", "wait-for -S fin"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "fin" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["display", "-p", "-t", "a:w.0", "#{pane_command_running} [#{pane_command_status}] #{?pane_command_start_time,s,-} #{?pane_command_end_time,e,-} #{?pane_last_prompt_time,p,-} #{e|<:#{pane_command_duration},5} #{e|>=:#{pane_command_end_time},#{pane_command_start_time}} #{e|>:#{pane_output_generation},0} #{t:pane_command_end_time}"] },
+  { run = ["set-hook", "-gu", "pane-activity"] },
+  { run = ["set", "-g", "@log", ""] },
+  # A command still running: no status or end, its duration counts to now.
+  # N is a prompt too; D with a status out of range or not a number is 255,
+  # one that is a key=value 0.
+  { run = ["splitw", "-d", "-t", "a:w", "sh", "-c", "printf '\\033]133;N\\033\\\\\\033]133;C\\007'; tmux wait-for -S c2; exec cat"] },
+  { wait_for = "c2" },
+  { run = ["display", "-p", "-t", "%1", "#{pane_command_running} [#{pane_command_status}] #{?pane_command_start_time,s,-} [#{pane_command_end_time}] #{?pane_last_prompt_time,p,-} #{e|<:#{pane_command_duration},5}"] },
+  { run = ["set-hook", "-g", "pane-command-finished[1]", "if -F '#{==:#{hook_command_status},7}' 'wait-for -S last'"] },
+  { run = ["splitw", "-d", "-t", "a:w", "sh", "-c", "printf '\\033]133;C\\007\\033]133;D;300\\007\\033]133;C\\007\\033]133;D;x\\007\\033]133;C\\007\\033]133;D;k=v\\007\\033]133;C\\007\\033]133;D\\007\\033]133;C\\007\\033]133;D;7\\007'; exec cat"] },
+  { wait_for = "last" },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["display", "-p", "-t", "%2", "#{pane_command_running} [#{pane_command_status}] #{?pane_last_prompt_time,p,-} #{P:#{pane_id}=#{pane_command_running};}"] },
+]

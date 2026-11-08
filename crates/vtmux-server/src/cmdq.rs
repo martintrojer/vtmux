@@ -254,6 +254,12 @@ impl Cmdq {
         self.queues.get(&q)?.get(i)?.state.clone()
     }
 
+    /// A step is firing now.
+    #[must_use]
+    pub fn firing(&self) -> bool {
+        self.current.is_some()
+    }
+
     /// `cmdq_running(NULL)` is a step whose state turns hooks off: the
     /// global queue is firing a hook's command.
     #[must_use]

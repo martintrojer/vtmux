@@ -50,5 +50,6 @@ pub use term::{
     GhosttyState, HeldScreen, ImportCheck, KeyMode, LineMark, LinkId, LinkState, ModeState,
     MouseModes, MouseTracking, Osc133, PATCH_STACK, PageBlob, PageCapacity, PageRows, PageState,
     PaneState, PaneTerm, Passthrough, RowState, SavedCursor, ScreenKind, ScreenModes, ScreenState,
-    StateError, StateImport, StyleState, TermState, compress_all_of, history_reads, page_rows,
+    StateError, StateImport, StyleState, TermEvent, TermState, compress_all_of, history_reads,
+    page_rows,
 };

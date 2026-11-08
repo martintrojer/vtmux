@@ -226,6 +226,13 @@ const VARIABLES: &[&str] = &[
     "pane_dead_status",
     "pane_dead_signal",
     "pane_dead_time",
+    "pane_output_generation",
+    "pane_last_prompt_time",
+    "pane_command_start_time",
+    "pane_command_end_time",
+    "pane_command_running",
+    "pane_command_duration",
+    "pane_command_status",
     "pane_start_command",
     "pane_start_command_list",
     "pane_start_path",
@@ -602,8 +609,23 @@ fn build(server: &mut Server, dir: &Path) -> Vec<mio::net::UnixStream> {
             .get_mut(&vtmux_core::ids::PaneId(p))
             .unwrap();
         pane.term.feed(bytes);
-        let _ = pane.term.take_title_events();
+        let _ = pane.term.take_events();
     }
+    // What OSC 133 said of a finished command (a running one's duration
+    // moves with the clock).
+    let pane = server
+        .model
+        .panes
+        .get_mut(&vtmux_core::ids::PaneId(6))
+        .unwrap();
+    pane.output_generation = 5;
+    pane.shell_commands = crate::model::ShellCommands {
+        last_prompt: Some(1_790_000_100),
+        started: Some(1_790_000_101),
+        ended: Some(1_790_000_104),
+        running: false,
+        status: Some(7),
+    };
     for words in [
         &["select-pane", "-T", "t0", "-t", "%0"][..],
         &["select-pane", "-T", "t1", "-t", "%1"],

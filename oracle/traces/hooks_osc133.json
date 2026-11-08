@@ -1,0 +1,441 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "hooks_osc133",
+  "inputs": {
+    "name": "hooks_osc133",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "tmux wait-for go; printf '\\033]2;t1\\007\\033]133;A\\007$ \\033]133;B\\007ls\\r\\n\\033]133;C\\007out\\007\\r\\n\\033]133;D;3\\007'; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w.0",
+          "[#{pane_command_running}] [#{pane_command_status}] [#{pane_command_duration}] [#{pane_last_prompt_time}] [#{pane_command_start_time}] [#{pane_command_end_time}] [#{pane_output_generation}]"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@act",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-activity",
+          "if -F '#{@act}' '' { set -g @act 1; set -gaF @log '|activity:#{hook_pane}:#{hook_window}' }"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-title-changed",
+          "set -gaF @log '|title:#{hook_pane}:#{hook_new_title}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-bell",
+          "set -gaF @log '|bell:#{hook_pane}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-shell-prompt",
+          "set -gaF @log '|prompt:#{hook_event}:#{hook}:#{hook_pane}:#{hook_window}:#{hook_window_name}:[#{hook_session}]:[#{hook_command_status}]'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-command-started",
+          "set -gaF @log '|started:#{hook_event}:#{hook_session}:#{hook_session_name}:#{hook_window_index}:#{hook_window}:#{hook_window_name}:#{hook_pane}:[#{hook_command_status}]:#{?hook_command_start_time,s,-}:#{?hook_command_end_time,e,-}:#{e|<:#{hook_command_duration},5}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-command-finished",
+          "set -gaF @log '|finished:#{hook_event}:#{hook_session}:#{hook_window_index}:#{hook_pane}:[#{hook_command_status}]:#{?hook_command_start_time,s,-}:#{?hook_command_end_time,e,-}:#{e|<:#{hook_command_duration},5}:#{e|>=:#{hook_command_end_time},#{hook_command_start_time}}:#{pane_command_running}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-ga",
+          "pane-command-finished",
+          "wait-for -S fin"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "fin"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w.0",
+          "#{pane_command_running} [#{pane_command_status}] #{?pane_command_start_time,s,-} #{?pane_command_end_time,e,-} #{?pane_last_prompt_time,p,-} #{e|<:#{pane_command_duration},5} #{e|>=:#{pane_command_end_time},#{pane_command_start_time}} #{e|>:#{pane_output_generation},0} #{t:pane_command_end_time}"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-gu",
+          "pane-activity"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:w",
+          "sh",
+          "-c",
+          "printf '\\033]133;N\\033\\\\\\033]133;C\\007'; tmux wait-for -S c2; exec cat"
+        ]
+      },
+      {
+        "wait_for": "c2"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%1",
+          "#{pane_command_running} [#{pane_command_status}] #{?pane_command_start_time,s,-} [#{pane_command_end_time}] #{?pane_last_prompt_time,p,-} #{e|<:#{pane_command_duration},5}"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-command-finished[1]",
+          "if -F '#{==:#{hook_command_status},7}' 'wait-for -S last'"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:w",
+          "sh",
+          "-c",
+          "printf '\\033]133;C\\007\\033]133;D;300\\007\\033]133;C\\007\\033]133;D;x\\007\\033]133;C\\007\\033]133;D;k=v\\007\\033]133;C\\007\\033]133;D\\007\\033]133;C\\007\\033]133;D;7\\007'; exec cat"
+        ]
+      },
+      {
+        "wait_for": "last"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "%2",
+          "#{pane_command_running} [#{pane_command_status}] #{?pane_last_prompt_time,p,-} #{P:#{pane_id}=#{pane_command_running};}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[0] [] [] [] [] [] [0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|activity:%0:@0|title:%0:t1|prompt:pane-shell-prompt:pane-shell-prompt:%0:@0:w:[]:[]|started:pane-command-started:$0:a:0:@0:w:%0:[]:s:-:1|bell:%0|finished:pane-command-finished:$0:0:%0:[3]:s:e:1:1:0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 [3] s e p 1 1 1 <DATE>\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1 [] s [] p 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|prompt:pane-shell-prompt:pane-shell-prompt:%1:@0:w:[]:[]|started:pane-command-started:$0:a:0:@0:w:%1:[]:s:-:1|started:pane-command-started:$0:a:0:@0:w:%2:[]:s:-:1|finished:pane-command-finished:$0:0:%2:[255]:s:e:1:1:0|started:pane-command-started:$0:a:0:@0:w:%2:[]:s:-:1|finished:pane-command-finished:$0:0:%2:[255]:s:e:1:1:0|started:pane-command-started:$0:a:0:@0:w:%2:[]:s:-:1|finished:pane-command-finished:$0:0:%2:[0]:s:e:1:1:0|started:pane-command-started:$0:a:0:@0:w:%2:[]:s:-:1|finished:pane-command-finished:$0:0:%2:[0]:s:e:1:1:0|started:pane-command-started:$0:a:0:@0:w:%2:[]:s:-:1|finished:pane-command-finished:$0:0:%2:[7]:s:e:1:1:0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 [7] - %0=0;%1=1;%2=0;\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

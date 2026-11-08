@@ -502,7 +502,7 @@ pub(crate) fn restore_term(
         term.feed(EMPTY_PANE_MODES);
     }
     term.set_title(&p.title);
-    term.take_title_events();
+    term.take_events();
     Ok(term)
 }
 
@@ -1183,6 +1183,12 @@ impl Server {
                     exited: p.exited,
                     status: p.status.map(status_out),
                     dead_time: p.dead_time,
+                    output_generation: p.output_generation,
+                    last_prompt_time: p.shell_commands.last_prompt,
+                    command_start_time: p.shell_commands.started,
+                    command_end_time: p.shell_commands.ended,
+                    command_running: p.shell_commands.running,
+                    command_status: p.shell_commands.status,
                     changed: p.changed,
                     unseen_changes: p.unseen_changes,
                     geometry: geometry_out(&p.rect),
@@ -1826,6 +1832,14 @@ impl Server {
             close_on_click: x.close_on_click,
             close_on_cancel: x.close_on_cancel,
             requests: crate::term_queries::PaneRequests::default(),
+            output_generation: x.output_generation,
+            shell_commands: crate::model::ShellCommands {
+                last_prompt: x.last_prompt_time,
+                started: x.command_start_time,
+                ended: x.command_end_time,
+                running: x.command_running,
+                status: x.command_status,
+            },
         };
         // History imported as rows is resident: due for the compressor at
         // once (decision 23).

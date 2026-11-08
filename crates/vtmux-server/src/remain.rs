@@ -169,8 +169,7 @@ impl Server {
         // Nothing can be answered: the PTY is gone.
         drop(pane.term.take_replies());
         drop(pane.term.take_passthrough());
-        pane.term.take_bells();
-        pane.term.take_title_events();
+        pane.term.take_events();
         !template.is_empty()
     }
 

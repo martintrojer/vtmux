@@ -1338,8 +1338,8 @@ impl PaneTerm {
             let mut titles = self.titles.borrow_mut();
             titles.server.clone_from(&p.title);
             titles.stack.clone_from(&p.title_stack);
-            titles.events.clear();
         }
+        self.events.borrow_mut().list.clear();
         self.set_input_buffer_size(p.input_buffer_size);
         self.scroll_on_clear = p.scroll_on_clear;
         self.page_rows = super::page_rows(cols);
@@ -1571,7 +1571,7 @@ impl StateImport {
         // Back where the parser was, with nothing it says kept.
         pane.feed(&continuation);
         let _ = pane.take_answers();
-        let _ = pane.take_title_events();
+        let _ = pane.take_events();
         Ok(pane)
     }
 }

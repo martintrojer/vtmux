@@ -84,8 +84,7 @@ impl ViewMode {
         // window_copy_init_ctx_cb: nothing goes anywhere from the backing.
         drop(self.term.take_replies());
         drop(self.term.take_passthrough());
-        self.term.take_bells();
-        self.term.take_title_events();
+        self.term.take_events();
         self.copy.view_added(&self.term, from);
         self.stale = false;
     }

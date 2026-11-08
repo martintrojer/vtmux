@@ -445,6 +445,36 @@ impl Server {
         self.waits_event(&ev);
     }
 
+    /// `events_fire_pane` for an event a pane fires on every loop turn it
+    /// writes (`pane-activity`), made cheap when only the firing is
+    /// counted: outside a command, with no `wait-for -E` waiting for it and
+    /// no command in its hook, only what `hooks_insert` does then
+    /// (`options_hook_fired`) is done, without the event.
+    pub(crate) fn fire_pane_often(&mut self, name: &str, p: PaneId) {
+        if !self.cmdq.firing() && !self.event_waits.iter().any(|w| w.name == name) {
+            let fs = self.hook_target(Some(Found::from_pane(&self.model, p)));
+            let Some(tree) = self.hook_tree(name, fs) else {
+                return;
+            };
+            let idle = self
+                .model
+                .options
+                .tree(tree)
+                .get_only(name)
+                .is_some_and(|e| match &e.value {
+                    OptionValue::Array(items) => {
+                        !items.values().any(|v| matches!(v, OptValue::Command(_)))
+                    }
+                    OptionValue::Single(_) => false,
+                });
+            if idle {
+                self.model.options.hook_fired(tree, name, now_epoch());
+                return;
+            }
+        }
+        self.model.fire_pane(name, p);
+    }
+
     /// `events_fire_client`'s target: `cmd_find_from_client`.
     pub(crate) fn client_found(&self, c: ClientId) -> Found {
         match self.clients.get(&c).and_then(|c| c.attached) {
@@ -537,11 +567,11 @@ impl Server {
             return;
         }
         if let Some(step) = ev.step {
-            self.hooks_insert(Some(step), ev, ev.formats("hook_"));
+            self.hooks_insert(Some(step), ev, || ev.formats("hook_"));
             return;
         }
         if !self.cmdq.global_no_hooks() {
-            self.hooks_insert(None, ev, ev.formats("hook_"));
+            self.hooks_insert(None, ev, || ev.formats("hook_"));
         }
     }
 
@@ -549,14 +579,20 @@ impl Server {
     /// the command's target, right after it.
     pub(crate) fn hooks_run(&mut self, step: Option<StepId>, name: &str, target: Found) {
         let ev = Event::new(name).target(target);
-        self.hooks_insert(step, &ev, Vec::new());
+        self.hooks_insert(step, &ev, Vec::new);
     }
 
     /// `hooks_insert` (hooks.c:100-197): the hook's commands, each array
     /// item a list of its own, after `after` or at the end of the global
     /// queue, run from the event's target with hooks off and the hook
-    /// formats.
-    fn hooks_insert(&mut self, after: Option<StepId>, ev: &Event, payload: Vec<(String, String)>) {
+    /// formats (`payload`, made only when there is something to run: a
+    /// pane's output fires events every loop turn).
+    fn hooks_insert(
+        &mut self,
+        after: Option<StepId>,
+        ev: &Event,
+        payload: impl FnOnce() -> Vec<(String, String)>,
+    ) {
         let fs = self.hook_target(ev.target);
         let Some((tree, lists)) = self.hook_commands(&ev.name, fs) else {
             return;
@@ -591,7 +627,7 @@ impl Server {
                 .ok()
                 .into_iter()
                 .collect();
-        self.hooks_queue(None, ev, fs, tree, lists, payload);
+        self.hooks_queue(None, ev, fs, tree, lists, || payload);
     }
 
     /// The rest of `hooks_insert`: count the firing, then queue `lists`
@@ -603,25 +639,25 @@ impl Server {
         fs: Option<Found>,
         tree: TreeId,
         lists: Vec<CommandList>,
-        payload: Vec<(String, String)>,
+        payload: impl FnOnce() -> Vec<(String, String)>,
     ) {
         self.model.options.hook_fired(tree, &ev.name, now_epoch());
+        if lists.is_empty() {
+            return;
+        }
         // format_create(c, item): `command`, then the payload, then `hook`;
         // a later value replaces an earlier one.
         let mut formats: BTreeMap<String, String> = BTreeMap::new();
         if let Some(c) = ev.command {
             formats.insert("command".into(), c.into());
         }
-        formats.extend(payload);
+        formats.extend(payload());
         formats.insert("hook".into(), ev.name.clone());
         let state = Rc::new(StepState {
             current: std::cell::Cell::new(fs),
             no_hooks: true,
             formats: formats.into_iter().collect(),
         });
-        if lists.is_empty() {
-            return;
-        }
         let groups: crate::cmdq::Groups = lists.into_iter().map(|l| (None, l.calls)).collect();
         if let Some(a) = after {
             self.cmdq_insert_with_state(a, groups, Some(&state));
@@ -669,23 +705,32 @@ impl Server {
         target::best_session(m, None, None).map(|s| Found::from_session(m, s))
     }
 
-    /// The hook's option (hooks.c:121-140): the session's (or the global
-    /// session options), else the pane's, else the window's; its tree and
-    /// its command lists.
+    /// The tree of the hook's option (hooks.c:121-140): the session's (or
+    /// the global session options), else the pane's, else the window's.
+    fn hook_tree(&self, name: &str, fs: Option<Found>) -> Option<TreeId> {
+        let store = &self.model.options;
+        let session_tree = fs
+            .and_then(|f| f.session)
+            .map_or(TreeId::GlobalSession, TreeId::Session);
+        [
+            Some(session_tree),
+            fs.and_then(|f| f.pane).map(TreeId::Pane),
+            fs.and_then(|f| f.window).map(TreeId::Window),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|t| store.holder(t, name))
+    }
+
+    /// The hook's option ([`Self::hook_tree`]): its tree and its command
+    /// lists.
     fn hook_commands(
         &mut self,
         name: &str,
         fs: Option<Found>,
     ) -> Option<(TreeId, Vec<CommandList>)> {
-        let store = &self.model.options;
-        let session_tree = fs
-            .and_then(|f| f.session)
-            .map_or(TreeId::GlobalSession, TreeId::Session);
-        let mut trees = vec![session_tree];
-        trees.extend(fs.and_then(|f| f.pane).map(TreeId::Pane));
-        trees.extend(fs.and_then(|f| f.window).map(TreeId::Window));
-        let tree = trees.into_iter().find_map(|t| store.holder(t, name))?;
-        let entry = store.tree(tree).get_only(name)?;
+        let tree = self.hook_tree(name, fs)?;
+        let entry = self.model.options.tree(tree).get_only(name)?;
         let lists = match &entry.value {
             OptionValue::Array(items) => items
                 .values()

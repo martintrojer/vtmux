@@ -1,0 +1,410 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "hooks_pane_activity",
+  "inputs": {
+    "name": "hooks_pane_activity",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "tmux wait-for go; printf 'hi\\n'; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w.0",
+          "[#{pane_output_generation}]"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-activity",
+          "set -gF @act '#{hook_event}:#{hook}:#{hook_pane}:#{hook_window}:#{hook_window_name}:[#{hook_session}]:[#{hook_window_index}]'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-ga",
+          "pane-activity",
+          "wait-for -S act"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "act"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@act"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w.0",
+          "#{e|>:#{pane_output_generation},0}"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-gu",
+          "pane-activity"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@p",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:w",
+          "sh",
+          "-c",
+          "tmux wait-for go2; printf 'x'; exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-p",
+          "-t",
+          "%1",
+          "pane-activity",
+          "set -gaF @p '|#{hook_pane}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-pa",
+          "-t",
+          "%1",
+          "pane-activity",
+          "wait-for -S act2"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "%0",
+          "-l",
+          "y"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go2"
+        ]
+      },
+      {
+        "wait_for": "act2"
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@p"
+        ]
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-p",
+          "-t",
+          "%1"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-gu",
+          "pane-activity"
+        ]
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-gw",
+          "-F",
+          "#{option_name}=#{hook_fire_count}",
+          "pane-activity"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:w",
+          "sh",
+          "-c",
+          "printf 'z'; tmux wait-for -S z; exec cat"
+        ]
+      },
+      {
+        "wait_for": "z"
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-gw",
+          "-F",
+          "#{option_name}=#{e|>:#{hook_fire_count},0}",
+          "pane-activity"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "[0]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "pane-activity:pane-activity:%0:@0:w:[]:[]\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|%1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "pane-activity[0] set-option -Fag @p \"|#{hook_pane}\"\npane-activity[1] wait-for -S act2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "pane-activity=0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "pane-activity=1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

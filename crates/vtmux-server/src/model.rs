@@ -297,6 +297,60 @@ pub struct Pane {
     /// Its queries waiting on a client terminal, and its theme reports
     /// ([`crate::term_queries`]).
     pub requests: crate::term_queries::PaneRequests,
+    /// `wp->output_generation`: how many times output was parsed into it
+    /// (input.c:1052, `#{pane_output_generation}`).
+    pub output_generation: u64,
+    /// What its shell said of its prompts and commands through OSC 133.
+    pub shell_commands: ShellCommands,
+}
+
+/// A pane's shell prompts and commands as OSC 133 reported them
+/// (`input_osc_133`, input.c:3289-3328: `wp->last_prompt_time`,
+/// `cmd_start_time`, `cmd_end_time`, `cmd_status` and `PANE_CMDRUNNING`).
+/// Times are epoch seconds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShellCommands {
+    /// The last `133;A` or `N`.
+    pub last_prompt: Option<i64>,
+    /// The last `133;C`.
+    pub started: Option<i64>,
+    /// The `133;D` after it.
+    pub ended: Option<i64>,
+    /// Started and not finished yet.
+    pub running: bool,
+    /// The finished command's exit status.
+    pub status: Option<u8>,
+}
+
+impl ShellCommands {
+    /// `133;C`: a command started at `now`.
+    pub fn start(&mut self, now: i64) {
+        self.started = Some(now);
+        self.ended = None;
+        self.running = true;
+        self.status = None;
+    }
+
+    /// `133;D`: the command finished at `now` with `status`.
+    pub fn finish(&mut self, now: i64, status: u8) {
+        self.ended = Some(now);
+        self.running = false;
+        self.status = Some(status);
+    }
+
+    /// How long the command took, or has taken by `now` while it runs;
+    /// never negative (`format_cb_pane_command_duration`, format.c:2398-2414,
+    /// and `input_fire_command_event`).
+    #[must_use]
+    pub fn duration(&self, now: i64) -> Option<i64> {
+        let start = self.started?;
+        let end = if self.running {
+            now
+        } else {
+            self.ended.unwrap_or(0)
+        };
+        Some(end.max(start) - start)
+    }
 }
 
 /// A redraw tmux asks for (server-fn.c); the server applies them to its

@@ -23,7 +23,7 @@ use vtmux_core::ids::{PaneId, SessionId, WindowId};
 use vtmux_core::layout::{Geometry, Layout as CoreLayout, WindowPanes};
 use vtmux_core::options::{Defaults, OptionValue, OptionsStore, TreeId, Value};
 use vtmux_core::protocol::{self, ClientMsg, Hello, ProtocolError, ServerMsg, Speaks};
-use vtmux_vt::PaneTerm;
+use vtmux_vt::{PaneTerm, TermEvent};
 
 use crate::alerts;
 use crate::commands::{self, After, Item};
@@ -560,6 +560,9 @@ pub struct Server {
     /// backlog): a key's echo or a prompt, not more of a flood. A frame
     /// that shows one is not paced ([`crate::render::FRAME_INTERVAL`]).
     burst_started: std::collections::BTreeSet<PaneId>,
+    /// Panes that fired `pane-activity` this turn (`PANE_ACTIVITY`, cleared
+    /// in `server_client_loop`, server-client.c:1940).
+    activity_fired: std::collections::BTreeSet<PaneId>,
     /// Panes whose copy or view mode drew to the terminal this turn without
     /// a pane redraw ([`Self::with_mode`]): like a burst, the frame that
     /// shows it is not paced, and the program's synchronized output stays.
@@ -827,6 +830,7 @@ impl Server {
             offset_due: std::collections::BTreeSet::new(),
             control_streams: crate::control_queue::Streams::default(),
             burst_started: std::collections::BTreeSet::new(),
+            activity_fired: std::collections::BTreeSet::new(),
             mode_drawn: std::collections::BTreeSet::new(),
             pending_exits: Vec::new(),
             waits: WaitChannels::default(),
@@ -2894,6 +2898,7 @@ impl Server {
         self.format_jobs_flush();
         self.model.redraw_panes.clear();
         self.burst_started.clear();
+        self.activity_fired.clear();
         self.mode_drawn.clear();
     }
 
@@ -4623,6 +4628,7 @@ impl Server {
     /// `default-shell`, the PTY sized to `rect`, and a terminal whose title
     /// starts as the host name (window.c:1479-1480). The caller links the
     /// returned pane into the model.
+    #[expect(clippy::too_many_lines, reason = "one line per field of the new pane")]
     pub fn spawn_pane(&mut self, ps: &PaneSpawn<'_>) -> io::Result<Pane> {
         let mut child = self.pane_environ(ps);
         // The shell and history budget come from the session's options,
@@ -4677,7 +4683,7 @@ impl Server {
         if !host.chars().any(char::is_control) {
             term.feed(format!("\x1b]2;{host}\x1b\\").as_bytes());
             // screen_init sets the title directly: no event.
-            term.take_title_events();
+            term.take_events();
         }
         if ps.empty {
             term.feed(EMPTY_PANE_MODES);
@@ -4732,6 +4738,8 @@ impl Server {
             close_on_click: false,
             close_on_cancel: false,
             requests: crate::term_queries::PaneRequests::default(),
+            output_generation: 0,
+            shell_commands: crate::model::ShellCommands::default(),
         })
     }
 
@@ -5072,11 +5080,12 @@ impl Server {
         // input.c:2725-2740: a new title (OSC 0/2) or path
         // (OSC 7) redraws the status of the window's sessions.
         let retitled = (pane.term.title(), pane.term.pwd()) != before;
-        let titles = pane.term.take_title_events();
+        let events = pane.term.take_events();
+        let titled = events.iter().any(|e| matches!(e, TermEvent::Title(_)));
+        pane.output_generation += 1;
         pane.changed = true;
         // input.c:1061: new input while in a mode.
         pane.unseen_changes |= !pane.modes.is_empty();
-        let bells = pane.term.take_bells();
         let redraw = pane.term.take_redraw();
         let answers = pane.term.take_answers();
         let toggled_alternate = alternate != pane.term.alternate_on();
@@ -5087,6 +5096,12 @@ impl Server {
         // non-empty read (input.c:1053): W/t sorts and lsw -O
         // activity order by it.
         let window = pane.window;
+        // input.c:1054-1056: pane-activity once a loop turn
+        // (server_client_loop clears PANE_ACTIVITY), before what the
+        // output itself fires.
+        if self.activity_fired.insert(p) {
+            self.fire_pane_often("pane-activity", p);
+        }
         if cursor_moved {
             self.cursor_moved_in(window);
         }
@@ -5114,27 +5129,12 @@ impl Server {
         if redraw {
             self.model.redraw_panes.insert(p);
         }
-        if retitled || !titles.is_empty() {
+        if retitled || titled {
             self.model
                 .redraw(crate::model::Redraw::WindowStatus(window));
         }
-        // input_fire_pane_title_changed (input.c:795-809): one event per
-        // OSC 0/2 and per title stack pop.
-        for title in titles {
-            let ev = crate::events::Event::new("pane-title-changed")
-                .target(crate::target::Found::from_pane(&self.model, p))
-                .pane("pane", p)
-                .window(&self.model, "window", window)
-                .text("new_title", title);
-            self.model.push_event(ev);
-        }
-        if bells != 0 {
-            // input_c0_dispatch BEL (input.c:1322-1326): pane-bell for
-            // each, whatever monitor-bell says, then alerts_queue.
-            for _ in 0..bells {
-                self.model.fire_pane("pane-bell", p);
-            }
-            self.model.alerts_queue(window, alerts::BELL);
+        for event in events {
+            self.pane_term_event(p, window, event);
         }
         for name in renames {
             self.pane_rename(p, window, &name);
@@ -5147,6 +5147,82 @@ impl Server {
         self.control_output(p, bytes);
         self.pipe_write(p, bytes);
         self.pane_passthrough(p, passthrough, redraw_pending);
+    }
+
+    /// What pane `p`'s program did while its output was parsed, in order.
+    fn pane_term_event(&mut self, p: PaneId, window: WindowId, event: TermEvent) {
+        let now = crate::model::now_epoch();
+        let commands = self.model.panes.get_mut(&p).map(|x| &mut x.shell_commands);
+        match event {
+            // input_fire_pane_title_changed (input.c:795-809): one event
+            // per OSC 0/2 and per title stack pop.
+            TermEvent::Title(title) => {
+                let ev = crate::events::Event::new("pane-title-changed")
+                    .target(crate::target::Found::from_pane(&self.model, p))
+                    .pane("pane", p)
+                    .window(&self.model, "window", window)
+                    .text("new_title", title);
+                self.model.push_event(ev);
+            }
+            // input_c0_dispatch BEL (input.c:1322-1326): pane-bell for
+            // each, whatever monitor-bell says, then alerts_queue.
+            TermEvent::Bells(n) => {
+                for _ in 0..n {
+                    self.model.fire_pane("pane-bell", p);
+                }
+                self.model.alerts_queue(window, alerts::BELL);
+            }
+            // input_osc_133 (input.c:3289-3328).
+            TermEvent::Prompt => {
+                if let Some(c) = commands {
+                    c.last_prompt = Some(now);
+                }
+                self.model.fire_pane("pane-shell-prompt", p);
+            }
+            TermEvent::CommandStarted => {
+                if let Some(c) = commands {
+                    c.start(now);
+                }
+                self.fire_command_event("pane-command-started", p, window, now);
+            }
+            TermEvent::CommandFinished(status) => {
+                if let Some(c) = commands {
+                    c.finish(now, status);
+                }
+                self.fire_command_event("pane-command-finished", p, window, now);
+            }
+        }
+    }
+
+    /// `input_fire_command_event` (input.c:3224-3262): the pane event
+    /// with the session and window index it is found in, and what OSC 133
+    /// said of the command.
+    fn fire_command_event(&mut self, name: &str, p: PaneId, window: WindowId, now: i64) {
+        let Some(c) = self.model.panes.get(&p).map(|x| x.shell_commands) else {
+            return;
+        };
+        let fs = crate::target::Found::from_pane(&self.model, p);
+        let mut ev = crate::events::Event::new(name).target(fs);
+        if let Some(s) = fs.session {
+            ev = ev.session(&self.model, "session", s);
+        }
+        if let Some(i) = fs.index {
+            ev = ev.int("window_index", i);
+        }
+        ev = ev.window(&self.model, "window", window).pane("pane", p);
+        if let Some(status) = c.status {
+            ev = ev.int("command_status", status);
+        }
+        if let Some(t) = c.started {
+            ev = ev.int("command_start_time", t);
+        }
+        if let Some(t) = c.ended {
+            ev = ev.int("command_end_time", t);
+        }
+        if let Some(d) = c.duration(now) {
+            ev = ev.int("command_duration", d);
+        }
+        self.model.push_event(ev);
     }
 
     /// `server_client_check_pane_buffer`'s end (server-client.c:2113-2124),
@@ -5626,6 +5702,7 @@ fn open_error(e: &vtmux_core::term_features::OpenError) -> EdgeError {
 
 #[cfg(test)]
 mod tests {
+    use super::Server;
     use crate::mode::prompt::tests::setup;
 
     #[test]
@@ -5726,6 +5803,121 @@ mod tests {
         assert_eq!(answer(&mut server, missing), "access denied");
         server.acl.deny(Subject::User(uid));
         assert_eq!(answer(&mut server, missing), "access denied");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// What a pane's output sets off, in tmux's order (input.c
+    /// `input_parse_buffer`): `pane-activity` first and once a loop turn,
+    /// then each title, BEL and OSC 133 event as the bytes come, the
+    /// command events with tmux's payload; the OSC 133 state follows.
+    #[test]
+    fn pane_output_fires_its_events_in_order() {
+        use crate::events::{Queued, Value};
+        let (mut server, p, s, _, dir) = setup();
+        crate::server::snapshot::tests::ok(
+            &mut server,
+            &dir,
+            &["set-hook", "-g", "pane-activity", "set -g @a 1"],
+        );
+        server.model.events.clear();
+        server.render_and_exit();
+        server.pane_input(
+            p,
+            b"\x1b]2;t\x07\x1b]133;A\x07$ \x1b]133;C\x07\x07\x07\x1b]133;D;3\x07",
+            false,
+        );
+        server.pane_input(p, b"\x1b]133;C\x1b\\", false);
+        let events: Vec<_> = std::mem::take(&mut server.model.events)
+            .into_iter()
+            .filter_map(|q| match q {
+                Queued::Event(ev) => Some(ev),
+                _ => None,
+            })
+            .collect();
+        let names: Vec<&str> = events.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "pane-activity",
+                "pane-title-changed",
+                "pane-shell-prompt",
+                "pane-command-started",
+                "pane-bell",
+                "pane-bell",
+                "pane-command-finished",
+                "pane-command-started",
+            ]
+        );
+        let finished = &events[6];
+        assert_eq!(finished.items.get("command_status"), Some(&Value::Int(3)));
+        assert_eq!(finished.get_pane("pane"), Some(p));
+        assert_eq!(finished.get_session("session").map(|x| x.0), Some(s));
+        assert_eq!(finished.items.get("window_index"), Some(&Value::Int(0)));
+        for key in ["command_start_time", "command_end_time", "command_duration"] {
+            assert!(finished.items.contains_key(key), "{key}");
+        }
+        let started = &events[7];
+        assert!(!started.items.contains_key("command_status"));
+        assert!(!started.items.contains_key("command_end_time"));
+        assert!(started.items.contains_key("command_duration"));
+        let pane = &server.model.panes[&p];
+        assert_eq!(pane.output_generation, 2);
+        let c = pane.shell_commands;
+        assert!(c.running && c.status.is_none() && c.ended.is_none());
+        assert!(c.last_prompt.is_some() && c.started.is_some());
+        // The next loop turn's output fires pane-activity again.
+        server.render_and_exit();
+        server.pane_input(p, b"x", false);
+        assert!(
+            server
+                .model
+                .events
+                .iter()
+                .any(|q| matches!(q, Queued::Event(ev) if ev.name == "pane-activity"))
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A `pane-activity` nothing would run commands for is only counted
+    /// (`options_hook_fired`), without an event; a hook command makes it
+    /// an event again.
+    #[test]
+    fn pane_activity_with_no_hook_commands_is_only_counted() {
+        use crate::events::Queued;
+        use vtmux_core::options::TreeId;
+        let (mut server, p, _, _, dir) = setup();
+        let activity = |server: &Server| {
+            server
+                .model
+                .events
+                .iter()
+                .filter(|q| matches!(q, Queued::Event(ev) if ev.name == "pane-activity"))
+                .count()
+        };
+        server.model.events.clear();
+        server.render_and_exit();
+        server.pane_input(p, b"x", false);
+        assert_eq!(activity(&server), 0);
+        let fires = |server: &Server| {
+            server
+                .model
+                .options
+                .hook_fire_stats(TreeId::GlobalWindow, "pane-activity")
+                .0
+        };
+        assert_eq!(fires(&server), 1);
+        server.render_and_exit();
+        server.pane_input(p, b"x", false);
+        assert_eq!((activity(&server), fires(&server)), (0, 2));
+        crate::server::snapshot::tests::ok(
+            &mut server,
+            &dir,
+            &["set-hook", "-g", "pane-activity", "set -g @a 1"],
+        );
+        server.render_and_exit();
+        server.model.events.clear();
+        server.pane_input(p, b"x", false);
+        assert_eq!(activity(&server), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
