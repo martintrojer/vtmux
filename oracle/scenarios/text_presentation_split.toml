@@ -1,0 +1,53 @@
+name = "text_presentation_split"
+size = [60, 8]
+# Characters tmux's own width table makes two columns that are text
+# presentation (Emoji_Presentation=No, East_Asian_Width=N): U+261D, U+26F9,
+# U+270C, U+270D, U+1F3CB, U+1F3CC, U+1F574, U+1F575, U+1F590
+# (utf8_default_width_cache, utf8.c). glibc's wcwidth, and so the program
+# writing them, and Ghostty (the observer, as the owner's terminal) count
+# them one column; tmux's grid two, so on such a terminal tmux draws the
+# rest of the row a column left of where it means it, the split's border
+# too (D-045). vtmux keeps them one column (vtmux_core::width::char_width),
+# except where the terminal agrees with tmux: with U+FE0F (two columns,
+# screen_write_combine), and after a ZWJ (tmux's cell keeps its base's two
+# columns; Ghostty joins the emoji sequence two wide). A skin-tone
+# modifier joins them two wide in tmux's grid and vtmux's (force_wide,
+# utf8_should_combine); Ghostty draws that one wide, so the compositor
+# moves the cursor after the cell; one that is not one of tmux's bases
+# (U+270C) takes a cell of its own in both, which Ghostty would join to
+# the emoji as it is printed, so the compositor writes it before its base.
+# The sixth row is drawn as a program that counts U+270C and U+270D one
+# column (vim) does: a cursor move to the column after `ab` and `XY`
+# there. The left pane is 34 wide, the border at column 34. The program
+# prints each input line's text as escapes (`printf "$l"`).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "8", "sh", "-c", "stty -echo; tmux wait-for -S ready; while read -r l; do printf \"$l\"; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { run = ["splitw", "-d", "-h", "-l", "25", "-t", "%0", "sh", "-c", "stty -echo; tmux wait-for -S ready; while read -r l; do printf \"$l\"; tmux wait-for -S fed; done"] },
+  { wait_for = "ready" },
+  { run = ["select-pane", "-t", "%1", "-T", "t"] },
+  { feed = { pane = "%1", bytes = "right\\r\\nright\\r\\nright\\r\\nright\\r\\nright\\r\\nright\\r\\nright\\r\\nright\r" } },
+  { wait_for = "fed" },
+  { attach = { session = "a" } },
+  { feed = { pane = "%0", bytes = "abc\\342\\230\\235defghijklmn|\\r\\n\\342\\234\\214 hello \\342\\234\\215 world|\\r\\n\\360\\237\\225\\264\\360\\237\\225\\265\\360\\237\\226\\220\\360\\237\\217\\213\\360\\237\\217\\214\\342\\233\\271\\342\\234\\215z|\\r\\n\\342\\233\\271\\342\\200\\215\\342\\231\\202z|\\r\\n\\342\\230\\235\\357\\270\\217z \\342\\234\\214\\360\\237\\217\\277z|\\r\\n\\342\\234\\214ab\\342\\234\\215cd|\\033[6;4HXY\\r\\n\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "-t", "%0", "#{cursor_x},#{cursor_y}"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-045", expect = { kind = "screen", rows = ["abc☝defghijklmn|                  \\e[32m│\\e[39mright", "✌ hello ✍ world|                  \\e[32m│\\e[39mright", "🕴🕵🖐🏋🏌⛹✍z|                         \\e[32m│\\e[39mright", "⛹‍♂z|                              \\e[32m│\\e[39mright", "☝️z ✌🏿z|                         \\e[32m│\\e[39mright", "✌abXYd|                           \\e[37m│\\e[39mright", "                                  \\e[37m│\\e[39mright", "                                  \\e[37m│\\e[39mright"], cursor = [0, 6] } } },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-045", expect = { kind = "screen", rows = ["abc☝defghijklmn|                  \\e[32m│\\e[39mright", "✌ hello ✍ world|                  \\e[32m│\\e[39mright", "🕴🕵🖐🏋🏌⛹✍z|                         \\e[32m│\\e[39mright", "⛹‍♂z|                              \\e[32m│\\e[39mright", "☝️z ✌🏿z|                         \\e[32m│\\e[39mright", "✌abXYd|                           \\e[37m│\\e[39mright", "                                  \\e[37m│\\e[39mright", "                                  \\e[37m│\\e[39mright"], cursor = [0, 6] } } },
+  { screen = {} },
+  { feed = { pane = "%0", bytes = "\\342\\230\\235\r" } },
+  { wait_for = "fed" },
+  { divergence = { id = "D-045", expect = { kind = "cli", stdout = "one 1\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "-t", "%0", "one #{cursor_x}"] },
+  { feed = { pane = "%0", bytes = "\\r\\n\\342\\233\\271\\342\\200\\215\\342\\231\\202\r" } },
+  { wait_for = "fed" },
+  { run = ["display", "-p", "-t", "%0", "zwj #{cursor_x}"] },
+  { divergence = { id = "D-045", expect = { kind = "cli", stdout = "abc☝defghijklmn|\n✌ hello ✍ world|\n🕴🕵🖐🏋🏌⛹✍z|\n⛹‍♂z|\n☝️z ✌🏿z|\n✌abXYd|\n☝\n⛹‍♂\n", stderr = "", exit = 0 } } },
+  { run = ["capturep", "-p", "-t", "%0"] },
+]

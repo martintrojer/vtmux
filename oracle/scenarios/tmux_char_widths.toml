@@ -3,7 +3,7 @@ size = [20, 9]
 # tmux's own character widths and joins, where Ghostty's clustering gives
 # others (D-031, vendored patch 0027): a lone regional indicator is one
 # column (utf8_default_width_cache, utf8.c), and so is the third of three;
-# U+261D is two (the same table); U+FE0F joins any character and makes it
+# U+261D is two (the same table; vtmux one, D-045); U+FE0F joins any character and makes it
 # two columns while variation-selector-always-wide is on
 # (screen_write_combine, screen-write.c), one after it is off; U+FE0E changes
 # no width; anything joins a cell that ends with a ZWJ; a skin-tone modifier
@@ -35,6 +35,7 @@ steps = [
   { run = ["display", "-p", "vs16 #{cursor_x},#{cursor_y}"] },
   { feed = { pane = "%0", bytes = "\\r\\n\\342\\230\\235y\\342\\214\\232\\357\\270\\216z\r" } },
   { wait_for = "fed" },
+  { divergence = { id = "D-045", expect = { kind = "cli", stdout = "table 5,3\n", stderr = "", exit = 0 } } },
   { run = ["display", "-p", "table #{cursor_x},#{cursor_y}"] },
   { feed = { pane = "%0", bytes = "\\r\\nx\\342\\200\\215\\360\\237\\230\\200y\\360\\237\\217\\273\\360\\237\\221\\213z\\343\\205\\244.\r" } },
   { wait_for = "fed" },

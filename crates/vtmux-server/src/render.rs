@@ -564,6 +564,24 @@ impl Compositor {
                     at = None;
                     continue;
                 }
+                if joins_left(cell)
+                    && let Some(next) =
+                        write_after_base(&mut out, &mut style, &screen, (x, y), caps)
+                {
+                    x = next;
+                    at = None;
+                    continue;
+                }
+                let narrow = may_draw_narrow(cell);
+                if narrow && x + 1 < screen.cols {
+                    // Its second column first, as a blank that a terminal
+                    // drawing the cell two wide covers, and one drawing it
+                    // one wide keeps (else it shows what it showed before).
+                    let _ = write!(out, "\x1b[{};{}H", y + 1, x + 2);
+                    set_style(&mut out, &mut style, cell.style, caps);
+                    out.push(' ');
+                    at = None;
+                }
                 if at != Some((x, y)) {
                     let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
                 }
@@ -619,7 +637,7 @@ impl Compositor {
                 set_style(&mut out, &mut style, cell.style, caps);
                 out.push_str(&outer_text(cell));
                 x += u16::from(cell.width.max(1));
-                at = (x < screen.cols && !joined_wide(cell)).then_some((x, y));
+                at = (x < screen.cols && !narrow).then_some((x, y));
             }
         }
         place_cursor(&mut out, &mut style, &screen, caps);
@@ -635,17 +653,67 @@ impl Compositor {
         out.into_bytes()
     }
 }
-/// A cell a joined character made two columns wide from one (U+FE0F, a
-/// regional indicator pair: `screen_write_combine`'s `force_wide`). The
-/// terminal may still count it as one, so where its cursor is after it is
-/// not known: tmux sends the cell with `TTY_CTX_CELL_INVALIDATE`, which
-/// forgets the cursor (`tty_cmd_cell`, tty.c), and so the next cell gets a
-/// cursor move.
-fn joined_wide(cell: &vtmux_vt::Cell) -> bool {
-    let mut chars = cell.text.chars();
+/// A two-column cell whose first character a terminal draws one column
+/// wide on its own: one a joined character made two columns wide (U+FE0F,
+/// a regional indicator pair, a skin-tone modifier, one after a ZWJ on a
+/// text-presentation emoji: `screen_write_combine`'s `force_wide`, D-045),
+/// or one `codepoint-widths` widened. The terminal may still count it as
+/// one, so where its cursor is after it is not known: tmux sends a joined
+/// cell with `TTY_CTX_CELL_INVALIDATE`, which forgets the cursor
+/// (`tty_cmd_cell`, tty.c), and so the next cell gets a cursor move.
+fn may_draw_narrow(cell: &vtmux_vt::Cell) -> bool {
     cell.width == 2
-        && chars.next().is_some_and(|c| width::char_width(c) == 1)
-        && chars.next().is_some()
+        && cell
+            .text
+            .chars()
+            .next()
+            .is_some_and(|c| width::table_width(c) != 2)
+}
+
+/// A cell of a skin-tone modifier alone, which tmux gave a cell of its own
+/// (its base is not one of `utf8_should_combine`'s, such as U+270C): a
+/// terminal that clusters by Unicode's rules (Ghostty) joins it to the
+/// emoji before it as it is printed, wherever the cursor came from, which
+/// draws both in one column and moves nothing after it into place (D-045).
+fn joins_left(cell: &vtmux_vt::Cell) -> bool {
+    let mut chars = cell.text.chars();
+    chars.next().is_some_and(is_skin_tone) && chars.next().is_none()
+}
+
+fn is_skin_tone(c: char) -> bool {
+    ('\u{1f3fb}'..='\u{1f3ff}').contains(&c)
+}
+
+/// Write the [`joins_left`] cell at `x`, `y` so that it joins nothing: the
+/// cell before it is blanked first, then this cell is written after the
+/// blank (which nothing joins), then the cell before it again (a character
+/// joins only what is before it). `None` when there is no text before it
+/// to join. Returns the next column to look at.
+fn write_after_base(
+    out: &mut String,
+    style: &mut Style,
+    screen: &Snapshot,
+    (x, y): (u16, u16),
+    caps: Caps,
+) -> Option<u16> {
+    let cell = screen.cell(x, y)?;
+    let lx = match x.checked_sub(1).and_then(|lx| screen.cell(lx, y))? {
+        c if c.width == 0 => x.checked_sub(2)?,
+        _ => x - 1,
+    };
+    let left = screen
+        .cell(lx, y)
+        .filter(|c| !c.text.is_empty() && c.text != " " && !lone_regional(c))?;
+    let _ = write!(out, "\x1b[{};{}H", y + 1, lx + 1);
+    set_style(out, style, left.style, caps);
+    out.push(' ');
+    let _ = write!(out, "\x1b[{};{}H", y + 1, x + 1);
+    set_style(out, style, cell.style, caps);
+    out.push_str(&outer_text(cell));
+    let _ = write!(out, "\x1b[{};{}H", y + 1, lx + 1);
+    set_style(out, style, left.style, caps);
+    out.push_str(&outer_text(left));
+    Some(x + u16::from(cell.width.max(1)))
 }
 
 /// A one-column cell of a regional indicator alone (tmux's width,
@@ -1032,6 +1100,64 @@ mod tests {
             frame.contains("\x1b[1;2H\x1b[0m\x1b[31m\u{1f1ef}\x1b[1;3H\x1b[0mx\u{1f1f5}\x1b[1;5HB"),
             "{frame:?}"
         );
+    }
+
+    /// Cells `x` and `x + 1` of the first row as one two-column cell of `text`.
+    fn put_wide(screen: &mut Snapshot, x: usize, text: &str) {
+        screen.cells[x].text = text.into();
+        screen.cells[x].width = 2;
+        screen.cells[x + 1].width = 0;
+    }
+
+    /// A two-column cell whose first character a terminal draws one column
+    /// wide on its own (D-045: U+1F590, which tmux joins to a skin tone, a
+    /// cell `codepoint-widths` widened) gets its second column written as a
+    /// blank first, which a terminal drawing the cell one wide keeps, and a
+    /// cursor move after it. An emoji drawn two wide anyway gets neither.
+    #[test]
+    fn a_wide_cell_drawn_narrow_blanks_its_second_column() {
+        let caps = test_caps();
+        let mut screen = erased(8);
+        screen.cells[0].text = "a".into();
+        put_wide(&mut screen, 1, "\u{1f590}\u{1f3fb}");
+        screen.cells[3].text = "b".into();
+        put_wide(&mut screen, 4, "\u{1f44d}\u{1f3fb}");
+        screen.cells[6].text = "c".into();
+        screen.cursor = Some((0, 0));
+        let frame = String::from_utf8(Compositor::default().frame(screen, caps)).unwrap();
+        assert!(
+            frame.contains("a\x1b[1;3H \x1b[1;2H\u{1f590}\u{1f3fb}\x1b[1;4Hb\u{1f44d}\u{1f3fb}c"),
+            "{frame:?}"
+        );
+    }
+
+    /// A skin-tone modifier in a cell of its own after U+270C (not one of
+    /// tmux's bases): Ghostty would join it to the emoji as it is printed,
+    /// so the emoji's cell is blanked, the modifier written after the
+    /// blank, then the emoji again (D-045).
+    #[test]
+    fn a_lone_skin_tone_is_written_before_the_emoji_before_it() {
+        let caps = test_caps();
+        let mut screen = erased(6);
+        screen.cells[0].text = "\u{270c}".into();
+        put_wide(&mut screen, 1, "\u{1f3ff}");
+        screen.cells[3].text = "z".into();
+        screen.cursor = Some((0, 0));
+        let mut c = Compositor::default();
+        let frame = String::from_utf8(c.frame(screen.clone(), caps)).unwrap();
+        assert!(
+            frame.contains("\x1b[1;1H \x1b[1;2H\u{1f3ff}\x1b[1;1H\u{270c}\x1b[1;4Hz"),
+            "{frame:?}"
+        );
+        // Only the emoji changed: written over, it joins nothing after it.
+        screen.cells[0].text = "\u{261d}".into();
+        let frame = String::from_utf8(c.frame(screen.clone(), caps)).unwrap();
+        assert!(frame.contains("\x1b[1;1H\u{261d}"), "{frame:?}");
+        assert!(!frame.contains('\u{1f3ff}'), "{frame:?}");
+        // Nothing before it to join: written as any cell.
+        screen.cells[0].text = "".into();
+        let frame = String::from_utf8(Compositor::default().frame(screen, caps)).unwrap();
+        assert!(frame.contains("\x1b[1;1H \u{1f3ff}z"), "{frame:?}");
     }
 
     /// `screen_write_flush_dirty`: forced cells are written even where the

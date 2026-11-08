@@ -786,7 +786,7 @@ Recorded per commit in git history; the list is kept current:
 
 - `patches/0027-tmux-clusters.patch` (`unicode/main.zig` `tmux_clusters`,
   `tmux_vs16_wide`, `setTmuxClusters`, `tmuxJamo`, `tmuxShouldCombine`,
-  `tmuxMayJoin`; `Terminal.zig` `tmuxCombine`, `print`, `printSliceFast`,
+  `tmuxMayJoin`, `tmuxTextPresentation`; `Terminal.zig` `tmuxCombine`, `print`, `printSliceFast`,
   `printSliceFill`; `c/unicode.zig`, `c/main.zig`, `lib_vt.zig`,
   `include/ghostty/vt/unicode.h`): with a process-wide switch
   (`ghostty_unicode_set_tmux_clusters(enabled, vs16_wide)`, off by default,
@@ -801,7 +801,11 @@ Recorded per commit in git history; the list is kept current:
   leaves a Latin-1 character after a cell with graphemes to `print`); two
   lone regional indicators, and an emoji skin-tone modifier with one of
   tmux's 72 bases in either order, join into two columns
-  (`utf8_should_combine`, utf8-combined.c); Hangul jamo join as
+  (`utf8_should_combine`, utf8-combined.c); a character joining after a
+  ZWJ makes one of the nine text-presentation emoji tmux's table makes two
+  columns (U+261D, U+26F9, U+270C, U+270D, U+1F3CB, U+1F3CC, U+1F574,
+  U+1F575, U+1F590), one column alone in vtmux's grid (D-045), two
+  columns, as tmux's cell is and Ghostty draws the sequence; Hangul jamo join as
   `hanguljamo_check_state` says (a medial or final jamo that cannot join is
   dropped); U+3164 is dropped wherever it comes; a cell stops joining at 32
   bytes of UTF-8 (`UTF8_SIZE`). Everything else, a spacing mark or a prepend
@@ -811,8 +815,8 @@ Recorded per commit in git history; the list is kept current:
   character wraps in both. The slice fast path batches a character only
   when `tmuxMayJoin` says tmux could not join it to the one before. vtmux
   turns it on in the server (`vtmux_vt::set_tmux_clusters`), with tmux's
-  own width table (`utf8_default_width_cache`) as overrides under
-  `codepoint-widths` (D-031); the oracle's observer stays on Ghostty's
+  own width table (`utf8_default_width_cache`, less those nine) as
+  overrides under `codepoint-widths` (D-031); the oracle's observer stays on Ghostty's
   rules. Wrapper: `unicode::set_tmux_clusters` (`libghostty-vt/src/unicode.rs`,
   `bindings.rs` by hand). Tests: `Terminal: tmux clusters (vtmux)` (each case
   through `print` and `printSlice`) and `tmux clustering rules (vtmux)`;

@@ -109,6 +109,17 @@
         "wait_for": "fed"
       },
       {
+        "divergence": {
+          "id": "D-045",
+          "expect": {
+            "kind": "cli",
+            "stdout": "table 5,3\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
         "run": [
           "display",
           "-p",
@@ -332,7 +343,7 @@
       }
     },
     {
-      "step": 16,
+      "step": 17,
       "observation": {
         "kind": "cli",
         "stdout": "table 6,3\n",
@@ -341,7 +352,7 @@
       }
     },
     {
-      "step": 18,
+      "step": 19,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -350,7 +361,7 @@
       }
     },
     {
-      "step": 19,
+      "step": 20,
       "observation": {
         "kind": "cli",
         "stdout": "join 6,4\n",
@@ -359,7 +370,7 @@
       }
     },
     {
-      "step": 21,
+      "step": 22,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -368,7 +379,7 @@
       }
     },
     {
-      "step": 24,
+      "step": 25,
       "observation": {
         "kind": "screen",
         "rows": [
@@ -389,16 +400,7 @@
       }
     },
     {
-      "step": 25,
-      "observation": {
-        "kind": "cli",
-        "stdout": "",
-        "stderr": "",
-        "exit": 0
-      }
-    },
-    {
-      "step": 27,
+      "step": 26,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -410,7 +412,7 @@
       "step": 28,
       "observation": {
         "kind": "cli",
-        "stdout": "vs16off 2,6\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
@@ -419,13 +421,13 @@
       "step": 29,
       "observation": {
         "kind": "cli",
-        "stdout": "",
+        "stdout": "vs16off 2,6\n",
         "stderr": "",
         "exit": 0
       }
     },
     {
-      "step": 31,
+      "step": 30,
       "observation": {
         "kind": "cli",
         "stdout": "",
@@ -437,13 +439,22 @@
       "step": 32,
       "observation": {
         "kind": "cli",
-        "stdout": "option 3,7\n",
+        "stdout": "",
         "stderr": "",
         "exit": 0
       }
     },
     {
       "step": 33,
+      "observation": {
+        "kind": "cli",
+        "stdout": "option 3,7\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
       "observation": {
         "kind": "cli",
         "stdout": "x🇬y\n🇬🇧🇬y\nx️y一️z\n☝y⌚︎z\nx‍😀y🏻👋z.\n\nx️y\n🇬y\n",

@@ -1,0 +1,35 @@
+name = "text_presentation_status"
+size = [40, 4]
+# The status line with characters tmux's width table makes two columns
+# that a terminal draws one (D-045: U+261D, U+270C, ...): tmux lays them
+# out two wide and the observer (Ghostty) draws the rest of the line a
+# column left, with a stale cell at its end; vtmux counts them one, here
+# and in formats (#{w:}). A regional indicator pair is two columns in
+# both; a lone one is one column in tmux's layout and two on Ghostty, so
+# vtmux draws the cell after it over it (D-044: nothing else moves).
+# Last, a skin-tone modifier after U+270C (a cell of its own in both,
+# which Ghostty would join to it as it is printed), U+26F9 ZWJ U+2642 (two
+# columns in both) and U+261D U+FE0F (two in both).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "a☝b🇯🇵c", "-x", "40", "-y", "3", "cat", "-"] },
+  { run = ["set", "-g", "status-left", "L🇯x "] },
+  { run = ["set", "-g", "status-right", "XYZW"] },
+  { run = ["select-pane", "-t", "%0", "-T", "t"] },
+  { attach = { session = "a" } },
+  { divergence = { id = "D-045", expect = { kind = "screen", rows = ["", "", "", "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                       \\e[30mXYZW"], cursor = [0, 0] } } },
+  { screen = {} },
+  { run = ["set", "-g", "status-right", "🇯R✌Q"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-045", expect = { kind = "screen", rows = ["", "", "", "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                        \\e[30mR✌Q"], cursor = [0, 0] } } },
+  { screen = {} },
+  { run = ["refresh-client"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-045", expect = { kind = "screen", rows = ["", "", "", "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                        \\e[30mR✌Q"], cursor = [0, 0] } } },
+  { screen = {} },
+  { divergence = { id = "D-045", expect = { kind = "cli", stdout = "6 4\n", stderr = "", exit = 0 } } },
+  { run = ["display", "-p", "#{w:#{window_name}} #{w:#{status-right}}"] },
+  { run = ["set", "-g", "status-right", "✌🏿⛹‍♂☝️|"] },
+  { settle = { react = true } },
+  { divergence = { id = "D-045", expect = { kind = "screen", rows = ["", "", "", "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                   \\e[30m✌🏿⛹‍♂☝️|"], cursor = [0, 0] } } },
+  { screen = {} },
+]

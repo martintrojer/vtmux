@@ -1,0 +1,336 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "text_presentation_status",
+  "inputs": {
+    "name": "text_presentation_status",
+    "size": [
+      40,
+      4
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "a☝b🇯🇵c",
+          "-x",
+          "40",
+          "-y",
+          "3",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-left",
+          "L🇯x "
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "XYZW"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-045",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "",
+              "",
+              "",
+              "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                       \\e[30mXYZW"
+            ],
+            "cursor": [
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "🇯R✌Q"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-045",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "",
+              "",
+              "",
+              "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                        \\e[30mR✌Q"
+            ],
+            "cursor": [
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "refresh-client"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-045",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "",
+              "",
+              "",
+              "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                        \\e[30mR✌Q"
+            ],
+            "cursor": [
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "divergence": {
+          "id": "D-045",
+          "expect": {
+            "kind": "cli",
+            "stdout": "6 4\n",
+            "stderr": "",
+            "exit": 0
+          }
+        }
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{w:#{window_name}} #{w:#{status-right}}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "✌🏿⛹‍♂☝️|"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "divergence": {
+          "id": "D-045",
+          "expect": {
+            "kind": "screen",
+            "rows": [
+              "",
+              "",
+              "",
+              "\\e[30m\\e[42mL\\e[39m \\e[30mx \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                   \\e[30m✌🏿⛹‍♂☝️|"
+            ],
+            "cursor": [
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42mL🇯x \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                      \\e[30mXYZW"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42mL🇯x \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                     \\e[30m🇯R✌Q"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42mL🇯x \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                     \\e[30m🇯R✌Q"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "7 5\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42mL🇯x \\e[4m0:a☝b🇯🇵c*\\e[0m\\e[42m                 \\e[30m✌🏿⛹‍♂☝️|R✌Q"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

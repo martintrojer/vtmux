@@ -712,6 +712,40 @@ static OVERRIDES: &[(u32, u8)] = &[
     // END GENERATED width_overrides
 ];
 
+/// The characters [`OVERRIDES`] makes two columns that are text presentation
+/// (`Emoji_Presentation=No`, `East_Asian_Width=N`): glibc's `wcwidth`, and so
+/// the programs in a pane, and terminals that follow Unicode's widths (Ghostty,
+/// the owner's) count them one column. tmux's two makes it draw the rest of
+/// such a row a column left of where it means it on those terminals, a split's
+/// border too; vtmux gives them glibc's one (D-045). With U+FE0F, or after a
+/// ZWJ, terminals draw them two wide, and so does vtmux ([`Cluster::push`]).
+/// They are the ones of the table's two-column characters that Ghostty's own
+/// table gives one column; oracle `text_presentation_split` draws each under
+/// Ghostty's widths.
+static TEXT_PRESENTATION: &[u32] = &[
+    0x261D,
+    0x26F9,
+    0x270C,
+    0x270D,
+    0x0001_F3CB,
+    0x0001_F3CC,
+    0x0001_F574,
+    0x0001_F575,
+    0x0001_F590,
+];
+
+/// One of [`TEXT_PRESENTATION`].
+fn is_text_presentation(c: char) -> bool {
+    TEXT_PRESENTATION.contains(&u32::from(c))
+}
+
+/// [`OVERRIDES`] without [`TEXT_PRESENTATION`]: the widths vtmux takes from
+/// tmux's table.
+fn tmux_override(cp: u32) -> Option<u8> {
+    let i = OVERRIDES.binary_search_by_key(&cp, |&(wc, _)| wc).ok()?;
+    (!TEXT_PRESENTATION.contains(&cp)).then_some(OVERRIDES[i].1)
+}
+
 /// The base characters that take an emoji skin-tone modifier
 /// (`utf8_should_combine`, utf8-combined.c:123-203).
 static SKIN_BASES: &[u32] = &[
@@ -841,7 +875,11 @@ pub fn codepoint_width_ranges() -> Vec<(u32, u32, u8)> {
 /// over it. Neighbouring code points of one width are one range.
 #[must_use]
 pub fn grid_width_ranges() -> Vec<(u32, u32, u8)> {
-    let mut items: Vec<(u32, u32, u8)> = OVERRIDES.iter().map(|&(c, w)| (c, c, w)).collect();
+    let mut items: Vec<(u32, u32, u8)> = OVERRIDES
+        .iter()
+        .filter(|(c, _)| !TEXT_PRESENTATION.contains(c))
+        .map(|&(c, w)| (c, c, w))
+        .collect();
     CODEPOINT_WIDTHS.with(|w| items.extend(w.borrow().iter().copied()));
     let mut out: Vec<(u32, u32, u8)> = Vec::new();
     for (lo, hi, w) in flatten(&items) {
@@ -948,7 +986,8 @@ fn codepoint_width(cp: u32) -> Option<u8> {
     })
 }
 
-/// The width tmux gives `c`: 0, 1 or 2.
+/// The width tmux gives `c`: 0, 1 or 2 (one for [`TEXT_PRESENTATION`],
+/// D-045).
 #[must_use]
 pub fn char_width(c: char) -> u8 {
     let cp = u32::from(c);
@@ -957,8 +996,16 @@ pub fn char_width(c: char) -> u8 {
     {
         return w;
     }
-    if let Ok(i) = OVERRIDES.binary_search_by_key(&cp, |&(wc, _)| wc) {
-        return OVERRIDES[i].1;
+    table_width(c)
+}
+
+/// [`char_width`] without `codepoint-widths`: the width tables give `c`, as
+/// a terminal that follows Unicode's widths draws it on its own.
+#[must_use]
+pub fn table_width(c: char) -> u8 {
+    let cp = u32::from(c);
+    if let Some(w) = tmux_override(cp) {
+        return w;
     }
     if cp < 0x80 {
         // `wcwidth` is -1 for the control characters, which tmux maps to 1; the
@@ -1109,6 +1156,10 @@ impl Cluster {
                         force_wide = true;
                     } else if !self.text.ends_with('\u{200d}') {
                         return Combine::Own;
+                    } else if is_text_presentation(first) {
+                        // tmux's cell keeps its base's two columns, and a
+                        // terminal draws the emoji sequence two wide (D-045).
+                        force_wide = true;
                     }
                 }
             }
@@ -1574,11 +1625,18 @@ mod tests {
     ];
     // END GENERATED width_probes
 
+    /// The reference's width less one for each of [`TEXT_PRESENTATION`],
+    /// which vtmux counts one column where tmux counts two (D-045).
+    fn d045(text: &str, reference: usize) -> usize {
+        reference - text.chars().filter(|&c| is_text_presentation(c)).count()
+    }
+
     #[test]
     fn text_width_matches_reference() {
         for &(text, want) in STRINGS {
-            assert_eq!(text_width(text), want, "{text:?}");
+            assert_eq!(text_width(text), d045(text, want), "{text:?}");
         }
+        assert_eq!(text_width("\u{261d}"), 1, "D-045");
     }
 
     /// `utf8_add_to_width_cache` (utf8.c:317); the cli test
@@ -1633,14 +1691,24 @@ mod tests {
             "the option wins over tmux's table: {grid:x?}"
         );
         set_codepoint_widths::<&str>(&[]);
+        let table: Vec<_> = OVERRIDES
+            .iter()
+            .filter(|(c, _)| !TEXT_PRESENTATION.contains(c))
+            .collect();
         assert_eq!(
             grid_width_ranges().len(),
-            OVERRIDES
+            table
                 .windows(2)
                 .filter(|p| p[0].0 + 1 != p[1].0 || p[0].1 != p[1].1)
                 .count()
                 + 1,
             "tmux's table alone"
+        );
+        assert!(
+            grid_width_ranges()
+                .iter()
+                .all(|&(lo, hi, _)| !TEXT_PRESENTATION.iter().any(|c| (lo..=hi).contains(c))),
+            "glibc's width, as Ghostty's, for the text-presentation ones (D-045)"
         );
         assert_eq!(char_width('α'), 1);
         assert_eq!(
@@ -1658,6 +1726,7 @@ mod tests {
     fn char_width_matches_reference_at_every_boundary() {
         for &(cp, want) in PROBES {
             let c = char::from_u32(cp).unwrap();
+            let want = d045(&c.to_string(), want);
             assert_eq!(usize::from(char_width(c)), want, "U+{cp:04X}");
         }
     }
@@ -1683,6 +1752,42 @@ mod tests {
         let mut cell = Cluster::new('\u{1f44d}');
         assert_eq!(cell.push('\u{1f3fd}'), Combine::Joined);
         assert_eq!((cell.text.as_str(), cell.width), ("\u{1f44d}\u{1f3fd}", 2));
+    }
+
+    /// D-045: one column alone, two with U+FE0F or after a ZWJ (tmux's
+    /// cell keeps its base's two there), and with a skin tone where tmux
+    /// joins one (`utf8_should_combine`), else that is a cell of its own.
+    #[test]
+    fn text_presentation_is_one_column_alone() {
+        for &cp in TEXT_PRESENTATION {
+            let c = char::from_u32(cp).unwrap();
+            assert_eq!(char_width(c), 1, "U+{cp:04X}");
+            assert!(
+                OVERRIDES.contains(&(cp, 2)),
+                "U+{cp:04X} is in tmux's table"
+            );
+            for tail in [&['\u{fe0f}'][..], &['\u{200d}', '\u{2642}']] {
+                let mut cell = Cluster::new(c);
+                assert!(tail.iter().all(|&t| cell.push(t) == Combine::Joined));
+                assert_eq!(cell.width, 2, "U+{cp:04X} {tail:?}");
+            }
+            let mut cell = Cluster::new(c);
+            let skin = cell.push('\u{1f3fd}');
+            if SKIN_BASES.contains(&cp) {
+                assert_eq!((skin, cell.width), (Combine::Joined, 2), "U+{cp:04X}");
+            } else {
+                assert_eq!((skin, cell.width), (Combine::Own, 1), "U+{cp:04X}");
+            }
+            // A ZWJ alone changes no width.
+            let mut cell = Cluster::new(c);
+            assert_eq!(cell.push('\u{200d}'), Combine::Joined);
+            assert_eq!(cell.width, 1);
+        }
+        // An emoji tmux's table and glibc agree on keeps its width.
+        let mut cell = Cluster::new('x');
+        cell.push('\u{200d}');
+        cell.push('\u{2642}');
+        assert_eq!(cell.width, 1, "only the text-presentation bases widen");
     }
 
     #[test]

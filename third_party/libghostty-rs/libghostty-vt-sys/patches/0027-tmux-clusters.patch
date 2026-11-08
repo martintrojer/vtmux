@@ -44,7 +44,7 @@ index 46537320a..693ec3b8f 100644
          @export(&c.style_default, .{ .name = "ghostty_style_default" });
          @export(&c.style_is_default, .{ .name = "ghostty_style_is_default" });
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 06701afb9..3c0427f06 100644
+index 06701afb9..077f4a77c 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
 @@ -719,6 +719,20 @@ fn printSliceFast(
@@ -93,7 +93,7 @@ index 06701afb9..3c0427f06 100644
                  var state: uucode.grapheme.BreakState = .default;
                  if (unicode.graphemeBreak(@intCast(cps[idx - 1]), @intCast(cp), &state)) continue;
              }
-@@ -1299,6 +1324,63 @@ inline fn printSliceCheckExpected(style_id: style.Id) u64 {
+@@ -1299,6 +1324,66 @@ inline fn printSliceCheckExpected(style_id: style.Id) u64 {
      return @bitCast(e);
  }
  
@@ -140,7 +140,10 @@ index 06701afb9..3c0427f06 100644
 +                    unicode.tmuxShouldCombine(c, c_ri, base, cell_ri))
 +                    force_wide = true
 +                else if (last != 0x200D)
-+                    return .own;
++                    return .own
++                else if (unicode.tmuxTextPresentation(base))
++                    // tmux's cell keeps its base's two columns (D-045).
++                    force_wide = true;
 +            },
 +        }
 +    }
@@ -157,7 +160,7 @@ index 06701afb9..3c0427f06 100644
  pub fn print(self: *Terminal, c: u21) !void {
      // log.debug("print={x} y={} x={}", .{ c, self.screens.active.cursor.y, self.screens.active.cursor.x });
  
-@@ -1336,11 +1418,17 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -1336,11 +1421,17 @@ pub fn print(self: *Terminal, c: u21) !void {
      else
          self.scrolling_region.right + 1;
  
@@ -176,7 +179,7 @@ index 06701afb9..3c0427f06 100644
          self.modes.get(.grapheme_cluster) and
          self.screens.active.cursor.x > 0)
      grapheme: {
-@@ -1383,8 +1471,26 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -1383,8 +1474,26 @@ pub fn print(self: *Terminal, c: u21) !void {
          // necessarily a grapheme break.
          if (prev.cell.codepoint() == 0) break :grapheme;
  
@@ -204,7 +207,7 @@ index 06701afb9..3c0427f06 100644
              var state: uucode.grapheme.BreakState = .default;
              if (prev.cell.hasGrapheme()) {
                  const cps = self.screens.active.cursor.page_pin.node.page().lookupGrapheme(prev.cell).?;
-@@ -1408,7 +1514,7 @@ pub fn print(self: *Terminal, c: u21) !void {
+@@ -1408,7 +1517,7 @@ pub fn print(self: *Terminal, c: u21) !void {
          // If we can NOT break, this means that "c" is part of a grapheme
          // with the previous char.
          if (!grapheme_break) {
@@ -213,7 +216,7 @@ index 06701afb9..3c0427f06 100644
                  .ignore => return,
                  .wide => wide: {
                      if (prev.cell.wide == .wide) break :wide;
-@@ -6140,6 +6246,81 @@ test "Terminal: width overrides (vtmux)" {
+@@ -6140,6 +6249,84 @@ test "Terminal: width overrides (vtmux)" {
      try testing.expectEqual(@as(usize, 9), t.screens.active.cursor.x);
  }
  
@@ -256,6 +259,9 @@ index 06701afb9..3c0427f06 100644
 +        .{ .cps = &.{ g, b, g, 'y' }, .x = 4, .y = 0, .text = "\u{1F1EC}\u{1F1E7}\u{1F1EC}y" },
 +        // Anything joins a cell that ends with a ZWJ.
 +        .{ .cps = &.{ 'x', 0x200D, 0x1F600, 'y' }, .x = 2, .y = 0, .text = "x\u{200D}\u{1F600}y" },
++        // ... and makes a text-presentation emoji two columns.
++        .{ .cps = &.{ 0x26F9, 0x200D, 0x2642, 'y' }, .x = 3, .y = 0, .text = "\u{26F9}\u{200D}\u{2642}y" },
++        .{ .cps = &.{ 0x26F9, 'y' }, .x = 2, .y = 0, .text = "\u{26F9}y" },
 +        .{ .cps = &.{ 'x', 0x200D, 0xE9, 'y' }, .x = 2, .y = 0, .text = "x\u{200D}\u{E9}y" },
 +        // A skin-tone modifier and its base join either way round.
 +        .{ .cps = &.{ 0x1F3FB, 0x1F44B, 'y' }, .x = 3, .y = 0, .text = "\u{1F3FB}\u{1F44B}y" },
@@ -324,10 +330,10 @@ index cac19be09..e3de5f403 100644
      cps: ?[*]const u32,
      len: usize,
 diff --git a/src/unicode/main.zig b/src/unicode/main.zig
-index 99a4fd6b0..154deaf16 100644
+index 99a4fd6b0..49f7ed6e2 100644
 --- a/src/unicode/main.zig
 +++ b/src/unicode/main.zig
-@@ -85,6 +85,114 @@ pub inline fn printWidth(cp: u21) u2 {
+@@ -85,6 +85,129 @@ pub inline fn printWidth(cp: u21) u2 {
      return if (cp <= 0xFF) 1 else table.get(cp).width;
  }
  
@@ -363,6 +369,18 @@ index 99a4fd6b0..154deaf16 100644
 +
 +pub inline fn tmuxIsRegional(cp: u21) bool {
 +    return cp >= 0x1F1E6 and cp <= 0x1F1FF;
++}
++
++/// vtmux: the characters tmux's own width table makes two columns that
++/// are text presentation (vtmux_core::width::TEXT_PRESENTATION, D-045):
++/// one column alone in vtmux's grid, as in Ghostty's table, but two after a
++/// ZWJ joins them, where tmux's cell keeps its base's two columns and
++/// Ghostty draws the emoji sequence two wide.
++pub fn tmuxTextPresentation(cp: u21) bool {
++    return switch (cp) {
++        0x261D, 0x26F9, 0x270C, 0x270D, 0x1F3CB, 0x1F3CC, 0x1F574, 0x1F575, 0x1F590 => true,
++        else => false,
++    };
 +}
 +
 +/// vtmux: tmux's `utf8_should_combine(with, add)` (utf8-combined.c),
@@ -437,6 +455,9 @@ index 99a4fd6b0..154deaf16 100644
 +    try testing.expect(tmuxMayJoin('x', 0x3164));
 +    try testing.expect(!tmuxMayJoin('x', 0x1F600));
 +    try testing.expect(!tmuxMayJoin(0x1F1EC, 0x1F600));
++    try testing.expect(tmuxTextPresentation(0x261D));
++    try testing.expect(tmuxTextPresentation(0x1F590));
++    try testing.expect(!tmuxTextPresentation(0x270A));
 +}
 +
  test "codepointWidth" {
