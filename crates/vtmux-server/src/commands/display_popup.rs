@@ -103,7 +103,7 @@ pub fn exec(
         border_style,
         command: command(server, s, args),
         cwd: match args.value('d') {
-            Some(d) => super::expand(server, found, d).into(),
+            Some(d) => super::expand_from_target(server, found, Some(tc), d).into(),
             None => server.client_cwd(Some(tc), Some(s)),
         },
         env: args.values('e').map(str::to_owned).collect(),

@@ -24,7 +24,13 @@ pub fn exec(
         name: args.value('b').map(str::to_owned),
         clip,
     };
-    let target = super::expand(server, found, &args.positional_text(0).unwrap_or_default());
+    let tc = server.find_client(item.client, item.origin, args.value('t'));
+    let target = super::expand_from_target(
+        server,
+        found,
+        tc,
+        &args.positional_text(0).unwrap_or_default(),
+    );
     let path = (target != "-").then(|| file_io::path(server, item, &target));
     file_io::read(server, item, path.as_deref(), then).map_err(Into::into)
 }

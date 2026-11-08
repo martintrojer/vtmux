@@ -1,0 +1,19 @@
+name = "run_shell_target_client"
+size = [60, 12]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "60", "-y", "11", "cat", "-"] },
+  { run = ["run-shell", "echo '[#{client_termname}:#{client_width}]'"] },
+  { attach = { session = "a" } },
+  { run = ["run-shell", "echo '[#{client_termname}:#{client_width}x#{client_height}:#{session_name}]'"] },
+  { run = ["run-shell", "-c", "#{?client_termname,/,/nonexistent}", "pwd"] },
+  { run = ["if-shell", "-F", "#{client_termname}", "run-shell 'echo yes'", "run-shell 'echo no'"] },
+  { run = ["if-shell", "test #{client_width} = 60", "run-shell 'echo sixty'", "run-shell 'echo other'"] },
+  { run = ["run-shell", "-C", "display -p '#{client_termname}'"] },
+  { run = ["set-buffer", "-b", "s", "saved"] },
+  { run = ["save-buffer", "-b", "s", "b-#{client_width}"] },
+  { run = ["run-shell", "cat b-60"] },
+  { run = ["load-buffer", "-b", "l", "#{?client_width,b-60,nonexistent}"] },
+  { run = ["show-buffer", "-b", "l"] },
+  { run = ["run-shell", "echo 'display -p sourced' > f-60"] },
+  { run = ["source-file", "-F", "f-#{client_width}"] },
+]

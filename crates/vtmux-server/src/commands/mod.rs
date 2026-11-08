@@ -913,6 +913,20 @@ pub fn expand(server: &Server, found: Found, template: &str) -> String {
     format::expand_str(template, &ctx)
 }
 
+/// `format_single_from_target` (format.c:6940-6948): the command's target
+/// and its target client `tc` (`cmdq_get_target_client`: for most commands
+/// the current client, `cmd_find_current_client`), whose formats
+/// (`client_*`) it can read.
+pub fn expand_from_target(
+    server: &Server,
+    found: Found,
+    tc: Option<ClientId>,
+    template: &str,
+) -> String {
+    let ctx = server.format_ctx(found, tc);
+    format::expand_str(template, &ctx)
+}
+
 /// [`expand`] for a tree that describes `kind` whatever `found` holds
 /// (`format_single` given fewer of session, winlink and pane).
 pub fn expand_as(

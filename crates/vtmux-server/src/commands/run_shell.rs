@@ -196,11 +196,14 @@ pub fn exec(
         None => None,
     };
     let done = Done::new(server, item, wait);
+    // cmdq_get_target_client: run-shell's flags are 0, so the current
+    // client (cmd-queue.c:614-615).
+    let tc = server.target_client(item.client, item.origin);
     // -t names the pane output goes to (cdata->wp_id).
     let to_pane = found.pane.filter(|_| args.target('t').is_some());
     let session = found.session;
     let cwd = match args.value('c') {
-        Some(c) => std::path::PathBuf::from(super::expand(server, found, c)),
+        Some(c) => std::path::PathBuf::from(super::expand_from_target(server, found, tc, c)),
         None => server.client_cwd(item.client, session),
     };
     let now = Instant::now();
@@ -213,7 +216,6 @@ pub fn exec(
             if let ArgValue::Commands(_) = v {
                 return v.clone();
             }
-            let tc = server.target_client(item.client, item.origin);
             ArgValue::Str(vtmux_core::format::expand_str(
                 &v.text(),
                 &server.format_ctx(found, tc),
@@ -234,8 +236,9 @@ pub fn exec(
         );
     } else {
         let command = args.positional_text(0).map(|cmd| {
-            // `#{1}`, `#{2}`... are the arguments after the command.
-            let mut ctx = server.format_ctx(found, None);
+            // format_create_from_target; `#{1}`, `#{2}`... are the
+            // arguments after the command.
+            let mut ctx = server.format_ctx(found, tc);
             for (i, arg) in args.positionals.iter().enumerate().skip(1) {
                 ctx.extra
                     .push((i.to_string().into(), arg.text().into_owned()));
@@ -354,7 +357,13 @@ pub fn if_shell(
     found: Found,
 ) -> Result<(), CmdError> {
     let wait = !args.flag('b');
-    let shellcmd = super::expand(server, found, &args.positional_text(0).unwrap_or_default());
+    let tc = server.target_client(item.client, item.origin);
+    let shellcmd = super::expand_from_target(
+        server,
+        found,
+        tc,
+        &args.positional_text(0).unwrap_or_default(),
+    );
     let then = args.positionals.get(1).cloned();
     let otherwise = args.positionals.get(2).cloned();
     if args.flag('F') {

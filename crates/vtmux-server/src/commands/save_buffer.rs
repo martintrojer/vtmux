@@ -38,7 +38,13 @@ pub fn exec(
         }
         "-".to_owned()
     } else {
-        super::expand(server, found, &args.positional_text(0).unwrap_or_default())
+        let tc = server.target_client(item.client, item.origin);
+        super::expand_from_target(
+            server,
+            found,
+            tc,
+            &args.positional_text(0).unwrap_or_default(),
+        )
     };
     if target == "-" {
         if attached || item.client.is_none() || !item.write_stdout(data) {

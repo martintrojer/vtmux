@@ -47,7 +47,8 @@ pub fn exec(
     for raw in &args.positionals {
         let raw = &*raw.text();
         let path = if args.flag('F') {
-            super::expand(server, found, raw)
+            let tc = server.target_client(item.client, item.origin);
+            super::expand_from_target(server, found, tc, raw)
         } else {
             raw.to_owned()
         };
