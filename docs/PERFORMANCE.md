@@ -26,7 +26,7 @@ A ratio is vtmux / tmux 3.8 for the same work in the same run; under 1 means vtm
 | Startup, `new -d` | 12.2 ms | 8.9 ms | 0.73x | |
 | Creating 400 panes, CPU | 200 ms | 380 ms | 1.9x | **Worse.** |
 | Copy mode entry, 1M lines, compressed | 220 ms | 57 ms | 0.26x | |
-| Search all of a 1M-line history | 1673 ms | 3078 ms | 1.8x | **Worse**, was 10.5 s. At 100k lines 0.62x (109 against 175 ms); *Copy mode and search* |
+| Search all of a 1M-line history | 1673 ms | 3078 ms | 1.8x | **Worse**, was 10.5 s. At 100k lines about parity with tmux (the reviewer's re-run: 155-164 ms against tmux's 152-155 ms); *Copy mode and search* |
 | 32 clients on one window of agent panes | 0.56 s per 10 s | 2.75 s | 4.9x | **Worse.** Each client composes its own frame; *Micro-benchmarks* |
 | 100 agent panes, one client | 3.37 s per 10 s | 2.71 s | 0.80x | RSS 100 MB against 17.8 MB, **Worse** |
 | 10 agent panes for 30 minutes | 6.5 MB | 21.9-22.1 MB | - | no growth in either; **Worse** RSS |
@@ -143,7 +143,7 @@ Raw runs:
 
 ## Copy mode and search
 
-`bench-history-memory.sh copymode spec big`, median of 3 servers per state. Entering copy mode on compressed history is faster than tmux. The table is from before `audit_perf_hotpaths`, which made the search faster than tmux's at 100k lines and 1.8x tmux's at 1M (*Plain search since `audit_perf_hotpaths`*, below).
+`bench-history-memory.sh copymode spec big`, median of 3 servers per state. Entering copy mode on compressed history is faster than tmux. The table is from before `audit_perf_hotpaths`, which made the search about as fast as tmux's at 100k lines and 1.8x tmux's at 1M (*Plain search since `audit_perf_hotpaths`*, below).
 
 Copy mode copies Ghostty's pages (patch 0005 copies compressed pages without decoding them) and reads rows on demand. That makes entry cheap; a search has to decode the pages.
 
@@ -175,10 +175,12 @@ A probe script, not the `copymode` mode above: one 120x40 pane, N log lines of a
 
 | history | search | tmux 3.8 | vtmux before | vtmux after | after / tmux |
 |---|---|---|---|---|---|
-| 100k lines | plain `zzznotfound` | 175 ms | 655 ms | 109 ms | 0.62x |
+| 100k lines | plain `zzznotfound` | 175 ms | 655 ms | 109 ms | 0.62x (the author's run) |
+| 100k lines | plain `zzznotfound`, the reviewer's re-run | 152-155 ms | - | 155-164 ms | about 1.0x: parity |
 | 100k lines | regular expression `zz+notfound` | 136 ms | - | 93 ms | 0.68x |
 | 1M lines | plain `zzznotfound` | 1673 ms | 10533 ms | 3078 ms | 1.8x |
 
+- Read the 100k rows as parity: the author's 0.62x came from one run under a different load, the reviewer's repeat gives 155-164 ms against tmux's 152-155 ms. No claim of faster than tmux.
 - Before, a plain pattern was compared cell by cell at every column of every line (`window_copy_search_lr`), reading each line's cells several times. Now a plain ASCII pattern is looked for in the text of a narrow ASCII line that does not wrap, as a regular expression already was. Other lines still go through the cells.
 - Before, the 1M-line search took longer than tmux's 10 s search timeout (`WINDOW_COPY_SEARCH_TIMEOUT`), so it gave up where tmux finished in 1.7 s. A match near the top of such a history was not found.
 - The 1M row still loses (1.8x) because each line is found with a walk of Ghostty's page list from the top (`ghostty_terminal_grid_ref`, `PageList.pin`). That is O(pages) per line, so a full search is quadratic: 10x the lines take about 30x the time. Fixing it needs a way to step from one row to the next in the C API, which is a Ghostty patch.
