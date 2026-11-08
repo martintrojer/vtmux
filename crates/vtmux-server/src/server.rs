@@ -4954,9 +4954,12 @@ impl Server {
         // (screen.c:122-125). MODE_CRLF stays (screen.c:117): a pane once
         // empty keeps it.
         pane.term.feed(
-            b"\x1b[r\x1b[?6l\x1b[H\x1b[?47l\x1b[m\x1b[2J\x1b[?7h\x1b[?25h\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2031l\x1b[?5W",
+            b"\x1b[r\x1b[?6l\x1b[H\x1b[?47l\x1b[m\x1b[2J\x1b[?7h\x1b[?25h\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l\x1b[?2031l",
         );
         let _ = pane.term.take_replies();
+        // Default tab stops (DECST8C), past the scanner: it drops the
+        // sequence as one tmux does not know from a program.
+        pane.term.reset_tab_stops();
         // The mode bits the terminal does not hold: blinking and the very
         // visible cursor (the shape stays).
         pane.term.reinit_cursor_modes();

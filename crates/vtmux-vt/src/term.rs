@@ -2134,6 +2134,13 @@ impl PaneTerm {
             .collect()
     }
 
+    /// The default tab stops (every 8 columns: DECST8C), written past the
+    /// scanner, which drops that sequence from a program (tmux has no such
+    /// sequence).
+    pub fn reset_tab_stops(&mut self) {
+        self.feed_piece(b"\x1b[?5W");
+    }
+
     /// `screen_reinit`'s `s->mode = MODE_CURSOR|MODE_WRAP` for the bits
     /// vtmux holds itself: the cursor's blinking and very visible bits go,
     /// its shape stays (screen.c:117). The caller feeds the rest.
