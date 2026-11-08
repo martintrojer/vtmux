@@ -865,22 +865,6 @@ impl Model {
         true
     }
 
-    /// `window_lost_pane` (window.c:1185-1225) for a pane moving to another
-    /// window: out of `w`'s lists and, if it was active, the next active
-    /// pane fires window-pane-changed and has its focus looked at.
-    pub fn lose_pane(&mut self, w: WindowId, p: PaneId) {
-        let Some(window) = self.windows.get_mut(&w) else {
-            return;
-        };
-        let was_active = window.panes.active == Some(p);
-        window.panes.remove(p);
-        let next = window.panes.active;
-        if was_active && let Some(n) = next {
-            self.fire_pane_changed(w, n, Some(p));
-            self.push_focus_check(n);
-        }
-    }
-
     /// `window_fire_pane_changed` (window.c:119-134).
     pub fn fire_pane_changed(&mut self, w: WindowId, p: PaneId, old: Option<PaneId>) {
         let mut ev = crate::events::Event::new("window-pane-changed")

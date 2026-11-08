@@ -17,6 +17,7 @@ use crate::target::Found;
 /// `BREAK_PANE_TEMPLATE` (cmd-break-pane.c:29).
 const TEMPLATE: &str = "#{session_name}:#{window_index}.#{pane_index}";
 
+#[allow(clippy::too_many_lines)] // cmd-break-pane.c's exec, step by step
 pub fn exec(
     server: &mut Server,
     item: &mut Item,
