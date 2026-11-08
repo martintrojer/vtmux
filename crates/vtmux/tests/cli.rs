@@ -891,6 +891,27 @@ fn command_errors() {
     });
 }
 
+/// `@`, `{active}` and `{current}` want a client with a session, and that
+/// error is not quietened by `CMD_FIND_CANFAIL` (cmd-find.c:1012-1020):
+/// display-message, set-option, show-options and the others with a CANFAIL
+/// target still run, and the command client exits 1. Without a session the
+/// lookup fails quietly before it (`no current target`, cmd-find.c:1003).
+#[test]
+fn client_window_target_without_a_client() {
+    compare("client_window_target_without_a_client", |w| {
+        vec![
+            w.run(&["start-server", ";", "display", "-p", "-t", "@", "x"]),
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["display", "-p", "-t", "@", "x"]),
+            w.run(&["display", "-p", "-t", "{active}", "#{session_name}"]),
+            w.run(&["set", "-t", "{current}", "@u", "1"]),
+            w.run(&["show", "-t", "@", "-v", "@u"]),
+            w.run(&["show-environment", "-t", "@", "NOPE"]),
+            w.run(&["display", "-p", "-t", "@x", "x"]),
+        ]
+    });
+}
+
 /// display-menu and display-popup are `CMD_CLIENT_CFLAG` without
 /// `CMD_CLIENT_CANFAIL`: the client is found before the target, so a
 /// command client gets `no current client` whatever `-t` names

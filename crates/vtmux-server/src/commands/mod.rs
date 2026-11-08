@@ -392,6 +392,19 @@ fn run_one(server: &mut Server, item: &mut Item, call: &CommandCall) -> Result<(
     let found = match &call.entry.target {
         Some(spec) => {
             let value = call.args.target(spec.flag);
+            // cmd-find.c:1012-1020: `@`, `{active}` and `{current}` from a
+            // client with no session are `no current client` even under
+            // CMD_FIND_CANFAIL, which quiets only the other errors: the
+            // command still runs and the client exits 1.
+            if spec.flags.can_fail
+                && item.origin.attached.is_none()
+                && value.as_ref().is_some_and(|v| {
+                    v.resolve(spec.kind) == vtmux_core::cmd::target::Resolved::ClientWindow
+                })
+                && target::current(&server.model, item.origin).is_some()
+            {
+                item.error(server, EdgeError::NoCurrentClient.to_bytes());
+            }
             target::resolve(
                 &server.model,
                 item.origin,
