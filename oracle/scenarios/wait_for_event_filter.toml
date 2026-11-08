@@ -1,0 +1,32 @@
+name = "wait_for_event_filter"
+# wait-for -E -F: the filter is expanded in a tree that has only the client
+# and the event's payload (cmd-wait-for.c cmd_wait_for_event_cb, format_create
+# with no format_defaults, then event_payload_add_formats). A payload key
+# that is a format_table name (window_name, session_name from the window and
+# session items, events-payload.c event_payload_add_formats) is shadowed by
+# the table, whose callback has no window or session here (format.c
+# format_find looks the table up before the tree), so #{window_name} is
+# empty and never wakes the wait; #{new_name} is a plain tree entry.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "wait-for -E -F '#{window_name}' window-renamed" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { run = ["renamew", "-t", "a:0", "x"] },
+  { run = ["run", "tmux wait-for -E -l window-renamed | wc -l | tr -d ' '"] },
+  { run = ["run", "tmux wait-for -E -w \"$(tmux wait-for -E -l window-renamed)\" window-renamed"] },
+  { control_send = { id = "c1", line = "wait-for -E -F '#{session_name}' session-renamed" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { run = ["rename", "-t", "a", "b"] },
+  { run = ["run", "tmux wait-for -E -l session-renamed | wc -l | tr -d ' '"] },
+  { run = ["run", "tmux wait-for -E -w \"$(tmux wait-for -E -l session-renamed)\" session-renamed"] },
+  { control_send = { id = "c1", line = "wait-for -E -F '#{==:#{new_name},z}' window-renamed" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { run = ["renamew", "-t", "b:0", "y"] },
+  { run = ["run", "tmux wait-for -E -l window-renamed | wc -l | tr -d ' '"] },
+  { run = ["renamew", "-t", "b:0", "z"] },
+  { run = ["run", "tmux wait-for -E -l window-renamed | wc -l | tr -d ' '"] },
+  { control_send = { id = "c1", line = "display -p done" } },
+  { control_wait = { id = "c1", until = "done" } },
+  { control_close = { id = "c1" } },
+]

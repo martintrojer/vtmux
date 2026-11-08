@@ -1,0 +1,289 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "wait_for_event_filter",
+  "inputs": {
+    "name": "wait_for_event_filter",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "wait-for -E -F '#{window_name}' window-renamed"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "renamew",
+          "-t",
+          "a:0",
+          "x"
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "tmux wait-for -E -l window-renamed | wc -l | tr -d ' '"
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "tmux wait-for -E -w \"$(tmux wait-for -E -l window-renamed)\" window-renamed"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "wait-for -E -F '#{session_name}' session-renamed"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "rename",
+          "-t",
+          "a",
+          "b"
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "tmux wait-for -E -l session-renamed | wc -l | tr -d ' '"
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "tmux wait-for -E -w \"$(tmux wait-for -E -l session-renamed)\" session-renamed"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "wait-for -E -F '#{==:#{new_name},z}' window-renamed"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "renamew",
+          "-t",
+          "b:0",
+          "y"
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "tmux wait-for -E -l window-renamed | wc -l | tr -d ' '"
+        ]
+      },
+      {
+        "run": [
+          "renamew",
+          "-t",
+          "b:0",
+          "z"
+        ]
+      },
+      {
+        "run": [
+          "run",
+          "tmux wait-for -E -l window-renamed | wc -l | tr -d ' '"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "display -p done"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "done"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%window-renamed @0 x",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%session-renamed $0 b",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%window-renamed @0 y",
+          "%window-renamed @0 z",
+          "%begin <TIME> #5 1",
+          "done",
+          "%end <TIME> #5 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

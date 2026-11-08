@@ -1151,7 +1151,7 @@ impl FormatContext for Ctx<'_> {
             // name, whose callback's answer stands even when it is none
             // (format.c:4641-4649).
             .or_else(|| {
-                if FORMAT_TABLE.binary_search(&name).is_ok() {
+                if in_format_table(name) {
                     return None;
                 }
                 let entry = self
@@ -1457,6 +1457,13 @@ fn cursor_colour_option(text: &str) -> String {
     vtmux_core::colour::Colour::parse(text)
         .unwrap_or(vtmux_core::colour::Colour::Default)
         .to_string()
+}
+
+/// Whether `name` is in tmux's `format_table`: `format_find` asks the
+/// table before the tree, so a tree entry of that name is never seen
+/// (format.c:4641-4649).
+pub(crate) fn in_format_table(name: &str) -> bool {
+    FORMAT_TABLE.binary_search(&name).is_ok()
 }
 
 /// The names in tmux's `format_table` (format.c:3592-4170), in its

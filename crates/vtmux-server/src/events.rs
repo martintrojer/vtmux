@@ -823,8 +823,16 @@ impl Server {
             }
             if let Some(f) = filter {
                 let mut ctx = self.format_ctx(Found::default(), Some(client));
-                ctx.extra
-                    .extend(ev.formats("").into_iter().map(|(k, v)| (k.into(), v)));
+                // event_payload_add_formats adds the payload to the tree,
+                // where a format_table name (window_name, session_name) is
+                // shadowed by the table's callback, which has no window or
+                // session here (format.c format_find).
+                ctx.extra.extend(
+                    ev.formats("")
+                        .into_iter()
+                        .filter(|(k, _)| !crate::format_ctx::in_format_table(k))
+                        .map(|(k, v)| (k.into(), v)),
+                );
                 // cmd_wait_for_event_cb (cmd-wait-for.c:238-239): FORMAT_NOJOBS.
                 if !vtmux_core::format::is_true(&vtmux_core::format::expand_str_nojobs(&f, &ctx)) {
                     continue;
