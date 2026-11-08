@@ -2804,6 +2804,136 @@ enum Param {
     Text,
 }
 
+/// tmux's SGR (input.c `input_csi_dispatch_sgr`) over the raw parameters
+/// `raw` (already through `input_split`): `out` gets SGR parameters that
+/// Ghostty reads the same way; false if they change nothing.
+fn tmux_sgr(raw: &[u8], out: &mut String) -> bool {
+    use std::fmt::Write as _;
+    let params: Vec<&[u8]> = raw.split(|b| *b == b';').collect();
+    // input_get: a missing parameter is `def`, a string -1.
+    let get = |i: usize, def: i64| -> i64 {
+        match params.get(i) {
+            None | Some([]) => def,
+            Some(p) if p.contains(&b':') => -1,
+            Some(p) => std::str::from_utf8(p)
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(-1),
+        }
+    };
+    let mut push = |s: std::fmt::Arguments<'_>| {
+        if !out.is_empty() {
+            out.push(';');
+        }
+        let _ = out.write_fmt(s);
+    };
+    let mut i = 0;
+    while i < params.len() {
+        if params[i].contains(&b':') {
+            sgr_colon(params[i], &mut push);
+            i += 1;
+            continue;
+        }
+        let n = get(i, 0);
+        if matches!(n, 38 | 48 | 58) {
+            i += 1;
+            match get(i, -1) {
+                2 => {
+                    if sgr_rgb(n, get(i + 1, -1), get(i + 2, -1), get(i + 3, -1), &mut push) {
+                        i += 3;
+                    }
+                }
+                5 => {
+                    sgr_256(n, get(i + 1, -1), &mut push);
+                    i += 1;
+                }
+                _ => {}
+            }
+        } else {
+            match n {
+                0..=5
+                | 7..=9
+                | 21..=25
+                | 27..=37
+                | 39..=47
+                | 49
+                | 53
+                | 55
+                | 59
+                | 90..=97
+                | 100..=107 => {
+                    push(format_args!("{n}"));
+                }
+                6 => push(format_args!("5")),
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    !out.is_empty()
+}
+
+/// `input_csi_dispatch_sgr_256_do`: out of range is the default colour
+/// (none for the underline).
+fn sgr_256(kind: i64, c: i64, push: &mut impl FnMut(std::fmt::Arguments<'_>)) {
+    match (kind, c) {
+        (58, -1 | 256..) => {}
+        (_, -1 | 256..) => push(format_args!("{}", kind + 1)),
+        _ => push(format_args!("{kind};5;{c}")),
+    }
+}
+
+/// `input_csi_dispatch_sgr_rgb_do`: false, setting nothing, if a part is
+/// missing or out of range.
+fn sgr_rgb(
+    kind: i64,
+    r: i64,
+    g: i64,
+    b: i64,
+    push: &mut impl FnMut(std::fmt::Arguments<'_>),
+) -> bool {
+    let ok = |v: i64| (0..=255).contains(&v);
+    if !(ok(r) && ok(g) && ok(b)) {
+        return false;
+    }
+    push(format_args!("{kind};2;{r};{g};{b}"));
+    true
+}
+
+/// `input_csi_dispatch_sgr_colon`: one parameter with sub-parameters, at
+/// most seven of them, each a number or missing.
+fn sgr_colon(param: &[u8], push: &mut impl FnMut(std::fmt::Arguments<'_>)) {
+    let mut p = [-1i64; 8];
+    let mut n = 0;
+    for piece in param.split(|b| *b == b':') {
+        if !piece.is_empty() {
+            let Some(v) = std::str::from_utf8(piece)
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .filter(|v| *v <= i64::from(i32::MAX))
+            else {
+                return;
+            };
+            p[n] = v;
+        }
+        n += 1;
+        if n == p.len() {
+            return;
+        }
+    }
+    match (p[0], p[1]) {
+        (4, style @ 0..=5) if n == 2 => push(format_args!("4:{style}")),
+        (38 | 48 | 58, 2) if n >= 3 => {
+            let i = if n == 5 { 2 } else { 3 };
+            if n >= i + 3 {
+                sgr_rgb(p[0], p[i], p[i + 1], p[i + 2], push);
+            }
+        }
+        (38 | 48 | 58, 5) if n >= 3 => sgr_256(p[0], p[2], push),
+        _ => {}
+    }
+}
+
 /// `input_split`: `None` when tmux gives up on the sequence (a number above
 /// `INT_MAX`, or 24 parameters: `param_list[24]`).
 fn parse_params(raw: &[u8]) -> Option<Vec<Param>> {
@@ -3497,6 +3627,10 @@ impl AltModeScanner {
                 self.ansi_mode(b == b'h');
                 None
             }
+            // SGR: Ghostty gets what tmux reads, or nothing.
+            (false, None, b'm') if !self.params.is_empty() && !self.tmux_sgr() => {
+                return Some(ScanEvent::Drop);
+            }
             (false, None, b't') if !self.other && !self.csi_ignored => {
                 self.title_ops = winops_title_ops(&self.params);
                 if !self.title_ops.is_empty() {
@@ -3549,6 +3683,20 @@ impl AltModeScanner {
             return Some(ScanEvent::Rewrite);
         }
         self.resync.then_some(ScanEvent::Resync)
+    }
+
+    /// False if the SGR just ended changes nothing for tmux; else, if
+    /// Ghostty would read it otherwise, [`Self::rewrite`] has it as tmux
+    /// reads it.
+    fn tmux_sgr(&mut self) -> bool {
+        let mut sgr = String::new();
+        if !tmux_sgr(&self.params, &mut sgr) {
+            return false;
+        }
+        if sgr.as_bytes() != self.params.as_slice() {
+            self.rewrite = Some(format!("\x1b[{sgr}").into_bytes());
+        }
+        true
     }
 
     /// The modes of an SM or RM that tmux knows (input.c
@@ -4412,6 +4560,52 @@ mod tests {
         let (m, _, region) = modes(b"\x1b[?25l\x1b[4h\x1b[2;3r\x1b[!p");
         assert_eq!((m.cursor_visible, m.insert, region), (false, true, (1, 2)));
         assert_eq!(modes(b"\x1b[=c\x1b[>1u\x1b[?u").1, Vec::<u8>::new());
+    }
+
+    /// SGR as tmux reads it (input.c `input_csi_dispatch_sgr`,
+    /// `_sgr_colon`, `_sgr_256`, `_sgr_rgb`): a missing parameter is 0, 38,
+    /// 48 and 58 take the next one as their kind whatever it is, a 256
+    /// colour out of range is the default, an RGB one out of range sets
+    /// nothing and leaves its parameters to be read as more SGR, a colon
+    /// form takes its own counts. Expected: tmux 3.8's `capture-pane -e`.
+    #[test]
+    fn sgr_reads_as_tmux() {
+        let cases: &[(&str, &str)] = &[
+            ("5;", "X"),
+            ("7;", "X"),
+            ("48;1", "X"),
+            ("1;;3", "\x1b[3mX\x1b[0m"),
+            ("38:2:::3", "X"),
+            ("48:2::1:2:3", "\x1b[48;2;1;2;3mX\x1b[49m"),
+            ("38:2:9:1:2:3:4", "\x1b[38;2;1;2;3mX\x1b[39m"),
+            ("38;5", "X"),
+            ("38;5;300", "X"),
+            ("48;5;300;1", "\x1b[1mX\x1b[0m"),
+            ("38;2;300;1;3", "\x1b[1;3mX\x1b[0m"),
+            ("38;7;1", "\x1b[1mX\x1b[0m"),
+            ("4:3", "\x1b[4:3mX\x1b[0m"),
+            ("4:9", "X"),
+            ("6", "\x1b[5mX\x1b[0m"),
+            ("01;034", "\x1b[1m\x1b[34mX\x1b[0m"),
+            ("38:5:9:9", "\x1b[38;5;9mX\x1b[39m"),
+            ("38:2:300:1:1", "X"),
+            (
+                "38;5;1;48;2;1;2;3;3",
+                "\x1b[3m\x1b[38;5;1m\x1b[48;2;1;2;3mX\x1b[0m",
+            ),
+            ("97;107", "\x1b[97m\x1b[107mX\x1b[39m\x1b[49m"),
+            ("1;0;3", "\x1b[3mX\x1b[0m"),
+        ];
+        for (sgr, want) in cases {
+            let mut t = PaneTerm::new(20, 2, 0);
+            t.feed(format!("\x1b[1;4m\x1b[0m\x1b[{sgr}mX\x1b[m").as_bytes());
+            let opts = crate::capture::CaptureOpts {
+                escapes: true,
+                ..Default::default()
+            };
+            let text = String::from_utf8_lossy(&crate::capture::capture(&t, opts)).into_owned();
+            assert_eq!(text.lines().next(), Some(*want), "SGR {sgr:?}");
+        }
     }
 
     /// Reference: 20x5 after `l0\nl1\nl2`, cursor at 4,2 (row 2 col 4):

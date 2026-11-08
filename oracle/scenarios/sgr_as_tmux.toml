@@ -1,0 +1,11 @@
+name = "sgr_as_tmux"
+# SGR as tmux reads it (input.c input_csi_dispatch_sgr, _sgr_colon, _sgr_256,
+# _sgr_rgb): a missing parameter is 0, 38/48/58 take the next parameter as
+# their kind whatever it is, a 256 colour out of range is the default, an RGB
+# colour out of range sets nothing and leaves its parameters to be read as
+# more SGR, a colon form has its own counts. Found by scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "20", "sh", "-c", "printf '\\033[5;mX\\033[m\\015\\012\\033[7;mX\\033[m\\015\\012\\033[48;1mX\\033[m\\015\\012\\033[38:2:::3mX\\033[m\\015\\012\\033[38:2:9:1:2:3:4mX\\033[m\\015\\012\\033[38;5mX\\033[m\\015\\012\\033[38;5;300mX\\033[m\\015\\012\\033[48;5;300;1mX\\033[m\\015\\012\\033[38;2;300;1;3mX\\033[m\\015\\012\\033[38;7;1mX\\033[m\\015\\012\\033[4:9mX\\033[m\\015\\012\\033[6mX\\033[m\\015\\012\\033[01;034mX\\033[m\\015\\012\\033[38:5:9:9mX\\033[m\\015\\012\\033[38:2:300:1:1mX\\033[m\\015\\012\\033[58:5:mX\\033[m\\015\\012\\033[1;0;3mX\\033[m\\015\\012'; tmux wait-for -S ready; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["capture-pane", "-p", "-e", "-t", "a:"] },
+]
