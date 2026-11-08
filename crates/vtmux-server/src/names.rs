@@ -4,7 +4,6 @@
 //! and the non-UTF-8 client sanitiser (utf8.c `utf8_sanitize`).
 
 use std::fmt::Write as _;
-use std::path::Path;
 
 use unicode_width::UnicodeWidthChar;
 use vtmux_core::rawstr::Unit;
@@ -69,41 +68,59 @@ pub fn clean_untrusted(name: &str) -> String {
 
 /// `parse_window_name` (names.c:140-176): the first word of a command,
 /// without quotes, `exec `, leading spaces or dashes, trailing junk, and
-/// with a path reduced to its basename.
+/// with a path reduced to its basename; empty when what is left is not a
+/// name `clean_name` takes (`utf8_isvalid`). Read as bytes, as tmux does:
+/// trailing junk is any byte glibc's `isalnum` and `ispunct` both refuse,
+/// which in a UTF-8 locale is every byte past 0x7f (D-019), so a name
+/// loses the non-ASCII characters it ends with.
 #[must_use]
 pub fn parse_window_name(input: &str) -> String {
-    let mut name = input;
-    if let Some(rest) = name.strip_prefix('"') {
+    let bytes = vtmux_core::rawstr::to_bytes(input);
+    let mut name: &[u8] = &bytes;
+    if let Some(rest) = name.strip_prefix(b"\"") {
         name = rest;
     }
-    if let Some(q) = name.find('"') {
+    if let Some(q) = name.iter().position(|&b| b == b'"') {
         name = &name[..q];
     }
-    if let Some(rest) = name.strip_prefix("exec ") {
+    if let Some(rest) = name.strip_prefix(b"exec ") {
         name = rest;
     }
-    name = name.trim_start_matches([' ', '-']);
-    if let Some(sp) = name.find(' ') {
+    while let [b' ' | b'-', rest @ ..] = name {
+        name = rest;
+    }
+    if let Some(sp) = name.iter().position(|&b| b == b' ') {
         name = &name[..sp];
     }
-    // Trailing characters that are neither alphanumeric nor punctuation.
-    let mut end = name.len();
-    while end > 1 {
-        let c = name.as_bytes()[end - 1];
-        if c.is_ascii_alphanumeric() || c.is_ascii_punctuation() || !c.is_ascii() {
-            break;
-        }
-        end -= 1;
+    // `ptr > name`: the first byte stays.
+    while let [_, .., last] = name
+        && !(last.is_ascii_alphanumeric() || last.is_ascii_punctuation())
+    {
+        name = &name[..name.len() - 1];
     }
-    let name = &name[..end];
-    let name = if name.starts_with('/') {
-        Path::new(name)
-            .file_name()
-            .map_or_else(|| "/".to_owned(), |b| b.to_string_lossy().into_owned())
+    if name.first() == Some(&b'/') {
+        name = basename(name);
+    }
+    let name = vtmux_core::rawstr::from_bytes(name);
+    if check_name(&name) {
+        vis(&name)
     } else {
-        name.to_owned()
-    };
-    vis(&name)
+        String::new()
+    }
+}
+
+/// POSIX `basename(3)` of a path that starts with `/`: the part after the
+/// last `/` once trailing ones are gone, `/` for nothing but slashes.
+fn basename(path: &[u8]) -> &[u8] {
+    let end = path.iter().rposition(|&b| b != b'/').map_or(0, |i| i + 1);
+    if end == 0 {
+        return b"/";
+    }
+    let start = path[..end]
+        .iter()
+        .rposition(|&b| b == b'/')
+        .map_or(0, |i| i + 1);
+    &path[start..end]
 }
 
 /// `args_escape` (arguments.c:606-649): one argument quoted the way
@@ -208,6 +225,26 @@ mod tests {
         assert_eq!(parse_window_name("exec  -foo bar"), "foo");
         assert_eq!(parse_window_name("\"/usr/bin/vim\" x"), "vim");
         assert_eq!(parse_window_name("-zsh"), "zsh");
+        assert_eq!(parse_window_name("/usr/bin/foo/ x"), "foo");
+        assert_eq!(parse_window_name("///"), "/");
+        assert_eq!(parse_window_name("/.."), "..");
+        assert_eq!(parse_window_name("ab\u{1}"), "ab");
+    }
+
+    /// Reference (tmux 3.8 on glibc), `#{pane_current_command}` of
+    /// `exec -a NAME sleep 100`: trailing non-ASCII goes byte by byte, the
+    /// first byte stays, and a name `utf8_isvalid` refuses is empty.
+    #[test]
+    fn window_names_as_tmux_reads_the_bytes() {
+        assert_eq!(parse_window_name("abé"), "ab");
+        assert_eq!(parse_window_name("ab漢"), "ab");
+        assert_eq!(parse_window_name("aéb"), "aéb");
+        assert_eq!(parse_window_name("é"), "");
+        assert_eq!(parse_window_name("a\tb"), "");
+        let invalid = vtmux_core::rawstr::from_bytes(b"a\xffb");
+        assert_eq!(parse_window_name(&invalid), "");
+        assert_eq!(parse_window_name("a\\b"), "a\\\\b");
+        assert_eq!(parse_window_name("x#(echo hi)y"), "x#(echo");
     }
 
     #[test]

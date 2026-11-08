@@ -3361,6 +3361,80 @@ fn windows_spawn_and_names() {
     });
 }
 
+/// `#{pane_current_command}` (format.c `format_cb_current_command`) is
+/// `parse_window_name` (names.c:140-176) of the foreground process's
+/// argv[0] (osdep-linux.c `osdep_get_name`; Linux only: macOS reads
+/// `p_comm`, the executable's name). tmux reads it as bytes: trailing bytes
+/// that are neither `isalnum` nor `ispunct` go, which under glibc's UTF-8
+/// locale is every byte past 0x7f (a name loses the non-ASCII characters
+/// it ends with; the first byte stays), and a name `clean_name` refuses (a
+/// control character, a byte that is not UTF-8) is empty. bash's `exec -a`
+/// sets argv[0].
+#[cfg(target_os = "linux")]
+#[test]
+fn current_command_is_read_as_bytes() {
+    const NAMES: [&str; 8] = [
+        "abé",
+        "ab漢",
+        "aéb",
+        "é",
+        "$'a\\tb'",
+        "$'a\\xffb'",
+        "$'ab\\x01'",
+        "'x#(y'",
+    ];
+    compare("current_command_is_read_as_bytes", |w| {
+        w.run(&["new", "-d", "-s", "a", "-n", "w", "cat", "-"]);
+        for name in NAMES {
+            w.run(&[
+                "neww",
+                "-d",
+                "-n",
+                "w",
+                "bash",
+                "-c",
+                &format!("exec -a {name} sleep 100"),
+            ]);
+        }
+        let list = || w.run(&["lsp", "-s", "-t", "a", "-F", "[#{pane_current_command}]"]);
+        // Until every bash has exec'd.
+        let start = Instant::now();
+        while list().stdout.contains("[bash]") {
+            assert!(start.elapsed() < Duration::from_secs(10), "{:?}", list());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let all = w.run(&["lsw", "-t", "a", "-F", "[#{pane_current_command}]"]);
+        w.run(&["kill-server"]);
+        vec![all]
+    });
+    let w = World::new(&vtmux_bin());
+    w.run(&["new", "-d", "-s", "a", "-n", "w", "cat", "-"]);
+    for name in NAMES {
+        w.run(&[
+            "neww",
+            "-d",
+            "-n",
+            "w",
+            "bash",
+            "-c",
+            &format!("exec -a {name} sleep 100"),
+        ]);
+    }
+    let want = "[cat]\n[ab]\n[ab]\n[aéb]\n[]\n[]\n[]\n[ab]\n[x#(y]\n";
+    let start = Instant::now();
+    loop {
+        let got = w
+            .run(&["lsw", "-t", "a", "-F", "[#{pane_current_command}]"])
+            .stdout;
+        if got == want {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "{got:?}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    w.run(&["kill-server"]);
+}
+
 /// A window's first automatic-rename check must see the command, not the
 /// shell that is about to exec it: `new -d -s a cat; neww -d cat` named the
 /// windows `sh` (tmux's check races the exec the same way, but names them
