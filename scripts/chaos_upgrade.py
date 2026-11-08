@@ -122,6 +122,28 @@ class Server:
                 time.sleep(0.05)
             else:
                 os.kill(int(pid), signal.SIGKILL)
+        # A server that did not answer (stopped, or serving no session for
+        # `display` to expand in) is found by its socket: its command line
+        # names the label, or (after an upgrade) the socket under this
+        # server's private directory. Clients of it go too: all ours.
+        for pattern in (f"-L {self.label} ", f"{self.tmp}/"):
+            for other in self.pids_matching(pattern):
+                try:
+                    os.kill(other, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    @staticmethod
+    def pids_matching(pattern):
+        try:
+            out = subprocess.run(
+                ["pgrep", "-f", "--", pattern],
+                capture_output=True,
+                timeout=10,
+            ).stdout.decode()
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        return [int(p) for p in out.split() if p.isdigit() and int(p) != os.getpid()]
 
 
 def sh_quote(s):
@@ -891,13 +913,36 @@ class Chaos:
         wait("every client", lambda: len(self.client_rows()) == len(self.clients))
 
     def cleanup(self):
-        self.hog(False)
-        for c in self.controls:
-            c.close()
-        self.observer.kill()
-        self.subject.kill()
+        """Everything this run started stopped, each step on its own so one
+        that fails leaves the rest to run; the servers first. `main` runs
+        it with SIGINT and SIGTERM ignored, so a second interrupt (the
+        `timeout` that sent the first, an impatient ^C) does not leave a
+        server running."""
+        steps = [
+            # The SIGCONTs chaos actions put off, sent now: a stopped
+            # server answers no kill-server.
+            self.continue_stopped,
+            lambda: self.hog(False),
+            self.subject.kill,
+            self.observer.kill,
+            *(c.close for c in self.controls),
+        ]
+        for step in steps:
+            try:
+                step()
+            except Exception as e:  # noqa: BLE001 - every step must run
+                log(f"cleanup: {e!r}")
         if not self.args.keep:
             shutil.rmtree(self.root, ignore_errors=True)
+
+    def continue_stopped(self):
+        for t in self.timers:
+            t.cancel()
+            try:
+                t.function(*t.args, **t.kwargs)
+            except Exception:  # noqa: BLE001 - a process gone already
+                pass
+        self.timers = []
 
 
 SGR_RE = re.compile(r"\x1b\[([0-9;:]*)m")
@@ -972,6 +1017,10 @@ def main():
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
     log(f"seed {args.seed}")
+    # A SIGTERM (`timeout`'s default) unwinds as ^C does, through the
+    # cleanup below.
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGHUP, interrupted)
     chaos = Chaos(args)
     try:
         chaos.setup()
@@ -989,8 +1038,14 @@ def main():
             input("held; press enter to clean up")
         return 1
     finally:
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, signal.SIG_IGN)
         chaos.cleanup()
     return 0
+
+
+def interrupted(signum, _frame):
+    raise KeyboardInterrupt(signal.Signals(signum).name)
 
 
 if __name__ == "__main__":
