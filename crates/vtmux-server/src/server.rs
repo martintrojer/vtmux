@@ -1134,9 +1134,25 @@ impl Server {
     }
 
     /// The server would exit but for its clients: `server_send_exit`, or
-    /// `server_loop` with `exit-empty` on and no sessions (server.c:268-306).
+    /// `server_loop` with `exit-empty` on and no sessions, or none attached
+    /// with `exit-unattached` (server.c:268-306).
     fn wants_flush(&self) -> bool {
-        self.shutdown || (self.exit_empty() && self.model.sessions.is_empty())
+        self.shutdown || (self.exit_empty() && self.nothing_attached())
+    }
+
+    /// `server_loop` (server.c:288-296): no sessions or, with
+    /// `exit-unattached` on, sessions no client is attached to.
+    fn nothing_attached(&self) -> bool {
+        if self.model.sessions.is_empty() {
+            return true;
+        }
+        matches!(
+            self.model
+                .options
+                .get(TreeId::Server, "exit-unattached")
+                .map(|e| &e.value),
+            Some(OptionValue::Single(Value::Flag(true)))
+        ) && self.clients.values().all(|c| c.attached.is_none())
     }
 
     fn exit_empty(&self) -> bool {
@@ -1164,7 +1180,7 @@ impl Server {
             return self.clients.values().all(|c| c.out.is_empty());
         }
         self.exit_empty()
-            && self.model.sessions.is_empty()
+            && self.nothing_attached()
             && self.clients.values().all(|c| c.closing && c.out.is_empty())
     }
 

@@ -1602,6 +1602,47 @@ fn unparsable_option_error(stderr: &str) -> String {
     stderr.replace("ambiguous option: ", "invalid option: ")
 }
 
+/// server.c `server_loop` (285-306): with exit-unattached on, the server
+/// exits once no client is attached to a session, sessions or not, but not
+/// while exit-empty is off; an attached (here control) client keeps it.
+#[test]
+fn exit_unattached() {
+    compare("exit_unattached", |w| {
+        let mut out = vec![
+            w.run(&["new", "-d", "-s", "a", "cat", "-"]),
+            w.run(&["new", "-d", "-s", "b", "cat", "-"]),
+            w.run(&["set", "-g", "exit-empty", "off"]),
+            w.run(&["set", "-g", "exit-unattached", "on"]),
+            w.run(&["ls", "-F", "#{session_name}"]),
+        ];
+        // stdin held open: a control client exits on stdin EOF.
+        let mut c = Command::new(&w.bin)
+            .args(["-L", &w.label, "-f", "/dev/null", "-C", "attach", "-t", "a"])
+            .current_dir(w.dir())
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
+            .env("TMUX_TMPDIR", w.dir())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn binary");
+        let start = Instant::now();
+        while w.run(&["lsc", "-F", "#{client_session}"]).stdout != "a\n"
+            && start.elapsed() < Duration::from_secs(5)
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        out.push(w.run(&["set", "-g", "exit-empty", "on"]));
+        out.push(w.run(&["ls", "-F", "#{session_name} #{session_attached}"]));
+        drop(c.stdin.take());
+        let _ = c.wait();
+        w.wait_gone();
+        out.push(w.run(&["ls"]));
+        out
+    });
+}
+
 /// spawn.c `spawn_pane` reads default-shell and history-limit for each new
 /// pane; server.c `server_loop` keeps an empty server with exit-empty off.
 #[test]
