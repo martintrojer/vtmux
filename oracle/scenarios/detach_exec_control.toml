@@ -1,0 +1,17 @@
+# detach-client -E on a control client (cmd-detach-client.c, server-client.c server_client_exec): tmux sends MSG_EXEC, but its client reads that only once attached (client.c client_dispatch_attached) and a control client is never sent MSG_READY, so the client runs on, attached, answering commands; -a -E from the command line finds it as the current client and leaves it be.
+name = "detach_exec_control"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "cat", "-"] },
+  { control = { argv = ["attach", "-t", "a"], id = "k" } },
+  { control_send = { id = "k", line = "detach -E 'echo hi'" } },
+  { control_wait = { id = "k", until = "%end" } },
+  { run = ["lsc", "-F", "#{client_session}|#{client_control_mode}"] },
+  { control_send = { id = "k", line = "display -p still" } },
+  { control_wait = { id = "k", until = "%end" } },
+  { run = ["detach", "-a", "-E", "echo hi2"] },
+  { run = ["lsc", "-F", "#{client_session}|#{client_control_mode}"] },
+  { control_send = { id = "k", line = "display -p still2" } },
+  { control_wait = { id = "k", until = "%end" } },
+  { control_close = { id = "k" } },
+]

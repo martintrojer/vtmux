@@ -410,7 +410,7 @@ fn client_main(mut args: Vec<OsString>) -> ExitCode {
             &how,
         ),
         (ControlMode::None, None) => relay(&mut stream, None, &how),
-        _ => control_relay(&mut stream, saved_tio.as_ref(), login),
+        _ => control_relay(&mut stream, saved_tio.as_ref()),
     }
 }
 
@@ -705,9 +705,8 @@ fn wait_exit(rest: &std::sync::mpsc::Receiver<Option<Vec<u8>>>) {
 /// (client.c:417-424), then wait for the input if `wait-exit` is set. A
 /// `-CC` client (`saved` is its terminal's settings) ends with the `ST`
 /// that closes the server's DCS, then puts the settings back
-/// (client.c:425-429); `detach-client -E` puts them back before the exec
-/// (client.c:403-405).
-fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>, login: bool) -> ExitCode {
+/// (client.c:425-429).
+fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>) -> ExitCode {
     let after = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx, rest) = std::sync::mpsc::channel();
     if let Ok(writer) = stream.try_clone() {
@@ -726,13 +725,6 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>, login: bool) 
                 let _ = io::stderr().lock().write_all(&b);
             }
             Ok(Some(ServerMsg::Exit { code, message, .. })) => break (code, message),
-            // client.c:403-407: detach-client -E replaces the client.
-            Ok(Some(ServerMsg::Exec { command, shell })) => {
-                restore_tty(saved);
-                return ExitCode::from(
-                    u8::try_from(vtmux_client::attach::exec(&shell, &command, login)).unwrap_or(1),
-                );
-            }
             Ok(Some(ServerMsg::Flags { wait_exit })) => wait = wait_exit,
             // A control client's file I/O is the server's (file.c:321). It
             // stays connected across an upgrade, and only a requester gets
@@ -740,8 +732,13 @@ fn control_relay(stream: &mut UnixStream, saved: Option<&Termios>, login: bool) 
             // frame a later server added (new frozen frames take new tags,
             // protocol module docs): `read_msg` has read all of it, so the
             // stream is still in step.
+            //
+            // `Exec` too: a control client reads MSG_EXEC only once
+            // attached (client.c `client_dispatch_attached`), which it never
+            // is, so `detach-client -E` leaves it running.
             Ok(Some(
                 ServerMsg::Ready
+                | ServerMsg::Exec { .. }
                 | ServerMsg::ReadOpen { .. }
                 | ServerMsg::WriteOpen { .. }
                 | ServerMsg::WriteData(_)

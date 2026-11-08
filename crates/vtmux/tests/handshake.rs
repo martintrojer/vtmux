@@ -380,9 +380,12 @@ fn a_control_client_of_another_version_is_accepted_with_flags_and_exit() {
     }
 }
 
-/// `detach-client -E` replaces a control client of another version too.
+/// A control client of another version is served commands and frozen
+/// frames, and `detach-client -E` leaves it running as it does any
+/// control client (tmux's reads `MSG_EXEC` only once attached, which a
+/// control client never is): no `Exec`, and the next command answers.
 #[test]
-fn a_control_client_of_another_version_gets_exec() {
+fn a_control_client_of_another_version_outlives_detach_exec() {
     let server = Server::start();
     let mut stream = server.connect();
     let hello = server.hello(
@@ -391,18 +394,22 @@ fn a_control_client_of_another_version_gets_exec() {
         &["attach", "-t", "a"],
     );
     protocol::write_msg(&mut stream, &hello).unwrap();
-    let line = ClientMsg::Stdin(b"detach-client -E 'exit 3'\n".to_vec());
+    let line = ClientMsg::Stdin(b"detach-client -E 'exit 3'\ndisplay -p still\n".to_vec());
     protocol::write_msg(&mut stream, &line).unwrap();
     let mut frames = Vec::new();
     while let Some(msg) = read(&mut stream) {
-        let exec = matches!(msg, ServerMsg::Exec { .. });
+        let done = matches!(&msg, ServerMsg::Stdout(b) if b.windows(5).any(|w| w == b"still"));
         frames.push(msg);
-        if exec {
+        if done {
             break;
         }
     }
     assert!(
-        matches!(frames.last(), Some(ServerMsg::Exec { command, .. }) if command == "exit 3"),
+        !frames.iter().any(|m| matches!(m, ServerMsg::Exec { .. })),
+        "{frames:?}"
+    );
+    assert!(
+        matches!(frames.last(), Some(ServerMsg::Stdout(_))),
         "{frames:?}"
     );
 }

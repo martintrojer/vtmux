@@ -2389,9 +2389,13 @@ impl Server {
     /// `server_client_exec` (server-client.c:630-655): the client runs
     /// `shell -c command` in place of itself, `shell` being the session's
     /// `default-shell` (the server's, with no session) unless it fails
-    /// `checkshell`. An empty command does nothing.
+    /// `checkshell`. An empty command does nothing, and so does a control
+    /// client: tmux sends it `MSG_EXEC`, but its client reads that only once
+    /// attached (client.c `client_dispatch_attached`), after a `MSG_READY`
+    /// that no control client is sent (cmd-attach-session.c,
+    /// cmd-new-session.c), so it stays connected and attached.
     pub fn exec_client(&mut self, id: ClientId, command: &str) {
-        if command.is_empty() {
+        if command.is_empty() || self.is_control(id) {
             return;
         }
         let tree = self
@@ -2400,10 +2404,6 @@ impl Server {
             .and_then(|c| c.attached)
             .map_or(TreeId::GlobalSession, TreeId::Session);
         let shell = self.default_shell(tree);
-        if self.is_control(id) {
-            self.control_exec(id, command.to_owned(), shell);
-            return;
-        }
         // MSG_EXEC takes the client out like MSG_DETACH: the terminal is
         // restored first, then the process is replaced.
         self.exit_attached_with(

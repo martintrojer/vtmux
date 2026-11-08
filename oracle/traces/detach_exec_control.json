@@ -1,0 +1,163 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "detach_exec_control",
+  "inputs": {
+    "name": "detach_exec_control",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "k"
+        }
+      },
+      {
+        "control_send": {
+          "id": "k",
+          "line": "detach -E 'echo hi'"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "k",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}|#{client_control_mode}"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "k",
+          "line": "display -p still"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "k",
+          "until": "%end"
+        }
+      },
+      {
+        "run": [
+          "detach",
+          "-a",
+          "-E",
+          "echo hi2"
+        ]
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_session}|#{client_control_mode}"
+        ]
+      },
+      {
+        "control_send": {
+          "id": "k",
+          "line": "display -p still2"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "k",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "k"
+        }
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a|1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a|1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%begin <TIME> #3 1",
+          "still",
+          "%end <TIME> #3 1",
+          "%begin <TIME> #4 1",
+          "still2",
+          "%end <TIME> #4 1",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

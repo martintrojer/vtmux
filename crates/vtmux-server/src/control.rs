@@ -11,7 +11,6 @@
 //! guard closes (control.c `control_notify_write`, `control_write_guard`).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use vtmux_core::cmd::{self, ParseOpts};
@@ -34,9 +33,6 @@ pub enum Exit {
     Detach,
     /// The server is going away (`MSG_SHUTDOWN`): status 0, no reason.
     Shutdown,
-    /// `detach-client -E` (`MSG_EXEC`): the client runs the command in
-    /// place of itself.
-    Exec { command: String, shell: PathBuf },
 }
 
 /// The timestamp, number and flags a guard pair shares.
@@ -807,7 +803,7 @@ impl Server {
             };
             let (code, message) = match exit {
                 Exit::Return => (cs.retval, cs.exit_message.take()),
-                Exit::Detach | Exit::Shutdown | Exit::Exec { .. } => (0, None),
+                Exit::Detach | Exit::Shutdown => (0, None),
             };
             cs.finished = true;
             cs.deferred.clear();
@@ -821,26 +817,7 @@ impl Server {
                 c.attached = None;
             }
             self.control_flush(id);
-            if let Exit::Exec { command, shell } = exit {
-                self.send(id, &ServerMsg::Exec { command, shell });
-                if let Some(c) = self.clients.get_mut(&id) {
-                    c.closing = true;
-                }
-                self.flush_client(id);
-            } else {
-                self.finish_client_with(id, code, message);
-            }
-        }
-    }
-
-    /// `detach-client -E` on a control client.
-    pub(crate) fn control_exec(&mut self, id: ClientId, command: String, shell: PathBuf) {
-        if let Some(c) = self.clients.get_mut(&id) {
-            c.left_session = c.attached.or(c.left_session);
-            c.attached = None;
-            if let Some(cs) = c.control.as_mut() {
-                cs.exit.get_or_insert(Exit::Exec { command, shell });
-            }
+            self.finish_client_with(id, code, message);
         }
     }
 

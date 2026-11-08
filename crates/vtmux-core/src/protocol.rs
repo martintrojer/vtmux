@@ -92,8 +92,9 @@
 //! - A control client (`-C`) of any version from [`FROZEN_SINCE`] on is
 //!   accepted ([`Speaks::Frozen`]): it sends only `Hello`, `Stdin` and
 //!   `StdinEof`, and the server sends it frozen frames only, dropping the
-//!   rest ([`ServerMsg::is_frozen`]). `Exec` (`detach-client -E`) and
-//!   `Flags` (`wait-exit`) are frozen so they reach it too.
+//!   rest ([`ServerMsg::is_frozen`]). `Exec` (`detach-client -E`, and
+//!   the shell for `-c`) and `Flags` (`wait-exit`) are frozen so they
+//!   reach it too; a control client ignores `Exec`, as tmux's does.
 //!
 //! Known limit: no frozen frame tells a client the server's version. A
 //! control client learns it only through a command,
