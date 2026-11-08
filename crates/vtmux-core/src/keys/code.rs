@@ -202,6 +202,12 @@ impl Key {
         u8::try_from(n).ok().filter(|n| *n < 16)
     }
 
+    /// `KEYC_IS_USER` (tmux.h:214): a `UserN` key.
+    #[must_use]
+    pub const fn is_user(self) -> bool {
+        (self.0 >> SHIFT_TYPE) & 0xff == ty::USER
+    }
+
     /// `KEYC_IS_MOUSE` (tmux.h:222): a mouse key of any kind.
     #[must_use]
     pub const fn is_mouse(self) -> bool {

@@ -262,6 +262,14 @@ pub fn lookup(s: &str) -> Option<Key> {
         shift: false,
         esc_prefix: false,
     };
+    // key-string.c:259-280: `0xNN` is a character by number, but only as
+    // the whole string; after a modifier it is no key at all.
+    if s.starts_with("0x") {
+        let core = CoreKey::from_name(s).filter(|k| *k != CoreKey::NONE)?;
+        let found = Key::from_core(core)?;
+        key.base = found.base;
+        return Some(key);
+    }
     let mut rest = s;
     if let Some(r) = rest.strip_prefix('^')
         && !r.is_empty()
@@ -284,13 +292,6 @@ pub fn lookup(s: &str) -> Option<Key> {
             _ => return None,
         }
         rest = &rest[2..];
-    }
-    // key-string.c:268-290: `0xNN` is a character by number.
-    if rest.starts_with("0x") {
-        let core = CoreKey::from_name(rest).filter(|k| *k != CoreKey::NONE)?;
-        let found = Key::from_core(core)?;
-        key.base = found.base;
-        return Some(key);
     }
     let mut chars = rest.chars();
     match (chars.next(), chars.next()) {
@@ -666,6 +667,11 @@ impl Sent {
 /// otherwise the text itself, character by character.
 #[must_use]
 pub fn send_keys_item(arg: &str, literal: bool) -> Sent {
+    // `Any` and the `UserN` keys are keys `input_key` writes nothing for
+    // (input-keys.c:672-676, "Ignore internal function key codes").
+    if !literal && CoreKey::from_name(arg).is_some_and(|k| k == CoreKey::ANY || k.is_user()) {
+        return Sent::Raw(Vec::new());
+    }
     if !literal && let Some(key) = lookup(arg) {
         return Sent::Key(key, arg.to_owned());
     }
@@ -722,6 +728,19 @@ mod tests {
             ),
             b"\x1bOA"
         );
+    }
+
+    /// key-string.c:253-280 and input-keys.c:672-676: `Any` and `UserN`
+    /// are keys with no bytes; `0xNN` is a key only as the whole name.
+    #[test]
+    fn keys_without_bytes_and_hex_after_a_modifier() {
+        for name in ["Any", "any", "User0", "User999", "C-User0"] {
+            assert_eq!(b(name), b"", "{name}");
+        }
+        for name in ["M-Any", "C-0x61", "M-0x61", "^0x61"] {
+            assert_eq!(b(name), name.as_bytes(), "{name}");
+        }
+        assert_eq!(b("0x61"), b"a");
     }
 
     #[test]

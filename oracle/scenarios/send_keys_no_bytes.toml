@@ -1,0 +1,15 @@
+# send-keys: `Any` and `UserN` (with modifiers too) are keys input_key
+# writes nothing for (input-keys.c:672-676); `M-Any` is no key, so it goes
+# as text. `0xNN` is a key only as the whole name (key-string.c:259-280),
+# so `C-0x61` and `^0x61` go as text, not as C-a.
+name = "send_keys_no_bytes"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "stty raw -echo; tmux wait-for -S raw; LC_ALL=C exec cat -v"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { wait_for = "raw" },
+  { attach = { session = "a" } },
+  { run = ["send-keys", "-t", "a", "<", "Any", "any", "User0", "C-User5", "M-Any", "C-0x61", "M-0x61", "^0x61", "0x61", ">"] },
+  { settle = { react = true } },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]
