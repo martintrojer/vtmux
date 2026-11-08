@@ -244,6 +244,10 @@ record! {
         /// the primary one).
         8 => one has_saved: bool,
         9 => one has_history: bool,
+        /// The cursor's row in [`AltEntry::saved`] that the primary screen
+        /// is resized with when the alternate one ends. A reader takes the
+        /// last row with anything in it without it.
+        10 => opt saved_cursor_row: Option<u32>,
     }
 }
 
@@ -281,7 +285,8 @@ record! {
         2 => one enabled: bool,
         /// tmux's `hsize` of the primary grid.
         3 => one hsize: u64,
-        /// Rows ever scrolled in (`hscrolled`).
+        /// Rows scrolled into history, and those a resize moved there less
+        /// those it took back: the newest row's id plus one.
         4 => one scrolled: u64,
         /// tmux's `scroll_generation`.
         5 => one generation: u64,
@@ -643,6 +648,7 @@ pub(crate) mod tests {
         alt.entry_row = Some(4);
         alt.has_saved = true;
         alt.has_history = true;
+        alt.saved_cursor_row = Some(0);
         let sync = t.sync.as_mut().unwrap();
         sync.cols = 20;
         sync.cursor = Some((1, 2));

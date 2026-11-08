@@ -285,6 +285,12 @@ fn pane(p: &PaneState) -> Result<(), StateError> {
         u32::try_from(p.input_buffer_size).is_ok(),
         "input buffer size",
     )?;
+    check(
+        p.saved
+            .as_ref()
+            .is_none_or(|s| usize::from(p.saved_cy) < s.len().max(1)),
+        "saved cursor",
+    )?;
     for rows in [&p.frozen, &p.saved].into_iter().flatten() {
         rows.iter().try_for_each(frozen_row)?;
     }

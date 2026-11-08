@@ -391,3 +391,37 @@ fn a_bad_layout_is_ignored_and_bad_rows_refused() {
         "layout ignored"
     );
 }
+
+/// Sixty lines of 75 characters and a prompt, at 80x20.
+fn sixty_lines() -> PaneTerm {
+    let mut text = Vec::new();
+    for i in 10..70 {
+        text.extend_from_slice(format!("{i}{}\r\n", "x".repeat(73)).as_bytes());
+    }
+    text.extend_from_slice(b"$ ");
+    pane(80, 20, 2000, &text)
+}
+
+/// The cursor row the primary screen is resized with when the alternate
+/// one ends goes in the snapshot; without it (an older writer) the import
+/// takes the last row with anything in it.
+#[test]
+fn the_saved_cursor_row_crosses_a_snapshot() {
+    let mut a = sixty_lines();
+    a.resize(80, 50);
+    a.feed(b"\x1b[?1049h\x1b[H\x1b[2Jvim");
+    a.resize(80, 20);
+    let t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+    assert_eq!(t.alt_entry.as_ref().unwrap().saved_cursor_row, Some(49));
+    let mut older = t.clone();
+    older.alt_entry.as_mut().unwrap().saved_cursor_row = None;
+    for t in [t, older] {
+        let mut b = term_from_snapshot(&t, PATCH_STACK).expect("import");
+        // tmux 3.8 (oracle alt_exit_hscrolled, shrink): the shorter screen
+        // pushed 30 rows, which a taller one pulls back.
+        b.feed(b"\x1b[?1049l");
+        assert_eq!((b.history_size(), b.cursor()), (41, (2, 19)));
+        b.resize(80, 60);
+        assert_eq!((b.history_size(), b.cursor()), (1, (2, 59)));
+    }
+}

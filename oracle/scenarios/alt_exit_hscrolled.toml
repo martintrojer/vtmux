@@ -1,0 +1,82 @@
+name = "alt_exit_hscrolled"
+size = [80, 24]
+# tmux leaves the primary grid alone under the alternate screen (GRID_HISTORY
+# off, no reflow: window.c window_pane_resize) and resizes it once on the way
+# back, from the size it had to the current one, history on (screen.c
+# screen_alternate_off, screen_resize_y, grid_reflow). So hscrolled, the
+# history rows a taller screen pulls back, is moved then as by one resize: a
+# narrowing runs it on through every split line (narrow), a shorter screen adds
+# the rows it pushes (shrink), a widening takes the joined rows away (both),
+# and a taller screen pulls back at most what is left of it (pull).
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "80", "-y", "8", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # narrow: 80x20 grown to 50 rows, narrowed to 25 under the alternate screen, grown to 80 rows after
+  { run = ["new", "-d", "-s", "narrow", "-n", "w", "-x", "80", "-y", "20", "sh", "-c", "i=10; while [ $i -lt 70 ]; do printf '%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\044 '; tmux wait-for -S narrow; tmux wait-for narrow-alt; printf '\\033[?1049h\\033[H\\033[2Jvim'; tmux wait-for -S narrow-on; tmux wait-for narrow-quit; printf '\\033[?1049l'; tmux wait-for -S narrow-off; exec cat"] },
+  { wait_for = "narrow" },
+  { run = ["resize-window", "-t", "narrow", "-y", "50"] },
+  { run = ["display", "-p", "-t", "narrow:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "narrow-alt"] },
+  { wait_for = "narrow-on" },
+  { run = ["resize-window", "-t", "narrow", "-x", "25"] },
+  { run = ["display", "-p", "-t", "narrow:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "narrow-quit"] },
+  { wait_for = "narrow-off" },
+  { run = ["display", "-p", "-t", "narrow:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "narrow", "-y", "80"] },
+  { run = ["display", "-p", "-t", "narrow:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "narrow:"] },
+  # shrink: grown to 50 rows, back to 20 under the alternate screen, grown to 60 after
+  { run = ["new", "-d", "-s", "shrink", "-n", "w", "-x", "80", "-y", "20", "sh", "-c", "i=10; while [ $i -lt 70 ]; do printf '%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\044 '; tmux wait-for -S shrink; tmux wait-for shrink-alt; printf '\\033[?1049h\\033[H\\033[2Jvim'; tmux wait-for -S shrink-on; tmux wait-for shrink-quit; printf '\\033[?1049l'; tmux wait-for -S shrink-off; exec cat"] },
+  { wait_for = "shrink" },
+  { run = ["resize-window", "-t", "shrink", "-y", "50"] },
+  { run = ["display", "-p", "-t", "shrink:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "shrink-alt"] },
+  { wait_for = "shrink-on" },
+  { run = ["resize-window", "-t", "shrink", "-y", "20"] },
+  { run = ["display", "-p", "-t", "shrink:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "shrink-quit"] },
+  { wait_for = "shrink-off" },
+  { run = ["display", "-p", "-t", "shrink:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "shrink", "-y", "60"] },
+  { run = ["display", "-p", "-t", "shrink:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "shrink:"] },
+  # both: narrowed and shortened under the alternate screen, widened and grown after
+  { run = ["new", "-d", "-s", "both", "-n", "w", "-x", "80", "-y", "20", "sh", "-c", "i=10; while [ $i -lt 70 ]; do printf '%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\044 '; tmux wait-for -S both; tmux wait-for both-alt; printf '\\033[?1049h\\033[H\\033[2Jvim'; tmux wait-for -S both-on; tmux wait-for both-quit; printf '\\033[?1049l'; tmux wait-for -S both-off; exec cat"] },
+  { wait_for = "both" },
+  { run = ["resize-window", "-t", "both", "-y", "50"] },
+  { run = ["display", "-p", "-t", "both:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "both-alt"] },
+  { wait_for = "both-on" },
+  { run = ["resize-window", "-t", "both", "-x", "25"] },
+  { run = ["display", "-p", "-t", "both:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "both", "-y", "30"] },
+  { run = ["display", "-p", "-t", "both:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "both-quit"] },
+  { wait_for = "both-off" },
+  { run = ["display", "-p", "-t", "both:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "both", "-x", "80"] },
+  { run = ["display", "-p", "-t", "both:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "both", "-y", "60"] },
+  { run = ["display", "-p", "-t", "both:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "both:"] },
+  # pull: a taller screen at the end pulls back at most hscrolled rows, however Ghostty resized the primary meanwhile
+  { run = ["new", "-d", "-s", "pull", "-n", "w", "-x", "80", "-y", "20", "sh", "-c", "i=10; while [ $i -lt 70 ]; do printf '%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\044 '; tmux wait-for -S pull; tmux wait-for pull-alt; printf '\\033[?1049h\\033[H\\033[2Jvim'; tmux wait-for -S pull-on; tmux wait-for pull-quit; printf '\\033[?1049l'; tmux wait-for -S pull-off; exec cat"] },
+  { wait_for = "pull" },
+  { run = ["wait-for", "-S", "pull-alt"] },
+  { wait_for = "pull-on" },
+  { run = ["resize-window", "-t", "pull", "-x", "25"] },
+  { run = ["display", "-p", "-t", "pull:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "pull", "-y", "40"] },
+  { run = ["display", "-p", "-t", "pull:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "pull", "-x", "80"] },
+  { run = ["display", "-p", "-t", "pull:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "pull", "-y", "30"] },
+  { run = ["display", "-p", "-t", "pull:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["wait-for", "-S", "pull-quit"] },
+  { wait_for = "pull-off" },
+  { run = ["display", "-p", "-t", "pull:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "pull", "-y", "60"] },
+  { run = ["display", "-p", "-t", "pull:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "pull:"] },
+]

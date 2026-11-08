@@ -1299,6 +1299,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         entry_row: p.alt_entry.map(|(y, _)| u64::from(y)),
         has_saved: p.saved.is_some(),
         has_history: p.frozen.is_some(),
+        saved_cursor_row: p.saved.is_some().then_some(u32::from(p.saved_cy)),
     });
     let (g0, g1, shifted, (s0, s1, ss)) = p.charset;
     let (shape, blinking, blinking_set, option) = p.cursor_style;
@@ -1515,6 +1516,17 @@ pub fn term_from_snapshot_with(
         None
     };
     let hsize = usize_of(h.hsize, "history size")?;
+    let saved: Option<Vec<FrozenRowState>> = alt
+        .has_saved
+        .then(|| alt.saved.iter().map(frozen_in).collect());
+    let saved_cy = match alt.saved_cursor_row {
+        Some(y) => narrow(y, "saved cursor row")?,
+        // An older writer: the cursor is most likely on the last line used.
+        None => saved
+            .as_ref()
+            .and_then(|rows| rows.iter().rposition(|r| !r.cells.is_empty()))
+            .map_or(0, |y| u16::try_from(y).unwrap_or(u16::MAX)),
+    };
     let ghostty = GhosttyState {
         scroll_region: (
             narrow(t.scroll_region.top, "scroll region")?,
@@ -1587,9 +1599,8 @@ pub fn term_from_snapshot_with(
             .iter()
             .map(|m| Ok((usize_of(m.row, "mark row")?, osc133_in(&m.mark)?)))
             .collect::<Result<_, TermError>>()?,
-        saved: alt
-            .has_saved
-            .then(|| alt.saved.iter().map(frozen_in).collect()),
+        saved,
+        saved_cy,
         alt_entry: alt
             .entry_row
             .map(|y| {

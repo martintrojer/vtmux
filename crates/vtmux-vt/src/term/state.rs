@@ -334,6 +334,8 @@ pub struct PaneState {
     pub frozen: Option<Vec<FrozenRowState>>,
     pub frozen_marks: Vec<(usize, Osc133)>,
     pub saved: Option<Vec<FrozenRowState>>,
+    /// The cursor's row in `saved` (see `PaneTerm::saved_cy`).
+    pub saved_cy: u16,
     /// The primary row tmux's history started at when the alternate screen
     /// came up, and the history rows retained then.
     pub alt_entry: Option<(u32, usize)>,
@@ -1115,6 +1117,7 @@ impl PaneTerm {
                 .saved
                 .as_ref()
                 .map(|rows| rows.iter().map(FrozenRow::to_state).collect()),
+            saved_cy: self.saved_cy,
             alt_entry: self
                 .alt_entry
                 .as_ref()
@@ -1194,6 +1197,7 @@ impl PaneTerm {
             .saved
             .as_ref()
             .map(|rows| Rc::new(rows.iter().map(FrozenRow::from_state).collect()));
+        self.saved_cy = p.saved_cy;
         let (g0, g1, shifted, saved) = p.charset;
         self.scan.charset = Charset {
             g0,

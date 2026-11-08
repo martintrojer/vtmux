@@ -749,6 +749,33 @@ impl FrozenRow {
         }
     }
 
+    /// The screen's width when the row was copied.
+    pub(crate) fn cols(&self) -> usize {
+        self.len
+    }
+
+    /// The row as tmux's grid stores it, for `grid_reflow`: each cell's
+    /// width up to `cellused` (a wide character's second column and a
+    /// tab's other columns are PADDING cells of width 0), and whether it
+    /// wraps.
+    pub(crate) fn tmux_widths(&self) -> (Vec<u8>, bool) {
+        let used = self
+            .cells
+            .iter()
+            .rposition(|c| !c.unused())
+            .map_or(0, |i| i + 1);
+        let widths = self.cells[..used]
+            .iter()
+            .map(|c| match (c.tab, c.wide) {
+                (TAB_CONTINUATION, _) | (_, Width::SpacerTail) => 0,
+                (0, Width::Double) => 2,
+                (0, _) => 1,
+                (tab, _) => tab,
+            })
+            .collect();
+        (widths, self.wrapped)
+    }
+
     /// This row as [`crate::TermState`] carries it.
     pub(crate) fn to_state(&self) -> crate::FrozenRowState {
         crate::FrozenRowState {
