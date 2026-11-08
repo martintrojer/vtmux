@@ -63,6 +63,11 @@ pub struct OuterCursor {
     mode: Option<Mode>,
     shape: CursorShape,
     colour: Option<(u8, u8, u8)>,
+    /// What the terminal has is not known (a live upgrade carries none of
+    /// it): the next style and colour are written whatever the last were,
+    /// and the teardown resets them.
+    style_unknown: bool,
+    colour_unknown: bool,
 }
 
 impl OuterCursor {
@@ -71,11 +76,23 @@ impl OuterCursor {
         self.mode = None;
     }
 
+    /// The terminal's style and colour are not known, as in a server that
+    /// took the client over from another image: the next frame writes both
+    /// whatever they were, a reset when the screen has none, and a
+    /// teardown first resets them.
+    pub fn forget(&mut self) {
+        self.mode = None;
+        self.style_unknown = true;
+        self.colour_unknown = true;
+    }
+
     /// `tty_start_tty`: the colour the terminal was given is gone (the
     /// teardown reset it).
     pub fn restart(&mut self) {
         self.colour = None;
         self.mode = None;
+        self.style_unknown = false;
+        self.colour_unknown = false;
     }
 
     /// `tty_update_cursor` for a frame whose cursor is `visible`, showing
@@ -123,7 +140,7 @@ impl OuterCursor {
         let steady = |n: i64| if blinking { n } else { n + 1 };
         match shape {
             CursorShape::Default => {
-                if self.shape != CursorShape::Default {
+                if self.shape != CursorShape::Default || self.style_unknown {
                     out.push_str(&reset_style(term));
                 }
                 if blinking || very_visible {
@@ -145,15 +162,17 @@ impl OuterCursor {
         }
         self.shape = shape;
         self.mode = Some(mode);
+        self.style_unknown = false;
         out
     }
 
     /// `tty_force_cursor_colour`: `Cs` with the colour as `rgb:rr/gg/bb`,
     /// or `Cr` for none, when it is not what the terminal has.
     fn force_colour(&mut self, term: &Term, colour: Option<(u8, u8, u8)>, out: &mut String) {
-        if colour == self.colour {
+        if colour == self.colour && !self.colour_unknown {
             return;
         }
+        self.colour_unknown = false;
         let code = match colour {
             None => term.code("Cr", &[]),
             Some((r, g, b)) => {
@@ -170,10 +189,10 @@ impl OuterCursor {
     #[must_use]
     pub fn teardown(&self, term: &Term) -> String {
         let mut out = String::new();
-        if self.shape != CursorShape::Default {
+        if self.shape != CursorShape::Default || self.style_unknown {
             out.push_str(&reset_style(term));
         }
-        if self.colour.is_some() {
+        if self.colour.is_some() || self.colour_unknown {
             out.push_str(&term.code("Cr", &[]).unwrap_or_default());
         }
         out
@@ -321,6 +340,33 @@ mod tests {
             c.update(&t, true, Some(&bar(false))),
             "\x1b[?12l\x1b[?25h\x1b[6 q"
         );
+    }
+
+    /// A terminal whose style and colour are not known (a client taken
+    /// over in a live upgrade) is given both again, a reset included, and
+    /// has both reset at a teardown; one that is known is not.
+    #[test]
+    fn a_cursor_not_known_is_written_and_reset() {
+        let t = term("xterm-256color");
+        let mut c = OuterCursor::default();
+        assert_eq!(c.teardown(&t), "");
+        c.forget();
+        assert_eq!(c.teardown(&t), "\x1b[2 q\x1b]112\x07");
+        let plain = CursorScreen::default();
+        assert_eq!(
+            c.update(&t, true, Some(&plain)),
+            "\x1b]112\x07\x1b[?12l\x1b[?25h\x1b[2 q"
+        );
+        assert_eq!(c.update(&t, true, Some(&plain)), "");
+        assert_eq!(c.teardown(&t), "");
+        // A style and colour of the screen's own: written, once.
+        let mut s = bar(false);
+        s.colour = Some((255, 0, 0));
+        let mut c = OuterCursor::default();
+        c.forget();
+        let want = "\x1b]12;rgb:ff/00/00\x07\x1b[?12l\x1b[?25h\x1b[6 q";
+        assert_eq!(c.update(&t, true, Some(&s)), want);
+        assert_eq!(c.update(&t, true, Some(&s)), "");
     }
 
     /// A screen without a style of its own takes its default

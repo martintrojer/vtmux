@@ -2065,6 +2065,9 @@ impl Server {
                 c.compositor
                     .set_cursor_codes(crate::render::CursorCodes::from_term(&term));
                 c.term = Some(Rc::new(term));
+                // The style and colour the old image gave the terminal are
+                // not in the snapshot.
+                c.cursor.forget();
                 c.term_options = (features, overrides);
                 c.update_theme();
             }

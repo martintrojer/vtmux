@@ -459,6 +459,15 @@ impl Attached {
         format!("{text}cursor {:?}\n", t.cursor())
     }
 
+    /// The terminal's cursor as an observer of everything it was sent
+    /// sees it: shape, blinking and colour.
+    fn cursor_style(&self) -> (vtmux_vt::CursorShape, bool, Option<(u8, u8, u8)>) {
+        let mut t = vtmux_vt::PaneTerm::new(80, 24, 0);
+        t.feed(&self.bytes.lock().unwrap());
+        let m = t.screen_modes();
+        (m.cursor_shape, m.cursor_blinking, t.cursor_colour())
+    }
+
     fn keys(&mut self, bytes: &str) {
         self.writer.write_all(bytes.as_bytes()).unwrap();
         self.writer.flush().unwrap();
@@ -1707,6 +1716,54 @@ fn an_attached_client_re_executes_and_comes_back_as_it_was() {
         attached.since(at).contains("typed")
     });
     assert!(attached.exited().is_none());
+}
+
+/// The cursor style and colour the terminal was given are not in the
+/// snapshot, so the re-attached client's terminal is given them again
+/// after it is started again (`tty_start_tty`, tty.c:357-395): a pane's
+/// own style and colour, or the reset (`Se`, `Cr`) of a pane with none,
+/// whatever the old image's last frame left; a pane's own shows the same
+/// before and after.
+#[test]
+fn a_re_attached_terminal_is_given_its_cursor_style_and_colour_again() {
+    use vtmux_vt::CursorShape::{Bar, Default};
+    let red = Some((255, 0, 0));
+    for (window, command, shown) in [
+        (
+            "styled",
+            r"printf '[5 q]12;red'; exec cat -",
+            (Bar, true, red),
+        ),
+        ("plain", r"exec cat -", (Default, false, None)),
+    ] {
+        let world = World::new();
+        world.populate(&[]);
+        world.run(&["neww", "-t", "a", "-n", window, "sh", "-c", command]);
+        let attached = Attached::new(&world, "a");
+        wait("the cursor the pane asked for", || {
+            attached.cursor_style() == shown
+        });
+        let at = attached.len();
+        assert_eq!(world.upgrade(&bin()), Some(upgraded()), "{window}");
+        reexecuted(&attached, at);
+        // After the terminal started again (`ESC[?996n`): the style and
+        // the colour, written whatever the last were.
+        let again = "\u{1b}[?996n";
+        wait("the cursor written again", || {
+            let since = attached.since(at);
+            let started = since.rfind(again).map_or("", |i| &since[i + again.len()..]);
+            let (style, colour) = match shown.2 {
+                Some(_) => ("\u{1b}[5 q", "\u{1b}]12;rgb:ff/00/00\u{7}"),
+                None => ("\u{1b}[2 q", "\u{1b}]112\u{7}"),
+            };
+            started.contains(style) && started.contains(colour)
+        });
+        // The reset is `Se`, which an observer reads as a steady block: the
+        // terminal's own default, so only a pane's own cursor compares.
+        if shown.2.is_some() {
+            wait("the same cursor", || attached.cursor_style() == shown);
+        }
+    }
 }
 
 /// Twenty upgrades in a row, alternating between this build and a copy of

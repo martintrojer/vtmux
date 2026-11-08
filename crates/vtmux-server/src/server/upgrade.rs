@@ -1006,6 +1006,10 @@ impl Server {
         c.pasting = false;
         c.window_cache = crate::render::WindowCache::default();
         c.compositor.invalidate();
+        // The terminal was reset by the teardown sent before the notice,
+        // if that reached it: its cursor style and colour are written
+        // again whatever the last frame of the old image left.
+        c.cursor.forget();
         let term = c.term.clone();
         if registered.is_err() {
             self.drop_client(old);
