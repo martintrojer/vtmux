@@ -25,6 +25,14 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Gate (full check.sh)
         run: bash scripts/check.sh
+      # A regress failure names target/regress/logs/<test>.log: keep it.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: regress-logs-linux
+          path: target/regress/logs/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # macOS: the same gate, but GitHub's macOS runners take ~28 min against
   # Linux's ~18, so it runs only where it pays: main (after the merge, not
@@ -43,6 +51,13 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Gate (full check.sh)
         run: bash scripts/check.sh
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: regress-logs-macos
+          path: target/regress/logs/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # Performance regression guard (docs/PERFORMANCE.md, "Regression guard"): never blocks, not
   # part of check.sh. The table goes to the job summary; the result JSON is the artifact to

@@ -1,0 +1,18 @@
+--- a/regress/screen-redraw-floating.sh
++++ b/regress/screen-redraw-floating.sh
+@@ -32,6 +32,15 @@
+ compare() {
+ 	sleep 1
+ 	$TMUX capturep -p $2 >$TMP || exit 1
++	# vtmux (compat/tmux-3.8/README.md, Test races): a scene that two servers
++	# and a client have not drawn within the second is late, not wrong; wait
++	# (max 10 s more) for it.
++	n=0
++	while [ -z "$GENERATE" ] && ! cmp -s $TMP "$RESULTS/$1.result" && \
++	    [ $n -lt 100 ]; do
++		sleep 0.1; n=$((n+1))
++		$TMUX capturep -p $2 >$TMP || exit 1
++	done
+ 	if [ -n "$GENERATE" ]; then
+ 		cp $TMP "$RESULTS/$1.result" || exit 1
+ 		echo "generated $1"

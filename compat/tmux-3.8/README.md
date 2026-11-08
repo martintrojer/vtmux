@@ -90,3 +90,18 @@ and is listed here; it is not a divergence, so it has no `D-NNN`.
   loaded machine can take longer than. Unpatched 0/1 on vtmux; patched it
   passes on both. It was `xfail` and `flaky` before; the `#{I/f:utf8}` lookup
   it also checks is implemented (`vtmux-core` `format/eval.rs`, `ClientInfo`).
+- `screen-redraw-floating.sh`
+  (`0007-screen-redraw-floating-wait-for-late-scenes.patch`): each scene is
+  drawn by the inner server, its attached client, and the outer server, and
+  `compare` captures the outer pane once, one second after the scene's last
+  command. A host that stalls one of them for longer fails the scene, though
+  the scene comes out right later. Failed once in CI (GitHub run 42460821207,
+  macOS, under check.sh's parallel regress; Linux passed, and none of the 59
+  ci runs before it failed this test). Locally 20/20 idle and 21/21 under 8 busy loops, on 8ec6e32 and
+  12/12 on its parent 0f36b68 under the same load. With the servers stopped at
+  random for 0.1 to 1 s (SIGSTOP), 7 of 80 scenes took 1.05 to 1.7 s to come
+  right, and every one did. With `sleep 1.5` before a floating pane's
+  `printf`, the unpatched script fails `floating-basic` on vtmux and the
+  reference alike. The patch polls `capturep` (max 10 s more) until the
+  capture matches the result file; with the delay it then passes on both.
+  `GENERATE=1` still captures once.
