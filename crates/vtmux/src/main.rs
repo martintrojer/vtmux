@@ -283,6 +283,7 @@ fn main() -> ExitCode {
 }
 
 /// The client: find or start the server, send the command, relay.
+#[allow(clippy::too_many_lines)] // the client's startup, one step per flag
 fn client_main(mut args: Vec<OsString>) -> ExitCode {
     let argv0 = if args.is_empty() {
         OsString::from("vtmux")

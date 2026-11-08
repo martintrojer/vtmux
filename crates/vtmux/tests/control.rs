@@ -421,8 +421,12 @@ fn control_control_needs_a_tty() {
 /// flags are those `cfmakeraw` clears (echo, canonical mode, signals,
 /// extensions): tmux 3.8 leaves the rest as the stack held them
 /// (client.c:349 on a `struct termios` it never filled in).
-type Modes = (u32, u32, u32, u32, u8, u8, u32);
+///
+/// The flag words are `u64` here: rustix's `bits()` is `u32` on Linux and
+/// `u64` on macOS (`tcflag_t`).
+type Modes = (u64, u64, u64, u64, u8, u8, u32);
 
+#[allow(clippy::useless_conversion)] // u64 -> u64 on macOS
 fn modes_of(tty: &std::fs::File) -> Modes {
     use rustix::termios::{LocalModes, SpecialCodeIndex, tcgetattr};
     let t = tcgetattr(tty).expect("tcgetattr");
@@ -432,10 +436,10 @@ fn modes_of(tty: &std::fs::File) -> Modes {
         | LocalModes::ISIG
         | LocalModes::IEXTEN;
     (
-        t.input_modes.bits(),
-        t.output_modes.bits(),
-        t.control_modes.bits(),
-        (t.local_modes & raw).bits(),
+        u64::from(t.input_modes.bits()),
+        u64::from(t.output_modes.bits()),
+        u64::from(t.control_modes.bits()),
+        u64::from((t.local_modes & raw).bits()),
         t.special_codes[SpecialCodeIndex::VMIN],
         t.special_codes[SpecialCodeIndex::VTIME],
         t.input_speed(),
