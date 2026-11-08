@@ -88,10 +88,27 @@ pub(super) fn head(s: &TermState) -> Result<(), StateError> {
         !s.alternate_active || s.alternate.is_some(),
         "alternate screen active but absent",
     )?;
-    screen(&s.primary, s)?;
+    // Only the alternate screen leaves the primary at another size
+    // (Ghostty patch 0028).
+    check(
+        s.primary_size.is_none_or(|(c, r)| {
+            s.alternate_active
+                && (1..=MAX_SIZE).contains(&c)
+                && (1..=MAX_SIZE).contains(&r)
+                && (c, r) != (s.cols, s.rows)
+        }),
+        "primary screen size",
+    )?;
+    screen(&s.primary, s.primary_size.unwrap_or((s.cols, s.rows)))?;
     if let Some(alt) = &s.alternate {
-        screen(alt, s)?;
+        screen(alt, (s.cols, s.rows))?;
     }
+    check(
+        s.ghostty
+            .alternate_saved
+            .is_none_or(|a| a.x <= MAX_SIZE && a.y < MAX_SIZE),
+        "alternate saved cursor",
+    )?;
     // Leaving a screen ends its link (Terminal.zig `switchScreen`), and
     // coming back asserts there is none.
     let inactive = if s.alternate_active {
@@ -122,8 +139,8 @@ pub(super) fn head(s: &TermState) -> Result<(), StateError> {
     pane(&s.pane)
 }
 
-fn screen(sc: &ScreenState, s: &TermState) -> Result<(), StateError> {
-    cursor(&sc.cursor, s)?;
+fn screen(sc: &ScreenState, size: (u16, u16)) -> Result<(), StateError> {
+    cursor(&sc.cursor, size)?;
     charset(sc.charset)?;
     if let Some(saved) = &sc.saved_cursor {
         // A saved cursor may be off a screen shrunk since; restoring it
@@ -138,7 +155,7 @@ fn screen(sc: &ScreenState, s: &TermState) -> Result<(), StateError> {
         "kitty keyboard flags",
     )?;
     for page in &sc.pages {
-        self::page(page, s.cols)?;
+        self::page(page, size.0)?;
     }
     Ok(())
 }
@@ -148,10 +165,10 @@ const SEMANTIC_OUTPUT: u8 = 0;
 const SEMANTIC_INPUT: u8 = 1;
 const SEMANTIC_PROMPT: u8 = 2;
 
-fn cursor(c: &GhosttyCursor, s: &TermState) -> Result<(), StateError> {
+fn cursor(c: &GhosttyCursor, (cols, rows): (u16, u16)) -> Result<(), StateError> {
     // Ghostty's cursor is always on the screen; a pending wrap keeps it
     // in the last column.
-    check(c.x < s.cols && c.y < s.rows, "cursor off the screen")?;
+    check(c.x < cols && c.y < rows, "cursor off the screen")?;
     // Only OSC 133;I's input clears at the end of a line (Screen.zig
     // `cursorSetSemanticContent`: output and prompt clear the flag), and
     // a linefeed asserts it is never set with output (Terminal.zig
@@ -284,12 +301,6 @@ fn pane(p: &PaneState) -> Result<(), StateError> {
     check(
         u32::try_from(p.input_buffer_size).is_ok(),
         "input buffer size",
-    )?;
-    check(
-        p.saved
-            .as_ref()
-            .is_none_or(|s| usize::from(p.saved_cy) < s.len().max(1)),
-        "saved cursor",
     )?;
     for rows in [&p.frozen, &p.saved].into_iter().flatten() {
         rows.iter().try_for_each(frozen_row)?;

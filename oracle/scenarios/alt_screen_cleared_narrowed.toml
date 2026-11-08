@@ -1,0 +1,55 @@
+name = "alt_screen_cleared_narrowed"
+size = [80, 24]
+# A screen cleared into history (scroll-on-clear, grid_view_clear_history) then
+# narrowed and widened under the alternate screen: tmux reflows the primary
+# once, on the way back (screen.c screen_alternate_off), where Ghostty reflowed
+# it at each resize and pulled history rows into the blank screen (history 167
+# for tmux's 180 after the narrowing). hlimit: the same with more history than
+# the screen.
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "80", "-y", "8", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  { run = ["new", "-d", "-s", "clr", "-n", "w", "-x", "80", "-y", "20", "sh", "-c", "i=10; while [ $i -lt 70 ]; do printf '%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\033[H\\033[2J'; tmux wait-for -S clr-p0; tmux wait-for clr-go1; printf '\\033[?1049h\\033[H\\033[2Jvim'; tmux wait-for -S clr-p1; tmux wait-for clr-go2; printf '\\033[?1049l'; tmux wait-for -S clr-p2; exec cat -"] },
+  { wait_for = "clr-p0" },
+  { run = ["display", "-p", "-t", "clr:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["wait-for", "-S", "clr-go1"] },
+  { wait_for = "clr-p1" },
+  { run = ["display", "-p", "-t", "clr:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "clr", "-x", "25"] },
+  { run = ["display", "-p", "-t", "clr:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["wait-for", "-S", "clr-go2"] },
+  { wait_for = "clr-p2" },
+  { run = ["display", "-p", "-t", "clr:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "clr", "-x", "80"] },
+  { run = ["display", "-p", "-t", "clr:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "clr", "-y", "40"] },
+  { run = ["display", "-p", "-t", "clr:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "clr:"] },
+  { run = ["new", "-d", "-s", "clrw", "-n", "w", "-x", "40", "-y", "20", "sh", "-c", "i=10; while [ $i -lt 70 ]; do printf '%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\033[H\\033[2J'; tmux wait-for -S clrw-p0; tmux wait-for clrw-go1; printf '\\033[?1049h\\033[H\\033[2Jvim'; tmux wait-for -S clrw-p1; tmux wait-for clrw-go2; printf '\\033[?1049l'; tmux wait-for -S clrw-p2; exec cat -"] },
+  { wait_for = "clrw-p0" },
+  { run = ["display", "-p", "-t", "clrw:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["wait-for", "-S", "clrw-go1"] },
+  { wait_for = "clrw-p1" },
+  { run = ["display", "-p", "-t", "clrw:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "clrw", "-x", "80"] },
+  { run = ["display", "-p", "-t", "clrw:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["wait-for", "-S", "clrw-go2"] },
+  { wait_for = "clrw-p2" },
+  { run = ["display", "-p", "-t", "clrw:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "clrw", "-x", "25"] },
+  { run = ["display", "-p", "-t", "clrw:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "clrw", "-y", "40"] },
+  { run = ["display", "-p", "-t", "clrw:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "clrw:"] },
+  { run = ["new", "-d", "-s", "hlimit", "-n", "w", "-x", "80", "-y", "20", "sh", "-c", "i=10; while [ $i -lt 210 ]; do printf '%sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012' $i; i=$((i+1)); done; printf '\\033[?1049h\\033[Hvim'; tmux wait-for -S hlimit-p0; tmux wait-for hlimit-go1; printf '\\033[?1049l'; tmux wait-for -S hlimit-p1; exec cat -"] },
+  { wait_for = "hlimit-p0" },
+  { run = ["display", "-p", "-t", "hlimit:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "hlimit", "-y", "10"] },
+  { run = ["display", "-p", "-t", "hlimit:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["wait-for", "-S", "hlimit-go1"] },
+  { wait_for = "hlimit-p1" },
+  { run = ["display", "-p", "-t", "hlimit:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["resize-window", "-t", "hlimit", "-y", "30"] },
+  { run = ["display", "-p", "-t", "hlimit:", "#{history_size} #{cursor_x},#{cursor_y} #{alternate_on}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "hlimit:"] },
+]

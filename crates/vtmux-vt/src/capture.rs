@@ -95,8 +95,9 @@ pub trait Lines {
 enum Source<'a> {
     /// The pane's grid, history included.
     Pane(&'a PaneTerm),
-    /// `-a`: the primary screen saved under the alternate one, no history.
-    Saved(Rc<Vec<FrozenRow>>),
+    /// `-a`: the primary screen saved under the alternate one, no history,
+    /// read `sx` columns wide (the pane's width now).
+    Saved(Rc<Vec<FrozenRow>>, usize),
     /// `-M`: a mode's screen, `sx` columns.
     Mode(&'a dyn Lines, usize),
 }
@@ -116,7 +117,7 @@ impl Source<'_> {
     fn size(&self) -> (usize, usize) {
         match self {
             Self::Pane(t) => (t.history_size(), usize::from(t.rows())),
-            Self::Saved(rows) => (0, rows.len()),
+            Self::Saved(rows, _) => (0, rows.len()),
             Self::Mode(l, _) => (l.history_size(), l.screen_rows()),
         }
     }
@@ -135,8 +136,11 @@ impl Source<'_> {
                 let (p, o) = (marked(LineMark::Prompt), marked(LineMark::Output));
                 (cells, wrapped, time, p, o)
             }
-            Self::Saved(rows) => {
-                let (cells, wrapped) = rows.get(y).map(FrozenRow::thaw).unwrap_or_default();
+            Self::Saved(rows, sx) => {
+                let (mut cells, wrapped) = rows.get(y).map(FrozenRow::thaw).unwrap_or_default();
+                // grid_string_cells reads the pane's width of a line
+                // whatever its own, so a narrower pane cuts it.
+                cells.truncate(*sx);
                 (cells, wrapped, 0, false, false)
             }
             Self::Mode(l, sx) => {
@@ -172,10 +176,12 @@ impl Source<'_> {
 
 /// `capture-pane -a` (cmd-capture-pane.c:268-279): the primary screen
 /// saved when the alternate screen came up (`saved_grid`), which has no
-/// history; `None` while no alternate screen is up.
+/// history, as wide as the pane is now (`sx`, cmd-capture-pane.c:269);
+/// `None` while no alternate screen is up.
 #[must_use]
 pub fn capture_alternate(term: &PaneTerm, opts: CaptureOpts) -> Option<Vec<u8>> {
-    Some(capture_from(&Source::Saved(term.saved_rows()?), opts))
+    let sx = usize::from(term.cols());
+    Some(capture_from(&Source::Saved(term.saved_rows()?, sx), opts))
 }
 
 /// Capture `term` the way `capture-pane` does, returning the buffer before
@@ -823,33 +829,6 @@ impl FrozenRow {
             len,
             wrapped,
         }
-    }
-
-    /// The screen's width when the row was copied.
-    pub(crate) fn cols(&self) -> usize {
-        self.len
-    }
-
-    /// The row as tmux's grid stores it, for `grid_reflow`: each cell's
-    /// width up to `cellused` (a wide character's second column and a
-    /// tab's other columns are PADDING cells of width 0), and whether it
-    /// wraps.
-    pub(crate) fn tmux_widths(&self) -> (Vec<u8>, bool) {
-        let used = self
-            .cells
-            .iter()
-            .rposition(|c| !c.unused())
-            .map_or(0, |i| i + 1);
-        let widths = self.cells[..used]
-            .iter()
-            .map(|c| match (c.tab, c.wide) {
-                (TAB_CONTINUATION, _) | (_, Width::SpacerTail) => 0,
-                (0, Width::Double) => 2,
-                (0, _) => 1,
-                (tab, _) => tab,
-            })
-            .collect();
-        (widths, self.wrapped)
     }
 
     /// This row as [`crate::TermState`] carries it.

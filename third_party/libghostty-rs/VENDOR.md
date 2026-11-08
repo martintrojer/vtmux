@@ -784,6 +784,52 @@ Recorded per commit in git history; the list is kept current:
   before (no history) and 0.036 s after; from row 20 0.026 s and 0.042 s.
   Not an upstream candidate (tmux's model).
 
+- `patches/0028-tmux-alternate-screen.patch` (`Terminal.zig` new fields
+  `tmux_alternate`, `tmux_alt_saved` and `TmuxAltSaved`,
+  `tmuxSwitchScreenMode`, `tmuxRestoreAltCursor`, `resize`,
+  `switchScreen`, `switchScreenMode`, `fullReset`; `c/vtmux_state.zig`
+  `set_tmux_alternate`, `alternate_saved`, `set_alternate_saved`,
+  `primary_size`, `importer_primary_size`, the importer's per-screen size;
+  `c/main.zig`, `lib_vt.zig`, `include/ghostty/vt/vtmux_state.h`): with
+  `tmux_alternate` set, modes 47, 1047 and 1049 switch screens as tmux's
+  `screen_alternate_on` and `screen_alternate_off` do (screen.c; input.c
+  `input_csi_dispatch_sm_private`, `_rm_private`), and the primary screen
+  is not resized while the alternate one is up (window.c
+  `window_pane_resize` resizes only the alternate grid). Every mode clears
+  the alternate screen as it comes up (upstream's 47 kept what it had) and
+  keeps the cursor; only 1049 saves the cursor and pen, in a terminal-wide
+  slot apart from DECSC's (`tmux_alt_saved`, tmux's `saved_cx`, `saved_cy`,
+  `saved_cell`), restored by `?1049l` even off the alternate screen and
+  from an earlier one, never with the charsets or origin mode; `?1049h` on
+  an alternate screen already up saves nothing. DECSC's slot is tmux's
+  input context's, so both screens share it (copied at each switch).
+  Upstream used DECSC's per-screen slot for 1049 and resized and reflowed
+  the primary at every resize, with its own cursor. When the alternate
+  screen ends at another size, the terminal takes the primary's size with
+  the cursor tmux resizes it with (the saved one, or the alternate
+  screen's back at that size: `min(y, rows - 1)`, a pending wrap as
+  tmux's `cx` past the last column) and drops the alternate screen; the
+  caller resizes back (vtmux: `PaneTerm::alternate_ended`, through its
+  usual primary resize, so patch 0025 moves `hscrolled` and the rows under
+  the cursor go first). `switchScreen` and `fullReset` resize a primary
+  left at another size before showing it. The state export and import
+  carry the primary's size (`primary_size`, `importer_primary_size`: its
+  pages and cursor at that size, only with an alternate screen) and the
+  1049 slot (`alternate_saved`, `set_alternate_saved`) outside
+  `GhosttyVtmuxState`, so patch 0017's layout is unchanged. Wrapper:
+  `Terminal::vtmux_set_tmux_alternate`, `vtmux_alternate_saved`,
+  `vtmux_set_alternate_saved`, `vtmux_primary_size`,
+  `Importer::primary_size` (`vtmux.rs`; `VtmuxAltSaved` and the
+  functions in `bindings.rs` by hand). Tests: `Terminal: tmux alternate
+  screen leaves the primary at its size (vtmux)`, `Terminal: tmux
+  alternate screen cursor slots (vtmux)`. With it, `-Doptimize=ReleaseSafe`
+  `-Dtest-filter=vtmux` 67/67 (71 in the C test binary), `resize`,
+  `PageList`, `reflow` and `Screen` pass; Debug `-Dtest-filter="Terminal: "`
+  1047/1049 with the known `tabClear single` failure in each test binary.
+  Oracle `alt_screen_exit`, `alt_screen_cleared_narrowed`,
+  `alt_screen_cursor_slots`, `alt_screen_history_clears`. Not an upstream
+  candidate (tmux's model).
+
 - `patches/0029-tmux-grid-corners.patch` (`PageList.zig`
   `ReflowCursor.reflowRow`, `tmuxEmptyRows`, new fields `tmux_empties`,
   `tmux_joined`, `tmux_padding_made`, `scrollClear`; `Terminal.zig`

@@ -801,6 +801,18 @@ impl<'a> Ctx<'a> {
                 }
             }
             "alternate_on" => flag(p.term.alternate_on()),
+            // format_cb_alternate_saved_x, _y (format.c:1463-1478): what
+            // ?1049h saved, UINT_MAX before any (screen.c screen_reinit).
+            "alternate_saved_x" => p
+                .term
+                .alternate_saved()
+                .map_or(u32::MAX, |(x, _)| u32::from(x))
+                .to_string(),
+            "alternate_saved_y" => p
+                .term
+                .alternate_saved()
+                .map_or(u32::MAX, |(_, y)| u32::from(y))
+                .to_string(),
             // format_cb_synchronized_output_flag (format.c:2143-2150).
             "synchronized_output_flag" => flag(p.term.sync_held().is_some()),
             // format_cb_mouse_*_flag (format.c:1995-2080), from tmux's own

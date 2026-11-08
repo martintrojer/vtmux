@@ -82,6 +82,17 @@ record! {
 }
 
 record! {
+    /// What `?1049h` saved for `?1049l` (tmux's `saved_cx`, `saved_cy` and
+    /// `saved_cell`), kept after the alternate screen ends: `x` is the
+    /// column count while a wrap was pending.
+    pub struct AltSaved {
+        1 => one x: u32,
+        2 => one y: u32,
+        3 => one style: Style,
+    }
+}
+
+record! {
     /// One screen: its visible rows, its history and its cursor state.
     /// The alternate screen has no history.
     pub struct Screen {
@@ -244,10 +255,10 @@ record! {
         /// the primary one).
         8 => one has_saved: bool,
         9 => one has_history: bool,
-        /// The cursor's row in [`AltEntry::saved`] that the primary screen
-        /// is resized with when the alternate one ends. A reader takes the
-        /// last row with anything in it without it.
-        10 => opt saved_cursor_row: Option<u32>,
+        // 10: the cursor's row in `saved` that the primary screen was
+        // resized with when the alternate one ended, while the emulator
+        // resized the primary under it. Since the emulator leaves it at
+        // its size (`TermState::primary_size`) it is not written or read.
     }
 }
 
@@ -418,6 +429,14 @@ record! {
         /// tmux's `INPUT_LAST`: the last thing parsed was a printed
         /// character, which a REP repeats (input.c `INPUT_CSI_REP`).
         36 => one input_last: bool,
+        /// The primary screen's width and height while the alternate
+        /// screen leaves it at the size it had (tmux resizes it when it
+        /// comes back), when they are not the terminal's: its visible
+        /// rows are then that many. A writer lists
+        /// [`crate::PRIMARY_SIZE_FEATURE`] with it.
+        37 => opt primary_size: Option<(u32, u32)>,
+        /// What `?1049h` saved, if anything.
+        38 => opt alternate_saved: Option<AltSaved>,
     }
 }
 
@@ -614,6 +633,21 @@ pub(crate) mod tests {
         round_trip(&TermState::default());
     }
 
+    /// The primary screen's size under the alternate one and `?1049h`'s
+    /// saved cursor, added after the golden file was written.
+    #[test]
+    fn alternate_screen_fields() {
+        let mut t = sample_term();
+        t.primary_size = Some((30, 4));
+        t.alternate_saved = Some(AltSaved {
+            x: 20,
+            y: 3,
+            style: t.primary.cursor.style,
+        });
+        round_trip(&t);
+        round_trip(t.alternate_saved.as_ref().unwrap());
+    }
+
     /// Every field added after the golden file was written, set.
     #[test]
     fn later_fields() {
@@ -650,7 +684,6 @@ pub(crate) mod tests {
         alt.entry_row = Some(4);
         alt.has_saved = true;
         alt.has_history = true;
-        alt.saved_cursor_row = Some(0);
         let sync = t.sync.as_mut().unwrap();
         sync.cols = 20;
         sync.cursor = Some((1, 2));

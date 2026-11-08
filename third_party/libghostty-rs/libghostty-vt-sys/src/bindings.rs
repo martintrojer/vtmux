@@ -6136,4 +6136,37 @@ unsafe extern "C" {
     ) -> Result::Type;
     #[doc = " The `hscrolled` after those resizes; stops carrying it (vtmux patch 0025)."]
     pub fn ghostty_vtmux_take_hscrolled(terminal: Terminal, out: *mut usize) -> Result::Type;
+    #[doc = " Switch screens as tmux does; the primary keeps its size under the alternate (vtmux patch 0028)."]
+    pub fn ghostty_vtmux_set_tmux_alternate(terminal: Terminal, enabled: bool) -> Result::Type;
+    #[doc = " What `?1049h` saved; GHOSTTY_NO_VALUE when nothing is (vtmux patch 0028)."]
+    pub fn ghostty_vtmux_alternate_saved(
+        terminal: Terminal,
+        out: *mut VtmuxAltSaved,
+    ) -> Result::Type;
+    #[doc = " Set what `?1049h` saved, or clear it with NULL (vtmux patch 0028)."]
+    pub fn ghostty_vtmux_set_alternate_saved(
+        terminal: Terminal,
+        saved: *const VtmuxAltSaved,
+    ) -> Result::Type;
+    #[doc = " The primary screen's size (vtmux patch 0028)."]
+    pub fn ghostty_vtmux_primary_size(
+        terminal: Terminal,
+        cols: *mut u16,
+        rows: *mut u16,
+    ) -> Result::Type;
+    #[doc = " Import the primary screen at this size, before its first page (vtmux patch 0028)."]
+    pub fn ghostty_vtmux_importer_primary_size(
+        importer: VtmuxImporter,
+        cols: u16,
+        rows: u16,
+    ) -> Result::Type;
+}
+#[doc = " What `?1049h` saved for `?1049l` (vtmux patch 0028)."]
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct VtmuxAltSaved {
+    pub size: usize,
+    pub x: u16,
+    pub y: u16,
+    pub pen: Style,
 }

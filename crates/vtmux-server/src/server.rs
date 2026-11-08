@@ -4829,10 +4829,13 @@ impl Server {
         pane.term.set_scroll_on_clear(false);
         // input_free: the old program's requests go.
         pane.requests.clear();
+        // screen_alternate_off(s, NULL, 0): no cursor restored; then
+        // saved_cx and saved_cy go (screen.c:122-125).
         pane.term.feed(
-            b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[20l\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
+            b"\x1b[?47l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[?7h\x1b[?25h\x1b[20l\x1b[?6l\x1b[?1l\x1b>\x1b[4l\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1004l",
         );
         let _ = pane.term.take_replies();
+        pane.term.forget_alternate_saved();
         // screen_reinit (spawn.c:329) under the current `extended-keys`.
         pane.term.set_extended_keys(extended_keys);
         pane.term.reset_key_mode();

@@ -102,10 +102,17 @@ pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 /// It keeps the names no writer lists any more, for the streams of the
 /// builds that did.
 pub const KNOWN_FEATURES: &[&str] = &[
+    PRIMARY_SIZE_FEATURE,
     SCROLLBAR_FEATURE,
     TERM_QUERIES_FEATURE,
     TERMINAL_TITLE_FEATURE,
 ];
+
+/// The [`Meta::requires`] name of a primary screen the alternate screen
+/// left at another size ([`TermState::primary_size`]), listed when some
+/// pane's is: a reader without it would take the primary's rows at the
+/// terminal's size.
+pub const PRIMARY_SIZE_FEATURE: &str = "alternate-primary-size";
 
 /// The [`Meta::requires`] name of a pane's auto-hide scrollbar state
 /// ([`Pane::scrollbar_visible`] and the fields after it), listed when

@@ -236,6 +236,8 @@ const VARIABLES: &[&str] = &[
     "cursor_y",
     "cursor_character",
     "alternate_on",
+    "alternate_saved_x",
+    "alternate_saved_y",
     "synchronized_output_flag",
     "mouse_any_flag",
     "mouse_standard_flag",
@@ -1382,6 +1384,52 @@ fn timers_and_messages_survive_a_rebuild() {
     let last = b.model.panes[&vtmux_core::ids::PaneId(0)].last_rename;
     assert!(last.is_some() && last <= Some(Instant::now()));
     assert_eq!(b.causes, a.causes);
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A primary screen the alternate one left at its size (Ghostty patch
+/// 0028) goes under its feature name, as a reader without it would take
+/// its rows at the pane's size, and comes back to end the alternate screen
+/// as tmux does; none left so requires nothing.
+#[test]
+fn a_primary_screen_left_at_its_size_requires_its_feature() {
+    let dir = temp_dir("psize");
+    let mut a = server(&dir);
+    ok(
+        &mut a,
+        &dir,
+        &[
+            "new-session",
+            "-d",
+            "-s",
+            "s",
+            "-x",
+            "80",
+            "-y",
+            "24",
+            "cat",
+            "-",
+        ],
+    );
+    let p = vtmux_core::ids::PaneId(0);
+    let term = &mut a.model.panes.get_mut(&p).unwrap().term;
+    term.feed(b"one\r\ntwo\x1b[?1049h\x1b[Hvim");
+    let plain = a.to_snapshot(snap::Meta::default());
+    assert!(plain.meta.requires.is_empty(), "{:?}", plain.meta.requires);
+    ok(&mut a, &dir, &["resize-window", "-t", "s", "-y", "10"]);
+    assert_eq!(a.model.panes[&p].term.rows(), 10);
+    let sized = a.to_snapshot(snap::Meta::default());
+    assert_eq!(
+        sized.meta.requires,
+        vec![snap::PRIMARY_SIZE_FEATURE.to_string()]
+    );
+
+    let mut b = rebuild(&a, &dir, "b");
+    let term = &mut b.model.panes.get_mut(&p).unwrap().term;
+    term.feed(b"\x1b[?1049l");
+    assert_eq!((term.cols(), term.rows()), (80, 10));
+    assert_eq!(term.cursor(), (3, 1));
     drop((a, b));
     let _ = std::fs::remove_dir_all(dir);
 }

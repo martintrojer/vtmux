@@ -1251,9 +1251,9 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         Form::Rows => CompressedPages::Rows,
         Form::SamePin => CompressedPages::Blob,
     };
-    let mut primary = ScreenOut::new(term.rows());
-    let mut alternate = ScreenOut::new(term.rows());
     let v = term.export_state_head();
+    let mut primary = ScreenOut::new(v.primary_size.map_or(v.rows, |(_, rows)| rows));
+    let mut alternate = ScreenOut::new(v.rows);
     let done: Result<(), std::convert::Infallible> =
         term.export_pages(compressed, |screen, page| {
             match screen {
@@ -1299,7 +1299,6 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
         entry_row: p.alt_entry.map(|(y, _)| u64::from(y)),
         has_saved: p.saved.is_some(),
         has_history: p.frozen.is_some(),
-        saved_cursor_row: p.saved.is_some().then_some(u32::from(p.saved_cy)),
     });
     let (g0, g1, shifted, (s0, s1, ss)) = p.charset;
     let (shape, blinking, blinking_set, option) = p.cursor_style;
@@ -1401,6 +1400,12 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             vt::ExtendedKeys::Always => 2,
         },
         input_last: p.last_print,
+        primary_size: v.primary_size.map(|(c, r)| (u32::from(c), u32::from(r))),
+        alternate_saved: g.alternate_saved.map(|a| snap::term::AltSaved {
+            x: a.x.into(),
+            y: a.y.into(),
+            style: style_out(&a.pen),
+        }),
         emulator: snap::term::Emulator {
             status_display: g.status_display.into(),
             previous_char: g.previous_char,
@@ -1501,11 +1506,23 @@ pub fn term_from_snapshot_with(
 ) -> Result<PaneTerm, TermError> {
     let cols = narrow::<u16>(t.cols, "terminal width")?;
     let rows = narrow::<u16>(t.rows, "terminal height")?;
+    let primary_size = t
+        .primary_size
+        .map(|(c, r)| {
+            Ok::<_, TermError>((
+                narrow::<u16>(c, "primary width")?,
+                narrow::<u16>(r, "primary height")?,
+            ))
+        })
+        .transpose()?;
+    let (primary_cols, primary_rows) = primary_size.unwrap_or((cols, rows));
     // Every screen shows exactly its visible rows; history is before them.
-    for screen in std::iter::once(&t.primary).chain(&t.alternate) {
-        if screen.rows.len() != usize::from(rows) {
-            return Err(bad("a screen's visible rows are not the terminal's height"));
-        }
+    if t.primary.rows.len() != usize::from(primary_rows)
+        || t.alternate
+            .as_ref()
+            .is_some_and(|alt| alt.rows.len() != usize::from(rows))
+    {
+        return Err(bad("a screen's visible rows are not its height"));
     }
     let h = &t.history;
     let usize_of = |v: u64, what| narrow::<usize>(v, what);
@@ -1519,14 +1536,6 @@ pub fn term_from_snapshot_with(
     let saved: Option<Vec<FrozenRowState>> = alt
         .has_saved
         .then(|| alt.saved.iter().map(frozen_in).collect());
-    let saved_cy = match alt.saved_cursor_row {
-        Some(y) => narrow(y, "saved cursor row")?,
-        // An older writer: the cursor is most likely on the last line used.
-        None => saved
-            .as_ref()
-            .and_then(|rows| rows.iter().rposition(|r| !r.cells.is_empty()))
-            .map_or(0, |y| u16::try_from(y).unwrap_or(u16::MAX)),
-    };
     let scrolled_rows = usize_of(h.scrolled, "history rows")?;
     let times = times_in(&h.times, scrolled_rows)?;
     // The times end at the newest row. A writer from before `hscrolled`
@@ -1578,6 +1587,17 @@ pub fn term_from_snapshot_with(
             .line_limit
             .map(|n| usize_of(n, "line limit"))
             .transpose()?,
+        alternate_saved: t
+            .alternate_saved
+            .as_ref()
+            .map(|a| {
+                Ok::<_, TermError>(vt::AltSaved {
+                    x: narrow(a.x, "alternate saved cursor")?,
+                    y: narrow(a.y, "alternate saved cursor")?,
+                    pen: style_in(&a.style),
+                })
+            })
+            .transpose()?,
     };
     let tc = &t.tmux_charset;
     let cs = &t.cursor_style;
@@ -1611,7 +1631,6 @@ pub fn term_from_snapshot_with(
             .map(|m| Ok((usize_of(m.row, "mark row")?, osc133_in(&m.mark)?)))
             .collect::<Result<_, TermError>>()?,
         saved,
-        saved_cy,
         alt_entry: alt
             .entry_row
             .map(|y| {
@@ -1673,6 +1692,7 @@ pub fn term_from_snapshot_with(
     let state = TermState {
         cols,
         rows,
+        primary_size,
         primary: screen_in(&t.primary)?,
         alternate: t.alternate.as_ref().map(screen_in).transpose()?,
         alternate_active: t.active == snap::term::ActiveScreen::Alternate,
@@ -1680,7 +1700,7 @@ pub fn term_from_snapshot_with(
         pane,
     };
     let mut import = StateImport::new(&state, check)?;
-    pages_of(&t.primary, cols, ghostty_patches, &mut |page| {
+    pages_of(&t.primary, primary_cols, ghostty_patches, &mut |page| {
         Ok(import.page(ScreenKind::Primary, page)?)
     })?;
     if let Some(alt) = &t.alternate {

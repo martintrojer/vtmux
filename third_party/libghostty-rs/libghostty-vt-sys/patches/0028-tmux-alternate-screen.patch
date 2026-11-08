@@ -1,0 +1,591 @@
+diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+index ef8792824..46cf8be97 100644
+--- a/include/ghostty/vt/vtmux_state.h
++++ b/include/ghostty/vt/vtmux_state.h
+@@ -335,6 +335,45 @@ GHOSTTY_API GhosttyResult ghostty_vtmux_set_hscrolled(GhosttyTerminal terminal,
+ GHOSTTY_API GhosttyResult ghostty_vtmux_take_hscrolled(GhosttyTerminal terminal,
+                                                        size_t* out);
+ 
++/**
++ * Switch screens for modes 47, 1047 and 1049 as tmux does, and leave the
++ * primary screen at its size while the alternate one is up (vtmux patch
++ * 0028). When it comes back at another size, the terminal takes that size
++ * and the caller resizes it back.
++ */
++GHOSTTY_API GhosttyResult ghostty_vtmux_set_tmux_alternate(GhosttyTerminal terminal,
++                                                           bool enabled);
++
++/** What `?1049h` saved for `?1049l` (tmux's saved_cx, saved_cy, saved_cell). */
++typedef struct {
++  size_t size;
++  uint16_t x;
++  uint16_t y;
++  GhosttyStyle pen;
++} GhosttyVtmuxAltSaved;
++
++/** What `?1049h` saved; GHOSTTY_NO_VALUE when nothing is. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_alternate_saved(GhosttyTerminal terminal,
++                                                        GhosttyVtmuxAltSaved* out);
++
++/** Set what `?1049h` saved, or clear it (NULL). */
++GHOSTTY_API GhosttyResult ghostty_vtmux_set_alternate_saved(
++    GhosttyTerminal terminal,
++    const GhosttyVtmuxAltSaved* saved);
++
++/** The primary screen's size, which the alternate screen may have left at
++ * its old one. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_primary_size(GhosttyTerminal terminal,
++                                                     uint16_t* cols,
++                                                     uint16_t* rows);
++
++/** Import the primary screen at this size (before its first page); the
++ * imported state must have the alternate screen up. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_importer_primary_size(
++    GhosttyVtmuxImporter importer,
++    uint16_t cols,
++    uint16_t rows);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 46537320a..3762ab864 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -391,6 +391,11 @@ comptime {
+         @export(&c.vtmux_set_active_screen, .{ .name = "ghostty_vtmux_set_active_screen" });
+         @export(&c.vtmux_set_hscrolled, .{ .name = "ghostty_vtmux_set_hscrolled" });
+         @export(&c.vtmux_take_hscrolled, .{ .name = "ghostty_vtmux_take_hscrolled" });
++        @export(&c.vtmux_set_tmux_alternate, .{ .name = "ghostty_vtmux_set_tmux_alternate" });
++        @export(&c.vtmux_alternate_saved, .{ .name = "ghostty_vtmux_alternate_saved" });
++        @export(&c.vtmux_set_alternate_saved, .{ .name = "ghostty_vtmux_set_alternate_saved" });
++        @export(&c.vtmux_primary_size, .{ .name = "ghostty_vtmux_primary_size" });
++        @export(&c.vtmux_importer_primary_size, .{ .name = "ghostty_vtmux_importer_primary_size" });
+         if (features.snapshot) {
+             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+             @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 06701afb9..90ac4fea8 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -102,6 +102,15 @@ glyph_glossary: glyph.Glossary = .empty,
+ /// nothing for it. Non-null means a client currently accepts drops.
+ kitty_dnd: ?*kitty.dnd.State = null,
+ 
++/// vtmux: modes 47, 1047 and 1049 switch screens as tmux's
++/// `screen_alternate_on` and `screen_alternate_off` do (screen.c; see
++/// `tmuxSwitchScreenMode`), and the primary screen is not resized while
++/// the alternate one is up: tmux resizes it once, when it comes back.
++tmux_alternate: bool = false,
++
++/// vtmux: what `?1049h` saved for `?1049l` under `tmux_alternate`.
++tmux_alt_saved: ?TmuxAltSaved = null,
++
+ /// These are just a packed set of flags we may set on the terminal.
+ flags: packed struct {
+     // This supports a Kitty extension where programs using semantic
+@@ -4736,7 +4745,11 @@ pub fn resize(
+     // and alt fails than the reverse.
+     try tw.check(.primary_screen);
+     const primary = self.screens.get(.primary).?;
+-    try primary.resize(.{
++    // vtmux: tmux leaves the primary screen alone under the alternate
++    // one (window.c window_pane_resize resizes only the alternate grid)
++    // and resizes it from its old size when it comes back.
++    const frozen = self.tmux_alternate and self.screens.active_key == .alternate;
++    if (!frozen) try primary.resize(.{
+         .cols = opts.cols,
+         .rows = opts.rows,
+         // vtmux: tmux reflows the main screen whatever DECAWM says
+@@ -4808,6 +4821,14 @@ pub fn resize(
+                 "alternate screen replacement failed, falling back to primary err={}",
+                 .{init_err},
+             );
++            // vtmux: the primary screen was not resized with it.
++            if (frozen) primary.resize(.{
++                .cols = opts.cols,
++                .rows = opts.rows,
++                .reflow = true,
++                .prompt_redraw = self.flags.shell_redraws_prompt,
++                .pull_scrollback = self.flags.resize_pull_scrollback,
++            }) catch |primary_err| log.warn("primary screen resize failed err={}", .{primary_err});
+             break :alt;
+         };
+ 
+@@ -5451,6 +5472,21 @@ pub fn switchScreen(self: *Terminal, key: ScreenSet.Key) !?*Screen {
+     if (self.screens.active_key == key) return null;
+     const old = self.screens.active;
+ 
++    // vtmux: a primary screen left at its old size under the alternate one
++    // (`tmux_alternate`) takes the terminal's before it is shown.
++    if (key == .primary) {
++        const primary = self.screens.get(.primary).?;
++        if (primary.pages.cols != self.cols or primary.pages.rows != self.rows) {
++            try primary.resize(.{
++                .cols = self.cols,
++                .rows = self.rows,
++                .reflow = true,
++                .prompt_redraw = self.flags.shell_redraws_prompt,
++                .pull_scrollback = self.flags.resize_pull_scrollback,
++            });
++        }
++    }
++
+     // We always end hyperlink state when switching screens.
+     // We need to do this on the original screen.
+     old.endHyperlink();
+@@ -5535,6 +5571,8 @@ pub fn switchScreenMode(
+     // We shouldn't touch anything in here without adding a unit
+     // test AND verifying the behavior with xterm.
+ 
++    if (self.tmux_alternate) return self.tmuxSwitchScreenMode(mode, enabled);
++
+     switch (mode) {
+         .@"47" => {},
+ 
+@@ -5599,6 +5637,133 @@ pub fn switchScreenMode(
+     }
+ }
+ 
++/// vtmux: tmux's `saved_cx`, `saved_cy` and `saved_cell` (screen.c
++/// `screen_alternate_on`): one slot for the terminal, apart from DECSC's,
++/// kept after the alternate screen ends. `x` is tmux's `cx`, the column
++/// count while a wrap is pending.
++pub const TmuxAltSaved = struct {
++    x: size.CellCountInt,
++    y: size.CellCountInt,
++    style: style.Style,
++};
++
++/// vtmux: modes 47, 1047 and 1049 as tmux switches screens
++/// (input.c `input_csi_dispatch_sm_private`, `_rm_private`; screen.c
++/// `screen_alternate_on`, `screen_alternate_off`). Every mode clears the
++/// alternate screen as it comes up and keeps the cursor; only 1049 saves
++/// the cursor and pen, in a slot of its own (`tmux_alt_saved`), and
++/// restores them as it ends, even off the alternate screen and from an
++/// earlier one. Turning on an alternate screen already up does nothing,
++/// not even 1049's save. DECSC's slot is tmux's input context's, so both
++/// screens share it, as they share the charsets.
++///
++/// The primary screen is not resized under the alternate one (`resize`).
++/// When it comes back at another size, the terminal takes the primary's
++/// size, with the cursor tmux resizes it with: the saved one, or the
++/// alternate screen's after it went back to that size (screen_resize_y
++/// with history off: rows under the cursor go first, so the cursor only
++/// moves when it is past the last row). The caller then resizes the
++/// terminal back, as tmux's second `screen_resize` does, and puts a
++/// cursor past the last column on it; with no size to go back to, that
++/// is done here.
++fn tmuxSwitchScreenMode(
++    self: *Terminal,
++    mode: SwitchScreenMode,
++    enabled: bool,
++) !void {
++    const cursor = mode == .@"1049";
++    const old = self.screens.active;
++    if (enabled) {
++        if (self.screens.active_key == .alternate) return;
++        if (cursor) self.tmux_alt_saved = .{
++            .x = if (old.cursor.pending_wrap) self.cols else old.cursor.x,
++            .y = old.cursor.y,
++            .style = old.cursor.style,
++        };
++        // tmux's screen_alternate_on clears the shared grid's visible
++        // lines with grid_clear_lines, which unwraps the last history line.
++        self.tmuxUnwrapAbove(0);
++        _ = try self.switchScreen(.alternate);
++        const alt = self.screens.active;
++        alt.saved_cursor = old.saved_cursor;
++        self.eraseDisplay(.complete, false);
++        alt.cursorCopy(old.cursor, .{ .hyperlink = false }) catch |err| {
++            log.warn("cursor copy failed entering alt screen err={}", .{err});
++        };
++        return;
++    }
++
++    const restore: ?TmuxAltSaved = if (cursor) self.tmux_alt_saved else null;
++    if (self.screens.active_key != .alternate) {
++        if (restore) |saved| {
++            self.tmuxRestoreAltCursor(saved);
++            self.screens.active.cursor.pending_wrap = false;
++        }
++        return;
++    }
++
++    const primary = self.screens.get(.primary).?;
++    const cols = primary.pages.cols;
++    const rows = primary.pages.rows;
++    const resized = cols != self.cols or rows != self.rows;
++    var tabstops: ?Tabstops = if (cols != self.cols)
++        try .init(old.alloc, cols, TABSTOP_INTERVAL)
++    else
++        null;
++    errdefer if (tabstops) |*v| v.deinit(old.alloc);
++    // The alternate screen's cursor (tmux's `cx` past the last column
++    // while a wrap is pending), back at the primary's size.
++    const alt_x: size.CellCountInt = if (old.cursor.pending_wrap) self.cols else old.cursor.x;
++    const alt_y = @min(old.cursor.y, rows - 1);
++
++    if (resized) {
++        self.cols = cols;
++        self.rows = rows;
++        self.scrolling_region = .{
++            .top = 0,
++            .bottom = rows - 1,
++            .left = 0,
++            .right = cols - 1,
++        };
++        if (tabstops) |v| {
++            self.tabstops.deinit(old.alloc);
++            self.tabstops = v;
++            tabstops = null;
++        }
++    }
++    errdefer comptime unreachable;
++    _ = self.switchScreen(.primary) catch unreachable;
++    primary.saved_cursor = old.saved_cursor;
++    var c = old.cursor;
++    c.x = @min(alt_x, cols - 1);
++    c.y = alt_y;
++    primary.cursorCopy(c, .{ .hyperlink = false }) catch |err| {
++        log.warn("cursor copy failed leaving alt screen err={}", .{err});
++    };
++    var x = alt_x;
++    if (restore) |saved| {
++        self.tmuxRestoreAltCursor(saved);
++        x = saved.x;
++    }
++    primary.cursor.pending_wrap = resized and x >= cols;
++    // The alternate screen comes up blank, at the terminal's size.
++    if (resized) self.screens.remove(old.alloc, .alternate);
++}
++
++/// vtmux: `?1049l` puts back the cursor and pen `?1049h` saved, clamped
++/// to the screen (screen.c `screen_alternate_off`).
++fn tmuxRestoreAltCursor(self: *Terminal, saved: TmuxAltSaved) void {
++    const screen = self.screens.active;
++    screen.cursor.style = saved.style;
++    screen.manualStyleUpdate() catch |err| {
++        log.warn("restore alt cursor error updating style err={}", .{err});
++        screen.cursor.style = .{};
++        screen.manualStyleUpdate() catch unreachable;
++    };
++    screen.cursor.pending_wrap = false;
++    screen.cursorAbsolute(@min(saved.x, self.cols - 1), @min(saved.y, self.rows - 1));
++}
++
+ /// Modal screen changes. These map to the literal terminal
+ /// modes to enable or disable alternate screen modes. They each
+ /// have subtle behaviors so we define them as an enum here.
+@@ -5639,6 +5804,18 @@ pub fn plainStringUnwrapped(self: *Terminal, alloc: Allocator) ![]const u8 {
+ /// this will reuse the existing memory. In the latter case, memory may
+ /// be wasted (since its unused) but it isn't leaked.
+ pub fn fullReset(self: *Terminal) void {
++    // vtmux: a primary screen left at its old size under the alternate
++    // one takes the terminal's (it is cleared below).
++    const primary = self.screens.get(.primary).?;
++    if (primary.pages.cols != self.cols or primary.pages.rows != self.rows) {
++        primary.resize(.{
++            .cols = self.cols,
++            .rows = self.rows,
++            .reflow = false,
++        }) catch |err| log.warn("primary screen resize failed err={}", .{err});
++    }
++    self.tmux_alt_saved = null;
++
+     // Ensure we're back on primary screen
+     self.screens.switchTo(.primary);
+ 
+@@ -19284,3 +19461,89 @@ test "Terminal: eraseDisplay complete at input prompt copied from alt screen scr
+ 
+     try testing.expect(t.screens.active.pages.total_rows > t.screens.active.pages.rows);
+ }
++
++test "Terminal: tmux alternate screen leaves the primary at its size (vtmux)" {
++    const alloc = testing.allocator;
++    var t = try init(testing.io, alloc, .{ .rows = 5, .cols = 10 });
++    defer t.deinit(alloc);
++    t.tmux_alternate = true;
++
++    try t.printString("a\nb\nc\nd\ne");
++    t.setCursorPos(2, 3);
++    try t.switchScreenMode(.@"47", true);
++    try t.resize(alloc, .{ .cols = 6, .rows = 3 });
++    const primary = t.screens.get(.primary).?;
++    try testing.expectEqual(@as(size.CellCountInt, 10), primary.pages.cols);
++    try testing.expectEqual(@as(size.CellCountInt, 5), primary.pages.rows);
++    try testing.expectEqual(@as(usize, 0), primary.pages.total_rows - primary.pages.rows);
++
++    // ?47l: the terminal takes the primary's size, with the alternate
++    // screen's cursor; the alternate screen goes.
++    t.setCursorPos(3, 6);
++    try t.switchScreenMode(.@"47", false);
++    try testing.expectEqual(.primary, t.screens.active_key);
++    try testing.expectEqual(@as(size.CellCountInt, 10), t.cols);
++    try testing.expectEqual(@as(size.CellCountInt, 5), t.rows);
++    try testing.expect(t.screens.get(.alternate) == null);
++    try testing.expectEqual(@as(size.CellCountInt, 5), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.y);
++    {
++        const str = try t.plainString(alloc);
++        defer alloc.free(str);
++        try testing.expectEqualStrings("a\nb\nc\nd\ne", str);
++    }
++    try t.resize(alloc, .{ .cols = 6, .rows = 3 });
++    try testing.expectEqual(@as(size.CellCountInt, 6), t.screens.active.pages.cols);
++
++    // A shorter alternate screen moves the cursor up to its last row.
++    try t.switchScreenMode(.@"1047", true);
++    t.setCursorPos(3, 2);
++    try t.resize(alloc, .{ .cols = 6, .rows = 2 });
++    try t.switchScreenMode(.@"1047", false);
++    try testing.expectEqual(@as(size.CellCountInt, 3), t.rows);
++    try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.y);
++}
++
++test "Terminal: tmux alternate screen cursor slots (vtmux)" {
++    const alloc = testing.allocator;
++    var t = try init(testing.io, alloc, .{ .rows = 5, .cols = 10 });
++    defer t.deinit(alloc);
++    t.tmux_alternate = true;
++
++    // DECSC on the primary, then ?1049h somewhere else: DECRC on the
++    // alternate screen goes to DECSC's, ?1049l to ?1049h's.
++    t.setCursorPos(2, 2);
++    t.saveCursor();
++    t.setCursorPos(4, 5);
++    try t.switchScreenMode(.@"1049", true);
++    t.restoreCursor();
++    try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.y);
++    try t.printString("X");
++    try t.switchScreenMode(.@"1049", false);
++    try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.y);
++    t.restoreCursor();
++    try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.x);
++
++    // ?1049l off the alternate screen still restores ?1049h's cursor.
++    t.setCursorPos(1, 1);
++    try t.switchScreenMode(.@"1049", false);
++    try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.y);
++
++    // ?47h then ?1049h saves nothing, and the screen comes up blank.
++    try t.switchScreenMode(.@"47", true);
++    {
++        const str = try t.plainString(alloc);
++        defer alloc.free(str);
++        try testing.expectEqualStrings("", str);
++    }
++    t.setCursorPos(2, 3);
++    try t.switchScreenMode(.@"1049", true);
++    t.setCursorPos(5, 5);
++    try t.switchScreenMode(.@"1049", false);
++    try testing.expectEqual(@as(size.CellCountInt, 4), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.y);
++    try testing.expectEqual(@as(size.CellCountInt, 4), t.tmux_alt_saved.?.x);
++}
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 7220c3ebc..d89ea39cf 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -253,6 +253,11 @@ pub const vtmux_importer_free = vtmux_state.importer_free;
+ pub const vtmux_set_active_screen = vtmux_state.set_active_screen;
+ pub const vtmux_set_hscrolled = vtmux_state.set_hscrolled;
+ pub const vtmux_take_hscrolled = vtmux_state.take_hscrolled;
++pub const vtmux_set_tmux_alternate = vtmux_state.set_tmux_alternate;
++pub const vtmux_alternate_saved = vtmux_state.alternate_saved;
++pub const vtmux_set_alternate_saved = vtmux_state.set_alternate_saved;
++pub const vtmux_primary_size = vtmux_state.primary_size;
++pub const vtmux_importer_primary_size = vtmux_state.importer_primary_size;
+ pub const snapshot_decoder_set = snapshot.decoder_set;
+ pub const snapshot_decoder_get = snapshot.decoder_get;
+ pub const snapshot_decoder_get_multi = snapshot.decoder_get_multi;
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+index 5dc23eecf..83b28589e 100644
+--- a/src/terminal/c/vtmux_state.zig
++++ b/src/terminal/c/vtmux_state.zig
+@@ -508,11 +508,21 @@ const Importer = struct {
+     wrapper: @typeInfo(terminal_c.Terminal).optional.child,
+     alloc: Allocator,
+     builders: [2]?PageList.Builder = .{ null, null },
++    /// vtmux patch 0028: the primary screen's size when it is not the
++    /// terminal's (left at its old size under the alternate screen).
++    primary_size: ?struct { cols: u16, rows: u16 } = null,
+     /// Decode every blob now and verify every page's integrity, instead
+     /// of trusting a blob's checksum until its first read (vtmux's dry
+     /// run before an upgrade's exec).
+     check: bool,
+ 
++    /// The size screen `key`'s pages are imported at.
++    fn screenSize(self: *const Importer, key: u8) struct { u16, u16 } {
++        const t = self.wrapper.terminal;
++        if (key == 0) if (self.primary_size) |p| return .{ p.cols, p.rows };
++        return .{ t.cols, t.rows };
++    }
++
+     fn deinit(self: *Importer) void {
+         for (&self.builders) |*b| if (b.*) |*builder| builder.deinit();
+         self.alloc.destroy(self);
+@@ -551,28 +561,28 @@ pub fn importer_page(
+     const imp = imp_ orelse return .invalid_value;
+     const page = page_ orelse return .invalid_value;
+     if (page.size < @sizeOf(CPage) or screen_key > 1) return .invalid_value;
+-    const t = imp.wrapper.terminal;
++    const cols, const rows = imp.screenSize(screen_key);
+     if (imp.builders[screen_key] == null) {
+         // Alternate screens never keep scrollback (as `screen.decode`);
+         // the primary's limits are copied from the terminal at finish.
+         imp.builders[screen_key] = PageList.Builder.init(imp.alloc, .{
+-            .cols = t.cols,
+-            .rows = t.rows,
++            .cols = cols,
++            .rows = rows,
+             .max_size = if (screen_key == 1) 0 else null,
+             .max_lines = if (screen_key == 1) 0 else null,
+         }) catch return .out_of_memory;
+     }
+     const builder = &imp.builders[screen_key].?;
+     if (page.blob) {
+-        importBlob(imp, builder, page, t.cols) catch |err| return switch (err) {
++        importBlob(imp, builder, page, cols) catch |err| return switch (err) {
+             error.OutOfMemory => .out_of_memory,
+             error.Invalid => .invalid_value,
+         };
+         return .success;
+     }
+-    // Every page of a screen has the terminal's width: Ghostty's page
++    // Every page of a screen has the screen's width: Ghostty's page
+     // list operations assume it (`PageList.resizeCols`, `beginUpdate`).
+-    if (page.cols != t.cols) return .invalid_value;
++    if (page.cols != cols) return .invalid_value;
+     // The exporter's capacity first: the same build's page held this
+     // content. Another build's may be too small for it; the page is then
+     // sized from its content.
+@@ -1007,7 +1017,13 @@ pub fn importer_finish(
+     if (wrapper.tracked_grid_refs.count() != 0) return .invalid_value;
+     if (imp.builders[0] == null) return .invalid_value;
+     if (state.screens[1].present != (imp.builders[1] != null)) return .invalid_value;
+-    if (!stateValid(state, t.cols, t.rows)) return .invalid_value;
++    if (!stateValidSized(state, t.cols, t.rows, imp.primary_size != null)) return .invalid_value;
++    if (imp.primary_size) |p| {
++        // Only the alternate screen leaves the primary at another size
++        // (the caller makes it the active one after the import).
++        if (!state.screens[1].present) return .invalid_value;
++        if (state.screens[0].cursor_x >= p.cols or state.screens[0].cursor_y >= p.rows) return .invalid_value;
++    }
+     finish(imp, state) catch |err| return switch (err) {
+         error.OutOfMemory => .out_of_memory,
+         else => .invalid_value,
+@@ -1018,6 +1034,10 @@ pub fn importer_finish(
+ /// Whether `finish` can apply the state as it is: what it would clamp or
+ /// map to a default is refused instead, so nothing changes on a bad one.
+ fn stateValid(s: *const CState, cols: u16, rows: u16) bool {
++    return stateValidSized(s, cols, rows, false);
++}
++
++fn stateValidSized(s: *const CState, cols: u16, rows: u16, skip_primary_cursor: bool) bool {
+     if (s.scroll_top > s.scroll_bottom or s.scroll_bottom >= rows) return false;
+     if (s.scroll_left > s.scroll_right or s.scroll_right >= cols) return false;
+     if (s.previous_char != 0xffffffff) {
+@@ -1025,9 +1045,10 @@ fn stateValid(s: *const CState, cols: u16, rows: u16) bool {
+         if (!std.unicode.utf8ValidCodepoint(c)) return false;
+     }
+     const bytes_len = if (s.bytes == null) 0 else s.bytes_len;
+-    for (s.screens) |screen| {
++    for (s.screens, 0..) |screen, i| {
+         if (!screen.present) continue;
+-        if (screen.cursor_x >= cols or screen.cursor_y >= rows) return false;
++        if (!(skip_primary_cursor and i == 0) and
++            (screen.cursor_x >= cols or screen.cursor_y >= rows)) return false;
+         if (screen.link_kind > 2) return false;
+         if (screen.link_kind != 0) {
+             if (screen.link_uri_len == 0) return false;
+@@ -1476,6 +1497,86 @@ pub fn take_hscrolled(
+     return .success;
+ }
+ 
++/// vtmux patch 0028: switch screens as tmux does (Terminal.tmux_alternate).
++pub fn set_tmux_alternate(
++    terminal_: terminal_c.Terminal,
++    enabled: bool,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    wrapper.terminal.tmux_alternate = enabled;
++    return .success;
++}
++
++/// C: GhosttyVtmuxAltSaved
++pub const CAltSaved = extern struct {
++    size: usize = @sizeOf(CAltSaved),
++    x: u16,
++    y: u16,
++    pen: style_c.Style,
++};
++
++/// vtmux patch 0028: what `?1049h` saved (Terminal.tmux_alt_saved);
++/// GHOSTTY_NO_VALUE when nothing is.
++pub fn alternate_saved(
++    terminal_: terminal_c.Terminal,
++    out_: ?*CAltSaved,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const out = out_ orelse return .invalid_value;
++    if (out.size < @sizeOf(CAltSaved)) return .invalid_value;
++    const saved = wrapper.terminal.tmux_alt_saved orelse return .no_value;
++    out.x = saved.x;
++    out.y = saved.y;
++    out.pen = .fromStyle(saved.style);
++    return .success;
++}
++
++/// vtmux patch 0028: set what `?1049h` saved, or clear it (null).
++pub fn set_alternate_saved(
++    terminal_: terminal_c.Terminal,
++    saved_: ?*const CAltSaved,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const t = wrapper.terminal;
++    const saved = saved_ orelse {
++        t.tmux_alt_saved = null;
++        return .success;
++    };
++    if (saved.size < @sizeOf(CAltSaved)) return .invalid_value;
++    t.tmux_alt_saved = .{ .x = saved.x, .y = saved.y, .style = styleFromC(saved.pen) };
++    return .success;
++}
++
++/// vtmux patch 0028: the primary screen's size, which is not the
++/// terminal's while the alternate screen has left it at its old one.
++pub fn primary_size(
++    terminal_: terminal_c.Terminal,
++    cols: ?*u16,
++    rows: ?*u16,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const c = cols orelse return .invalid_value;
++    const r = rows orelse return .invalid_value;
++    const primary = wrapper.terminal.screens.get(.primary) orelse return .no_value;
++    c.* = primary.pages.cols;
++    r.* = primary.pages.rows;
++    return .success;
++}
++
++/// vtmux patch 0028: import the primary screen at this size, before its
++/// first page; the state must then have the alternate screen up.
++pub fn importer_primary_size(
++    imp_: CImporter,
++    cols: u16,
++    rows: u16,
++) callconv(lib.calling_conv) Result {
++    const imp = imp_ orelse return .invalid_value;
++    if (cols == 0 or rows == 0 or imp.builders[0] != null) return .invalid_value;
++    const t = imp.wrapper.terminal;
++    imp.primary_size = if (cols == t.cols and rows == t.rows) null else .{ .cols = cols, .rows = rows };
++    return .success;
++}
++
+ test "vtmux state: rows round trip into a fresh terminal" {
+     const testing = std.testing;
+     var a: terminal_c.Terminal = null;

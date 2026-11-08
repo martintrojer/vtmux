@@ -257,6 +257,53 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
         })?;
         Ok(out)
     }
+
+    /// Switch screens for modes 47, 1047 and 1049 as tmux does, and leave
+    /// the primary screen at its size while the alternate one is up: when
+    /// it comes back at another size, the terminal has that size and the
+    /// caller resizes it back (patch 0028).
+    pub fn vtmux_set_tmux_alternate(&mut self, enabled: bool) -> Result<()> {
+        from_result(unsafe { ffi::ghostty_vtmux_set_tmux_alternate(self.inner.as_raw(), enabled) })
+    }
+
+    /// The cursor (tmux's `cx`, `cy`) and pen `?1049h` saved, if any.
+    pub fn vtmux_alternate_saved(&self) -> Result<Option<(u16, u16, ffi::Style)>> {
+        // SAFETY: plain data; Ghostty fills it.
+        let mut out: ffi::VtmuxAltSaved = unsafe { std::mem::zeroed() };
+        out.size = std::mem::size_of::<ffi::VtmuxAltSaved>();
+        match unsafe { ffi::ghostty_vtmux_alternate_saved(self.inner.as_raw(), &raw mut out) } {
+            ffi::Result::NO_VALUE => Ok(None),
+            r => from_result(r).map(|()| Some((out.x, out.y, out.pen))),
+        }
+    }
+
+    /// Set what `?1049h` saved, or clear it.
+    pub fn vtmux_set_alternate_saved(
+        &mut self,
+        saved: Option<(u16, u16, ffi::Style)>,
+    ) -> Result<()> {
+        let raw = saved.map(|(x, y, mut pen)| {
+            pen.size = std::mem::size_of::<ffi::Style>();
+            ffi::VtmuxAltSaved {
+                size: std::mem::size_of::<ffi::VtmuxAltSaved>(),
+                x,
+                y,
+                pen,
+            }
+        });
+        let ptr = raw.as_ref().map_or(std::ptr::null(), std::ptr::from_ref);
+        from_result(unsafe { ffi::ghostty_vtmux_set_alternate_saved(self.inner.as_raw(), ptr) })
+    }
+
+    /// The primary screen's size: the terminal's, except while the
+    /// alternate screen has left it at its old one.
+    pub fn vtmux_primary_size(&self) -> Result<(u16, u16)> {
+        let (mut cols, mut rows) = (0u16, 0u16);
+        from_result(unsafe {
+            ffi::ghostty_vtmux_primary_size(self.inner.as_raw(), &raw mut cols, &raw mut rows)
+        })?;
+        Ok((cols, rows))
+    }
 }
 
 fn reserve<T>(v: &mut Vec<T>, len: usize) {
@@ -283,6 +330,18 @@ impl Importer<'_> {
         } else {
             Err(Error::InvalidValue)
         }
+    }
+
+    /// Import the primary screen at `cols` x `rows`, before its first
+    /// page; the state must then have the alternate screen up (patch 0028).
+    pub fn primary_size(
+        &mut self,
+        term: &mut Terminal<'_, '_>,
+        cols: u16,
+        rows: u16,
+    ) -> Result<()> {
+        self.check_term(term)?;
+        from_result(unsafe { ffi::ghostty_vtmux_importer_primary_size(self.raw, cols, rows) })
     }
 
     /// Add the next page (oldest first) of a screen. The page is copied.

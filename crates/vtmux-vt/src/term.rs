@@ -21,7 +21,6 @@ use libghostty_vt::{Terminal, TerminalOptions};
 
 use crate::capture::FrozenRow;
 
-mod hscrolled;
 mod state;
 use crate::dcs::{self, Dcs, Dispatch, Step};
 use crate::palette::{self, OscEnd, Palette, Reply};
@@ -299,8 +298,7 @@ pub struct PaneTerm {
     /// (`grid_view_clear_history`, `grid_clear_history`), and a resize moves
     /// it as `screen_resize_y` and `grid_reflow` do (Ghostty patch 0025).
     /// Under the alternate screen only a clear changes it; the resize that
-    /// ends it moves it ([`PaneTerm::hscrolled_after_alternate`]). At most
-    /// `hsize`.
+    /// ends it moves it ([`PaneTerm::alternate_ended`]). At most `hsize`.
     hscrolled: usize,
     /// Rows scrolled into the primary history, and those a resize moved
     /// into it less those it took back: the newest history row has id
@@ -329,17 +327,10 @@ pub struct PaneTerm {
     /// The primary screen's visible rows, copied as the alternate screen
     /// came up (tmux's `saved_grid`, screen.c:704-705), while it is up.
     saved: Option<Rc<Vec<FrozenRow>>>,
-    /// The cursor's row in `saved` that tmux resizes the primary screen
-    /// with when the alternate one ends (`screen_alternate_off`): the row
-    /// `?1049h` saved (`saved_cy`), or after `?47l` or `?1047l` the
-    /// alternate screen's.
-    saved_cy: u16,
     /// The oldest row of tmux's primary history (the active top when it
     /// has none), pinned as the alternate screen came up, and the history
-    /// rows Ghostty kept then. Ghostty reflows the primary screen at every
-    /// resize under the alternate screen; tmux leaves it alone and
-    /// reflows it once on the way back (screen.c `screen_alternate_off`).
-    /// Either way tmux's history starts at this row again.
+    /// rows Ghostty kept then: a lowered limit may collect history under
+    /// the alternate screen, and tmux's history starts at this row again.
     alt_entry: Option<(TrackedGridRef, usize)>,
     /// ED3 arrived under the alternate screen: tmux cleared the primary
     /// history (input.c:1758), which libghostty cannot reach until the
@@ -518,6 +509,10 @@ impl PaneTerm {
         let _ = term.set_kitty_image_storage_limit(0);
         let _ = term.set_glyph_protocol_enabled(false);
         keep_clustering(&mut term);
+        // Modes 47, 1047 and 1049 as tmux switches screens, the primary
+        // screen left at its size under the alternate one (patch 0028).
+        term.vtmux_set_tmux_alternate(true)
+            .expect("libghostty tmux alternate screen");
 
         let mut pane = Self {
             term,
@@ -546,7 +541,6 @@ impl PaneTerm {
             },
             frozen: None,
             saved: None,
-            saved_cy: 0,
             alt_entry: None,
             clear_primary_history: false,
             redraw: false,
@@ -714,6 +708,9 @@ impl PaneTerm {
                     self.sync.hold = None;
                 }
                 let alternate = self.alternate_on();
+                // The size an ending alternate screen leaves the pane at.
+                let size = (alternate && e == ScanEvent::AltMode(b'l'))
+                    .then(|| (self.cols(), self.rows()));
                 match e {
                     // The alternate screen is about to switch: last chance to
                     // read the primary history.
@@ -722,18 +719,6 @@ impl PaneTerm {
                         self.saved = Some(Rc::new(self.freeze_visible()));
                         self.frozen_marks = self.osc133_lines();
                         self.alt_entry = self.pin_oldest().map(|pin| (pin, self.retained_rows()));
-                        self.saved_cy = tmux_cursor(&self.term).1;
-                    }
-                    // screen_alternate_off without the cursor (`?47l`,
-                    // `?1047l`) keeps the alternate screen's, through the
-                    // resize back to the saved size with history off.
-                    ScanEvent::AltMode(b'l') if self.alternate_on() && !self.scan.alt_cursor => {
-                        let rows = self.saved.as_ref().map_or(0, |s| s.len());
-                        self.saved_cy = alternate_cursor_at(
-                            tmux_cursor(&self.term).1,
-                            self.rows(),
-                            u16::try_from(rows).unwrap_or(u16::MAX),
-                        );
                     }
                     // tmux's ED3 clears the grid's history, which under the
                     // alternate screen is the primary one (input.c:1758).
@@ -792,6 +777,11 @@ impl PaneTerm {
                     _ => self.feed_piece(&bytes[i..=i]),
                 }
                 i += 1;
+                if let Some(size) = size
+                    && !self.alternate_on()
+                {
+                    self.alternate_ended(size);
+                }
                 if std::mem::take(&mut self.scan.deccolm) {
                     self.deccolm();
                 }
@@ -1176,9 +1166,8 @@ impl PaneTerm {
         }
         self.term.vt_write(piece);
         if !self.alternate_on() {
-            let frozen = self.frozen.take();
-            let saved = self.saved.take();
-            let saved_cy = std::mem::take(&mut self.saved_cy);
+            self.frozen = None;
+            self.saved = None;
             let entry = self.alt_entry.take();
             if std::mem::take(&mut self.clear_primary_history) {
                 // Back on the primary screen: apply the ED3 that arrived
@@ -1189,21 +1178,16 @@ impl PaneTerm {
             } else if track {
                 self.account_scroll();
             } else {
-                // Back from the alternate screen (or a reset): the primary
-                // history may have changed under us (a resize reflowed it,
-                // a reset cleared it, a budget lowered while the alternate
-                // screen was up pruned it).
-                let (hsize, hscrolled) = (self.hsize, self.hscrolled);
+                // Back from the alternate screen: the primary history may
+                // have changed under us (a budget lowered while the
+                // alternate screen was up pruned it). Ghostty left the
+                // primary screen alone meanwhile, as tmux does (patch
+                // 0028); `alternate_ended` resizes it.
                 if let Some((oldest, retained)) = entry {
                     self.history_from(&oldest, retained);
                 }
                 self.clamp_history_to_retained();
-                if let (Some(history), Some(saved)) = (frozen, saved) {
-                    let history = &history[history.len().saturating_sub(hsize)..];
-                    self.hscrolled = self
-                        .hscrolled_after_alternate(hscrolled, history, &saved, saved_cy)
-                        .min(self.hsize);
-                }
+                self.hscrolled = self.hscrolled.min(self.hsize);
             }
             self.alt_collected = 0;
             // Resizes under the alternate screen leave the limit lifted.
@@ -1498,6 +1482,28 @@ impl PaneTerm {
         if (cols.max(1), rows.max(1)) != (self.cols(), self.rows()) {
             self.stop_sync();
         }
+        self.resize_grid(cols, rows);
+    }
+
+    /// `screen_alternate_off` after the alternate screen ended at `size`
+    /// (screen.c): Ghostty left the primary screen at the size it had
+    /// when the alternate one came up, gave the terminal that size and put
+    /// the cursor where tmux resizes it with (patch 0028); tmux then
+    /// resizes it to the pane's size with history on and reflow
+    /// (`screen_resize`, so the rows under the cursor go before any are
+    /// pushed into history, and `hscrolled` moves as in any resize), and
+    /// puts a cursor past the last column on it.
+    fn alternate_ended(&mut self, size: (u16, u16)) {
+        if (self.cols(), self.rows()) != size {
+            self.resize_grid(size.0, size.1);
+        }
+        if self.term.is_cursor_pending_wrap().unwrap_or(false) {
+            let (x, y) = self.cursor();
+            self.write_screen_moves(&format!("\x1b[{};{}H", y + 1, x + 1));
+        }
+    }
+
+    fn resize_grid(&mut self, cols: u16, rows: u16) {
         let before = self.term.scrollback_rows().unwrap_or(0);
         let same_width = cols.max(1) == self.cols();
         let on_primary = !self.alternate_on();
@@ -1548,7 +1554,11 @@ impl PaneTerm {
                 .expect("libghostty resize");
             self.take_hscrolled(carry);
         }
-        self.page_rows = page_rows(cols.max(1));
+        // At the primary screen's width: the alternate screen leaves it at
+        // its own (patch 0028).
+        if on_primary {
+            self.page_rows = page_rows(cols.max(1));
+        }
         if on_primary {
             // Reflow moves rows in and out of history: tmux's history
             // starts at the row that was its oldest. (While the alternate
@@ -1594,46 +1604,6 @@ impl PaneTerm {
             self.hscrolled = self.hscrolled.min(self.hsize);
         }
         self.generation += 1;
-    }
-
-    /// tmux's `hscrolled` (`h`, as the alternate screen left it) after the
-    /// alternate screen ended: as `screen_alternate_off` resizes the
-    /// primary grid (its `history` and the `saved` screen) from the size it
-    /// had to the current one, history on, with the cursor on row `cy` of
-    /// it (`screen_resize_y`, then `grid_reflow` when the width
-    /// changed). Under the alternate screen tmux neither pushes, pulls nor
-    /// reflows (window.c `window_pane_resize`), so `h` is the entry's but
-    /// for clears and collection.
-    fn hscrolled_after_alternate(
-        &self,
-        h: usize,
-        history: &[FrozenRow],
-        saved: &[FrozenRow],
-        cy: u16,
-    ) -> usize {
-        let Some(old_cols) = saved.first().map(FrozenRow::cols) else {
-            return h;
-        };
-        let (cols, rows) = (usize::from(self.cols()), usize::from(self.rows()));
-        let below = saved.len().saturating_sub(usize::from(cy) + 1);
-        let (h, eaten, blank) = hscrolled::resize_y(h, saved.len(), rows, below);
-        if cols == old_cols {
-            return h;
-        }
-        let kept = saved.len() - eaten;
-        let row = |y: usize| {
-            let r = if y < history.len() {
-                &history[y]
-            } else if y - history.len() < kept {
-                &saved[y - history.len()]
-            } else {
-                return hscrolled::Line::new(Vec::new(), false);
-            };
-            let (cells, wrapped) = r.tmux_widths();
-            hscrolled::Line::new(cells, wrapped)
-        };
-        let mut lines = hscrolled::Lines::new(history.len() + kept + blank, row);
-        hscrolled::reflow(&mut lines, cols, h)
     }
 
     /// Read tmux's `hscrolled` back after the resizes that carried it,
@@ -1993,6 +1963,25 @@ impl PaneTerm {
     #[must_use]
     pub fn alternate_on(&self) -> bool {
         matches!(self.term.active_screen(), Ok(Screen::Alternate))
+    }
+
+    /// Forget the cursor `?1049h` saved, as `screen_reinit` does
+    /// (screen.c:124-125, for `respawn-pane`).
+    pub fn forget_alternate_saved(&mut self) {
+        let _ = self.term.vtmux_set_alternate_saved(None);
+    }
+
+    /// The cursor `?1049h` saved (`#{alternate_saved_x}`,
+    /// `#{alternate_saved_y}`: tmux's `saved_cx` and `saved_cy`, the column
+    /// count while a wrap was pending), kept after the alternate screen
+    /// ends; `None` before any (tmux's `UINT_MAX`, screen.c `screen_reinit`).
+    #[must_use]
+    pub fn alternate_saved(&self) -> Option<(u16, u16)> {
+        self.term
+            .vtmux_alternate_saved()
+            .ok()
+            .flatten()
+            .map(|(x, y, _)| (x, y))
     }
 
     /// `#{history_size}`: tmux's `hsize`, which saw-tooths between 90% of the
@@ -3473,20 +3462,6 @@ fn tmux_cursor(term: &Terminal<'_, '_>) -> (u16, u16) {
         term.cursor_x().unwrap_or(0)
     };
     (x, term.cursor_y().unwrap_or(0))
-}
-
-/// The alternate screen's cursor row `cy` after `screen_alternate_off`
-/// resizes it from `rows` back to the saved `saved` rows with history off
-/// (`screen_resize_y`): a shorter screen deletes the lines under the cursor
-/// first, then those at the top, and the cursor goes up with its line.
-fn alternate_cursor_at(cy: u16, rows: u16, saved: u16) -> u16 {
-    let mut cy = cy.min(rows.saturating_sub(1));
-    if rows > saved {
-        let needed = rows - saved;
-        let eat = needed.min(rows - 1 - cy);
-        cy -= cy.min(needed - eat);
-    }
-    cy.min(saved.saturating_sub(1))
 }
 
 /// Map one reply Ghostty produced to the reply tmux 3.8 would give to the same
@@ -5152,19 +5127,86 @@ mod tests {
         }
     }
 
-    /// `?47l` and `?1047l` keep the alternate screen's cursor through the
-    /// resize back to the saved size (`screen_resize_y`, history off).
+    /// `?47l` and `?1047l` resize the primary screen with the alternate
+    /// screen's cursor (screen.c `screen_alternate_off`): the rows under it
+    /// go before any are pushed into history, a taller screen pulls rows
+    /// back above it, and a narrower one puts it at the end of its line.
+    /// Numbers from tmux 3.8 (oracle `alt_screen_exit`: `s47`, `b47bot`,
+    /// `b47botn`), through a state export under the alternate screen too.
     #[test]
-    fn an_alternate_cursor_comes_back_resized() {
-        // Taller now: the lines under the cursor go first, then those at
-        // the top, so a cursor that had fewer than 30 under it ends on the
-        // last row.
-        assert_eq!(alternate_cursor_at(0, 50, 20), 0);
-        assert_eq!(alternate_cursor_at(10, 50, 20), 10);
-        assert_eq!(alternate_cursor_at(19, 50, 20), 19);
-        assert_eq!(alternate_cursor_at(40, 50, 20), 19);
-        // Shorter now: it stays.
-        assert_eq!(alternate_cursor_at(5, 20, 50), 5);
+    fn the_alternate_cursor_resizes_the_primary_as_tmux() {
+        type Case = (u16, &'static [u8], (u16, u16), (usize, (u16, u16)));
+        let cases: [Case; 3] = [
+            (50, b"\x1b[?47h\x1b[H\x1b[2Jvim", (80, 20), (11, (3, 0))),
+            (
+                20,
+                b"\x1b[?47h\x1b[H\x1b[2J\x1b[20;1Hvim",
+                (80, 50),
+                (11, (3, 49)),
+            ),
+            (
+                20,
+                b"\x1b[?1047h\x1b[H\x1b[2J\x1b[20;1Hvim",
+                (30, 20),
+                (161, (0, 19)),
+            ),
+        ];
+        for (n, (rows, enter, (c, r), back)) in cases.into_iter().enumerate() {
+            for import in [false, true] {
+                let mut t = PaneTerm::new(80, rows, 2000);
+                for i in 10..70 {
+                    t.feed(format!("{i}{}\r\n", "x".repeat(73)).as_bytes());
+                }
+                t.feed(enter);
+                t.resize(c, r);
+                if import {
+                    t = PaneTerm::import_state(&t.export_state()).expect("import");
+                }
+                t.feed(if enter.starts_with(b"\x1b[?47") {
+                    b"\x1b[?47l"
+                } else {
+                    b"\x1b[?1047l"
+                });
+                assert_eq!((t.cols(), t.rows()), (c, r), "case {n}, import {import}");
+                assert_eq!(
+                    (t.history_size(), t.cursor()),
+                    back,
+                    "case {n}, import {import}"
+                );
+            }
+        }
+    }
+
+    /// `?1049h` saves the cursor in a slot of its own, kept after the
+    /// alternate screen and restored by `?1049l` even off it; `?1049h` on
+    /// an alternate screen already up saves nothing; DECSC's slot is one
+    /// for both screens; every alternate screen comes up blank (input.c,
+    /// screen.c `screen_alternate_on`, `screen_alternate_off`; oracle
+    /// `alt_screen_cursor_slots`).
+    #[test]
+    fn alternate_screen_cursor_slots_as_tmux() {
+        let mut t = PaneTerm::new(20, 10, 100);
+        assert_eq!(t.alternate_saved(), None);
+        t.feed(b"\x1b[3;3H\x1b7\x1b[5;6H\x1b[?1049h\x1b8");
+        assert_eq!(t.cursor(), (2, 2), "DECRC on the alternate screen");
+        assert_eq!(t.alternate_saved(), Some((5, 4)));
+        t.feed(b"\x1b[7;7H\x1b7\x1b[?1049l");
+        assert_eq!(t.cursor(), (5, 4));
+        t.feed(b"\x1b8");
+        assert_eq!(t.cursor(), (6, 6), "DECRC after the alternate screen");
+        t.feed(b"\x1b[1;1H\x1b[?1049l");
+        assert_eq!(t.cursor(), (5, 4), "?1049l off the alternate screen");
+        t.feed(b"\x1b[?47habc\x1b[?47l\x1b[?47h");
+        assert_eq!(
+            t.row(t.history_size()).cells[0].text.as_str(),
+            "",
+            "blank again"
+        );
+        t.feed(b"\x1b[2;2H\x1b[?1049h\x1b[9;9H\x1b[?1049l");
+        assert_eq!(t.alternate_saved(), Some((5, 4)), "nothing saved");
+        assert_eq!(t.cursor(), (5, 4));
+        t.forget_alternate_saved();
+        assert_eq!(t.alternate_saved(), None);
     }
 
     /// A taller screen pulls back only the history rows tmux counts as

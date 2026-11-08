@@ -73,6 +73,10 @@ pub enum CompressedPages {
 pub struct TermState {
     pub cols: u16,
     pub rows: u16,
+    /// The primary screen's size while the alternate screen has left it
+    /// at the one it had (Ghostty patch 0028); `None` when it is the
+    /// terminal's.
+    pub primary_size: Option<(u16, u16)>,
     pub primary: ScreenState,
     pub alternate: Option<ScreenState>,
     pub alternate_active: bool,
@@ -295,6 +299,17 @@ pub struct GhosttyState {
     /// Ghostty's scrollback limits.
     pub max_bytes: Option<usize>,
     pub max_lines: Option<usize>,
+    /// What `?1049h` saved for `?1049l` (Ghostty patch 0028).
+    pub alternate_saved: Option<AltSaved>,
+}
+
+/// The cursor and pen `?1049h` saved (tmux's `saved_cx`, `saved_cy` and
+/// `saved_cell`): `x` is the column count while a wrap was pending.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AltSaved {
+    pub x: u16,
+    pub y: u16,
+    pub pen: StyleState,
 }
 
 /// One mode: its number, ANSI or DEC, and its current, XTSAVE'd and reset
@@ -334,8 +349,6 @@ pub struct PaneState {
     pub frozen: Option<Vec<FrozenRowState>>,
     pub frozen_marks: Vec<(usize, Osc133)>,
     pub saved: Option<Vec<FrozenRowState>>,
-    /// The cursor's row in `saved` (see `PaneTerm::saved_cy`).
-    pub saved_cy: u16,
     /// The primary row tmux's history started at when the alternate screen
     /// came up, and the history rows retained then.
     pub alt_entry: Option<(u32, usize)>,
@@ -859,6 +872,7 @@ impl GhosttyState {
             pwd: String::new(),
             max_bytes: None,
             max_lines: None,
+            alternate_saved: None,
         }
     }
 
@@ -1057,9 +1071,20 @@ impl PaneTerm {
         term.pwd().unwrap_or_default().clone_into(&mut ghostty.pwd);
         ghostty.max_bytes = term.scrollback_max_bytes().ok().flatten();
         ghostty.max_lines = self.line_limit;
+        ghostty.alternate_saved = term
+            .vtmux_alternate_saved()
+            .expect("alternate saved cursor")
+            .map(|(x, y, pen)| AltSaved {
+                x,
+                y,
+                pen: StyleState::from_ffi(&pen),
+            });
+        let size = (raw.raw.cols, raw.raw.rows);
         TermState {
             cols: raw.raw.cols,
             rows: raw.raw.rows,
+            primary_size: Some(term.vtmux_primary_size().expect("primary size"))
+                .filter(|&p| p != size),
             primary: ScreenState::from_ffi(&raw.raw.screens[0], &raw.bytes, Vec::new()),
             alternate: has_alternate
                 .then(|| ScreenState::from_ffi(&raw.raw.screens[1], &raw.bytes, Vec::new())),
@@ -1171,7 +1196,6 @@ impl PaneTerm {
                 .saved
                 .as_ref()
                 .map(|rows| rows.iter().map(FrozenRow::to_state).collect()),
-            saved_cy: self.saved_cy,
             alt_entry: self
                 .alt_entry
                 .as_ref()
@@ -1251,7 +1275,6 @@ impl PaneTerm {
             .saved
             .as_ref()
             .map(|rows| Rc::new(rows.iter().map(FrozenRow::from_state).collect()));
-        self.saved_cy = p.saved_cy;
         let (g0, g1, shifted, saved) = p.charset;
         self.scan.charset = Charset {
             g0,
@@ -1344,6 +1367,9 @@ pub struct StateImport {
     alt_entry: Option<(u32, usize)>,
     alternate: bool,
     alternate_active: bool,
+    /// The primary screen's width (see [`TermState::primary_size`]).
+    primary_cols: u16,
+    alternate_saved: Option<AltSaved>,
     continuation: Vec<u8>,
     scratch: gv::Page,
 }
@@ -1369,11 +1395,17 @@ impl StateImport {
         let _ = pane.term.set_scrollback_max_bytes(head.ghostty.max_bytes);
         let _ = pane.term.set_scrollback_max_lines(head.ghostty.max_lines);
         pane.line_limit = head.ghostty.max_lines;
-        pane.restore_model(p, head.cols);
-        let importer = pane
+        let (primary_cols, primary_rows) = head.primary_size.unwrap_or((head.cols, head.rows));
+        pane.restore_model(p, primary_cols);
+        let mut importer = pane
             .term
             .vtmux_importer(check == ImportCheck::Full)
             .map_err(ghostty_err)?;
+        if head.primary_size.is_some() {
+            importer
+                .primary_size(&mut pane.term, primary_cols, primary_rows)
+                .map_err(ghostty_err)?;
+        }
 
         let mut raw = gv::State::default();
         raw.raw.cols = head.cols;
@@ -1396,6 +1428,8 @@ impl StateImport {
             alt_entry: p.alt_entry,
             alternate: head.alternate.is_some(),
             alternate_active: head.alternate_active,
+            primary_cols,
+            alternate_saved: head.ghostty.alternate_saved,
             continuation: p.continuation.clone(),
             scratch: gv::Page::default(),
         })
@@ -1413,7 +1447,11 @@ impl StateImport {
         if screen == ScreenKind::Alternate && !self.alternate {
             return Err(StateError::Invalid("page of an absent alternate screen"));
         }
-        validate::page(page, self.pane.cols())?;
+        let cols = match screen {
+            ScreenKind::Primary => self.primary_cols,
+            ScreenKind::Alternate => self.pane.cols(),
+        };
+        validate::page(page, cols)?;
         let term = &mut self.pane.term;
         match page {
             PageState::Rows(rows) => {
@@ -1450,10 +1488,14 @@ impl StateImport {
             marks,
             alt_entry,
             alternate_active,
+            alternate_saved,
             continuation,
             ..
         } = self;
         importer.finish(&mut pane.term, &raw).map_err(ghostty_err)?;
+        pane.term
+            .vtmux_set_alternate_saved(alternate_saved.map(|a| (a.x, a.y, a.pen.to_ffi())))
+            .map_err(ghostty_err)?;
         let _ = pane.term.vtmux_set_title(&title);
         let _ = pane.term.vtmux_set_pwd(&pwd);
 

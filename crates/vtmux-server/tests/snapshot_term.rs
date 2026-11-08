@@ -431,26 +431,42 @@ fn an_older_writers_times_start_where_they_end() {
     }
 }
 
-/// The cursor row the primary screen is resized with when the alternate
-/// one ends goes in the snapshot; without it (an older writer) the import
-/// takes the last row with anything in it.
+/// The primary screen the alternate one left at its size, and the cursor
+/// `?1049h` saved, cross a snapshot: the end of the alternate screen
+/// resizes the primary as tmux 3.8 does (oracle `alt_exit_hscrolled`,
+/// shrink; `alt_screen_exit`, `s47`).
 #[test]
-fn the_saved_cursor_row_crosses_a_snapshot() {
-    let mut a = sixty_lines();
-    a.resize(80, 50);
-    a.feed(b"\x1b[?1049h\x1b[H\x1b[2Jvim");
-    a.resize(80, 20);
-    let t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
-    assert_eq!(t.alt_entry.as_ref().unwrap().saved_cursor_row, Some(49));
-    let mut older = t.clone();
-    older.alt_entry.as_mut().unwrap().saved_cursor_row = None;
-    for t in [t, older] {
-        let mut b = term_from_snapshot(&t, PATCH_STACK).expect("import");
-        // tmux 3.8 (oracle alt_exit_hscrolled, shrink): the shorter screen
+fn the_primary_size_crosses_a_snapshot() {
+    for (enter, leave, back, end) in [
+        // ?1049l: the saved cursor, on the last row; the shorter screen
         // pushed 30 rows, which a taller one pulls back.
-        b.feed(b"\x1b[?1049l");
-        assert_eq!((b.history_size(), b.cursor()), (41, (2, 19)));
+        (
+            &b"\x1b[?1049h\x1b[H\x1b[2Jvim"[..],
+            &b"\x1b[?1049l"[..],
+            (41, (2, 19)),
+            (1, (2, 59)),
+        ),
+        // ?47l: the alternate cursor, on the top row; the rows under it
+        // go, none into history.
+        (
+            b"\x1b[?47h\x1b[H\x1b[2Jvim",
+            b"\x1b[?47l",
+            (11, (3, 0)),
+            (0, (3, 11)),
+        ),
+    ] {
+        let mut a = sixty_lines();
+        a.resize(80, 50);
+        a.feed(enter);
+        a.resize(80, 20);
+        let t = through_stream(term_to_snapshot(&a, Form::Rows), Form::Rows);
+        assert_eq!(t.primary_size, Some((80, 50)));
+        assert_eq!(t.primary.rows.len(), 50);
+        let mut b = term_from_snapshot(&t, PATCH_STACK).expect("import");
+        assert_eq!(b.alternate_saved(), a.alternate_saved());
+        b.feed(leave);
+        assert_eq!((b.history_size(), b.cursor()), back);
         b.resize(80, 60);
-        assert_eq!((b.history_size(), b.cursor()), (1, (2, 59)));
+        assert_eq!((b.history_size(), b.cursor()), end);
     }
 }
