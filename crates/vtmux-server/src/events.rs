@@ -67,6 +67,11 @@ pub struct Event {
     /// mode says `%window-*` to their clients and `%unlinked-window-*` to
     /// the rest (control-notify.c:128-203).
     pub linked: BTreeSet<SessionId>,
+    /// For window-layout-changed: `#{window_raw_flags}` of the window in
+    /// each session linking it when it fired, as control-notify.c:62-104
+    /// expands them (a later select-window in the same command does not
+    /// change them).
+    pub flags: BTreeMap<SessionId, String>,
     /// `_hooks_monitor`: a monitor hook's event, fired by the monitor of
     /// the hook in this tree. Only that hook runs for it.
     pub monitor: Option<TreeId>,
@@ -335,6 +340,11 @@ impl Model {
             .window(self, "window", w)
             .linked_now(self, w);
         ev.layouts = Some(Rc::new(layouts));
+        ev.flags = ev
+            .linked
+            .iter()
+            .filter_map(|&s| Some((s, self.printable_flags(s, self.index_of(s, w)?, false))))
+            .collect();
         self.push_event(ev);
     }
 }

@@ -865,6 +865,52 @@ impl Model {
         true
     }
 
+    /// `window_printable_flags` (window.c:1359-1386) of the window at
+    /// `index` of session `s`; `escape` doubles the `#` of the activity
+    /// flag (`#{window_flags}`, not `#{window_raw_flags}`).
+    #[must_use]
+    pub fn printable_flags(&self, s: SessionId, index: u32, escape: bool) -> String {
+        let mut f = String::new();
+        let Some(session) = self.sessions.get(&s) else {
+            return f;
+        };
+        let alerts = session.link_alerts.get(&index).copied().unwrap_or(0);
+        if alerts & crate::alerts::ACTIVITY != 0 {
+            f.push_str(if escape { "##" } else { "#" });
+        }
+        if alerts & crate::alerts::BELL != 0 {
+            f.push('!');
+        }
+        if alerts & crate::alerts::SILENCE != 0 {
+            f.push('~');
+        }
+        if session.current == index {
+            f.push('*');
+        }
+        if session.last.first() == Some(&index) {
+            f.push('-');
+        }
+        if self
+            .marked()
+            .is_some_and(|m| m.session == Some(s) && m.index == Some(index))
+        {
+            f.push('M');
+        }
+        if let Some(w) = session
+            .windows
+            .get(&index)
+            .and_then(|w| self.windows.get(w))
+        {
+            if w.panes.modal.is_some() {
+                f.push('O');
+            }
+            if w.zoomed() {
+                f.push('Z');
+            }
+        }
+        f
+    }
+
     /// `window_fire_pane_changed` (window.c:119-134).
     pub fn fire_pane_changed(&mut self, w: WindowId, p: PaneId, old: Option<PaneId>) {
         let mut ev = crate::events::Event::new("window-pane-changed")

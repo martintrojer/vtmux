@@ -1,0 +1,21 @@
+# %layout-change ends with the window's flags in the client's session as window-layout-changed fires (control-notify.c:62-104, events are synchronous): break-pane and move-pane without -d close the pane's old layout while that window is still current (`*`), then select the new one; zoom adds Z.
+name = "control_layout_flags_at_fire"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat", "-"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "breakp -s a:0.0 -n x" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "selectw -t a:0" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "movep -s a:0.0 -t a:1" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "resizep -Z -t a:1" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["lsw", "-F", "#{window_index} #{window_raw_flags} #{window_panes}"] },
+  { run = ["kill-server"] },
+]

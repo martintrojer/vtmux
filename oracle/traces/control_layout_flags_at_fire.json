@@ -1,0 +1,244 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "control_layout_flags_at_fire",
+  "inputs": {
+    "name": "control_layout_flags_at_fire",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:0",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:0",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:1",
+          "-n",
+          "w1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "control": {
+          "argv": [
+            "attach",
+            "-t",
+            "a"
+          ],
+          "id": "c1"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "breakp -s a:0.0 -n x"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "selectw -t a:0"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "movep -s a:0.0 -t a:1"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_send": {
+          "id": "c1",
+          "line": "resizep -Z -t a:1"
+        }
+      },
+      {
+        "control_wait": {
+          "id": "c1",
+          "until": "%end"
+        }
+      },
+      {
+        "control_close": {
+          "id": "c1"
+        }
+      },
+      {
+        "run": [
+          "lsw",
+          "-F",
+          "#{window_index} #{window_raw_flags} #{window_panes}"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "control",
+        "lines": [
+          "%begin <TIME> #1 0",
+          "%end <TIME> #1 0",
+          "%session-changed $0 a",
+          "%begin <TIME> #2 1",
+          "%end <TIME> #2 1",
+          "%window-pane-changed @0 %2",
+          "%layout-change @0 c19d,80x24,0,0[80x12,0,0,2,80x11,0,13,1] c19d,80x24,0,0[80x12,0,0,2,80x11,0,13,1] *",
+          "%window-add @2",
+          "%session-window-changed $0 @2",
+          "%begin <TIME> #3 1",
+          "%end <TIME> #3 1",
+          "%session-window-changed $0 @0",
+          "%begin <TIME> #4 1",
+          "%end <TIME> #4 1",
+          "%layout-change @0 b25e,80x24,0,0,1 b25e,80x24,0,0,1 *",
+          "%window-pane-changed @0 %1",
+          "%window-pane-changed @1 %2",
+          "%session-window-changed $0 @1",
+          "%layout-change @0 b25e,80x24,0,0,1 b25e,80x24,0,0,1 -",
+          "%layout-change @1 41a2,80x24,0,0[80x12,0,0,3,80x11,0,13,2] 41a2,80x24,0,0[80x12,0,0,3,80x11,0,13,2] *",
+          "%begin <TIME> #5 1",
+          "%end <TIME> #5 1",
+          "%layout-change @1 41a2,80x24,0,0[80x12,0,0,3,80x11,0,13,2] b25f,80x24,0,0,2 *Z",
+          "%exit"
+        ],
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0 - 1\n1 *Z 2\n2  1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

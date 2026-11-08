@@ -1012,7 +1012,7 @@ impl Server {
                 let Some(w) = ev.get_window("window") else {
                     return;
                 };
-                self.control_layout_changed(w, ev.layouts.as_deref());
+                self.control_layout_changed(w, ev.layouts.as_deref(), &ev.flags);
             }
             // control-notify.c:107-123.
             "window-pane-changed" => {
@@ -1137,9 +1137,14 @@ impl Server {
 
     /// `%layout-change` (control-notify.c:62-104): to each client whose
     /// session has the window, unless the window has gone or has no layout.
-    fn control_layout_changed(&mut self, w: WindowId, layouts: Option<&crate::events::Layouts>) {
+    fn control_layout_changed(
+        &mut self,
+        w: WindowId,
+        layouts: Option<&crate::events::Layouts>,
+        flags: &BTreeMap<SessionId, String>,
+    ) {
         const TEMPLATE: &str = "%layout-change #{window_id} #{window_layout} \
-                                #{window_visible_layout} #{window_raw_flags}";
+                                #{window_visible_layout} ";
         if !self.model.windows.contains_key(&w) || self.model.sessions_with(w).next().is_none() {
             return;
         }
@@ -1167,17 +1172,17 @@ impl Server {
                     .extend(layout.map(|v| ("window_layout".into(), v)));
                 ctx.extra
                     .extend(visible.map(|v| ("window_visible_layout".into(), v)));
-                // `Z` is the last of the flags (window.c window_printable_flags).
-                let now = vtmux_core::format::expand_str("#{window_raw_flags}", &ctx);
-                let mut flags = now.strip_suffix('Z').unwrap_or(&now).to_owned();
-                if l.zoomed {
-                    flags.push('Z');
-                }
-                ctx.extra.push(("window_raw_flags".into(), flags));
             }
-            let line =
+            let mut line =
                 vtmux_core::rawstr::to_bytes(&vtmux_core::format::expand_str(TEMPLATE, &ctx))
                     .into_owned();
+            // A session that linked the window only after it fired: its
+            // flags now.
+            let f = flags
+                .get(&s)
+                .cloned()
+                .unwrap_or_else(|| self.model.printable_flags(s, index, false));
+            line.extend_from_slice(f.as_bytes());
             self.control_notify_one(id, true, line);
         }
     }

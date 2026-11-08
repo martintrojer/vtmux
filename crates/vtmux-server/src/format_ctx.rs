@@ -498,33 +498,7 @@ impl<'a> Ctx<'a> {
             // doubles the `#` of the activity flag.
             "window_flags" | "window_raw_flags" => {
                 let (s, i) = wl?;
-                let alerts = s.link_alerts.get(&i).copied().unwrap_or(0);
-                let mut f = String::new();
-                if alerts & alerts::ACTIVITY != 0 {
-                    f.push_str(if name == "window_flags" { "##" } else { "#" });
-                }
-                if alerts & alerts::BELL != 0 {
-                    f.push('!');
-                }
-                if alerts & alerts::SILENCE != 0 {
-                    f.push('~');
-                }
-                if s.current == i {
-                    f.push('*');
-                }
-                if s.last.first() == Some(&i) {
-                    f.push('-');
-                }
-                if self.marked_winlink(s.id, i) {
-                    f.push('M');
-                }
-                if w.panes.modal.is_some() {
-                    f.push('O');
-                }
-                if w.zoomed() {
-                    f.push('Z');
-                }
-                f
+                self.model.printable_flags(s.id, i, name == "window_flags")
             }
             // format_cb_window_linked: the window has more than one winlink
             // (a window linked twice in one session counts).
