@@ -1,0 +1,1306 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "tree_preview_mouse",
+  "inputs": {
+    "name": "tree_preview_mouse",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "aaa",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          "R"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "automatic-rename",
+          "off"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "mouse",
+          "on"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:1",
+          "-n",
+          "w1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:2",
+          "-n",
+          "w2",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:3",
+          "-n",
+          "w3",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "aaa:4",
+          "-n",
+          "w4",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "aaa:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "aaa:1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "bbb",
+          "-n",
+          "x0",
+          "-x",
+          "80",
+          "-y",
+          "23",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%0",
+          "-T",
+          "t0"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%1",
+          "-T",
+          "t1"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%2",
+          "-T",
+          "t2"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%3",
+          "-T",
+          "t3"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%4",
+          "-T",
+          "t4"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%5",
+          "-T",
+          "t5"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%6",
+          "-T",
+          "t6"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "%7",
+          "-T",
+          "t7"
+        ]
+      },
+      {
+        "run": [
+          "run-shell",
+          "until [ \"$(tmux list-panes -a -F '#{pane_current_command}' | sort -u)\" = cat ]; do :; done"
+        ]
+      },
+      {
+        "attach": {
+          "session": "aaa"
+        }
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "aaa:0"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-s",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;30;15M\u001b[<0;30;15m"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}.#{pane_index} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "aaa:0"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-s",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;78;15M\u001b[<0;78;15m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;78;15M\u001b[<0;78;15m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;2;15M\u001b[<0;2;15m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;40;20M\u001b[<0;40;20m"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}.#{pane_index} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "aaa:0"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-w",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "j"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;60;16M\u001b[<0;60;16m"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}.#{pane_index} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "aaa:0"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;40;20M\u001b[<0;40;20m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}.#{pane_index} #{pane_in_mode}"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "aaa:0"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-s",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "i"
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;10;18M\u001b[<0;10;18m"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}.#{pane_index} #{pane_in_mode}"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "aaa:0"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-s",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "keys": "v"
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<0;10;18M\u001b[<0;10;18m"
+      },
+      {
+        "screen": {}
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "#{window_index}.#{pane_index} #{pane_in_mode}"
+        ]
+      },
+      {
+        "keys": "q"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "aaa:0"
+        ]
+      },
+      {
+        "run": [
+          "choose-tree",
+          "-s",
+          "-t",
+          "aaa:0.0"
+        ]
+      },
+      {
+        "settle": {
+          "react": true
+        }
+      },
+      {
+        "settle": {
+          "quiet_ms": 400
+        }
+      },
+      {
+        "keys": "\u001b[<2;10;18M\u001b[<2;10;18m"
+      },
+      {
+        "screen": {}
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[32m────────────────────────────────────────────────────────────────────────────────",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m────────────────────────────────────────────────────────────────────────────────",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] 0:w0- \\e[4m1:w1*\\e[0m\\e[30m\\e[42m 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1.0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 30,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 34,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) + aaa: 5 windows (attached)\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[32m+\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[40m┌ aaa (sort: index) (view: preview) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                     \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                     \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                       \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m\\e[40m<\\e[39m\\e[49m \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m \\e[34m1:w1\\e[39m \\e[37m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m \\e[34m2:w2\\e[39m \\e[37m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m \\e[34m3:w3\\e[39m \\e[37m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m \\e[37m\\e[40m>\\e[39m\\e[49m \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m└──────┘\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m└──────┘\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m└──────┘\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1- 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 37,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) + aaa: 5 windows (attached)\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[32m+\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[40m┌ aaa (sort: index) (view: preview) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                      \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                      \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m\\e[40m<\\e[39m\\e[49m \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m \\e[34m2:w2\\e[39m \\e[37m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m \\e[34m3:w3\\e[39m \\e[37m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m│\\e[39m \\e[34m4:w4\\e[39m \\e[37m│\\e[39m\\e[49m         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m└──────┘\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m└──────┘\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m└──────┘\\e[39m\\e[49m         \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                          \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1- 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 40,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) + aaa: 5 windows (attached)\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[32m+\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[40m┌ aaa (sort: index) (view: preview) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                     \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                     \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                       \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m \\e[37m\\e[40m<\\e[39m\\e[49m \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m \\e[34m1:w1\\e[39m \\e[37m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m \\e[34m2:w2\\e[39m \\e[37m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m \\e[34m3:w3\\e[39m \\e[37m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m \\e[37m\\e[40m>\\e[39m\\e[49m \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m└──────┘\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m       \\e[37m\\e[40m└──────┘\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m└──────┘\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m   \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                      \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1- 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 44,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] 0:w0- 1:w1  \\e[4m2:w2*\\e[0m\\e[30m\\e[42m 3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 45,
+      "observation": {
+        "kind": "cli",
+        "stdout": "2.0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 46,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 47,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 50,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[37m(0) \\e[31m-\\e[37m \\e[39maaa\\e[37m: 5 windows (attached)\\e[39m",
+          "\\e[37m(1) ├─→ \\e[32m+\\e[37m \\e[39m0\\e[37m: \\e[39mw0\\e[37m*: \"t0\"\\e[39m",
+          "\\e[30m\\e[43m(2) ├─→ + 1: w1\\e[39m",
+          "\\e[37m\\e[49m(3) ├─→ \\e[32m+\\e[37m \\e[39m2\\e[37m: \\e[39mw2\\e[37m-: \"t2\"\\e[39m",
+          "\\e[37m(4) ├─→ \\e[32m+\\e[37m \\e[39m3\\e[37m: \\e[39mw3\\e[37m: \"t3\"\\e[39m",
+          "\\e[37m(5) └─→ \\e[32m+\\e[37m \\e[39m4\\e[37m: \\e[39mw4\\e[37m: \"t4\"\\e[39m",
+          "\\e[37m(6) \\e[31m-\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "(7) └─→ \\e[32m+\\e[37m \\e[39m0\\e[37m: \\e[39mx0\\e[37m*: \"t7\"\\e[39m",
+          "",
+          "",
+          "",
+          "\\e[37m\\e[40m┌ 1 (sort: index) (view: preview) ─────────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m \\e[7m \\e[0m                       \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                       \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m         \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m         \\e[37m\\e[40m│\\e[39m \\e[31m0:t1\\e[39m \\e[37m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m \\e[34m1:t6\\e[39m \\e[37m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m│\\e[39m \\e[34m2:t5\\e[39m \\e[37m│\\e[39m\\e[49m          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m         \\e[37m\\e[40m└──────┘\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m└──────┘\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m└──────┘\\e[39m\\e[49m          \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                           \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                           \\e[37m\\e[40m│",
+          "└──────────────────────────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1  2:w2- 3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 54,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[37m────────────────────────────────────────────────────────────────────────────────",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[32m────────────────────────────────────────────────────────────────────────────────",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] 0:w0- \\e[4m1:w1*\\e[0m\\e[30m\\e[42m 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          12
+        ]
+      }
+    },
+    {
+      "step": 55,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1.2 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 56,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 57,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 61,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1- 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 62,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0.0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 65,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 66,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 72,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "q",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1- 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "step": 73,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0.0 0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 74,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 75,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 80,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) + aaa: 5 windows (attached)\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[32m+\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1- 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "step": 81,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0.0 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 84,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 85,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 89,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[30m\\e[43m(0) + aaa: 5 windows (attached)\\e[39m",
+          "\\e[37m\\e[49m(1) \\e[32m+\\e[37m \\e[39mbbb\\e[37m: 1 windows",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "\\e[40m┌ aaa (sort: index) (view: preview) ───────────────────────────────────────────┐",
+          "│\\e[39m\\e[49m q\\e[7m \\e[0m                     \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                      \\e[37m\\e[40m│\\e[7m\\e[39m\\e[49m \\e[0m                        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m                        \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│\\e[39m\\e[49m         \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m┌──────┐\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "┌──────────────────┐\\e[39m\\e[49m     \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m \\e[34m1:w1\\e[39m \\e[37m│\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m│\\e[39m \\e[34m2:w2\\e[39m \\e[37m│\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m \\e[37m\\e[40m>\\e[39m\\e[49m \\e[37m\\e[40m│",
+          "│ Scroll Left  (<) │\\e[39m\\e[49m     \\e[37m\\e[40m│\\e[39m\\e[49m        \\e[37m\\e[40m└──────┘\\e[39m\\e[49m       \\e[37m\\e[40m│\\e[39m\\e[49m         \\e[37m\\e[40m└──────┘\\e[39m\\e[49m        \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│ Scroll Right (>) │\\e[39m\\e[49m     \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "├──────────────────┤\\e[39m\\e[49m     \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "│ Cancel       (q) │\\e[39m\\e[49m     \\e[37m\\e[40m│\\e[39m\\e[49m                       \\e[37m\\e[40m│\\e[39m\\e[49m                         \\e[37m\\e[40m│\\e[39m\\e[49m   \\e[37m\\e[40m│",
+          "└──────────────────┘───────────────────────────────────────────────────────────┘",
+          "\\e[30m\\e[42m[aaa] \\e[4m0:w0*\\e[0m\\e[30m\\e[42m 1:w1- 2:w2  3:w3  4:w4\\e[39m                                             \\e[30mR"
+        ],
+        "cursor": [
+          2,
+          17
+        ]
+      }
+    }
+  ]
+}

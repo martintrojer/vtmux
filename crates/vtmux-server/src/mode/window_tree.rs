@@ -6,9 +6,7 @@
 //! The preview under the list shows the current item: a session's windows
 //! or a window's panes side by side ([`Strip`], scrolled with `<` and
 //! `>`), a pane's screen, or with `i` the item's information; the drawing
-//! is `render::tree`.
-//!
-//! Not here yet: session groups (`-G`) and the mouse in the preview
+//! is `render::tree`. A press in the preview picks from its strip
 //! (`window_tree_mouse`); a right-click opens the mode's menu
 //! ([`super::tree_mode`]).
 
@@ -729,6 +727,17 @@ impl TreeMode for WindowTree {
         server.tree_mode_key(p, c, key, item)
     }
 
+    fn preview_mouse(
+        server: &mut Server,
+        p: PaneId,
+        c: Option<ClientId>,
+        key: Key,
+        x: u32,
+        item: Option<Item>,
+    ) -> bool {
+        server.tree_preview_mouse(p, c, key, x, item)
+    }
+
     fn draw_preview(
         &self,
         source: &crate::render::window::Source<'_>,
@@ -849,6 +858,89 @@ impl Server {
             _ => {}
         }
         false
+    }
+
+    /// `window_tree_mouse` (window-tree.c:1377-1435): a press in the
+    /// preview at column `x` of a session's windows or a window's panes
+    /// scrolls with the `<` and `>` columns, or expands the item, makes
+    /// the window or pane under it current and chooses it (Enter). The
+    /// columns are the strip's as drawn (`data->left`, `data->right`,
+    /// `data->each`), its inside starting at column 2.
+    pub(super) fn tree_preview_mouse(
+        &mut self,
+        p: PaneId,
+        c: Option<ClientId>,
+        key: Key,
+        x: u32,
+        item: Option<Item>,
+    ) -> bool {
+        use vtmux_core::keys::{MouseKind, MouseLocation};
+        if key.key_and_modifiers() != Key::mouse(MouseKind::Down, 1, MouseLocation::Pane) {
+            return false;
+        }
+        let Some(item) = item else { return false };
+        let Some(Some((strip, sx))) = self.with_tree::<WindowTree, _>(p, |server, t| {
+            let (sx, _) = t.tree.preview_size()?;
+            let mut offset = t.offset(&server.model);
+            Some((t.strip(&server.model, item, sx, &mut offset)?, sx))
+        }) else {
+            return false;
+        };
+        let x = x as usize;
+        // `cx + 2` and `cx + sx - 3`, cx being 2.
+        let left = strip.left.then_some(4);
+        if left.is_some_and(|l| x <= l) {
+            self.tree_preview_key(p, '<');
+            return false;
+        }
+        if strip.right && x + 1 >= sx {
+            self.tree_preview_key(p, '>');
+            return false;
+        }
+        let mut x = match left {
+            Some(l) => x - l,
+            None => x.saturating_sub(1),
+        };
+        if x == 0 || strip.end == 0 {
+            x = 0;
+        } else {
+            x /= strip.each;
+            if strip.start + x >= strip.end {
+                x = strip.end - 1;
+            }
+        }
+        let index = strip.start + x;
+        let pick = match item {
+            Item::Session(sid) => self
+                .model
+                .sessions
+                .get(&sid)
+                .and_then(|x| x.windows.keys().nth(index))
+                .map(|&wi| Tag::Window(sid, wi)),
+            // Every pane, the one -h hides too (TAILQ_FOREACH).
+            Item::Window(sid, wi) => Found::from_winlink(&self.model, sid, wi)
+                .window
+                .and_then(|w| self.model.windows.get(&w))
+                .and_then(|w| w.panes.panes.get(index))
+                .map(|&q| Tag::Pane(q)),
+            Item::Pane(..) => return false,
+        };
+        let current = self.with_tree::<WindowTree, _>(p, |server, t| {
+            let mut tree = std::mem::take(&mut t.tree);
+            if let Some(tag) = tree.current_item().map(|i| i.tag) {
+                tree.expand(&mut KeyEnv { server, mode: &*t }, tag);
+            }
+            if let Some(tag) = pick {
+                tree.set_current(tag);
+            }
+            t.tree = tree;
+            t.moved();
+            t.tree.current_item().map(|i| i.data)
+        });
+        let Some(Some(item)) = current else {
+            return false;
+        };
+        self.tree_mode_key(p, c, Key::ascii(b'\r'), Some(item))
     }
 
     /// `H`: the starting session and window expanded, the starting pane

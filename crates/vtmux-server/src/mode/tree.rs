@@ -236,6 +236,9 @@ pub enum Action {
         at: (u32, u32),
         outside: bool,
     },
+    /// A mouse key in the preview at column `x` of the pane, for the
+    /// mode (`mode_tree_key` leaves it as the key).
+    PreviewMouse { key: Key, x: u32 },
 }
 
 /// What the tree needs from the mode while handling keys: building the
@@ -956,7 +959,9 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
     /// `None` outside it. A press or double click on a row selects it;
     /// the double click is then Enter. A right-click opens the menu
     /// (`mode_tree_display_menu`): the mode's own on the list, mode-tree's
-    /// outside it. Everything else is used up. The help screen takes the
+    /// outside it. Other keys outside the list go to the mode while the
+    /// preview is on ([`Action::PreviewMouse`]). Everything else is used
+    /// up. The help screen takes the
     /// key too.
     pub fn mouse_key(&mut self, key: Key, at: Option<(u32, u32)>) -> Action {
         use vtmux_core::keys::{MouseKind, MouseLocation};
@@ -989,7 +994,12 @@ impl<K: Copy + PartialEq, D> ModeTree<K, D> {
             if k == down3 {
                 return menu(self, true);
             }
-            return Action::Key(None);
+            // With the preview on, the key goes on to the mode
+            // (`window_tree_mouse`).
+            if self.preview == Preview::Off {
+                return Action::Key(None);
+            }
+            return Action::PreviewMouse { key, x };
         }
         if self.offset + row < self.lines.len() {
             if k == down1 || k == down3 || k == double1 {

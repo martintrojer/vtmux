@@ -143,6 +143,18 @@ pub(crate) trait TreeMode: Sized + 'static {
         key: Key,
         item: Option<Self::Data>,
     ) -> bool;
+    /// A mouse key in the preview at column `x` (`window_tree_mouse`);
+    /// `true` when the mode is finished. Only choose-tree has one.
+    fn preview_mouse(
+        _server: &mut Server,
+        _p: PaneId,
+        _c: Option<ClientId>,
+        _key: Key,
+        _x: u32,
+        _item: Option<Self::Data>,
+    ) -> bool {
+        false
+    }
     /// `drawcb`: the item's preview in the `size` area at `at`.
     fn draw_preview(
         &self,
@@ -458,9 +470,9 @@ impl Server {
     }
 
     /// A mouse key at `at` in the pane: the tree's mouse branch
-    /// (`mode_tree_key`), then the mode's (a double click is Enter). The
-    /// mode's own mouse handling (`window_tree_mouse`) is not here yet. A
-    /// mode prompt takes no mouse events yet.
+    /// (`mode_tree_key`), then the mode's (a double click is Enter, a
+    /// press in choose-tree's preview picks from it, `window_tree_mouse`).
+    /// A mode prompt takes no mouse events yet.
     pub(crate) fn tree_mouse_key(
         &mut self,
         p: PaneId,
@@ -659,6 +671,7 @@ impl Server {
             }
             Action::Key(None) => false,
             Action::Key(Some(k)) => M::mode_key(self, p, c, k, item),
+            Action::PreviewMouse { key, x } => M::preview_mouse(self, p, c, key, x, item),
         };
         if finished || M::empty(self) {
             self.reset_mode(p);
