@@ -1,0 +1,301 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "break_pane_grouped",
+  "inputs": {
+    "name": "break_pane_grouped",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "g",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-d",
+          "-t",
+          "a:0",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:0.1",
+          "-t",
+          "g",
+          "-n",
+          "p1"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:3",
+          "-n",
+          "one",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:3",
+          "-t",
+          "g:7"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:3",
+          "-t",
+          "a:7"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-a",
+          "-s",
+          "g:7",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"
+        ]
+      },
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "b",
+          "-n",
+          "b0",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:7",
+          "-t",
+          "b:4"
+        ]
+      },
+      {
+        "run": [
+          "lsw",
+          "-a",
+          "-F",
+          "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0 @0 w0 1\na:1 @2 p1 1\ng:0 @0 w0 1\ng:1 @2 p1 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "sessions are grouped\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0 @0 w0 1\na:1 @2 p1 1\na:7 @3 one 1\ng:0 @0 w0 1\ng:1 @2 p1 1\ng:7 @3 one 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "sessions are grouped\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0 @0 w0 1\na:2 @2 p1 1\na:7 @3 one 1\ng:0 @0 w0 1\ng:1 @2 p1 1\ng:7 @3 one 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "a:0 @0 w0 1\na:2 @2 p1 1\nb:0 @4 b0 1\nb:4 @3 one 1\ng:0 @0 w0 1\ng:2 @2 p1 1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

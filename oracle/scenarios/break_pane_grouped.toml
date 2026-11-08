@@ -1,0 +1,19 @@
+# break-pane of a window's only pane links the window itself (server_link_window, cmd-break-pane.c:130-146), which refuses another session of the source's group: `sessions are grouped` (server-fn.c:296-300), after a -a shuffle of the target has already happened. A pane of a bigger window goes to a new window, which any session takes. The same session and an ungrouped one take the window.
+name = "break_pane_grouped"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "g", "-t", "a"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["breakp", "-d", "-s", "a:0.1", "-t", "g", "-n", "p1"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"] },
+  { run = ["neww", "-d", "-t", "a:3", "-n", "one", "cat", "-"] },
+  { run = ["breakp", "-d", "-s", "a:3", "-t", "g:7"] },
+  { run = ["breakp", "-d", "-s", "a:3", "-t", "a:7"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"] },
+  { run = ["breakp", "-d", "-a", "-s", "g:7", "-t", "a:0"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"] },
+  { run = ["new", "-d", "-s", "b", "-n", "b0", "cat", "-"] },
+  { run = ["breakp", "-d", "-s", "a:7", "-t", "b:4"] },
+  { run = ["lsw", "-a", "-F", "#{session_name}:#{window_index} #{window_id} #{window_name} #{window_panes}"] },
+  { run = ["kill-server"] },
+]

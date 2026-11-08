@@ -74,7 +74,11 @@ pub fn exec(
 
     let (index, w) = if server.model.windows[&w].panes.panes.len() == 1 {
         // server_link_window then server_unlink_window: the window itself
-        // moves.
+        // moves, but not to another session of its group (server-fn.c:
+        // 296-300), after any -a/-b shuffle.
+        if server.model.grouped_together(src_s, dst_s) {
+            return Err(EdgeError::Message("sessions are grouped".into()).into());
+        }
         let index = server
             .model
             .link_window(dst_s, w, idx)
