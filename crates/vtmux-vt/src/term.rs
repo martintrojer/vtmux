@@ -292,6 +292,13 @@ pub struct PaneTerm {
     line_limit: Option<usize>,
     /// tmux's `hsize` for the primary grid, modelled (see [`PaneTerm::feed`]).
     hsize: usize,
+    /// tmux's `hscrolled` (grid.c `struct grid`), the newest `hsize` rows a
+    /// taller screen pulls back into view: rows scroll in
+    /// (`grid_scroll_history`), a clear into history or of it resets it
+    /// (`grid_view_clear_history`, `grid_clear_history`), and a resize moves
+    /// it as `screen_resize_y` and `grid_reflow` do (Ghostty patch 0025).
+    /// At most `hsize`.
+    hscrolled: usize,
     /// Rows ever scrolled into the primary history: the newest history row
     /// has id `scrolled - 1` (tmux's `hscrolled`, never reduced by
     /// collection), so a history row keeps its id while more scroll in.
@@ -514,6 +521,7 @@ impl PaneTerm {
             page_rows: page_rows(cols),
             line_limit: None,
             hsize: 0,
+            hscrolled: 0,
             scrolled: 0,
             generation: 0,
             times: VecDeque::new(),
@@ -710,6 +718,7 @@ impl PaneTerm {
                     ScanEvent::ClearHistory if self.alternate_on() => {
                         self.frozen = Some(Rc::default());
                         self.hsize = 0;
+                        self.hscrolled = 0;
                         self.clear_primary_history = true;
                     }
                     _ => {}
@@ -1047,7 +1056,14 @@ impl PaneTerm {
         );
         let pending = self.term.is_cursor_pending_wrap().unwrap_or(false);
         self.term.vt_write(b"\x18");
+        let scrolled = self.scrolled;
         self.feed_piece(b"\x1b[22J");
+        // grid_view_clear_history: the rows it scrolled into history are
+        // not pulled back by a taller screen (nor anything before them); a
+        // screen with no line used only clears.
+        if self.scrolled != scrolled {
+            self.hscrolled = 0;
+        }
         // CUP is relative to the scroll region under origin mode.
         let origin = self.term.mode(Mode::ORIGIN).unwrap_or(false);
         let _ = self.term.set_mode(Mode::ORIGIN, false);
@@ -1146,6 +1162,7 @@ impl PaneTerm {
                 // under the alternate one.
                 self.term.vt_write(b"\x1b[3J");
                 self.hsize = 0;
+                self.hscrolled = 0;
             } else if track {
                 self.account_scroll();
             } else {
@@ -1223,6 +1240,7 @@ impl PaneTerm {
         // count unknown; assume everything retained is new.
         let scrolled = retained.saturating_sub(above_pin.unwrap_or(0));
         self.hsize = tmux_hsize(self.hsize, self.history_lines, scrolled).min(retained);
+        self.hscrolled = (self.hscrolled + scrolled).min(self.hsize);
         self.retain();
         self.scrolled += scrolled as u64;
         if scrolled > 0 {
@@ -1465,9 +1483,15 @@ impl PaneTerm {
             let _ = self.term.set_scrollback_max_lines(None);
             self.line_limit = None;
         }
+        // tmux's hscrolled goes through the height change and the reflow
+        // (Ghostty patch 0025); the rows above tmux's oldest are not tmux's.
+        let carry = on_primary && self.history;
+        if carry {
+            let origin = self.retained_rows().saturating_sub(self.hsize);
+            let _ = self.term.vtmux_set_hscrolled(self.hscrolled, origin);
+        }
         if on_primary {
             self.eat_below_cursor(rows.max(1));
-            self.grow_pulling_history(rows.max(1));
         }
         // A cursor at the end of its line stays at the end of the
         // reflowed line, past the last column when that ends a row
@@ -1484,6 +1508,7 @@ impl PaneTerm {
             self.term
                 .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
                 .expect("libghostty resize");
+            self.take_hscrolled(carry);
             if blank < rows.max(1) {
                 self.reflow_blank_rows(blank, oldest.as_ref());
             }
@@ -1491,6 +1516,7 @@ impl PaneTerm {
             self.term
                 .resize(cols.max(1), rows.max(1), CELL_WIDTH_PX, CELL_HEIGHT_PX)
                 .expect("libghostty resize");
+            self.take_hscrolled(carry);
         }
         self.page_rows = page_rows(cols.max(1));
         if on_primary {
@@ -1520,8 +1546,10 @@ impl PaneTerm {
                     self.times.pop_front();
                     self.times_base += 1;
                 }
+                // The times end at the newest row: rows pulled back take
+                // their ids with them, also those without a time.
                 self.scrolled = scrolled;
-                self.times_base = self.times_base.max(self.scrolled - self.times.len() as u64);
+                self.times_base = self.scrolled.saturating_sub(self.times.len() as u64);
             } else {
                 // Ghostty's reflow does not say which row went where.
                 self.scrolled = scrolled;
@@ -1532,8 +1560,18 @@ impl PaneTerm {
         if on_primary {
             self.retain();
             self.clamp_history_to_retained();
+            // grid_reflow: at most the new history.
+            self.hscrolled = self.hscrolled.min(self.hsize);
         }
         self.generation += 1;
+    }
+
+    /// Read tmux's `hscrolled` back after the resizes that carried it,
+    /// before any of vtmux's own fix-ups resize again.
+    fn take_hscrolled(&mut self, carry: bool) {
+        if carry && let Ok(h) = self.term.vtmux_take_hscrolled() {
+            self.hscrolled = h;
+        }
     }
 
     /// `screen_resize_y` (screen.c:430-445) with `eat_empty`: a shorter
@@ -1580,31 +1618,6 @@ impl PaneTerm {
                     && cells.iter().all(|c| !c.has_text().unwrap_or(true))
             })
         })
-    }
-
-    /// `screen_resize_y` (screen.c:466-487): a taller screen pulls as many
-    /// lines as it can back out of history, wherever the cursor is, and
-    /// the cursor moves down with its line. Ghostty pulls only with the
-    /// cursor on the last row, so it goes there for the resize. A cursor
-    /// waiting to wrap is left to Ghostty: moving it would lose the wrap.
-    fn grow_pulling_history(&mut self, rows: u16) {
-        let old = self.rows();
-        let (cx, cy) = self.cursor();
-        if rows <= old
-            || cy + 1 >= old
-            || self.hsize == 0
-            || self.term.is_cursor_pending_wrap().unwrap_or(false)
-        {
-            return;
-        }
-        let before = self.term.scrollback_rows().unwrap_or(0);
-        self.write_screen_moves(&format!("\x1b[{old};1H"));
-        self.term
-            .resize(self.cols(), rows, CELL_WIDTH_PX, CELL_HEIGHT_PX)
-            .expect("libghostty resize");
-        let pulled = before.saturating_sub(self.term.scrollback_rows().unwrap_or(0));
-        let cy = usize::from(cy) + pulled;
-        self.write_screen_moves(&format!("\x1b[{};{}H", cy + 1, cx + 1));
     }
 
     /// Write `seq` (cursor moves in screen coordinates) with origin mode
@@ -1968,6 +1981,7 @@ impl PaneTerm {
         if self.alternate_on() {
             self.frozen = Some(Rc::default());
             self.hsize = 0;
+            self.hscrolled = 0;
             self.clear_primary_history = true;
             return;
         }
@@ -1978,6 +1992,7 @@ impl PaneTerm {
         let _ = self.term.set_scrollback_max_bytes(Some(0));
         let _ = self.term.set_scrollback_max_bytes(budget);
         self.hsize = 0;
+        self.hscrolled = 0;
         self.times.clear();
         self.times_base = self.scrolled;
         self.clamp_history_to_retained();
@@ -2003,6 +2018,7 @@ impl PaneTerm {
         if hsize > 0 && hsize >= limit {
             let ny = (hsize - limit).max(1).min(hsize);
             self.hsize -= ny;
+            self.hscrolled = self.hscrolled.min(self.hsize);
             while self.times.len() > self.hsize {
                 self.times.pop_front();
                 self.times_base += 1;
@@ -2031,6 +2047,7 @@ impl PaneTerm {
     fn clamp_history_to_retained(&mut self) {
         let retained = self.term.scrollback_rows().unwrap_or(0);
         self.hsize = self.hsize.min(retained);
+        self.hscrolled = self.hscrolled.min(self.hsize);
         while self.times.len() > retained {
             self.times.pop_front();
             self.times_base += 1;
@@ -4930,6 +4947,43 @@ mod tests {
         assert_eq!(t.bottom_row_used(), 0);
     }
 
+    /// A taller screen pulls back only the history rows tmux counts as
+    /// scrolled (`hscrolled`, `screen_resize_y`): none of those a clear
+    /// scrolled into history (`grid_view_clear_history`), the rows scrolled
+    /// after it. The count survives a state export.
+    #[test]
+    fn a_taller_screen_pulls_back_only_scrolled_rows() {
+        let mut t = PaneTerm::new(20, 6, 100);
+        t.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n\x1b[2Jafter\r\nA\r\nB");
+        assert_eq!(t.history_size(), 10);
+        let mut u = PaneTerm::import_state(&t.export_state()).expect("import");
+        for p in [&mut t, &mut u] {
+            p.resize(20, 12);
+            assert_eq!((p.history_size(), p.cursor()), (8, (1, 7)));
+        }
+        // A narrowing under a short first line: the rows it pushes into
+        // history are not scrolled ones (grid_reflow_split).
+        let mut t = PaneTerm::new(40, 8, 100);
+        t.feed(format!("$ ls\r\n{}$ ", format!("{}\r\n", "x".repeat(36)).repeat(4)).as_bytes());
+        t.resize(12, 8);
+        assert_eq!((t.history_size(), t.cursor()), (8, (2, 5)));
+        t.resize(12, 14);
+        assert_eq!((t.history_size(), t.cursor()), (8, (2, 5)));
+        // A long one: they come back, and the state stays one an import
+        // takes (the pulled rows' ids go with them).
+        let mut t = PaneTerm::new(40, 8, 100);
+        t.feed(format!("{}$ ", format!("{}\r\n", "x".repeat(36)).repeat(5)).as_bytes());
+        t.resize(12, 8);
+        assert_eq!(t.history_size(), 10);
+        t.resize(12, 14);
+        assert_eq!((t.history_size(), t.cursor()), (4, (2, 11)));
+        let mut u = PaneTerm::import_state(&t.export_state()).expect("import");
+        assert_eq!(u.history_size(), 4);
+        t.feed(b"\r\nmore");
+        u.feed(b"\r\nmore");
+        assert_eq!(u.history_id(0), t.history_id(0));
+    }
+
     /// A resize does not touch tmux's input parser (`screen_resize` leaves
     /// `wp->ictx` alone), so a sequence the program left half-written is
     /// finished by its next bytes. The resize's own cursor moves
@@ -4937,9 +4991,9 @@ mod tests {
     #[test]
     fn a_resize_keeps_a_half_written_sequence() {
         use crate::snapshot::Color;
-        // Each resize writes moves: a shorter screen with text below the
-        // cursor (eat_below_cursor), a taller one with history and the
-        // cursor off the last row (grow_pulling_history).
+        // A shorter screen with text below the cursor writes moves
+        // (eat_below_cursor); a taller one pulls history back without any
+        // (Ghostty patch 0025).
         let resizes: [&[(u16, u16)]; 2] = [&[(20, 4)], &[(20, 4), (20, 6)]];
         let starts: [(&[u8], &[u8], Color); 4] = [
             (b"\x1b[3", b"1mX", Color::Palette(1)),

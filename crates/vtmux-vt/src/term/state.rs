@@ -317,6 +317,8 @@ pub struct PaneState {
     /// tmux's `GRID_HISTORY` (see `PaneTerm::history`).
     pub keeps_history: bool,
     pub hsize: usize,
+    /// tmux's `hscrolled` (see `PaneTerm::hscrolled`), at most `hsize`.
+    pub hscrolled: usize,
     pub scrolled: u64,
     pub generation: u64,
     pub times_base: u64,
@@ -1091,6 +1093,7 @@ impl PaneTerm {
             history_limit: self.history_lines,
             keeps_history: self.history,
             hsize: self.hsize,
+            hscrolled: self.hscrolled,
             scrolled: self.scrolled,
             generation: self.generation,
             times_base: self.times_base,
@@ -1174,6 +1177,7 @@ impl PaneTerm {
     /// The pane's own part of an import (see [`PaneState`]).
     fn restore_model(&mut self, p: &PaneState, cols: u16) {
         self.hsize = p.hsize;
+        self.hscrolled = p.hscrolled;
         self.scrolled = p.scrolled;
         self.generation = p.generation;
         self.times_base = p.times_base;

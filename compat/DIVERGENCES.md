@@ -341,3 +341,18 @@ product reasons" category.
 - Evidence: reference tmux 3.8, `printf 'abclklongwordlongword longwordlongword 字漢😀'` on 40x6, `resize-window -x 9` then `-x 23`: tmux `capture-pane -pJ` `abclklongwordlongword longwordlongword 字漢` / `😀`, `#{history_size} #{cursor_x},#{cursor_y}` `1 20,0`; vtmux one line ending `字漢😀`, `1 2,1`.
 - Category: Do not copy tmux bug (the soft wrap of a line is lost on a resize).
 
+### D-042: a character joined after a wide character whose padding cell it overwrote stays on screen
+
+- Test / assertion: oracle `reflow_wide_padding_history` scene `redraw` (annotated, the screen after widening to 200).
+- tmux behaviour: a narrowing reflow can leave a wide character's padding cell to start the next row on its own (`grid_reflow_split`, `grid_reflow_join` test `width + gc.data.width > sx` for it too). A character written over that cell replaces it (`screen_write_overwrite` at column 0 clears only the cell itself), so when a widening reflow joins the rows again the character becomes the cell after the wide character, where its padding was. `capture-pane` prints it (`grid_string_cells` writes every cell that is not padding) but the screen does not: `tty_draw_line` steps over a cell's width (`i += gcp->data.width`), so the character is hidden under the wide character and the rest of the line is drawn a column left of where `capture-pane` and the cursor put it.
+- vtmux behaviour: Ghostty keeps every wide character with its spacer tail, so the character follows the wide character's second column: the screen shows it and the rest of the line a column right of tmux's screen; `capture-pane` gives what tmux's does.
+- Evidence: reference tmux 3.8, `$ echo` and 37 `字` printed on 80 columns, narrowed to 17, then the bytes bash 5 wrote for its redraw there (`\r ESC[K ESC[A`, `$ echo` and the 37 `字`, a space and `ESC[K` at each row end), widened to 200: tmux's screen `…字字 echo 字…`, `capture-pane -p` `…字字$ echo 字…`; vtmux both `…字字$ echo 字…`. Found by review_lows_batch_k with bash readline (after bash's next redraw tmux shows 47 `字` in a row, vtmux 37, a blank, then 10).
+- Category: Do not copy tmux bug (a character on the line is hidden from the screen).
+
+### D-043: `capture-pane -e` writes the link of a line that starts inside the one the line above ends in
+
+- Test / assertion: oracle `reflow_wide_padding_history` scene `link` (annotated, `capture-pane -p -e -S -`).
+- tmux behaviour: `grid_string_cells` closes a link still open at the end of each line (`has_link` is per call), but `cmd_capture_pane_history` hands it the last cell of the line before (`lastgc`), so a line whose first cell is in the same link as the last cell of the line before writes no OSC 8 for it: its text comes out unlinked. With `-J` the two are one line and nothing is lost.
+- vtmux behaviour: such a line opens the link again, as a line that starts in any other link does.
+- Evidence: reference tmux 3.8, two lines of twelve `ESC]8;id=lIJ;http://e.x/I/J ESC\ LJ字 ESC]8;; ESC\` links and a space on 80 columns, narrowed to 33: tmux's second row starts `字 ESC]8;id=l06;…`, the `字` of link `l05` unlinked; vtmux's `ESC]8;id=l05;http://e.x/0/5 ESC\ 字 ESC]8;; ESC\ ESC]8;id=l06;…`. Found by review_lows_batch_k (links resized 80, 17, 200, 33x10).
+- Category: Do not copy tmux bug (a link is lost from the output).

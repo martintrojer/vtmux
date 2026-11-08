@@ -1,0 +1,82 @@
+name = "reflow_wide_padding_history"
+size = [200, 8]
+# A taller screen pulls back only the history rows tmux counts as scrolled
+# (grid.c hscrolled): screen_resize_y (screen.c) adds the rows a shorter
+# screen pushes into history and pulls at most hscrolled rows back, wherever
+# the cursor is; grid_view_clear_history (a clear under scroll-on-clear,
+# DECCOLM) sets it to 0; grid_reflow moves it as the index of a line from the
+# top: grid_reflow_split adds a split line's extra rows when its index is not
+# past it, grid_reflow_join takes away the rows it joins before it. So a
+# narrowing under a short first line leaves it 0, a long first line runs it
+# on (pshort, plong), and a widen-and-grow keeps rows in history (emoji,
+# deccolm). Two tmux 3.8 bugs are not copied (compat/DIVERGENCES.md): D-042,
+# a cell joined after a wide character whose padding cell was overwritten
+# hides under it on screen (redraw: bash's redraw at 17 columns, widened to
+# 200); D-043, capture-pane -e drops the link of a row that starts inside the
+# link the row above ends in (link).
+steps = [
+  { run = ["new", "-d", "-s", "init", "-n", "w", "-x", "80", "-y", "8", "cat", "-"] },
+  { run = ["set", "-g", "status", "off"] },
+  # pshort: a short first line: the rows a narrowing pushes into history stay there when the screen grows
+  { run = ["new", "-d", "-s", "pshort", "-n", "w", "-x", "40", "-y", "8", "sh", "-c", "printf '\\044 ls\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012\\044 '; tmux wait-for -S pshort; exec cat"] },
+  { wait_for = "pshort" },
+  { run = ["resize-window", "-t", "pshort", "-x", "12"] },
+  { run = ["display", "-p", "-t", "pshort:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "pshort", "-y", "14"] },
+  { run = ["display", "-p", "-t", "pshort:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "pshort:"] },
+  # plong: a long first line: they come back
+  { run = ["new", "-d", "-s", "plong", "-n", "w", "-x", "40", "-y", "8", "sh", "-c", "printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\015\\012\\044 '; tmux wait-for -S plong; exec cat"] },
+  { wait_for = "plong" },
+  { run = ["resize-window", "-t", "plong", "-x", "12"] },
+  { run = ["display", "-p", "-t", "plong:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "plong", "-y", "14"] },
+  { run = ["display", "-p", "-t", "plong:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "plong:"] },
+  # clear: rows a clear scrolled into history stay there, the two scrolled after it come back
+  { run = ["new", "-d", "-s", "clear", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "printf '1\\015\\0122\\015\\0123\\015\\0124\\015\\0125\\015\\0126\\015\\0127\\015\\0128\\015\\012\\033[2Jafter\\015\\012A\\015\\012B'; tmux wait-for -S clear; exec cat"] },
+  { wait_for = "clear" },
+  { run = ["display", "-p", "-t", "clear:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "clear", "-y", "12"] },
+  { run = ["display", "-p", "-t", "clear:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "clear:"] },
+  # emoji: widened and grown from 33x10 to 80x24, one row stays in history
+  { run = ["new", "-d", "-s", "emoji", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "printf 'abcdefg\\360\\237\\230\\200\\015\\012abcdefgh\\345\\255\\227\\015\\012\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227'; tmux wait-for -S emoji; exec cat"] },
+  { wait_for = "emoji" },
+  { run = ["resize-window", "-t", "emoji", "-x", "17", "-y", "24"] },
+  { run = ["display", "-p", "-t", "emoji:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "emoji", "-x", "200", "-y", "24"] },
+  { run = ["display", "-p", "-t", "emoji:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "emoji", "-x", "33", "-y", "10"] },
+  { run = ["display", "-p", "-t", "emoji:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "emoji", "-x", "80", "-y", "24"] },
+  { run = ["display", "-p", "-t", "emoji:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "emoji:"] },
+  # deccolm: DECCOLM's clear (mode 40 reset) scrolled hello into history, where it stays
+  { run = ["new", "-d", "-s", "deccolm", "-n", "w", "-x", "80", "-y", "24", "sh", "-c", "printf 'hello\\033[?40l\\033[?3hAB\\033[10;100HZ'; tmux wait-for -S deccolm; exec cat"] },
+  { wait_for = "deccolm" },
+  { run = ["resize-window", "-t", "deccolm", "-x", "30", "-y", "10"] },
+  { run = ["display", "-p", "-t", "deccolm:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "deccolm", "-x", "90", "-y", "24"] },
+  { run = ["display", "-p", "-t", "deccolm:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-S", "-", "-t", "deccolm:"] },
+  # link: a row starting inside a link (D-043)
+  { run = ["new", "-d", "-s", "link", "-n", "w", "-x", "80", "-y", "8", "sh", "-c", "printf '\\033]8;id=l00;http://e.x/0/0\\033\\134L0\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l01;http://e.x/0/1\\033\\134L1\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l02;http://e.x/0/2\\033\\134L2\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l03;http://e.x/0/3\\033\\134L3\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l04;http://e.x/0/4\\033\\134L4\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l05;http://e.x/0/5\\033\\134L5\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l06;http://e.x/0/6\\033\\134L6\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l07;http://e.x/0/7\\033\\134L7\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l08;http://e.x/0/8\\033\\134L8\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l09;http://e.x/0/9\\033\\134L9\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l010;http://e.x/0/10\\033\\134L10\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l011;http://e.x/0/11\\033\\134L11\\345\\255\\227\\033]8;;\\033\\134 \\015\\012\\033]8;id=l10;http://e.x/1/0\\033\\134L0\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l11;http://e.x/1/1\\033\\134L1\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l12;http://e.x/1/2\\033\\134L2\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l13;http://e.x/1/3\\033\\134L3\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l14;http://e.x/1/4\\033\\134L4\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l15;http://e.x/1/5\\033\\134L5\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l16;http://e.x/1/6\\033\\134L6\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l17;http://e.x/1/7\\033\\134L7\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l18;http://e.x/1/8\\033\\134L8\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l19;http://e.x/1/9\\033\\134L9\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l110;http://e.x/1/10\\033\\134L10\\345\\255\\227\\033]8;;\\033\\134 \\033]8;id=l111;http://e.x/1/11\\033\\134L11\\345\\255\\227\\033]8;;\\033\\134 '; tmux wait-for -S link; exec cat"] },
+  { wait_for = "link" },
+  { run = ["resize-window", "-t", "link", "-x", "33"] },
+  { divergence = { id = "D-043", expect = { kind = "cli", stdout = "\u001b]8;id=l00;http://e.x/0/0\u001b\\L0字\u001b]8;;\u001b\\ \u001b]8;id=l01;http://e.x/0/1\u001b\\L1字\u001b]8;;\u001b\\ \u001b]8;id=l02;http://e.x/0/2\u001b\\L2字\u001b]8;;\u001b\\ \u001b]8;id=l03;http://e.x/0/3\u001b\\L3字\u001b]8;;\u001b\\ \u001b]8;id=l04;http://e.x/0/4\u001b\\L4字\u001b]8;;\u001b\\ \u001b]8;id=l05;http://e.x/0/5\u001b\\L5\u001b]8;;\u001b\\\n\u001b]8;id=l05;http://e.x/0/5\u001b\\字\u001b]8;;\u001b\\ \u001b]8;id=l06;http://e.x/0/6\u001b\\L6字\u001b]8;;\u001b\\ \u001b]8;id=l07;http://e.x/0/7\u001b\\L7字\u001b]8;;\u001b\\ \u001b]8;id=l08;http://e.x/0/8\u001b\\L8字\u001b]8;;\u001b\\ \u001b]8;id=l09;http://e.x/0/9\u001b\\L9字\u001b]8;;\u001b\\ \u001b]8;id=l010;http://e.x/0/10\u001b\\L10字\u001b]8;;\u001b\\\n \u001b]8;id=l011;http://e.x/0/11\u001b\\L11字\u001b]8;;\u001b\\\n\u001b]8;id=l10;http://e.x/1/0\u001b\\L0字\u001b]8;;\u001b\\ \u001b]8;id=l11;http://e.x/1/1\u001b\\L1字\u001b]8;;\u001b\\ \u001b]8;id=l12;http://e.x/1/2\u001b\\L2字\u001b]8;;\u001b\\ \u001b]8;id=l13;http://e.x/1/3\u001b\\L3字\u001b]8;;\u001b\\ \u001b]8;id=l14;http://e.x/1/4\u001b\\L4字\u001b]8;;\u001b\\ \u001b]8;id=l15;http://e.x/1/5\u001b\\L5\u001b]8;;\u001b\\\n\u001b]8;id=l15;http://e.x/1/5\u001b\\字\u001b]8;;\u001b\\ \u001b]8;id=l16;http://e.x/1/6\u001b\\L6字\u001b]8;;\u001b\\ \u001b]8;id=l17;http://e.x/1/7\u001b\\L7字\u001b]8;;\u001b\\ \u001b]8;id=l18;http://e.x/1/8\u001b\\L8字\u001b]8;;\u001b\\ \u001b]8;id=l19;http://e.x/1/9\u001b\\L9字\u001b]8;;\u001b\\ \u001b]8;id=l110;http://e.x/1/10\u001b\\L10字\u001b]8;;\u001b\\\n \u001b]8;id=l111;http://e.x/1/11\u001b\\L11字\u001b]8;;\u001b\\\n\n\n\n\n\n\n", stderr = "", exit = 0 } } },
+  { run = ["capture-pane", "-p", "-e", "-S", "-", "-t", "link:"] },
+  # redraw: bash redraws a CJK line at 17 columns over an orphaned padding cell, then 200 (D-042)
+  { run = ["new", "-d", "-s", "redraw", "-n", "w", "-x", "80", "-y", "8", "sh", "-c", "printf '\\044 echo \\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227'; tmux wait-for -S redraw; tmux wait-for redraw2; printf '\\015\\033[K\\033[A\\044 echo \\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227 \\033[K\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227 \\033[K\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227 \\033[K\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227\\345\\255\\227'; tmux wait-for -S redraw3; exec cat"] },
+  { wait_for = "redraw" },
+  { run = ["resize-window", "-t", "redraw", "-x", "17"] },
+  { run = ["wait-for", "-S", "redraw2"] },
+  { wait_for = "redraw3" },
+  { run = ["display", "-p", "-t", "redraw:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["resize-window", "-t", "redraw", "-x", "200"] },
+  { attach = { session = "redraw", id = "redraw" } },
+  { run = ["display", "-p", "-t", "redraw:", "#{history_size} #{cursor_x},#{cursor_y}"] },
+  { run = ["capture-pane", "-p", "-t", "redraw:"] },
+  { divergence = { id = "D-042", expect = { kind = "screen", rows = ["$ echo 字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字字$ echo 字字字字字字字字字字字字字 字字字字字字字字 字字字字字字字字 字", "字字字字字字字", "", "", "", "", "", ""], cursor = [14, 1] } } },
+  { screen = { id = "redraw" } },
+]

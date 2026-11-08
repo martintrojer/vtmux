@@ -1368,6 +1368,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             times_base: p.times_base,
             times: times_out(&p.times),
             max_bytes: g.max_bytes.map(|n| n as u64),
+            hscrolled: Some(p.hscrolled as u64),
         },
         alt_entry,
         sync: p.sync.as_ref().map(|(s, left)| sync_out(s, *left)),
@@ -1561,6 +1562,11 @@ pub fn term_from_snapshot_with(
         history_limit: usize_of(h.limit, "history limit")?,
         keeps_history: h.enabled,
         hsize,
+        hscrolled: h
+            .hscrolled
+            .map(|n| usize_of(n, "scrolled history rows"))
+            .transpose()?
+            .unwrap_or(hsize),
         scrolled: h.scrolled,
         generation: h.generation,
         times_base: h.times_base,

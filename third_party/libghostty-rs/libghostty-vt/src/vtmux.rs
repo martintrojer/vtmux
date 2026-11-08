@@ -237,6 +237,26 @@ impl<'alloc, 'cb> Terminal<'alloc, 'cb> {
     pub fn vtmux_set_active_screen(&mut self, screen: u8) -> Result<()> {
         from_result(unsafe { ffi::ghostty_vtmux_set_active_screen(self.inner.as_raw(), screen) })
     }
+
+    /// Carry tmux's `hscrolled` (the newest history rows a taller screen
+    /// pulls back) through the next resizes of the primary screen, as
+    /// tmux's `screen_resize_y` and `grid_reflow` move it; `origin` rows at
+    /// the top of the scrollback are rows tmux no longer has.
+    pub fn vtmux_set_hscrolled(&mut self, hscrolled: usize, origin: usize) -> Result<()> {
+        from_result(unsafe {
+            ffi::ghostty_vtmux_set_hscrolled(self.inner.as_raw(), hscrolled, origin)
+        })
+    }
+
+    /// The `hscrolled` after the resizes since [`Self::vtmux_set_hscrolled`],
+    /// which stops carrying it.
+    pub fn vtmux_take_hscrolled(&mut self) -> Result<usize> {
+        let mut out = 0usize;
+        from_result(unsafe {
+            ffi::ghostty_vtmux_take_hscrolled(self.inner.as_raw(), &raw mut out)
+        })?;
+        Ok(out)
+    }
 }
 
 fn reserve<T>(v: &mut Vec<T>, len: usize) {

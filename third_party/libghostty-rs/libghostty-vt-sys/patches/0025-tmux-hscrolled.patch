@@ -1,0 +1,349 @@
+diff --git a/include/ghostty/vt/vtmux_state.h b/include/ghostty/vt/vtmux_state.h
+index adcc99d2d..ef8792824 100644
+--- a/include/ghostty/vt/vtmux_state.h
++++ b/include/ghostty/vt/vtmux_state.h
+@@ -318,6 +318,23 @@ GHOSTTY_API void ghostty_vtmux_importer_free(GhosttyVtmuxImporter importer);
+ GHOSTTY_API GhosttyResult ghostty_vtmux_set_active_screen(GhosttyTerminal terminal,
+                                                           uint8_t screen);
+ 
++/**
++ * Carry tmux's `hscrolled` (the newest history rows a taller screen pulls
++ * back) through the next resizes of the primary screen: a shorter screen
++ * adds the rows it pushes into history, a taller one pulls back at most
++ * that many wherever the cursor is, and a reflow moves it as tmux's
++ * grid_reflow does. `origin` rows at the top of the scrollback are rows
++ * tmux no longer has.
++ */
++GHOSTTY_API GhosttyResult ghostty_vtmux_set_hscrolled(GhosttyTerminal terminal,
++                                                      size_t hscrolled,
++                                                      size_t origin);
++
++/** The `hscrolled` after the resizes since ghostty_vtmux_set_hscrolled,
++ * which stops carrying it; GHOSTTY_NO_VALUE when none was set. */
++GHOSTTY_API GhosttyResult ghostty_vtmux_take_hscrolled(GhosttyTerminal terminal,
++                                                       size_t* out);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 88cea3e5f..46537320a 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -389,6 +389,8 @@ comptime {
+         @export(&c.vtmux_importer_finish, .{ .name = "ghostty_vtmux_importer_finish" });
+         @export(&c.vtmux_importer_free, .{ .name = "ghostty_vtmux_importer_free" });
+         @export(&c.vtmux_set_active_screen, .{ .name = "ghostty_vtmux_set_active_screen" });
++        @export(&c.vtmux_set_hscrolled, .{ .name = "ghostty_vtmux_set_hscrolled" });
++        @export(&c.vtmux_take_hscrolled, .{ .name = "ghostty_vtmux_take_hscrolled" });
+         if (features.snapshot) {
+             @export(&c.snapshot_encode, .{ .name = "ghostty_snapshot_encode" });
+             @export(&c.snapshot_encode_buf, .{ .name = "ghostty_snapshot_encode_buf" });
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index fbb16dc2c..e5b98c589 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -459,6 +459,12 @@ recycle_node: ?*List.Node = null,
+ /// Limits for scrollback.
+ limits: Limits,
+ 
++/// vtmux: tmux's `hscrolled` (grid.c `struct grid`) while set: how many of
++/// the newest history rows a taller screen pulls back into view. Set
++/// before a resize and read after it (`ghostty_vtmux_set_hscrolled`,
++/// `ghostty_vtmux_take_hscrolled`); null leaves Ghostty's own rules.
++tmux_hscrolled: ?TmuxHscrolled = null,
++
+ /// The total number of rows represented by this PageList. This is used
+ /// specifically for scrollbar information so we can have the total size.
+ total_rows: usize,
+@@ -1333,6 +1339,55 @@ pub const Resize = struct {
+     };
+ };
+ 
++/// vtmux: tmux's `hscrolled` through a resize (see `tmux_hscrolled`).
++///
++/// tmux pulls back only lines that scrolled into history, not those a
++/// clear moved there (grid-view.c `grid_view_clear_history` sets it to 0)
++/// or a narrowing reflow pushed there: `screen_resize_y` (screen.c) adds the
++/// lines a shorter screen pushes into history and pulls at most `hscrolled`
++/// lines back into a taller one, wherever the cursor is, the rest blank at
++/// the bottom. `grid_reflow` (grid.c) then moves it as if it were the index
++/// of a line from the top of the history: `grid_reflow_split` adds a split
++/// line's extra lines when its index is not past it, `grid_reflow_join`
++/// takes away the lines it consumes before it (or stops at the line they
++/// join), and the result is at most the new history size.
++pub const TmuxHscrolled = struct {
++    h: usize,
++
++    /// Rows at the top that tmux no longer has (Ghostty prunes whole pages,
++    /// so it keeps a few more): tmux's line indexes start below them.
++    origin: usize,
++
++    /// Reflow bookkeeping, reset by each reflow: the source row reflowed
++    /// next, the destination row tmux's first line went to, and the
++    /// destination row the line being joined is on.
++    src: usize = 0,
++    dst_origin: usize = 0,
++    join_to: usize = 0,
++
++    /// A line of `pieces` rows (from its row's own cells) starts at source
++    /// row `src` and ends on destination row `last`
++    /// (`grid_reflow_split`, `grid_reflow_move`, the first line of
++    /// `grid_reflow_join`).
++    fn lineStart(self: *TmuxHscrolled, src: usize, pieces: usize, last: usize) void {
++        if (src < self.origin) return;
++        if (pieces >= 2 and src - self.origin <= self.h) self.h += pieces - 1;
++        self.join_to = last -| self.dst_origin;
++    }
++
++    /// Source row `src` was joined whole to the line being joined
++    /// (`grid_reflow_join`, one consumed line at a time).
++    fn consumed(self: *TmuxHscrolled, src: usize) void {
++        if (src < self.origin) return;
++        const to = self.join_to;
++        if (self.h > to + 1) {
++            self.h -= 1;
++        } else if (self.h > to) {
++            self.h = to;
++        }
++    }
++};
++
+ /// Resize
+ /// TODO: docs
+ pub fn resize(self: *PageList, opts: Resize) Allocator.Error!void {
+@@ -1554,6 +1609,11 @@ fn resizeCols(
+ 
+     // Reflow all our rows.
+     {
++        if (self.tmux_hscrolled) |*t| {
++            t.src = 0;
++            t.dst_origin = 0;
++            t.join_to = 0;
++        }
+         var reflow_cursor: ReflowCursor = .init(first_rewritten_node);
+         while (it.next()) |row| {
+             try reflow_cursor.reflowRow(
+@@ -1840,6 +1900,16 @@ const ReflowCursor = struct {
+             }
+         }
+ 
++        // vtmux: whether tmux reflows this row as a line of its own (a
++        // line's first row, a row after a full one, or the empty line
++        // above) or joins it to the line before it (tmux_hscrolled).
++        const tmux_src = if (list.tmux_hscrolled) |*t| src: {
++            const src = t.src;
++            t.src += 1;
++            break :src src;
++        } else 0;
++        const tmux_fresh = !prev_wrap or self.new_rows > 0 or self.pending_wrap;
++
+         // Handle tracked pin adjustments. We also note whether any
+         // tracked pin is on this row at all so that the per-cell loop
+         // below can skip pin scans entirely for the overwhelmingly
+@@ -1921,6 +1991,24 @@ const ReflowCursor = struct {
+ 
+         self.copyRowMetadata(src_row);
+ 
++        // vtmux: the destination rows this row's cells start (tmux_hscrolled).
++        const tmux_rows_start = self.total_rows;
++        const tmux_start_pending = self.pending_wrap;
++        if (list.tmux_hscrolled) |*t| if (tmux_src == t.origin) {
++            t.dst_origin = tmux_rows_start - @intFromBool(!tmux_start_pending);
++        };
++        defer if (list.tmux_hscrolled) |*t| {
++            const started = self.total_rows - tmux_rows_start;
++            const last = self.total_rows - 1;
++            if (tmux_fresh) {
++                t.lineStart(tmux_src, if (tmux_start_pending) @max(started, 1) else started + 1, last);
++            } else if (started == 0) {
++                t.consumed(tmux_src);
++            } else {
++                t.lineStart(tmux_src, started, last);
++            }
++        };
++
+         var x: usize = 0;
+         while (x < cols_len) {
+             if (self.pending_wrap) {
+@@ -3217,6 +3305,10 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
+                 // Account for our trimmed rows in the total row cache
+                 self.total_rows -= trimmed;
+ 
++                // vtmux: the rows pushed into history scrolled there
++                // (screen_resize_y: `hscrolled += needed`).
++                if (self.tmux_hscrolled) |*t| t.h += self.rows - rows - trimmed;
++
+                 // If we didn't trim enough, just modify our row count and this
+                 // will create additional history.
+                 self.rows = rows;
+@@ -3225,6 +3317,24 @@ fn resizeWithoutReflow(self: *PageList, opts: Resize) Allocator.Error!void {
+             // Making rows larger we adjust our row count, and then grow
+             // to the row count.
+             .gt => gt: {
++                // vtmux: tmux pulls back at most `hscrolled` rows, wherever
++                // the cursor is, and adds the rest blank at the bottom
++                // (screen_resize_y). The cursor stays on its row.
++                if (self.tmux_hscrolled) |*t| {
++                    const delta = rows - self.rows;
++                    const pull = @min(t.h, delta, self.total_rows - self.rows);
++                    t.h -= pull;
++                    self.rows = rows;
++                    for (0..delta - pull) |_| _ = try self.grow();
++                    switch (self.viewport) {
++                        .pin => if (self.pinIsActive(self.viewport_pin.*)) {
++                            self.viewport = .active;
++                        },
++                        .active, .top => {},
++                    }
++                    break :gt;
++                }
++
+                 // If our rows increased and our cursor is NOT at the bottom,
+                 // we want to try to preserve the y value of the old cursor.
+                 // In other words, we don't want to "pull down" scrollback.
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index e6bb83cc0..06701afb9 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -15539,6 +15539,87 @@ test "Terminal: reflow measures a wide character as tmux does (vtmux)" {
+     }
+ }
+ 
++test "Terminal: tmux hscrolled through resizes (vtmux)" {
++    const alloc = testing.allocator;
++    const io_impl = testing.io;
++    const line = "abcdefghijklmnopqr\n";
++
++    const History = struct {
++        fn rows(t: *Terminal) usize {
++            const pages = &t.screens.active.pages;
++            return pages.total_rows - pages.rows;
++        }
++        fn take(t: *Terminal) usize {
++            const pages = &t.screens.active.pages;
++            const h = pages.tmux_hscrolled.?.h;
++            pages.tmux_hscrolled = null;
++            return h;
++        }
++    };
++
++    // A taller screen pulls back at most hscrolled rows, wherever the
++    // cursor is, the rest blank at the bottom (screen_resize_y).
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 4, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("1\n2\n3\n4\n5\n6");
++        t.setCursorPos(1, 1);
++        try testing.expectEqual(@as(usize, 2), History.rows(&t));
++        t.screens.active.pages.tmux_hscrolled = .{ .h = 1, .origin = 0 };
++        try t.resize(alloc, .{ .cols = 10, .rows = 6 });
++        try testing.expectEqual(@as(usize, 1), History.rows(&t));
++        try testing.expectEqual(@as(size.CellCountInt, 1), t.screens.active.cursor.y);
++        try testing.expectEqual(@as(usize, 0), History.take(&t));
++        const str = try t.plainString(alloc);
++        defer alloc.free(str);
++        try testing.expectEqualStrings("2\n3\n4\n5\n6", str);
++    }
++
++    // A shorter screen adds the rows it pushes into history.
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 6, .cols = 10 });
++        defer t.deinit(alloc);
++        try t.printString("1\n2\n3\n4\n5\n6");
++        t.screens.active.pages.tmux_hscrolled = .{ .h = 0, .origin = 0 };
++        try t.resize(alloc, .{ .cols = 10, .rows = 4 });
++        try testing.expectEqual(@as(usize, 2), History.take(&t));
++    }
++
++    // A narrowing reflow adds a split line's extra rows only while its
++    // index from the top is not past hscrolled (grid_reflow_split): a short
++    // first line stops it...
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 12, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString("$ ls\n" ++ line ++ line ++ line ++ "$ ");
++        t.screens.active.pages.tmux_hscrolled = .{ .h = 0, .origin = 0 };
++        try t.resize(alloc, .{ .cols = 8, .rows = 12 });
++        try testing.expectEqual(@as(usize, 0), History.take(&t));
++    }
++
++    // ...a long one runs on through the lines after it, and rows tmux no
++    // longer has do not count.
++    for ([_]usize{ 0, 1 }, [_]usize{ 8, 6 }) |origin, want| {
++        var t = try init(io_impl, alloc, .{ .rows = 12, .cols = 20 });
++        defer t.deinit(alloc);
++        try t.printString(line ++ line ++ line ++ line ++ "$ ");
++        t.screens.active.pages.tmux_hscrolled = .{ .h = 0, .origin = origin };
++        try t.resize(alloc, .{ .cols = 8, .rows = 12 });
++        try testing.expectEqual(want, History.take(&t));
++    }
++
++    // A widening reflow takes away the rows it joins before hscrolled and
++    // stops at the line they join (grid_reflow_join).
++    {
++        var t = try init(io_impl, alloc, .{ .rows = 12, .cols = 8 });
++        defer t.deinit(alloc);
++        try t.printString("$ ls\n" ++ line ++ line ++ line ++ "$ ");
++        t.screens.active.pages.tmux_hscrolled = .{ .h = 5, .origin = 0 };
++        try t.resize(alloc, .{ .cols = 20, .rows = 12 });
++        try testing.expectEqual(@as(usize, 2), History.take(&t));
++    }
++}
++
+ test "Terminal: reflow leaves a cursor at the line's end past it (vtmux)" {
+     const alloc = testing.allocator;
+     const io_impl = testing.io;
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index d3f1513f2..7220c3ebc 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -251,6 +251,8 @@ pub const vtmux_importer_page = vtmux_state.importer_page;
+ pub const vtmux_importer_finish = vtmux_state.importer_finish;
+ pub const vtmux_importer_free = vtmux_state.importer_free;
+ pub const vtmux_set_active_screen = vtmux_state.set_active_screen;
++pub const vtmux_set_hscrolled = vtmux_state.set_hscrolled;
++pub const vtmux_take_hscrolled = vtmux_state.take_hscrolled;
+ pub const snapshot_decoder_set = snapshot.decoder_set;
+ pub const snapshot_decoder_get = snapshot.decoder_get;
+ pub const snapshot_decoder_get_multi = snapshot.decoder_get_multi;
+diff --git a/src/terminal/c/vtmux_state.zig b/src/terminal/c/vtmux_state.zig
+index 8bedd797c..5dc23eecf 100644
+--- a/src/terminal/c/vtmux_state.zig
++++ b/src/terminal/c/vtmux_state.zig
+@@ -1447,6 +1447,35 @@ pub fn set_active_screen(
+     return .success;
+ }
+ 
++/// vtmux: carry tmux's `hscrolled` through the next resizes of the
++/// primary screen (PageList.tmux_hscrolled): `origin` rows at the top are
++/// rows tmux no longer has.
++pub fn set_hscrolled(
++    terminal_: terminal_c.Terminal,
++    hscrolled: usize,
++    origin: usize,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const screen = wrapper.terminal.screens.get(.primary) orelse return .no_value;
++    screen.pages.tmux_hscrolled = .{ .h = hscrolled, .origin = origin };
++    return .success;
++}
++
++/// vtmux: tmux's `hscrolled` after the resizes since `set_hscrolled`, which
++/// stops carrying it.
++pub fn take_hscrolled(
++    terminal_: terminal_c.Terminal,
++    out: ?*usize,
++) callconv(lib.calling_conv) Result {
++    const wrapper = terminal_ orelse return .invalid_value;
++    const out_ = out orelse return .invalid_value;
++    const screen = wrapper.terminal.screens.get(.primary) orelse return .no_value;
++    const t = screen.pages.tmux_hscrolled orelse return .no_value;
++    out_.* = t.h;
++    screen.pages.tmux_hscrolled = null;
++    return .success;
++}
++
+ test "vtmux state: rows round trip into a fresh terminal" {
+     const testing = std.testing;
+     var a: terminal_c.Terminal = null;

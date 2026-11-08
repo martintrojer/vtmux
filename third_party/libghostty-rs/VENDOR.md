@@ -699,6 +699,46 @@ Recorded per commit in git history; the list is kept current:
   snapshot"`, 89/89). On the final patches, `-Doptimize=ReleaseSafe` with
   `-Dtest-filter=PageList` 699/699, `reflow` 303/303, `vtmux` 130/130.
 
+- `patches/0025-tmux-hscrolled.patch` (`PageList.zig` new field
+  `tmux_hscrolled` and `TmuxHscrolled`, `resizeWithoutReflow`,
+  `resizeCols`, `ReflowCursor.reflowRow`; `c/vtmux_state.zig`
+  `set_hscrolled`, `take_hscrolled`; `c/main.zig`, `lib_vt.zig`,
+  `include/ghostty/vt/vtmux_state.h`): tmux's `hscrolled` (grid.c `struct
+  grid`) through a resize of the primary screen. tmux pulls back into a
+  taller screen only the history lines it counts as scrolled, at most
+  `hscrolled` of them, wherever the cursor is, and adds the rest blank at
+  the bottom; a shorter screen adds the lines it pushes into history
+  (screen.c `screen_resize_y`). Upstream pulled every history row it had
+  when the cursor was on the last row and none otherwise (vtmux moved the
+  cursor there to get tmux's pull, `grow_pulling_history`, now gone).
+  `grid_reflow` then moves `hscrolled` as if it were the index of a line
+  from the top: `grid_reflow_split` adds a split line's extra lines when
+  the line's index is not past it, `grid_reflow_join` takes away each
+  line it consumes before it or stops at the line they join. The reflow
+  cursor reproduces that: a source row that starts a line (a line's first
+  row, a row after a full one, the empty line under a wrapped one, or the
+  rest of a row a join took part of) is tmux's split or move, with as many
+  lines as destination rows its cells start, and a row joined whole is a
+  consumed line. `origin`, the rows above tmux's oldest history line that
+  Ghostty still keeps (it prunes whole pages), are left out of both
+  indexes. So a narrowing under a short first line keeps it, a long first
+  line runs it on through the split lines after it, and rows a clear or a
+  narrowing put in history stay there when the screen grows: oracle
+  `reflow_wide_padding_history` (scenes `pshort`, `plong`, `clear`,
+  `emoji`, `deccolm`). vtmux sets it before each primary resize
+  (`ghostty_vtmux_set_hscrolled`) and reads it after Ghostty's resizes,
+  before its own fix-ups (`ghostty_vtmux_take_hscrolled`); vtmux-vt keeps
+  the count between resizes (`PaneTerm::hscrolled`: scrolls add,
+  `grid_view_clear_history` and `grid_clear_history` reset, at most
+  `hsize`), and the live-upgrade state and snapshot carry it
+  (`HistoryState` tag 11). Wrapper: `Terminal::vtmux_set_hscrolled`,
+  `vtmux_take_hscrolled` (`vtmux.rs`, `bindings.rs` by hand). Test:
+  `Terminal: tmux hscrolled through resizes (vtmux)`. With it,
+  `-Doptimize=ReleaseSafe` `-Dtest-filter=reflow` 152/152 (153 in the C
+  test binary), `PageList` 349/349, `resize` 227/227, `Screen` 276/276,
+  `vtmux` 65/65; Debug `-Dtest-filter="Terminal: "` 521/522 with the known
+  `tabClear single` failure. Not an upstream candidate (tmux's model).
+
 ## Bumping ghostty
 
 1. Pick a ghostty commit and set `GHOSTTY_COMMIT` in

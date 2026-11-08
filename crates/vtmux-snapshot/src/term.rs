@@ -296,6 +296,9 @@ record! {
         9 => many times: Vec<TimeRun>,
         /// The emulator's history byte budget.
         10 => opt max_bytes: Option<u64>,
+        /// tmux's `hscrolled`: the newest history rows a taller screen
+        /// pulls back. A reader takes all of `hsize` without it.
+        11 => opt hscrolled: Option<u64>,
     }
 }
 
@@ -635,6 +638,7 @@ pub(crate) mod tests {
             count: 7,
         }];
         t.history.max_bytes = Some(1 << 20);
+        t.history.hscrolled = Some(2);
         let alt = t.alt_entry.as_mut().unwrap();
         alt.entry_row = Some(4);
         alt.has_saved = true;

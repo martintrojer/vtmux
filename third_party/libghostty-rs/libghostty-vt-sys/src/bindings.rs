@@ -6128,4 +6128,12 @@ unsafe extern "C" {
     pub fn ghostty_vtmux_importer_free(importer: VtmuxImporter);
     #[doc = " Make a screen the active one (vtmux patch 0017)."]
     pub fn ghostty_vtmux_set_active_screen(terminal: Terminal, screen: u8) -> Result::Type;
+    #[doc = " Carry tmux's `hscrolled` through the next resizes of the primary screen (vtmux patch 0025)."]
+    pub fn ghostty_vtmux_set_hscrolled(
+        terminal: Terminal,
+        hscrolled: usize,
+        origin: usize,
+    ) -> Result::Type;
+    #[doc = " The `hscrolled` after those resizes; stops carrying it (vtmux patch 0025)."]
+    pub fn ghostty_vtmux_take_hscrolled(terminal: Terminal, out: *mut usize) -> Result::Type;
 }

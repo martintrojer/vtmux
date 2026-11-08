@@ -265,7 +265,10 @@ fn charset(c: GhosttyCharset) -> Result<(), StateError> {
 
 fn pane(p: &PaneState) -> Result<(), StateError> {
     check(
-        p.history_limit <= MAX_LINES && p.hsize <= MAX_LINES && p.alt_collected <= MAX_LINES,
+        p.history_limit <= MAX_LINES
+            && p.hsize <= MAX_LINES
+            && p.hscrolled <= p.hsize
+            && p.alt_collected <= MAX_LINES,
         "history size",
     )?;
     // A history row's id counts the rows scrolled before it, and its time
