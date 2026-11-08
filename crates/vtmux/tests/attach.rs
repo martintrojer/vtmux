@@ -4236,7 +4236,7 @@ fn config_causes_show_in_view_mode_once_attached() {
         let conf = cfg_dir.join("c.conf");
         std::fs::write(
             &conf,
-            "set -g status-right ''\nset -g status-left 'S '\nset -g nosuchopt 1\nset -g \"\\033[31mred\" 1\nset -g status-interval x\n",
+            "set -g status-right ''\nset -g status-left 'S '\nset -g nosuchopt 1\nset -g status-interval \"\\033[31mred\"\nset -g status-interval x\n",
         )
         .unwrap();
         let conf = conf.to_str().unwrap().to_owned();
