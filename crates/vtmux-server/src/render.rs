@@ -60,6 +60,47 @@ pub struct Caps {
     /// (`CLIENT_UTF8`) and its terminal has `Bidi`, so vertical borders
     /// are drawn between bidi isolates.
     pub isolates: bool,
+    /// The attributes it can show.
+    pub attrs: Attrs,
+}
+
+/// The attribute capabilities `tty_attributes` writes with (tty.c:2727-
+/// 2758) and `tty_colours_us` (tty.c:3060-3104), by presence: tmux writes
+/// nothing for one the terminal lacks. vtmux writes each in the form
+/// tmux's own feature gives it (tty-features.c), not the entry's template
+/// (D-007).
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent terminal capabilities"
+)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Attrs {
+    /// `Smulx`: the double, curly, dotted and dashed underlines.
+    pub underline_styles: bool,
+    /// `Setulc`: an RGB underline colour; `Setulc1`: a palette one.
+    pub underline_rgb: bool,
+    pub underline_palette: bool,
+    /// `Smol`.
+    pub overline: bool,
+}
+impl Attrs {
+    /// What xterm-256color has.
+    pub const XTERM: Self = Self {
+        underline_styles: false,
+        underline_rgb: false,
+        underline_palette: false,
+        overline: false,
+    };
+
+    #[must_use]
+    pub fn from_term(term: &Term) -> Self {
+        Self {
+            underline_styles: term.has_name("Smulx"),
+            underline_rgb: term.has_name("Setulc"),
+            underline_palette: term.has_name("Setulc1"),
+            overline: term.has_name("Smol"),
+        }
+    }
 }
 impl Caps {
     /// How [`compose::draw_line_by`] may clear a run of empty cells.
@@ -114,6 +155,7 @@ impl Caps {
             no_am: !term.flag("am"),
             light_theme: false,
             isolates: term.feature_present("utf8") && term.has_name("Bidi"),
+            attrs: Attrs::from_term(term),
         }
     }
 }
@@ -896,19 +938,51 @@ fn set_style(out: &mut String, current: &mut Style, wanted: Style, caps: Caps) {
         (wanted.bold || bright, 1),
         (wanted.faint, 2),
         (wanted.italic, 3),
-        (wanted.underline != Underline::None, 4),
+        (wanted.underline == Underline::Single, 4),
         (wanted.blink, 5),
         (inverse, 7),
         (wanted.invisible, 8),
         (wanted.strikethrough, 9),
+        (wanted.overline && caps.attrs.overline, 53),
     ] {
         if on {
             let _ = write!(out, "\x1b[{code}m");
         }
     }
+    // tty_attributes: the other underlines are `Smulx` with their number.
+    let styled = match wanted.underline {
+        Underline::Double => 2,
+        Underline::Curly => 3,
+        Underline::Dotted => 4,
+        Underline::Dashed => 5,
+        Underline::None | Underline::Single => 0,
+    };
+    if styled != 0 && caps.attrs.underline_styles {
+        let _ = write!(out, "\x1b[4:{styled}m");
+    }
     color(out, fg, false);
     color(out, bg, true);
+    underline_colour(out, wanted.underline_color, caps.attrs);
     *current = wanted;
+}
+
+/// `tty_check_us` and `tty_colours_us` (tty.c:2965-2984, 3060-3104): a
+/// palette underline colour is `Setulc1` with its number, or, without it,
+/// the colour as RGB (`colour_force_rgb`); RGB is `Setulc`.
+fn underline_colour(out: &mut String, c: Color, attrs: Attrs) {
+    let rgb = match c {
+        Color::Default => return,
+        Color::Palette(n) | Color::Palette256(n) if attrs.underline_palette => {
+            let _ = write!(out, "\x1b[58:5:{n}m");
+            return;
+        }
+        Color::Palette(n) | Color::Palette256(n) => colour::palette_rgb(n),
+        Color::Rgb(r, g, b) => (r, g, b),
+    };
+    if attrs.underline_rgb {
+        let (r, g, b) = rgb;
+        let _ = write!(out, "\x1b[58:2:{r}:{g}:{b}m");
+    }
 }
 /// A cell colour as `tty_check_fg`/`tty_check_bg` take it: palette 0-7 and
 /// 8-15 are the plain and aixterm colours, unless set as `38;5;N`
@@ -962,6 +1036,7 @@ mod tests {
             no_am: false,
             light_theme: false,
             isolates: false,
+            attrs: Attrs::XTERM,
         };
         let mut pane = vtmux_vt::PaneTerm::new(4, 2, 0);
         pane.feed(b"abc");
@@ -993,6 +1068,7 @@ mod tests {
             no_am: false,
             light_theme: false,
             isolates: false,
+            attrs: Attrs::XTERM,
         }
     }
 
@@ -1025,6 +1101,48 @@ mod tests {
         let frame = String::from_utf8(c.frame(erased(20), caps)).unwrap();
         assert!(frame.contains("\x1b[1;4H\x1b[K"), "{frame:?}");
         assert!(!frame.contains("H "), "no space written: {frame:?}");
+    }
+
+    /// `tty_attributes` and `tty_colours_us` by what the terminal has:
+    /// without `Smulx` the styled underlines are not written at all
+    /// (xterm-256color), without `Setulc` no underline colour, without
+    /// `Smol` no overline; with them, tmux's feature forms, a palette
+    /// colour as RGB unless there is `Setulc1`.
+    #[test]
+    fn underline_styles_colours_and_overline_follow_the_terminal() {
+        let frame_of = |attrs: Attrs| {
+            let mut pane = vtmux_vt::PaneTerm::new(8, 1, 0);
+            pane.feed(b"\x1b[4:3;53mc\x1b[0;4;58:2::1:2:3mu\x1b[0;4:2;58;5;196md");
+            let caps = Caps {
+                attrs,
+                ..test_caps()
+            };
+            String::from_utf8(Compositor::default().frame(vtmux_vt::snapshot(&pane), caps)).unwrap()
+        };
+        let plain = frame_of(Attrs::XTERM);
+        assert!(
+            plain.contains("\x1b[1;1H\x1b[0mc\x1b[0m\x1b[4mu\x1b[0md"),
+            "{plain:?}"
+        );
+        let styled = frame_of(Attrs {
+            underline_styles: true,
+            underline_rgb: true,
+            underline_palette: false,
+            overline: true,
+        });
+        assert!(
+            styled.contains(
+                "\x1b[0m\x1b[53m\x1b[4:3mc\x1b[0m\x1b[4m\x1b[58:2:1:2:3mu\x1b[0m\x1b[4:2m\x1b[58:2:255:0:0md"
+            ),
+            "{styled:?}"
+        );
+        let palette = frame_of(Attrs {
+            underline_styles: true,
+            underline_rgb: true,
+            underline_palette: true,
+            overline: false,
+        });
+        assert!(palette.contains("\x1b[4:2m\x1b[58:5:196md"), "{palette:?}");
     }
 
     /// A changed run is written as its text: the cursor is moved once, not
@@ -1206,6 +1324,7 @@ mod tests {
             no_am: false,
             light_theme: false,
             isolates: false,
+            attrs: Attrs::XTERM,
         };
         let mut c = Compositor::default();
         let t0 = std::time::Instant::now();
@@ -1245,6 +1364,7 @@ mod tests {
             no_am: false,
             light_theme: false,
             isolates: false,
+            attrs: Attrs::XTERM,
         };
         let mut pane = vtmux_vt::PaneTerm::new(80, 24, 0);
         pane.feed(b"one");

@@ -1,0 +1,16 @@
+name = "attach_underline_styles"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "printf '\\033[4:3mcurly\\033[0m \\033[4:2mdbl\\033[0m \\033[4:4mdot\\033[4:5mdash\\033[0m \\033[4mu\\033[0m\\n\\033[4;58;5;196mpal\\033[0m \\033[4:3;58;2;1;2;3mrgb\\033[0m \\033[53mover\\033[0m\\n'; tmux wait-for -S ready; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["select-pane", "-t", "a", "-T", "p"] },
+  { attach = { session = "a" } },
+  { screen = {} },
+  { attach = { session = "a", id = "t", term = "tmux" } },
+  { screen = { id = "t" } },
+  { run = ["set", "-as", "terminal-features", ",xterm*:usstyle:overline"] },
+  { attach = { session = "a", id = "u" } },
+  { screen = { id = "u" } },
+  { run = ["lsc", "-F", "#{client_termname}|#{client_termfeatures}"] },
+]

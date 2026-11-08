@@ -1,0 +1,207 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "attach_underline_styles",
+  "inputs": {
+    "name": "attach_underline_styles",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "printf '\\033[4:3mcurly\\033[0m \\033[4:2mdbl\\033[0m \\033[4:4mdot\\033[4:5mdash\\033[0m \\033[4mu\\033[0m\\n\\033[4;58;5;196mpal\\033[0m \\033[4:3;58;2;1;2;3mrgb\\033[0m \\033[53mover\\033[0m\\n'; tmux wait-for -S ready; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a",
+          "-T",
+          "p"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "screen": {}
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "t",
+          "term": "tmux"
+        }
+      },
+      {
+        "screen": {
+          "id": "t"
+        }
+      },
+      {
+        "run": [
+          "set",
+          "-as",
+          "terminal-features",
+          ",xterm*:usstyle:overline"
+        ]
+      },
+      {
+        "attach": {
+          "session": "a",
+          "id": "u"
+        }
+      },
+      {
+        "screen": {
+          "id": "u"
+        }
+      },
+      {
+        "run": [
+          "lsc",
+          "-F",
+          "#{client_termname}|#{client_termfeatures}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "curly dbl dotdash \\e[4mu\\e[0m",
+          "\\e[4mpal\\e[0m rgb over",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[4:3mcurly\\e[0m \\e[4:2mdbl\\e[0m \\e[4:4mdot\\e[0;4:5mdash\\e[0m \\e[4mu\\e[0m",
+          "\\e[4mpal\\e[0m \\e[4:3mrgb\\e[0m over",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[30m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "screen",
+        "rows": [
+          "\\e[4:3mcurly\\e[0m \\e[4:2mdbl\\e[0m \\e[4:4mdot\\e[0;4:5mdash\\e[0m \\e[4mu\\e[0m",
+          "\\e[4m\\e[58;5;196mpal\\e[0m \\e[4:3m\\e[58;2;1;2;3mrgb\\e[0m \\e[5:3mover\\e[0m",
+          "",
+          "",
+          "",
+          "\\e[30m\\e[42m[a] \\e[4m0:w*\\e[0m\\e[42m"
+        ],
+        "cursor": [
+          0,
+          2
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "xterm-256color|bpaste,ccolour,clipboard,cstyle,focus,title\ntmux|bpaste,focus,title\nxterm-256color|bpaste,ccolour,clipboard,cstyle,focus,overline,title,usstyle\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

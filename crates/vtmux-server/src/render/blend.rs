@@ -211,6 +211,7 @@ mod tests {
             no_am: false,
             light_theme: false,
             isolates: false,
+            attrs: crate::render::Attrs::XTERM,
         }
     }
 
