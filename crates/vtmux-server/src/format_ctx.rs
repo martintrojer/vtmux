@@ -786,6 +786,8 @@ impl<'a> Ctx<'a> {
                 .collect::<Vec<_>>()
                 .join(" "),
             // format_cb_start_path (format.c:943-955).
+            // format_cb_pane_path: what OSC 7 set, else empty.
+            "pane_path" => p.term.pwd(),
             "pane_start_path" => p.cwd.to_string_lossy().into_owned(),
             "pane_tty" => p.tty.clone(),
             "pane_current_command" => {

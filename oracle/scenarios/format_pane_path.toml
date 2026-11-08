@@ -1,0 +1,17 @@
+name = "format_pane_path"
+# #{pane_path} is the path OSC 7 set, empty before (format.c format_cb_pane_path, screen_set_path);
+# a respawn keeps it (screen_reinit leaves the path).
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["select-pane", "-t", "a:w", "-T", "t"] },
+  { run = ["display", "-p", "-t", "a:w", "[#{pane_path}]#{?pane_path,set,unset}"] },
+  { run = ["respawn-pane", "-k", "-t", "a:w", "sh", "-c", "printf '\\033]7;file://host/tmp/x y\\007'; tmux wait-for -S one; exec cat -"] },
+  { wait_for = "one" },
+  { run = ["display", "-p", "-t", "a:w", "[#{pane_path}]#{?pane_path,set,unset}"] },
+  { run = ["respawn-pane", "-k", "-t", "a:w", "sh", "-c", "printf '\\033]7;/a/#(b)\\033\\\\'; tmux wait-for -S two; exec cat -"] },
+  { wait_for = "two" },
+  { run = ["display", "-p", "-t", "a:w", "[#{pane_path}]"] },
+  { run = ["respawn-pane", "-k", "-t", "a:w", "sh", "-c", "tmux wait-for -S three; exec cat -"] },
+  { wait_for = "three" },
+  { run = ["display", "-p", "-t", "a:w", "[#{pane_path}]"] },
+]
