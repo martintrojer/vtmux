@@ -1868,6 +1868,19 @@ fn terminal_features_apply_at_attach() {
     }
 }
 
+/// Whether the host has a terminfo entry for `term`: the reference tmux
+/// refuses a terminal it can't find (macOS's base set has no
+/// `rxvt-unicode-256color`), so a row that attaches under it can't be
+/// compared there. Assumed present when `infocmp` is not.
+fn host_has_terminfo(term: &str) -> bool {
+    std::process::Command::new("infocmp")
+        .arg(term)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_or(true, |s| s.success())
+}
+
 /// D-007: the terminals a tmux user's `TERM` names attach, with what their
 /// terminfo entries say (tty-term.c `tty_term_create`): the console has 8
 /// colours, no `smcup` (so `tty_start_tty` writes none) and no `kmous`; a VT
@@ -1878,6 +1891,9 @@ fn terminal_features_apply_at_attach() {
 fn terminals_tmux_knows_attach() {
     let fields = "#{client_termname}|#{client_termfeatures}|#{client_colours}|#{Ic:smcup}|#{Ic:kmous}|#{Ic:bce}|#{If:mouse}";
     for term in ["linux", "vt100", "vt220", "rxvt-unicode-256color", "tmux"] {
+        if !host_has_terminfo(term) {
+            continue;
+        }
         let mut seen = Vec::new();
         for bin in bins() {
             let w = World::new(bin.clone());
@@ -1963,6 +1979,9 @@ fn terminfo_keys_follow_the_terminal() {
         ("rxvt-unicode-256color", b"\x1b[7~", "Home"),
         ("rxvt-unicode-256color", b"\x1b[8~", "End"),
     ] {
+        if !host_has_terminfo(term) {
+            continue;
+        }
         for bin in bins() {
             let w = World::new(bin.clone());
             assert!(
@@ -4207,9 +4226,14 @@ fn set_titles_needs_the_title_feature() {
 #[test]
 fn config_causes_show_in_view_mode_once_attached() {
     let mut screens = Vec::new();
+    // One short path for both servers: the messages show it, a host's long
+    // temp dir (macOS's /var/folders/...) wraps on the screen where no
+    // replacement of it can match, and the two servers' random dirs differ.
+    let cfg_dir = PathBuf::from(format!("/tmp/vtmux-cc-{}", std::process::id()));
+    std::fs::create_dir_all(&cfg_dir).unwrap();
     for bin in bins() {
         let w = World::new(bin);
-        let conf = w.home.path().join("c.conf");
+        let conf = cfg_dir.join("c.conf");
         std::fs::write(
             &conf,
             "set -g status-right ''\nset -g status-left 'S '\nset -g nosuchopt 1\nset -g \"\\033[31mred\" 1\nset -g status-interval x\n",
@@ -4250,6 +4274,7 @@ fn config_causes_show_in_view_mode_once_attached() {
         c.exited(0);
         screens.push(seen);
     }
+    let _ = std::fs::remove_dir_all(&cfg_dir);
     assert!(screens[0][0].contains("nosuchopt"), "{}", screens[0][0]);
     assert_eq!(screens[0], screens[1], "vtmux (left) vs tmux 3.8 (right)");
 }
