@@ -64,6 +64,13 @@ pub fn reader_features() -> snap::Features {
     }
 }
 
+/// The terminal holds a very visible cursor
+/// ([`snap::CURSOR_VERY_VISIBLE_FEATURE`]).
+#[must_use]
+pub fn has_very_visible_cursor(t: &snap::TermState) -> bool {
+    t.cursor_style.very_visible
+}
+
 /// Whether `t` holds a page in Ghostty's form (the stream then requires
 /// [`ghostty_pages_requirement`]).
 #[must_use]
@@ -1453,6 +1460,7 @@ pub fn term_to_snapshot(term: &PaneTerm, form: Form) -> snap::TermState {
             blinking,
             blinking_set,
             option: option.into(),
+            very_visible: p.cursor_very_visible,
         },
         mouse: snap::term::MouseModes {
             tracking: match p.mouse.tracking {
@@ -1773,6 +1781,7 @@ pub fn term_from_snapshot_with(
             cs.blinking_set,
             narrow(cs.option, "cursor-style")?,
         ),
+        cursor_very_visible: cs.very_visible,
         mouse: vt::MouseModes {
             tracking: match t.mouse.tracking {
                 0 => vt::MouseTracking::None,

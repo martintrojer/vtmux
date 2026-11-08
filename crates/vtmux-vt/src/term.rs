@@ -1948,6 +1948,77 @@ impl PaneTerm {
         self.term.mode(Mode::BRACKETED_PASTE).unwrap_or(false)
     }
 
+    /// The screen modes tmux's `s->mode` holds that its formats read
+    /// (`#{wrap_flag}`, `#{pane_private_modes}`, ...; format.c:1482-1491,
+    /// 1837-1992, 2131-2206, 3441-3450).
+    #[must_use]
+    pub fn screen_modes(&self) -> ScreenModes {
+        let on = |m: Mode| self.term.mode(m).unwrap_or(false);
+        let c = self.cursor.get();
+        ScreenModes {
+            app_cursor: on(Mode::DECCKM),
+            app_keypad: on(Mode::KEYPAD_KEYS),
+            origin: on(Mode::ORIGIN),
+            wrap: on(Mode::WRAPAROUND),
+            insert: on(Mode::INSERT),
+            cursor_visible: on(Mode::CURSOR_VISIBLE),
+            focus: on(Mode::FOCUS_EVENT),
+            bracketed_paste: on(Mode::BRACKETED_PASTE),
+            sync: self.sync_held().is_some(),
+            theme_updates: on(Mode::COLOR_SCHEME_REPORT),
+            cursor_shape: match c.shape {
+                1 => CursorShape::Block,
+                2 => CursorShape::Underline,
+                3 => CursorShape::Bar,
+                _ => CursorShape::Default,
+            },
+            cursor_blinking: c.blinking,
+            cursor_blinking_set: c.blinking_set,
+            cursor_very_visible: c.very_visible,
+        }
+    }
+
+    /// The scroll region's top and bottom rows, inclusive (tmux's
+    /// `s->rupper`, `s->rlower`).
+    #[must_use]
+    pub fn scroll_region(&self) -> (u16, u16) {
+        match self.term.vtmux_state_export() {
+            Ok(st) => (st.raw.scroll_top, st.raw.scroll_bottom),
+            Err(_) => (0, self.rows().saturating_sub(1)),
+        }
+    }
+
+    /// The columns with a tab stop, in order (tmux's `s->tabs`).
+    #[must_use]
+    pub fn tab_stops(&self) -> Vec<u16> {
+        let Ok(st) = self.term.vtmux_state_export() else {
+            return Vec::new();
+        };
+        (0..st.raw.cols)
+            .filter(|&c| {
+                st.raw
+                    .tabstops
+                    .get(usize::from(c / 8))
+                    .is_some_and(|b| b & (1 << (c % 8)) != 0)
+            })
+            .collect()
+    }
+
+    /// `screen_reinit`'s `s->mode = MODE_CURSOR|MODE_WRAP` for the bits
+    /// vtmux holds itself: the cursor's blinking and very visible bits go,
+    /// its shape stays (screen.c:117). The caller feeds the rest.
+    pub fn reinit_cursor_modes(&mut self) {
+        let mut c = self.cursor.get();
+        c.reset();
+        self.cursor.set(c);
+    }
+
+    /// The cursor colour OSC 12 set (`s->ccolour`); `None` is unset.
+    #[must_use]
+    pub fn cursor_colour(&self) -> Option<palette::Rgb> {
+        self.scan.palette.state().cursor
+    }
+
     /// The mouse modes the program asked for, as tmux holds them: what
     /// `#{mouse_any_flag}` and the other `mouse_*_flag` formats read, what
     /// DECRQM `?1000`-`?1006` report, and what decides forwarding of
@@ -2510,6 +2581,47 @@ impl MouseModes {
     }
 }
 
+/// The cursor shape a program set with DECSCUSR (`s->cstyle`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorShape {
+    Default,
+    Block,
+    Underline,
+    Bar,
+}
+
+/// See [`PaneTerm::screen_modes`].
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScreenModes {
+    /// `MODE_KCURSOR` (DECCKM).
+    pub app_cursor: bool,
+    /// `MODE_KKEYPAD` (DECKPAM).
+    pub app_keypad: bool,
+    /// `MODE_ORIGIN` (DECOM).
+    pub origin: bool,
+    /// `MODE_WRAP` (DECAWM).
+    pub wrap: bool,
+    /// `MODE_INSERT` (IRM).
+    pub insert: bool,
+    /// `MODE_CURSOR` (DECTCEM).
+    pub cursor_visible: bool,
+    /// `MODE_FOCUSON`.
+    pub focus: bool,
+    /// `MODE_BRACKETPASTE`.
+    pub bracketed_paste: bool,
+    /// `MODE_SYNC`.
+    pub sync: bool,
+    /// `MODE_THEME_UPDATES`.
+    pub theme_updates: bool,
+    pub cursor_shape: CursorShape,
+    /// `MODE_CURSOR_BLINKING` and `MODE_CURSOR_BLINKING_SET`.
+    pub cursor_blinking: bool,
+    pub cursor_blinking_set: bool,
+    /// `MODE_CURSOR_VERY_VISIBLE`.
+    pub cursor_very_visible: bool,
+}
+
 /// tmux's cursor style state: `s->cstyle`, `MODE_CURSOR_BLINKING`,
 /// `MODE_CURSOR_BLINKING_SET`, and the `cursor-style` option they fall
 /// back to (input.c:1666-1680, 2553-2617).
@@ -2520,6 +2632,9 @@ struct CursorState {
     shape: u8,
     blinking: bool,
     blinking_set: bool,
+    /// `MODE_CURSOR_VERY_VISIBLE`: `CSI 34 l` sets it, `CSI 34 h` clears it
+    /// (input.c:1913-1915, 2010-2012).
+    very_visible: bool,
     /// The pane's `cursor-style` option, 0..=6.
     option: u8,
 }
@@ -2552,6 +2667,7 @@ impl CursorState {
     fn reset(&mut self) {
         self.blinking = false;
         self.blinking_set = false;
+        self.very_visible = false;
     }
 
     /// The `Ps` of the DECRQSS cursor reply (input.c:2571-2604).
@@ -3145,6 +3261,20 @@ impl AltModeScanner {
         }
     }
 
+    /// SM or RM: mode 34, the very visible cursor, is tmux's own
+    /// (input.c:1913-1915, 2010-2012; RM sets it).
+    fn ansi_mode(&mut self, set: bool) {
+        if let Some(params) = parse_params(&self.params) {
+            let mut c = self.cursor.get();
+            for p in params {
+                if p == Param::Num(34) {
+                    c.very_visible = !set;
+                }
+            }
+            self.cursor.set(c);
+        }
+    }
+
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
         if let Some(e) = self.csi_tmux_lacks(b) {
             return Some(e);
@@ -3200,6 +3330,10 @@ impl AltModeScanner {
                     self.cursor.set(c);
                     self.mouse.set(m);
                 }
+                None
+            }
+            (false, None, b'h' | b'l') if !self.csi_ignored => {
+                self.ansi_mode(b == b'h');
                 None
             }
             (false, None, b't') if !self.other && !self.csi_ignored => {

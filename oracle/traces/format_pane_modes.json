@@ -1,0 +1,551 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "format_pane_modes",
+  "inputs": {
+    "name": "format_pane_modes",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "select-pane",
+          "-t",
+          "a:w0",
+          "-T",
+          "t"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w0",
+          "#{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "w1",
+          "sh",
+          "-c",
+          "printf '\\033[?2004h\\033[?25l\\033[?12h\\033[34l'; tmux wait-for -S w1; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "w1"
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "w2",
+          "sh",
+          "-c",
+          "printf '\\033[5 q\\033[4h\\033[?1h\\033=\\033[?6h\\033[?7l'; tmux wait-for -S w2; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "w2"
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "w3",
+          "sh",
+          "-c",
+          "printf '\\033[?1000h\\033[?1006h\\033[?1004h\\033[?2031h\\033]12;red\\007\\033[3;10r'; tmux wait-for -S w3; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "w3"
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "w4",
+          "sh",
+          "-c",
+          "printf '\\033[3g\\033[5G\\033H\\033[20G\\033H\\033[3 q\\033[0 q\\033[34l\\033[34h'; tmux wait-for -S w4; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "w4"
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a",
+          "-n",
+          "w5",
+          "sh",
+          "-c",
+          "printf '\\033[3g\\033]12;#123456\\007\\033]112\\007\\033[5r'; tmux wait-for -S w5; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "w5"
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w1",
+          "#{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w2",
+          "#{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w3",
+          "#{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w4",
+          "#{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w5",
+          "#{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "cursor-colour",
+          "blue"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-p",
+          "-t",
+          "a:w4",
+          "cursor-colour",
+          "#abcdef"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w4",
+          "#{cursor_colour}"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w5",
+          "#{cursor_colour}"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a:w1"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w1",
+          "#{pane_mode} #{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "clock-mode",
+          "-t",
+          "a:w2"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w2",
+          "#{pane_mode} #{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "send-keys",
+          "-t",
+          "a:w1",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w1",
+          "#{pane_mode} #{bracket_paste_flag}|#{cursor_flag}|#{cursor_blinking}|#{cursor_very_visible}|#{cursor_shape}|#{insert_flag}|#{keypad_cursor_flag}|#{keypad_flag}|#{origin_flag}|#{wrap_flag}|#{pane_private_modes}|#{cursor_colour}|#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      },
+      {
+        "run": [
+          "resize-window",
+          "-t",
+          "a:w0",
+          "-x",
+          "100",
+          "-y",
+          "30"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w0",
+          "#{scroll_region_upper},#{scroll_region_lower}|#{pane_tabs}"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0|1|0|0|default|0|0|0|0|1|7,25|none|0,23|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "1|0|1|1|default|0|0|0|0|1|7,12,2004|none|0,23|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0|1|1|0|bar|1|1|1|1|0|1,6,25|none|0,23|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0|1|0|0|default|0|0|0|0|1|7,25,1000,1004,1006,2031|#ff0000|2,9|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0|1|1|0|default|0|0|0|0|1|7,25|none|0,23|4,19\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0|1|0|0|default|0|0|0|0|1|7,25|none|4,23|\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "#abcdef\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 21,
+      "observation": {
+        "kind": "cli",
+        "stdout": "blue\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 22,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 23,
+      "observation": {
+        "kind": "cli",
+        "stdout": "copy-mode 0|0|0|0|default|0|0|0|0|1|7,12,2004|blue|0,23|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 24,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 25,
+      "observation": {
+        "kind": "cli",
+        "stdout": "clock-mode 0|1|0|0|default|1|1|1|1|0|1,6,25|none|0,23|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 26,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 27,
+      "observation": {
+        "kind": "cli",
+        "stdout": " 1|0|1|1|default|0|0|0|0|1|7,12,2004|blue|0,23|8,16,24,32,40,48,56,64,72\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 28,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 29,
+      "observation": {
+        "kind": "cli",
+        "stdout": "0,29|8,16,24,32,40,48,56,64,72,80,88,96\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

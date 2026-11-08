@@ -1251,6 +1251,19 @@ impl Server {
         if !meta.requires.contains(&need) && terms.any(crate::snapshot_term::has_ghostty_pages) {
             meta.requires.push(need);
         }
+        let visible = snap::CURSOR_VERY_VISIBLE_FEATURE.to_string();
+        if panes
+            .iter()
+            .filter_map(|p| p.term.as_ref())
+            .chain(
+                clients
+                    .iter()
+                    .filter_map(|c| c.popup.as_ref()?.term.as_ref()),
+            )
+            .any(crate::snapshot_term::has_very_visible_cursor)
+        {
+            meta.requires.push(visible);
+        }
         let bar = snap::SCROLLBAR_FEATURE.to_string();
         if !meta.requires.contains(&bar)
             && panes.iter().any(|p| {

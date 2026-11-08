@@ -843,6 +843,58 @@ impl<'a> Ctx<'a> {
             "mouse_all_flag" => flag(p.term.mouse_modes().tracking == MouseTracking::All),
             "mouse_sgr_flag" => flag(p.term.mouse_modes().sgr),
             "mouse_utf8_flag" => flag(p.term.mouse_modes().utf8),
+            // format.c:1482-1491, 1837-1992, 2131-2140, 3441-3450. Those
+            // that read `wp->screen` see a mode's own screen while the pane
+            // is in one (`screen_init`: no bracketed paste, no blinking, the
+            // default shape).
+            "bracket_paste_flag" => flag(Self::pane_screen(p).bracketed_paste),
+            "cursor_blinking" => flag(Self::pane_screen(p).cursor_blinking),
+            "cursor_very_visible" => flag(Self::pane_screen(p).cursor_very_visible),
+            "cursor_shape" => match Self::pane_screen(p).cursor_shape {
+                vtmux_vt::CursorShape::Default => "default",
+                vtmux_vt::CursorShape::Block => "block",
+                vtmux_vt::CursorShape::Underline => "underline",
+                vtmux_vt::CursorShape::Bar => "bar",
+            }
+            .to_owned(),
+            "cursor_flag" => flag(p.term.screen_modes().cursor_visible),
+            "insert_flag" => flag(p.term.screen_modes().insert),
+            "keypad_cursor_flag" => flag(p.term.screen_modes().app_cursor),
+            "keypad_flag" => flag(p.term.screen_modes().app_keypad),
+            "origin_flag" => flag(p.term.screen_modes().origin),
+            "wrap_flag" => flag(p.term.screen_modes().wrap),
+            "pane_private_modes" => private_modes(p.term.screen_modes(), p.term.mouse_modes()),
+            // format.c:2833-2848, 1050-1077 (empty without tab stops).
+            "scroll_region_upper" => p.term.scroll_region().0.to_string(),
+            "scroll_region_lower" => p.term.scroll_region().1.to_string(),
+            "pane_tabs" => {
+                let tabs = p.term.tab_stops();
+                if tabs.is_empty() {
+                    return None;
+                }
+                tabs.iter()
+                    .map(u16::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+            // format_cb_cursor_colour (format.c:1295-1306): what OSC 12 set,
+            // else `cursor-colour` (`screen_set_default_cursor`). Copy and
+            // view mode's screen takes the global window option
+            // (window-copy.c:590-591), other modes' none (`screen_init`).
+            "cursor_colour" => match p.modes.first().map(crate::mode::PaneMode::name) {
+                Some("copy-mode" | "view-mode") => {
+                    cursor_colour_option(&self.option_text(TreeId::GlobalWindow, "cursor-colour"))
+                }
+                Some(_) => "none".to_owned(),
+                None => match p.term.cursor_colour() {
+                    Some((red, green, blue)) => {
+                        vtmux_core::colour::Colour::Rgb(red, green, blue).to_string()
+                    }
+                    None => {
+                        cursor_colour_option(&self.option_text(TreeId::Pane(p.id), "cursor-colour"))
+                    }
+                },
+            },
             "pane_key_mode" => match self.model.pane_key_mode(p.id)? {
                 vtmux_vt::KeyMode::Standard => "VT10x",
                 vtmux_vt::KeyMode::Extended1 => "Ext 1",
@@ -970,6 +1022,31 @@ impl Ctx<'_> {
             .or_else(|| self.window_value(name))
             .or_else(|| self.pane_value(name))
             .or_else(|| self.buffer_value(name))
+    }
+
+    /// The modes of the screen a pane shows (`wp->screen`): its own, or a
+    /// mode's (`screen_init`) while it is in one.
+    fn pane_screen(p: &crate::model::Pane) -> vtmux_vt::ScreenModes {
+        let m = p.term.screen_modes();
+        if p.modes.is_empty() {
+            return m;
+        }
+        vtmux_vt::ScreenModes {
+            bracketed_paste: false,
+            cursor_blinking: false,
+            cursor_blinking_set: false,
+            cursor_very_visible: false,
+            cursor_shape: vtmux_vt::CursorShape::Default,
+            ..m
+        }
+    }
+
+    /// An option's value as `show-options` gives it, inherited.
+    fn option_text(&self, tree: TreeId, name: &str) -> String {
+        self.options
+            .get(tree, name)
+            .map(|e| e.value.to_text(e.def, None, false))
+            .unwrap_or_default()
     }
 
     /// The buffer variables (format.c:1493-1535).
@@ -1261,4 +1338,45 @@ impl FormatContext for Ctx<'_> {
             entries,
         })
     }
+}
+
+/// `format_cb_pane_private_modes` (format.c:2155-2206): the DEC private
+/// modes set, by number in tmux's table order; the cursor blinking only
+/// when the program set it (`MODE_CURSOR_BLINKING_SET`), not when it comes
+/// with a DECSCUSR style.
+fn private_modes(m: vtmux_vt::ScreenModes, mouse: vtmux_vt::MouseModes) -> String {
+    let table = [
+        (m.app_cursor, 1),
+        (m.origin, 6),
+        (m.wrap, 7),
+        (m.cursor_blinking && m.cursor_blinking_set, 12),
+        (m.cursor_visible, 25),
+        (mouse.tracking == MouseTracking::Standard, 1000),
+        (mouse.tracking == MouseTracking::Button, 1002),
+        (mouse.tracking == MouseTracking::All, 1003),
+        (m.focus, 1004),
+        (mouse.utf8, 1005),
+        (mouse.sgr, 1006),
+        (m.bracketed_paste, 2004),
+        (m.sync, 2026),
+        (m.theme_updates, 2031),
+    ];
+    table
+        .iter()
+        .filter(|(on, _)| *on)
+        .map(|(_, n)| n.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// `colour_tostring` of `cursor-colour` as `screen_set_default_cursor`
+/// reads it (`style_apply` over `style_parse_colour`, style.c:476-497):
+/// empty is none (-1), a colour it cannot parse leaves the default cell's.
+fn cursor_colour_option(text: &str) -> String {
+    if text.is_empty() {
+        return "none".to_owned();
+    }
+    vtmux_core::colour::Colour::parse(text)
+        .unwrap_or(vtmux_core::colour::Colour::Default)
+        .to_string()
 }

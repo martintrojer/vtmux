@@ -108,10 +108,16 @@ pub const HEADER_LEN: usize = 8 + 4 + 8 + 32;
 /// It keeps the names no writer lists any more, for the streams of the
 /// builds that did.
 pub const KNOWN_FEATURES: &[&str] = &[
+    CURSOR_VERY_VISIBLE_FEATURE,
     SCROLLBAR_FEATURE,
     TERM_QUERIES_FEATURE,
     TERMINAL_TITLE_FEATURE,
 ];
+
+/// The [`Meta::requires`] name of a pane terminal's very visible cursor
+/// ([`term::CursorStyle::very_visible`]), listed when some terminal's is
+/// set.
+pub const CURSOR_VERY_VISIBLE_FEATURE: &str = "cursor-very-visible";
 
 /// The [`Meta::requires`] name of a pane's auto-hide scrollbar state
 /// ([`Pane::scrollbar_visible`] and the fields after it), listed when

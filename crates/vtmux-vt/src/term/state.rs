@@ -356,6 +356,8 @@ pub struct PaneState {
     pub charset: (bool, bool, bool, (bool, bool, bool)),
     /// tmux's cursor style: shape, blinking, blinking set, option.
     pub cursor_style: (u8, bool, bool, u8),
+    /// tmux's `MODE_CURSOR_VERY_VISIBLE` (`CSI 34 l`).
+    pub cursor_very_visible: bool,
     pub mouse: MouseModes,
     pub key_mode: KeyMode,
     pub extended_keys: ExtendedKeys,
@@ -1236,6 +1238,7 @@ impl PaneTerm {
                 .and_then(|(pin, retained)| Some((screen_y(pin)?, *retained))),
             charset: (c.g0, c.g1, c.shifted, c.saved),
             cursor_style: (cs.shape, cs.blinking, cs.blinking_set, cs.option),
+            cursor_very_visible: cs.very_visible,
             mouse: self.mouse.get(),
             key_mode: self.scan.key_mode,
             extended_keys: self.scan.extended_keys,
@@ -1321,6 +1324,7 @@ impl PaneTerm {
             shape,
             blinking,
             blinking_set,
+            very_visible: p.cursor_very_visible,
             option,
         });
         self.mouse.set(p.mouse);

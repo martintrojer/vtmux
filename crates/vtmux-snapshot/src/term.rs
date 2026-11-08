@@ -225,6 +225,9 @@ record! {
         3 => one blinking_set: bool,
         /// The pane's `cursor-style` option, 0..=6.
         4 => one option: u32,
+        /// `MODE_CURSOR_VERY_VISIBLE` (`CSI 34 l`). Written under
+        /// [`crate::CURSOR_VERY_VISIBLE_FEATURE`] when set.
+        5 => one very_visible: bool,
     }
 }
 
@@ -546,6 +549,7 @@ pub(crate) mod tests {
     }
 
     /// A terminal state with every field set.
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn sample_term() -> TermState {
         TermState {
             cols: 20,
@@ -599,6 +603,7 @@ pub(crate) mod tests {
                 blinking: true,
                 blinking_set: true,
                 option: 4,
+                very_visible: false,
             },
             mouse: MouseModes {
                 tracking: 1002,
@@ -735,6 +740,7 @@ pub(crate) mod tests {
         }];
         t.history.max_bytes = Some(1 << 20);
         t.history.hscrolled = Some(2);
+        t.cursor_style.very_visible = true;
         let alt = t.alt_entry.as_mut().unwrap();
         alt.entry_row = Some(4);
         alt.has_saved = true;
