@@ -844,7 +844,9 @@ fn character(bytes: &[u8], expired: bool) -> Option<(Key, usize)> {
     if let Ok(s) = std::str::from_utf8(bytes.get(..len).unwrap_or(bytes)) {
         return Some((key(Base::Char(s.chars().next()?)), len));
     }
-    Some((key(Base::Char(char::REPLACEMENT_CHARACTER)), 1))
+    // tty-keys.c:930-937: not a key and not UTF-8, so the first byte is
+    // the key as it is.
+    Some((key(Base::Byte(b)), 1))
 }
 
 #[cfg(test)]
@@ -879,6 +881,23 @@ mod tests {
         assert_eq!(
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]
+        );
+    }
+
+    /// tty-keys.c:930-937: bytes that are not UTF-8 are keys one byte at
+    /// a time, of their value, which no character is: a status prompt
+    /// drops them (prompt.c:1492-1501).
+    #[test]
+    fn invalid_utf8_is_one_raw_key_per_byte() {
+        let mut d = Decoder::default();
+        d.feed(b"\xe6\x85_");
+        assert_eq!(
+            d.drain(Instant::now()),
+            vec![
+                Event::Key(key(Base::Byte(0xe6))),
+                Event::Key(key(Base::Byte(0x85))),
+                Event::Key(key(Base::Char('_')))
+            ]
         );
     }
 

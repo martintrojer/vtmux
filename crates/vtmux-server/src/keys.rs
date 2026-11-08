@@ -40,6 +40,10 @@ const KEYPAD_NUMERIC: &[u8; 16] = b"/*-789+456123\n0.";
 pub enum Base {
     Char(char),
     Named(Named),
+    /// A byte from the terminal that does not start valid UTF-8, as the
+    /// key of its value (tty-keys.c:930-937, the fallback after
+    /// `tty_keys_next1` finds no key): a Unicode key with no character.
+    Byte(u8),
 }
 
 #[expect(
@@ -69,6 +73,7 @@ impl Key {
         };
         let mut k = match self.base {
             Base::Char(c) => CoreKey::from_char(c),
+            Base::Byte(b) => CoreKey::from_code(u64::from(b)),
             Base::Named(n) => match n {
                 F(n) => CoreKey::function_key(n),
                 Insert => CoreKey::IC,
@@ -105,6 +110,8 @@ impl Key {
         let base = key.base();
         let base = if let Some(c) = base.as_char() {
             Base::Char(c)
+        } else if let Ok(b) = u8::try_from(base.code()) {
+            Base::Byte(b)
         } else {
             let named = [
                 (CoreKey::IC, Named::Insert),
@@ -390,6 +397,7 @@ pub fn encode_into(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
     }
     match key.base {
         Base::Char(c) => encode_char(c, &key, modes, out),
+        Base::Byte(_) => encode_byte(&key, modes, out),
         Base::Named(n) => {
             // input-keys.c:658-671: no entry for a non-implied meta key, so
             // write Escape and then the key without meta.
@@ -524,6 +532,27 @@ fn encode_char(c: char, key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
         }
         KeyMode::Extended1 | KeyMode::Standard => encode_vt10x(c, key, out),
     }
+}
+
+/// A byte that is not UTF-8. tmux's Unicode key type is 0, so its key
+/// 0x80-0xff is a Unicode key whose packed UTF-8 (`utf8_to_data`) is
+/// empty: unmodified it writes nothing (input-keys.c:627-646), with Meta
+/// in the standard mode (or the extended mode 1, which sends Meta keys
+/// so) just the Escape (`input_key_vt10x`, 482-505), and an extended
+/// sequence fails on it (`input_key_extended`, 458-464).
+fn encode_byte(key: &Key, modes: KeyModes, out: &mut Vec<u8>) -> bool {
+    if !key.ctrl && !key.meta && !key.shift {
+        return true;
+    }
+    let vt10x = match modes.key_mode {
+        KeyMode::Standard => true,
+        KeyMode::Extended1 => key.meta && !key.ctrl,
+        KeyMode::Extended2 => false,
+    };
+    if vt10x && key.meta {
+        out.push(0x1b);
+    }
+    vt10x
 }
 
 /// `input_key_mode1` (input-keys.c:544-568): the keys modifyOtherKeys 1
@@ -730,6 +759,35 @@ mod tests {
             assert_eq!(Key::from_core(core), Some(key), "{name}");
         }
         assert_eq!(Key::from_core(CoreKey::NONE), None);
+    }
+
+    /// A byte that does not start UTF-8 is tmux's key of that value: a
+    /// Unicode key (type 0) with no UTF-8 in it, so it has an empty name
+    /// (key-string.c:437-443), no character, and a pane gets nothing for
+    /// it but the Escape of Meta (input-keys.c:482-505, 627-646).
+    #[test]
+    fn invalid_utf8_bytes_are_empty_keys() {
+        let byte = |meta, ctrl| Key {
+            base: Base::Byte(0xe6),
+            ctrl,
+            meta,
+            shift: false,
+            esc_prefix: false,
+        };
+        let core = byte(false, false).to_core();
+        assert_eq!((core.code(), core.to_string()), (0xe6, String::new()));
+        assert_eq!(core.as_char(), None);
+        assert_eq!(Key::from_core(core), Some(byte(false, false)));
+        let standard = KeyModes::default();
+        assert_eq!(encode(&byte(false, false), standard), b"");
+        assert_eq!(encode(&byte(true, false), standard), b"\x1b");
+        assert_eq!(encode(&byte(false, true), standard), b"");
+        let extended = KeyModes {
+            key_mode: KeyMode::Extended2,
+            ..KeyModes::default()
+        };
+        assert!(encode_into(&byte(false, false), extended, &mut Vec::new()));
+        assert!(!encode_into(&byte(true, false), extended, &mut Vec::new()));
     }
 
     #[test]

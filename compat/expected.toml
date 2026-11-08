@@ -387,8 +387,7 @@ status = "pass"
 status = "pass"
 
 [tests."prompt-keys.sh"]
-status = "xfail"
-reason = "the mode prompts pass; the status-line prompt's invalid-UTF-8 append shows two U+FFFD before the `_`: vtmux decodes a byte that starts no UTF-8 as U+FFFD, tmux as the key of its value (tty-keys.c:930-937), a Unicode key with no character that prompt.c:1492-1501 drops"
+status = "pass"
 
 [tests."prompt-mechanics.sh"]
 status = "pass"
