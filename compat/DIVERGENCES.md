@@ -396,3 +396,11 @@ product reasons" category.
 - vtmux behaviour: the client exits 0 with `%exit`; the server, its sessions and the other clients stay.
 - Evidence: CI failure of `pause_after_pauses_a_pane_the_client_is_behind_on` (tmux's exit 1, vtmux 0). The reference tmux 3.8 with `fatalx` also writing to a file, 12 runs at a time under 48 busy loops: the old test hit the crash in 2 of 360 runs (`not enough data: 0 < 2730`, `CLIENT_EXIT` set, client offset = queued = buffer length, one block of 4095 bytes left), 0 of 360 with the pane turned off first; `stdin_eof_while_output_is_queued_keeps_the_server` against it crashed 4 of 360 (blocks of 289, 866 and 2730 bytes).
 - Category: Do not copy tmux bug (the server exits and every session is lost).
+
+### D-049: copying a line wrapped before a wide character that did not fit leaves out tmux's space
+
+- Test / assertion: none; found by the copy-mode differential audit (`select-line`, `copy-selection`, `show-buffer`).
+- tmux behaviour: a wide character that does not fit the rest of a row wraps to the next and leaves the last cell unwritten (`screen_write_cell`, screen-write.c:2706-2711). `window_copy_copy_line` copies a wrapped line up to `cellsize` (window-copy.c:6236-6241), and `grid_expand_line` grows a line written past half its width to the whole width (grid.c), so the unwritten cell is copied as a space. After a reflow the line is rebuilt with `cellsize` equal to `cellused` (`grid_reflow_join`, `grid_reflow_split`) and the space is gone, or comes back elsewhere, depending on the widths it went through.
+- vtmux behaviour: the cell is Ghostty's spacer head, which no copy, search or capture counts as written, so the copy has no space, whatever the resizes. The search already reads it as tmux's blank.
+- Evidence: reference tmux 3.8, 12x6 pane, `printf 'abcdefghijk日z\n'`, `copy-mode`, `history-top`, `select-line`, `copy-selection`: tmux `abcdefghijk 日z`, vtmux `abcdefghijk日z`. After `resize-window -x 30` and back to 12, tmux `abcdefghijk日z` too; after 12 to 13, tmux `abcdefghijk日 z`. `capture-pane -pJ` gives `abcdefghijk日z` in both.
+- Category: Deferred (matching it needs tmux's `cellsize` for every row, through every reflow).
