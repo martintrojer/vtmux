@@ -1,0 +1,164 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "keys_escape_time",
+  "inputs": {
+    "name": "keys_escape_time",
+    "size": [
+      40,
+      6
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "40",
+          "-y",
+          "5",
+          "sh",
+          "-c",
+          "stty raw -echo; tmux wait-for -S raw; LC_ALL=C exec cat -v"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "status-right",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-s",
+          "escape-time",
+          "8000"
+        ]
+      },
+      {
+        "run": [
+          "bind",
+          "-n",
+          "M-x",
+          "set",
+          "-g",
+          "@k",
+          "meta"
+        ]
+      },
+      {
+        "wait_for": "raw"
+      },
+      {
+        "attach": {
+          "session": "a"
+        }
+      },
+      {
+        "keys": "<"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "\u001b"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "keys": "x>"
+      },
+      {
+        "settle": {}
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@k"
+        ]
+      },
+      {
+        "run": [
+          "capture-pane",
+          "-p",
+          "-t",
+          "a"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "meta\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "<>\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

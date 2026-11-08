@@ -233,6 +233,9 @@ pub struct Decoder {
     /// A pane's request went to the terminal and is not answered yet
     /// (`!TAILQ_EMPTY(&c->input_requests)`); the server keeps it current.
     pub requests_out: bool,
+    /// The `escape-time` option, which the server keeps current; `None`
+    /// is its default.
+    pub escape_time: Option<Duration>,
 }
 impl Decoder {
     /// The startup queries went to the terminal (DA, DA2, XTVERSION and
@@ -322,7 +325,20 @@ impl Decoder {
             // terminal leaves it unanswered.
             || self.winsize_query
             || (self.pasting && b"\x1b[201~".starts_with(&self.bytes) && self.bytes.len() < 6);
-        Some(start + if waiting { REPLY_DELAY } else { ESCAPE_TIME })
+        // tty-keys.c:990-1012: escape-time, 1 ms for 0, at least 500 ms
+        // while a reply may still come.
+        let delay = self
+            .escape_time
+            .unwrap_or(ESCAPE_TIME)
+            .max(Duration::from_millis(1));
+        Some(
+            start
+                + if waiting {
+                    delay.max(REPLY_DELAY)
+                } else {
+                    delay
+                },
+        )
     }
     /// The events in what has come so far, as [`Self::drain_with_bytes`]
     /// without the bytes.
@@ -1048,6 +1064,40 @@ mod tests {
             d.drain(now + Duration::from_millis(11)),
             vec![Event::Key(key(Base::Char('\x1b')))]
         );
+    }
+
+    /// tty-keys.c:990-1012: a partial key waits `escape-time` (1 ms for
+    /// 0), and at least 500 ms while a startup reply may still come.
+    #[test]
+    fn partial_keys_wait_escape_time() {
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        for (option, want) in [
+            (None, ms(10)),
+            (Some(ms(0)), ms(1)),
+            (Some(ms(3000)), ms(3000)),
+        ] {
+            let mut d = Decoder {
+                escape_time: option,
+                ..Decoder::default()
+            };
+            d.feed(b"\x1b");
+            assert_eq!(d.drain(now), Vec::new());
+            assert_eq!(d.deadline(), Some(now + want), "{option:?}");
+            assert_eq!(d.drain(now + want.saturating_sub(ms(1))), Vec::new());
+            assert_eq!(
+                d.drain(now + want),
+                vec![Event::Key(key(Base::Char('\x1b')))]
+            );
+        }
+        let mut d = Decoder {
+            escape_time: Some(ms(0)),
+            ..Decoder::default()
+        };
+        d.query_sent(now);
+        d.feed(b"\x1b");
+        assert_eq!(d.drain(now), Vec::new());
+        assert_eq!(d.deadline(), Some(now + ms(500)));
     }
 
     /// `tty_keys_next` (tty-keys.c:900-933): after an Escape only the key

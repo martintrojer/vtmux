@@ -2568,6 +2568,14 @@ impl Server {
         self.flush_client(id);
     }
 
+    /// The `escape-time` server option.
+    fn escape_time(&self) -> Duration {
+        let ms = self
+            .model
+            .number_option(vtmux_core::options::TreeId::Server, "escape-time");
+        Duration::from_millis(u64::try_from(ms).unwrap_or(0))
+    }
+
     /// Input from an attached terminal client: decode it into keys
     /// (tty-keys.c) and hand each to the key tables
     /// ([`Server::handle_key`], `server_client_key_callback`).
@@ -2583,10 +2591,12 @@ impl Server {
             return Ok(());
         };
         self.model.current_of(s).ok_or(EdgeError::NoCurrentTarget)?;
+        let escape_time = self.escape_time();
         let c = self
             .clients
             .get_mut(&id)
             .ok_or(EdgeError::NoCurrentClient)?;
+        c.decoder.escape_time = Some(escape_time);
         c.decoder.feed(bytes);
         let now = Instant::now();
         let events = c.decoder.drain_with_bytes(now);

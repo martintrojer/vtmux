@@ -1,0 +1,23 @@
+# escape-time is how long a typed Escape waits for the key it may start
+# (tty-keys.c tty_keys_next, partial_key): with 8000 ms, an Escape and an
+# `x` typed seconds apart are still M-x, whose root binding runs, and the
+# pane gets nothing. The settle between them waits out its 3 s reaction
+# limit (the Escape alone draws nothing).
+name = "keys_escape_time"
+size = [40, 6]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "40", "-y", "5", "sh", "-c", "stty raw -echo; tmux wait-for -S raw; LC_ALL=C exec cat -v"] },
+  { run = ["set", "-g", "status-right", ""] },
+  { run = ["set", "-s", "escape-time", "8000"] },
+  { run = ["bind", "-n", "M-x", "set", "-g", "@k", "meta"] },
+  { wait_for = "raw" },
+  { attach = { session = "a" } },
+  { keys = "<" },
+  { settle = {} },
+  { keys = "\u001b" },
+  { settle = {} },
+  { keys = "x>" },
+  { settle = {} },
+  { run = ["show", "-gv", "@k"] },
+  { run = ["capture-pane", "-p", "-t", "a"] },
+]
