@@ -3441,6 +3441,7 @@ impl AltModeScanner {
         Some(ScanEvent::EraseChars)
     }
 
+    #[allow(clippy::too_many_lines)] // one arm per CSI final byte
     fn csi_event(&mut self, b: u8) -> Option<ScanEvent> {
         if let Some(e) = self.csi_tmux_lacks(b) {
             return Some(e);
@@ -4404,15 +4405,12 @@ mod tests {
         let modes = |bytes: &[u8]| {
             let mut t = PaneTerm::new(20, 3, 100);
             t.feed(bytes);
-            (t.screen_modes(), t.take_replies())
+            (t.screen_modes(), t.take_replies(), t.scroll_region())
         };
-        let (m, _) = modes(b"\x1b[?7s\x1b[?7l\x1b[?7r");
+        let (m, ..) = modes(b"\x1b[?7s\x1b[?7l\x1b[?7r");
         assert!(!m.wrap);
-        let (m, _) = modes(b"\x1b[?25l\x1b[4h\x1b[2;3r\x1b[!p");
-        assert_eq!(
-            (m.cursor_visible, m.insert, m.scroll_region),
-            (false, true, (1, 2))
-        );
+        let (m, _, region) = modes(b"\x1b[?25l\x1b[4h\x1b[2;3r\x1b[!p");
+        assert_eq!((m.cursor_visible, m.insert, region), (false, true, (1, 2)));
         assert_eq!(modes(b"\x1b[=c\x1b[>1u\x1b[?u").1, Vec::<u8>::new());
     }
 
