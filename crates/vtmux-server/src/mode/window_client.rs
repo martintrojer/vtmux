@@ -274,6 +274,8 @@ fn client_ctx<'a>(source: &Source<'a>, view: &ClientView) -> crate::format_ctx::
     let mut ctx = crate::format_ctx::Ctx::new(source.model, source.info, source.env, found);
     ctx.clients = std::rc::Rc::clone(source.clients.views());
     ctx.client = Some(view.clone());
+    // format_defaults(ft, item->c, NULL, 0, NULL) (window-client.c:382).
+    ctx.kind = crate::format_ctx::Kind::Unknown;
     ctx
 }
 

@@ -73,7 +73,9 @@ pub fn list_keys(
 ) -> Result<(), CmdError> {
     let tc = server.target_client(item.client, item.origin);
     let listed = {
-        let ctx = server.format_ctx(found, tc);
+        let mut ctx = server.format_ctx(found, tc);
+        // format_defaults(ft, tc, NULL, NULL, NULL) (cmd-list-keys.c:235).
+        ctx.kind = crate::format_ctx::Kind::Unknown;
         server
             .key_bindings
             .list_keys(args, global_prefix(server), &ctx)

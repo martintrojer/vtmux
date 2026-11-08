@@ -133,6 +133,15 @@ impl ClientView {
     }
 }
 
+/// What a format tree describes (`ft->type`, `FORMAT_TYPE_*`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Unknown,
+    Session,
+    Window,
+    Pane,
+}
+
 /// One expansion's view: the model plus the target (`format_defaults(ft,
 /// c, s, wl, wp)`, which fills a missing window or pane from the session).
 pub struct Ctx<'a> {
@@ -141,6 +150,9 @@ pub struct Ctx<'a> {
     pub global_env: &'a Environ,
     pub options: &'a OptionsStore,
     pub target: Found,
+    /// What the tree describes (`ft->type`), read by `#{session_format}`,
+    /// `#{window_format}` and `#{pane_format}`.
+    pub kind: Kind,
     /// Extra variables (`line` for `list-*`).
     pub extra: Vec<(std::borrow::Cow<'static, str>, String)>,
     /// The attached clients, in connection order (`#{L:...}`).
@@ -168,6 +180,17 @@ impl<'a> Ctx<'a> {
         global_env: &'a Environ,
         target: Found,
     ) -> Self {
+        // format_defaults (format.c:7006-7013): the type is the deepest part
+        // given, before the rest is filled in.
+        let kind = if target.pane.is_some() {
+            Kind::Pane
+        } else if target.index.is_some() || target.window.is_some() {
+            Kind::Window
+        } else if target.session.is_some() {
+            Kind::Session
+        } else {
+            Kind::Unknown
+        };
         // format_defaults (format.c:7015-7020): fill window and pane from the
         // session.
         let mut target = target;
@@ -189,6 +212,7 @@ impl<'a> Ctx<'a> {
             global_env,
             options: &model.options,
             target,
+            kind,
             extra: Vec::new(),
             clients: Rc::from([]),
             client: None,
@@ -293,10 +317,6 @@ impl<'a> Ctx<'a> {
             // the peer's uid is the server's.
             "client_uid" => rustix::process::getuid().as_raw().to_string(),
             "client_user" => sys::user::current_user()?.name,
-            "client_mode_format" => {
-                "#[fg=themelightgrey]#{t/p:client_activity}: session #[default]#{session_name}"
-                    .to_owned()
-            }
             _ => return None,
         })
     }
@@ -924,6 +944,16 @@ impl Ctx<'_> {
             "config_files" => Some(self.info.config_files.clone()),
             "current_file" => self.info.current_file.clone(),
             "host" => Some(self.info.host.clone()),
+            "server_sessions" => Some(self.model.sessions.len().to_string()),
+            "next_session_id" => Some(self.model.session_ids.peek().to_string()),
+            // Built without sixel (format.c `format_cb_sixel_support`).
+            "sixel_support" => Some("0".to_owned()),
+            "buffer_mode_format" => Some(crate::mode::window_buffer::DEFAULT_FORMAT.to_owned()),
+            "client_mode_format" => Some(crate::mode::window_client::DEFAULT_FORMAT.to_owned()),
+            "tree_mode_format" => Some(crate::mode::window_tree::DEFAULT_FORMAT.to_owned()),
+            "session_format" => Some(u8::from(self.kind == Kind::Session).to_string()),
+            "window_format" => Some(u8::from(self.kind == Kind::Window).to_string()),
+            "pane_format" => Some(u8::from(self.kind == Kind::Pane).to_string()),
             "host_short" => Some(
                 self.info
                     .host

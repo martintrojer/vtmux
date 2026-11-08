@@ -3412,7 +3412,9 @@ impl Server {
             .get(tree, "set-titles-string")
             .map(|e| e.value.to_text(e.def, None, false))
             .unwrap_or_default();
-        let ctx = self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
+        let mut ctx = self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
+        // format_defaults(ft, c, NULL, NULL, NULL) (server-client.c:2624).
+        ctx.kind = crate::format_ctx::Kind::Unknown;
         let title = vtmux_core::format::expand_time(&template, &ctx);
         let client = self.clients.get_mut(&id)?;
         if client.title.as_deref() == Some(title.as_str()) {
@@ -3773,8 +3775,9 @@ impl Server {
             let mut ctx =
                 self.format_ctx(crate::target::Found::from_session(&self.model, s), Some(id));
             // status_redraw (status.c:241-244): the client's tree, FORMAT_STATUS
-            // and maybe FORMAT_FORCE.
+            // and maybe FORMAT_FORCE, format_defaults(ft, c, NULL, NULL, NULL).
             ctx.jobs = Some(jobs);
+            ctx.kind = crate::format_ctx::Kind::Unknown;
             status.draw(&source, &mut ctx, s, caps, screen, lines, top);
         }
         if let Some(c) = self.clients.get_mut(&id) {

@@ -98,6 +98,8 @@ pub fn exec(
         }
         let found = session.map_or_else(Found::default, |s| Found::from_session(&server.model, s));
         let mut ctx = server.format_ctx(found, Some(*id));
+        // format_defaults(ft, c, NULL, NULL, NULL) (cmd-list-clients.c:90).
+        ctx.kind = crate::format_ctx::Kind::Unknown;
         ctx.extra.push(("line".into(), i.to_string()));
         if let Some(f) = filter {
             let v = format::expand_str(f, &ctx);
