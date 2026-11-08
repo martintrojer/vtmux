@@ -190,6 +190,11 @@ pub(crate) fn target_client(
 }
 
 impl Pending {
+    /// The command waiting on the prompt; `None` with `-b`.
+    pub(crate) fn step(&self) -> Option<StepId> {
+        self.step
+    }
+
     /// `cmd_command_prompt_callback`: collect the answer; after the last
     /// prompt (or on an incremental prompt's edit), fill the template and
     /// queue the commands for client `c`.

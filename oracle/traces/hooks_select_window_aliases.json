@@ -1,0 +1,307 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "hooks_select_window_aliases",
+  "inputs": {
+    "name": "hooks_select_window_aliases",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:1",
+          "-n",
+          "w1",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-t",
+          "a:2",
+          "-n",
+          "w2",
+          "exec cat"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "after-select-window",
+          "set -agF @log 'sw#{window_index}[#{hook_arguments}]|'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "after-next-window",
+          "set -ag @log 'NEXT|'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "after-previous-window",
+          "set -ag @log 'PREV|'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "after-last-window",
+          "set -ag @log 'LAST|'"
+        ]
+      },
+      {
+        "run": [
+          "next-window",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "next-window",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "previous-window",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "last-window",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-n",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-l",
+          "-t",
+          "a"
+        ]
+      },
+      {
+        "run": [
+          "select-window",
+          "-t",
+          "a:0"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "show-hooks",
+          "-g",
+          "after-next-window"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: after-next-window\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: after-previous-window\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: after-last-window\n",
+        "exit": 1
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "sw1[-t a]|sw2[-t a]|sw1[-t a]|sw2[-t a]|sw0[-n -t a]|sw2[-l -t a]|sw0[-t a:0]|\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "invalid option: after-next-window\n",
+        "exit": 1
+      }
+    }
+  ]
+}

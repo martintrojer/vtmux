@@ -582,7 +582,10 @@ impl Server {
         c.attached?;
         if c.popup.is_some() {
             Some("a popup")
-        } else if c.status.prompt().is_some() || c.prompt_owner.is_some() {
+        } else if c.status.prompt().is_some()
+            || c.prompt_owner.is_some()
+            || self.pane_prompt_waits_on(id)
+        {
             Some("a prompt")
         } else if self
             .client_window(id)
@@ -592,6 +595,17 @@ impl Server {
         } else {
             None
         }
+    }
+
+    /// Whether a prompt in a pane (`command-prompt -P`, as copy-mode-vi's
+    /// `/` opens; cmd-command-prompt.c:94-110) holds a command in client
+    /// `id`'s queue.
+    fn pane_prompt_waits_on(&self, id: ClientId) -> bool {
+        self.model
+            .panes
+            .values()
+            .filter_map(|p| p.prompt_owner.as_ref()?.step())
+            .any(|step| self.cmdq.queue_of(step) == Some(Some(id)))
     }
 
     /// What an upgrade now would change for a client to see, for

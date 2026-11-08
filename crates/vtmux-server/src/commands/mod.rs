@@ -341,13 +341,18 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
     server.drain_events();
     if !item.no_hooks {
         let hook = match &result {
-            // new-pane fires split-window's hook (cmd-split-window.c:314).
-            Ok(()) if call.entry.name == "new-pane" && item.hook_target.is_some() => {
-                Some("after-split-window".to_owned())
-            }
-            Ok(()) if call.entry.after_hook() || item.hook_target.is_some() => {
-                Some(format!("after-{}", call.entry.name))
-            }
+            // A command that fires its own hook names it: new-pane fires
+            // split-window's (cmd-split-window.c:315), next-window,
+            // previous-window and last-window select-window's
+            // (cmd-select-window.c:125).
+            Ok(()) if item.hook_target.is_some() => Some(match call.entry.name {
+                "new-pane" => "after-split-window".to_owned(),
+                "next-window" | "previous-window" | "last-window" => {
+                    "after-select-window".to_owned()
+                }
+                name => format!("after-{name}"),
+            }),
+            Ok(()) if call.entry.after_hook() => Some(format!("after-{}", call.entry.name)),
             Err(CmdError::Quiet) | Ok(()) => None,
             Err(_) => Some("command-error".to_owned()),
         };

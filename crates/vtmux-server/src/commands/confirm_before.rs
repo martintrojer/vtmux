@@ -81,6 +81,11 @@ pub fn exec(server: &mut Server, item: &mut Item, args: &Args) -> Result<(), Cmd
 }
 
 impl Pending {
+    /// The command waiting on the prompt; `None` with `-b`.
+    pub(crate) fn step(&self) -> Option<StepId> {
+        self.step
+    }
+
     /// `cmd_confirm_before_callback`: the confirm key, or Enter with `-y`,
     /// queues the command. A waiting command client exits 0 if it ran,
     /// else 1 (`retcode`).

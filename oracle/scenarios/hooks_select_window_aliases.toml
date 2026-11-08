@@ -1,0 +1,22 @@
+# next-window, previous-window and last-window fire after-select-window, not an after- hook of their own name (cmd-select-window.c:122-125: cmdq_insert_hook with "after-select-window"); select-window -n/-p/-l and plain select-window fire it too. mu-crew's after-select-window[42] focus hook relies on this for prefix n/p/l.
+name = "hooks_select_window_aliases"
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "exec cat"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "exec cat"] },
+  { run = ["neww", "-d", "-t", "a:2", "-n", "w2", "exec cat"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "after-select-window", "set -agF @log 'sw#{window_index}[#{hook_arguments}]|'"] },
+  { run = ["set-hook", "-g", "after-next-window", "set -ag @log 'NEXT|'"] },
+  { run = ["set-hook", "-g", "after-previous-window", "set -ag @log 'PREV|'"] },
+  { run = ["set-hook", "-g", "after-last-window", "set -ag @log 'LAST|'"] },
+  { run = ["next-window", "-t", "a"] },
+  { run = ["next-window", "-t", "a"] },
+  { run = ["previous-window", "-t", "a"] },
+  { run = ["last-window", "-t", "a"] },
+  { run = ["select-window", "-n", "-t", "a"] },
+  { run = ["select-window", "-l", "-t", "a"] },
+  { run = ["select-window", "-t", "a:0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["show-hooks", "-g", "after-next-window"] },
+]

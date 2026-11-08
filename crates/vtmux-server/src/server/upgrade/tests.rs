@@ -1278,6 +1278,54 @@ fn an_open_prompt_refuses_the_upgrade_saying_what_to_close() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A prompt in a pane (copy-mode-vi's `/`, `command-prompt -P`) also
+/// waits in the client's queue, and the refusal names it the same way.
+#[test]
+fn an_open_pane_prompt_refuses_the_upgrade_saying_what_to_close() {
+    let (mut server, dir) = setup("paneprompt");
+    let set = command(
+        &mut server,
+        &dir,
+        &["set", "-g", "mode-keys", "vi"],
+        Instant::now() + std::time::Duration::from_secs(1),
+    );
+    assert_eq!(set.exit, Some(0), "{}", set.err);
+    let (term, mut term_peer) = st::attach(&mut server, &dir, "a", &[]);
+    let _ = st::messages(&mut server, term, &mut term_peer);
+    // The prefix key and `[`, then `/` (an incremental prompt, copy-mode's
+    // C-s, would not wait: cmd-command-prompt.c:102-103).
+    server.on_client_input(term, b"\x02[").unwrap();
+    server.cmdq_process();
+    server.on_client_input(term, b"/").unwrap();
+    server.cmdq_process();
+    assert!(
+        server
+            .model
+            .panes
+            .values()
+            .any(|p| p.prompt_owner.is_some()),
+        "pane prompt open"
+    );
+    let binary = passing(&dir);
+    let b = binary.to_str().unwrap();
+    let a = command(
+        &mut server,
+        &dir,
+        &["vtmux-upgrade", "-b", b],
+        Instant::now() + super::PREFLIGHT_WAIT * 2,
+    );
+    assert_eq!(
+        (a.err.as_str(), a.exit),
+        (
+            "still running after 3 s: client /dev/vtmux-test-tty has a prompt open: close it, \
+             then run vtmux-upgrade again\n",
+            Some(1)
+        )
+    );
+    assert!(execs().is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// A binary of this patch stack whose `n`th dry run says it started in
 /// `dir/started<n>`, then passes once `dir/release<n>` exists (or after
 /// 20 s).

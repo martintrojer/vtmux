@@ -32,6 +32,18 @@ pub(crate) enum Owner {
     Mode(Box<dyn crate::mode::prompt::ModePromptOwner>),
 }
 
+impl Owner {
+    /// The command that waits in its queue until the prompt closes; a
+    /// mode's own prompt holds no command.
+    pub(crate) fn step(&self) -> Option<crate::cmdq::StepId> {
+        match self {
+            Self::Command(p) => p.step(),
+            Self::Confirm(p) => p.step(),
+            Self::Mode(_) => None,
+        }
+    }
+}
+
 /// What the owner is told (`enum prompt_key_result` with the line).
 pub(crate) enum Line {
     /// The line is finished (`PROMPT_KEY_CLOSE`); `None`: cancelled.
