@@ -4742,6 +4742,30 @@ fn buffer_file_io_inside_source_file_uses_the_client() {
     });
 }
 
+/// cmd-queue.c `cmdq_fire_command` (lines 642-651): command-error follows
+/// any command that returns `CMD_RETURN_ERROR`, also one that fails without a
+/// message (`unbind-key -q`, `move-window -r` on no session) and a
+/// `source-file` whose path matches nothing.
+#[test]
+fn command_error_fires_for_a_quiet_failure() {
+    compare("command_error_fires_for_a_quiet_failure", |w| {
+        let mut out = vec![w.run(&["new", "-d", "-s", "a", "-n", "w", "cat", "-"])];
+        let mut run = |argv: &[&str]| out.push(w.run(argv));
+        run(&[
+            "set-hook",
+            "-g",
+            "command-error",
+            "display -p \"E #{hook_arguments}\"",
+        ]);
+        run(&["unbind-key", "-q", "-T", "nosuch", "x"]);
+        run(&["unbind-key", "-q", "nosuchkey"]);
+        run(&["move-window", "-r", "-t", "nosuch"]);
+        run(&["source-file", "/nonexistent/rv.conf"]);
+        run(&["source-file", "-q", "/nonexistent/rv.conf"]);
+        out
+    });
+}
+
 /// after-* hooks (cmd-queue.c `cmdq_insert_hook`, hooks.c `hooks_insert`):
 /// the hook's commands run right after the command, before the next one in
 /// its list, with the arguments and flags as `hook_*` formats and the

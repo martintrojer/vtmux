@@ -353,7 +353,9 @@ pub fn fire(server: &mut Server, item: &mut Item, call: &CommandCall) -> bool {
                 name => format!("after-{name}"),
             }),
             Ok(()) if call.entry.after_hook() => Some(format!("after-{}", call.entry.name)),
-            Err(CmdError::Quiet) | Ok(()) => None,
+            Ok(()) => None,
+            // cmd-queue.c:642-651: any CMD_RETURN_ERROR, a quiet one
+            // (unbind-key -q, a missed source-file) included.
             Err(_) => Some("command-error".to_owned()),
         };
         if let Some(name) = hook {
