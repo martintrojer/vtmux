@@ -1,0 +1,21 @@
+name = "pane_mode_formats"
+# The pane formats that read the screen's modes (format.c format_cb_cursor_flag,
+# _insert_flag, _keypad_cursor_flag, _keypad_flag, _wrap_flag, _origin_flag,
+# _scroll_region_upper, _scroll_region_lower, _cursor_shape, _cursor_blinking,
+# _bracket_paste_flag): fresh, after a program set them, and in copy mode, where
+# the last three read the mode's own screen (wp->screen). Found by
+# scripts/emu_fuzz.py.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "20", "-y", "6", "sh", "-c", "tmux wait-for -S ready; tmux wait-for go; printf '\\033[?25l\\033[4h\\033[?1h\\033=\\033[?7l\\033[2;4r\\033[?6h\\033[5 q\\033[?2004h'; tmux wait-for -S set; tmux wait-for go2; printf '\\033[?12l\\033[3 q\\033[r'; tmux wait-for -S set2; exec cat"] },
+  { wait_for = "ready" },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_flag} #{insert_flag} #{keypad_cursor_flag} #{keypad_flag} #{wrap_flag} #{origin_flag} #{scroll_region_upper} #{scroll_region_lower} #{cursor_shape} #{cursor_blinking} #{bracket_paste_flag}"] },
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "set" },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_flag} #{insert_flag} #{keypad_cursor_flag} #{keypad_flag} #{wrap_flag} #{origin_flag} #{scroll_region_upper} #{scroll_region_lower} #{cursor_shape} #{cursor_blinking} #{bracket_paste_flag}"] },
+  { run = ["copy-mode", "-t", "a:"] },
+  { run = ["display", "-p", "-t", "a:", "#{pane_in_mode} #{cursor_flag} #{insert_flag} #{keypad_cursor_flag} #{keypad_flag} #{wrap_flag} #{origin_flag} #{scroll_region_upper} #{scroll_region_lower} #{cursor_shape} #{cursor_blinking} #{bracket_paste_flag}"] },
+  { run = ["send-keys", "-t", "a:", "-X", "cancel"] },
+  { run = ["wait-for", "-S", "go2"] },
+  { wait_for = "set2" },
+  { run = ["display", "-p", "-t", "a:", "#{cursor_flag} #{insert_flag} #{keypad_cursor_flag} #{keypad_flag} #{wrap_flag} #{origin_flag} #{scroll_region_upper} #{scroll_region_lower} #{cursor_shape} #{cursor_blinking} #{bracket_paste_flag}"] },
+]
