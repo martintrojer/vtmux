@@ -484,18 +484,64 @@ impl Server {
                 }
             }
         }
-        // A popup's passthrough is not forwarded (vtmux has no `-E` use for it).
-        let _ = p.term.take_passthrough();
-        let replies = p.term.take_replies();
+        let passthrough = p.term.take_passthrough();
+        let mut replies = Vec::new();
+        let mut clipboard = Vec::new();
+        for answer in p.term.take_answers() {
+            match answer {
+                vtmux_vt::Reply::Bytes(b) => replies.extend_from_slice(&b),
+                vtmux_vt::Reply::SetClipboard { clip, data } => clipboard.push((clip, data)),
+                _ => {}
+            }
+        }
         if let Some(io) = p.io.as_mut().filter(|_| !replies.is_empty()) {
             io.write(&replies);
         }
-        if closed {
-            if let Some(io) = p.io.take() {
+        let done = closed.then(|| p.io.take());
+        self.popup_passthrough(c, passthrough);
+        for (clip, data) in clipboard {
+            self.popup_set_clipboard(c, &clip, &data);
+        }
+        if let Some(io) = done {
+            if let Some(io) = io {
                 io.deregister(self.poll.registry());
             }
             self.popup_check_done(c);
         }
+    }
+
+    /// A popup's `DCS tmux;` payloads (input.c `input_dcs_dispatch`, with
+    /// no pane: the global window options' `allow-passthrough`) go to its
+    /// client (`popup_set_client_cb`), whatever the mode.
+    fn popup_passthrough(&mut self, c: ClientId, payloads: Vec<vtmux_vt::Passthrough>) {
+        if payloads.is_empty()
+            || self
+                .model
+                .number_option(TreeId::GlobalWindow, "allow-passthrough")
+                == 0
+        {
+            return;
+        }
+        if let Some(client) = self.clients.get_mut(&c) {
+            for payload in payloads {
+                client.passthrough.extend_from_slice(&payload.data);
+            }
+        }
+    }
+
+    /// OSC 52 from a popup (input.c `input_osc_52`, the popup branch): with
+    /// `set-clipboard on`, its client's clipboard and a new buffer, no
+    /// `pane-set-clipboard` hook.
+    fn popup_set_clipboard(&mut self, c: ClientId, clip: &[u8], data: &[u8]) {
+        if self.model.number_option(TreeId::Server, "set-clipboard") != 2 {
+            return;
+        }
+        let Some(decoded) = crate::input::base64_decode(data).filter(|d| !d.is_empty()) else {
+            return;
+        };
+        self.set_selection_clip(c, &String::from_utf8_lossy(clip), &decoded);
+        let limit = crate::commands::buffer_limit(self);
+        self.model.paste.add(decoded, limit);
     }
 
     /// The popup PTY can take more input.

@@ -4424,6 +4424,67 @@ fn allow_passthrough_delivers_dcs_tmux_payloads_raw() {
     }
 }
 
+/// A popup's program has no pane (input.c `input_osc_52` and
+/// `input_dcs_dispatch` with `wp == NULL`): its OSC 52 sets its client's
+/// clipboard and adds a buffer under `set-clipboard on` only, and its
+/// `DCS tmux;` payloads go to its client under the global
+/// `allow-passthrough` (`on` or `all`; `popup_set_client_cb`).
+#[test]
+fn popup_osc52_and_passthrough_reach_its_client() {
+    // (set-clipboard, allow-passthrough, clipboard set, payload delivered)
+    let cases = [
+        ("on", "off", true, false),
+        ("external", "on", false, true),
+        ("off", "all", false, true),
+    ];
+    for bin in bins() {
+        for (clip, pass, want_clip, want_pass) in cases {
+            let w = World::new(bin.clone());
+            let mut a = w.attach(&["new", "-s", "a", "-n", "w", "cat", "-"]);
+            a.wait(|a| status_row(a).starts_with("[a]"));
+            w.cli(&["set", "-s", "set-clipboard", clip]);
+            w.cli(&["set", "-g", "allow-passthrough", pass]);
+            let name = String::from_utf8_lossy(&w.cli(&["lsc", "-F", "#{client_name}"]).stdout)
+                .trim()
+                .to_owned();
+            let script = "printf '\\033]52;c;cG9w\\007\\033Ptmux;\\033\\033]52;p;cHQ=\\007\\033\\\\POPUP'; exec cat -";
+            // Opening one waits for it to close (cmd-display-menu.c:703).
+            let mut opened = Command::new(&w.bin)
+                .args(w.args())
+                .args(["display-popup", "-c", &name, "-w", "20", "-h", "5"])
+                .args(["sh", "-c", script])
+                .env_clear()
+                .envs(w.env())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            a.wait(|a| a.text().contains("POPUP"));
+            // Everything before it is in once a later redraw is.
+            w.cli(&["refresh-client", "-t", &name]);
+            a.keys(b"END");
+            a.wait(|a| a.text().contains("END"));
+            let text = a.text();
+            let what = format!("{} {clip} {pass}", bin.display());
+            assert_eq!(
+                text.contains("\x1b]52;c;cG9w\x07"),
+                want_clip,
+                "{what}: {text:?}"
+            );
+            assert_eq!(
+                text.contains("\x1b]52;p;cHQ=\x07"),
+                want_pass,
+                "{what}: {text:?}"
+            );
+            let buffers = w.cli(&["list-buffers", "-F", "#{buffer_sample}"]);
+            let buffers = String::from_utf8_lossy(&buffers.stdout).into_owned();
+            assert_eq!(buffers, if want_clip { "pop\n" } else { "" }, "{what}");
+            w.cli(&["display-popup", "-C", "-c", &name]);
+            opened.wait().unwrap();
+        }
+    }
+}
+
 /// input.c:2970, 3099, 3115, 3142, 3158, 3455, 3478: an OSC that changes the
 /// pane's palette (4, 104, 10, 11, 110, 111) makes tmux redraw the whole pane
 /// (`screen_write_fullredraw`, `PANE_REDRAW`), and `allow-passthrough on`
