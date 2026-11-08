@@ -1,0 +1,363 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "hooks_lost_pane",
+  "inputs": {
+    "name": "hooks_lost_pane",
+    "size": [
+      80,
+      24
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w0",
+          "-x",
+          "80",
+          "-y",
+          "24",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "neww",
+          "-d",
+          "-n",
+          "w1",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "splitw",
+          "-t",
+          "a:0",
+          "cat",
+          "-"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@F",
+          "#{hook}:#{hook_pane}:#{hook_window}:#{pane_id}:#{window_id}"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-pane-changed",
+          "set -gaF @log '|#{E:@F}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-resized",
+          "set -gaF @log '|#{E:@F}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-layout-changed",
+          "set -gaF @log '|#{E:@F}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "window-linked",
+          "set -gaF @log '|#{E:@F}'"
+        ]
+      },
+      {
+        "run": [
+          "set-hook",
+          "-g",
+          "pane-moved",
+          "set -gaF @log '|#{E:@F}'"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-s",
+          "a:0.1",
+          "-t",
+          "a:1.0"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "joinp",
+          "-d",
+          "-s",
+          "a:1.1",
+          "-t",
+          "a:0.0"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "selectp",
+          "-t",
+          "a:0.1"
+        ]
+      },
+      {
+        "run": [
+          "set",
+          "-g",
+          "@log",
+          ""
+        ]
+      },
+      {
+        "run": [
+          "breakp",
+          "-d",
+          "-s",
+          "a:0.1"
+        ]
+      },
+      {
+        "run": [
+          "show",
+          "-gv",
+          "@log"
+        ]
+      },
+      {
+        "run": [
+          "kill-server"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|pane-resized:%0:@0:%0:@0|window-layout-changed::@0:%2:@1|window-pane-changed:%0:@0:%0:@0|pane-resized:%1:@1:%1:@1|window-pane-changed:%2:@1:%2:@1|pane-moved:%2:@1:%2:@1|window-layout-changed::@0:%0:@0|window-layout-changed::@1:%2:@1\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|pane-resized:%1:@1:%1:@1|window-layout-changed::@1:%1:@1|window-pane-changed:%1:@1:%1:@1|pane-resized:%0:@0:%0:@0|pane-moved:%2:@0:%2:@0|window-layout-changed::@1:%1:@1|window-layout-changed::@0:%0:@0\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "|window-pane-changed:%0:@0:%0:@0|pane-resized:%0:@0:%0:@0|window-layout-changed::@0:%0:@0|window-linked::@2:%2:@2|pane-resized:%2:@2:%2:@2|pane-moved:%2:@2:%2:@2\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}

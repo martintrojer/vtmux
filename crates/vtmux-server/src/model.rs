@@ -1493,21 +1493,31 @@ impl Model {
         // still the window's (layout.c:1548): from the closing pane, if it
         // is the active one.
         self.layout_changed(wid);
-        let window = self.windows.get_mut(&wid).expect("checked above");
-        let was_active = window.panes.active == Some(id);
-        window.panes.remove(id);
-        let next = window.panes.active;
-        if was_active && let Some(n) = next {
-            self.fire_pane_changed(wid, n, Some(id));
-            // window.c:1219.
-            self.push_focus_check(n);
-        }
+        // window_remove_pane -> window_lost_pane.
+        self.lose_pane(wid, id);
         self.options.remove_pane(id);
         let pane = self.panes.remove(&id);
         self.pop_zoom(wid, was_zoomed);
         // server-fn.c:435 / 567: server_redraw_window.
         self.redraw(Redraw::Window(wid));
         pane.into_iter().collect()
+    }
+
+    /// The pane-list half of `window_lost_pane` (window.c:1185-1222) for a
+    /// pane moved out of window `w`: it leaves the list and the last-used
+    /// stack, and a new active pane fires window-pane-changed and has its
+    /// focus looked at.
+    pub fn lose_pane(&mut self, w: WindowId, p: PaneId) {
+        let Some(window) = self.windows.get_mut(&w) else {
+            return;
+        };
+        let was_active = window.panes.active == Some(p);
+        window.panes.remove(p);
+        let next = window.panes.active;
+        if was_active && let Some(n) = next {
+            self.fire_pane_changed(w, n, Some(p));
+            self.push_focus_check(n);
+        }
     }
 
     /// `PANE_FLOATOVERZOOM` of pane `p`.

@@ -1,0 +1,33 @@
+name = "hooks_lost_pane"
+# A pane moved out of its window by break-pane or join-pane: window_lost_pane
+# (window.c:1185-1222) fires window-pane-changed for the source window's new
+# active pane when the moved pane was active. break-pane calls it before
+# layout_close_pane (cmd-break-pane.c:154-157), join-pane after
+# (cmd-join-pane.c:497-501). layout_close_pane resizes the panes left
+# (layout_fix_panes, pane-resized) before it fires window-layout-changed
+# (layout.c:1544-1548). break-pane links the new window (session_attach,
+# window-linked) before layout_init resizes the pane in it
+# (cmd-break-pane.c:179-181), so that pane-resized starts from the new
+# window.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["neww", "-d", "-n", "w1", "cat", "-"] },
+  { run = ["splitw", "-t", "a:0", "cat", "-"] },
+  { run = ["set", "-g", "@F", "#{hook}:#{hook_pane}:#{hook_window}:#{pane_id}:#{window_id}"] },
+  { run = ["set-hook", "-g", "window-pane-changed", "set -gaF @log '|#{E:@F}'"] },
+  { run = ["set-hook", "-g", "pane-resized", "set -gaF @log '|#{E:@F}'"] },
+  { run = ["set-hook", "-g", "window-layout-changed", "set -gaF @log '|#{E:@F}'"] },
+  { run = ["set-hook", "-g", "window-linked", "set -gaF @log '|#{E:@F}'"] },
+  { run = ["set-hook", "-g", "pane-moved", "set -gaF @log '|#{E:@F}'"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["joinp", "-s", "a:0.1", "-t", "a:1.0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["joinp", "-d", "-s", "a:1.1", "-t", "a:0.0"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["selectp", "-t", "a:0.1"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["breakp", "-d", "-s", "a:0.1"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]

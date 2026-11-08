@@ -110,6 +110,10 @@ pub fn exec(
             .model
             .link_window(dst_s, new_w, idx)
             .map_err(EdgeError::Message)?;
+        // layout_init after session_attach (cmd-break-pane.c:179-181): the
+        // pane's pane-resized comes after window-linked, from its new
+        // window.
+        server.model.fix_panes(new_w);
         // cmd-break-pane.c:185-187.
         server.model.fire_window("window-created", new_w);
         server
@@ -158,8 +162,10 @@ fn move_to_new_window(
     let m = &mut server.model;
     // window_lost_pane: a moved pane loses its mark.
     m.clear_mark_of(wp);
+    // window_lost_pane comes before layout_close_pane
+    // (cmd-break-pane.c:154-157), so its window-pane-changed comes first.
+    m.lose_pane(w, wp);
     let old = m.windows.get_mut(&w).expect("source window");
-    old.panes.remove(wp);
     old.layout.close_pane(wp);
     let (sx, sy) = (old.sx(), old.sy());
     let opts = old.layout.opts;
@@ -217,7 +223,6 @@ fn move_to_new_window(
         );
         m.windows.get_mut(&new_w).expect("just made").name = n;
     }
-    m.fix_panes(new_w);
     new_w
 }
 

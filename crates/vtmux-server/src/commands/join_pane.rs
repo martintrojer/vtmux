@@ -74,19 +74,19 @@ pub fn exec(
         .expect("source window")
         .layout
         .close_pane(src_wp);
-    // layout_close_pane fires window-layout-changed (layout.c:1548).
+    // layout_close_pane resizes the panes left (layout_fix_panes) and
+    // fires window-layout-changed (layout.c:1544-1548).
+    m.fix_panes(src_w);
     m.layout_changed(src_w);
-    if src_w != dst_w {
-        // window_lost_pane: a moved pane loses its mark.
-        m.clear_mark_of(src_wp);
-    }
-    let src = m.windows.get_mut(&src_w).expect("source window");
     if src_w == dst_w {
+        let src = m.windows.get_mut(&src_w).expect("source window");
         src.panes.panes.retain(|p| *p != src_wp);
         src.panes.z_order.retain(|p| *p != src_wp);
     } else {
-        // window_lost_pane: a new active pane, out of the last-used stack.
-        src.panes.remove(src_wp);
+        // window_lost_pane: a moved pane loses its mark; a new active pane,
+        // out of the last-used stack, fires window-pane-changed.
+        m.clear_mark_of(src_wp);
+        m.lose_pane(src_w, src_wp);
     }
     let w = m.windows.get_mut(&dst_w).expect("target window");
     relabel_cell(&mut w.layout, hole, src_wp);
