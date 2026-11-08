@@ -1,0 +1,26 @@
+# A pane leaving its window for another (break-pane, join-pane, move-pane) goes through window_lost_pane (window.c:1185-1225): when it was the active pane, the pane that takes over fires window-pane-changed (%window-pane-changed, the hook), before break-pane's layout_close_pane (cmd-break-pane.c:155-156) and after join-pane's (cmd-join-pane.c:497-501). A pane that was not active fires nothing.
+name = "pane_changed_on_move"
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["set", "-g", "automatic-rename", "off"] },
+  { run = ["set", "-g", "@log", ""] },
+  { run = ["set-hook", "-g", "window-pane-changed", "set -gaF @log '[#{hook_window} #{hook_pane}]'"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["splitw", "-d", "-t", "a:0", "cat", "-"] },
+  { run = ["neww", "-d", "-t", "a:1", "-n", "w1", "cat", "-"] },
+  { control = { argv = ["attach", "-t", "a"], id = "c1" } },
+  { control_send = { id = "c1", line = "breakp -d -s a:0.0 -n x" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "breakp -d -s a:0.1 -n y" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "joinp -d -s a:0.0 -t a:1" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_send = { id = "c1", line = "show -gv @log" } },
+  { control_wait = { id = "c1", until = "%end" } },
+  { control_close = { id = "c1" } },
+  { run = ["splitw", "-d", "-t", "a:1", "cat", "-"] },
+  { run = ["movep", "-s", "a:1.0", "-t", "a:2"] },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["lsp", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_id} #{pane_active}"] },
+  { run = ["kill-server"] },
+]
