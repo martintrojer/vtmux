@@ -267,8 +267,24 @@ record! {
         /// resolves it when asked. Added within v1 and empty in the golden
         /// sample: a v1 reader without it falls back to its own binary.
         35 => one start_binary: String,
+        /// What a `vtmux-persist` checkpoint the server found at its start
+        /// leaves it free to write ([`PERSIST_HOLD_WHILE_THERE`],
+        /// [`PERSIST_HOLD_ALWAYS`]; 0: free), so the image a live upgrade
+        /// starts keeps the old one's promise not to write over a
+        /// checkpoint it refused. Added within v1, 0 in the golden sample:
+        /// a v1 reader without it holds nothing back, as builds before it
+        /// did. Always 0 in a checkpoint.
+        36 => one persist_hold: u32,
     }
 }
+
+/// [`Server::persist_hold`]: the checkpoint a restore refused is not
+/// written over while its manifests are there.
+pub const PERSIST_HOLD_WHILE_THERE: u32 = 1;
+/// [`Server::persist_hold`]: a newer binary's checkpoint; nothing is
+/// written to the directory for the server's lifetime. So is any value
+/// this build does not know.
+pub const PERSIST_HOLD_ALWAYS: u32 = 2;
 
 record! {
     /// A `server-access` entry.
@@ -1125,6 +1141,7 @@ pub(crate) mod tests {
             ],
             // Added within v1, so out of the sample the golden file pins.
             start_binary: String::new(),
+            persist_hold: 0,
         }
     }
 

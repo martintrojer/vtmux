@@ -745,6 +745,21 @@ fn the_start_binary_round_trips_and_defaults_to_empty() {
     assert_eq!(golden.server.start_binary, "");
 }
 
+/// `Server::persist_hold` came within v1, like `start_binary`: it round
+/// trips, and a stream without it (the golden file's) holds nothing back.
+#[test]
+fn the_persist_hold_round_trips_and_defaults_to_free() {
+    let mut s = sample();
+    assert_eq!(s.server.persist_hold, 0);
+    s.server.persist_hold = PERSIST_HOLD_WHILE_THERE;
+    assert_eq!(
+        decode(&encode(&s)).unwrap().server.persist_hold,
+        PERSIST_HOLD_WHILE_THERE
+    );
+    let golden = decode(&std::fs::read(golden(1)).unwrap()).unwrap();
+    assert_eq!(golden.server.persist_hold, 0);
+}
+
 /// A selection's `clipx` (the line numbers' gutter) came within v1: it
 /// round trips, and a stream without it decodes with no gutter.
 #[test]

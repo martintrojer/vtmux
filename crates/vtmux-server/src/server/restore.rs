@@ -43,8 +43,10 @@
 //! written there for this server's lifetime, with why in
 //! `show-messages`. A server that did not restore (its config set
 //! `vtmux-persist off`, turned on later by `set -s`) or was started by a
-//! live upgrade (which carries no persistence state) checks the same
-//! before it first writes there.
+//! live upgrade checks the same before it first writes there. A live
+//! upgrade carries what the start found (`Persist::kept`, the snapshot's
+//! `persist_hold`), so the new image keeps a refused checkpoint as the
+//! old one did.
 //!
 //! Restored panes come back dead (`#{pane_dead}` 1, exit status unknown:
 //! `JobStatus::Unknown`), showing `remain-on-exit-format`'s dead line
@@ -304,6 +306,8 @@ pub(crate) fn prepare(
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     x.config_causes.clear();
+    // What this start finds decides what it may write (`start`).
+    x.persist_hold = 0;
     s.descriptors.clear();
     s.clients.clear();
     s.server.next_client = 0;
@@ -404,7 +408,7 @@ enum Found {
 /// fails for another reason is [`find`]'s to report. A server checks
 /// again before it first writes there (`Server::checkpoint_target`): one
 /// whose config had `vtmux-persist off`, or the image a live upgrade
-/// started, which carries no persistence state.
+/// started (which carries whether the old one held it back, not why).
 pub(super) fn written_by_newer(dir: &Path) -> Option<String> {
     [MANIFEST, MANIFEST_PREV].into_iter().find_map(|name| {
         let bytes = std::fs::read(dir.join(name)).ok()?;

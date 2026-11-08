@@ -952,6 +952,7 @@ impl Server {
                 .as_ref()
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
+            persist_hold: self.persist.kept.hold(),
             server_options: tree((0, 0)),
             session_options: tree((1, 0)),
             window_options: tree((2, 0)),
@@ -1499,6 +1500,7 @@ impl Server {
         server.info = info;
         server.global_env = env_in(&s.environment);
         server.start_binary = (!s.start_binary.is_empty()).then(|| PathBuf::from(&s.start_binary));
+        server.persist.kept = super::persist::Kept::from_hold(s.persist_hold);
 
         // Options: every tree, then the hook bookkeeping.
         let mut trees = vec![

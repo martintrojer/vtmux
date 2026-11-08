@@ -1322,9 +1322,8 @@ fn a_newer_checkpoint_stays_untouched_when_persist_is_turned_on_later() {
     assert_eq!(contents(&w.state()), before);
 }
 
-/// The image a live upgrade starts carries no persistence state: it too
-/// leaves a newer binary's checkpoint alone, checking before it first
-/// writes there.
+/// The image a live upgrade starts leaves a newer binary's checkpoint
+/// alone too, checking before it first writes there.
 #[test]
 fn a_newer_checkpoint_stays_untouched_across_a_live_upgrade() {
     let mut w = World::start(&["cat", "-"], &[]);
@@ -1335,8 +1334,42 @@ fn a_newer_checkpoint_stays_untouched_across_a_live_upgrade() {
     let before = contents(&w.state());
     w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
     w.repid();
-    // The frozen handshake (`tests/upgrade.rs`): the image that ends up
-    // serving answers the requester.
+    upgrade(&w);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&["rename-session", "-t", "z", "changed"]);
+    w.kill_server();
+    assert_eq!(contents(&w.state()), before);
+}
+
+/// A checkpoint a restore refused (here a corrupt one) stays as it was
+/// across a live upgrade too: the new image keeps the old one's promise
+/// not to write over it while it is there, periodically or at shutdown.
+/// It wrote over it at its first checkpoint.
+#[test]
+fn a_refused_checkpoint_stays_untouched_across_a_live_upgrade() {
+    let mut w = World::start(&["cat", "-"], &[("VTMUX_PERSIST_INTERVAL_MS", "50")]);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.kill_server();
+    let path = w.state().join(persist::MANIFEST);
+    let mut bytes = std::fs::read(&path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&path, &bytes).unwrap();
+    let before = contents(&w.state());
+    w.ok(&["new", "-d", "-s", "z", "cat", "-"]);
+    w.repid();
+    assert!(w.ok(&["show-messages"]).contains("not restored"));
+    upgrade(&w);
+    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
+    w.ok(&["rename-session", "-t", "z", "changed"]);
+    w.ok(&["new-window", "-d", "-n", "later", "cat", "-"]);
+    w.kill_server();
+    assert_eq!(contents(&w.state()), before);
+}
+
+/// Upgrade `w`'s server onto the same binary over the frozen handshake
+/// (`tests/upgrade.rs`): the image that ends up serving answers.
+fn upgrade(w: &World) {
     let socket = w.ok(&["display", "-p", "#{socket_path}"]);
     let mut stream = std::os::unix::net::UnixStream::connect(socket.trim_end()).unwrap();
     stream
@@ -1354,8 +1387,4 @@ fn a_newer_checkpoint_stays_untouched_across_a_live_upgrade() {
         ),
         "{answer:?}"
     );
-    w.ok(&["set", "-s", "vtmux-persist", "layout"]);
-    w.ok(&["rename-session", "-t", "z", "changed"]);
-    w.kill_server();
-    assert_eq!(contents(&w.state()), before);
 }

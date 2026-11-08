@@ -93,6 +93,28 @@ pub(super) enum Kept {
     Always,
 }
 
+impl Kept {
+    /// As the snapshot carries it (`snap::Server::persist_hold`), so the
+    /// image a live upgrade starts keeps it.
+    pub(super) fn hold(self) -> u32 {
+        match self {
+            Self::No => 0,
+            Self::WhileThere => snap::PERSIST_HOLD_WHILE_THERE,
+            Self::Always => snap::PERSIST_HOLD_ALWAYS,
+        }
+    }
+
+    /// [`Kept::hold`] read back; a value this build does not know holds
+    /// the directory for good.
+    pub(super) fn from_hold(hold: u32) -> Self {
+        match hold {
+            0 => Self::No,
+            snap::PERSIST_HOLD_WHILE_THERE => Self::WhileThere,
+            _ => Self::Always,
+        }
+    }
+}
+
 /// The checkpoint timer and what was last written.
 #[derive(Debug)]
 pub struct Persist {
@@ -375,6 +397,7 @@ impl Server {
         s.clients.clear();
         s.server.next_client = 0;
         s.server.wait_channels.clear();
+        s.server.persist_hold = 0;
         // What was typed or ran: the message log records every command
         // line (cmd-queue.c `cmdq_add_message`), the environment holds
         // tokens, prompt history and search strings are typed text.
