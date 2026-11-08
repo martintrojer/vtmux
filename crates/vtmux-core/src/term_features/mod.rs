@@ -267,15 +267,7 @@ impl Cap {
     /// The value a feature gives a string capability
     /// (`tty_feature_*_capabilities`), escapes decoded.
     fn feature_value(self) -> Option<&'static str> {
-        match self {
-            Self::Ms => Some(MS),
-            Self::Tsl => Some("\x1b]0;"),
-            Self::Fsl => Some("\x07"),
-            // tty-features.c:251-254.
-            Self::Eneks => Some("\x1b[>4;2m"),
-            Self::Dseks => Some("\x1b[>4m"),
-            _ => None,
-        }
+        feature_value(self.name())
     }
 
     fn bit(self) -> u16 {
@@ -289,6 +281,32 @@ impl Cap {
 
 /// `Ms` as the `clipboard` feature gives it (tty-features.c), escapes decoded.
 const MS: &str = "\x1b]52;%p1%s;%p2%s\x07";
+
+/// The value the feature that adds string capability `name` gives it
+/// (`tty_feature_*_capabilities`, tty-features.c), escapes decoded; `None`
+/// for one vtmux does not write.
+fn feature_value(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "Ms" => MS,
+        "tsl" => "\x1b]0;",
+        "fsl" => "\x07",
+        "Eneks" => "\x1b[>4;2m",
+        "Dseks" => "\x1b[>4m",
+        // `cstyle`, `ccolour`.
+        "Ss" => "\x1b[%p1%d q",
+        "Se" => "\x1b[2 q",
+        "Cs" => "\x1b]12;%p1%s\x07",
+        "Cr" => "\x1b]112\x07",
+        // `usstyle`, `overline`, `strikethrough`.
+        "Smulx" => "\x1b[4:%p1%dm",
+        "Setulc" => "\x1b[58:2:%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m",
+        "Setulc1" => "\x1b[58:5:%p1%dm",
+        "ol" => "\x1b[59m",
+        "Smol" => "\x1b[53m",
+        "smxx" => "\x1b[9m",
+        _ => return None,
+    })
+}
 
 /// Why a terminal cannot be opened (`tty_term_read_list`, `tty_term_create`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -663,6 +681,23 @@ impl Term {
             .filter(|_| self.has_name(name))
     }
 
+    /// `tty_term_string_*` with `params`, for a capability vtmux writes:
+    /// its value (the entry's, a feature's or an override's), or, where the
+    /// table has the name but no value for it, the value tmux's feature for
+    /// it gives (D-007); `None` when the terminal lacks it.
+    #[must_use]
+    pub fn code(&self, name: &str, params: &[Param]) -> Option<String> {
+        if !self.has_name(name) {
+            return None;
+        }
+        let template = self
+            .values
+            .get(name)
+            .map(String::as_str)
+            .or_else(|| feature_value(name))?;
+        Some(tparm(template, params))
+    }
+
     fn cap_string(&self, cap: Cap) -> Option<&str> {
         self.string(cap.name())
     }
@@ -788,7 +823,12 @@ impl Term {
             if feature == Feature::IgnoreFunctionKeys {
                 self.other.retain(|c| !is_function_key(c));
             }
-            self.other.extend(feature.other_caps());
+            for &name in feature.other_caps() {
+                self.other.insert(name);
+                if let Some(value) = feature_value(name) {
+                    self.values.insert(name, value.to_owned());
+                }
+            }
             // tty-features.c:63-66: `Swd=\E]7;`, replacing the terminal's.
             if feature == Feature::Osc7 {
                 self.values.insert("Swd", "\x1b]7;".to_owned());
@@ -1138,6 +1178,8 @@ fn ctrl(c: u8, base: u8) -> u8 {
 #[cfg(test)]
 mod golden;
 mod terminfo;
+mod tparm;
+pub use tparm::{Param, tparm};
 
 #[cfg(test)]
 mod selection_tests {
@@ -1275,5 +1317,121 @@ mod table_tests {
         let xterm = open("xterm-256color", &["xterm*:kf1=\\EOX"]).unwrap();
         assert_eq!(keys(&xterm, "kf1").as_deref(), Some("\x1bOX"));
         assert_eq!(keys(&xterm, "khome").as_deref(), Some("\x1bOH"));
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+
+    fn open(name: &str, features: &[&str], overrides: &[&str]) -> Term {
+        let list = |l: &[&str]| l.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        Term::open(name, &[], None, &list(features), &list(overrides)).unwrap()
+    }
+
+    /// `tparm` as ncurses evaluates the templates terminfo and
+    /// tty-features.c use: parameters, constants, arithmetic, `%i`,
+    /// conditionals, and the stray `%;` of the `usstyle` `Setulc`.
+    #[test]
+    fn tparm_evaluates_terminfo_templates() {
+        use Param::{Int, Str};
+        assert_eq!(tparm("\x1b[%p1%d q", &[Int(5)]), "\x1b[5 q");
+        assert_eq!(tparm("\x1b]12;%p1%s\x07", &[Str("red")]), "\x1b]12;red\x07");
+        assert_eq!(
+            tparm("\x1b[%i%p1%d;%p2%dH", &[Int(0), Int(9)]),
+            "\x1b[1;10H"
+        );
+        assert_eq!(
+            tparm(
+                "\x1b[58:2:%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m",
+                &[Int(0x01_02_03)]
+            ),
+            "\x1b[58:2:1:2:3m"
+        );
+        assert_eq!(
+            tparm(
+                "%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;",
+                &[Int(3)]
+            ),
+            "33"
+        );
+        assert_eq!(
+            tparm(
+                "%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;",
+                &[Int(12)]
+            ),
+            "94"
+        );
+        assert_eq!(
+            tparm(
+                "%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;",
+                &[Int(200)]
+            ),
+            "38;5;200"
+        );
+        assert_eq!(tparm("100%%%'A'%c", &[]), "100%A");
+    }
+
+    /// The cursor and underline strings come from the entry, then the
+    /// features (which replace them, but for `cstyle`'s `TERM_NOREPLACE`),
+    /// then the overrides; a name the table has no value for takes the
+    /// value tmux's feature gives it.
+    #[test]
+    fn cursor_and_underline_codes_follow_entry_features_and_overrides() {
+        let code = |t: &Term, name: &str, p: &[Param]| t.code(name, p);
+        let ghostty = open("xterm-ghostty", &[], &[]);
+        assert_eq!(code(&ghostty, "Se", &[]).as_deref(), Some("\x1b[0 q"));
+        assert_eq!(
+            code(&ghostty, "Ss", &[Param::Int(6)]).as_deref(),
+            Some("\x1b[6 q")
+        );
+        assert_eq!(code(&ghostty, "Cs", &[Param::Str("red")]), None);
+        assert_eq!(
+            code(&ghostty, "Setulc", &[Param::Int(0x01_02_03)]).as_deref(),
+            Some("\x1b[58:2::1:2:3m")
+        );
+        // XTVERSION adds ghostty's features: `usstyle` replaces Setulc,
+        // `cstyle` leaves Se, `ccolour` adds Cs and Cr.
+        let mut named = open("xterm-ghostty", &[], &[]);
+        named.extended_device_attributes("ghostty 1.2.0");
+        assert_eq!(code(&named, "Se", &[]).as_deref(), Some("\x1b[0 q"));
+        assert_eq!(
+            code(&named, "Setulc", &[Param::Int(0x01_02_03)]).as_deref(),
+            Some("\x1b[58:2:1:2:3m")
+        );
+        assert_eq!(
+            code(&named, "Cs", &[Param::Str("rgb:ff/00/00")]).as_deref(),
+            Some("\x1b]12;rgb:ff/00/00\x07")
+        );
+        assert_eq!(code(&named, "Cr", &[]).as_deref(), Some("\x1b]112\x07"));
+        assert_eq!(code(&named, "Smol", &[]).as_deref(), Some("\x1b[53m"));
+        let xterm = open("xterm-256color", &["xterm*:usstyle"], &[]);
+        assert_eq!(code(&xterm, "Se", &[]).as_deref(), Some("\x1b[2 q"));
+        assert_eq!(
+            code(&xterm, "Smulx", &[Param::Int(3)]).as_deref(),
+            Some("\x1b[4:3m")
+        );
+        assert_eq!(
+            code(&xterm, "Setulc1", &[Param::Int(196)]).as_deref(),
+            Some("\x1b[58:5:196m")
+        );
+        assert_eq!(code(&xterm, "Smol", &[]), None);
+        let tmux = open("tmux-256color", &[], &[]);
+        assert_eq!(
+            code(&tmux, "Smulx", &[Param::Int(2)]).as_deref(),
+            Some("\x1b[4:2m")
+        );
+        assert_eq!(code(&tmux, "Setulc", &[Param::Int(1)]), None);
+        assert_eq!(code(&tmux, "cvvis", &[]).as_deref(), Some("\x1b[34l"));
+        let screen = open("screen", &[], &[]);
+        assert_eq!(code(&screen, "smso", &[]).as_deref(), Some("\x1b[3m"));
+        // An override's value wins; `Se` without one (the common
+        // `Se=\E[ q`) is written as given.
+        let over = open("xterm-256color", &[], &["xterm*:Ss=\\E[%p1%d q:Se=\\E[ q"]);
+        assert_eq!(code(&over, "Se", &[]).as_deref(), Some("\x1b[ q"));
+        // mintty's entry has the names but the table no values.
+        let mintty = open("mintty", &[], &[]);
+        assert_eq!(code(&mintty, "Se", &[]).as_deref(), Some("\x1b[2 q"));
+        assert_eq!(code(&mintty, "Cr", &[]).as_deref(), Some("\x1b]112\x07"));
     }
 }

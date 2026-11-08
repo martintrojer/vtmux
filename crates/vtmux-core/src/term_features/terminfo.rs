@@ -287,7 +287,7 @@ pub(super) const TERMINALS: &[(&str, Entry)] = &[
     ("konsole-direct", Entry { names: NAMES_KONSOLE_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_GNOME }),
     ("linux", Entry { names: NAMES_LINUX, off: &[], colours: Some(8), strings: STRINGS_LINUX }),
     ("linux-16color", Entry { names: NAMES_LINUX, off: &[], colours: Some(16), strings: STRINGS_LINUX }),
-    ("mintty", Entry { names: NAMES_MINTTY, off: &[], colours: Some(256), strings: STRINGS_XTERM_256COLOR }),
+    ("mintty", Entry { names: NAMES_MINTTY, off: &[], colours: Some(256), strings: STRINGS_MINTTY }),
     ("ms-terminal", Entry { names: NAMES_MS_TERMINAL, off: &[], colours: Some(256), strings: STRINGS_MS_TERMINAL }),
     ("putty", Entry { names: NAMES_PUTTY, off: &[], colours: Some(8), strings: STRINGS_PUTTY }),
     ("putty-256color", Entry { names: NAMES_PUTTY, off: &[], colours: Some(256), strings: STRINGS_PUTTY }),
@@ -311,10 +311,10 @@ pub(super) const TERMINALS: &[(&str, Entry)] = &[
     ("screen.mrxvt", Entry { names: NAMES_SCREEN_MRXVT, off: &[], colours: Some(8), strings: STRINGS_SCREEN_MRXVT }),
     ("screen.putty", Entry { names: NAMES_PUTTY, off: &[], colours: Some(8), strings: STRINGS_SCREEN_PUTTY }),
     ("screen.putty-256color", Entry { names: NAMES_PUTTY, off: &[], colours: Some(256), strings: STRINGS_SCREEN_PUTTY }),
-    ("screen.rxvt", Entry { names: NAMES_SCREEN_RXVT, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
+    ("screen.rxvt", Entry { names: NAMES_SCREEN_RXVT, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_RXVT }),
     ("screen.teraterm", Entry { names: NAMES_SCREEN_16COLOR, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN }),
-    ("screen.vte", Entry { names: NAMES_SCREEN_VTE, off: &[], colours: Some(8), strings: STRINGS_SCREEN_GNOME }),
-    ("screen.vte-256color", Entry { names: NAMES_SCREEN_VTE, off: &[], colours: Some(256), strings: STRINGS_SCREEN_GNOME }),
+    ("screen.vte", Entry { names: NAMES_SCREEN_VTE, off: &[], colours: Some(8), strings: STRINGS_SCREEN_VTE }),
+    ("screen.vte-256color", Entry { names: NAMES_SCREEN_VTE, off: &[], colours: Some(256), strings: STRINGS_SCREEN_VTE }),
     ("screen.xterm-256color", Entry { names: NAMES_SCREEN_XTERM_256COLOR, off: &["bce"], colours: Some(256), strings: STRINGS_SCREEN_XTERM_256COLOR }),
     ("screen.xterm-new", Entry { names: NAMES_SCREEN_XTERM_256COLOR, off: &["bce"], colours: Some(8), strings: STRINGS_SCREEN_XTERM_256COLOR }),
     ("screen.xterm-r6", Entry { names: NAMES_SCREEN_XTERM_R6, off: &["bce"], colours: None, strings: STRINGS_SCREEN_XTERM_R6 }),
@@ -328,9 +328,9 @@ pub(super) const TERMINALS: &[(&str, Entry)] = &[
     ("vt100", Entry { names: NAMES_VT100, off: &["bce"], colours: None, strings: STRINGS_VT100 }),
     ("vt102", Entry { names: NAMES_VT102, off: &["bce"], colours: None, strings: STRINGS_VT100 }),
     ("vt220", Entry { names: NAMES_VT220, off: &["bce"], colours: None, strings: STRINGS_VT220 }),
-    ("vte", Entry { names: NAMES_VTE, off: &[], colours: Some(8), strings: STRINGS_GNOME }),
-    ("vte-256color", Entry { names: NAMES_VTE, off: &[], colours: Some(256), strings: STRINGS_GNOME }),
-    ("vte-direct", Entry { names: NAMES_VTE_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_GNOME }),
+    ("vte", Entry { names: NAMES_VTE, off: &[], colours: Some(8), strings: STRINGS_VTE }),
+    ("vte-256color", Entry { names: NAMES_VTE, off: &[], colours: Some(256), strings: STRINGS_VTE }),
+    ("vte-direct", Entry { names: NAMES_VTE_DIRECT, off: &[], colours: Some(16_777_216), strings: STRINGS_VTE }),
     ("xterm", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(8), strings: STRINGS_XTERM_256COLOR }),
     ("xterm-16color", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(16), strings: STRINGS_XTERM_256COLOR }),
     ("xterm-256color", Entry { names: NAMES_XTERM_256COLOR, off: &[], colours: Some(256), strings: STRINGS_XTERM_256COLOR }),
@@ -393,6 +393,12 @@ const STRINGS_XTERM_256COLOR: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?12;25h"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[2 q"),
+    ("Cs", "\x1b]12;%p1%s\x07"),
+    ("Cr", "\x1b]112\x07"),
 ];
 
 const NAMES_XTERM_DIRECT: &[Cap] = &[
@@ -468,6 +474,13 @@ const STRINGS_ALACRITTY: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?12;25h"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[0 q"),
+    ("Cs", "\x1b]12;%p1%s\x07"),
+    ("Cr", "\x1b]112\x07"),
+    ("Smulx", "\x1b[4:%p1%dm"),
 ];
 
 const NAMES_ALACRITTY_DIRECT: &[Cap] = &[
@@ -548,6 +561,16 @@ const STRINGS_GHOSTTY: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?12;25h"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[0 q"),
+    ("Smulx", "\x1b[4:%p1%dm"),
+    (
+        "Setulc",
+        "\x1b[58:2::%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m",
+    ),
+    ("Smol", "\x1b[53m"),
 ];
 
 const NAMES_GNOME: &[Cap] = &[
@@ -597,6 +620,7 @@ const STRINGS_GNOME: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_ITERM2: &[Cap] = &[
@@ -691,6 +715,12 @@ const STRINGS_KITTY: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?12;25h"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[2 q"),
+    ("Cs", "\x1b]12;%p1%s\x07"),
+    ("Cr", "\x1b]112\x07"),
 ];
 
 const NAMES_KITTY_DIRECT: &[Cap] = &[
@@ -785,6 +815,8 @@ const STRINGS_LINUX: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?25h\x1b[?8c"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_MINTTY: &[Cap] = &[
@@ -806,6 +838,37 @@ const NAMES_MINTTY: &[Cap] = &[
     "kUP5", "kUP6", "kUP7", "Ms", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab",
     "setaf", "setal", "Se", "sgr0", "sitm", "smacs", "smcup", "smkx", "Smol", "smso", "Smulx",
     "smul", "smxx", "Ss", "vpa", "XT",
+];
+
+const STRINGS_MINTTY: &[(&str, &str)] = &[
+    ("clear", "\x1b[H\x1b[2J"),
+    ("smcup", "\x1b[?1049h\x1b[22;0;0t"),
+    ("rmcup", "\x1b[?1049l\x1b[23;0;0t"),
+    ("smkx", "\x1b[?1h\x1b="),
+    ("rmkx", "\x1b[?1l\x1b>"),
+    ("cnorm", "\x1b[?12l\x1b[?25h"),
+    ("E3", "\x1b[3J"),
+    ("ind", "\x0a"),
+    ("Ms", "\x1b]52;%p1%s;%p2%s\x07"),
+    ("kf1", "\x1bOP"),
+    ("kf2", "\x1bOQ"),
+    ("kf3", "\x1bOR"),
+    ("kf4", "\x1bOS"),
+    ("kf5", "\x1b[15~"),
+    ("kf6", "\x1b[17~"),
+    ("kf7", "\x1b[18~"),
+    ("kf8", "\x1b[19~"),
+    ("kf9", "\x1b[20~"),
+    ("kf10", "\x1b[21~"),
+    ("kf11", "\x1b[23~"),
+    ("kf12", "\x1b[24~"),
+    ("kich1", "\x1b[2~"),
+    ("kdch1", "\x1b[3~"),
+    ("khome", "\x1bOH"),
+    ("kend", "\x1bOF"),
+    ("knp", "\x1b[6~"),
+    ("kpp", "\x1b[5~"),
+    ("kcbt", "\x1b[Z"),
 ];
 
 const NAMES_MS_TERMINAL: &[Cap] = &[
@@ -898,6 +961,7 @@ const STRINGS_PUTTY: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_RXVT: &[Cap] = &[
@@ -942,6 +1006,7 @@ const STRINGS_RXVT: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_RXVT_UNICODE: &[Cap] = &[
@@ -985,6 +1050,8 @@ const STRINGS_RXVT_UNICODE: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?12;25h"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_SCREEN: &[Cap] = &[
@@ -1024,6 +1091,8 @@ const STRINGS_SCREEN: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[34l"),
+    ("smso", "\x1b[3m"),
 ];
 
 const NAMES_SCREEN_16COLOR: &[Cap] = &[
@@ -1077,6 +1146,7 @@ const STRINGS_SCREEN_ETERM: &[(&str, &str)] = &[
     ("kend", "\x1b[4~"),
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_SCREEN_GNOME: &[Cap] = &[
@@ -1126,6 +1196,7 @@ const STRINGS_SCREEN_GNOME: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_SCREEN_KONSOLE: &[Cap] = &[
@@ -1185,6 +1256,8 @@ const STRINGS_SCREEN_LINUX: &[(&str, &str)] = &[
     ("kend", "\x1b[4~"),
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
+    ("cvvis", "\x1b[34l"),
+    ("smso", "\x1b[3m"),
 ];
 
 const NAMES_SCREEN_MLTERM: &[Cap] = &[
@@ -1234,6 +1307,7 @@ const STRINGS_SCREEN_MLTERM: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_SCREEN_MRXVT: &[Cap] = &[
@@ -1282,6 +1356,7 @@ const STRINGS_SCREEN_MRXVT: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
 ];
 
 const STRINGS_SCREEN_PUTTY: &[(&str, &str)] = &[
@@ -1314,6 +1389,7 @@ const STRINGS_SCREEN_PUTTY: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_SCREEN_RXVT: &[Cap] = &[
@@ -1329,6 +1405,36 @@ const NAMES_SCREEN_RXVT: &[Cap] = &[
     "kmous", "knp", "kNXT", "kNXT5", "kNXT6", "kpp", "kPRV", "kPRV5", "kPRV6", "kRIT", "kRIT5",
     "kri", "kUP", "kUP5", "op", "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf",
     "sgr0", "smacs", "smcup", "smkx", "smso", "smul", "U8", "vpa", "XT",
+];
+
+const STRINGS_SCREEN_RXVT: &[(&str, &str)] = &[
+    ("clear", "\x1b[H\x1b[J"),
+    ("smcup", "\x1b[?1049h"),
+    ("rmcup", "\x1b[?1049l"),
+    ("smkx", "\x1b[?1h\x1b="),
+    ("rmkx", "\x1b[?1l\x1b>"),
+    ("cnorm", "\x1b[34h\x1b[?25h"),
+    ("ind", "\x0a"),
+    ("kf1", "\x1bOP"),
+    ("kf2", "\x1bOQ"),
+    ("kf3", "\x1bOR"),
+    ("kf4", "\x1bOS"),
+    ("kf5", "\x1b[15~"),
+    ("kf6", "\x1b[17~"),
+    ("kf7", "\x1b[18~"),
+    ("kf8", "\x1b[19~"),
+    ("kf9", "\x1b[20~"),
+    ("kf10", "\x1b[21~"),
+    ("kf11", "\x1b[23~"),
+    ("kf12", "\x1b[24~"),
+    ("kich1", "\x1b[2~"),
+    ("kdch1", "\x1b[3~"),
+    ("khome", "\x1b[1~"),
+    ("kend", "\x1b[4~"),
+    ("knp", "\x1b[6~"),
+    ("kpp", "\x1b[5~"),
+    ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[3m"),
 ];
 
 const NAMES_SCREEN_VTE: &[Cap] = &[
@@ -1349,6 +1455,38 @@ const NAMES_SCREEN_VTE: &[Cap] = &[
     "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
     "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "smacs", "smcup",
     "smkx", "Smol", "smso", "Smulx", "smul", "smxx", "vpa", "XT",
+];
+
+const STRINGS_SCREEN_VTE: &[(&str, &str)] = &[
+    ("clear", "\x1b[H\x1b[2J"),
+    ("smcup", "\x1b7\x1b[?47h"),
+    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
+    ("smkx", "\x1b[?1h\x1b="),
+    ("rmkx", "\x1b[?1l\x1b>"),
+    ("cnorm", "\x1b[?25h"),
+    ("ind", "\x0a"),
+    ("kf1", "\x1bOP"),
+    ("kf2", "\x1bOQ"),
+    ("kf3", "\x1bOR"),
+    ("kf4", "\x1bOS"),
+    ("kf5", "\x1b[15~"),
+    ("kf6", "\x1b[17~"),
+    ("kf7", "\x1b[18~"),
+    ("kf8", "\x1b[19~"),
+    ("kf9", "\x1b[20~"),
+    ("kf10", "\x1b[21~"),
+    ("kf11", "\x1b[23~"),
+    ("kf12", "\x1b[24~"),
+    ("kich1", "\x1b[2~"),
+    ("kdch1", "\x1b[3~"),
+    ("khome", "\x1b[1~"),
+    ("kend", "\x1b[4~"),
+    ("knp", "\x1b[6~"),
+    ("kpp", "\x1b[5~"),
+    ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
+    ("Smulx", "\x1b[4:%p1%dm"),
+    ("Smol", "\x1b[53m"),
 ];
 
 const NAMES_SCREEN_XTERM_256COLOR: &[Cap] = &[
@@ -1399,6 +1537,12 @@ const STRINGS_SCREEN_XTERM_256COLOR: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?12;25h"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[2 q"),
+    ("Cs", "\x1b]12;%p1%s\x07"),
+    ("Cr", "\x1b]112\x07"),
 ];
 
 const NAMES_SCREEN_XTERM_R6: &[Cap] = &[
@@ -1435,6 +1579,7 @@ const STRINGS_SCREEN_XTERM_R6: &[(&str, &str)] = &[
     ("kend", "\x1b[4~"),
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_ST: &[Cap] = &[
@@ -1483,6 +1628,9 @@ const STRINGS_ST: &[(&str, &str)] = &[
     ("kend", "\x1b[4~"),
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[2 q"),
 ];
 
 const NAMES_ST_DIRECT: &[Cap] = &[
@@ -1554,6 +1702,13 @@ const STRINGS_TMUX: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[34l"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[2 q"),
+    ("Cs", "\x1b]12;%p1%s\x07"),
+    ("Cr", "\x1b]112\x07"),
+    ("Smulx", "\x1b[4:%p1%dm"),
 ];
 
 const NAMES_TMUX_DIRECT: &[Cap] = &[
@@ -1599,6 +1754,7 @@ const STRINGS_VT100: &[(&str, &str)] = &[
     ("kf8", "\x1bOl"),
     ("kf9", "\x1bOw"),
     ("kf10", "\x1bOx"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_VT102: &[Cap] = &[
@@ -1636,6 +1792,7 @@ const STRINGS_VT220: &[(&str, &str)] = &[
     ("kdch1", "\x1b[3~"),
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_VTE: &[Cap] = &[
@@ -1656,6 +1813,38 @@ const NAMES_VTE: &[Cap] = &[
     "kRIT4", "kRIT5", "kRIT6", "kRIT7", "kri", "kUP", "kUP3", "kUP4", "kUP5", "kUP6", "kUP7", "op",
     "rev", "rin", "ri", "rmacs", "rmcup", "rmkx", "setab", "setaf", "sgr0", "sitm", "smacs",
     "smcup", "smkx", "Smol", "smso", "Smulx", "smul", "smxx", "vpa", "XT",
+];
+
+const STRINGS_VTE: &[(&str, &str)] = &[
+    ("clear", "\x1b[H\x1b[2J"),
+    ("smcup", "\x1b7\x1b[?47h"),
+    ("rmcup", "\x1b[2J\x1b[?47l\x1b8"),
+    ("smkx", "\x1b[?1h\x1b="),
+    ("rmkx", "\x1b[?1l\x1b>"),
+    ("cnorm", "\x1b[?25h"),
+    ("ind", "\x0a"),
+    ("kf1", "\x1bOP"),
+    ("kf2", "\x1bOQ"),
+    ("kf3", "\x1bOR"),
+    ("kf4", "\x1bOS"),
+    ("kf5", "\x1b[15~"),
+    ("kf6", "\x1b[17~"),
+    ("kf7", "\x1b[18~"),
+    ("kf8", "\x1b[19~"),
+    ("kf9", "\x1b[20~"),
+    ("kf10", "\x1b[21~"),
+    ("kf11", "\x1b[23~"),
+    ("kf12", "\x1b[24~"),
+    ("kich1", "\x1b[2~"),
+    ("kdch1", "\x1b[3~"),
+    ("khome", "\x1bOH"),
+    ("kend", "\x1bOF"),
+    ("knp", "\x1b[6~"),
+    ("kpp", "\x1b[5~"),
+    ("kcbt", "\x1b[Z"),
+    ("smso", "\x1b[7m"),
+    ("Smulx", "\x1b[4:%p1%dm"),
+    ("Smol", "\x1b[53m"),
 ];
 
 const NAMES_VTE_DIRECT: &[Cap] = &[
@@ -1710,6 +1899,7 @@ const STRINGS_XTERM_COLOR: &[(&str, &str)] = &[
     ("kdch1", "\x1b[3~"),
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
+    ("smso", "\x1b[7m"),
 ];
 
 const NAMES_XTERM_KITTY: &[Cap] = &[
@@ -1763,6 +1953,12 @@ const STRINGS_XTERM_KITTY: &[(&str, &str)] = &[
     ("knp", "\x1b[6~"),
     ("kpp", "\x1b[5~"),
     ("kcbt", "\x1b[Z"),
+    ("cvvis", "\x1b[?12;25h"),
+    ("smso", "\x1b[7m"),
+    ("Ss", "\x1b[%p1%d q"),
+    ("Se", "\x1b[2 q"),
+    ("Cs", "\x1b]12;%p1%s\x07"),
+    ("Cr", "\x1b]112\x07"),
 ];
 
 const NAMES_XTERM_MONO: &[Cap] = &[

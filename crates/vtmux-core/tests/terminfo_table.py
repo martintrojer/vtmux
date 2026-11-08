@@ -49,7 +49,8 @@ ALIASES = {'foot': 'xterm-256color', 'foot-direct': 'xterm-direct'}
 
 STRINGS = ['clear', 'smcup', 'rmcup', 'smkx', 'rmkx', 'cnorm', 'E3', 'ind', 'tsl', 'fsl',
            'Ms', 'Eneks', 'Dseks'] + ['kf%d' % i for i in range(1, 13)] + \
-    ['kich1', 'kdch1', 'khome', 'kend', 'knp', 'kpp', 'kcbt']
+    ['kich1', 'kdch1', 'khome', 'kend', 'knp', 'kpp', 'kcbt'] + \
+    ['cvvis', 'smso', 'Ss', 'Se', 'Cs', 'Cr', 'Smulx', 'Setulc', 'Smol']
 
 
 def codes():
