@@ -774,6 +774,14 @@ impl Server {
         self.control_flush(id);
     }
 
+    /// `server_send_exit` marks control client `id` exiting
+    /// (`CLIENT_EXIT_SHUTDOWN`): from now on it hears no notification.
+    pub(crate) fn control_mark_shutdown(&mut self, id: ClientId) {
+        if let Some(cs) = self.control_mut(id) {
+            cs.exit.get_or_insert(Exit::Shutdown);
+        }
+    }
+
     /// End of a loop turn (`server_client_check_exit`): send `Exit` to
     /// control clients that are leaving; on shutdown, to all of them.
     pub(crate) fn control_tick(&mut self) {

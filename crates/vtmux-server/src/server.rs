@@ -1242,7 +1242,22 @@ impl Server {
         // D27 decision 16: the checkpoint of a clean shutdown holds the
         // server as it was, before `send_exit` hangs up every pane.
         self.checkpoint_exit();
-        self.shutdown = true;
+        if !self.shutdown {
+            self.shutdown = true;
+            // server_send_exit (server.c:319-326) walks the clients in
+            // order: a suspended one is lost at once, so its
+            // client-detached reaches only the control clients after it;
+            // every other is marked exiting, a control client hearing no
+            // notification from then on.
+            let ids: Vec<ClientId> = self.clients.keys().copied().collect();
+            for id in ids {
+                match self.clients.get(&id) {
+                    Some(c) if c.suspended && !c.dead => self.drop_client(id),
+                    Some(c) if c.control.is_some() => self.control_mark_shutdown(id),
+                    _ => {}
+                }
+            }
+        }
         if !self.jobs.still_running() {
             self.close_listener();
         }
