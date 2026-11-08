@@ -6,7 +6,7 @@
 # with the right button from the border sizes it (not below 3x3 inside a
 # border, so the job's terminal follows); a plain right press on the left
 # or top border is used up. A borderless popup (-B) moves and sizes only
-# with Meta, here grown (a narrowed popup reflows in vtmux, D-044). A job
+# with Meta, here grown (a narrowed popup reflows in vtmux, D-050). A job
 # that asked for no mouse gets nothing. The job starts a line at each
 # ESC, so how its reads split the reports does not show.
 name = "popup_mouse"
