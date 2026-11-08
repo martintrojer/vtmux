@@ -2212,6 +2212,13 @@ impl Server {
     /// and every window is fitted again (`recalculate_sizes`); the loop's
     /// check pass applies it.
     pub(crate) fn resize_client(&mut self, id: ClientId, cols: u32, rows: u32) {
+        self.refit_client(id, cols, rows, true);
+    }
+
+    /// [`Self::resize_client`]; `fire` false for a client fitted again
+    /// without a `MSG_RESIZE` (a switch of session, which fires no
+    /// client-resized: server-client.c `server_client_set_session`).
+    pub(crate) fn refit_client(&mut self, id: ClientId, cols: u32, rows: u32, fire: bool) {
         if self.is_control(id) {
             return;
         }
@@ -2226,6 +2233,7 @@ impl Server {
         }
         // server-client.c:2730-2731: client-resized once it has a session.
         if let Some((ox, oy)) = old
+            && fire
             && client.attached.is_some()
             && client.was_attached
         {

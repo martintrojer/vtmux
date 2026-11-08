@@ -1,0 +1,25 @@
+name = "hooks_switch_client_resized"
+# A switch of session is no resize: client-resized fires only for
+# MSG_RESIZE (server-client.c:2713-2731), not from
+# server_client_set_session, whether the sessions' windows have the
+# client's size or not.
+size = [80, 24]
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w0", "-x", "80", "-y", "24", "cat", "-"] },
+  { run = ["new", "-d", "-s", "b", "-n", "bw", "-x", "50", "-y", "10", "cat", "-"] },
+  { run = ["set", "-g", "status-right", "x"] },
+  { attach = { session = "a" } },
+  { settle = {} },
+  { run = ["set-hook", "-g", "client-resized", "set -agF @log '|#{hook}:#{hook_session_name}'"] },
+  { run = ["set-hook", "-g", "client-session-changed", "set -agF @log '|#{hook}:#{hook_session_name}'"] },
+  { run = ["set", "-g", "@log", ""] },
+  { keys = "\u0002)" },
+  { settle = {} },
+  { keys = "\u0002(" },
+  { settle = {} },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["switch-client", "-t", "b"] },
+  { settle = { react = true } },
+  { run = ["show", "-gv", "@log"] },
+  { run = ["kill-server"] },
+]

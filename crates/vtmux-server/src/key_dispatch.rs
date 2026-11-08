@@ -377,7 +377,7 @@ impl Server {
                 .and_then(|c| c.hello.as_ref())
                 .and_then(|h| h.tty.clone())
             {
-                self.resize_client(id, tty.cols, tty.rows);
+                self.refit_client(id, tty.cols, tty.rows, false);
             }
         }
         if let Some(c) = self.clients.get_mut(&id)
