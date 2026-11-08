@@ -1,0 +1,32 @@
+name = "clear_history_hyperlinks"
+size = [40, 8]
+# clear-history -H (cmd-capture-pane.c:424-431): screen_reset_hyperlinks
+# (screen.c:145-151) empties the screen's link table, so the links written
+# before it are gone from capture-pane -H and -e and from
+# #{copy_cursor_hyperlink}, and a link written after it is read as ever
+# (D-018). Plain clear-history leaves them.
+steps = [
+  { run = ["new", "-d", "-s", "a", "-n", "w", "-x", "24", "-y", "6", "sh", "-c", "printf '\\033]8;id=a;http://a\\033\\\\A1\\033]8;;\\033\\\\ \\033]8;;http://b\\033\\\\B\\033]8;;\\033\\\\\\nplain\\n'; tmux wait-for -S ready; tmux wait-for go; printf '\\033]8;;http://n\\033\\\\NEW\\033]8;;\\033\\\\\\n'; tmux wait-for -S done; exec cat -"] },
+  { wait_for = "ready" },
+  { run = ["capturep", "-pH"] },
+  { run = ["capturep", "-pe"] },
+  { run = ["copy-mode", "-t", "a:w"] },
+  { run = ["send", "-t", "a:w", "-X", "history-top"] },
+  { run = ["display", "-p", "-t", "a:w", "#{copy_cursor_hyperlink}"] },
+  { run = ["send", "-t", "a:w", "-X", "cancel"] },
+  # Without -H the links stay.
+  { run = ["clear-history", "-t", "a:w"] },
+  { run = ["capturep", "-pH"] },
+  { run = ["clear-history", "-H", "-t", "a:w"] },
+  { run = ["capturep", "-pH"] },
+  { run = ["capturep", "-pe"] },
+  { run = ["copy-mode", "-t", "a:w"] },
+  { run = ["send", "-t", "a:w", "-X", "history-top"] },
+  { run = ["display", "-p", "-t", "a:w", "#{copy_cursor_hyperlink}"] },
+  { run = ["send", "-t", "a:w", "-X", "cancel"] },
+  # A link written afterwards is a link again.
+  { run = ["wait-for", "-S", "go"] },
+  { wait_for = "done" },
+  { run = ["capturep", "-pH"] },
+  { run = ["capturep", "-pe"] },
+]

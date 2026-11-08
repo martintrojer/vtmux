@@ -949,6 +949,37 @@ fn page_state(buf: &gv::Page) -> PageState {
     }
 }
 
+impl TermState {
+    /// Forget every hyperlink of the screen in use: the links the cells of
+    /// its pages refer to and the one open at its cursor. Whether there
+    /// was any. Pages held as blobs are not looked at (an export as rows
+    /// has none).
+    fn forget_hyperlinks(&mut self) -> bool {
+        let screen = if self.alternate_active {
+            self.alternate.as_mut()
+        } else {
+            Some(&mut self.primary)
+        };
+        let Some(screen) = screen else {
+            return false;
+        };
+        let mut found = screen.cursor.link.take().is_some();
+        for page in &mut screen.pages {
+            let PageState::Rows(rows) = page else {
+                continue;
+            };
+            if rows.links.iter().any(Option::is_some) || rows.cells.iter().any(|c| c.link != 0) {
+                found = true;
+                rows.links = vec![None];
+                for cell in &mut rows.cells {
+                    cell.link = 0;
+                }
+            }
+        }
+        found
+    }
+}
+
 impl PaneTerm {
     /// The pane's whole terminal state, every compressed page as rows (see
     /// [`TermState`]). Reads history without restoring compressed pages.
@@ -979,6 +1010,29 @@ impl PaneTerm {
             });
         let Ok(()) = done;
         state
+    }
+
+    /// `screen_reset_hyperlinks` (screen.c:145-151), as `clear-history -H`
+    /// runs it (cmd-capture-pane.c:427-428): the screen in use forgets
+    /// every OSC 8 link, those its cells carry (the table tmux empties,
+    /// which leaves the cells' ids pointing nowhere) and one still open at
+    /// the cursor, so nothing reads a link from it until a program writes
+    /// a new one. Ghostty keeps links with the page that holds the cells,
+    /// with no call to drop them, so a screen that has links is rebuilt
+    /// from its exported state (the path a live upgrade takes) without
+    /// them; a screen with none is left alone. Whether it was rebuilt.
+    pub fn reset_hyperlinks(&mut self) -> bool {
+        let mut state = self.export_state();
+        if !state.forget_hyperlinks() {
+            return false;
+        }
+        match Self::import_state(&state) {
+            Ok(term) => {
+                *self = term;
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// The pane's terminal state but its pages: every screen's `pages` is

@@ -160,13 +160,11 @@ product reasons" category.
 - Evidence: reference tmux 3.8 on a PTY client, `TERM=screen`, `xterm-256color` and `xterm-256color` with `COLORTERM=truecolor`: flags `0x20`, `0x20`, `0x31`; `show-messages -T | wc -l` is 237 for `screen`.
 - Category: Deferred
 
-### D-018: `clear-history -H` has no hyperlink table to reset
+### D-018: closed (`clear-history -H` empties the link table)
 
-- Test / assertion: none.
-- tmux behaviour: `-H` calls `screen_reset_hyperlinks` (cmd-capture-pane.c:427-428), emptying the pane's OSC 8 link table, which `capture-pane -H`, `#{mouse_hyperlink}` and `#{copy_cursor_hyperlink}` read: links written before the reset are gone from them.
-- vtmux behaviour: `-H` is accepted and changes nothing. libghostty-vt keeps links with the pages that hold the rows and vtmux exposes no table, so `#{mouse_hyperlink}` and `#{copy_cursor_hyperlink}` still give a link written before `clear-history -H`, and so do `capture-pane -H`, `-e` and `-R`.
-- Evidence: `clear-history -H` and `clear-history` give the same `history_size` and capture output on the reference and on vtmux (`cli.rs` `clear_history_keeps_the_screen`). After `printf '\033]8;;http://z/\033\\LNK...'`, `clear-history -H`, then `copy-mode` at the link, `#{copy_cursor_hyperlink}` is empty on the reference and `http://z/` on vtmux.
-- Category: Deferred
+- Was: `-H` was accepted and changed nothing, so `#{mouse_hyperlink}`, `#{copy_cursor_hyperlink}` and `capture-pane -H`, `-e` and `-R` still gave a link written before it.
+- Now: `-H` runs `PaneTerm::reset_hyperlinks` after the history is cleared (cmd-capture-pane.c:424-431, `screen_reset_hyperlinks`, screen.c:145-151): the screen in use (the alternate one while it is up, as `wp->screen`) forgets every link its cells carry and the one open at its cursor, and text written on is not linked. libghostty-vt has no call to drop links (it keeps them with the page that holds the cells), so a screen that has links is rebuilt from its exported state, the path a live upgrade takes, minus the links; a screen with none is untouched. Plain `clear-history` leaves them. Oracle `clear_history_hyperlinks` (links gone from `capture-pane -H`/`-e` and `#{copy_cursor_hyperlink}`, a link written afterwards read as ever) fails without it; unit test `reset_hyperlinks_forgets_the_links_of_the_screen_in_use`.
+- Residual: tmux keeps the links of the screen not in use (the primary's, while the alternate is up), and so does vtmux.
 
 ### D-019: bytes that are not UTF-8 follow glibc on macOS too
 

@@ -4924,6 +4924,38 @@ mod tests {
         }
     }
 
+    /// `clear-history -H` (cmd-capture-pane.c:427-428,
+    /// `screen_reset_hyperlinks`): the screen in use forgets its links and
+    /// the one open at the cursor, whatever else it holds stays, and a
+    /// link written afterwards is read as ever. A screen without links is
+    /// left as it is.
+    #[test]
+    fn reset_hyperlinks_forgets_the_links_of_the_screen_in_use() {
+        let mut t = PaneTerm::new(20, 4, 100);
+        assert!(!t.reset_hyperlinks());
+        t.feed(b"\x1b[31mred \x1b[0m\x1b]8;id=a;http://a\x07ab\x1b]8;;\x07 \x1b]8;;http://b\x07\xc3\xa9x");
+        let (cursor, before) = (t.cursor(), t.row(0).text());
+        assert_eq!(t.hyperlink(4, 0).as_deref(), Some("http://a"));
+        assert_eq!(t.hyperlink(8, 0).as_deref(), Some("http://b"));
+        assert!(t.reset_hyperlinks());
+        assert_eq!((0..20).find_map(|x| t.hyperlink(x, 0)), None);
+        assert_eq!((t.cursor(), t.row(0).text()), (cursor, before));
+        assert!(!t.reset_hyperlinks());
+        // The link open at the cursor is closed with the rest: text written
+        // on has none, and a new link is a link.
+        t.feed(b"yz\x1b]8;;http://n\x07new\x1b]8;;\x07");
+        assert_eq!(t.hyperlink(10, 0), None);
+        assert_eq!(t.hyperlink(12, 0).as_deref(), Some("http://n"));
+        // The alternate screen's links go with it, the primary's stay.
+        t.feed(b"\x1b[?1049h\x1b[H\x1b]8;;http://alt\x07alt\x1b]8;;\x07");
+        assert_eq!(t.hyperlink(0, 0).as_deref(), Some("http://alt"));
+        assert!(t.reset_hyperlinks());
+        assert_eq!(t.hyperlink(0, 0), None);
+        assert_eq!(t.row(0).text(), "alt");
+        t.feed(b"\x1b[?1049l");
+        assert_eq!(t.hyperlink(12, 0).as_deref(), Some("http://n"));
+    }
+
     /// worker-25's reproduction of the reflow abort (patches 0018 and
     /// 0019): 4000 lines of 20 grapheme cells, each cell its own OSC 8
     /// link (`id=K`, K of 1000, so links repeat across pages), on 80x24,

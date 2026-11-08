@@ -553,7 +553,7 @@ fn dispatch(
             show_messages::exec(server, item, args);
             Ok(())
         }
-        "clear-history" => clear_history::exec(server, found),
+        "clear-history" => clear_history::exec(server, args, found),
         "bind-key" | "unbind-key" => keys::bind_or_unbind(server, call),
         "list-keys" => keys::list_keys(server, item, args, found),
         "send-prefix" => keys::send_prefix(server, item, args, found),

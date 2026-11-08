@@ -1,0 +1,360 @@
+{
+  "tmux_version": "3.8",
+  "recorded_host": "<HOST>",
+  "name": "clear_history_hyperlinks",
+  "inputs": {
+    "name": "clear_history_hyperlinks",
+    "size": [
+      40,
+      8
+    ],
+    "steps": [
+      {
+        "run": [
+          "new",
+          "-d",
+          "-s",
+          "a",
+          "-n",
+          "w",
+          "-x",
+          "24",
+          "-y",
+          "6",
+          "sh",
+          "-c",
+          "printf '\\033]8;id=a;http://a\\033\\\\A1\\033]8;;\\033\\\\ \\033]8;;http://b\\033\\\\B\\033]8;;\\033\\\\\\nplain\\n'; tmux wait-for -S ready; tmux wait-for go; printf '\\033]8;;http://n\\033\\\\NEW\\033]8;;\\033\\\\\\n'; tmux wait-for -S done; exec cat -"
+        ]
+      },
+      {
+        "wait_for": "ready"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pH"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pe"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a:w",
+          "-X",
+          "history-top"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{copy_cursor_hyperlink}"
+        ]
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a:w",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "run": [
+          "clear-history",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pH"
+        ]
+      },
+      {
+        "run": [
+          "clear-history",
+          "-H",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pH"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pe"
+        ]
+      },
+      {
+        "run": [
+          "copy-mode",
+          "-t",
+          "a:w"
+        ]
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a:w",
+          "-X",
+          "history-top"
+        ]
+      },
+      {
+        "run": [
+          "display",
+          "-p",
+          "-t",
+          "a:w",
+          "#{copy_cursor_hyperlink}"
+        ]
+      },
+      {
+        "run": [
+          "send",
+          "-t",
+          "a:w",
+          "-X",
+          "cancel"
+        ]
+      },
+      {
+        "run": [
+          "wait-for",
+          "-S",
+          "go"
+        ]
+      },
+      {
+        "wait_for": "done"
+      },
+      {
+        "run": [
+          "capturep",
+          "-pH"
+        ]
+      },
+      {
+        "run": [
+          "capturep",
+          "-pe"
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": 0,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 1,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 2,
+      "observation": {
+        "kind": "cli",
+        "stdout": "http://a http://b\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 3,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\u001b]8;id=a;http://a\u001b\\A1\u001b]8;;\u001b\\ \u001b]8;;http://b\u001b\\B\u001b]8;;\u001b\\\nplain\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 4,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 5,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 6,
+      "observation": {
+        "kind": "cli",
+        "stdout": "http://a\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 7,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 8,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 9,
+      "observation": {
+        "kind": "cli",
+        "stdout": "http://a http://b\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 10,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 11,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 12,
+      "observation": {
+        "kind": "cli",
+        "stdout": "A1 B\nplain\n\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 13,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 14,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 15,
+      "observation": {
+        "kind": "cli",
+        "stdout": "\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 16,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 17,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 18,
+      "observation": {
+        "kind": "cli",
+        "stdout": "",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 19,
+      "observation": {
+        "kind": "cli",
+        "stdout": "http://n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    },
+    {
+      "step": 20,
+      "observation": {
+        "kind": "cli",
+        "stdout": "A1 B\nplain\n\u001b]8;;http://n\u001b\\NEW\u001b]8;;\u001b\\\n\n\n\n",
+        "stderr": "",
+        "exit": 0
+      }
+    }
+  ]
+}
